@@ -271,18 +271,7 @@
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Auto"
                               ScrollViewer.VerticalScrollBarVisibility="Auto">
-                        <ListView.ContextFlyout>
-                            <MenuFlyout x:Name="JobsContextMenu" Opening="JobsContextMenu_Opening">
-                                <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
-                                <MenuFlyoutItem Text="Open folder" Click="MenuOpenFolder_Click" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
-                                <MenuFlyoutSubItem x:Name="AddToQueueMenu" Text="Add to queue" />
-                                <MenuFlyoutItem Text="Delete from queue" Click="MenuDeleteFromQueue_Click" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Text="Properties" Click="MenuProperties_Click" />
-                            </MenuFlyout>
-                        </ListView.ContextFlyout>
+
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent">

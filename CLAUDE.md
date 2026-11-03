@@ -144,6 +144,10 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 - WinUI 3 unpackaged apps need the Windows App SDK runtime or self-contained
   deployment. Build the UI with `-p:Platform=x64`; the solution build does this
   automatically now.
+- The published WinUI app needs `DownloadManager.Desktop.WinUI.pri` next to the
+  exe. `scripts\publish.ps1` copies it and fails loudly if missing. A startup
+  `XamlParseException` in `MainWindow.InitializeComponent` while the bin build
+  runs is the symptom of a missing/stale `.pri`.
 - disassembler project lock: one headless server only. MCP config points at the HTTP
   server, not stdio, to avoid duplicate process locks.
 - Native-host registration is per user and must point at an absolute

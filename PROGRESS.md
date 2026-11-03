@@ -95,6 +95,16 @@ Native-host registration evidence:
   reported queue 1 stopped and the job paused at 983,040/8,388,608 bytes.
   Invoking **Start Queue** made queue 1 running and the job resumed at
   1,441,792 bytes. The job was then cancelled and its partial file removed.
+- WinUI row menu (E14): the compact `Q` column shows the queue number. Selecting
+  a completed row and pressing Shift+F10 opens the row menu with `Open`,
+  `Open folder`, `Remove`, `Add to queue >`, `Delete from queue`, and
+  `Properties`. The menu is constructed in code and was verified in the running
+  window.
+- Packaging fix (E15): the published WinUI app was missing
+  `DownloadManager.Desktop.WinUI.pri`, causing `XamlParseException` at startup
+  while the bin build worked. `publish.ps1` now copies the generated `.pri` and
+  fails if it is absent; the republished app started and reached
+  `MainWindow activated` with no crash log.
 
 ## Payload placement (2026-11-04)
 

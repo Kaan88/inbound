@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<JobViewModel> _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
+    private MenuFlyoutSubItem? _addToQueueMenu;
     private SettingsDto? _settings;
     private HostStatusDto? _status;
     private bool _settingsDialogOpen;
@@ -32,6 +33,7 @@ public sealed partial class MainWindow : Window
         UiTrace.Write("MainWindow InitializeComponent complete");
         RootGrid.RequestedTheme = ElementTheme.Dark;
         JobsList.ItemsSource = _visibleJobs;
+        BuildJobsContextMenu();
         UiTrace.Write("MainWindow collections initialized");
 
         try
@@ -285,9 +287,37 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void JobsContextMenu_Opening(object sender, object e)
+    private void BuildJobsContextMenu()
     {
-        AddToQueueMenu.Items.Clear();
+        var flyout = new MenuFlyout();
+        flyout.Opening += JobsContextMenu_Opening;
+        flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
+        flyout.Items.Add(CreateContextItem("Open folder", MenuOpenFolder_Click));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
+        _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to queue" };
+        flyout.Items.Add(_addToQueueMenu);
+        flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
+        JobsList.ContextFlyout = flyout;
+    }
+
+    private static MenuFlyoutItem CreateContextItem(string text, RoutedEventHandler handler)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += handler;
+        return item;
+    }
+
+    private void JobsContextMenu_Opening(object? sender, object e)
+    {
+        if (_addToQueueMenu is null)
+        {
+            return;
+        }
+
+        _addToQueueMenu.Items.Clear();
         if (_settings is null)
         {
             return;
@@ -297,7 +327,7 @@ public sealed partial class MainWindow : Window
         {
             var item = new MenuFlyoutItem { Text = queue.Name, Tag = queue.Id };
             item.Click += MenuAddToQueue_Click;
-            AddToQueueMenu.Items.Add(item);
+            _addToQueueMenu.Items.Add(item);
         }
     }
 
