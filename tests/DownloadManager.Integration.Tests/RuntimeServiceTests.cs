@@ -408,6 +408,189 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DailyScheduleStartsAndStopsOnlyItsQueue()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 2,
+            IsRunning = false,
+            Order = 1,
+        });
+        var scheduleId = Guid.NewGuid();
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = scheduleId,
+            Name = "Work hours",
+            QueueId = 1,
+            Enabled = true,
+            Kind = "daily",
+            Days = "Wed",
+            StartTime = "09:00",
+            StopTime = "10:00",
+        });
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var wednesday = new DateTimeOffset(2026, 11, 4, 8, 59, 0, TimeSpan.Zero);
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(wednesday));
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+        var started = await ctx.Service.EvaluateSchedulesAsync(wednesday.AddMinutes(1));
+        var startAction = Assert.Single(started);
+        Assert.Equal("start", startAction.Action);
+        Assert.True(startAction.Ok, startAction.Error);
+        var afterStart = ctx.Service.GetSnapshot().Settings;
+        Assert.True(afterStart.Queues.Single(q => q.Id == 1).IsRunning);
+        Assert.True(afterStart.Queues.Single(q => q.Id == 0).IsRunning);
+        Assert.Equal(new DateOnly(2026, 11, 4), afterStart.Schedules.Single(s => s.Id == scheduleId).LastStartDate);
+
+        var duplicate = await ctx.Service.EvaluateSchedulesAsync(wednesday.AddMinutes(30));
+        Assert.DoesNotContain(duplicate, a => a.Action == "start");
+
+        var job = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/scheduled.bin?size=2097152&seed=93&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "scheduled.bin",
+            Source = "cli",
+            QueueId = 1,
+        });
+        Assert.True(job.Accepted, job.Error);
+        await ctx.WaitFor(job.Job!.Id, j => j.ReceivedBytes > 65_536);
+
+        var stopped = await ctx.Service.EvaluateSchedulesAsync(
+            new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        var stopAction = Assert.Single(stopped);
+        Assert.Equal("stop", stopAction.Action);
+        Assert.True(stopAction.Ok, stopAction.Error);
+        var afterStop = ctx.Service.GetSnapshot().Settings;
+        Assert.False(afterStop.Queues.Single(q => q.Id == 1).IsRunning);
+        Assert.Equal(new DateOnly(2026, 11, 4), afterStop.Schedules.Single(s => s.Id == scheduleId).LastStopDate);
+        Assert.Equal("paused", (await ctx.WaitFor(job.Job.Id, j => j.State == "paused")).State);
+
+        // Thursday is not selected: no start even though the clock says 09:00.
+        var thursday = await ctx.Service.EvaluateSchedulesAsync(
+            new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero));
+        Assert.Empty(thursday);
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+    }
+
+    [Fact]
+    public async Task OneTimeScheduleOnlyRunsOnItsDate()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 2,
+            IsRunning = false,
+            Order = 1,
+        });
+        var scheduleId = Guid.NewGuid();
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = scheduleId,
+            Name = "One shot",
+            QueueId = 1,
+            Enabled = true,
+            Kind = "oneTime",
+            StartDate = new DateOnly(2026, 11, 4),
+            StartTime = "09:00",
+            StopTime = "10:00",
+        });
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(
+            new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero)));
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+        var started = await ctx.Service.EvaluateSchedulesAsync(
+            new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.Zero));
+        Assert.Equal("start", Assert.Single(started).Action);
+
+        var stopped = await ctx.Service.EvaluateSchedulesAsync(
+            new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+        Assert.Equal("stop", Assert.Single(stopped).Action);
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+        var cleared = ctx.Service.GetSnapshot().Settings;
+        cleared.Schedules.Clear();
+        var clearResult = await ctx.Service.UpdateSettingsAsync(cleared);
+        Assert.True(clearResult.Ok, clearResult.Error);
+        Assert.Empty(ctx.Service.GetSnapshot().Settings.Schedules);
+    }
+
+    [Fact]
+    public async Task ScheduleRunStateSurvivesRestart()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.Queues.Add(new QueueDto
+            {
+                Id = 1,
+                Name = "Night",
+                MaxConcurrentDownloads = 2,
+                IsRunning = false,
+                Order = 1,
+            });
+            var scheduleId = Guid.NewGuid();
+            settings.Schedules.Add(new ScheduleDto
+            {
+                Id = scheduleId,
+                Name = "Daily",
+                QueueId = 1,
+                Enabled = true,
+                Kind = "daily",
+                Days = "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                StartTime = "09:00",
+                StopTime = "10:00",
+            });
+            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+            var mondayMorning = new DateTimeOffset(2026, 11, 9, 9, 0, 0, TimeSpan.Zero);
+            Assert.Equal("start",
+                Assert.Single(await ctx.Service.EvaluateSchedulesAsync(mondayMorning)).Action);
+
+            // Simulate the user stopping the queue later that morning.
+            Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+            {
+                QueueId = 1,
+                Action = "stop",
+            })).Ok);
+
+            await using var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            var reloaded = second.Service.GetSnapshot().Settings.Schedules.Single(s => s.Id == scheduleId);
+            Assert.Equal(new DateOnly(2026, 11, 9), reloaded.LastStartDate);
+
+            // Same day: the persisted last-run date prevents a second start.
+            var sameDay = await second.Service.EvaluateSchedulesAsync(
+                new DateTimeOffset(2026, 11, 9, 9, 30, 0, TimeSpan.Zero));
+            Assert.Empty(sameDay);
+            Assert.False(second.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+            // Next day: the daily schedule is eligible again.
+            var nextDay = await second.Service.EvaluateSchedulesAsync(
+                new DateTimeOffset(2026, 11, 10, 9, 0, 0, TimeSpan.Zero));
+            Assert.Equal("start", Assert.Single(nextDay).Action);
+            Assert.True(second.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -499,7 +682,13 @@ public sealed class RuntimeServiceTests
                     AllowLocalNetwork = true,
                 },
                 checkpoints: checkpoints);
-            var service = new DownloadManagerService(paths, store, checkpoints, settingsStore, engine);
+            var service = new DownloadManagerService(
+                paths,
+                store,
+                checkpoints,
+                settingsStore,
+                engine,
+                enableSchedulerTimer: false);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

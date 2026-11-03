@@ -23,8 +23,9 @@ containing secrets.
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
 Chrome automatic + context-menu handoff. Phase 8 is partly implemented: named
-queues, per-queue concurrency, start/stop, queue assignment/reassignment, and
-persistence are tested; schedules/completion actions remain. Payload bytes are
+queues, per-queue concurrency, start/stop, queue assignment/reassignment,
+persistence, and daily/one-time schedule execution are tested; completion
+actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload bytes are
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large

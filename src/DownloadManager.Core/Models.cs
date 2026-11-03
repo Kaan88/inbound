@@ -231,9 +231,22 @@ public sealed class ScheduleRule
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
     public bool Enabled { get; set; } = true;
+
+    /// <summary>daily or oneTime.</summary>
+    public string Kind { get; set; } = "daily";
+
+    /// <summary>Local date for a oneTime schedule.</summary>
+    public DateOnly? StartDate { get; set; }
+
     public string Days { get; set; } = "Mon,Tue,Wed,Thu,Fri,Sat,Sun";
     public string StartTime { get; set; } = "09:00";
     public string? StopTime { get; set; }
+
+    /// <summary>Local date the queue was last started by this schedule.</summary>
+    public DateOnly? LastStartDate { get; set; }
+
+    /// <summary>Local date the queue was last stopped by this schedule.</summary>
+    public DateOnly? LastStopDate { get; set; }
 }
 
 public sealed class AppSettings

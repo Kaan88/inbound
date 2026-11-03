@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
@@ -11,6 +12,14 @@ public sealed class JobChangeEventArgs(JobDto job, string changeType) : EventArg
     public string ChangeType { get; } = changeType;
 }
 
+public sealed record ScheduleAction(
+    Guid ScheduleId,
+    int QueueId,
+    string Action,
+    DateOnly Date,
+    bool Ok,
+    string? Error);
+
 public sealed class DownloadManagerService
 {
     private readonly StoragePaths _paths;
@@ -19,10 +28,14 @@ public sealed class DownloadManagerService
     private readonly ISettingsStore _settingsStore;
     private readonly IDownloadEngine _engine;
     private readonly Action<string>? _log;
+    private readonly TimeProvider _timeProvider;
+    private readonly bool _enableSchedulerTimer;
     private readonly object _sync = new();
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private AppSettings _settings = new();
+    private CancellationTokenSource? _schedulerCts;
+    private Task? _schedulerTask;
     private bool _shuttingDown;
     private bool _initialized;
 
@@ -32,7 +45,9 @@ public sealed class DownloadManagerService
         IDownloadCheckpointStore checkpointStore,
         ISettingsStore settingsStore,
         IDownloadEngine engine,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        TimeProvider? timeProvider = null,
+        bool enableSchedulerTimer = true)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -40,6 +55,8 @@ public sealed class DownloadManagerService
         _settingsStore = settingsStore;
         _engine = engine;
         _log = log;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _enableSchedulerTimer = enableSchedulerTimer;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -73,6 +90,7 @@ public sealed class DownloadManagerService
 
         _initialized = true;
         Schedule();
+        StartSchedulerLoop();
     }
 
     public SnapshotDto GetSnapshot()
@@ -715,9 +733,221 @@ public sealed class DownloadManagerService
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
 
+    /// <summary>
+    /// Evaluates the configured one-time/daily queue schedules against a local
+    /// timestamp. Public so tests can drive time deterministically; the host calls
+    /// it from its 30-second scheduler loop with <see cref="TimeProvider.GetLocalNow"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<ScheduleAction>> EvaluateSchedulesAsync(
+        DateTimeOffset localNow,
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(localNow.DateTime);
+        var nowTime = TimeOnly.FromDateTime(localNow.DateTime);
+        var due = new List<(Guid Id, int QueueId, string Action)>();
+
+        lock (_sync)
+        {
+            if (!_initialized || _shuttingDown)
+            {
+                return Array.Empty<ScheduleAction>();
+            }
+
+            foreach (var schedule in _settings.Schedules)
+            {
+                if (!schedule.Enabled)
+                {
+                    continue;
+                }
+
+                if (!_settings.Queues.Any(q => q.Id == schedule.QueueId))
+                {
+                    continue;
+                }
+
+                if (!TryParseScheduleTime(schedule.StartTime, out var start))
+                {
+                    continue;
+                }
+
+                var hasStop = TryParseScheduleTime(schedule.StopTime, out var stop);
+                var isOneTime = string.Equals(schedule.Kind, "oneTime", StringComparison.OrdinalIgnoreCase);
+                var dayMatches = !isOneTime && MatchesDay(schedule.Days, localNow.DayOfWeek);
+                var dateMatches = isOneTime ? schedule.StartDate == today : dayMatches;
+                var overnight = hasStop && stop <= start;
+
+                var startDue = dateMatches &&
+                               nowTime >= start &&
+                               schedule.LastStartDate != today;
+
+                // A same-day window that already closed is missed, not started late.
+                if (startDue && hasStop && !overnight && nowTime >= stop)
+                {
+                    startDue = false;
+                }
+
+                // If an overnight window opened yesterday, it is already running;
+                // don't start it again after midnight.
+                if (startDue && overnight && schedule.LastStartDate == today.AddDays(-1) && nowTime < stop)
+                {
+                    startDue = false;
+                }
+
+                if (startDue)
+                {
+                    due.Add((schedule.Id, schedule.QueueId, "start"));
+                    continue;
+                }
+
+                if (!hasStop || nowTime < stop || schedule.LastStopDate == today)
+                {
+                    continue;
+                }
+
+                var startedInWindow = overnight
+                    ? schedule.LastStartDate == today || schedule.LastStartDate == today.AddDays(-1)
+                    : schedule.LastStartDate == today;
+                if (startedInWindow)
+                {
+                    due.Add((schedule.Id, schedule.QueueId, "stop"));
+                }
+            }
+        }
+
+        var results = new List<ScheduleAction>(due.Count);
+        foreach (var action in due)
+        {
+            lock (_sync)
+            {
+                if (_shuttingDown)
+                {
+                    break;
+                }
+            }
+
+            var reply = await QueueActionAsync(
+                new QueueActionRequest { QueueId = action.QueueId, Action = action.Action },
+                cancellationToken).ConfigureAwait(false);
+
+            if (reply.Ok)
+            {
+                lock (_sync)
+                {
+                    var schedule = _settings.Schedules.FirstOrDefault(s => s.Id == action.Id);
+                    if (schedule is not null)
+                    {
+                        if (action.Action == "start")
+                        {
+                            schedule.LastStartDate = today;
+                        }
+                        else
+                        {
+                            schedule.LastStopDate = today;
+                        }
+                    }
+                }
+
+                await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+                SettingsChanged?.Invoke(this, _settings);
+                _log?.Invoke($"Scheduler {action.Action} queue {action.QueueId} for {today:yyyy-MM-dd}.");
+            }
+
+            results.Add(new ScheduleAction(
+                action.Id,
+                action.QueueId,
+                action.Action,
+                today,
+                reply.Ok,
+                reply.Error));
+        }
+
+        return results;
+    }
+
+    private static bool MatchesDay(string days, DayOfWeek day)
+    {
+        if (string.IsNullOrWhiteSpace(days))
+        {
+            return true;
+        }
+
+        var token = day.ToString()[..3];
+        return days
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(value => value.Length >= 3 &&
+                          value[..3].Equals(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryParseScheduleTime(string? value, out TimeOnly time)
+    {
+        if (!string.IsNullOrWhiteSpace(value) &&
+            TimeOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out time))
+        {
+            return true;
+        }
+
+        time = default;
+        return false;
+    }
+
+    private void StartSchedulerLoop()
+    {
+        if (!_enableSchedulerTimer || _schedulerCts is not null)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _schedulerCts = cts;
+        _schedulerTask = Task.Run(() => SchedulerLoopAsync(cts.Token), CancellationToken.None);
+    }
+
+    private async Task SchedulerLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EvaluateSchedulesAsync(_timeProvider.GetLocalNow(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Scheduler startup evaluation failed: {ex.Message}");
+        }
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    await EvaluateSchedulesAsync(_timeProvider.GetLocalNow(), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _log?.Invoke($"Scheduler tick failed: {ex.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // normal shutdown
+        }
+    }
+
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         List<JobRuntime> active;
+        var schedulerTask = _schedulerTask;
+        _schedulerCts?.Cancel();
         lock (_sync)
         {
             _shuttingDown = true;
@@ -758,6 +988,23 @@ public sealed class DownloadManagerService
 
             await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
         }
+
+        if (schedulerTask is not null)
+        {
+            try
+            {
+                await Task.WhenAny(schedulerTask, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken))
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // shutdown is best effort
+            }
+        }
+
+        _schedulerCts?.Dispose();
+        _schedulerCts = null;
+        _schedulerTask = null;
     }
 
     private async Task<bool> ReconcileAsync(JobRuntime runtime, CancellationToken cancellationToken)
@@ -1372,9 +1619,13 @@ public sealed class DownloadManagerService
                 Name = s.Name,
                 QueueId = s.QueueId,
                 Enabled = s.Enabled,
+                Kind = s.Kind,
+                StartDate = s.StartDate,
                 Days = s.Days,
                 StartTime = s.StartTime,
                 StopTime = s.StopTime,
+                LastStartDate = s.LastStartDate,
+                LastStopDate = s.LastStopDate,
             }).ToList(),
         };
 
@@ -1431,20 +1682,35 @@ public sealed class DownloadManagerService
         List<ScheduleDto>? requested,
         List<ScheduleRule> existing)
     {
-        if (requested is not { Count: > 0 })
+        // A null list means "not supplied"; an empty list means the caller
+        // explicitly removed every schedule and must be honored.
+        if (requested is null)
         {
             return existing.ToList();
         }
 
-        return requested.Select(s => new ScheduleRule
+        var existingById = existing.ToDictionary(s => s.Id);
+        return requested.Select(s =>
         {
-            Id = s.Id == Guid.Empty ? Guid.NewGuid() : s.Id,
-            Name = s.Name,
-            QueueId = s.QueueId,
-            Enabled = s.Enabled,
-            Days = s.Days,
-            StartTime = s.StartTime,
-            StopTime = s.StopTime,
+            var id = s.Id == Guid.Empty ? Guid.NewGuid() : s.Id;
+            existingById.TryGetValue(id, out var previous);
+            return new ScheduleRule
+            {
+                Id = id,
+                Name = s.Name,
+                QueueId = s.QueueId,
+                Enabled = s.Enabled,
+                Kind = string.Equals(s.Kind, "oneTime", StringComparison.OrdinalIgnoreCase)
+                    ? "oneTime"
+                    : "daily",
+                StartDate = s.StartDate,
+                Days = s.Days,
+                StartTime = s.StartTime,
+                StopTime = s.StopTime,
+                // Run state is owned by the host scheduler, never by a UI payload.
+                LastStartDate = previous?.LastStartDate,
+                LastStopDate = previous?.LastStopDate,
+            };
         }).ToList();
     }
 

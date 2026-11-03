@@ -578,6 +578,9 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
 
             schedule.Name = string.IsNullOrWhiteSpace(schedule.Name) ? "Schedule" : schedule.Name.Trim();
+            schedule.Kind = string.Equals(schedule.Kind, "oneTime", StringComparison.OrdinalIgnoreCase)
+                ? "oneTime"
+                : "daily";
             schedule.Days = string.IsNullOrWhiteSpace(schedule.Days) ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun" : schedule.Days;
             schedule.StartTime = string.IsNullOrWhiteSpace(schedule.StartTime) ? "09:00" : schedule.StartTime;
         }

@@ -22,7 +22,8 @@
   redistribution, global/per-host limits, throughput benchmark, and independent
   verification remain).
 - Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
-  and CLI/UI assignment verified; schedules/quotas/completion actions remain).
+  reassignment, and daily/one-time schedule execution verified; quotas,
+  completion actions, sleep prevention, and DST/wall-clock tests remain).
 - Phases 6, 7, 9–12: pending. See `reference notes` E1–E10 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -144,10 +145,13 @@ partial-data preservation and content validation.
 
 ## Phase 8 - Queues and scheduling (in progress)
 
-Named queues, per-queue concurrency, start/stop, queue persistence, and CLI/UI
-assignment are implemented and tested (E9/E10). Remaining: moving jobs between
-queues, schedule execution, quotas, completion actions, sleep prevention,
-DST/restart behavior.
+Named queues, per-queue concurrency, start/stop, queue persistence, CLI/UI
+assignment/reassignment, and daily/one-time schedule execution are implemented
+and tested (E9/E10/E13/E16). The host evaluates schedules every 30 seconds and
+on startup; schedules target one queue, honor weekday selection, and persist
+last-run dates across restart. Remaining: quotas, completion actions, sleep
+prevention, and DST/wall-clock behavior. CLI management exists as
+`dm schedule list|add|remove|enable|disable`.
 
 ## Phase 9 — Media detection and downloading (pending)
 

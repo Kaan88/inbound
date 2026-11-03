@@ -65,9 +65,13 @@ public sealed class ScheduleDto
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
     public bool Enabled { get; set; } = true;
+    public string Kind { get; set; } = "daily";
+    public DateOnly? StartDate { get; set; }
     public string Days { get; set; } = "Mon,Tue,Wed,Thu,Fri,Sat,Sun";
     public string StartTime { get; set; } = "09:00";
     public string? StopTime { get; set; }
+    public DateOnly? LastStartDate { get; set; }
+    public DateOnly? LastStopDate { get; set; }
 }
 
 public sealed class SettingsDto

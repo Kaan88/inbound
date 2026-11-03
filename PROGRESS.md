@@ -127,15 +127,35 @@ random-access part file **in the destination directory**:
   part was gone, the 4 MiB file remained, and its SHA-256 matched seed 99
   (`4f1f120d5224489310bb0c39f4ff32ea3798e8ee1a2d99fe0b647696a20afec0`).
 
+## Scheduler evidence (2026-11-04)
+
+- Daily and one-time schedules target one queue, honor weekday selection, and
+  start/stop that queue only. Same-day duplicate starts are suppressed; a
+  same-day window that already closed is not started late; a scheduled stop
+  pauses the queue's active jobs.
+- Last start/stop dates persist in settings across service recreation, so a
+  restart does not repeat the same day's start.
+- The host runs an evaluation immediately at startup and every 30 seconds.
+- Integration tests (E16): `DailyScheduleStartsAndStopsOnlyItsQueue`,
+  `OneTimeScheduleOnlyRunsOnItsDate`, `ScheduleRunStateSurvivesRestart`.
+  Clearing all schedules is also covered (an empty list is not treated as
+  "keep existing").
+- Published host: added a Wednesday 02:42–04:42 schedule for stopped queue
+  `Night` at 02:42:20. At 02:42:42 the host logged
+  `Scheduler start queue 1 for 2026-11-04`; `queue list` showed queue 1
+  `running` and `schedule list` showed `last-start=2026-11-04`.
+- CLI: `dm schedule list|add|remove|enable|disable`; removal accepts a
+  hyphenated or compact GUID prefix.
+
 ## Tests
 
 - Engine: **14/14 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer, segmented resume, no-range fallback, changed content,
   truncation, and single-stream resume.
 - Core: **11/11 passed**.
-- Runtime/persistence: **11/11 passed** (`tests\DownloadManager.Integration.Tests`),
-  including the queue tests, queue reassignment, and the destination-local
-  payload test.
+- Runtime/persistence: **14/14 passed** (`tests\DownloadManager.Integration.Tests`),
+  including queues, reassignment, destination-local payload, and three scheduler
+  tests.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -156,18 +176,17 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the queue increment (service, IPC, CLI, WinUI, tests, evidence).
-2. Exercise the WinUI queue controls against the host and record the UI result.
-3. Complete Phase 8: moving jobs between queues, schedule execution, completion
-   actions, sleep prevention.
-4. Implement Phase 6 management gaps exercised by the UI (open-folder action,
-   duplicate decisions, categories/destination rules, batch URLs).
-5. Phase 7: authenticated browser request transfer, proxy/site login, Refresh
+1. Commit the scheduler increment (host timer, models, CLI, tests, evidence).
+2. Complete Phase 8: completion actions (open/exit/shutdown), quotas, sleep
+   prevention, and DST/wall-clock tests.
+3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
+   categories/destination rules, batch URLs, batch download from clipboard).
+4. Phase 7: authenticated browser request transfer, proxy/site login, Refresh
    Download Address preserving partial data.
-6. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
+5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
-7. Phase 10: Download All/site grabber.
-8. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
+6. Phase 10: Download All/site grabber.
+7. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
    visual/behavioral audit, final parity evidence. Continue the reference app GUI
    inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
 

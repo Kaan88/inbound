@@ -212,6 +212,8 @@ internal static class Program
             }
             case "queue":
                 return await QueueAsync(client, args, json).ConfigureAwait(false);
+            case "schedule":
+                return await ScheduleAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
             case "host":
@@ -306,6 +308,134 @@ internal static class Program
         }
 
         return action.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> ScheduleAsync(CliClient client, string[] args, bool json)
+    {
+        var positional = args.Skip(1)
+            .Where(a => !a.StartsWith("--", StringComparison.Ordinal))
+            .ToArray();
+        var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
+        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+        var settings = snapshot.Settings;
+
+        if (sub == "list")
+        {
+            if (json)
+            {
+                PrintJson(settings.Schedules);
+                return 0;
+            }
+
+            Console.WriteLine($"{"ID",-9} {"STATE",-4} {"KIND",-8} {"START",-5} {"STOP",-5} {"Q",3}  NAME / DAYS");
+            foreach (var schedule in settings.Schedules)
+            {
+                Console.WriteLine(
+                    $"{schedule.Id.ToString("N")[..8],-9} " +
+                    $"{(schedule.Enabled ? "on" : "off"),-4} " +
+                    $"{schedule.Kind,-8} {schedule.StartTime,-5} {schedule.StopTime ?? "-",-5} " +
+                    $"{schedule.QueueId,3}  {schedule.Name} [{schedule.Days}]" +
+                    (schedule.LastStartDate is { } lastStart ? $" last-start={lastStart:yyyy-MM-dd}" : string.Empty));
+            }
+
+            return 0;
+        }
+
+        if (sub == "add")
+        {
+            if (positional.Length < 3 ||
+                !int.TryParse(positional[1], out var queueId) ||
+                !TimeOnly.TryParse(positional[2], CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+            {
+                Console.Error.WriteLine("usage: schedule add <queue-id> <HH:mm> [--days ...] [--stop HH:mm] [--once yyyy-MM-dd] [--name ...] [--disabled]");
+                return 2;
+            }
+
+            DateOnly? startDate = null;
+            var kind = "daily";
+            if (GetOption(args, "--once") is { } once)
+            {
+                if (!DateOnly.TryParse(once, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+                {
+                    Console.Error.WriteLine("--once expects yyyy-MM-dd.");
+                    return 2;
+                }
+
+                startDate = parsedDate;
+                kind = "oneTime";
+            }
+
+            TimeOnly? stop = null;
+            if (GetOption(args, "--stop") is { } stopText)
+            {
+                if (!TimeOnly.TryParse(stopText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedStop))
+                {
+                    Console.Error.WriteLine("--stop expects HH:mm.");
+                    return 2;
+                }
+
+                stop = parsedStop;
+            }
+
+            var schedule = new ScheduleDto
+            {
+                Id = Guid.NewGuid(),
+                Name = GetOption(args, "--name") ?? $"Schedule {settings.Schedules.Count + 1}",
+                QueueId = queueId,
+                Enabled = !args.Contains("--disabled", StringComparer.OrdinalIgnoreCase),
+                Kind = kind,
+                StartDate = startDate,
+                Days = GetOption(args, "--days") ?? "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                StartTime = start.ToString("HH:mm", CultureInfo.InvariantCulture),
+                StopTime = stop?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            };
+            settings.Schedules.Add(schedule);
+            var added = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            var addedResult = added.GetPayload<SettingsResult>();
+            if (addedResult.Ok)
+            {
+                Console.WriteLine($"added: {schedule.Id:N} {schedule.Kind} queue {schedule.QueueId} at {schedule.StartTime}");
+            }
+
+            return PrintSettingsResult(added, json);
+        }
+
+        if (sub is "remove" or "enable" or "disable")
+        {
+            if (positional.Length < 2)
+            {
+                Console.Error.WriteLine($"usage: schedule {sub} <schedule-id>");
+                return 2;
+            }
+
+            var selector = positional[1];
+            var normalized = selector.Replace("-", string.Empty, StringComparison.Ordinal);
+            var matches = settings.Schedules
+                .Where(s => s.Id.ToString("N").StartsWith(normalized, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                Console.Error.WriteLine($"schedule '{selector}' did not match exactly one entry.");
+                return 1;
+            }
+
+            if (sub == "remove")
+            {
+                settings.Schedules.RemoveAll(s => s.Id == matches[0].Id);
+            }
+            else
+            {
+                matches[0].Enabled = sub == "enable";
+            }
+
+            var changed = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(changed, json);
+        }
+
+        Console.Error.WriteLine("usage: schedule list|add|remove|enable|disable");
+        return 2;
     }
 
     private static async Task<int> QueueAsync(CliClient client, string[] args, bool json)
@@ -661,6 +791,7 @@ internal static class Program
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move
+              dm schedule list|add|remove|enable|disable
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown
               dm doctor [--no-start]

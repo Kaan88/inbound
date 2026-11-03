@@ -75,7 +75,7 @@ SDK, or presentation types.
 | 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; measured benchmarks and independent verification pending |
 | 6 | Everyday download management | pending | Practical daily use without CLI |
 | 7 | Authentication + refresh address | pending | Authenticated/refreshed downloads safe and secret-free |
-| 8 | Queues + scheduler | in progress | Named queues, per-queue caps, start/stop, and restart persistence verified (E9/E10); schedules/completion actions pending |
+| 8 | Queues + scheduler | in progress | Named queues, per-queue caps, start/stop, reassignment, and daily/one-time schedule execution verified (E9/E10/E13/E16); quotas, completion actions, sleep prevention, and DST tests pending |
 | 9 | Media detection/downloading | pending | Playable media with correct tracks and recovery |
 | 10 | Download All + site grabber | pending | Controlled offline mirror within crawl boundaries |
 | 11 | Remaining compatibility/integration | pending | Every inventory row implemented or explicitly scoped |
