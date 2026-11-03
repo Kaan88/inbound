@@ -20,27 +20,38 @@ containing secrets.
 
 ## Current status (2026-11-04)
 
-Phase 0 (baseline/setup) is in progress. See `PROGRESS.md` for the exact handoff,
-current commit, and next action. Do not trust stale summaries here; `PROGRESS.md`
-and `ROADMAP.md` win.
+Phases 0–5 are substantially implemented: single-stream engine, resume/crash
+recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
+Chrome automatic + context-menu handoff. Full 1:1 parity is **not** complete;
+`reference notes` and `PROGRESS.md` are authoritative. Remaining large areas:
+everyday management gaps, authentication/refresh, queues/scheduler, media
+(HLS/DASH), Download All/grabber, FTP, and clean-environment install/upgrade
+verification.
+
+Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
+extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
+handoffs completed with matching SHA-256 hashes. The extension is at
+`extensions\chrome\dist` and can be loaded unpacked in normal Chrome.
 
 ## Architecture
 
 One per-user **Host** process owns engine, persistence, scheduler, tray, and IPC.
 The WinUI app, CLI, and Chrome native host are clients. This is deliberate:
 single-writer durability and one lifecycle authority, while keeping the UI
-replaceable.
+replaceable. Orchestration lives in `DownloadManager.Runtime`, which is
+UI-agnostic and directly testable.
 
 | Project | Purpose | TFM / notes |
 | --- | --- | --- |
 | `DownloadManager.Core` | domain models, states, policies, interfaces | `net10.0`; no WinUI/Windows App SDK |
 | `DownloadManager.Contracts` | versioned IPC DTOs/commands/events | `net10.0` |
 | `DownloadManager.Engine` | HTTP transfers, segmentation, resume, retries, limits | `net10.0`; no presentation |
-| `DownloadManager.Persistence` | atomic job/settings/history stores + migrations | `net10.0` |
-| `DownloadManager.Host` | background host, scheduler, named-pipe server, tray | `net10.0-windows` |
+| `DownloadManager.Persistence` | atomic job/settings/checkpoint stores + migrations | `net10.0` |
+| `DownloadManager.Runtime` | job orchestration, scheduling, dedupe, reconciliation | `net10.0` |
+| `DownloadManager.Host` | background host, named-pipe server, tray, lifecycle | `net10.0-windows` |
 | `DownloadManager.Tray` | tray icon/menu library | `net10.0-windows`, WinForms |
-| `DownloadManager.Desktop.WinUI` | replaceable frontend | `net10.0-windows10.0.19041.0`, WinUI 3 |
-| `DownloadManager.NativeHost` | Chrome Native Messaging bridge | `net10.0-windows` |
+| `DownloadManager.Desktop.WinUI` | replaceable WinUI 3 frontend | `net10.0-windows10.0.19041.0`, WinUI 3 |
+| `DownloadManager.NativeHost` | Chrome Native Messaging bridge | `net10.0` |
 | `DownloadManager.Cli` | headless control/diagnostics | `net10.0` |
 | `extensions/chrome` | MV3 TypeScript extension, own ID/assets | Node/tsc |
 | `tests/*` | unit + integration + fault tests | xUnit |
@@ -56,22 +67,37 @@ the host durably records and ACKs before Chrome’s download is cancelled. On an
 failure Chrome’s download is resumed. POST bodies and unsupported request types
 stay in Chrome. See `docs/browser-integration.md`.
 
+## UI structure (rebuilt from the observed reference app window)
+
+Dark WinUI shell with menu bar (`Tasks`, `File`, `Downloads`, `View`, `Help`),
+large icon+label toolbar (Add URL, Resume, Stop, Stop All, Delete, Delete
+Completed, Options; Scheduler/queues disabled until implemented), category
+sidebar (All Downloads, Compressed, Documents, Music, Programs, Video,
+Unfinished, Finished), and an eight-column compact list (File Name, Q, Size,
+Status, Time left, Transfer rate, Last Try Date, Description). Closing hides the
+window; a second launch activates the existing UI via a named event.
+
 ## Commands
 
 ```powershell
-dotnet build DownloadManager.sln -c Debug
-dotnet test DownloadManager.sln -c Debug
+dotnet build DownloadManager.slnx -c Release
+dotnet test tests\DownloadManager.Engine.Tests\DownloadManager.Engine.Tests.csproj -c Release
+dotnet test tests\DownloadManager.Integration.Tests\DownloadManager.Integration.Tests.csproj -c Release
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+powershell -ExecutionPolicy Bypass -File scripts\publish.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1
 ```
 
 Extension:
 
 ```powershell
 cd extensions\chrome
-npm install
+npm ci
+npx tsc --noEmit
 npm run build
+# chrome://extensions -> Developer mode -> Load unpacked -> dist
 ```
 
 disassembler MCP is a headless server on `http://127.0.0.1:8081/mcp`, project
@@ -83,7 +109,8 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 ## Conventions
 
 - Nullable enabled, implicit usings, file-scoped namespaces, async APIs with
-  `CancellationToken`, no `.Result`/`.Wait()` on I/O.
+  `CancellationToken`, no `.Result`/`.Wait()` on I/O. A few synchronous bridge
+  entry points use `GetAwaiter().GetResult()` intentionally.
 - Engine must remain UI-agnostic and testable against the local HTTP server.
 - All durable writes: temp file in same directory + atomic replace + fsync where
   practical. Checkpoints must be recoverable after a kill at any point.
@@ -96,10 +123,22 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 ## Known traps
 
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
-- `dotnet package search` initially listed only an offline source. Verify
-  `nuget.org` is configured before assuming a package restore will work.
+- **Chrome stable 156 removed `--load-extension`**. Manual “Load unpacked” works;
+  for automation use Chrome for Testing 156+ (verified path:
+  `C:\Users\kaank\AppData\Local\Temp\opencode\cft\chrome-win64\chrome.exe`).
+  Chrome for Testing loads the extension with `--load-extension` and a fresh
+  profile. Do not waste time automating Chrome stable's folder picker.
+- Mandatory enterprise policy is not a reliable path here; use CfT/manual.
+- The harness denies child-process writes to user `Downloads` and default
+  LocalAppData, so Host state falls back to `artifacts\app\data` during tests.
+  Use `test-downloads` for browser-test destinations.
 - WinUI 3 unpackaged apps need the Windows App SDK runtime or self-contained
-  deployment; test `dotnet build` before expanding UI work.
+  deployment. Build the UI with `-p:Platform=x64`; the solution build does this
+  automatically now.
 - disassembler project lock: one headless server only. MCP config points at the HTTP
   server, not stdio, to avoid duplicate process locks.
+- Native-host registration is per user and must point at an absolute
+  `DownloadManager.NativeHost.exe`; `scripts\register-native-host.ps1` does this.
 - Never dump registry values containing cookies into committed files; redact.
+- TestServer and UI executables lock their output during builds; stop them or use
+  `scripts\publish.ps1`, which handles this.

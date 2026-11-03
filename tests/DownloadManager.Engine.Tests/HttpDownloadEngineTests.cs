@@ -76,6 +76,84 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task SegmentedDownloadUsesMultipleConnectionsAndMatchesHash()
+    {
+        const int size = 2 * 1024 * 1024;
+        _server.ResetConcurrency();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/file/segmented.bin?size={size}&seed=21&bps=1048576", "segmented.bin");
+        job.RequestedConnections = 4;
+
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_server.PeakConcurrentRangeRequests >= 2,
+            $"expected concurrent range requests, saw {_server.PeakConcurrentRangeRequests}");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(21, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task SegmentedDownloadResumesFromCheckpoint()
+    {
+        const int size = 2 * 1024 * 1024;
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/file/segmented-resume.bin?size={size}&seed=22&bps=524288", "segmented-resume.bin");
+        job.RequestedConnections = 4;
+        var store = new JsonCheckpointStore(ctx.StoragePaths);
+        using var cts = new CancellationTokenSource();
+        var cancelled = false;
+
+        using (var engine = CreateEngine(store))
+        {
+            var progress = new InlineProgress<TransferProgress>(p =>
+            {
+                if (!cancelled && p.ReceivedBytes >= 131_072)
+                {
+                    cancelled = true;
+                    cts.Cancel();
+                }
+            });
+            var first = await engine.ExecuteAsync(job, null, progress, cts.Token);
+            Assert.False(first.Success);
+        }
+
+        var checkpoint = await store.LoadAsync(job.Id);
+        Assert.NotNull(checkpoint);
+        Assert.True(checkpoint!.Segments.Count > 1);
+        Assert.True(checkpoint.CompletedBytes > 0);
+        Assert.True(File.Exists(job.PartFilePath));
+
+        using (var engine = CreateEngine(store))
+        {
+            var second = await engine.ExecuteAsync(job, checkpoint, null, CancellationToken.None);
+            Assert.True(second.Success, second.Failure?.Message);
+            var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(22, size))).ToLowerInvariant();
+            Assert.Equal(expected, await Hashing.Sha256FileAsync(second.FinalFilePath!));
+        }
+    }
+
+    [Fact]
+    public async Task SegmentedRequestFallsBackWhenServerIgnoresRanges()
+    {
+        const int size = 2 * 1024 * 1024;
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/norange/segmented-nr.bin?size={size}&seed=23&bps=2097152", "segmented-nr.bin");
+        job.RequestedConnections = 4;
+
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(23, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
     public async Task DownloadsUnknownLength()
     {
         using var ctx = new EngineContext();

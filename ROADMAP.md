@@ -6,7 +6,24 @@
 > The current phase is broken into concrete tasks; future phases stay coarse
 > until their dependencies are known.
 
-## Phase 0 — Baseline and setup (in progress)
+## Current status (2026-11-04)
+
+- Phase 0: complete (build, test server, pinned reference, parity inventory,
+  browser strategy). UI inventory is useful but not exhaustive.
+- Phase 1: complete (engine tests + CLI hash evidence).
+- Phase 2: in progress (resume, validators, changed content, service restart
+  verified; OS process-kill matrix still pending).
+- Phase 3: complete (host/tray/IPC, reference app-shaped UI, hide-on-close, single-instance
+  activation).
+- Phase 4: in progress (automatic and context-menu handoff verified with hashes;
+  failure path, disabled integration, authenticated requests, and independent
+  verification remain).
+- Phase 5: in progress (segmented transfer/resume/fallback verified; dynamic
+  redistribution, global/per-host limits, throughput benchmark, and independent
+  verification remain).
+- Phases 6–12: pending. See `reference notes` E1–E8 and `PROGRESS.md`.
+
+## Phase 0 — Baseline and setup (done)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -23,7 +40,7 @@
 **Exit gate:** buildable solution, initial parity inventory, concrete browser
 handoff strategy.
 
-## Phase 1 — Correct single-stream downloading (pending)
+## Phase 1 — Correct single-stream downloading (done)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -38,7 +55,7 @@ handoff strategy.
 **Exit gate:** controlled downloads hash correctly; partial/truncated transfers
 never appear successful.
 
-## Phase 2 — Persistence, resume, recovery (pending)
+## Phase 2 — Persistence, resume, recovery (in progress)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -53,7 +70,7 @@ never appear successful.
 **Exit gate:** forced termination/restart preserves safe recovery; incompatible
 content is never silently combined.
 
-## Phase 3 — Tray and minimal frontend (pending)
+## Phase 3 — Tray and minimal frontend (done)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -68,7 +85,7 @@ content is never silently combined.
 **Exit gate:** downloads manageable with main window closed; UI death does not
 kill engine.
 
-## Phase 4 — Chrome integration (pending)
+## Phase 4 — Chrome integration (in progress)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
@@ -84,7 +101,7 @@ kill engine.
 **Exit gate:** one supported Chrome request reliably creates one job while host
 is in tray; failed handoffs never silently lose downloads.
 
-## Phase 5 — Parallel transfers and acceleration (pending)
+## Phase 5 — Parallel transfers and acceleration (in progress)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |

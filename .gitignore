@@ -25,6 +25,8 @@ extensions/chrome/.parcel-cache/
 # Downloads and test fixtures (keep large files out of git)
 test-downloads/
 downloads/
+test-browser-profile*/
+extensions/chrome/update.xml
 *.part
 *.partial
 *.iso

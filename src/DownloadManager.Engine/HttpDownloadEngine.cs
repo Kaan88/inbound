@@ -88,6 +88,22 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
         }
 
+        if (job.RequestedConnections > 1 &&
+            job.SpeedLimitBytesPerSecond is not > 0 &&
+            (checkpoint is null || checkpoint.Segments.Count > 1))
+        {
+            var segmented = await TryExecuteSegmentedAsync(job, checkpoint, progress, cancellationToken)
+                .ConfigureAwait(false);
+            if (segmented is not null)
+            {
+                return segmented;
+            }
+
+            // The segmented attempt resets the part/checkpoint when it cannot
+            // safely continue, so the single-stream path starts from zero.
+            checkpoint = null;
+        }
+
         var state = new TransferState(job, checkpoint)
         {
             PartPath = job.PartFilePath,
@@ -427,13 +443,16 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? rangeEnd = null)
     {
         var currentUri = new Uri(job.Url, UriKind.Absolute);
         var originalOrigin = currentUri.GetLeftPart(UriPartial.Authority);
         for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
         {
-            using var request = BuildRequest(job, currentUri, offset, sameOrigin: currentUri.GetLeftPart(UriPartial.Authority) == originalOrigin);
+            using var request = BuildRequest(job, currentUri, offset,
+                sameOrigin: currentUri.GetLeftPart(UriPartial.Authority) == originalOrigin,
+                rangeEnd: rangeEnd);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_options.ConnectTimeout);
 
@@ -487,7 +506,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             isRetryable: false);
     }
 
-    private HttpRequestMessage BuildRequest(DownloadJob job, Uri uri, long offset, bool sameOrigin)
+    private HttpRequestMessage BuildRequest(
+        DownloadJob job,
+        Uri uri,
+        long offset,
+        bool sameOrigin,
+        long? rangeEnd = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.AcceptEncoding.Clear();
@@ -522,9 +546,9 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             request.Headers.Referrer = referrer;
         }
 
-        if (offset > 0)
+        if (offset > 0 || rangeEnd is not null)
         {
-            request.Headers.Range = new RangeHeaderValue(offset, null);
+            request.Headers.Range = new RangeHeaderValue(offset, rangeEnd);
             if (!string.IsNullOrWhiteSpace(job.ETag) && !job.ETag.StartsWith("W/", StringComparison.Ordinal))
             {
                 request.Headers.IfRange = new RangeConditionHeaderValue(job.ETag);
@@ -536,6 +560,670 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         }
 
         return request;
+    }
+
+    private async Task<DownloadResult?> TryExecuteSegmentedAsync(
+        DownloadJob job,
+        DownloadCheckpoint? checkpoint,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        SegmentedPlan? plan;
+        try
+        {
+            plan = await ProbeSegmentedAsync(job, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (plan is null || plan.Total < 1024 * 1024)
+        {
+            return null;
+        }
+
+        if (checkpoint is not null)
+        {
+            if (checkpoint.TotalBytes != plan.Total ||
+                checkpoint.Segments.Count < 2 ||
+                !SegmentsValid(checkpoint.Segments, plan.Total) ||
+                !File.Exists(job.PartFilePath) ||
+                new FileInfo(job.PartFilePath).Length != plan.Total ||
+                ValidatorsConflict(checkpoint.ETag, checkpoint.LastModified, plan.ETag, plan.LastModified))
+            {
+                await ResetSegmentedAsync(job).ConfigureAwait(false);
+                return null;
+            }
+        }
+        else
+        {
+            try
+            {
+                if (File.Exists(job.PartFilePath))
+                {
+                    File.Delete(job.PartFilePath);
+                }
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+
+        var segments = checkpoint is null
+            ? BuildSegments(plan.Total, job.RequestedConnections)
+            : checkpoint.Segments.Select(CloneSegment).ToList();
+        if (segments.Count < 2)
+        {
+            return null;
+        }
+
+        job.ETag = plan.ETag ?? job.ETag;
+        job.LastModified = plan.LastModified ?? job.LastModified;
+        job.ContentType = plan.ContentType ?? job.ContentType;
+
+        FileStream file;
+        try
+        {
+            file = new FileStream(
+                job.PartFilePath,
+                checkpoint is null ? FileMode.Create : FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.ReadWrite,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.RandomAccess);
+            if (checkpoint is null)
+            {
+                file.SetLength(plan.Total);
+            }
+
+            if (file.Length != plan.Total)
+            {
+                await file.DisposeAsync().ConfigureAwait(false);
+                await ResetSegmentedAsync(job).ConfigureAwait(false);
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _));
+        }
+
+        var run = new SegmentedRun(job, plan, file, segments)
+        {
+            AggregateBytes = segments.Sum(s => s.Completed),
+        };
+        var reporter = new SegmentedReporter(progress, run);
+        run.Reporter = reporter;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        run.Cancellation = linked;
+        var tasks = segments.Select(segment => DownloadSegmentAsync(run, segment, linked.Token)).ToArray();
+        DownloadResult? failure = null;
+
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancellation or a segment aborting the rest.
+        }
+        catch (SegmentationUnsupportedException)
+        {
+            run.Unsupported = true;
+        }
+        catch (SegmentFailureException ex)
+        {
+            failure = DownloadResult.Fail(DownloadState.Failed, ex.Failure, run.AggregateBytes, plan.Total);
+        }
+        catch (Exception ex)
+        {
+            failure = DownloadResult.Fail(DownloadState.Failed,
+                new JobFailure(FailureKind.Unknown, ex.Message, false, true, DateTimeOffset.UtcNow),
+                run.AggregateBytes, plan.Total);
+        }
+        finally
+        {
+            if (run.Unsupported || failure is not null)
+            {
+                linked.Cancel();
+            }
+
+            try
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The first failure is already captured above.
+            }
+
+            await file.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (run.Unsupported)
+        {
+            await ResetSegmentedAsync(job).ConfigureAwait(false);
+            return null;
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+            return DownloadResult.Fail(DownloadState.Cancelled,
+                new JobFailure(FailureKind.Cancelled, "The download was cancelled.", false, true, DateTimeOffset.UtcNow),
+                run.AggregateBytes, plan.Total);
+        }
+
+        if (failure is not null)
+        {
+            await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+            return failure;
+        }
+
+        if (run.AggregateBytes != plan.Total || !segments.All(s => s.Completed >= s.End - s.Start + 1))
+        {
+            await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+            return DownloadResult.Fail(DownloadState.Failed,
+                new JobFailure(FailureKind.Network,
+                    "The segmented transfer ended before all bytes arrived.",
+                    true, true, DateTimeOffset.UtcNow),
+                run.AggregateBytes, plan.Total);
+        }
+
+        var finalState = new TransferState(job, null)
+        {
+            PartPath = job.PartFilePath,
+            Bytes = run.AggregateBytes,
+            Total = plan.Total,
+            ETag = plan.ETag,
+            LastModified = plan.LastModified,
+            ContentType = plan.ContentType,
+        };
+        var finalReporter = new TransferReporter(progress, finalState);
+        finalReporter.Reset();
+        return await FinalizeAsync(job, finalState, finalReporter, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SegmentedPlan?> ProbeSegmentedAsync(DownloadJob job, CancellationToken cancellationToken)
+    {
+        using var response = await SendWithRedirectsAsync(job, 0, cancellationToken, rangeEnd: 0)
+            .ConfigureAwait(false);
+        if ((int)response.StatusCode != 206)
+        {
+            return null;
+        }
+
+        var range = response.Content.Headers.ContentRange;
+        if (range?.From != 0 || range.To is null || range.Length is not > 0)
+        {
+            return null;
+        }
+
+        return new SegmentedPlan(
+            range.Length.Value,
+            response.Headers.ETag?.Tag,
+            response.Content.Headers.LastModified?.ToString("R"),
+            response.Content.Headers.ContentType?.ToString());
+    }
+
+    private async Task DownloadSegmentAsync(
+        SegmentedRun run,
+        SegmentCheckpoint segment,
+        CancellationToken cancellationToken)
+    {
+        var job = run.Job;
+        var length = segment.End - segment.Start + 1;
+        var attempt = 0;
+        Interlocked.Increment(ref run.ActiveConnections);
+        try
+        {
+            while (segment.Completed < length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                attempt++;
+                try
+                {
+                    var offset = segment.Start + segment.Completed;
+                    using var response = await SendWithRedirectsAsync(job, offset, cancellationToken, segment.End)
+                        .ConfigureAwait(false);
+                    var status = (int)response.StatusCode;
+
+                    if (status == 200)
+                    {
+                        throw new SegmentationUnsupportedException();
+                    }
+
+                    if (status == 416)
+                    {
+                        if (segment.Completed == length)
+                        {
+                            break;
+                        }
+
+                        throw new SegmentationUnsupportedException();
+                    }
+
+                    if (status is 401 or 403 or 404)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(
+                                status == 401 ? FailureKind.Unauthorized : status == 403 ? FailureKind.Forbidden : FailureKind.NotFound,
+                                $"The server returned HTTP {status} for a segment.",
+                                false,
+                                false,
+                                DateTimeOffset.UtcNow),
+                            retryable: false);
+                    }
+
+                    if (status is 408 or 425 or 429 || status >= 500)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.Http, $"The server returned HTTP {status} for a segment.",
+                                true, true, DateTimeOffset.UtcNow),
+                            retryable: true);
+                    }
+
+                    if (status != 206)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.Http, $"Unexpected HTTP {status} for a segment.",
+                                false, false, DateTimeOffset.UtcNow),
+                            retryable: false);
+                    }
+
+                    var range = response.Content.Headers.ContentRange;
+                    if (range?.From != offset || range.To is null || range.To > segment.End)
+                    {
+                        throw new SegmentationUnsupportedException();
+                    }
+
+                    if (range.Length != run.Plan.Total)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.RemoteChanged,
+                                "The remote file size changed during a segmented transfer.",
+                                false, false, DateTimeOffset.UtcNow),
+                            retryable: false);
+                    }
+
+                    var responseEtag = response.Headers.ETag?.Tag;
+                    var responseLastModified = response.Content.Headers.LastModified?.ToString("R");
+                    if (ValidatorsConflict(job.ETag, job.LastModified, responseEtag, responseLastModified))
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.RemoteChanged,
+                                "The remote file changed during a segmented transfer.",
+                                false, false, DateTimeOffset.UtcNow),
+                            retryable: false);
+                    }
+
+                    var remaining = length - segment.Completed;
+                    var contentLength = response.Content.Headers.ContentLength;
+                    if (contentLength is > 0 && contentLength != remaining)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.InvalidContent,
+                                "The server returned a segment with an unexpected length.",
+                                true, true, DateTimeOffset.UtcNow),
+                            retryable: true);
+                    }
+
+                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                    var buffer = new byte[_options.BufferSize];
+                    var writeOffset = offset;
+                    while (true)
+                    {
+                        var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken)
+                            .AsTask()
+                            .WaitAsync(_options.ReadTimeout, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        if (read > length - segment.Completed)
+                        {
+                            throw new SegmentFailureException(
+                                new JobFailure(FailureKind.InvalidContent,
+                                    "A segment response exceeded its range.",
+                                    false, false, DateTimeOffset.UtcNow),
+                                retryable: false);
+                        }
+
+                        await RandomAccess.WriteAsync(
+                                run.File.SafeFileHandle,
+                                buffer.AsMemory(0, read),
+                                writeOffset,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        writeOffset += read;
+
+                        lock (run.Sync)
+                        {
+                            segment.Completed += read;
+                            run.AggregateBytes += read;
+                        }
+
+                        run.Reporter.Report(force: false, "Downloading");
+                        await MaybeSaveSegmentedCheckpointAsync(run, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (segment.Completed < length)
+                    {
+                        throw new SegmentFailureException(
+                            new JobFailure(FailureKind.Network,
+                                "A segment connection ended before its range completed.",
+                                true, true, DateTimeOffset.UtcNow),
+                            retryable: true);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (SegmentationUnsupportedException)
+                {
+                    throw;
+                }
+                catch (SegmentFailureException ex)
+                {
+                    if (!ex.Retryable || attempt >= _options.MaxAttempts)
+                    {
+                        throw;
+                    }
+
+                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    var failure = MapException(ex, out var retryable);
+                    if (!retryable || attempt >= _options.MaxAttempts)
+                    {
+                        throw new SegmentFailureException(failure, retryable);
+                    }
+
+                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref run.ActiveConnections);
+        }
+    }
+
+    private async Task MaybeSaveSegmentedCheckpointAsync(SegmentedRun run, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (run.Sync)
+        {
+            if (now - run.LastCheckpoint < TimeSpan.FromSeconds(1))
+            {
+                return;
+            }
+
+            run.LastCheckpoint = now;
+        }
+
+        await SaveSegmentedCheckpointAsync(run, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SaveSegmentedCheckpointAsync(SegmentedRun run, CancellationToken cancellationToken)
+    {
+        if (_checkpoints is null)
+        {
+            return;
+        }
+
+        await run.CheckpointGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            DownloadCheckpoint checkpoint;
+            lock (run.Sync)
+            {
+                checkpoint = new DownloadCheckpoint
+                {
+                    JobId = run.Job.Id,
+                    Url = run.Job.Url,
+                    FinalUrl = run.Job.FinalUrl,
+                    ETag = run.Plan.ETag,
+                    LastModified = run.Plan.LastModified,
+                    TotalBytes = run.Plan.Total,
+                    ContentType = run.Plan.ContentType,
+                    Segments = run.Segments.Select(CloneSegment).ToList(),
+                };
+            }
+
+            await _checkpoints.SaveAsync(checkpoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            // A missing checkpoint only costs resume precision.
+        }
+        finally
+        {
+            run.CheckpointGate.Release();
+        }
+    }
+
+    private async Task ResetSegmentedAsync(DownloadJob job)
+    {
+        try
+        {
+            if (File.Exists(job.PartFilePath))
+            {
+                using var stream = new FileStream(job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                stream.SetLength(0);
+            }
+        }
+        catch (IOException)
+        {
+            // best effort; the next download will truncate it
+        }
+
+        if (_checkpoints is not null)
+        {
+            try
+            {
+                await _checkpoints.DeleteAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // best effort
+            }
+        }
+    }
+
+    private static List<SegmentCheckpoint> BuildSegments(long total, int requestedConnections)
+    {
+        const long minimumSegment = 256 * 1024;
+        var count = Math.Clamp(requestedConnections, 1, 32);
+        count = (int)Math.Min(count, Math.Max(1, total / minimumSegment));
+        if (count < 2)
+        {
+            return new List<SegmentCheckpoint>
+            {
+                new() { Start = 0, End = total - 1, Completed = 0 },
+            };
+        }
+
+        var baseSize = total / count;
+        var remainder = total % count;
+        var segments = new List<SegmentCheckpoint>(count);
+        long start = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var size = baseSize + (i < remainder ? 1 : 0);
+            segments.Add(new SegmentCheckpoint
+            {
+                Start = start,
+                End = start + size - 1,
+                Completed = 0,
+            });
+            start += size;
+        }
+
+        return segments;
+    }
+
+    private static bool SegmentsValid(IReadOnlyList<SegmentCheckpoint> segments, long total)
+    {
+        long expectedStart = 0;
+        foreach (var segment in segments.OrderBy(s => s.Start))
+        {
+            if (segment.Start != expectedStart || segment.End < segment.Start || segment.End >= total)
+            {
+                return false;
+            }
+
+            var length = segment.End - segment.Start + 1;
+            if (segment.Completed < 0 || segment.Completed > length)
+            {
+                return false;
+            }
+
+            expectedStart = segment.End + 1;
+        }
+
+        return expectedStart == total;
+    }
+
+    private static SegmentCheckpoint CloneSegment(SegmentCheckpoint segment)
+        => new()
+        {
+            Start = segment.Start,
+            End = segment.End,
+            Completed = segment.Completed,
+        };
+
+    private static bool ValidatorsConflict(TransferState state, string? responseEtag, string? responseLastModified)
+        => ValidatorsConflict(state.ETag, state.LastModified, responseEtag, responseLastModified);
+
+    private static bool ValidatorsConflict(
+        string? expectedEtag,
+        string? expectedLastModified,
+        string? responseEtag,
+        string? responseLastModified)
+    {
+        if (!string.IsNullOrWhiteSpace(expectedEtag) && !string.IsNullOrWhiteSpace(responseEtag) &&
+            !string.Equals(expectedEtag, responseEtag, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(expectedLastModified) && !string.IsNullOrWhiteSpace(responseLastModified) &&
+            !string.Equals(expectedLastModified, responseLastModified, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private sealed record SegmentedPlan(
+        long Total,
+        string? ETag,
+        string? LastModified,
+        string? ContentType);
+
+    private sealed class SegmentedRun
+    {
+        public SegmentedRun(
+            DownloadJob job,
+            SegmentedPlan plan,
+            FileStream file,
+            List<SegmentCheckpoint> segments)
+        {
+            Job = job;
+            Plan = plan;
+            File = file;
+            Segments = segments;
+        }
+
+        public DownloadJob Job { get; }
+        public SegmentedPlan Plan { get; }
+        public FileStream File { get; }
+        public List<SegmentCheckpoint> Segments { get; }
+        public object Sync { get; } = new();
+        public long AggregateBytes { get; set; }
+        public int ActiveConnections;
+        public bool Unsupported { get; set; }
+        public DateTimeOffset LastCheckpoint { get; set; } = DateTimeOffset.MinValue;
+        public SemaphoreSlim CheckpointGate { get; } = new(1, 1);
+        public CancellationTokenSource? Cancellation { get; set; }
+        public SegmentedReporter Reporter { get; set; } = null!;
+    }
+
+    private sealed class SegmentedReporter
+    {
+        private readonly IProgress<TransferProgress>? _progress;
+        private readonly SegmentedRun _run;
+        private readonly SpeedEstimator _estimator = new();
+        private DateTimeOffset _lastReport = DateTimeOffset.MinValue;
+
+        public SegmentedReporter(IProgress<TransferProgress>? progress, SegmentedRun run)
+        {
+            _progress = progress;
+            _run = run;
+        }
+
+        public void Report(bool force, string phase)
+        {
+            if (_progress is null)
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (!force && now - _lastReport < TimeSpan.FromMilliseconds(250))
+            {
+                return;
+            }
+
+            long bytes;
+            int active;
+            lock (_run.Sync)
+            {
+                bytes = _run.AggregateBytes;
+                active = _run.ActiveConnections;
+            }
+
+            var (speed, eta) = _estimator.Update(bytes, _run.Plan.Total, now);
+            _lastReport = now;
+            try
+            {
+                _progress.Report(new TransferProgress(bytes, _run.Plan.Total, speed, eta, active, phase));
+            }
+            catch
+            {
+                // progress observers must not break the transfer
+            }
+        }
+    }
+
+    private sealed class SegmentationUnsupportedException : Exception
+    {
+    }
+
+    private sealed class SegmentFailureException : Exception
+    {
+        public SegmentFailureException(JobFailure failure, bool retryable)
+        {
+            Failure = failure;
+            Retryable = retryable;
+        }
+
+        public JobFailure Failure { get; }
+        public bool Retryable { get; }
     }
 
     private async Task<DownloadResult> FinalizeAsync(
@@ -568,7 +1256,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             return DownloadResult.Fail(DownloadState.Failed,
                 new JobFailure(FailureKind.InvalidContent,
-                    "The partial file length does not match the transfer state.",
+                    $"The partial file length ({partInfo.Length}) does not match the transfer state ({state.Bytes}).",
                     false, true, DateTimeOffset.UtcNow),
                 state.Bytes, state.Total);
         }
@@ -673,23 +1361,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             // The payload itself is still written; a missing/stale checkpoint only
             // costs resume precision and is reconciled at startup.
         }
-    }
-
-    private static bool ValidatorsConflict(TransferState state, string? responseEtag, string? responseLastModified)
-    {
-        if (!string.IsNullOrWhiteSpace(state.ETag) && !string.IsNullOrWhiteSpace(responseEtag) &&
-            !string.Equals(state.ETag, responseEtag, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(state.LastModified) && !string.IsNullOrWhiteSpace(responseLastModified) &&
-            !string.Equals(state.LastModified, responseLastModified, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return false;
     }
 
     private static async Task ThrottleAsync(long totalBytes, TimeSpan elapsed, long? limit, CancellationToken cancellationToken)

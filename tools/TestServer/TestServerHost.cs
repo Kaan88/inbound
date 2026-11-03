@@ -18,6 +18,16 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _versions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
+    private int _activeRangeRequests;
+    private int _peakRangeRequests;
+
+    public int PeakConcurrentRangeRequests => Volatile.Read(ref _peakRangeRequests);
+
+    public void ResetConcurrency()
+    {
+        Interlocked.Exchange(ref _activeRangeRequests, 0);
+        Interlocked.Exchange(ref _peakRangeRequests, 0);
+    }
 
     private TestServerHost(WebApplication app)
     {
@@ -63,9 +73,25 @@ public sealed class TestServerHost : IAsyncDisposable
         {
             var size = QueryInt(context, "size", 1024 * 1024);
             var seed = QueryInt(context, "seed", 1);
-            await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
-                throttleBytesPerSecond: QueryInt(context, "bps", 0),
-                unknownLength: false).ConfigureAwait(false);
+            var isRange = !string.IsNullOrWhiteSpace(context.Request.Headers.Range);
+            if (isRange)
+            {
+                BeginRangeRequest();
+            }
+
+            try
+            {
+                await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                    throttleBytesPerSecond: QueryInt(context, "bps", 0),
+                    unknownLength: false).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (isRange)
+                {
+                    Interlocked.Decrement(ref _activeRangeRequests);
+                }
+            }
         });
 
         _app.MapGet("/norange/{name}", async (HttpContext context, string name) =>
@@ -408,6 +434,24 @@ public sealed class TestServerHost : IAsyncDisposable
 
     private static int QueryInt(HttpContext context, string name, int fallback)
         => int.TryParse(context.Request.Query[name], out var value) ? value : fallback;
+
+    private void BeginRangeRequest()
+    {
+        var active = Interlocked.Increment(ref _activeRangeRequests);
+        var currentPeak = Volatile.Read(ref _peakRangeRequests);
+        while (active > currentPeak)
+        {
+            var observed = Interlocked.CompareExchange(ref _peakRangeRequests, active, currentPeak);
+            if (observed == currentPeak)
+            {
+                break;
+            }
+
+            currentPeak = observed;
+        }
+    }
+
+    private void EndRangeRequest() => Interlocked.Decrement(ref _activeRangeRequests);
 
     public async ValueTask DisposeAsync()
     {
