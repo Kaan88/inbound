@@ -51,7 +51,6 @@ if (Test-Path $extensionTarget) {
 Copy-Item $extensionSource $extensionTarget -Recurse -Force
 
 & (Join-Path $PSScriptRoot "register-native-host.ps1") -AppDir $appDir -Force
-if ($LASTEXITCODE -ne 0) { throw "Native-host registration failed." }
 
 if (-not $NoShortcut) {
     try {

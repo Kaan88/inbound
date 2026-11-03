@@ -272,6 +272,13 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.QueueAction:
+                    var queueAction = message.GetPayload<QueueActionRequest>();
+                    await Reply(client, message, MessageTypes.SettingsResult,
+                        await _service.QueueActionAsync(queueAction, cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.HostOpenUi:
                     var open = message.GetPayload<HostActionRequest>();
                     _controller.OpenUi(string.IsNullOrWhiteSpace(open.Action) ? null : open.Action);

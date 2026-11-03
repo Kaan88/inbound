@@ -21,7 +21,9 @@
 - Phase 5: in progress (segmented transfer/resume/fallback verified; dynamic
   redistribution, global/per-host limits, throughput benchmark, and independent
   verification remain).
-- Phases 6–12: pending. See `reference notes` E1–E8 and `PROGRESS.md`.
+- Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
+  and CLI/UI assignment verified; schedules/quotas/completion actions remain).
+- Phases 6, 7, 9–12: pending. See `reference notes` E1–E10 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
 
@@ -129,10 +131,11 @@ Coarse: cookies/referrer/UA/custom headers, site logins, HTTP/SOCKS proxies,
 redirect credential rules, expired URL errors, Refresh Download Address with
 partial-data preservation and content validation.
 
-## Phase 8 — Queues and scheduling (pending)
+## Phase 8 - Queues and scheduling (in progress)
 
-Coarse: named queues, ordering/reassignment, per-queue concurrency, start/stop,
-one-time/recurring schedules, quotas, completion actions, sleep prevention,
+Named queues, per-queue concurrency, start/stop, queue persistence, and CLI/UI
+assignment are implemented and tested (E9/E10). Remaining: moving jobs between
+queues, schedule execution, quotas, completion actions, sleep prevention,
 DST/restart behavior.
 
 ## Phase 9 — Media detection and downloading (pending)

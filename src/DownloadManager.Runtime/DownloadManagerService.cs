@@ -173,6 +173,11 @@ public sealed class DownloadManagerService
             return new AddJobResponse { Accepted = false, Error = headerError, ErrorCode = "invalid_headers" };
         }
 
+        var queueId = _settings.Queues.Any(q => q.Id == request.QueueId)
+            ? request.QueueId
+            : _settings.DefaultQueueId;
+        var queue = _settings.Queues.First(q => q.Id == queueId);
+
         var job = new DownloadJob
         {
             Url = request.Url,
@@ -180,6 +185,8 @@ public sealed class DownloadManagerService
             PageUrl = request.PageUrl,
             Referrer = request.Referrer,
             UserAgent = request.UserAgent,
+            QueueId = queueId,
+            QueueName = queue.Name,
             FileName = Path.GetFileName(finalPath),
             DestinationDirectory = destination,
             FinalFilePath = finalPath,
@@ -538,17 +545,129 @@ public sealed class DownloadManagerService
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,
+            DefaultQueueId = settings.DefaultQueueId,
+            Queues = MapQueues(settings.Queues, _settings.Queues, settings.MaxConcurrentDownloads),
+            Schedules = MapSchedules(settings.Schedules, _settings.Schedules),
         };
+
+        if (!next.Queues.Any(q => q.Id == next.DefaultQueueId))
+        {
+            next.DefaultQueueId = next.Queues[0].Id;
+        }
 
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         lock (_sync)
         {
             _settings = next;
+            var queueNames = next.Queues.ToDictionary(q => q.Id, q => q.Name);
+            foreach (var runtime in _jobs.Values)
+            {
+                if (queueNames.TryGetValue(runtime.Job.QueueId, out var queueName))
+                {
+                    runtime.Job.QueueName = queueName;
+                }
+            }
         }
 
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
+    }
+
+    public async Task<SettingsResult> QueueActionAsync(
+        QueueActionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        List<JobRuntime> paused = new();
+        List<JobRuntime> resumed = new();
+        string? error = null;
+
+        lock (_sync)
+        {
+            var queue = _settings.Queues.FirstOrDefault(q => q.Id == request.QueueId);
+            if (queue is null)
+            {
+                return new SettingsResult { Ok = false, Error = "Queue not found.", Settings = MapSettings(_settings) };
+            }
+
+            switch (request.Action.ToLowerInvariant())
+            {
+                case "start":
+                    queue.IsRunning = true;
+                    foreach (var runtime in _jobs.Values.Where(r =>
+                                 r.Job.QueueId == queue.Id && r.Job.State == DownloadState.Paused))
+                    {
+                        if (runtime.Starting || runtime.Runner is { IsCompleted: false })
+                        {
+                            // The pause is still settling; requeue once the runner exits.
+                            runtime.ResumeWhenStopped = true;
+                            continue;
+                        }
+
+                        runtime.PauseRequested = false;
+                        runtime.CancelRequested = false;
+                        runtime.CancelledForRemoval = false;
+                        runtime.Job.State = DownloadState.Queued;
+                        runtime.Job.StartMode = StartMode.StartNow;
+                        runtime.Job.Failure = null;
+                        runtime.Job.Touch();
+                        resumed.Add(runtime);
+                    }
+
+                    break;
+                case "stop":
+                    queue.IsRunning = false;
+                    paused = _jobs.Values
+                        .Where(r => r.Job.QueueId == queue.Id &&
+                                    (r.Starting || r.Runner is { IsCompleted: false }))
+                        .ToList();
+                    foreach (var runtime in paused)
+                    {
+                        runtime.PauseRequested = true;
+                        runtime.Job.State = DownloadState.Paused;
+                        runtime.Job.BytesPerSecond = null;
+                        runtime.Job.EstimatedRemaining = null;
+                        runtime.Job.ActiveConnections = 0;
+                        runtime.Job.Touch();
+                        runtime.Cts?.Cancel();
+                    }
+
+                    break;
+                case "setmax":
+                    queue.MaxConcurrentDownloads = Math.Clamp(request.MaxConcurrentDownloads, 1, 16);
+                    break;
+                default:
+                    error = "Unknown queue action.";
+                    break;
+            }
+
+            foreach (var runtime in _jobs.Values.Where(r => r.Job.QueueId == queue.Id))
+            {
+                runtime.Job.QueueName = queue.Name;
+            }
+        }
+
+        if (error is not null)
+        {
+            return new SettingsResult { Ok = false, Error = error, Settings = MapSettings(_settings) };
+        }
+
+        foreach (var runtime in paused)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "paused");
+        }
+
+        foreach (var runtime in resumed)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "queued");
+        }
+
+        await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+        SettingsChanged?.Invoke(this, _settings);
+        Schedule();
+        return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
 
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
@@ -672,21 +791,51 @@ public sealed class DownloadManagerService
                 return;
             }
 
-            var active = _jobs.Values.Count(r => r.Starting || r.Runner is { IsCompleted: false });
-            var slots = _settings.MaxConcurrentDownloads - active;
+            var running = _jobs.Values
+                .Where(r => r.Starting || r.Runner is { IsCompleted: false })
+                .ToList();
+            var activeTotal = running.Count;
+            var slots = _settings.MaxConcurrentDownloads - activeTotal;
             if (slots <= 0)
             {
                 return;
             }
 
-            toStart = _jobs.Values
-                .Where(r => !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
-                            r.Job.State == DownloadState.Queued &&
-                            r.Job.StartMode != StartMode.Later)
-                .OrderByDescending(r => r.Job.Priority)
-                .ThenBy(r => r.Job.CreatedAt)
-                .Take(slots)
-                .ToList();
+            var queueDefaults = _settings.Queues.FirstOrDefault(q => q.Id == _settings.DefaultQueueId)
+                                ?? _settings.Queues[0];
+            var perQueueActive = running
+                .GroupBy(r => r.Job.QueueId)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            toStart = new List<JobRuntime>();
+            foreach (var runtime in _jobs.Values
+                         .Where(r => !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
+                                     r.Job.State == DownloadState.Queued &&
+                                     r.Job.StartMode != StartMode.Later)
+                         .OrderByDescending(r => r.Job.Priority)
+                         .ThenBy(r => r.Job.CreatedAt))
+            {
+                if (slots <= 0)
+                {
+                    break;
+                }
+
+                var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults;
+                if (!queue.IsRunning)
+                {
+                    continue;
+                }
+
+                var queueActive = perQueueActive.GetValueOrDefault(queue.Id);
+                if (queueActive >= queue.MaxConcurrentDownloads)
+                {
+                    continue;
+                }
+
+                toStart.Add(runtime);
+                perQueueActive[queue.Id] = queueActive + 1;
+                slots--;
+            }
 
             foreach (var runtime in toStart)
             {
@@ -706,6 +855,25 @@ public sealed class DownloadManagerService
         CancellationTokenSource cts;
         lock (_sync)
         {
+            if (runtime.PauseRequested || _shuttingDown)
+            {
+                if (runtime.ResumeWhenStopped && !_shuttingDown)
+                {
+                    runtime.PauseRequested = false;
+                    runtime.ResumeWhenStopped = false;
+                }
+                else
+                {
+                    job.State = DownloadState.Paused;
+                    job.BytesPerSecond = null;
+                    job.EstimatedRemaining = null;
+                    job.ActiveConnections = 0;
+                    job.Touch();
+                    runtime.Starting = false;
+                    return;
+                }
+            }
+
             runtime.Cts?.Dispose();
             cts = new CancellationTokenSource();
             runtime.Cts = cts;
@@ -811,9 +979,20 @@ public sealed class DownloadManagerService
             }
             else if (runtime.PauseRequested || _shuttingDown)
             {
-                job.State = DownloadState.Paused;
-                job.Failure = null;
-                changeType = "paused";
+                if (runtime.ResumeWhenStopped && !_shuttingDown)
+                {
+                    runtime.PauseRequested = false;
+                    runtime.ResumeWhenStopped = false;
+                    job.State = DownloadState.Queued;
+                    job.Failure = null;
+                    changeType = "queued";
+                }
+                else
+                {
+                    job.State = DownloadState.Paused;
+                    job.Failure = null;
+                    changeType = "paused";
+                }
             }
             else if (result.Success)
             {
@@ -1085,6 +1264,7 @@ public sealed class DownloadManagerService
             Priority = job.Priority,
             Description = job.Description,
             ExpectedSha256 = job.ExpectedSha256,
+            QueueName = job.QueueName,
             StartMode = JsonNamingPolicy.CamelCase.ConvertName(job.StartMode.ToString()),
             CanPause = job.CanPause,
             CanResume = job.CanResume,
@@ -1123,7 +1303,96 @@ public sealed class DownloadManagerService
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,
+            DefaultQueueId = settings.DefaultQueueId,
+            Queues = settings.Queues.Select(q => new QueueDto
+            {
+                Id = q.Id,
+                Name = q.Name,
+                MaxConcurrentDownloads = q.MaxConcurrentDownloads,
+                IsRunning = q.IsRunning,
+                Order = q.Order,
+            }).ToList(),
+            Schedules = settings.Schedules.Select(s => new ScheduleDto
+            {
+                Id = s.Id,
+                Name = s.Name,
+                QueueId = s.QueueId,
+                Enabled = s.Enabled,
+                Days = s.Days,
+                StartTime = s.StartTime,
+                StopTime = s.StopTime,
+            }).ToList(),
         };
+
+    private static List<DownloadQueue> MapQueues(
+        List<QueueDto>? requested,
+        List<DownloadQueue> existing,
+        int defaultMax)
+    {
+        var source = requested is { Count: > 0 }
+            ? requested.Select((q, index) => new DownloadQueue
+            {
+                Id = q.Id,
+                Name = string.IsNullOrWhiteSpace(q.Name) ? $"Queue {index + 1}" : q.Name.Trim(),
+                MaxConcurrentDownloads = Math.Clamp(q.MaxConcurrentDownloads, 1, 16),
+                IsRunning = q.IsRunning,
+                Order = index,
+            }).ToList()
+            : existing.Select((q, index) => new DownloadQueue
+            {
+                Id = q.Id,
+                Name = q.Name,
+                MaxConcurrentDownloads = q.MaxConcurrentDownloads,
+                IsRunning = q.IsRunning,
+                Order = index,
+            }).ToList();
+
+        if (source.Count == 0)
+        {
+            source.Add(new DownloadQueue
+            {
+                Id = 0,
+                Name = "Main",
+                MaxConcurrentDownloads = Math.Clamp(defaultMax, 1, 16),
+                IsRunning = true,
+            });
+        }
+
+        var seen = new HashSet<int>();
+        for (var i = 0; i < source.Count; i++)
+        {
+            if (!seen.Add(source[i].Id))
+            {
+                source[i].Id = seen.Max() + 1;
+                seen.Add(source[i].Id);
+            }
+
+            source[i].Order = i;
+        }
+
+        return source;
+    }
+
+    private static List<ScheduleRule> MapSchedules(
+        List<ScheduleDto>? requested,
+        List<ScheduleRule> existing)
+    {
+        if (requested is not { Count: > 0 })
+        {
+            return existing.ToList();
+        }
+
+        return requested.Select(s => new ScheduleRule
+        {
+            Id = s.Id == Guid.Empty ? Guid.NewGuid() : s.Id,
+            Name = s.Name,
+            QueueId = s.QueueId,
+            Enabled = s.Enabled,
+            Days = s.Days,
+            StartTime = s.StartTime,
+            StopTime = s.StopTime,
+        }).ToList();
+    }
 
     private sealed class JobRuntime
     {
@@ -1137,6 +1406,7 @@ public sealed class DownloadManagerService
         public Task? Runner { get; set; }
         public bool Starting { get; set; }
         public bool PauseRequested { get; set; }
+        public bool ResumeWhenStopped { get; set; }
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
         public bool CancelledForRemoval { get; set; }

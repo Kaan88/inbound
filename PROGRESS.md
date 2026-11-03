@@ -9,9 +9,9 @@ remain open. Authoritative parity evidence is in `reference notes`.
 - Repository: `C:\Users\kaank\Downloads\reference app`; remote
   `https://github.com/Kaan88/download-manager` (verified **private**).
 - Commits: `0f3a294` baseline engine/host/IPC/CLI/native bridge,
-  `a957f70` Chrome extension, `2143b6e` reference app-shaped WinUI frontend.
-  The segmented-transfer, packaging, and evidence increment is pending at the
-  time of this note.
+  `a957f70` Chrome extension, `2143b6e` reference app-shaped WinUI frontend,
+  `eb03ef4` segmented transfers, packaging scripts, browser-handoff evidence,
+  and updated parity/onboarding.
 - reference app reference pinned to **6.43.12.3** (`v6.43b12 Full`); see
   `notes/reference-version.md`.
 - Tracking fallback: Goal/Todo tools are unavailable in this OpenCode 2.2.5
@@ -30,7 +30,8 @@ remain open. Authoritative parity evidence is in `reference notes`.
 | WinUI frontend | reference app-shaped dark shell: Tasks/File/Downloads/View/Help menu, large toolbar, category sidebar, eight-column list; Add URL and Options dialogs; filtering/sorting; single-instance activation |
 | Chrome extension | Own MV3 identity `pknddmneejadnnngffojnoecojhdfalc`; automatic interception and context-menu handoff; destination/start dialog; popup/options |
 | Native bridge | Registered per user as `com.kaank.downloadmanager`; durable ACK and dedupe; Chrome for Testing handoff verified |
-| Packaging | `scripts/build.ps1`, `publish.ps1`, `register-native-host.ps1`, `install.ps1`, `uninstall.ps1`, `package.ps1`; clean-environment install still unverified |
+| Queues | Named queues (`Main`, added `Night`), per-queue max concurrency, start/stop, queue assignment at add time, persistence across restart; CLI `dm queue` and WinUI Add URL/Start Queue/Stop Queue |
+| Packaging | `scripts/build.ps1`, `publish.ps1`, `register-native-host.ps1`, `install.ps1`, `uninstall.ps1`, `package.ps1`; installed-build download and uninstall verified in this harness; clean external environment still unverified |
 
 ## Browser evidence (2026-11-04)
 
@@ -69,12 +70,36 @@ Native-host registration evidence:
   `C:\Users\kaank\Downloads\reference app\artifacts\app\DownloadManager.NativeHost.exe`
   (development publish), allowed origin only the pinned extension.
 
+## Queue evidence (2026-11-04)
+
+- `RuntimeServiceTests` now has three queue acceptance tests (see `reference notes`
+  E9). The suite is **9/9 passed**.
+  - `StoppingQueuePausesOnlyThatQueue`: stopping queue `Night` paused only its
+    job; `Main` completed; starting `Night` resumed and the SHA-256 matched
+    seed 42.
+  - `PerQueueConcurrencyIsRespected`: two queues capped at one each ran exactly
+    one job each while the global cap was three.
+  - `QueueStateAndMembershipSurviveRestart`: queue name, max, stopped state, and
+    the job's queue membership survived service recreation.
+- CLI end-to-end against the published host (E10): `queue add Night 2`,
+  `queue stop 1`, add with `--queue 1` stayed `queued` with no file,
+  `queue start 1` completed 524,288 bytes; SHA-256
+  `cd77d60c1cd3feb361d2013317b43a5e40cdac91bcf973cc9421d5a281dd121f`
+  matched test seed 707.
+- WinUI controls (E11): the real window showed the `Queue` column with `Night`.
+  UI Automation selected an active row and invoked **Stop Queue**; the host
+  reported queue 1 stopped and the job paused at 983,040/8,388,608 bytes.
+  Invoking **Start Queue** made queue 1 running and the job resumed at
+  1,441,792 bytes. The job was then cancelled and its partial file removed.
+
 ## Tests
 
 - Engine: **14/14 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer, segmented resume, no-range fallback, changed content,
   truncation, and single-stream resume.
-- Runtime/persistence: **6/6 passed** (`tests\DownloadManager.Integration.Tests`).
+- Core: **11/11 passed**.
+- Runtime/persistence: **9/9 passed** (`tests\DownloadManager.Integration.Tests`),
+  including the three queue tests above.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -95,19 +120,20 @@ Native-host registration evidence:
 
 ## Next actions (dependency order)
 
-1. Commit the segmented-transfer, packaging-script, and evidence increment; push.
-2. Run browser handoff once more from a normal Chrome installation if available
-   (extension already loadable manually; use the dist directory).
-3. Implement Phase 6 management gaps exercised by the UI (open-folder action,
+1. Commit the queue increment (service, IPC, CLI, WinUI, tests, evidence).
+2. Exercise the WinUI queue controls against the host and record the UI result.
+3. Complete Phase 8: moving jobs between queues, schedule execution, completion
+   actions, sleep prevention.
+4. Implement Phase 6 management gaps exercised by the UI (open-folder action,
    duplicate decisions, categories/destination rules, batch URLs).
-4. Phase 7: authenticated browser request transfer, proxy/site login, Refresh
+5. Phase 7: authenticated browser request transfer, proxy/site login, Refresh
    Download Address preserving partial data.
-5. Phase 8: queues and scheduler; complete completion actions/sleep prevention.
 6. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 7. Phase 10: Download All/site grabber.
 8. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
-   visual/behavioral audit, final parity evidence.
+   visual/behavioral audit, final parity evidence. Continue the reference app GUI
+   inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
 
 ## Commands
 

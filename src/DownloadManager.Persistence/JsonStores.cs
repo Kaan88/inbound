@@ -536,6 +536,52 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.DefaultDownloadDirectory = AppSettings.GetDefaultDownloadDirectory();
         }
 
+        settings.Queues ??= new List<DownloadQueue>();
+        if (settings.Queues.Count == 0)
+        {
+            settings.Queues.Add(new DownloadQueue
+            {
+                Id = 0,
+                Name = "Main",
+                MaxConcurrentDownloads = Math.Clamp(settings.MaxConcurrentDownloads, 1, 16),
+                IsRunning = true,
+                Order = 0,
+            });
+        }
+
+        var seenQueueIds = new HashSet<int>();
+        for (var i = 0; i < settings.Queues.Count; i++)
+        {
+            var queue = settings.Queues[i];
+            if (!seenQueueIds.Add(queue.Id))
+            {
+                queue.Id = seenQueueIds.Count == 0 ? 0 : seenQueueIds.Max() + 1;
+                seenQueueIds.Add(queue.Id);
+            }
+
+            queue.Name = string.IsNullOrWhiteSpace(queue.Name) ? $"Queue {i + 1}" : queue.Name.Trim();
+            queue.MaxConcurrentDownloads = Math.Clamp(queue.MaxConcurrentDownloads, 1, 16);
+            queue.Order = i;
+        }
+
+        if (!settings.Queues.Any(q => q.Id == settings.DefaultQueueId))
+        {
+            settings.DefaultQueueId = settings.Queues[0].Id;
+        }
+
+        settings.Schedules ??= new List<ScheduleRule>();
+        foreach (var schedule in settings.Schedules)
+        {
+            if (!settings.Queues.Any(q => q.Id == schedule.QueueId))
+            {
+                schedule.QueueId = settings.DefaultQueueId;
+            }
+
+            schedule.Name = string.IsNullOrWhiteSpace(schedule.Name) ? "Schedule" : schedule.Name.Trim();
+            schedule.Days = string.IsNullOrWhiteSpace(schedule.Days) ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun" : schedule.Days;
+            schedule.StartTime = string.IsNullOrWhiteSpace(schedule.StartTime) ? "09:00" : schedule.StartTime;
+        }
+
         settings.ExcludedFileExtensions ??= new List<string>();
         settings.ExcludedHosts ??= new List<string>();
         settings.InterceptedFileExtensions ??= new List<string>();

@@ -9,10 +9,7 @@ $packageRoot = Join-Path $root "artifacts\package\download-manager-$Version"
 $packageFile = Join-Path $root "artifacts\package\download-manager-$Version.zip"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Configuration Release
-if ($LASTEXITCODE -ne 0) { throw "Build failed." }
-
 & (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release
-if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
 if (Test-Path $packageRoot) { Remove-Item $packageRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null

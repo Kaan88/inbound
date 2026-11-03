@@ -2,11 +2,14 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Output = (Join-Path (Split-Path -Parent $PSScriptRoot) "artifacts\app")
+    [string]$Output
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Output)) {
+    $Output = Join-Path $root "artifacts\app"
+}
 $extension = Join-Path $root "extensions\chrome\dist"
 
 Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI, TestServer -ErrorAction SilentlyContinue |

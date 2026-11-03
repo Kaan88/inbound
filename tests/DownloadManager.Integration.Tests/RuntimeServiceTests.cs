@@ -190,6 +190,167 @@ public sealed class RuntimeServiceTests
         Assert.Empty(Directory.EnumerateFiles(ctx.Paths.PartialsDirectory, "*.part"));
     }
 
+    [Fact]
+    public async Task StoppingQueuePausesOnlyThatQueue()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 2,
+            IsRunning = true,
+            Order = 1,
+        });
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        const int size = 1_048_576;
+        var main = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/q0.bin?size={size}&seed=41&bps=262144",
+            DestinationDirectory = ctx.Destination,
+            FileName = "q0.bin",
+            Source = "cli",
+            QueueId = 0,
+        });
+        var night = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/q1.bin?size={size}&seed=42&bps=262144",
+            DestinationDirectory = ctx.Destination,
+            FileName = "q1.bin",
+            Source = "cli",
+            QueueId = 1,
+        });
+
+        Assert.True(main.Accepted, main.Error);
+        Assert.True(night.Accepted, night.Error);
+        Assert.Equal(1, night.Job!.QueueId);
+        Assert.Equal("Night", night.Job.QueueName);
+
+        await ctx.WaitFor(main.Job!.Id, j => j.ReceivedBytes > 65_536);
+        await ctx.WaitFor(night.Job.Id, j => j.ReceivedBytes > 65_536);
+
+        var stop = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 1, Action = "stop" });
+        Assert.True(stop.Ok, stop.Error);
+        var paused = await ctx.WaitFor(night.Job.Id, j => j.State == "paused");
+        Assert.Equal(1, paused.QueueId);
+
+        // The other queue keeps running and completes.
+        await ctx.WaitFor(main.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.Equal(1, ctx.Service.GetJob(night.Job.Id)!.QueueId);
+
+        var start = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 1, Action = "start" });
+        Assert.True(start.Ok, start.Error);
+        var completed = await ctx.WaitFor(night.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(42, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task PerQueueConcurrencyIsRespected()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues =
+        [
+            new QueueDto { Id = 0, Name = "Main", MaxConcurrentDownloads = 1, IsRunning = true, Order = 0 },
+            new QueueDto { Id = 1, Name = "Night", MaxConcurrentDownloads = 1, IsRunning = true, Order = 1 },
+        ];
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var jobs = new List<JobDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/slow/pq{i}.bin?size=524288&seed={50 + i}&bps=131072",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"pq{i}.bin",
+                Source = "cli",
+                QueueId = i == 2 ? 1 : 0,
+            });
+            Assert.True(response.Accepted, response.Error);
+            jobs.Add(response.Job!);
+        }
+
+        await Task.Delay(700);
+        var snapshot = ctx.Service.GetSnapshot();
+        var running = snapshot.Jobs
+            .Where(j => j.State is "connecting" or "downloading")
+            .GroupBy(j => j.QueueId)
+            .ToList();
+        Assert.All(running, group => Assert.InRange(group.Count(), 1, 1));
+        Assert.Equal(2, running.Sum(group => group.Count()));
+
+        foreach (var job in jobs)
+        {
+            await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(60));
+        }
+
+        Assert.Equal(0, jobs[0].QueueId);
+        Assert.Equal(1, jobs[2].QueueId);
+    }
+
+    [Fact]
+    public async Task QueueStateAndMembershipSurviveRestart()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.Queues.Add(new QueueDto
+            {
+                Id = 1,
+                Name = "Night",
+                MaxConcurrentDownloads = 2,
+                IsRunning = false,
+                Order = 1,
+            });
+            var update = await ctx.Service.UpdateSettingsAsync(settings);
+            Assert.True(update.Ok, update.Error);
+
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/slow/persist.bin?size=524288&seed=60&bps=262144",
+                DestinationDirectory = ctx.Destination,
+                FileName = "persist.bin",
+                Source = "cli",
+                QueueId = 1,
+            });
+            Assert.True(response.Accepted, response.Error);
+            await Task.Delay(250);
+            Assert.Equal("queued", ctx.Service.GetJob(response.Job!.Id)!.State);
+
+            await using var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination, autoResume: false);
+            var reloadedSettings = second.Service.GetSnapshot().Settings;
+            var night = Assert.Single(reloadedSettings.Queues, q => q.Id == 1);
+            Assert.Equal("Night", night.Name);
+            Assert.Equal(2, night.MaxConcurrentDownloads);
+            Assert.False(night.IsRunning);
+
+            var reloaded = second.Service.GetJob(response.Job.Id);
+            Assert.NotNull(reloaded);
+            Assert.Equal(1, reloaded!.QueueId);
+            Assert.Equal("Night", reloaded.QueueName);
+            Assert.Equal("queued", reloaded.State);
+
+            var start = await second.Service.QueueActionAsync(new QueueActionRequest { QueueId = 1, Action = "start" });
+            Assert.True(start.Ok, start.Error);
+            var completed = await second.WaitFor(response.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(60, 524_288))).ToLowerInvariant();
+            Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
     private sealed class ServiceContext : IAsyncDisposable
     {
         private readonly HttpDownloadEngine _engine;

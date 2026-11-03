@@ -31,6 +31,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private DateTimeOffset _createdAt;
 
     public Guid Id { get; private set; }
+    public int QueueId { get; private set; }
+    public string QueueName { get; private set; } = "Main";
 
     public string FileName { get => _fileName; private set => Set(ref _fileName, value); }
     public string Url { get => _url; private set => Set(ref _url, value); }
@@ -81,7 +83,9 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Destination = job.DestinationDirectory;
         FinalFilePath = job.FinalFilePath;
         FileGlyph = GlyphFor(FileName);
-        QueueText = job.QueueId > 0 ? job.QueueId.ToString(CultureInfo.InvariantCulture) : string.Empty;
+        QueueId = job.QueueId;
+        QueueName = job.QueueName ?? (job.QueueId == 0 ? "Main" : $"Queue {job.QueueId}");
+        QueueText = QueueName;
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
         Description = job.Description ?? job.PageUrl ?? string.Empty;

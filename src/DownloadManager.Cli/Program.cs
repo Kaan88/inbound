@@ -83,6 +83,11 @@ internal static class Program
                     request.Connections = connections;
                 }
 
+                if (int.TryParse(GetOption(args, "--queue"), out var queueId))
+                {
+                    request.QueueId = queueId;
+                }
+
                 foreach (var header in GetOptions(args, "--header"))
                 {
                     var separator = header.IndexOf(':');
@@ -205,6 +210,8 @@ internal static class Program
                 var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new { }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
+            case "queue":
+                return await QueueAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
             case "host":
@@ -299,6 +306,103 @@ internal static class Program
         }
 
         return action.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> QueueAsync(CliClient client, string[] args, bool json)
+    {
+        var optionArgs = args.Skip(1).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+        var sub = optionArgs.FirstOrDefault()?.ToLowerInvariant() ?? "list";
+        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+        var settings = snapshot.Settings;
+
+        if (sub == "list")
+        {
+            if (json)
+            {
+                PrintJson(settings.Queues);
+            }
+            else
+            {
+                Console.WriteLine($"{"ID",-4} {"STATE",-8} {"MAX",4}  NAME");
+                foreach (var queue in settings.Queues.OrderBy(q => q.Order))
+                {
+                    Console.WriteLine($"{queue.Id,-4} {(queue.IsRunning ? "running" : "stopped"),-8} {queue.MaxConcurrentDownloads,4}  {queue.Name}");
+                }
+            }
+
+            return 0;
+        }
+
+        if (sub == "add")
+        {
+            var name = optionArgs.Skip(1).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                Console.Error.WriteLine("usage: queue add <name> [max]");
+                return 2;
+            }
+
+            var max = optionArgs.Length > 2 && int.TryParse(optionArgs[2], out var parsedMax) ? parsedMax : 3;
+            var nextId = settings.Queues.Count == 0 ? 0 : settings.Queues.Max(q => q.Id) + 1;
+            settings.Queues.Add(new QueueDto
+            {
+                Id = nextId,
+                Name = name,
+                MaxConcurrentDownloads = max,
+                IsRunning = true,
+                Order = settings.Queues.Count,
+            });
+            var update = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(update, json);
+        }
+
+        if (sub is "start" or "stop" or "max")
+        {
+            if (optionArgs.Length < 2 || !int.TryParse(optionArgs[1], out var queueId))
+            {
+                Console.Error.WriteLine($"usage: queue {sub} <queue-id> [max]");
+                return 2;
+            }
+
+            var request = new QueueActionRequest
+            {
+                QueueId = queueId,
+                Action = sub,
+                MaxConcurrentDownloads = optionArgs.Length > 2 && int.TryParse(optionArgs[2], out var maxValue)
+                    ? maxValue
+                    : 3,
+            };
+            var reply = await client.RequestAsync(MessageTypes.QueueAction, request).ConfigureAwait(false);
+            return PrintSettingsResult(reply, json);
+        }
+
+        Console.Error.WriteLine("usage: queue list|add|start|stop|max");
+        return 2;
+    }
+
+    private static int PrintSettingsResult(IpcMessage reply, bool json)
+    {
+        var result = reply.GetPayload<SettingsResult>();
+        if (json)
+        {
+            PrintJson(result);
+        }
+        else if (!result.Ok)
+        {
+            Console.Error.WriteLine(result.Error);
+        }
+        else
+        {
+            PrintSettings(result.Settings);
+            Console.WriteLine("Queues:");
+            foreach (var queue in result.Settings.Queues)
+            {
+                Console.WriteLine($"  {queue.Id}: {queue.Name} ({(queue.IsRunning ? "running" : "stopped")}, max {queue.MaxConcurrentDownloads})");
+            }
+        }
+
+        return result.Ok ? 0 : 1;
     }
 
     private static async Task<int> SettingsAsync(CliClient client, string[] args, bool json)
@@ -490,6 +594,7 @@ internal static class Program
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
         Console.WriteLine($"auto intercept:    {settings.BrowserAutoIntercept}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
+        Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 
     private static void PrintJson<T>(T value)
@@ -538,6 +643,7 @@ internal static class Program
               dm pause|resume|retry <job-id>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
+              dm queue list|add|start|stop|max
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown
               dm doctor [--no-start]

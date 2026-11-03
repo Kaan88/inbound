@@ -111,6 +111,7 @@ public sealed class DownloadJob
     public string? ClientRequestId { get; set; }
     public string? OwnerExtensionId { get; set; }
     public int QueueId { get; set; }
+    public string? QueueName { get; set; }
     public int Priority { get; set; }
     public string? Description { get; set; }
     public string? ExpectedSha256 { get; set; }
@@ -215,6 +216,26 @@ public sealed class SegmentCheckpoint
     public bool IsComplete => Completed >= End - Start + 1;
 }
 
+public sealed class DownloadQueue
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "Main";
+    public int MaxConcurrentDownloads { get; set; } = 3;
+    public bool IsRunning { get; set; } = true;
+    public int Order { get; set; }
+}
+
+public sealed class ScheduleRule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "Daily";
+    public int QueueId { get; set; }
+    public bool Enabled { get; set; } = true;
+    public string Days { get; set; } = "Mon,Tue,Wed,Thu,Fri,Sat,Sun";
+    public string StartTime { get; set; } = "09:00";
+    public string? StopTime { get; set; }
+}
+
 public sealed class AppSettings
 {
     public const int CurrentSchemaVersion = 1;
@@ -222,6 +243,12 @@ public sealed class AppSettings
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string DefaultDownloadDirectory { get; set; } = GetDefaultDownloadDirectory();
     public int MaxConcurrentDownloads { get; set; } = 3;
+    public int DefaultQueueId { get; set; }
+    public List<DownloadQueue> Queues { get; set; } =
+    [
+        new DownloadQueue { Id = 0, Name = "Main", MaxConcurrentDownloads = 3, IsRunning = true, Order = 0 },
+    ];
+    public List<ScheduleRule> Schedules { get; set; } = new();
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }

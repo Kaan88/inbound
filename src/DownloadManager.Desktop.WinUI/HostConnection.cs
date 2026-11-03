@@ -51,6 +51,9 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings },
             TimeSpan.FromSeconds(10), cancellationToken);
 
+    public Task<IpcMessage> QueueActionAsync(QueueActionRequest request, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.QueueAction, request, TimeSpan.FromSeconds(10), cancellationToken);
+
     public Task<IpcMessage> PauseAllAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobsPauseAll, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 

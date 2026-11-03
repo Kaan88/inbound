@@ -124,17 +124,19 @@
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource InboundToolButtonStyle}" IsEnabled="False"
-                            ToolTipService.ToolTip="Queue support is not implemented yet">
+                    <Button x:Name="StartQueueButton" Style="{StaticResource InboundToolButtonStyle}"
+                            Click="StartQueueButton_Click"
+                            ToolTipService.ToolTip="Start the selected queue">
                         <StackPanel>
-                            <FontIcon Glyph="&#xE768;" FontSize="25" Foreground="#777777" />
+                            <FontIcon Glyph="&#xE768;" FontSize="25" Foreground="#8CCF8C" />
                             <TextBlock Text="Start Queue" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource InboundToolButtonStyle}" IsEnabled="False"
-                            ToolTipService.ToolTip="Queue support is not implemented yet">
+                    <Button x:Name="StopQueueButton" Style="{StaticResource InboundToolButtonStyle}"
+                            Click="StopQueueButton_Click"
+                            ToolTipService.ToolTip="Stop the selected queue and pause its downloads">
                         <StackPanel>
-                            <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="#777777" />
+                            <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="#D98C8C" />
                             <TextBlock Text="Stop Queue" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
@@ -238,7 +240,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="30" />
+                            <ColumnDefinition Width="64" />
                             <ColumnDefinition Width="78" />
                             <ColumnDefinition Width="92" />
                             <ColumnDefinition Width="78" />
@@ -248,7 +250,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="" />
                         <TextBlock Grid.Column="1" Text="File Name" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="2" Text="Q" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="Queue" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
                         <TextBlock Grid.Column="3" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" />
                         <TextBlock Grid.Column="4" Text="Status" Style="{StaticResource InboundHeaderTextStyle}" />
                         <TextBlock Grid.Column="5" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
@@ -274,7 +276,7 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="30" />
+                                        <ColumnDefinition Width="64" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="92" />
                                         <ColumnDefinition Width="78" />

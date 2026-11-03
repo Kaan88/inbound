@@ -174,6 +174,8 @@ public sealed partial class MainWindow : Window
         DeleteButton.IsEnabled = connected && job is not null;
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
+        StartQueueButton.IsEnabled = connected && _settings is not null;
+        StopQueueButton.IsEnabled = connected && _settings is not null;
     }
 
     private void UpdateStatusText()
@@ -526,11 +528,24 @@ public sealed partial class MainWindow : Window
         startMode.Items.Add("Download later");
         startMode.SelectedIndex = 0;
 
+        var queueBox = new ComboBox { Header = "Queue" };
+        foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
+        {
+            queueBox.Items.Add(queue.Name);
+        }
+
+        var defaultQueueIndex = _settings.Queues
+            .OrderBy(q => q.Order)
+            .ToList()
+            .FindIndex(q => q.Id == _settings.DefaultQueueId);
+        queueBox.SelectedIndex = Math.Max(0, defaultQueueIndex);
+
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(urlBox);
         panel.Children.Add(nameBox);
         panel.Children.Add(destinationBox);
         panel.Children.Add(startMode);
+        panel.Children.Add(queueBox);
 
         var dialog = new ContentDialog
         {
@@ -561,6 +576,8 @@ public sealed partial class MainWindow : Window
             DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
             StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
             Source = "api",
+            QueueId = _settings.Queues.OrderBy(q => q.Order)
+                .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
         };
 
         try
@@ -721,6 +738,47 @@ public sealed partial class MainWindow : Window
             ExcludedHosts = new List<string>(source.ExcludedHosts),
             InterceptedFileExtensions = new List<string>(source.InterceptedFileExtensions),
         };
+
+    private async void StartQueueButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunQueueActionAsync("start");
+    }
+
+    private async void StopQueueButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunQueueActionAsync("stop");
+    }
+
+    private async Task RunQueueActionAsync(string action)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var queueId = SelectedJob?.QueueId ?? _settings.DefaultQueueId;
+        try
+        {
+            var reply = await _connection.QueueActionAsync(new QueueActionRequest
+            {
+                QueueId = queueId,
+                Action = action,
+            });
+            var result = reply.GetPayload<SettingsResult>();
+            if (!result.Ok)
+            {
+                await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the queue action.");
+                return;
+            }
+
+            _settings = result.Settings;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Queue action failed", ex.Message);
+        }
+    }
 
     private async void PauseButton_Click(object sender, RoutedEventArgs e)
     {

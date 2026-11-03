@@ -34,6 +34,7 @@ public static class MessageTypes
     public const string SettingsGet = "settings.get";
     public const string SettingsUpdate = "settings.update";
     public const string SettingsResult = "settings.result";
+    public const string QueueAction = "queue.action";
     public const string HostStatus = "host.status";
     public const string HostShutdown = "host.shutdown";
     public const string HostPing = "host.ping";

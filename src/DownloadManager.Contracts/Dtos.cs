@@ -41,6 +41,7 @@ public sealed class JobDto
     public int Priority { get; set; }
     public string? Description { get; set; }
     public string? ExpectedSha256 { get; set; }
+    public string? QueueName { get; set; }
     public string StartMode { get; set; } = "startNow";
     public bool CanPause { get; set; }
     public bool CanResume { get; set; }
@@ -48,10 +49,33 @@ public sealed class JobDto
     public FailureDto? Failure { get; set; }
 }
 
+public sealed class QueueDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "Main";
+    public int MaxConcurrentDownloads { get; set; } = 3;
+    public bool IsRunning { get; set; } = true;
+    public int Order { get; set; }
+}
+
+public sealed class ScheduleDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = "Daily";
+    public int QueueId { get; set; }
+    public bool Enabled { get; set; } = true;
+    public string Days { get; set; } = "Mon,Tue,Wed,Thu,Fri,Sat,Sun";
+    public string StartTime { get; set; } = "09:00";
+    public string? StopTime { get; set; }
+}
+
 public sealed class SettingsDto
 {
     public string DefaultDownloadDirectory { get; set; } = string.Empty;
     public int MaxConcurrentDownloads { get; set; } = 3;
+    public int DefaultQueueId { get; set; }
+    public List<QueueDto> Queues { get; set; } = new();
+    public List<ScheduleDto> Schedules { get; set; } = new();
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
@@ -127,6 +151,7 @@ public sealed class AddJobRequest
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
     public bool? AutoResumeAfterRestart { get; set; }
+    public int QueueId { get; set; }
 }
 
 public sealed class AddJobResponse
@@ -149,6 +174,13 @@ public sealed class JobActionResponse
     public bool Ok { get; set; }
     public JobDto? Job { get; set; }
     public string? Error { get; set; }
+}
+
+public sealed class QueueActionRequest
+{
+    public int QueueId { get; set; }
+    public string Action { get; set; } = "start";
+    public int MaxConcurrentDownloads { get; set; }
 }
 
 public sealed class JobEventDto
