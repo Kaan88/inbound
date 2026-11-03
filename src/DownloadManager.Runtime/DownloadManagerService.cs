@@ -148,7 +148,6 @@ public sealed class DownloadManagerService
         var conflictPolicy = ParseEnum(request.ConflictPolicy, ConflictPolicy.Rename);
 
         var destination = ResolveDestination(request.DestinationDirectory);
-        Directory.CreateDirectory(_paths.PartialsDirectory);
         var fileName = string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameResolver.Resolve(null, uri)
             : FileNameResolver.Sanitize(request.FileName);
@@ -791,40 +790,6 @@ public sealed class DownloadManagerService
             job.ContentType ??= checkpoint.ContentType;
         }
 
-        if (!string.IsNullOrWhiteSpace(job.FinalFilePath) && !string.IsNullOrWhiteSpace(job.PartFilePath))
-        {
-            // One-time migration for jobs created before payload files lived on the
-            // destination volume. New jobs never take this path.
-            var destinationPart = BuildPartPath(job.FinalFilePath, job.Id);
-            if (!SamePath(job.PartFilePath, destinationPart))
-            {
-                try
-                {
-                    if (File.Exists(job.PartFilePath) && !File.Exists(destinationPart))
-                    {
-                        var partDirectory = Path.GetDirectoryName(destinationPart);
-                        if (!string.IsNullOrWhiteSpace(partDirectory))
-                        {
-                            Directory.CreateDirectory(partDirectory);
-                        }
-
-                        File.Move(job.PartFilePath, destinationPart);
-                        job.PartFilePath = destinationPart;
-                        changed = true;
-                    }
-                    else if (!File.Exists(job.PartFilePath) && File.Exists(destinationPart))
-                    {
-                        job.PartFilePath = destinationPart;
-                        changed = true;
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // Keep the legacy location for this job; resume stays valid.
-                }
-            }
-        }
-
         if (job.ReceivedBytes > 0 && !File.Exists(job.PartFilePath))
         {
             // The partial payload is gone. Resume will start from zero rather than
@@ -1195,21 +1160,6 @@ public sealed class DownloadManagerService
     /// </summary>
     private static string BuildPartPath(string finalPath, Guid jobId)
         => $"{finalPath}.{jobId:N}.part";
-
-    private static bool SamePath(string left, string right)
-    {
-        try
-        {
-            return string.Equals(
-                Path.GetFullPath(left),
-                Path.GetFullPath(right),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-    }
 
     private static string ResolveFinalPath(string directory, string fileName, ConflictPolicy policy)
     {

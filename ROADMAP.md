@@ -114,9 +114,8 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
-| P5.8 | Legacy temp-part migration | in progress | P5.7 | On startup, a job whose part file still lives in `%LOCALAPPDATA%\DownloadManager\data\partial` is moved to its destination when possible; resume bytes are preserved. |
-| P5.9 | Destination free-space preflight | pending | P5.7 | Before starting, check free space on the destination volume; fail early with the destination path, not the state drive. |
-| P5.10 | Stale destination part cleanup | pending | P5.7 | Orphaned `<final>.<jobId>.part` files are identified safely and removed or surfaced without touching active jobs. |
+| P5.8 | Destination free-space preflight | pending | P5.7 | Before starting, check free space on the destination volume; fail early with the destination path, not the state drive. |
+| P5.9 | Stale destination part cleanup | pending | P5.7 | Orphaned `<final>.<jobId>.part` files are identified safely and removed or surfaced without touching active jobs. |
 
 **Payload placement decision (2026-11-04):** unlike reference app's fixed temporary
 directory plus post-download stitching, our engine writes every range directly

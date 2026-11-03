@@ -119,9 +119,6 @@ random-access part file **in the destination directory**:
   is no separate segment stitching step; completion is `File.Move` within the
   same directory/volume, which is atomic and needs no extra free space.
 - Metadata and checkpoints remain small and stay in the data directory.
-- Existing jobs whose part file is still in the old `data\partial` directory
-  are migrated on startup when the move succeeds; otherwise they keep the
-  legacy location so resume is never lost.
 - `PartialPayloadLivesOnDestinationVolume` verifies the live part location, the
   empty state partial directory, part cleanup, and the final hash.
 - Published CLI check: the live `payload-loc.bin` part file was
