@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Send to Download Manager</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="handoff">
+  <main class="page narrow">
+    <header class="brand">
+      <img src="icons/icon48.png" alt="" width="36" height="36" />
+      <div>
+        <h1>Send to Download Manager</h1>
+        <p class="muted small">Review the request before it becomes a durable download job.</p>
+      </div>
+    </header>
+
+    <section class="card form-card">
+      <label class="field">
+        <span>URL</span>
+        <input id="url" type="text" readonly />
+      </label>
+      <label class="field">
+        <span>File name</span>
+        <input id="fileName" type="text" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span>Destination folder (optional)</span>
+        <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
+      </label>
+      <label class="field">
+        <span>Start</span>
+        <select id="startMode">
+          <option value="now">Start immediately</option>
+          <option value="later">Download later</option>
+        </select>
+      </label>
+      <p id="hint" class="muted small">
+        Authenticated requests carry the browser's cookies for this site. They are sent only to the
+        local application and are not logged.
+      </p>
+    </section>
+
+    <div class="actions">
+      <button id="confirm" class="primary" type="button">Download</button>
+      <button id="cancel" type="button">Cancel</button>
+    </div>
+    <p id="error" class="error hidden"></p>
+    <p id="success" class="success hidden"></p>
+  </main>
+  <script src="handoff.js"></script>
+</body>
+</html>
+</html>

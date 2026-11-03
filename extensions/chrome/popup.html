@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download Manager</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="popup">
+  <header class="brand">
+    <img src="icons/icon32.png" alt="" width="24" height="24" />
+    <div>
+      <strong>Download Manager</strong>
+      <span id="statusText" class="muted">Checking bridge…</span>
+    </div>
+  </header>
+
+  <section id="statusCard" class="card status-card">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusLabel">Native bridge</span>
+    <span id="statusDetail" class="muted"></span>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <strong>Recent downloads</strong>
+      <button id="refresh" class="link-button" type="button">Refresh</button>
+    </div>
+    <ul id="jobs" class="job-list">
+      <li class="empty">No recent downloads.</li>
+    </ul>
+  </section>
+
+  <div class="actions">
+    <button id="openApp" class="primary" type="button">Open app</button>
+    <button id="options" type="button">Settings</button>
+    <button id="bypass" class="quiet" type="button">Bypass 5 min</button>
+  </div>
+
+  <p id="error" class="error hidden"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

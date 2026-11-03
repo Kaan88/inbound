@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download Manager Bridge settings</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="options">
+  <main class="page">
+    <header class="brand large">
+      <img src="icons/icon48.png" alt="" width="36" height="36" />
+      <div>
+        <h1>Download Manager Bridge</h1>
+        <p class="muted">Chrome → Download Manager handoff. The desktop host remains the source of truth.</p>
+      </div>
+    </header>
+
+    <section class="card form-card">
+      <h2>Integration</h2>
+      <label class="check">
+        <input id="enabled" type="checkbox" />
+        <span>Enable the Chrome bridge</span>
+      </label>
+      <label class="check">
+        <input id="autoIntercept" type="checkbox" />
+        <span>Automatically take over eligible downloads</span>
+      </label>
+      <label class="check">
+        <input id="notifications" type="checkbox" />
+        <span>Show notifications for handoff results</span>
+      </label>
+
+      <label class="field">
+        <span>Default start mode</span>
+        <select id="startMode">
+          <option value="now">Start immediately</option>
+          <option value="later">Download later (queued in the app)</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Default destination (optional override)</span>
+        <input id="defaultDestination" type="text" spellcheck="false" placeholder="Leave empty to use the app's folder" />
+      </label>
+    </section>
+
+    <section class="card form-card">
+      <h2>File and site rules</h2>
+      <label class="field">
+        <span>Intercept these file extensions (comma-separated; empty means all)</span>
+        <textarea id="interceptedExtensions" rows="4" spellcheck="false"></textarea>
+      </label>
+      <label class="field">
+        <span>Never intercept these extensions</span>
+        <textarea id="excludedExtensions" rows="2" spellcheck="false"></textarea>
+      </label>
+      <label class="field">
+        <span>Never intercept these hosts (one per line or comma-separated)</span>
+        <textarea id="excludedHosts" rows="3" spellcheck="false"></textarea>
+      </label>
+    </section>
+
+    <section class="card form-card">
+      <h2>Connection</h2>
+      <p class="muted small">
+        Chrome launches the native host named <code>com.kaank.downloadmanager</code>. The host is
+        registered per user by the installer and must be present before automatic interception is
+        useful. Unsupported requests stay in Chrome.
+      </p>
+      <div class="row">
+        <button id="test" type="button">Test native host</button>
+        <button id="openApp" type="button">Open Download Manager</button>
+      </div>
+      <p id="testResult" class="muted small"></p>
+    </section>
+
+    <div class="actions sticky">
+      <button id="save" class="primary" type="button">Save settings</button>
+      <span id="saveResult" class="muted small"></span>
+    </div>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
