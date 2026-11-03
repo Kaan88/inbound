@@ -8,6 +8,51 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="InboundToolButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="86" />
+                <Setter Property="Height" Value="58" />
+                <Setter Property="Padding" Value="2" />
+                <Setter Property="Margin" Value="1,0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="3" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="InboundToolLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="10.5" />
+                <Setter Property="TextAlignment" Value="Center" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Margin" Value="0,3,0,0" />
+            </Style>
+
+            <Style x:Key="InboundCategoryItemStyle" TargetType="ListBoxItem">
+                <Setter Property="MinHeight" Value="23" />
+                <Setter Property="Padding" Value="8,2" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="FontSize" Value="12" />
+            </Style>
+
+            <Style x:Key="InboundListRowStyle" TargetType="ListViewItem">
+                <Setter Property="MinHeight" Value="27" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="CornerRadius" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+            </Style>
+
+            <Style x:Key="InboundHeaderTextStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="#D7D7D7" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Padding" Value="4,0" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

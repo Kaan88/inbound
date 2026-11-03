@@ -26,13 +26,13 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public string BaseAddress { get; private set; } = string.Empty;
 
-    public static async Task<TestServerHost> StartAsync(CancellationToken cancellationToken = default)
+    public static async Task<TestServerHost> StartAsync(int port = 0, CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(IPAddress.Loopback, 0);
+            options.Listen(IPAddress.Loopback, port);
         });
 
         var app = builder.Build();
