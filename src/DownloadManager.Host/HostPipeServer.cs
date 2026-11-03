@@ -244,6 +244,14 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.JobMoveToQueue:
+                    var moveToQueue = message.GetPayload<JobQueueRequest>();
+                    await Reply(client, message, MessageTypes.JobActionResult,
+                        await _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsPauseAll:
                     await _service.PauseAllAsync(cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.HostActionResult,

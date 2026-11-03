@@ -240,7 +240,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="64" />
+                            <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="78" />
                             <ColumnDefinition Width="92" />
                             <ColumnDefinition Width="78" />
@@ -250,7 +250,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="" />
                         <TextBlock Grid.Column="1" Text="File Name" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="2" Text="Queue" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="Q" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
                         <TextBlock Grid.Column="3" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" />
                         <TextBlock Grid.Column="4" Text="Status" Style="{StaticResource InboundHeaderTextStyle}" />
                         <TextBlock Grid.Column="5" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
@@ -268,15 +268,28 @@
                               ItemContainerStyle="{StaticResource InboundListRowStyle}"
                               SelectionChanged="JobsList_SelectionChanged"
                               DoubleTapped="JobsList_DoubleTapped"
+                              RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Auto"
                               ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListView.ContextFlyout>
+                            <MenuFlyout x:Name="JobsContextMenu" Opening="JobsContextMenu_Opening">
+                                <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
+                                <MenuFlyoutItem Text="Open folder" Click="MenuOpenFolder_Click" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
+                                <MenuFlyoutSubItem x:Name="AddToQueueMenu" Text="Add to queue" />
+                                <MenuFlyoutItem Text="Delete from queue" Click="MenuDeleteFromQueue_Click" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Properties" Click="MenuProperties_Click" />
+                            </MenuFlyout>
+                        </ListView.ContextFlyout>
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="92" />
                                         <ColumnDefinition Width="78" />
@@ -289,7 +302,8 @@
                                     <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
-                                               VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#A0A0A0" />
+                                               VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#A0A0A0"
+                                               ToolTipService.ToolTip="{Binding QueueName}" />
                                     <TextBlock Grid.Column="3" Text="{Binding SizeText}" FontSize="11"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="1">

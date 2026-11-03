@@ -357,6 +357,21 @@ internal static class Program
             return PrintSettingsResult(update, json);
         }
 
+        if (sub == "move")
+        {
+            if (optionArgs.Length < 3 ||
+                !Guid.TryParse(optionArgs[1], out var jobId) ||
+                !int.TryParse(optionArgs[2], out var targetQueue))
+            {
+                Console.Error.WriteLine("usage: queue move <job-id> <queue-id>");
+                return 2;
+            }
+
+            var reply = await client.RequestAsync(MessageTypes.JobMoveToQueue,
+                new JobQueueRequest { JobId = jobId, QueueId = targetQueue }).ConfigureAwait(false);
+            return PrintAction(reply, json);
+        }
+
         if (sub is "start" or "stop" or "max")
         {
             if (optionArgs.Length < 2 || !int.TryParse(optionArgs[1], out var queueId))
@@ -573,6 +588,8 @@ internal static class Program
         Console.WriteLine($"file:     {job.FinalFilePath}");
         Console.WriteLine($"url:      {job.Url}");
         Console.WriteLine($"state:    {job.State}");
+        Console.WriteLine($"queue:    {job.QueueId}:{job.QueueName}");
+        Console.WriteLine($"part:     {job.PartFilePath}");
         Console.WriteLine($"bytes:    {job.ReceivedBytes} / {job.TotalBytes?.ToString() ?? "unknown"}");
         Console.WriteLine($"speed:    {job.BytesPerSecond?.ToString("0.0") ?? "-"} B/s");
         Console.WriteLine($"source:   {job.Source}");
@@ -643,7 +660,7 @@ internal static class Program
               dm pause|resume|retry <job-id>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
-              dm queue list|add|start|stop|max
+              dm queue list|add|start|stop|max|move
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown
               dm doctor [--no-start]

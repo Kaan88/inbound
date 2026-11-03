@@ -54,6 +54,10 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> QueueActionAsync(QueueActionRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.QueueAction, request, TimeSpan.FromSeconds(10), cancellationToken);
 
+    public Task<IpcMessage> MoveToQueueAsync(Guid jobId, int queueId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobMoveToQueue, new JobQueueRequest { JobId = jobId, QueueId = queueId },
+            TimeSpan.FromSeconds(10), cancellationToken);
+
     public Task<IpcMessage> PauseAllAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobsPauseAll, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 

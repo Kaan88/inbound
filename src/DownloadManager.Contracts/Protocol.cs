@@ -27,6 +27,7 @@ public static class MessageTypes
     public const string JobCancel = "job.cancel";
     public const string JobRetry = "job.retry";
     public const string JobRemove = "job.remove";
+    public const string JobMoveToQueue = "job.moveToQueue";
     public const string JobActionResult = "job.actionResult";
     public const string HostStatusResult = "host.statusResult";
     public const string JobsPauseAll = "jobs.pauseAll";

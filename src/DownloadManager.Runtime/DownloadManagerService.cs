@@ -190,7 +190,7 @@ public sealed class DownloadManagerService
             FileName = Path.GetFileName(finalPath),
             DestinationDirectory = destination,
             FinalFilePath = finalPath,
-            PartFilePath = Path.Combine(_paths.PartialsDirectory, $"{Guid.NewGuid():N}.part"),
+            PartFilePath = string.Empty,
             StartMode = startMode,
             Source = source,
             ClientRequestId = clientRequestId,
@@ -207,8 +207,10 @@ public sealed class DownloadManagerService
             ReceivedBytes = 0,
         };
 
-        // Use the generated job id for the part path so concurrent/unrelated jobs can never share one.
-        job.PartFilePath = Path.Combine(_paths.PartialsDirectory, $"{job.Id:N}.part");
+        // Keep the payload on the destination volume. Segments are written at their
+        // final offsets into this file, so completion is a same-volume rename and
+        // never needs free space on the state drive or a cross-volume copy.
+        job.PartFilePath = BuildPartPath(finalPath, job.Id);
 
         try
         {
@@ -670,6 +672,50 @@ public sealed class DownloadManagerService
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
 
+    public async Task<JobActionResponse> MoveToQueueAsync(
+        Guid id,
+        int queueId,
+        CancellationToken cancellationToken = default)
+    {
+        JobRuntime? runtime;
+        DownloadQueue? queue;
+        var paused = false;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(id, out runtime))
+            {
+                return new JobActionResponse { Ok = false, Error = "Job not found." };
+            }
+
+            queue = _settings.Queues.FirstOrDefault(q => q.Id == queueId);
+            if (queue is null)
+            {
+                return new JobActionResponse { Ok = false, Error = "Queue not found." };
+            }
+
+            runtime.Job.QueueId = queue.Id;
+            runtime.Job.QueueName = queue.Name;
+            runtime.Job.Touch();
+
+            if (!queue.IsRunning && (runtime.Starting || runtime.Runner is { IsCompleted: false }))
+            {
+                runtime.PauseRequested = true;
+                runtime.Job.State = DownloadState.Paused;
+                runtime.Job.BytesPerSecond = null;
+                runtime.Job.EstimatedRemaining = null;
+                runtime.Job.ActiveConnections = 0;
+                runtime.Job.Touch();
+                runtime.Cts?.Cancel();
+                paused = true;
+            }
+        }
+
+        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+        Raise(runtime, paused ? "paused" : "updated");
+        Schedule();
+        return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+    }
+
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         List<JobRuntime> active;
@@ -743,6 +789,40 @@ public sealed class DownloadManagerService
             job.ETag ??= checkpoint.ETag;
             job.LastModified ??= checkpoint.LastModified;
             job.ContentType ??= checkpoint.ContentType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.FinalFilePath) && !string.IsNullOrWhiteSpace(job.PartFilePath))
+        {
+            // One-time migration for jobs created before payload files lived on the
+            // destination volume. New jobs never take this path.
+            var destinationPart = BuildPartPath(job.FinalFilePath, job.Id);
+            if (!SamePath(job.PartFilePath, destinationPart))
+            {
+                try
+                {
+                    if (File.Exists(job.PartFilePath) && !File.Exists(destinationPart))
+                    {
+                        var partDirectory = Path.GetDirectoryName(destinationPart);
+                        if (!string.IsNullOrWhiteSpace(partDirectory))
+                        {
+                            Directory.CreateDirectory(partDirectory);
+                        }
+
+                        File.Move(job.PartFilePath, destinationPart);
+                        job.PartFilePath = destinationPart;
+                        changed = true;
+                    }
+                    else if (!File.Exists(job.PartFilePath) && File.Exists(destinationPart))
+                    {
+                        job.PartFilePath = destinationPart;
+                        changed = true;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Keep the legacy location for this job; resume stays valid.
+                }
+            }
         }
 
         if (job.ReceivedBytes > 0 && !File.Exists(job.PartFilePath))
@@ -1108,6 +1188,29 @@ public sealed class DownloadManagerService
         return Path.GetFullPath(directory);
     }
 
+    /// <summary>
+    /// Payload path for a job. It deliberately lives next to the final file so the
+    /// transfer consumes space on the chosen destination volume and completion is
+    /// an atomic rename on that same volume.
+    /// </summary>
+    private static string BuildPartPath(string finalPath, Guid jobId)
+        => $"{finalPath}.{jobId:N}.part";
+
+    private static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left),
+                Path.GetFullPath(right),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
     private static string ResolveFinalPath(string directory, string fileName, ConflictPolicy policy)
     {
         var candidate = Path.Combine(directory, FileNameResolver.Sanitize(fileName));
@@ -1241,6 +1344,7 @@ public sealed class DownloadManagerService
             FileName = job.FileName,
             DestinationDirectory = job.DestinationDirectory,
             FinalFilePath = job.FinalFilePath,
+            PartFilePath = job.PartFilePath,
             TotalBytes = job.TotalBytes,
             ReceivedBytes = job.ReceivedBytes,
             Progress = job.ProgressFraction,

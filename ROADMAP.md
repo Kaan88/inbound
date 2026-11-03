@@ -107,15 +107,27 @@ is in tray; failed handoffs never silently lose downloads.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P5.1 | Range probing and safe partitioning | pending | P2.3 | Servers with/without ranges handled |
-| P5.2 | Concurrent segment writer + checkpoints | pending | P5.1 | Assembly hash matches; crash-safe |
-| P5.3 | Per-host/global limits, fallback | pending | P5.2 | Limits observed; single-stream fallback works |
-| P5.4 | Speed limits + estimator | pending | P5.2 | Throttle accuracy within tolerance |
+| P5.1 | Range probing and safe partitioning | done | P2.3 | Servers with/without ranges handled |
+| P5.2 | Concurrent segment writer + checkpoints | done | P5.1 | Assembly hash matches; crash-safe |
+| P5.3 | Per-host/global limits, fallback | partial | P5.2 | Limits observed; single-stream fallback works |
+| P5.4 | Speed limits + estimator | partial | P5.2 | Throttle accuracy within tolerance |
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
+| P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
+| P5.8 | Legacy temp-part migration | in progress | P5.7 | On startup, a job whose part file still lives in `%LOCALAPPDATA%\DownloadManager\data\partial` is moved to its destination when possible; resume bytes are preserved. |
+| P5.9 | Destination free-space preflight | pending | P5.7 | Before starting, check free space on the destination volume; fail early with the destination path, not the state drive. |
+| P5.10 | Stale destination part cleanup | pending | P5.7 | Orphaned `<final>.<jobId>.part` files are identified safely and removed or surfaced without touching active jobs. |
+
+**Payload placement decision (2026-11-04):** unlike reference app's fixed temporary
+directory plus post-download stitching, our engine writes every range directly
+into a single random-access part file in the destination directory. The part
+file consumes space on the drive the user chose; when all ranges complete the
+file is renamed in place. This removes the cross-volume copy that makes large
+downloads appear to "stitch and move" on C: even when D: was selected. Small
+metadata and checkpoints remain in the app data directory.
 
 **Exit gate:** accelerated transfers correct through pause/crash/retry with
-measurements.
+measurements and destination-local payload behavior.
 
 ## Phase 6 — Everyday download management (pending)
 

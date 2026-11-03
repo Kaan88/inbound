@@ -85,7 +85,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileGlyph = GlyphFor(FileName);
         QueueId = job.QueueId;
         QueueName = job.QueueName ?? (job.QueueId == 0 ? "Main" : $"Queue {job.QueueId}");
-        QueueText = QueueName;
+        QueueText = (job.QueueId + 1).ToString(CultureInfo.InvariantCulture);
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
         Description = job.Description ?? job.PageUrl ?? string.Empty;

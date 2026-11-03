@@ -86,11 +86,39 @@ Native-host registration evidence:
   `queue start 1` completed 524,288 bytes; SHA-256
   `cd77d60c1cd3feb361d2013317b43a5e40cdac91bcf973cc9421d5a281dd121f`
   matched test seed 707.
+- Reassignment (E13): `job.moveToQueue` moves a job between queues, persists the
+  new membership, and pauses an active job when the target queue is stopped.
+  It is exposed through CLI `queue move`, the WinUI row context menu, and the
+  integration test `MovingJobToStoppedQueueUpdatesMembershipAndPauses`.
 - WinUI controls (E11): the real window showed the `Queue` column with `Night`.
   UI Automation selected an active row and invoked **Stop Queue**; the host
   reported queue 1 stopped and the job paused at 983,040/8,388,608 bytes.
   Invoking **Start Queue** made queue 1 running and the job resumed at
   1,441,792 bytes. The job was then cancelled and its partial file removed.
+
+## Payload placement (2026-11-04)
+
+reference app downloads to a fixed temporary directory and then stitches/moves the result,
+so choosing another drive does not avoid C: space or a cross-volume copy. Our
+engine instead writes all ranges at their final offsets into a single
+random-access part file **in the destination directory**:
+
+- `DownloadManager.Runtime` now sets `PartFilePath` to
+  `<final path>.<job id>.part` in the chosen destination.
+- The engine already used `RandomAccess.WriteAsync` at range offsets, so there
+  is no separate segment stitching step; completion is `File.Move` within the
+  same directory/volume, which is atomic and needs no extra free space.
+- Metadata and checkpoints remain small and stay in the data directory.
+- Existing jobs whose part file is still in the old `data\partial` directory
+  are migrated on startup when the move succeeds; otherwise they keep the
+  legacy location so resume is never lost.
+- `PartialPayloadLivesOnDestinationVolume` verifies the live part location, the
+  empty state partial directory, part cleanup, and the final hash.
+- Published CLI check: the live `payload-loc.bin` part file was
+  `test-downloads\payload-loc.bin.51948fdc....part` (1,310,720 bytes while
+  downloading), `artifacts\app\data\partial` was empty, and after completion the
+  part was gone, the 4 MiB file remained, and its SHA-256 matched seed 99
+  (`4f1f120d5224489310bb0c39f4ff32ea3798e8ee1a2d99fe0b647696a20afec0`).
 
 ## Tests
 
@@ -98,8 +126,9 @@ Native-host registration evidence:
   segmented transfer, segmented resume, no-range fallback, changed content,
   truncation, and single-stream resume.
 - Core: **11/11 passed**.
-- Runtime/persistence: **9/9 passed** (`tests\DownloadManager.Integration.Tests`),
-  including the three queue tests above.
+- Runtime/persistence: **11/11 passed** (`tests\DownloadManager.Integration.Tests`),
+  including the queue tests, queue reassignment, and the destination-local
+  payload test.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.

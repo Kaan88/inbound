@@ -18,6 +18,7 @@ public sealed class JobDto
     public string FileName { get; set; } = string.Empty;
     public string DestinationDirectory { get; set; } = string.Empty;
     public string FinalFilePath { get; set; } = string.Empty;
+    public string PartFilePath { get; set; } = string.Empty;
     public long? TotalBytes { get; set; }
     public long ReceivedBytes { get; set; }
     public double? Progress { get; set; }
@@ -181,6 +182,12 @@ public sealed class QueueActionRequest
     public int QueueId { get; set; }
     public string Action { get; set; } = "start";
     public int MaxConcurrentDownloads { get; set; }
+}
+
+public sealed class JobQueueRequest
+{
+    public Guid JobId { get; set; }
+    public int QueueId { get; set; }
 }
 
 public sealed class JobEventDto

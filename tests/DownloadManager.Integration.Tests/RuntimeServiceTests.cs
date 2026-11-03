@@ -351,6 +351,89 @@ public sealed class RuntimeServiceTests
         }
     }
 
+    [Fact]
+    public async Task MovingJobToStoppedQueueUpdatesMembershipAndPauses()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 2,
+            IsRunning = false,
+            Order = 1,
+        });
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var done = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/move-done.bin?size=65536&seed=91",
+            DestinationDirectory = ctx.Destination,
+            FileName = "move-done.bin",
+            Source = "cli",
+            QueueId = 0,
+        });
+        await ctx.WaitFor(done.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var moveDone = await ctx.Service.MoveToQueueAsync(done.Job.Id, 1);
+        Assert.True(moveDone.Ok, moveDone.Error);
+        Assert.Equal(1, moveDone.Job!.QueueId);
+        Assert.Equal("Night", moveDone.Job.QueueName);
+
+        const int size = 1_048_576;
+        var active = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/move-active.bin?size={size}&seed=92&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "move-active.bin",
+            Source = "cli",
+            QueueId = 0,
+        });
+        Assert.True(active.Accepted, active.Error);
+        await ctx.WaitFor(active.Job!.Id, j => j.ReceivedBytes > 65_536);
+
+        var moveActive = await ctx.Service.MoveToQueueAsync(active.Job.Id, 1);
+        Assert.True(moveActive.Ok, moveActive.Error);
+        var paused = await ctx.WaitFor(active.Job.Id, j => j.State == "paused");
+        Assert.Equal(1, paused.QueueId);
+        Assert.Equal("Night", paused.QueueName);
+
+        var start = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 1, Action = "start" });
+        Assert.True(start.Ok, start.Error);
+        var completed = await ctx.WaitFor(active.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(92, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task PartialPayloadLivesOnDestinationVolume()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        const int size = 1_048_576;
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/partloc.bin?size={size}&seed=90&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "partloc.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+
+        var job = await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65_536);
+        Assert.StartsWith(ctx.Destination, job.PartFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(job.PartFilePath));
+        Assert.Empty(Directory.EnumerateFiles(ctx.Paths.PartialsDirectory, "*.part"));
+
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.False(File.Exists(completed.PartFilePath));
+        Assert.Equal(size, completed.ReceivedBytes);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(90, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
     private sealed class ServiceContext : IAsyncDisposable
     {
         private readonly HttpDownloadEngine _engine;

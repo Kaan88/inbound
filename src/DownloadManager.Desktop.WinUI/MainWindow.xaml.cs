@@ -5,6 +5,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -268,6 +269,94 @@ public sealed partial class MainWindow : Window
         {
             await OpenJobAsync(job);
         }
+    }
+
+    private void JobsList_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var element = e.OriginalSource as DependencyObject;
+        while (element is not null && element is not ListViewItem)
+        {
+            element = VisualTreeHelper.GetParent(element);
+        }
+
+        if (element is ListViewItem { Content: JobViewModel job })
+        {
+            JobsList.SelectedItem = job;
+        }
+    }
+
+    private void JobsContextMenu_Opening(object sender, object e)
+    {
+        AddToQueueMenu.Items.Clear();
+        if (_settings is null)
+        {
+            return;
+        }
+
+        foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
+        {
+            var item = new MenuFlyoutItem { Text = queue.Name, Tag = queue.Id };
+            item.Click += MenuAddToQueue_Click;
+            AddToQueueMenu.Items.Add(item);
+        }
+    }
+
+    private async void MenuOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is { } job)
+        {
+            await OpenJobAsync(job);
+        }
+    }
+
+    private void MenuOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is { } job)
+        {
+            OpenContainingFolder(job);
+        }
+    }
+
+    private async void MenuAddToQueue_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is { } job && sender is MenuFlyoutItem { Tag: int queueId })
+        {
+            await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, queueId));
+        }
+    }
+
+    private async void MenuDeleteFromQueue_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is { } job && _settings is { } settings)
+        {
+            await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, settings.DefaultQueueId));
+        }
+    }
+
+    private async void MenuProperties_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } job)
+        {
+            return;
+        }
+
+        var content = new TextBlock
+        {
+            Text = $"File: {job.FileName}\nQueue: {job.QueueName}\nState: {job.StateText}\n" +
+                   $"Size: {job.SizeText}\nSource: {job.SourceText}\nURL: {job.Url}\n" +
+                   $"Destination: {job.Destination}\nFinal path: {job.FinalFilePath}\n" +
+                   $"Last try: {job.LastTryText}",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Download properties",
+            Content = content,
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        await dialog.ShowAsync();
     }
 
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);

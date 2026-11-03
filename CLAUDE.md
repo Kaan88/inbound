@@ -23,11 +23,14 @@ containing secrets.
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
 Chrome automatic + context-menu handoff. Phase 8 is partly implemented: named
-queues, per-queue concurrency, start/stop, queue assignment, and persistence are
-tested; schedules/completion actions remain. Full 1:1 parity is **not** complete;
-`reference notes` and `PROGRESS.md` are authoritative. Remaining large areas:
-everyday management gaps, authentication/refresh, schedules, media (HLS/DASH),
-Download All/grabber, FTP, and clean-environment install/upgrade verification.
+queues, per-queue concurrency, start/stop, queue assignment/reassignment, and
+persistence are tested; schedules/completion actions remain. Payload bytes are
+written directly into a destination-local part file and renamed in place, with
+no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
+complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
+areas: everyday management gaps, authentication/refresh, schedules, media
+(HLS/DASH), Download All/grabber, FTP, and clean-environment install/upgrade
+verification.
 
 Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
 extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
@@ -115,6 +118,11 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 - Engine must remain UI-agnostic and testable against the local HTTP server.
 - All durable writes: temp file in same directory + atomic replace + fsync where
   practical. Checkpoints must be recoverable after a kill at any point.
+- Payload placement: never put download bytes in the state directory. The job's
+  single random-access part file must live in `DestinationDirectory`
+  (`<final>.<jobId>.part`), with ranges written at final offsets, so completion
+  is a same-volume rename. Do not reintroduce a fixed temp directory or an
+  assembly copy. Only metadata/checkpoints stay in app data.
 - Never mark a parity row `implemented` without linked acceptance evidence.
   Use `partial`, `blocked`, or `unverified` otherwise.
 - Do not add unlabelled stubs or settings that do nothing.

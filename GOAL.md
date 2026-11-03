@@ -101,6 +101,12 @@ SDK, or presentation types.
    functional behavior is studied.
 7. **Reference binaries stay out of git.** Hashes, addresses, and analysis notes
    are committed; executables and captures are not.
+8. **Destination-local payload.** Unlike reference app's fixed temp directory plus
+   post-download stitching, every job's single random-access part file lives in
+   the chosen destination directory. Segments are written at their final offsets
+   into that file and completion is a same-volume atomic rename. The state drive
+   is never used for payload bytes, so choosing another drive actually uses that
+   drive's free space and never requires a cross-volume copy.
 
 ## Completion criteria
 
