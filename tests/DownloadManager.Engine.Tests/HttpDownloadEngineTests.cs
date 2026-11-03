@@ -61,6 +61,37 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task SendsCookieRefererAndUserAgentToAuthenticatedEndpoint()
+    {
+        const int size = 262_144;
+        _server.ResetAuthStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/auth/file/auth.bin?size={size}&seed=321", "auth.bin");
+        job.Referrer = $"{_server.BaseAddress}/auth/login?size={size}&seed=321";
+        job.UserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/156.0.0.0 Safari/537.36";
+        job.RequestHeaders["Cookie"] = "dmsession=valid-auth-token";
+
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_server.AuthAuthorized > 0);
+        Assert.Equal(0, _server.AuthDenied);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(321, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+
+        using var http = new HttpClient();
+        var stats = await http.GetStringAsync($"{_server.BaseAddress}/auth/stats");
+        Assert.Contains("\"lastCookiePresent\":true", stats);
+        Assert.Contains("/auth/login", stats);
+        Assert.Contains("Chrome/156", stats);
+        Assert.DoesNotContain("valid-auth-token", stats);
+    }
+
+    [Fact]
     public async Task DownloadsWithoutRangeSupport()
     {
         using var ctx = new EngineContext();

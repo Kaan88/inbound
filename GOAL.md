@@ -71,7 +71,7 @@ SDK, or presentation types.
 | 1 | Correct single-stream engine + CLI | done | Controlled downloads hash correctly; failures never look successful |
 | 2 | Persistence, resume, crash recovery | in progress | Kill/restart preserves safe resume and final hashes (process-kill matrix still pending) |
 | 3 | Tray + minimal WinUI frontend | done | Downloads continue with window closed; reopen restores state |
-| 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray (failure-path/auth cases open) |
+| 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray; authenticated cookie/referrer/UA handoff verified (failure-path recovery still open) |
 | 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; measured benchmarks and independent verification pending |
 | 6 | Everyday download management | pending | Practical daily use without CLI |
 | 7 | Authentication + refresh address | pending | Authenticated/refreshed downloads safe and secret-free |

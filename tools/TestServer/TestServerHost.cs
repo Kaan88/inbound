@@ -18,15 +18,41 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _versions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
+    private readonly object _authLastSync = new();
     private int _activeRangeRequests;
     private int _peakRangeRequests;
+    private long _authAuthorized;
+    private long _authDenied;
+    private bool _lastAuthCookiePresent;
+    private string _lastAuthReferer = string.Empty;
+    private string _lastAuthUserAgent = string.Empty;
+    private string _lastAuthRange = string.Empty;
+    private string? _lastAuthFailure;
+
+    private const string AuthCookie = "dmsession=valid-auth-token";
 
     public int PeakConcurrentRangeRequests => Volatile.Read(ref _peakRangeRequests);
+    public long AuthAuthorized => Interlocked.Read(ref _authAuthorized);
+    public long AuthDenied => Interlocked.Read(ref _authDenied);
 
     public void ResetConcurrency()
     {
         Interlocked.Exchange(ref _activeRangeRequests, 0);
         Interlocked.Exchange(ref _peakRangeRequests, 0);
+    }
+
+    public void ResetAuthStats()
+    {
+        Interlocked.Exchange(ref _authAuthorized, 0);
+        Interlocked.Exchange(ref _authDenied, 0);
+        lock (_authLastSync)
+        {
+            _lastAuthCookiePresent = false;
+            _lastAuthReferer = string.Empty;
+            _lastAuthUserAgent = string.Empty;
+            _lastAuthRange = string.Empty;
+            _lastAuthFailure = null;
+        }
     }
 
     private TestServerHost(WebApplication app)
@@ -216,6 +242,69 @@ public sealed class TestServerHost : IAsyncDisposable
             await context.Response.WriteAsync("authenticated").ConfigureAwait(false);
         });
 
+        _app.MapGet("/auth/login", async (HttpContext context) =>
+        {
+            var size = QueryInt(context, "size", 2 * 1024 * 1024);
+            var seed = QueryInt(context, "seed", 123);
+            context.Response.Cookies.Append("dmsession", "valid-auth-token", new CookieOptions
+            {
+                Path = "/",
+                HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
+            });
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync(
+                "<html><body style=\"font:16px sans-serif;padding:24px\">" +
+                "<h3>Authenticated download test</h3>" +
+                $"<a id=\"dl\" href=\"/auth/file/secure.bin?size={size}&amp;seed={seed}\">Download secure.bin</a>" +
+                "</body></html>").ConfigureAwait(false);
+        });
+
+        _app.MapGet("/auth/file/{name}", async (HttpContext context, string name) =>
+        {
+            var size = QueryInt(context, "size", 2 * 1024 * 1024);
+            var seed = QueryInt(context, "seed", 123);
+            var cookie = context.Request.Headers.Cookie.ToString();
+            var referer = context.Request.Headers.Referer.ToString();
+            var userAgent = context.Request.Headers.UserAgent.ToString();
+            var range = context.Request.Headers.Range.ToString();
+
+            var cookieOk = cookie
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(part => part.Equals(AuthCookie, StringComparison.Ordinal));
+            var expectedReferrer = $"{context.Request.Scheme}://{context.Request.Host}/auth/login";
+            var refererOk = referer.StartsWith(expectedReferrer, StringComparison.OrdinalIgnoreCase);
+            var userAgentOk = userAgent.Contains("Chrome/", StringComparison.OrdinalIgnoreCase);
+
+            RecordAuth(cookieOk, referer, userAgent, range, cookieOk && refererOk && userAgentOk
+                ? null
+                : !cookieOk ? "missing or wrong dmsession cookie"
+                : !refererOk ? "missing or wrong Referer"
+                : "missing Chrome User-Agent");
+
+            if (!cookieOk || !refererOk || !userAgentOk)
+            {
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsync("authenticated handoff rejected").ConfigureAwait(false);
+                return;
+            }
+
+            await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                throttleBytesPerSecond: QueryInt(context, "bps", 0),
+                unknownLength: false).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/auth/stats", () => Results.Json(new
+        {
+            authorized = AuthAuthorized,
+            denied = AuthDenied,
+            lastCookiePresent = _lastAuthCookiePresent,
+            lastReferer = _lastAuthReferer,
+            lastUserAgent = _lastAuthUserAgent,
+            lastRange = _lastAuthRange,
+            lastFailure = _lastAuthFailure,
+        }));
+
         _app.MapGet("/cookie/required", async (HttpContext context) =>
         {
             if (!context.Request.Headers.Cookie.ToString().Contains("session=ok", StringComparison.Ordinal))
@@ -275,9 +364,34 @@ public sealed class TestServerHost : IAsyncDisposable
             _content.Clear();
             _versions.Clear();
             _requestCounts.Clear();
+            ResetAuthStats();
             return Results.Ok();
         });
     }
+
+    private void RecordAuth(bool cookiePresent, string referer, string userAgent, string range, string? failure)
+    {
+        if (failure is null)
+        {
+            Interlocked.Increment(ref _authAuthorized);
+        }
+        else
+        {
+            Interlocked.Increment(ref _authDenied);
+        }
+
+        lock (_authLastSync)
+        {
+            _lastAuthCookiePresent = cookiePresent;
+            _lastAuthReferer = Truncate(referer, 512);
+            _lastAuthUserAgent = Truncate(userAgent, 512);
+            _lastAuthRange = Truncate(range, 128);
+            _lastAuthFailure = failure;
+        }
+    }
+
+    private static string Truncate(string value, int max)
+        => value.Length <= max ? value : value[..max];
 
     private async Task ServeAsync(
         HttpContext context,

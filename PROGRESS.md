@@ -147,11 +147,35 @@ random-access part file **in the destination directory**:
 - CLI: `dm schedule list|add|remove|enable|disable`; removal accepts a
   hyphenated or compact GUID prefix.
 
+## Authenticated browser handoff evidence (2026-11-04)
+
+- TestServer `/auth/login` sets an HttpOnly `dmsession` cookie and links to
+  `/auth/file/secure.bin?size=2097152&seed=123`; that endpoint requires the
+  cookie, a Referer starting with `/auth/login`, and a `Chrome/` user-agent.
+- Engine test `SendsCookieRefererAndUserAgentToAuthenticatedEndpoint` downloads
+  the protected file, asserts the expected hash, checks auth stats, and checks
+  that the stats response never exposes the cookie value. Engine suite:
+  **15/15 passed**.
+- Live Chrome for Testing 156 (extension
+  `pknddmneejadnnngffojnoecojhdfalc`) clicked the login page link. Chrome's
+  `downloads.search({})` was empty after takeover; host job `b0dc0ea4...` was
+  `chromeAuto`, `completed`, 2,097,152 bytes; SHA-256 matched seed 123:
+  `e0816c5b74d3960a47028f600af178dda4fe932f80a02417d8ced54f6101d52b`.
+- `/auth/stats` before the negative probe: `authorized=10, denied=0,
+  lastCookiePresent=true`, last Referer
+  `http://127.0.0.1:6411/auth/login?size=2097152&seed=123`, last UA Chrome/156,
+  last Range `bytes=1048576-1310719` (segmented requests all authenticated).
+- A request without the cookie returned **403** and `denied=1` with
+  `missing or wrong dmsession cookie`.
+- Job JSON contained header key `Cookie` and the expected test value; host logs
+  contained neither `dmsession` nor the cookie value. The value is redacted from
+  all committed records.
+
 ## Tests
 
-- Engine: **14/14 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **15/15 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer, segmented resume, no-range fallback, changed content,
-  truncation, and single-stream resume.
+  truncation, single-stream resume, and authenticated header propagation.
 - Core: **11/11 passed**.
 - Runtime/persistence: **14/14 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, reassignment, destination-local payload, and three scheduler
@@ -181,8 +205,9 @@ random-access part file **in the destination directory**:
    prevention, and DST/wall-clock tests.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7: authenticated browser request transfer, proxy/site login, Refresh
-   Download Address preserving partial data.
+4. Phase 7 remainder: proxy/SOCKS support, site-login storage, redirect
+   credential-boundary tests, expired-URL classification, and Refresh Download
+   Address preserving partial data. Cookie/referrer/UA handoff is done (E17).
 5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 6. Phase 10: Download All/site grabber.

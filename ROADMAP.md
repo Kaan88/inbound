@@ -15,16 +15,19 @@
   verified; OS process-kill matrix still pending).
 - Phase 3: complete (host/tray/IPC, reference app-shaped UI, hide-on-close, single-instance
   activation).
-- Phase 4: in progress (automatic and context-menu handoff verified with hashes;
-  failure path, disabled integration, authenticated requests, and independent
-  verification remain).
+- Phase 4: in progress (automatic, context-menu, and authenticated handoff
+  verified with hashes; failure-path recovery, disabled integration, and
+  independent verification remain).
 - Phase 5: in progress (segmented transfer/resume/fallback verified; dynamic
   redistribution, global/per-host limits, throughput benchmark, and independent
   verification remain).
+- Phase 7: in progress (cookie/referrer/UA/custom-header propagation verified
+  end to end; site logins, proxies, credential-boundary redirects, expired URL
+  classification, and Refresh Download Address remain).
 - Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
   reassignment, and daily/one-time schedule execution verified; quotas,
   completion actions, sleep prevention, and DST/wall-clock tests remain).
-- Phases 6, 7, 9–12: pending. See `reference notes` E1–E10 and `PROGRESS.md`.
+- Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
 
@@ -92,11 +95,13 @@ kill engine.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P4.1 | Extension scaffold with own manifest key/ID | pending | P0.6 | Loads unpacked; ID stable; no reference app assets |
-| P4.2 | Native host + registration scripts | pending | P3.1 | Chrome launches bridge; bridge starts host |
-| P4.3 | Handoff contract + durable dedupe | pending | P3.3 | Same request ID twice → one job |
-| P4.4 | Context-menu “Download with Download Manager” | pending | P4.1/P4.2 | Selected link creates job while UI closed |
-| P4.5 | Destination + Start/Download Later dialog | pending | P4.4 | Choices persist and affect job |
+| P4.1 | Extension scaffold with own manifest key/ID | done | P0.6 | Loads unpacked; ID stable; no reference app assets |
+| P4.2 | Native host + registration scripts | done | P3.1 | Chrome launches bridge; bridge starts host |
+| P4.3 | Handoff contract + durable dedupe | done | P3.3 | Same request ID twice → one job |
+| P4.4 | Context-menu “Download with Download Manager” | done | P4.1/P4.2 | Selected link creates job while UI closed |
+| P4.5 | Destination + Start/Download Later dialog | done | P4.4 | Choices persist and affect job |
+| P4.6 | Authenticated handoff (cookies/referrer/UA) | done | P4.3 | Auth endpoint accepts all segment requests; cookie absent from logs |
+| P4.7 | Failure-path recovery (host/native down) | pending | P4.3 | Chrome resumes; user sees actionable error; no silent loss |
 | P4.6 | Automatic interception + filters/bypass | pending | P4.4 | Allowed types intercepted; exclusions pass through |
 | P4.7 | Progress back to extension + failure recovery | pending | P4.4 | Extension shows state; unavailable host gives actionable error |
 | P4.8 | Independent browser handoff verification | pending | P4.7 | Restart Chrome/host; exactly-once handoff |
@@ -137,11 +142,12 @@ duplicates, categories/destination rules, clipboard monitoring, Download Later,
 notifications, batch URLs/numbered patterns, import/export, per-download
 progress/segment view.
 
-## Phase 7 — Authentication and refreshed addresses (pending)
+## Phase 7 - Authentication and refreshed addresses (in progress)
 
-Coarse: cookies/referrer/UA/custom headers, site logins, HTTP/SOCKS proxies,
-redirect credential rules, expired URL errors, Refresh Download Address with
-partial-data preservation and content validation.
+Cookies, referrer, user-agent, and custom headers are verified end to end for
+CLI/engine and Chrome handoff (`S1`, `E17`). Remaining: site logins, HTTP/SOCKS
+proxies, redirect credential rules, expired URL errors, and Refresh Download
+Address with partial-data preservation and content validation.
 
 ## Phase 8 - Queues and scheduling (in progress)
 

@@ -22,16 +22,17 @@ containing secrets.
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
-Chrome automatic + context-menu handoff. Phase 8 is partly implemented: named
+Chrome automatic + context-menu handoff, including authenticated cookie,
+referrer and user-agent transfer. Phase 8 is partly implemented: named
 queues, per-queue concurrency, start/stop, queue assignment/reassignment,
 persistence, and daily/one-time schedule execution are tested; completion
 actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload bytes are
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, authentication/refresh, schedules, media
-(HLS/DASH), Download All/grabber, FTP, and clean-environment install/upgrade
-verification.
+areas: everyday management gaps, proxies/site logins/refresh address, schedule
+completion actions/quotas, media (HLS/DASH), Download All/grabber, FTP, and
+clean-environment install/upgrade verification.
 
 Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
 extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
