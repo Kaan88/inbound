@@ -1,0 +1,256 @@
+using System.Text.Json.Serialization;
+
+namespace DownloadManager.Core;
+
+public enum DownloadState
+{
+    Queued,
+    Connecting,
+    Downloading,
+    RetryWaiting,
+    Verifying,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+public enum FailureKind
+{
+    None,
+    Network,
+    Timeout,
+    Dns,
+    Tls,
+    Http,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    RangeUnsupported,
+    RemoteChanged,
+    InvalidContent,
+    DiskFull,
+    Permission,
+    DestinationUnavailable,
+    Cancelled,
+    Unknown,
+}
+
+public enum DownloadSource
+{
+    Cli,
+    Api,
+    ChromeContextMenu,
+    ChromeAuto,
+    Clipboard,
+    Batch,
+    ClipboardMonitor,
+    Import,
+}
+
+public enum StartMode
+{
+    StartNow,
+    Queue,
+    Later,
+}
+
+public enum ConflictPolicy
+{
+    Rename,
+    Overwrite,
+    Fail,
+}
+
+public sealed record JobFailure(
+    FailureKind Kind,
+    string Message,
+    bool IsRetryable,
+    bool IsResumable,
+    DateTimeOffset OccurredAt)
+{
+    public static JobFailure None { get; } = new(FailureKind.None, string.Empty, false, false, DateTimeOffset.MinValue);
+}
+
+public sealed class DownloadJob
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Url { get; set; } = string.Empty;
+    public string? FinalUrl { get; set; }
+    public string? PageUrl { get; set; }
+    public string? Referrer { get; set; }
+    public string? UserAgent { get; set; }
+
+    public string FileName { get; set; } = string.Empty;
+    public string DestinationDirectory { get; set; } = string.Empty;
+    public string FinalFilePath { get; set; } = string.Empty;
+    public string PartFilePath { get; set; } = string.Empty;
+
+    public long? TotalBytes { get; set; }
+    public long ReceivedBytes { get; set; }
+    public DownloadState State { get; set; } = DownloadState.Queued;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    public string? ETag { get; set; }
+    public string? LastModified { get; set; }
+    public string? ContentType { get; set; }
+
+    public int RequestedConnections { get; set; } = 1;
+    public int ActiveConnections { get; set; }
+    public double? BytesPerSecond { get; set; }
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    public TimeSpan? EstimatedRemaining { get; set; }
+
+    public DownloadSource Source { get; set; } = DownloadSource.Cli;
+    public string? ClientRequestId { get; set; }
+    public string? OwnerExtensionId { get; set; }
+    public int QueueId { get; set; }
+    public int Priority { get; set; }
+    public string? Description { get; set; }
+    public string? ExpectedSha256 { get; set; }
+
+    public StartMode StartMode { get; set; } = StartMode.StartNow;
+    public ConflictPolicy ConflictPolicy { get; set; } = ConflictPolicy.Rename;
+    public bool DeleteFileOnCancel { get; set; } = true;
+    public bool AutoResumeAfterRestart { get; set; } = true;
+
+    public JobFailure? Failure { get; set; }
+    public Dictionary<string, string> RequestHeaders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool IsTerminal => State is DownloadState.Completed or DownloadState.Cancelled;
+
+    [JsonIgnore]
+    public bool IsActive => State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting;
+
+    [JsonIgnore]
+    public bool CanPause => State is DownloadState.Queued or DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting;
+
+    [JsonIgnore]
+    public bool CanResume => State is DownloadState.Paused or DownloadState.Failed or DownloadState.Cancelled;
+
+    [JsonIgnore]
+    public double? ProgressFraction => TotalBytes is > 0 ? Math.Clamp((double)ReceivedBytes / TotalBytes.Value, 0, 1) : null;
+
+    public void Touch() => UpdatedAt = DateTimeOffset.UtcNow;
+
+    public DownloadJob Clone()
+    {
+        var clone = (DownloadJob)MemberwiseClone();
+        clone.RequestHeaders = new Dictionary<string, string>(RequestHeaders, StringComparer.OrdinalIgnoreCase);
+        return clone;
+    }
+}
+
+public sealed record TransferProgress(
+    long ReceivedBytes,
+    long? TotalBytes,
+    double BytesPerSecond,
+    TimeSpan? EstimatedRemaining,
+    int ActiveConnections,
+    string Phase);
+
+public sealed record DownloadResult(
+    bool Success,
+    DownloadState FinalState,
+    JobFailure? Failure,
+    long BytesWritten,
+    long? TotalBytes,
+    string? FinalFilePath,
+    string? ETag,
+    string? LastModified,
+    string? ContentType)
+{
+    public static DownloadResult Ok(long bytes, long? total, string finalPath, string? etag, string? lastModified, string? contentType)
+        => new(true, DownloadState.Completed, null, bytes, total, finalPath, etag, lastModified, contentType);
+
+    public static DownloadResult Fail(DownloadState state, JobFailure failure, long bytes = 0, long? total = null)
+        => new(false, state, failure, bytes, total, null, null, null, null);
+}
+
+public sealed record EngineOptions
+{
+    public int MaxAttempts { get; init; } = 5;
+    public TimeSpan InitialRetryDelay { get; init; } = TimeSpan.FromSeconds(1);
+    public double RetryBackoffFactor { get; init; } = 2.0;
+    public TimeSpan MaxRetryDelay { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(20);
+    public TimeSpan ReadTimeout { get; init; } = TimeSpan.FromSeconds(90);
+    public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(60);
+    public int BufferSize { get; init; } = 128 * 1024;
+    public int MaxRedirects { get; init; } = 10;
+    public bool AllowLocalNetwork { get; init; } = true;
+    public string AcceptEncoding { get; init; } = "identity";
+}
+
+public sealed class DownloadCheckpoint
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public Guid JobId { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string? FinalUrl { get; set; }
+    public string? ETag { get; set; }
+    public string? LastModified { get; set; }
+    public long? TotalBytes { get; set; }
+    public string? ContentType { get; set; }
+    public List<SegmentCheckpoint> Segments { get; set; } = new();
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public long CompletedBytes => Segments.Sum(s => s.Completed);
+}
+
+public sealed class SegmentCheckpoint
+{
+    public long Start { get; set; }
+    public long End { get; set; }
+    public long Completed { get; set; }
+    public bool IsComplete => Completed >= End - Start + 1;
+}
+
+public sealed class AppSettings
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public string DefaultDownloadDirectory { get; set; } = GetDefaultDownloadDirectory();
+    public int MaxConcurrentDownloads { get; set; } = 3;
+    public int DefaultConnections { get; set; } = 8;
+    public int MaxConnectionsPerHost { get; set; } = 8;
+    public long? GlobalSpeedLimitBytesPerSecond { get; set; }
+    public bool LaunchAtStartup { get; set; }
+    public bool ClipboardMonitoring { get; set; }
+    public bool BrowserIntegrationEnabled { get; set; } = true;
+    public bool BrowserAutoIntercept { get; set; } = true;
+    public bool NotifyOnCompletion { get; set; } = true;
+    public bool PlayCompletionSound { get; set; } = true;
+    public bool ShowCompletionDialog { get; set; } = true;
+    public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
+    public bool AllowLocalNetwork { get; set; } = true;
+    public string Theme { get; set; } = "System";
+    public string? LastDestinationDirectory { get; set; }
+    public List<string> ExcludedFileExtensions { get; set; } = new();
+    public List<string> ExcludedHosts { get; set; } = new();
+    public List<string> InterceptedFileExtensions { get; set; } = new()
+    {
+        "3gp", "7z", "aac", "ace", "aif", "apk", "arj", "asf", "avi", "bin", "bz2",
+        "exe", "gz", "gzip", "img", "iso", "lzh", "m4a", "m4v", "mkv", "mov", "mp3",
+        "mpa", "mpe", "mpeg", "mpg", "msi", "msu", "ogg", "ogv", "plj", "pps", "ppt",
+        "qt", "ra", "rar", "rm", "rmvb", "sea", "sit", "sitx", "tar", "wav", "wma",
+        "wmv", "z", "zip"
+    };
+
+    public static string GetDefaultDownloadDirectory()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var downloads = Path.Combine(profile, "Downloads");
+        return Directory.Exists(downloads) ? downloads : profile;
+    }
+}

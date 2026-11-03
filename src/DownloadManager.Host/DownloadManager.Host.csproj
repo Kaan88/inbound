@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <Content Include="..\..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\DownloadManager.Tray\DownloadManager.Tray.csproj" />
+    <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,209 @@
+namespace DownloadManager.Contracts;
+
+public sealed class FailureDto
+{
+    public string Kind { get; set; } = "none";
+    public string Message { get; set; } = string.Empty;
+    public bool IsRetryable { get; set; }
+    public bool IsResumable { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
+public sealed class JobDto
+{
+    public Guid Id { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string? FinalUrl { get; set; }
+    public string? PageUrl { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string DestinationDirectory { get; set; } = string.Empty;
+    public string FinalFilePath { get; set; } = string.Empty;
+    public long? TotalBytes { get; set; }
+    public long ReceivedBytes { get; set; }
+    public double? Progress { get; set; }
+    public string State { get; set; } = "queued";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string? ContentType { get; set; }
+    public string? ETag { get; set; }
+    public string? LastModified { get; set; }
+    public int RequestedConnections { get; set; }
+    public int ActiveConnections { get; set; }
+    public double? BytesPerSecond { get; set; }
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    public TimeSpan? EstimatedRemaining { get; set; }
+    public string Source { get; set; } = "cli";
+    public string? ClientRequestId { get; set; }
+    public string? OwnerExtensionId { get; set; }
+    public int QueueId { get; set; }
+    public int Priority { get; set; }
+    public string? Description { get; set; }
+    public string? ExpectedSha256 { get; set; }
+    public string StartMode { get; set; } = "startNow";
+    public bool CanPause { get; set; }
+    public bool CanResume { get; set; }
+    public bool IsTerminal { get; set; }
+    public FailureDto? Failure { get; set; }
+}
+
+public sealed class SettingsDto
+{
+    public string DefaultDownloadDirectory { get; set; } = string.Empty;
+    public int MaxConcurrentDownloads { get; set; } = 3;
+    public int DefaultConnections { get; set; } = 8;
+    public int MaxConnectionsPerHost { get; set; } = 8;
+    public long? GlobalSpeedLimitBytesPerSecond { get; set; }
+    public bool LaunchAtStartup { get; set; }
+    public bool ClipboardMonitoring { get; set; }
+    public bool BrowserIntegrationEnabled { get; set; } = true;
+    public bool BrowserAutoIntercept { get; set; } = true;
+    public bool NotifyOnCompletion { get; set; } = true;
+    public bool PlayCompletionSound { get; set; } = true;
+    public bool ShowCompletionDialog { get; set; } = true;
+    public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
+    public bool AllowLocalNetwork { get; set; } = true;
+    public string Theme { get; set; } = "System";
+    public string? LastDestinationDirectory { get; set; }
+    public List<string> ExcludedFileExtensions { get; set; } = new();
+    public List<string> ExcludedHosts { get; set; } = new();
+    public List<string> InterceptedFileExtensions { get; set; } = new();
+}
+
+public sealed class HostStatusDto
+{
+    public string HostVersion { get; set; } = string.Empty;
+    public int ProtocolVersion { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public bool TrayAvailable { get; set; }
+    public bool NativeHostRegistered { get; set; }
+    public int ActiveDownloads { get; set; }
+    public int QueuedDownloads { get; set; }
+    public int TotalJobs { get; set; }
+    public string StateDirectory { get; set; } = string.Empty;
+    public string? LastError { get; set; }
+}
+
+public sealed class HostHelloDto
+{
+    public string HostVersion { get; set; } = string.Empty;
+    public int ProtocolVersion { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public List<string> Capabilities { get; set; } = new();
+}
+
+public sealed class IncompatibleDto
+{
+    public int MinVersion { get; set; }
+    public int MaxVersion { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class SnapshotDto
+{
+    public List<JobDto> Jobs { get; set; } = new();
+    public SettingsDto Settings { get; set; } = new();
+    public HostStatusDto Status { get; set; } = new();
+}
+
+public sealed class AddJobRequest
+{
+    public string Url { get; set; } = string.Empty;
+    public string? FinalUrl { get; set; }
+    public string? DestinationDirectory { get; set; }
+    public string? FileName { get; set; }
+    public string StartMode { get; set; } = "startNow";
+    public string Source { get; set; } = "cli";
+    public string? ClientRequestId { get; set; }
+    public string? OwnerExtensionId { get; set; }
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? Referrer { get; set; }
+    public string? UserAgent { get; set; }
+    public string? PageUrl { get; set; }
+    public int? Connections { get; set; }
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    public string? Description { get; set; }
+    public string ConflictPolicy { get; set; } = "rename";
+    public string? ExpectedSha256 { get; set; }
+    public bool? AutoResumeAfterRestart { get; set; }
+}
+
+public sealed class AddJobResponse
+{
+    public bool Accepted { get; set; }
+    public bool Duplicate { get; set; }
+    public JobDto? Job { get; set; }
+    public string? Error { get; set; }
+    public string? ErrorCode { get; set; }
+}
+
+public sealed class JobActionRequest
+{
+    public Guid JobId { get; set; }
+    public bool DeleteFile { get; set; }
+}
+
+public sealed class JobActionResponse
+{
+    public bool Ok { get; set; }
+    public JobDto? Job { get; set; }
+    public string? Error { get; set; }
+}
+
+public sealed class JobEventDto
+{
+    public JobDto Job { get; set; } = new();
+    public string EventType { get; set; } = "updated";
+}
+
+public sealed class SettingsUpdateRequest
+{
+    public SettingsDto Settings { get; set; } = new();
+}
+
+public sealed class SettingsResult
+{
+    public bool Ok { get; set; }
+    public SettingsDto Settings { get; set; } = new();
+    public string? Error { get; set; }
+}
+
+public sealed class HostActionRequest
+{
+    public string Action { get; set; } = string.Empty;
+}
+
+public sealed class HostActionResult
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+}
+
+public sealed class HandoffRequest
+{
+    public string RequestId { get; set; } = string.Empty;
+    public string ExtensionId { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string? FinalUrl { get; set; }
+    public string? PageUrl { get; set; }
+    public string? Referrer { get; set; }
+    public string? UserAgent { get; set; }
+    public string? SuggestedFileName { get; set; }
+    public string? MimeType { get; set; }
+    public long? TotalBytes { get; set; }
+    public string StartMode { get; set; } = "startNow";
+    public bool IsAutoIntercept { get; set; }
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? DestinationDirectory { get; set; }
+}
+
+public sealed class HandoffAck
+{
+    public bool Accepted { get; set; }
+    public bool Duplicate { get; set; }
+    public Guid JobId { get; set; }
+    public JobDto? Job { get; set; }
+    public string? Error { get; set; }
+    public string? ErrorCode { get; set; }
+}

@@ -1,0 +1,61 @@
+# Build output
+bin/
+obj/
+artifacts/
+dist/
+publish/
+out/
+*.user
+*.suo
+.vs/
+.vscode/
+*.binlog
+TestResults/
+coverage/
+*.trx
+*.deps.json
+*.runtimeconfig.json
+
+# Node
+node_modules/
+extensions/chrome/dist/
+extensions/chrome/.parcel-cache/
+*.tsbuildinfo
+
+# Downloads and test fixtures (keep large files out of git)
+test-downloads/
+downloads/
+*.part
+*.partial
+*.iso
+*.zip
+*.7z
+*.testdata
+
+# Runtime state / secrets
+*.log
+logs/
+secrets/
+.env
+*.pfx
+*.pem
+*.key
+!extensions/chrome/src/**/*.key.pub
+
+# Reverse-engineering artifacts that must not be committed
+notes/artifacts/
+notes/binaries/
+notes/captures/
+notes/disassembler/
+*.exe
+*.dll
+*.sys
+*.crx
+*.xpi
+*.chm
+
+# OS/editor
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp

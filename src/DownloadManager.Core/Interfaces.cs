@@ -1,0 +1,56 @@
+namespace DownloadManager.Core;
+
+public interface IJobStore
+{
+    Task InitializeAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DownloadJob>> LoadAllAsync(CancellationToken cancellationToken = default);
+    Task<DownloadJob?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task SaveAsync(DownloadJob job, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the job id already claimed for this browser request, or null.
+    /// Implementations must be safe against concurrent callers in one host.
+    /// </summary>
+    Task<Guid?> FindClaimedRequestAsync(string extensionId, string clientRequestId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Durably records a request claim. Returns false if another claim already exists.
+    /// </summary>
+    Task<bool> TryClaimRequestAsync(string extensionId, string clientRequestId, Guid jobId, CancellationToken cancellationToken = default);
+
+    Task DeleteClaimAsync(string extensionId, string clientRequestId, CancellationToken cancellationToken = default);
+}
+
+public interface IDownloadCheckpointStore
+{
+    Task<DownloadCheckpoint?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default);
+}
+
+public interface ISettingsStore
+{
+    Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default);
+    Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
+}
+
+public interface IDownloadEngine
+{
+    Task<DownloadResult> ExecuteAsync(
+        DownloadJob job,
+        DownloadCheckpoint? checkpoint,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken);
+}
+
+public interface IClock
+{
+    DateTimeOffset UtcNow { get; }
+}
+
+public sealed class SystemClock : IClock
+{
+    public static SystemClock Instance { get; } = new();
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+}

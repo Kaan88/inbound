@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+  </ItemGroup>
+</Project>
