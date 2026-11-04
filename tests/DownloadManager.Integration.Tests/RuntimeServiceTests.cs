@@ -436,6 +436,37 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task GlobalSpeedLimitAppliesToNewJobs()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.GlobalSpeedLimitBytesPerSecond = 131_072;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        const int size = 524_288;
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/global-speed.bin?size={size}&seed=18",
+            DestinationDirectory = ctx.Destination,
+            FileName = "global-speed.bin",
+            Connections = 1,
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        Assert.Equal(131_072, response.Job!.SpeedLimitBytesPerSecond);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(20));
+        stopwatch.Stop();
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 8.0);
+        Assert.Equal(size, completed.ReceivedBytes);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(18, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task ConnectionProfilesCapRequestedConnections()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

@@ -926,6 +926,22 @@ random-access part file **in the destination directory**:
 - TestServer now has `/large/{name}` (streams 200 MB without allocating it) and
   `/large/expected` for the streaming hash.
 
+## Host-instance and speed-limit evidence (L1/A7, 2026-11-04)
+
+- L1: one published Host was running (PID 45304); a second `--background`
+  launch exited while the count stayed at 1 and the original PID remained.
+  `dm host status` still answered over IPC.
+- A7:
+  - engine `PerDownloadSpeedLimitIsApplied`: 512 KiB with a 128 KiB/s
+    per-download limit completed in 4.0 s (bound 3.2-8.0 s) with the expected
+    hash;
+  - integration `GlobalSpeedLimitAppliesToNewJobs`: a 128 KiB/s global setting
+    was inherited by a new job, which completed 512 KiB in 4.3 s with the
+    expected hash.
+- Limitations: limits are per job; aggregate fairness across simultaneous
+  limited jobs is not enforced.
+- Engine suite **26/26**, integration **57/57**.
+
 ## Retry/reconciliation evidence (R5/R7/R8, 2026-11-04)
 
 - R5: engine `RetriesTransientServerErrors` hit `/flaky/retry.bin` with two
@@ -1064,15 +1080,16 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **25/25 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **26/26 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
-  HTML-page policy, monotonic progress/ETA, and transient-500 retry recovery.
+  HTML-page policy, monotonic progress/ETA, transient-500 retry recovery, and
+  per-download speed limiting.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **56/56 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **57/57 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1081,10 +1098,10 @@ random-access part file **in the destination directory**:
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
   recent-URL history, pause-vs-cancel partial files, crash metadata clamping,
-  the scoped site grabber/offline mirror, persistent/scheduled grabber projects,
-  FTP auth/resume, post-download hook isolation, connection profiles,
-  secret-preserving settings updates, installer-only update check/download, and
-  segment/progress details.
+  global speed limiting, the scoped site grabber/offline mirror,
+  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
+  isolation, connection profiles, secret-preserving settings updates,
+  installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

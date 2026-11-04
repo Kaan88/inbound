@@ -485,6 +485,29 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task PerDownloadSpeedLimitIsApplied()
+    {
+        using var ctx = new EngineContext();
+        const int size = 524_288;
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/speed.bin?size={size}&seed=17",
+            "speed.bin");
+        job.SpeedLimitBytesPerSecond = 131_072;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        stopwatch.Stop();
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 8.0);
+        Assert.Equal(size, new FileInfo(result.FinalFilePath!).Length);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(17, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
     public async Task HtmlPageIsSavedOnlyForHtmlLikeTargets()
     {
         using var ctx = new EngineContext();

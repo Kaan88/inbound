@@ -135,7 +135,7 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.1 | Range probing and safe partitioning | done | P2.3 | Servers with/without ranges handled |
 | P5.2 | Concurrent segment writer + checkpoints | done | P5.1 | Assembly hash matches; crash-safe |
 | P5.3 | Per-host/global limits, fallback | partial | P5.2 | Limits observed; single-stream fallback works |
-| P5.4 | Speed limits + estimator | partial | P5.2 | Throttle accuracy within tolerance |
+| P5.4 | Speed limits + estimator | done | P5.2 | Per-download and global 128 KiB/s limits measured within tolerance (E69); estimator quality remains under A8 |
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
