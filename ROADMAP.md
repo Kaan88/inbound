@@ -32,8 +32,9 @@
   HLS master/media assembly, static DASH SegmentTemplate assembly, DASH
   audio/video muxing via FFmpeg, HLS/DASH fragment recovery, expiring
   segment-token refresh, explicit live-stream exclusion, DRM detection, HLS
-  AES-128 (single and rotating keys), HLS alternate-audio muxing, in-page media
-  panel, and HLS quality selection verified; additional DASH modes remain).
+  AES-128 (single and rotating keys), HLS alternate-audio muxing, DASH
+  SegmentTimeline/SegmentList, in-page media panel, and HLS quality selection
+  verified; SegmentBase/byte-range DASH remains).
 - Phase 6: complete (clipboard URL monitoring, completion notification/sound,
   batch URLs, search/sort/context actions, editable descriptions, duplicate
   policies, category destinations, remembered last folder and recent URLs, JSON
@@ -205,7 +206,8 @@ a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
 shadow-DOM media panel and HLS quality-variant selection are verified (V2 done;
 E32). HLS AES-128 with single and rotating keys is verified (V10 done; E55).
 HLS alternate audio groups are selected and muxed with video (V11 done; E57).
-Remaining: SegmentBase/SegmentList/timeline DASH.
+DASH SegmentTimeline and full-URL SegmentList are verified (E58). Remaining:
+SegmentBase and SegmentList mediaRange/byte ranges.
 
 ## Phase 10 - Download All and site grabber (done)
 

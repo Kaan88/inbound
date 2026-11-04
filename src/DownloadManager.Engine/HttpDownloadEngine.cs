@@ -1721,19 +1721,55 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         out string? error)
     {
         error = null;
+        var baseUri = ResolveDashBase(manifestUri, root, ns);
+        baseUri = ResolveDashBase(baseUri, period, ns);
+        baseUri = ResolveDashBase(baseUri, adaptation, ns);
+        baseUri = ResolveDashBase(baseUri, representation, ns);
+
+        var segmentList = representation.Elements(ns + "SegmentList").FirstOrDefault()
+                          ?? adaptation.Elements(ns + "SegmentList").FirstOrDefault()
+                          ?? period.Elements(ns + "SegmentList").FirstOrDefault();
+        if (segmentList is not null)
+        {
+            var initialization = segmentList.Element(ns + "Initialization");
+            var initUrl = (string?)initialization?.Attribute("sourceURL") ??
+                          (string?)segmentList.Attribute("initialization");
+            var listInitUri = ResolveDashUri(baseUri, initUrl ?? string.Empty);
+            var segmentUrls = segmentList.Elements(ns + "SegmentURL").ToList();
+            if (segmentUrls.Any(segment => segment.Attribute("mediaRange") is not null))
+            {
+                error = "DASH SegmentList mediaRange is not supported yet.";
+                return null;
+            }
+
+            var listed = new List<Uri>();
+            foreach (var segment in segmentUrls)
+            {
+                var uri = ResolveDashUri(baseUri, (string?)segment.Attribute("media") ?? string.Empty);
+                if (uri is not null)
+                {
+                    listed.Add(uri);
+                }
+            }
+
+            if (listed.Count == 0)
+            {
+                error = "The DASH SegmentList has no media segments.";
+                return null;
+            }
+
+            return new DashTrack(
+                listInitUri, listed, ComputeMediaSignature("dash", listInitUri, listed));
+        }
+
         var template = representation.Elements(ns + "SegmentTemplate").FirstOrDefault()
                        ?? adaptation.Elements(ns + "SegmentTemplate").FirstOrDefault()
                        ?? period.Elements(ns + "SegmentTemplate").FirstOrDefault();
         if (template is null)
         {
-            error = "This DASH manifest uses SegmentBase/SegmentList, which is not supported yet.";
+            error = "This DASH manifest uses SegmentBase or an unsupported indexing mode.";
             return null;
         }
-
-        var baseUri = ResolveDashBase(manifestUri, root, ns);
-        baseUri = ResolveDashBase(baseUri, period, ns);
-        baseUri = ResolveDashBase(baseUri, adaptation, ns);
-        baseUri = ResolveDashBase(baseUri, representation, ns);
 
         var mediaTemplate = (string?)template.Attribute("media");
         if (string.IsNullOrWhiteSpace(mediaTemplate))
@@ -1760,6 +1796,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         if (timeline is not null)
         {
             long time = 0;
+            var number = startNumber;
             foreach (var s in timeline.Elements(ns + "S"))
             {
                 time = ParseLong((string?)s.Attribute("t"), time);
@@ -1773,13 +1810,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 for (var i = 0; i <= repeat; i++)
                 {
                     var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
-                        mediaTemplate, representationId, bandwidth, null, time));
+                        mediaTemplate, representationId, bandwidth, number, time));
                     if (uri is not null)
                     {
                         segments.Add(uri);
                     }
 
                     time += step;
+                    number++;
                 }
             }
         }

@@ -902,6 +902,24 @@ random-access part file **in the destination directory**:
   `hist-two.bin` and `hist-one.bin`.
 - Phase 6 is complete; M8's previous "no recent history" limitation is closed.
 
+## DASH SegmentTimeline/SegmentList evidence (V4, 2026-11-04)
+
+- `SegmentTimeline` now advances `startNumber` for each expanded segment, so
+  `$Number$` templates work alongside `$Time$`; `S@t/@d/@r` repeats expand
+  correctly.
+- `SegmentList` support reads `Initialization@sourceURL` and full-URL
+  `SegmentURL@media` entries; `mediaRange` is rejected explicitly for now.
+- TestServer:
+  - `/dash/timeline.mpd` uses one `S` with `r=2`;
+  - `/dash/segmentlist.mpd` lists all three media URLs.
+- Integration `DashTimelineAndSegmentListMatchExpectedOutput`:
+  both completed at 498,366 bytes with the reference SHA-256;
+  integration suite **53/53**.
+- Published CLI reproduced both at 498,366 bytes with SHA-256
+  `3a17840b06a53432f9fa9a09188b7d68e3de720201bb88b3648277c2227cfba1`.
+- Remaining: SegmentBase and SegmentList mediaRange/byte ranges; dynamic/live and
+  multi-period remain unsupported.
+
 ## HLS alternate-audio evidence (V11, 2026-11-04)
 
 - HLS master parsing now understands `#EXT-X-MEDIA:TYPE=AUDIO` entries
@@ -992,16 +1010,17 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **52/52 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **53/53 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, HLS AES-128 key rotation, HLS alternate-audio muxing, DASH
-  assembly, DASH A/V muxing, HLS/DASH fragment recovery, rotating-token refresh,
-  live-stream exclusion, DRM detection, editable properties, duplicate policies,
-  category destinations, recent-URL history, the scoped site grabber/offline
-  mirror, persistent/scheduled grabber projects, FTP auth/resume, post-download
-  hook isolation, connection profiles, secret-preserving settings updates,
+  SegmentTemplate/Timeline/SegmentList assembly, DASH A/V muxing, HLS/DASH
+  fragment recovery, rotating-token refresh, live-stream exclusion, DRM
+  detection, editable properties, duplicate policies, category destinations,
+  recent-URL history, the scoped site grabber/offline mirror,
+  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
+  isolation, connection profiles, secret-preserving settings updates,
   installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
