@@ -713,6 +713,33 @@ public sealed class DownloadManagerService
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
 
+    public async Task<JobActionResponse> UpdateJobAsync(
+        JobUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        JobRuntime? runtime;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(request.JobId, out runtime))
+            {
+                return new JobActionResponse { Ok = false, Error = "Job not found." };
+            }
+
+            if (request.Description is not null)
+            {
+                runtime.Job.Description = string.IsNullOrWhiteSpace(request.Description)
+                    ? null
+                    : request.Description.Trim();
+            }
+
+            runtime.Job.Touch();
+        }
+
+        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+        Raise(runtime, "updated");
+        return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+    }
+
     public async Task<JobActionResponse> MoveToQueueAsync(
         Guid id,
         int queueId,

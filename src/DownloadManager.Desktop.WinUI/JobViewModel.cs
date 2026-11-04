@@ -27,6 +27,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private string _queueText = string.Empty;
     private string _lastTryText = string.Empty;
     private string _description = string.Empty;
+    private string _rawDescription = string.Empty;
     private Visibility _progressVisibility = Visibility.Collapsed;
     private DateTimeOffset _createdAt;
 
@@ -53,6 +54,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public string QueueText { get => _queueText; private set => Set(ref _queueText, value); }
     public string LastTryText { get => _lastTryText; private set => Set(ref _lastTryText, value); }
     public string Description { get => _description; private set => Set(ref _description, value); }
+    public string RawDescription { get => _rawDescription; private set => Set(ref _rawDescription, value); }
     public Visibility ProgressVisibility { get => _progressVisibility; private set => Set(ref _progressVisibility, value); }
     public DateTimeOffset CreatedAt { get => _createdAt; private set => Set(ref _createdAt, value); }
 
@@ -88,6 +90,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         QueueText = (job.QueueId + 1).ToString(CultureInfo.InvariantCulture);
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        RawDescription = job.Description ?? string.Empty;
         Description = job.Description ?? job.PageUrl ?? string.Empty;
         ProgressVisibility = (job.State is "downloading" or "connecting" or "retryWaiting" or "verifying" or "paused") &&
                              ProgressPercent > 0

@@ -143,6 +143,54 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DescriptionEditPersistsAcrossRestart()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/described.bin?size=65536&seed=240",
+                DestinationDirectory = ctx.Destination,
+                FileName = "described.bin",
+                Source = "cli",
+                StartMode = "later",
+            });
+            var jobId = response.Job!.Id;
+            var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+            {
+                JobId = jobId,
+                Description = "  quarterly report  ",
+            });
+            Assert.True(update.Ok, update.Error);
+            Assert.Equal("quarterly report", update.Job!.Description);
+
+            var missing = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+            {
+                JobId = Guid.NewGuid(),
+                Description = "nope",
+            });
+            Assert.False(missing.Ok);
+
+            var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+            try
+            {
+                var reloaded = second.Service.GetJob(jobId);
+                Assert.NotNull(reloaded);
+                Assert.Equal("quarterly report", reloaded!.Description);
+            }
+            finally
+            {
+                await second.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConcurrencyLimitIsObserved()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 1);

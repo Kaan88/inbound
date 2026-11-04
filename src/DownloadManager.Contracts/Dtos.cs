@@ -235,6 +235,12 @@ public sealed class JobRefreshUrlRequest
     public string Url { get; set; } = string.Empty;
 }
 
+public sealed class JobUpdateRequest
+{
+    public Guid JobId { get; set; }
+    public string? Description { get; set; }
+}
+
 public sealed class JobEventDto
 {
     public JobDto Job { get; set; } = new();

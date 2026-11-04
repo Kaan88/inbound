@@ -517,6 +517,20 @@ random-access part file **in the destination directory**:
   dialog showed URL pattern, range hint, destination, start, and queue fields.
 - Remaining: wildcard `*` substitution and batch import files.
 
+## Editable properties evidence (M3, 2026-11-04)
+
+- Added `job.update` / `JobUpdateRequest`; the runtime trims and persists the
+  description, raises an update event, and rejects unknown job ids.
+- CLI `dm describe <id> <text>` and the WinUI Properties dialog (editable
+  Description + Save/Cancel) use the same IPC method.
+- Integration `DescriptionEditPersistsAcrossRestart`: set/reset description
+  trimming, unknown-id rejection, and reload from a fresh service instance.
+- Integration suite **37/37**.
+- Published CLI: `describe` returned `ok`; `status --json` showed
+  `"description": "Quarterly report from UI"` before and after a Host restart.
+- Remaining: editing URL/file name/destination, duplicate policies, categories,
+  recent folders, import/export, and the completion dialog.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -524,12 +538,13 @@ random-access part file **in the destination directory**:
   credentials, and redirect credential boundaries.
 - Core: **34/34 passed**, including shutdown-command construction, clipboard URL
   extraction, and batch URL expansion.
-- Runtime/persistence: **36/36 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **37/37 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
-  rotating-token refresh, live-stream exclusion, and DRM detection.
+  rotating-token refresh, live-stream exclusion, DRM detection, and editable
+  property persistence.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -560,10 +575,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Phase 6 remainder: editable properties (M3), duplicate decisions (M6),
-   categories/destination rules (M7), remembered folders/recent URLs (M8),
-   import/export (M13), and completion dialog (M11). Clipboard monitoring and
-   completion notification/sound are done (E33); batch URLs are done (E34).
+4. Phase 6 remainder: duplicate decisions (M6), categories/destination rules
+   (M7), remembered folders/recent URLs (M8), import/export (M13), and completion
+   dialog (M11). Clipboard monitoring (E33), batch URLs (E34), and editable
+   descriptions (E35) are done.
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done

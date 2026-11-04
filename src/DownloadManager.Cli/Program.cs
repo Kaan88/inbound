@@ -172,6 +172,22 @@ internal static class Program
                 return 0;
             }
 
+            case "describe":
+            {
+                if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var describeId))
+                {
+                    Console.Error.WriteLine("usage: describe <job-id> <description text>");
+                    return 2;
+                }
+
+                var reply = await client.RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest
+                {
+                    JobId = describeId,
+                    Description = string.Join(' ', optionArgs.Skip(1)),
+                }).ConfigureAwait(false);
+                return PrintAction(reply, json);
+            }
+
             case "pause":
                 return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobPause, json).ConfigureAwait(false);
             case "resume":
@@ -1083,6 +1099,7 @@ internal static class Program
                           [--connections N] [--queue ID]
               dm list [--json]
               dm status <job-id> [--json]
+              dm describe <job-id> <description text>
               dm pause|resume|retry <job-id>
               dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]

@@ -62,6 +62,10 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url },
             TimeSpan.FromSeconds(10), cancellationToken);
 
+    public Task<IpcMessage> UpdateJobAsync(Guid jobId, string description, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Description = description },
+            TimeSpan.FromSeconds(10), cancellationToken);
+
     public Task<IpcMessage> PauseAllAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobsPauseAll, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 

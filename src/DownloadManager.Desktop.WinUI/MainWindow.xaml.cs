@@ -403,7 +403,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var content = new TextBlock
+        var info = new TextBlock
         {
             Text = $"File: {job.FileName}\nQueue: {job.QueueName}\nState: {job.StateText}\n" +
                    $"Size: {job.SizeText}\nSource: {job.SourceText}\nURL: {job.Url}\n" +
@@ -411,15 +411,48 @@ public sealed partial class MainWindow : Window
                    $"Last try: {job.LastTryText}",
             TextWrapping = TextWrapping.Wrap,
         };
+        var descriptionBox = new TextBox
+        {
+            Header = "Description",
+            Text = job.RawDescription,
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
+            Height = 80,
+        };
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(info);
+        panel.Children.Add(descriptionBox);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
             Title = "Download properties",
-            Content = content,
-            CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
+            Content = panel,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
         };
-        await dialog.ShowAsync();
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            var reply = await _connection.UpdateJobAsync(job.Id, descriptionBox.Text);
+            var result = reply.GetPayload<JobActionResponse>();
+            if (!result.Ok)
+            {
+                await ShowMessageAsync("Could not update properties", result.Error ?? "The host rejected the update.");
+                return;
+            }
+
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Could not update properties", ex.Message);
+        }
     }
 
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);
