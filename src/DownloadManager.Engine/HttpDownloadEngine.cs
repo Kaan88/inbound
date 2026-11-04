@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -25,6 +26,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private readonly object _siteLoginSync = new();
     private List<SiteLoginCredential> _siteLogins = new();
     private readonly IMediaMuxer _muxer;
+    private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private string? _ffmpegPath;
     private HttpClient _client;
 
@@ -32,10 +34,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         EngineOptions? options = null,
         HttpMessageHandler? handler = null,
         IDownloadCheckpointStore? checkpoints = null,
-        IMediaMuxer? muxer = null)
+        IMediaMuxer? muxer = null,
+        IMediaCheckpointStore? mediaCheckpoints = null)
     {
         _options = options ?? new EngineOptions();
         _checkpoints = checkpoints;
+        _mediaCheckpoints = mediaCheckpoints;
         _ffmpegPath = _options.FfmpegPath;
         _muxer = muxer ?? new FfmpegMediaMuxer(() => _ffmpegPath);
         if (handler is null)
@@ -842,6 +846,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             isFragmentedMp4 ? ".mp4" : ".ts",
             isFragmentedMp4 ? "video/mp4" : "video/mp2t",
             "Downloading HLS",
+            "hls",
+            ComputeMediaSignature("hls", initUri, segments),
             progress,
             cancellationToken).ConfigureAwait(false);
     }
@@ -853,6 +859,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         string extension,
         string mimeType,
         string phase,
+        string checkpointTrack,
+        string checkpointSignature,
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -869,31 +877,74 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             directory, baseName + extension, job.ConflictPolicy);
         job.FileName = Path.GetFileName(job.FinalFilePath);
 
+        var completedSegments = 0;
         var received = 0L;
+        if (_mediaCheckpoints is not null)
+        {
+            var existing = await _mediaCheckpoints.LoadAsync(job.Id, checkpointTrack, cancellationToken)
+                .ConfigureAwait(false);
+            if (existing is not null)
+            {
+                var partLength = File.Exists(job.PartFilePath)
+                    ? new FileInfo(job.PartFilePath).Length
+                    : -1;
+                if (string.Equals(existing.Signature, checkpointSignature, StringComparison.Ordinal) &&
+                    partLength >= existing.CompletedBytes &&
+                    existing.CompletedBytes >= 0)
+                {
+                    completedSegments = Math.Min(existing.CompletedSegments, segments.Count);
+                    received = existing.CompletedBytes;
+                }
+                else
+                {
+                    await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var progressState = new HlsProgressState();
         try
         {
             await using (var part = new FileStream(
                              job.PartFilePath,
-                             FileMode.Create,
+                             received > 0 ? FileMode.Open : FileMode.Create,
                              FileAccess.Write,
                              FileShare.Read,
                              _options.BufferSize,
                              FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                if (initUri is not null)
+                if (received > 0)
+                {
+                    part.SetLength(received);
+                    part.Position = received;
+                }
+
+                if (initUri is not null && completedSegments == 0)
                 {
                     received += await DownloadHlsSegmentAsync(
                         job, initUri, part, received, progress, stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
-                foreach (var segment in segments)
+                for (var i = completedSegments; i < segments.Count; i++)
                 {
                     received += await DownloadHlsSegmentAsync(
-                        job, segment, part, received, progress, stopwatch, progressState, phase, cancellationToken)
+                        job, segments[i], part, received, progress, stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
+                    await part.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    if (_mediaCheckpoints is not null)
+                    {
+                        await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
+                        {
+                            JobId = job.Id,
+                            Track = checkpointTrack,
+                            Signature = checkpointSignature,
+                            CompletedSegments = i + 1,
+                            CompletedBytes = received,
+                        }, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
 
@@ -910,6 +961,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
 
             File.Move(job.PartFilePath, job.FinalFilePath, overwrite: false);
+            if (_mediaCheckpoints is not null)
+            {
+                await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             progress?.Report(new TransferProgress(
                 received, received, received / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds),
                 TimeSpan.Zero, 1, "Completed"));
@@ -1143,10 +1200,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
 
             var singleTrack = videoTrack ?? audioTrack!;
+            var singleTrackName = videoTrack is not null ? "dash-video" : "dash-audio";
             return await AssembleMediaSegmentsAsync(
                 job, singleTrack.InitUri, singleTrack.Segments, ".mp4",
                 videoTrack is not null ? "video/mp4" : "audio/mp4",
-                "Downloading DASH", progress, cancellationToken).ConfigureAwait(false);
+                "Downloading DASH",
+                singleTrackName,
+                singleTrack.Signature,
+                progress, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1287,7 +1348,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             return null;
         }
 
-        return new DashTrack(initUri, segments);
+        return new DashTrack(initUri, segments, ComputeMediaSignature("dash", initUri, segments));
     }
 
     private async Task<DownloadResult> DownloadAndMuxDashTracksAsync(
@@ -1316,11 +1377,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         try
         {
             received += await DownloadDashTrackToFileAsync(
-                job, videoTrack, videoPath, received, "Downloading DASH video", progress, cancellationToken)
-                .ConfigureAwait(false);
+                job, videoTrack, videoPath, received, "Downloading DASH video",
+                "dash-video", progress, cancellationToken).ConfigureAwait(false);
             received += await DownloadDashTrackToFileAsync(
-                job, audioTrack, audioPath, received, "Downloading DASH audio", progress, cancellationToken)
-                .ConfigureAwait(false);
+                job, audioTrack, audioPath, received, "Downloading DASH audio",
+                "dash-audio", progress, cancellationToken).ConfigureAwait(false);
 
             progress?.Report(new TransferProgress(received, null, 0, null, 0, "Muxing audio/video"));
             var mux = await _muxer.MuxAsync(videoPath, audioPath, muxPath, cancellationToken)
@@ -1347,6 +1408,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
 
             File.Move(muxPath, job.FinalFilePath, overwrite: false);
+            if (_mediaCheckpoints is not null)
+            {
+                await _mediaCheckpoints.DeleteAsync(job.Id, "dash-video", cancellationToken).ConfigureAwait(false);
+                await _mediaCheckpoints.DeleteAsync(job.Id, "dash-audio", cancellationToken).ConfigureAwait(false);
+            }
+
             var finalBytes = new FileInfo(job.FinalFilePath).Length;
             DeleteFileQuietly(videoPath);
             DeleteFileQuietly(audioPath);
@@ -1381,28 +1448,68 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         string path,
         long receivedBase,
         string phase,
+        string checkpointTrack,
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
+        var completedSegments = 0;
         var received = 0L;
+        if (_mediaCheckpoints is not null)
+        {
+            var existing = await _mediaCheckpoints.LoadAsync(job.Id, checkpointTrack, cancellationToken)
+                .ConfigureAwait(false);
+            var length = File.Exists(path) ? new FileInfo(path).Length : -1;
+            if (existing is not null &&
+                string.Equals(existing.Signature, track.Signature, StringComparison.Ordinal) &&
+                length >= existing.CompletedBytes)
+            {
+                completedSegments = Math.Min(existing.CompletedSegments, track.Segments.Count);
+                received = existing.CompletedBytes;
+            }
+            else if (existing is not null)
+            {
+                await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var state = new HlsProgressState();
         await using (var file = new FileStream(
-                         path, FileMode.Create, FileAccess.Write, FileShare.Read,
+                         path, received > 0 ? FileMode.Open : FileMode.Create,
+                         FileAccess.Write, FileShare.Read,
                          _options.BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
-            if (track.InitUri is not null)
+            if (received > 0)
+            {
+                file.SetLength(received);
+                file.Position = received;
+            }
+
+            if (track.InitUri is not null && completedSegments == 0)
             {
                 received += await DownloadHlsSegmentAsync(
                     job, track.InitUri, file, receivedBase + received, progress, stopwatch, state, phase,
                     cancellationToken).ConfigureAwait(false);
             }
 
-            foreach (var segment in track.Segments)
+            for (var i = completedSegments; i < track.Segments.Count; i++)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, segment, file, receivedBase + received, progress, stopwatch, state, phase,
+                    job, track.Segments[i], file, receivedBase + received, progress, stopwatch, state, phase,
                     cancellationToken).ConfigureAwait(false);
+                await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+                if (_mediaCheckpoints is not null)
+                {
+                    await _mediaCheckpoints.SaveAsync(new MediaCheckpoint
+                    {
+                        JobId = job.Id,
+                        Track = checkpointTrack,
+                        Signature = track.Signature,
+                        CompletedSegments = i + 1,
+                        CompletedBytes = received,
+                    }, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
 
@@ -1424,7 +1531,27 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         }
     }
 
-    private sealed record DashTrack(Uri? InitUri, List<Uri> Segments);
+    private static string ComputeMediaSignature(string track, Uri? init, IReadOnlyList<Uri> segments)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendSignature(hash, track);
+        AppendSignature(hash, init?.AbsoluteUri ?? string.Empty);
+        foreach (var segment in segments)
+        {
+            AppendSignature(hash, segment.AbsoluteUri);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void AppendSignature(IncrementalHash hash, string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        hash.AppendData(bytes);
+        hash.AppendData([0]);
+    }
+
+    private sealed record DashTrack(Uri? InitUri, List<Uri> Segments, string Signature);
 
     private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
     {

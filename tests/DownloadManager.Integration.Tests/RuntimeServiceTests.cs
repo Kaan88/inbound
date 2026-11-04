@@ -1234,6 +1234,75 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task HlsResumesAtCompletedSegmentAfterInterruption()
+    {
+        _server.ResetHlsStats();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/hls/recovery.m3u8",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hls-recovery.m3u8",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 210_000, TimeSpan.FromSeconds(30));
+        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
+        var paused = await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
+        Assert.True(paused.ReceivedBytes > 0);
+        var seg0AfterPause = _server.HlsSegmentRequests("seg0.ts");
+        var seg2AfterPause = _server.HlsSegmentRequests("seg2.ts");
+
+        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(60));
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Equal(1, _server.HlsSegmentRequests("seg0.ts")); // completed fragment not repeated
+        Assert.True(_server.HlsSegmentRequests("seg1.ts") >= 2 ||
+                    _server.HlsSegmentRequests("seg2.ts") >= 2);
+        Assert.True(_server.HlsSegmentRequests("seg2.ts") >= seg2AfterPause);
+        Assert.Equal(1, seg0AfterPause);
+    }
+
+    [Fact]
+    public async Task DashResumesAtCompletedSegmentAfterInterruption()
+    {
+        _server.ResetHlsStats();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/dash/recovery.mpd",
+            DestinationDirectory = ctx.Destination,
+            FileName = "dash-recovery.mpd",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 184_000, TimeSpan.FromSeconds(30));
+        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
+        await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
+        var chunk1AfterPause = _server.DashSegmentRequests("chunk-0-00001.m4s");
+
+        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(60));
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Equal(1, _server.DashSegmentRequests("chunk-0-00001.m4s"));
+        Assert.True(_server.DashSegmentRequests("chunk-0-00002.m4s") >= 2 ||
+                    _server.DashSegmentRequests("chunk-0-00003.m4s") >= 2);
+        Assert.Equal(1, chunk1AfterPause);
+    }
+
+    [Fact]
     public async Task DashSeparateAudioVideoMuxesWhenFfmpegAvailable()
     {
         var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
@@ -1431,6 +1500,7 @@ public sealed class RuntimeServiceTests
             ISleepPrevention? sleepPrevention = null)
         {
             var checkpoints = new JsonCheckpointStore(paths);
+            var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
             var store = new JsonJobStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
@@ -1442,7 +1512,8 @@ public sealed class RuntimeServiceTests
                     ReadTimeout = TimeSpan.FromSeconds(15),
                     AllowLocalNetwork = true,
                 },
-                checkpoints: checkpoints);
+                checkpoints: checkpoints,
+                mediaCheckpoints: mediaCheckpoints);
             var service = new DownloadManagerService(
                 paths,
                 store,
@@ -1451,7 +1522,8 @@ public sealed class RuntimeServiceTests
                 engine,
                 enableSchedulerTimer: false,
                 completionActions: completionActions,
-                sleepPrevention: sleepPrevention);
+                sleepPrevention: sleepPrevention,
+                mediaCheckpoints: mediaCheckpoints);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

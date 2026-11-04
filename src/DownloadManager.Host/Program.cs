@@ -38,6 +38,7 @@ internal static class Program
         {
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
+            var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
                 new EngineOptions
@@ -49,13 +50,15 @@ internal static class Program
                     ReadTimeout = TimeSpan.FromSeconds(90),
                     AllowLocalNetwork = true,
                 },
-                checkpoints: checkpoints);
+                checkpoints: checkpoints,
+                mediaCheckpoints: mediaCheckpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
             var service = new DownloadManagerService(
                 paths, jobStore, checkpoints, settingsStore, engine, log.Info,
                 completionActions: completionExecutor,
-                sleepPrevention: sleepPrevention);
+                sleepPrevention: sleepPrevention,
+                mediaCheckpoints: mediaCheckpoints);
             service.InitializeAsync().GetAwaiter().GetResult();
             service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
             service.TrayAvailable = true;

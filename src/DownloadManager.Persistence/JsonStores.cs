@@ -13,6 +13,7 @@ public sealed class StoragePaths
         Root = root;
         JobsDirectory = Path.Combine(root, "jobs");
         CheckpointsDirectory = Path.Combine(root, "checkpoints");
+        MediaCheckpointsDirectory = Path.Combine(root, "media-checkpoints");
         PartialsDirectory = Path.Combine(root, "partial");
         DedupeDirectory = Path.Combine(root, "dedupe");
         LogsDirectory = Path.Combine(root, "logs");
@@ -24,6 +25,7 @@ public sealed class StoragePaths
     public string Root { get; }
     public string JobsDirectory { get; }
     public string CheckpointsDirectory { get; }
+    public string MediaCheckpointsDirectory { get; }
     public string PartialsDirectory { get; }
     public string DedupeDirectory { get; }
     public string LogsDirectory { get; }
@@ -79,6 +81,7 @@ public sealed class StoragePaths
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(JobsDirectory);
         Directory.CreateDirectory(CheckpointsDirectory);
+        Directory.CreateDirectory(MediaCheckpointsDirectory);
         Directory.CreateDirectory(PartialsDirectory);
         Directory.CreateDirectory(DedupeDirectory);
         Directory.CreateDirectory(LogsDirectory);
@@ -451,6 +454,87 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
 
     private string PathFor(Guid jobId)
         => Path.Combine(_paths.CheckpointsDirectory, $"{jobId:N}.json");
+}
+
+public sealed class JsonMediaCheckpointStore : IMediaCheckpointStore
+{
+    private readonly StoragePaths _paths;
+
+    public JsonMediaCheckpointStore(StoragePaths paths)
+    {
+        _paths = paths;
+    }
+
+    public async Task<MediaCheckpoint?> LoadAsync(
+        Guid jobId,
+        string track,
+        CancellationToken cancellationToken = default)
+    {
+        var path = PathFor(jobId, track);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            var checkpoint = JsonSerializer.Deserialize<MediaCheckpoint>(json, PersistenceJson.Options);
+            return checkpoint is not null &&
+                   checkpoint.SchemaVersion <= MediaCheckpoint.CurrentSchemaVersion &&
+                   checkpoint.JobId == jobId &&
+                   string.Equals(checkpoint.Track, track, StringComparison.Ordinal)
+                ? checkpoint
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    public async Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    {
+        _paths.EnsureCreated();
+        checkpoint.SchemaVersion = MediaCheckpoint.CurrentSchemaVersion;
+        checkpoint.UpdatedAt = DateTimeOffset.UtcNow;
+        var json = JsonSerializer.Serialize(checkpoint, PersistenceJson.Options);
+        await AtomicFile.WriteAsync(PathFor(checkpoint.JobId, checkpoint.Track), json, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public Task DeleteAsync(Guid jobId, string? track = null, CancellationToken cancellationToken = default)
+    {
+        var directory = _paths.MediaCheckpointsDirectory;
+        if (!Directory.Exists(directory))
+        {
+            return Task.CompletedTask;
+        }
+
+        var pattern = track is null ? $"{jobId:N}-*.json" : Path.GetFileName(PathFor(jobId, track));
+        foreach (var file in Directory.EnumerateFiles(directory, pattern))
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (IOException)
+            {
+                // best effort
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private string PathFor(Guid jobId, string track)
+        => Path.Combine(_paths.MediaCheckpointsDirectory, $"{jobId:N}-{SafeTrack(track)}.json");
+
+    private static string SafeTrack(string track)
+    {
+        var clean = new string(track.Where(char.IsLetterOrDigit).ToArray());
+        return clean.Length == 0 ? "media" : clean;
+    }
 }
 
 public sealed class JsonSettingsStore : ISettingsStore

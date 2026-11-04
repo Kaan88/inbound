@@ -33,8 +33,9 @@ complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
 areas: everyday management gaps, additional DASH/HLS modes, Download
 All/grabber, FTP, and clean-environment install/upgrade verification. Phase 8
 (queues/scheduler) is complete; direct media detection, popup resources,
-unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly, and
-DASH A/V muxing via FFmpeg are implemented. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
+unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
+DASH A/V muxing via FFmpeg, and HLS/DASH fragment checkpoint recovery are
+implemented. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
 credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and
 DPAPI protection for proxy passwords remain.
 

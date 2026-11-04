@@ -32,6 +32,7 @@ public sealed class DownloadManagerService
     private readonly bool _enableSchedulerTimer;
     private readonly ICompletionActionExecutor _completionActions;
     private readonly ISleepPrevention _sleepPrevention;
+    private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly object _sync = new();
     private bool _sleepPreventionActive;
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
@@ -53,7 +54,8 @@ public sealed class DownloadManagerService
         TimeProvider? timeProvider = null,
         bool enableSchedulerTimer = true,
         ICompletionActionExecutor? completionActions = null,
-        ISleepPrevention? sleepPrevention = null)
+        ISleepPrevention? sleepPrevention = null,
+        IMediaCheckpointStore? mediaCheckpoints = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -65,6 +67,7 @@ public sealed class DownloadManagerService
         _enableSchedulerTimer = enableSchedulerTimer;
         _completionActions = completionActions ?? NullCompletionActionExecutor.Instance;
         _sleepPrevention = sleepPrevention ?? NullSleepPrevention.Instance;
+        _mediaCheckpoints = mediaCheckpoints;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -1692,12 +1695,19 @@ public sealed class DownloadManagerService
     private async Task DeletePayloadAsync(DownloadJob job, bool includeFinal, CancellationToken cancellationToken)
     {
         DeleteFileQuietly(job.PartFilePath);
+        DeleteFileQuietly(job.PartFilePath + ".video");
+        DeleteFileQuietly(job.PartFilePath + ".audio");
+        DeleteFileQuietly(job.PartFilePath + ".mux.mp4");
         if (includeFinal)
         {
             DeleteFileQuietly(job.FinalFilePath);
         }
 
         await _checkpointStore.DeleteAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        if (_mediaCheckpoints is not null)
+        {
+            await _mediaCheckpoints.DeleteAsync(job.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private string ResolveDestination(string? requested)

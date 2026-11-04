@@ -18,6 +18,8 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _versions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
     private readonly object _authLastSync = new();
     private int _activeRangeRequests;
     private int _peakRangeRequests;
@@ -63,6 +65,16 @@ public sealed class TestServerHost : IAsyncDisposable
     {
         Interlocked.Exchange(ref _activeRangeRequests, 0);
         Interlocked.Exchange(ref _peakRangeRequests, 0);
+    }
+
+    public int HlsSegmentRequests(string name) => _hlsSegmentRequests.GetValueOrDefault(name);
+
+    public int DashSegmentRequests(string name) => _dashSegmentRequests.GetValueOrDefault(name);
+
+    public void ResetHlsStats()
+    {
+        _hlsSegmentRequests.Clear();
+        _dashSegmentRequests.Clear();
     }
 
     public void ResetExpiringStats()
@@ -470,7 +482,35 @@ public sealed class TestServerHost : IAsyncDisposable
                 ? "application/vnd.apple.mpegurl"
                 : "video/mp2t";
             context.Response.ContentLength = bytes.Length;
-            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+            if (file.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
+            {
+                _hlsSegmentRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
+            }
+
+            var throttle = QueryInt(context, "bps", 0);
+            if (throttle <= 0)
+            {
+                await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+                return;
+            }
+
+            var buffer = new byte[16 * 1024];
+            var written = 0;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (written < bytes.Length)
+            {
+                var count = Math.Min(buffer.Length, bytes.Length - written);
+                Array.Copy(bytes, written, buffer, 0, count);
+                await context.Response.Body.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted)
+                    .ConfigureAwait(false);
+                written += count;
+                var expected = written / (double)throttle;
+                var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
+                }
+            }
         });
 
         _app.MapGet("/hls/expected", () =>
@@ -492,6 +532,11 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/hls/stats", () => Results.Json(new
+        {
+            segments = _hlsSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
+        }));
+
         _app.MapGet("/dash/{file}", async (HttpContext context, string file) =>
         {
             if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
@@ -512,8 +557,41 @@ public sealed class TestServerHost : IAsyncDisposable
                 ? "application/dash+xml"
                 : "video/mp4";
             context.Response.ContentLength = bytes.Length;
-            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+            if (file.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase))
+            {
+                _dashSegmentRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
+            }
+
+            var throttle = QueryInt(context, "bps", 0);
+            if (throttle <= 0)
+            {
+                await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+                return;
+            }
+
+            var buffer = new byte[16 * 1024];
+            var written = 0;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (written < bytes.Length)
+            {
+                var count = Math.Min(buffer.Length, bytes.Length - written);
+                Array.Copy(bytes, written, buffer, 0, count);
+                await context.Response.Body.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted)
+                    .ConfigureAwait(false);
+                written += count;
+                var expected = written / (double)throttle;
+                var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
+                }
+            }
         });
+
+        _app.MapGet("/dash/stats", () => Results.Json(new
+        {
+            segments = _dashSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
+        }));
 
         _app.MapGet("/dash/expected", () =>
         {
@@ -608,6 +686,8 @@ public sealed class TestServerHost : IAsyncDisposable
             _content.Clear();
             _versions.Clear();
             _requestCounts.Clear();
+            _hlsSegmentRequests.Clear();
+            _dashSegmentRequests.Clear();
             ResetAuthStats();
             ResetExpiringStats();
             ResetSiteAuthStats();

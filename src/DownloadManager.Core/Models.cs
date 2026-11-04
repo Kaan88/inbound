@@ -243,6 +243,19 @@ public sealed class DownloadCheckpoint
     public long CompletedBytes => Segments.Sum(s => s.Completed);
 }
 
+public sealed class MediaCheckpoint
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public Guid JobId { get; set; }
+    public string Track { get; set; } = "media";
+    public string Signature { get; set; } = string.Empty;
+    public int CompletedSegments { get; set; }
+    public long CompletedBytes { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class SegmentCheckpoint
 {
     public long Start { get; set; }

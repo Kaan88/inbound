@@ -365,17 +365,37 @@ random-access part file **in the destination directory**:
 - The test returns early when FFmpeg is absent; the recorded run had FFmpeg
   9.0.2 configured. FFmpeg is not bundled.
 
+## Fragment recovery evidence (2026-11-04)
+
+- Added `MediaCheckpoint`/`IMediaCheckpointStore` with per-job/per-track JSON
+  under `media-checkpoints/`. Each checkpoint records the track, manifest
+  signature, completed segment count, and completed byte count.
+- HLS/DASH assembly loads the checkpoint, verifies the signature and part
+  length, truncates any partial fragment, resumes at the next completed
+  boundary, and saves after every full segment. Manifest changes invalidate the
+  checkpoint and restart safely. DASH A/V tracks checkpoint independently.
+- `HlsResumesAtCompletedSegmentAfterInterruption`: `/hls/recovery.m3u8` at
+  64 KiB/s paused after >210,000 bytes; after resume `seg0.ts` was requested
+  exactly once, a later segment was repeated for its partial bytes, and the
+  final file matched the expected SHA-256.
+- `DashResumesAtCompletedSegmentAfterInterruption`: `/dash/recovery.mpd` paused
+  after >184,000 bytes; `chunk-0-00001.m4s` was requested exactly once, a later
+  chunk repeated, and the final file matched the expected SHA-256.
+- Integration suite **32/32** with FFmpeg configured. Existing ffprobe checks
+  confirm playable HLS/DASH output.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **30/30 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **32/32 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
-  HLS master/media, DASH assembly, and DASH A/V muxing.
+  HLS master/media, DASH assembly, DASH A/V muxing, and HLS/DASH fragment
+  recovery.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -399,9 +419,9 @@ random-access part file **in the destination directory**:
 1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
    tests, evidence).
 2. Phase 9: additional DASH modes, in-page/quality panel, HLS alternate audio,
-   checkpoint recovery/AES-128, live/DRM behavior. Direct media detection, popup
-   list, unencrypted HLS, static DASH SegmentTemplate, and DASH A/V muxing are
-   done (E24/E25/E26/E27).
+   AES-128, expiring segment URLs, live/DRM behavior. Direct media detection,
+   popup list, unencrypted HLS, static DASH SegmentTemplate, DASH A/V muxing,
+   and HLS/DASH fragment recovery are done (E24–E28).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

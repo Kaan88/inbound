@@ -76,6 +76,15 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
 
 public sealed record MediaMuxResult(bool Success, string? Error);
 
+public interface IMediaCheckpointStore
+{
+    Task<MediaCheckpoint?> LoadAsync(Guid jobId, string track, CancellationToken cancellationToken = default);
+
+    Task SaveAsync(MediaCheckpoint checkpoint, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(Guid jobId, string? track = null, CancellationToken cancellationToken = default);
+}
+
 public interface IMediaMuxer
 {
     Task<MediaMuxResult> MuxAsync(
