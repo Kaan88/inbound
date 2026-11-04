@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Threading.Channels;
 using DownloadManager.Contracts;
 using DownloadManager.Runtime;
+using DownloadManager.Tray;
 
 namespace DownloadManager.Host;
 
@@ -94,14 +95,7 @@ public sealed class HostPipeServer
 
     private static NamedPipeServerStream CreatePipe()
     {
-        var security = new PipeSecurity();
-        var currentUser = WindowsIdentity.GetCurrent().User
-                          ?? throw new InvalidOperationException("The current user has no SID.");
-        security.AddAccessRule(new PipeAccessRule(currentUser, PipeAccessRights.FullControl, AccessControlType.Allow));
-        security.AddAccessRule(new PipeAccessRule(
-            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-            PipeAccessRights.FullControl,
-            AccessControlType.Allow));
+        var security = PipeSecurityFactory.CreateForCurrentUser();
 
         return NamedPipeServerStreamAcl.Create(
             PipeNames.HostPipe(),

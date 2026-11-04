@@ -166,6 +166,7 @@ public sealed class HostStatusDto
     public int QueuedDownloads { get; set; }
     public int TotalJobs { get; set; }
     public string StateDirectory { get; set; } = string.Empty;
+    public string BrowserIntegration { get; set; } = "unknown";
     public string? LastError { get; set; }
     public List<string> OrphanPartFiles { get; set; } = new();
 }

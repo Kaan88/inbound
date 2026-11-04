@@ -3020,7 +3020,12 @@ public sealed class DownloadManagerService
             QueuedDownloads = queued,
             TotalJobs = _jobs.Count,
             StateDirectory = _paths.Root,
-            OrphanPartFiles = _orphanPartFiles.ToList(),
+            BrowserIntegration = !_settings.BrowserIntegrationEnabled
+                ? "disabled"
+                : NativeHostRegistered?.Invoke() == true
+                    ? "connected"
+                    : "native host not registered",
+            OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
         };
     }
 

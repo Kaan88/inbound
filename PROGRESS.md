@@ -942,6 +942,28 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Host lifecycle/tray evidence (L2/L5/L7/L8, 2026-11-04)
+
+- L2: new `tools/HostChecks` constructs a TrayIconController with recording
+  callbacks. It invoked Open, Settings, Pause All, Resume All and Exit and
+  observed `4 active downloads`, `Browser integration: connected`, and
+  `Download Manager - 4 active`; all checks passed.
+- L5: `PipeSecurityFactory.CreateForCurrentUser` grants FullControl only to the
+  current user and LocalSystem. HostChecks created a real pipe with it and
+  observed `currentUserFullControl=True`, `localSystemFullControl=True`,
+  `broadAllowAce=False`. `icacls` cannot open a busy live pipe.
+- L7: tray text, published `dm host status`, and WinUI status all report
+  `browser connected`; disabled/missing-registration states are exposed by the
+  same helper.
+- L8: live 4 MiB transfer logged `Sleep prevention active`; clean Host shutdown
+  logged `Sleep prevention released` + `Host stopped` and exited. Restart
+  restored a paused 32.8% job and a queued Later job; resuming the Later job
+  completed 1,048,576 bytes with SHA-256
+  `9c34d73a6d2499da0ca37e07de10c1b55c690deeb673972042bb9d3af7cdd2e4`
+  and sleep prevention cycled again.
+- Limitations: tray shell click-through not automated; no second Windows
+  account; OS shutdown/restart actions and `powercfg /requests` not executed.
+
 ## Disk-space, permission, and part-reconciliation evidence (R6/R7, 2026-11-04)
 
 - R6:

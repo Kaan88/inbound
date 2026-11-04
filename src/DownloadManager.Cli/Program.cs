@@ -426,6 +426,7 @@ internal static class Program
                         Console.WriteLine($"state: {status.StateDirectory}");
                         Console.WriteLine($"jobs: {status.TotalJobs}  active: {status.ActiveDownloads}  queued: {status.QueuedDownloads}");
                         Console.WriteLine($"tray: {status.TrayAvailable}  native host: {(status.NativeHostRegistered ? "registered" : "not registered")}");
+                        Console.WriteLine($"browser integration: {status.BrowserIntegration}");
                         if (status.OrphanPartFiles.Count > 0)
                         {
                             Console.WriteLine($"orphan parts: {status.OrphanPartFiles.Count}");
