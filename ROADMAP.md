@@ -35,9 +35,9 @@
   media panel, and HLS quality selection verified; additional DASH/HLS modes and
   AES-128 remain).
 - Phase 6: in progress (clipboard URL monitoring, completion notification/sound
-  settings, queue-aware add dialog, search/sort/context actions, and properties
-  viewing exist; editable properties, batch URLs, categories, and import/export
-  remain).
+  settings, queue-aware add dialog and batch URLs, search/sort/context actions,
+  and properties viewing exist; editable properties, categories, and
+  import/export remain).
 - Phase 10: in progress (Download All link collection, filtering, selection, and
   batch handoff verified; crawl scope, link rewriting, and persistent projects
   remain).

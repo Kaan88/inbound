@@ -58,6 +58,9 @@ internal static class Program
 
         switch (command)
         {
+            case "add-batch":
+                return await AddBatchAsync(client, args, optionArgs, json).ConfigureAwait(false);
+
             case "add":
             {
                 if (optionArgs.Length == 0)
@@ -553,6 +556,113 @@ internal static class Program
         return 2;
     }
 
+    private static async Task<int> AddBatchAsync(
+        CliClient client,
+        string[] args,
+        string[] positional,
+        bool json)
+    {
+        if (positional.Length == 0)
+        {
+            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--wait] [--yes]");
+            return 2;
+        }
+
+        IReadOnlyList<string> urls;
+        try
+        {
+            urls = BatchUrlExpander.Expand(positional[0]);
+        }
+        catch (FormatException ex)
+        {
+            Console.Error.WriteLine($"batch pattern: {ex.Message}");
+            return 2;
+        }
+
+        urls = urls.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (urls.Count == 0)
+        {
+            Console.Error.WriteLine("batch pattern produced no URLs.");
+            return 2;
+        }
+
+        if (urls.Count > 25 && !args.Contains("--yes", StringComparer.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine(
+                $"batch pattern expands to {urls.Count} URLs; re-run with --yes to add them all.");
+            return 2;
+        }
+
+        var startMode = GetOption(args, "--start") ?? "now";
+        int? connections = int.TryParse(GetOption(args, "--connections"), out var parsedConnections)
+            ? parsedConnections
+            : null;
+        int? queueId = int.TryParse(GetOption(args, "--queue"), out var parsedQueue)
+            ? parsedQueue
+            : null;
+        var destination = GetOption(args, "--dest");
+
+        var results = new List<(string Url, AddJobResponse Result)>();
+        foreach (var url in urls)
+        {
+            try
+            {
+                var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
+                {
+                    Url = url,
+                    DestinationDirectory = destination,
+                    StartMode = startMode,
+                    Source = "batch",
+                    Connections = connections,
+                    QueueId = queueId.GetValueOrDefault(-1),
+                }).ConfigureAwait(false);
+                var result = reply.GetPayload<AddJobResponse>();
+                results.Add((url, result));
+                if (!json)
+                {
+                    Console.WriteLine(result.Accepted
+                        ? $"{(result.Duplicate ? "Already queued" : "Added")}: {result.Job?.Id:N}  {result.Job?.FileName}"
+                        : $"Failed: {url}: {result.Error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add((url, new AddJobResponse { Accepted = false, Error = ex.Message }));
+                if (!json)
+                {
+                    Console.Error.WriteLine($"Failed: {url}: {ex.Message}");
+                }
+            }
+        }
+
+        if (json)
+        {
+            PrintJson(results.Select(r => new { r.Url, r.Result.Accepted, r.Result.Duplicate, r.Result.Error, r.Result.Job }));
+        }
+
+        var accepted = results.Count(r => r.Result.Accepted);
+        var duplicates = results.Count(r => r.Result.Duplicate);
+        var failed = results.Count - accepted;
+        if (!json)
+        {
+            Console.WriteLine($"batch: {urls.Count} URLs, {accepted} accepted ({duplicates} duplicate), {failed} failed");
+        }
+
+        if (args.Contains("--wait", StringComparer.OrdinalIgnoreCase))
+        {
+            var exit = 0;
+            foreach (var entry in results.Where(r => r.Result.Accepted && r.Result.Job is not null))
+            {
+                exit = Math.Max(exit, await WaitForAsync(client, entry.Result.Job!.Id, json)
+                    .ConfigureAwait(false));
+            }
+
+            return exit;
+        }
+
+        return failed > 0 ? 1 : 0;
+    }
+
     private static async Task<int> QueueAsync(CliClient client, string[] args, bool json)
     {
         var optionArgs = args.Skip(1).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
@@ -969,6 +1079,8 @@ internal static class Program
             Usage:
               dm add <url> [--dest DIR] [--name NAME] [--start now|later] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
+              dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
+                          [--connections N] [--queue ID]
               dm list [--json]
               dm status <job-id> [--json]
               dm pause|resume|retry <job-id>

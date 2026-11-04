@@ -750,6 +750,167 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void MenuAddBatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var patternBox = new TextBox
+        {
+            Header = "URL pattern",
+            PlaceholderText = "https://example.com/file[001-010].zip",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var hint = new TextBlock
+        {
+            Text = "Ranges: [1-10], [001-010], [a-z], or lists [1,3,5]. Multiple ranges expand together.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            FontSize = 12,
+        };
+        var destinationBox = new TextBox
+        {
+            Header = "Destination folder",
+            Text = _settings.DefaultDownloadDirectory,
+        };
+        var startMode = new ComboBox { Header = "Start" };
+        startMode.Items.Add("Start now");
+        startMode.Items.Add("Download later");
+        startMode.SelectedIndex = 0;
+        var queueBox = new ComboBox { Header = "Queue" };
+        foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
+        {
+            queueBox.Items.Add(queue.Name);
+        }
+
+        var defaultQueueIndex = _settings.Queues
+            .OrderBy(q => q.Order)
+            .ToList()
+            .FindIndex(q => q.Id == _settings.DefaultQueueId);
+        queueBox.SelectedIndex = Math.Max(0, defaultQueueIndex);
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(patternBox);
+        panel.Children.Add(hint);
+        panel.Children.Add(destinationBox);
+        panel.Children.Add(startMode);
+        panel.Children.Add(queueBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Add batch download",
+            Content = panel,
+            PrimaryButtonText = "Add batch",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> urls;
+        try
+        {
+            urls = BatchUrlExpander.Expand(patternBox.Text);
+        }
+        catch (FormatException ex)
+        {
+            await ShowMessageAsync("Invalid batch pattern", ex.Message);
+            return;
+        }
+
+        urls = urls.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (urls.Count == 0)
+        {
+            await ShowMessageAsync("Batch download", "The pattern produced no URLs.");
+            return;
+        }
+
+        if (urls.Count > 25)
+        {
+            var confirm = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Add many downloads?",
+                Content = new TextBlock
+                {
+                    Text = $"This pattern expands to {urls.Count} downloads. Add them all?",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "Add all",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        var queueId = _settings.Queues.OrderBy(q => q.Order)
+            .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId;
+        var destination = string.IsNullOrWhiteSpace(destinationBox.Text)
+            ? null
+            : destinationBox.Text.Trim();
+        var start = startMode.SelectedIndex == 1 ? "later" : "now";
+        var accepted = 0;
+        var duplicates = 0;
+        var failed = 0;
+        string? firstError = null;
+
+        foreach (var url in urls)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            {
+                failed++;
+                firstError ??= $"Invalid URL: {url}";
+                continue;
+            }
+
+            try
+            {
+                var reply = await _connection.AddAsync(new AddJobRequest
+                {
+                    Url = url,
+                    DestinationDirectory = destination,
+                    StartMode = start,
+                    Source = "batch",
+                    QueueId = queueId,
+                });
+                var add = reply.GetPayload<AddJobResponse>();
+                if (add.Accepted)
+                {
+                    accepted++;
+                    if (add.Duplicate)
+                    {
+                        duplicates++;
+                    }
+                }
+                else
+                {
+                    failed++;
+                    firstError ??= add.Error;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                firstError ??= ex.Message;
+            }
+        }
+
+        await RefreshAsync();
+        var summary = $"Added {accepted} of {urls.Count} downloads" +
+                      (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
+                      (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
+        await ShowMessageAsync("Batch download", summary);
+    }
+
     private async Task ShowSettingsDialogAsync()
     {
         if (_settingsDialogOpen || _settings is null)

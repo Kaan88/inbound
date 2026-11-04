@@ -499,13 +499,31 @@ random-access part file **in the destination directory**:
   `PlayCompletionSound`; failures still notify. `ShowCompletionDialog` remains
   unimplemented.
 
+## Batch URL evidence (M12, 2026-11-04)
+
+- `BatchUrlExpander` lives in Contracts so CLI and WinUI share it. It expands:
+  - numeric ranges, preserving zero padding (`[001-003]`);
+  - ascending/descending ranges (`[1-10]`, `[c-a]`);
+  - comma lists (`[1,3,5]`);
+  - multiple groups as a cartesian product;
+  - and rejects malformed/mixed ranges or more than 1000 URLs.
+- Core `BatchUrlExpanderTests` (9 cases) pass; core suite **34/34**.
+- CLI `add-batch`:
+  - `batch-[1-3].bin?...seed=230` added 3 jobs, all completed at 65,536 bytes
+    with SHA-256
+    `2377642935741989d3a43dfefd0e3f027a48603012f3ab22b5ef92b14275dc89`;
+  - a `[1-30]` pattern without `--yes` exited 2 and added nothing.
+- WinUI: Tasks → Add batch download was opened through UI Automation; the
+  dialog showed URL pattern, range hint, destination, start, and queue fields.
+- Remaining: wildcard `*` substitution and batch import files.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **25/25 passed**, including shutdown-command construction and clipboard
-  URL extraction.
+- Core: **34/34 passed**, including shutdown-command construction, clipboard URL
+  extraction, and batch URL expansion.
 - Runtime/persistence: **36/36 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
@@ -544,8 +562,8 @@ random-access part file **in the destination directory**:
    projects. G1 is done (E31).
 4. Phase 6 remainder: editable properties (M3), duplicate decisions (M6),
    categories/destination rules (M7), remembered folders/recent URLs (M8),
-   batch URLs (M12), import/export (M13), and completion dialog (M11).
-   Clipboard monitoring and completion notification/sound are done (E33).
+   import/export (M13), and completion dialog (M11). Clipboard monitoring and
+   completion notification/sound are done (E33); batch URLs are done (E34).
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done

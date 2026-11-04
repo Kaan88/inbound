@@ -1,3 +1,4 @@
+using DownloadManager.Contracts;
 using DownloadManager.Core;
 
 namespace DownloadManager.Core.Tests;
@@ -85,6 +86,68 @@ public sealed class DownloadJobTests
         Assert.Null(job.ProgressFraction);
         job.TotalBytes = 100;
         Assert.Equal(0.1, job.ProgressFraction);
+    }
+}
+
+public sealed class BatchUrlExpanderTests
+{
+    [Fact]
+    public void ExpandsZeroPaddedNumericRange()
+    {
+        Assert.Equal(
+            new[]
+            {
+                "https://example.com/file001.zip",
+                "https://example.com/file002.zip",
+                "https://example.com/file003.zip",
+            },
+            BatchUrlExpander.Expand("https://example.com/file[001-003].zip"));
+    }
+
+    [Fact]
+    public void ExpandsDescendingLetters()
+    {
+        Assert.Equal(
+            new[] { "https://example.com/c.txt", "https://example.com/b.txt", "https://example.com/a.txt" },
+            BatchUrlExpander.Expand("https://example.com/[c-a].txt"));
+    }
+
+    [Fact]
+    public void ExpandsCommaListAndCartesianProduct()
+    {
+        Assert.Equal(
+            new[]
+            {
+                "https://example.com/1/a.bin",
+                "https://example.com/1/b.bin",
+                "https://example.com/3/a.bin",
+                "https://example.com/3/b.bin",
+            },
+            BatchUrlExpander.Expand("https://example.com/[1,3]/[a-b].bin"));
+    }
+
+    [Fact]
+    public void ReturnsSingleUrlWithoutRanges()
+    {
+        Assert.Equal(
+            new[] { "https://example.com/file.zip" },
+            BatchUrlExpander.Expand("https://example.com/file.zip"));
+    }
+
+    [Theory]
+    [InlineData("https://example.com/[1-].zip")]
+    [InlineData("https://example.com/[a-1].zip")]
+    [InlineData("https://example.com/[1,].zip")]
+    [InlineData("https://example.com/[1-2.zip")]
+    public void RejectsInvalidPatterns(string pattern)
+    {
+        Assert.Throws<FormatException>(() => BatchUrlExpander.Expand(pattern));
+    }
+
+    [Fact]
+    public void EnforcesExpansionLimit()
+    {
+        Assert.Throws<FormatException>(() => BatchUrlExpander.Expand("https://example.com/[1-100].zip", 10));
     }
 }
 
