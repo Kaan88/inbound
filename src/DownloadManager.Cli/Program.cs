@@ -446,25 +446,36 @@ internal static class Program
                     var reply = await client.RequestAsync(MessageTypes.HostCleanOrphans,
                         new CleanOrphansRequest { Delete = delete }).ConfigureAwait(false);
                     var result = reply.GetPayload<CleanOrphansResponse>();
+                    if (result is null)
+                    {
+                        Console.Error.WriteLine("error: host returned no clean-orphans result");
+                        return 1;
+                    }
+
                     if (json)
                     {
                         PrintJson(result);
                     }
                     else
                     {
-                        Console.WriteLine($"{(delete ? "deleted" : "quarantined")}: {result?.Processed.Count ?? 0}");
-                        foreach (var path in result?.Processed ?? new List<string>())
+                        Console.WriteLine($"{(delete ? "deleted" : "quarantined")}: {result.Processed.Count}");
+                        foreach (var path in result.Processed)
                         {
                             Console.WriteLine($"  {path}");
                         }
 
-                        foreach (var path in result?.Failed ?? new List<string>())
+                        foreach (var path in result.Failed)
                         {
                             Console.WriteLine($"  failed: {path}");
                         }
+
+                        if (!string.IsNullOrWhiteSpace(result.Error))
+                        {
+                            Console.Error.WriteLine($"error: {result.Error}");
+                        }
                     }
 
-                    return result?.Ok == true ? 0 : 1;
+                    return result.Ok ? 0 : 1;
                 }
 
                 if (sub == "open")

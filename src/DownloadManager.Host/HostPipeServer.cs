@@ -194,7 +194,7 @@ public sealed class HostPipeServer
                     break;
 
                 case MessageTypes.HostCleanOrphans:
-                    var cleanOrphans = message.GetPayload<CleanOrphansRequest>();
+                    var cleanOrphans = message.GetPayload<CleanOrphansRequest>() ?? new CleanOrphansRequest();
                     await Reply(client, message, MessageTypes.HostCleanOrphansResult,
                         await _service.CleanOrphanPartFilesAsync(cleanOrphans.Delete, cancellationToken)
                             .ConfigureAwait(false))

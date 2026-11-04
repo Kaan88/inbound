@@ -254,7 +254,27 @@ public sealed class RuntimeServiceTests
             Assert.False(File.Exists(first));
             var quarantine = Path.Combine(ctx.Destination, DownloadManagerService.OrphanQuarantineFolderName);
             Assert.True(File.Exists(Path.Combine(quarantine, Path.GetFileName(first))));
+            Assert.DoesNotContain(first, ctx.Service.GetSnapshot().Status.OrphanPartFiles,
+                StringComparer.OrdinalIgnoreCase);
 
+            // Same name again: the quarantine keeps both copies.
+            await File.WriteAllBytesAsync(first, new byte[11]);
+            var collided = await ctx.Service.CleanOrphanPartFilesAsync(false, CancellationToken.None);
+            Assert.True(collided.Ok);
+            Assert.Equal(2, Directory.GetFiles(quarantine).Length);
+
+            // A locked orphan is reported as failed, not silently skipped.
+            var locked = Path.Combine(ctx.Destination, $"orphan-locked.{Guid.NewGuid():N}.part");
+            await File.WriteAllBytesAsync(locked, new byte[5]);
+            using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var failed = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
+                Assert.False(failed.Ok);
+                Assert.Contains(locked, failed.Failed, StringComparer.OrdinalIgnoreCase);
+                Assert.False(string.IsNullOrWhiteSpace(failed.Error));
+            }
+
+            File.Delete(locked);
             await File.WriteAllBytesAsync(second, new byte[10]);
             var deleted = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
             Assert.True(deleted.Ok);

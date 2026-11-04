@@ -2172,42 +2172,22 @@ public sealed class DownloadManagerService
             candidates = _orphanPartFiles.ToList();
         }
 
-        var attached = _jobs.Values
-            .Select(runtime => runtime.Job.PartFilePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(path => Path.GetFullPath(path!))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
         var response = new CleanOrphansResponse { Ok = true };
         foreach (var path in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (attached.Contains(Path.GetFullPath(path)) || !File.Exists(path))
-            {
-                continue;
-            }
-
             try
             {
-                if (delete)
+                // Hold the job lock across the check and the move/delete so a job added or
+                // re-pointed concurrently can never have its part file taken away.
+                lock (_sync)
                 {
-                    File.Delete(path);
-                    _log?.Invoke($"Deleted orphan partial file: {path}");
-                }
-                else
-                {
-                    var folder = Path.Combine(Path.GetDirectoryName(path)!, OrphanQuarantineFolderName);
-                    Directory.CreateDirectory(folder);
-                    var target = Path.Combine(folder, Path.GetFileName(path));
-                    var counter = 1;
-                    while (File.Exists(target))
+                    if (AttachedPartPathsLocked().Contains(NormalizePath(path)) || !File.Exists(path))
                     {
-                        target = Path.Combine(folder,
-                            $"{Path.GetFileNameWithoutExtension(path)} ({counter++}){Path.GetExtension(path)}");
+                        continue;
                     }
 
-                    File.Move(path, target);
-                    _log?.Invoke($"Quarantined orphan partial file: {path} -> {target}");
+                    CleanOrphanLocked(path, delete);
                 }
 
                 response.Processed.Add(path);
@@ -2233,15 +2213,63 @@ public sealed class DownloadManagerService
         return Task.FromResult(response);
     }
 
+    private static string NormalizePath(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
+    }
+
+    private HashSet<string> AttachedPartPathsLocked()
+        => _jobs.Values
+            .Select(runtime => runtime.Job.PartFilePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => NormalizePath(path!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private void CleanOrphanLocked(string path, bool delete)
+    {
+        if (delete)
+        {
+            File.Delete(path);
+            _log?.Invoke($"Deleted orphan partial file: {path}");
+            return;
+        }
+
+        var folder = Path.Combine(Path.GetDirectoryName(path)!, OrphanQuarantineFolderName);
+        Directory.CreateDirectory(folder);
+        var target = Path.Combine(folder, Path.GetFileName(path));
+        var counter = 1;
+        while (File.Exists(target))
+        {
+            target = Path.Combine(folder,
+                $"{Path.GetFileNameWithoutExtension(path)} ({counter++}){Path.GetExtension(path)}");
+        }
+
+        File.Move(path, target);
+        _log?.Invoke($"Quarantined orphan partial file: {path} -> {target}");
+    }
+
     private void ScanOrphanPartFiles()
     {
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var runtime in _jobs.Values)
+        HashSet<string> known;
+        lock (_sync)
         {
-            if (!string.IsNullOrWhiteSpace(runtime.Job.DestinationDirectory))
+            foreach (var runtime in _jobs.Values)
             {
-                directories.Add(runtime.Job.DestinationDirectory);
+                if (!string.IsNullOrWhiteSpace(runtime.Job.DestinationDirectory))
+                {
+                    directories.Add(runtime.Job.DestinationDirectory);
+                }
             }
+
+            known = AttachedPartPathsLocked();
         }
 
         if (!string.IsNullOrWhiteSpace(_settings.DefaultDownloadDirectory))
@@ -2262,10 +2290,6 @@ public sealed class DownloadManagerService
             }
         }
 
-        var known = _jobs.Values
-            .Select(runtime => runtime.Job.PartFilePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         lock (_sync)
         {
             _orphanPartFiles.Clear();
@@ -2283,7 +2307,7 @@ public sealed class DownloadManagerService
                 foreach (var path in Directory.EnumerateFiles(
                              directory, "*.part", SearchOption.TopDirectoryOnly))
                 {
-                    if (known.Contains(path))
+                    if (known.Contains(NormalizePath(path)))
                     {
                         continue;
                     }

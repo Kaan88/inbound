@@ -153,6 +153,17 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 - Own branding/assets only; do not copy reference app icons, strings, or binaries.
 - Keep `PROGRESS.md` current at each checkpoint; commit coherent increments.
 
+## Review delegation (user requirement, 2026-11-04)
+
+Delegate simple reviews to a Haiku subagent instead of doing them in the main
+session: spawn a `general` (or `explore` for read-only) subagent with model
+`claude-agent/haiku`. "Simple" means small diff/commit reviews, doc/encoding
+sanity checks, parity-row or evidence wording checks, and test-coverage
+spot checks. Keep complex reviews (concurrency, durability, security, IPC
+protocol changes, architecture) in the main model. Give the subagent full
+context (commit hash, files, what to check) since it starts fresh, and treat
+its findings as input to verify, not as acceptance evidence.
+
 ## Known traps
 
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
