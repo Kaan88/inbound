@@ -15,7 +15,10 @@ if (Test-Path $packageRoot) { Remove-Item $packageRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Copy-Item (Join-Path $root "artifacts\app") (Join-Path $packageRoot "app") -Recurse -Force
 Copy-Item (Join-Path $root "artifacts\extension") (Join-Path $packageRoot "extension") -Recurse -Force
-Copy-Item (Join-Path $PSScriptRoot "install.ps1") $packageRoot
+$installText = Get-Content (Join-Path $PSScriptRoot "install.ps1") -Raw
+$installText = $installText.Replace('[string]$Version = "0.1.0"', "[string]`$Version = `"$Version`"")
+Set-Content -Path (Join-Path $packageRoot "install.ps1") -Value $installText -Encoding UTF8
+Copy-Item (Join-Path $PSScriptRoot "repair.ps1") $packageRoot
 Copy-Item (Join-Path $PSScriptRoot "uninstall.ps1") $packageRoot
 Copy-Item (Join-Path $PSScriptRoot "register-native-host.ps1") $packageRoot
 Copy-Item (Join-Path $root "README.md") $packageRoot

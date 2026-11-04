@@ -36,6 +36,7 @@ public sealed class DownloadManagerService
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IGrabberProjectStore? _grabberProjectStore;
     private readonly IDownloadEngine? _ftpEngine;
+    private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly object _sync = new();
     private readonly List<GrabberProject> _grabberProjects = new();
     private readonly HashSet<Guid> _runningGrabberProjects = new();
@@ -644,6 +645,11 @@ public sealed class DownloadManagerService
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             FfmpegPath = settings.FfmpegPath,
             PostDownloadCommand = settings.PostDownloadCommand,
+            UpdateManifestUrl = settings.UpdateManifestUrl,
+            UpdatePublicKey = settings.UpdatePublicKey,
+            UpdateChannel = settings.UpdateChannel,
+            AutoCheckUpdates = settings.AutoCheckUpdates,
+            LastUpdateCheck = settings.LastUpdateCheck,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
@@ -841,6 +847,255 @@ public sealed class DownloadManagerService
             },
             cancellationToken,
             progress).ConfigureAwait(false);
+    }
+
+    public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
+    {
+        var install = InstalledBuild.TryLoad();
+        if (install is null)
+        {
+            return new UpdateCheckResult
+            {
+                Ok = false,
+                Status = "notInstalled",
+                Error = "Portable and development builds do not auto-update.",
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.UpdateManifestUrl) ||
+            string.IsNullOrWhiteSpace(_settings.UpdatePublicKey))
+        {
+            return new UpdateCheckResult
+            {
+                Ok = false,
+                Status = "notConfigured",
+                InstalledVersion = install.Version,
+                Error = "Update manifest URL/public key are not configured.",
+            };
+        }
+
+        if (!Uri.TryCreate(_settings.UpdateManifestUrl, UriKind.Absolute, out var manifestUri) ||
+            (manifestUri.Scheme != "https" && !manifestUri.IsLoopback))
+        {
+            return new UpdateCheckResult
+            {
+                Ok = false,
+                Status = "invalid",
+                InstalledVersion = install.Version,
+                Error = "The update manifest must use HTTPS (loopback is allowed for testing).",
+            };
+        }
+
+        try
+        {
+            using var response = await UpdateClient.GetAsync(manifestUri, cancellationToken)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = false,
+                    Status = "invalid",
+                    InstalledVersion = install.Version,
+                    Error = $"Update manifest returned HTTP {(int)response.StatusCode}.",
+                };
+            }
+
+            if (response.Content.Headers.ContentLength is > 1024 * 1024)
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = false,
+                    Status = "invalid",
+                    InstalledVersion = install.Version,
+                    Error = "Update manifest is too large.",
+                };
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var manifest = UpdateManifestVerifier.Parse(json);
+            if (manifest is null ||
+                !UpdateManifestVerifier.Verify(manifest, _settings.UpdatePublicKey))
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = false,
+                    Status = "invalid",
+                    InstalledVersion = install.Version,
+                    Error = "The update manifest signature is invalid.",
+                };
+            }
+
+            if (!string.Equals(manifest.Channel, _settings.UpdateChannel, StringComparison.OrdinalIgnoreCase))
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = true,
+                    Status = "upToDate",
+                    InstalledVersion = install.Version,
+                    AvailableVersion = manifest.Version,
+                };
+            }
+
+            if (!IsNewerVersion(manifest.Version, install.Version))
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = true,
+                    Status = "upToDate",
+                    InstalledVersion = install.Version,
+                    AvailableVersion = manifest.Version,
+                    InstallerUrl = manifest.InstallerUrl,
+                    Size = manifest.Size,
+                    Sha256 = manifest.Sha256,
+                };
+            }
+
+            return new UpdateCheckResult
+            {
+                Ok = true,
+                Status = "updateAvailable",
+                InstalledVersion = install.Version,
+                AvailableVersion = manifest.Version,
+                InstallerUrl = manifest.InstallerUrl,
+                Size = manifest.Size,
+                Sha256 = manifest.Sha256,
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new UpdateCheckResult
+            {
+                Ok = false,
+                Status = "invalid",
+                InstalledVersion = install.Version,
+                Error = ex.Message,
+            };
+        }
+    }
+
+    public async Task<UpdateDownloadResult> DownloadUpdateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var check = await CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false);
+        if (!check.Ok || check.Status != "updateAvailable" ||
+            string.IsNullOrWhiteSpace(check.InstallerUrl) ||
+            string.IsNullOrWhiteSpace(check.Sha256) || check.Size is not > 0)
+        {
+            return new UpdateDownloadResult
+            {
+                Ok = false,
+                Error = check.Error ?? "No update is available to download.",
+            };
+        }
+
+        if (!Uri.TryCreate(check.InstallerUrl, UriKind.Absolute, out var installerUri) ||
+            (installerUri.Scheme != "https" && !installerUri.IsLoopback))
+        {
+            return new UpdateDownloadResult
+            {
+                Ok = false,
+                Error = "The installer URL must use HTTPS (loopback is allowed for testing).",
+            };
+        }
+
+        if (check.Size > 1024L * 1024 * 1024)
+        {
+            return new UpdateDownloadResult { Ok = false, Error = "The update is too large." };
+        }
+
+        var directory = Path.Combine(_paths.Root, "updates");
+        Directory.CreateDirectory(directory);
+        var target = Path.Combine(directory, $"installer-{check.AvailableVersion}.zip");
+        try
+        {
+            using var response = await UpdateClient.GetAsync(
+                installerUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new UpdateDownloadResult
+                {
+                    Ok = false,
+                    Error = $"Installer download returned HTTP {(int)response.StatusCode}.",
+                };
+            }
+
+            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken)
+                             .ConfigureAwait(false))
+            await using (var destination = new FileStream(
+                             target, FileMode.Create, FileAccess.Write, FileShare.None, 81_920,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var buffer = new byte[81_920];
+                long written = 0;
+                while (true)
+                {
+                    var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    written += read;
+                    if (written > check.Size)
+                    {
+                        destination.Close();
+                        DeleteFileQuietly(target);
+                        return new UpdateDownloadResult
+                        {
+                            Ok = false,
+                            Error = "The installer is larger than the signed size.",
+                        };
+                    }
+
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+
+            var length = new FileInfo(target).Length;
+            var hash = await Hashing.Sha256FileAsync(target, cancellationToken).ConfigureAwait(false);
+            if (length != check.Size ||
+                !hash.Equals(check.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteFileQuietly(target);
+                return new UpdateDownloadResult
+                {
+                    Ok = false,
+                    Error = "Installer size or SHA-256 did not match the signed manifest.",
+                };
+            }
+
+            return new UpdateDownloadResult
+            {
+                Ok = true,
+                Path = target,
+                Size = length,
+                Sha256 = hash,
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            DeleteFileQuietly(target);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            DeleteFileQuietly(target);
+            return new UpdateDownloadResult { Ok = false, Error = ex.Message };
+        }
+    }
+
+    private static bool IsNewerVersion(string candidate, string installed)
+    {
+        static string Clean(string value) => value.Trim().TrimStart('v', 'V');
+        return Version.TryParse(Clean(candidate), out var candidateVersion) &&
+               Version.TryParse(Clean(installed), out var installedVersion) &&
+               candidateVersion > installedVersion;
     }
 
     public GrabberProjectsResult GetGrabberProjects()
@@ -2505,6 +2760,11 @@ public sealed class DownloadManagerService
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             FfmpegPath = settings.FfmpegPath,
             PostDownloadCommand = settings.PostDownloadCommand,
+            UpdateManifestUrl = settings.UpdateManifestUrl,
+            UpdatePublicKey = settings.UpdatePublicKey,
+            UpdateChannel = settings.UpdateChannel,
+            AutoCheckUpdates = settings.AutoCheckUpdates,
+            LastUpdateCheck = settings.LastUpdateCheck,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,

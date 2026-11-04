@@ -137,6 +137,33 @@ public sealed class JobListFileTests
     }
 }
 
+public sealed class UpdateManifestVerifierTests
+{
+    [Fact]
+    public void VerifiesSignedManifestAndRejectsTampering()
+    {
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var manifest = new UpdateManifest
+        {
+            Version = "1.2.3",
+            Channel = "stable",
+            InstallerUrl = "https://example.com/installer.zip",
+            Size = 1234,
+            Sha256 = new string('a', 64),
+        };
+        var signature = rsa.SignData(
+            System.Text.Encoding.UTF8.GetBytes(UpdateManifestVerifier.Canonical(manifest)),
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        manifest.Signature = Convert.ToBase64String(signature);
+        var publicKey = rsa.ExportSubjectPublicKeyInfoPem();
+
+        Assert.True(UpdateManifestVerifier.Verify(manifest, publicKey));
+        manifest.Size++;
+        Assert.False(UpdateManifestVerifier.Verify(manifest, publicKey));
+    }
+}
+
 public sealed class PostDownloadCommandLineTests
 {
     [Fact]

@@ -189,6 +189,9 @@ internal static class Program
             case "profile":
                 return await ProfileAsync(client, optionArgs, json).ConfigureAwait(false);
 
+            case "update":
+                return await UpdateAsync(client, optionArgs, json).ConfigureAwait(false);
+
             case "export":
             {
                 if (optionArgs.Length < 1)
@@ -752,6 +755,69 @@ internal static class Program
         }
 
         return result.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> UpdateAsync(
+        CliClient client,
+        string[] positional,
+        bool json)
+    {
+        var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "check";
+        var type = sub == "download"
+            ? MessageTypes.UpdateDownload
+            : MessageTypes.UpdateCheck;
+        var reply = await client.RequestAsync(type, new { }).ConfigureAwait(false);
+
+        if (sub == "download")
+        {
+            var result = reply.GetPayload<UpdateDownloadResult>();
+            if (json)
+            {
+                PrintJson(result);
+            }
+            else if (!result.Ok)
+            {
+                Console.Error.WriteLine($"update download failed: {result.Error}");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"downloaded update: {result.Path} ({result.Size} bytes, {result.Sha256})");
+            }
+
+            return result.Ok ? 0 : 1;
+        }
+
+        var check = reply.GetPayload<UpdateCheckResult>();
+        if (json)
+        {
+            PrintJson(check);
+        }
+        else if (!check.Ok && check.Status is not ("upToDate" or "notInstalled"))
+        {
+            Console.Error.WriteLine($"update check failed: {check.Error}");
+        }
+        else
+        {
+            Console.WriteLine($"{check.Status}: installed {check.InstalledVersion ?? "-"} " +
+                              $"available {check.AvailableVersion ?? "-"}");
+            if (check.Status == "updateAvailable")
+            {
+                Console.WriteLine($"  installer: {check.InstallerUrl}");
+                Console.WriteLine($"  size: {check.Size}  sha256: {check.Sha256}");
+                Console.WriteLine("  run 'dm update download' to fetch and verify it.");
+            }
+            else if (check.Status == "notInstalled")
+            {
+                Console.WriteLine("  portable/development build: auto-update intentionally disabled.");
+            }
+            else if (check.Status == "notConfigured")
+            {
+                Console.WriteLine($"  {check.Error}");
+            }
+        }
+
+        return check.Status is "updateAvailable" or "upToDate" or "notInstalled" ? 0 : 1;
     }
 
     private static async Task<int> ProfileAsync(
@@ -1416,6 +1482,19 @@ internal static class Program
                     settings.PostDownloadCommand =
                         string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
                     break;
+                case "updatemanifest":
+                    settings.UpdateManifestUrl =
+                        string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
+                    break;
+                case "updatekey":
+                    settings.UpdatePublicKey = value;
+                    break;
+                case "updatechannel":
+                    settings.UpdateChannel = value;
+                    break;
+                case "autocheckupdates":
+                    settings.AutoCheckUpdates = ParseBool(value);
+                    break;
                 case "compresseddir":
                     SetCategoryFolder(settings, "compressed", value);
                     break;
@@ -1643,6 +1722,7 @@ internal static class Program
               dm grabber list|add|run|remove
               dm grabber add <start-url> [--name NAME] [--dest DIR] [grabber options]
               dm profile list|add|remove
+              dm update check|download
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>

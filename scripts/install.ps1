@@ -2,6 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "DownloadManager"),
+    [string]$Version = "0.1.0",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -39,6 +40,16 @@ Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction Sil
 Start-Sleep -Milliseconds 500
 
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+$installMetadata = [ordered]@{
+    version = $Version
+    channel = "stable"
+    installRoot = $installRoot
+    installedAt = (Get-Date).ToString("O")
+}
+[System.IO.File]::WriteAllText(
+    (Join-Path $installRoot "install.json"),
+    ($installMetadata | ConvertTo-Json -Depth 3),
+    (New-Object System.Text.UTF8Encoding($false)))
 if (Test-Path $appDir) {
     Remove-Item $appDir -Recurse -Force
 }

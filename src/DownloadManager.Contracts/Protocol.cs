@@ -55,6 +55,10 @@ public static class MessageTypes
     public const string GrabberProjectRemove = "grabber.project.remove";
     public const string GrabberProjectsResult = "grabber.projects.result";
     public const string GrabberProjectResult = "grabber.project.result";
+    public const string UpdateCheck = "update.check";
+    public const string UpdateCheckResult = "update.checkResult";
+    public const string UpdateDownload = "update.download";
+    public const string UpdateDownloadResult = "update.downloadResult";
 }
 
 public static class IpcJson

@@ -276,6 +276,18 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.UpdateCheck:
+                    await Reply(client, message, MessageTypes.UpdateCheckResult,
+                        await _service.CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.UpdateDownload:
+                    await Reply(client, message, MessageTypes.UpdateDownloadResult,
+                        await _service.DownloadUpdateAsync(cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.GrabberProjectsQuery:
                     await Reply(client, message, MessageTypes.GrabberProjectsResult,
                         _service.GetGrabberProjects()).ConfigureAwait(false);

@@ -795,6 +795,30 @@ random-access part file **in the destination directory**:
 - Limitation: verified with a workspace install root, not a clean Windows
   machine. Job-level preservation follows from the untouched data subtree.
 
+## Update-check evidence (C9 foundation, 2026-11-04)
+
+- `install.ps1` now writes `install.json` (version/channel/installRoot).
+  `InstalledBuild` walks up to find it or uses
+  `DOWNLOADMANAGER_INSTALL_ROOT`; no marker means portable/dev.
+- Added a signed manifest format: version, channel, installer URL, size,
+  SHA-256, RSA PKCS#1/SHA-256 signature; `UpdateManifestVerifier` checks the
+  canonical fields.
+- Runtime `update.check`/`update.download`:
+  - refuses portable builds before any network call;
+  - HTTPS only (loopback allowed for tests), channel filter, newer-version
+    check;
+  - downloads to `data\updates`, enforces signed size and SHA-256, deletes on
+    mismatch.
+- Core verifier test passes (**46/46**).
+- Integration `UpdateCheckExcludesPortableAndVerifiesSignedDownload` (**48/48**):
+  portable `notInstalled`; a signed 1.0.1 manifest against a 1.0.0 install
+  returned `updateAvailable`; an 8,192-byte package downloaded with the expected
+  SHA-256.
+- Published CLI portable check printed `notInstalled`; `update download` exited
+  1 with the portable-exclusion message. WinUI Help exposes check/download.
+- Remaining: periodic/auto checks, silent install, rollback, install-now/later,
+  tray notification, critical-download gating. C9 is **partial**.
+
 ## Browser scope decision (C3, 2026-11-04)
 
 - Chrome is the only supported browser. Edge (Chromium), Firefox, and others are
@@ -821,10 +845,10 @@ random-access part file **in the destination directory**:
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **45/45 passed**, including shutdown-command construction, clipboard URL
+- Core: **46/46 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
-  and safe post-download argument construction.
-- Runtime/persistence: **47/47 passed** (`tests\DownloadManager.Integration.Tests`),
+  safe post-download argument construction, and update-manifest signatures.
+- Runtime/persistence: **48/48 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -832,8 +856,8 @@ random-access part file **in the destination directory**:
   rotating-token refresh, live-stream exclusion, DRM detection, editable
   properties, duplicate policies, category destinations, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
-  post-download hook isolation, connection profiles, and secret-preserving
-  settings updates.
+  post-download hook isolation, connection profiles, secret-preserving settings
+  updates, and installer-only update check/download.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

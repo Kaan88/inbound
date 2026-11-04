@@ -66,6 +66,8 @@
             </MenuBarItem>
 
             <MenuBarItem Title="Help">
+                <MenuFlyoutItem Text="Check for updates..." Click="MenuUpdate_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="About Download Manager" Click="MenuAbout_Click" />
                 <MenuFlyoutItem Text="Open diagnostics folder" Click="MenuDiagnostics_Click" />
             </MenuBarItem>

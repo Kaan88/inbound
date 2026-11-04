@@ -39,8 +39,9 @@ last-folder memory, JSON list export/import, completion dialog/notification/
 sound, Download All link collection/filter/selection, batch handoff, a scoped
 site grabber with offline link rewriting, persistent/scheduled grabber projects,
 FTP auth/resume, post-download hooks, external CLI control, connection profiles,
-settings transfer, installer/native-host repair, upgrade/uninstall, and the
-WinUI scheduler are implemented; Edge/Firefox integration is explicitly out of
+settings transfer, installer/native-host repair, upgrade/uninstall, installer-
+only update check/download, and the WinUI scheduler are implemented; silent
+update install/rollback remain. Edge/Firefox integration is explicitly out of
 scope (C3);
 direct media detection, in-page panel with HLS quality variants, popup resources,
 unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,

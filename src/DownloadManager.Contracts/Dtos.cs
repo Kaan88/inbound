@@ -138,6 +138,11 @@ public sealed class SettingsDto
     public bool PreventSleepWhileDownloading { get; set; } = true;
     public string? FfmpegPath { get; set; }
     public string? PostDownloadCommand { get; set; }
+    public string? UpdateManifestUrl { get; set; }
+    public string? UpdatePublicKey { get; set; }
+    public string UpdateChannel { get; set; } = "stable";
+    public bool AutoCheckUpdates { get; set; }
+    public DateTimeOffset? LastUpdateCheck { get; set; }
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }

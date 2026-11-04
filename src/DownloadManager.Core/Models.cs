@@ -398,6 +398,11 @@ public sealed class AppSettings
 
     /// <summary>Program run once after each successful download; file path is one argument.</summary>
     public string? PostDownloadCommand { get; set; }
+    public string? UpdateManifestUrl { get; set; }
+    public string? UpdatePublicKey { get; set; }
+    public string UpdateChannel { get; set; } = "stable";
+    public bool AutoCheckUpdates { get; set; }
+    public DateTimeOffset? LastUpdateCheck { get; set; }
 
     /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>
     public bool AllowSystemCompletionActions { get; set; }

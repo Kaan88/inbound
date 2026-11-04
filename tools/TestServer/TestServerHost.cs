@@ -20,6 +20,8 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
+    private byte[]? _updateManifest;
+    private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
     private int _activeRangeRequests;
     private int _peakRangeRequests;
@@ -79,6 +81,12 @@ public sealed class TestServerHost : IAsyncDisposable
     {
         _hlsSegmentRequests.Clear();
         _dashSegmentRequests.Clear();
+    }
+
+    public void SetUpdatePayload(byte[] manifest, byte[] package)
+    {
+        _updateManifest = manifest;
+        _updatePackage = package;
     }
 
     public void ResetRotatingMedia()
@@ -153,6 +161,16 @@ public sealed class TestServerHost : IAsyncDisposable
     private void MapEndpoints()
     {
         _app.MapGet("/health", () => Results.Text("ok"));
+
+        _app.MapGet("/update/manifest", () =>
+            _updateManifest is null
+                ? Results.NotFound()
+                : Results.Bytes(_updateManifest, "application/json"));
+
+        _app.MapGet("/update/package", () =>
+            _updatePackage is null
+                ? Results.NotFound()
+                : Results.Bytes(_updatePackage, "application/zip"));
 
         _app.MapGet("/ftp/info", () => Results.Json(new
         {

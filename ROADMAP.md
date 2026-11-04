@@ -233,13 +233,13 @@ registry entry), not by the executable name.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P11.1 | Installed-build detection | pending | C8 | Portable/dev builds report "not installed" and expose no updater; installed builds read version/channel from install metadata |
-| P11.2 | Signed update manifest | pending | P11.1 | HTTPS manifest includes version, channel, installer URL, size, SHA-256 and signature; manifest is verified before use |
-| P11.3 | Update check policy | pending | P11.2 | Configurable interval/manual check; stable channel by default; no check when disabled; redirects limited to trusted hosts |
-| P11.4 | Download and verify installer | pending | P11.2 | Installer downloaded to a temp path, size/hash/signature verified, and rejected safely on mismatch |
+| P11.1 | Installed-build detection | done | C8 | Portable/dev builds report "not installed" and expose no updater; installed builds read version/channel from install metadata (`install.json`, E49) |
+| P11.2 | Signed update manifest | done | P11.1 | HTTPS manifest includes version, channel, installer URL, size, SHA-256 and RSA signature; manifest is verified before use (E49) |
+| P11.3 | Update check policy | partial | P11.2 | Manual check, stable channel default, signature/channel/version filtering done; configurable periodic/automatic check and trusted-redirect hardening remain |
+| P11.4 | Download and verify installer | done | P11.2 | Installer downloaded to the state updates folder; signed size and SHA-256 enforced; mismatch deletes the file (E49) |
 | P11.5 | Installer-only silent upgrade | pending | P11.4/C8 | New installer upgrades in place; settings, queues, schedules, site logins and unfinished jobs survive; old host is stopped cleanly first |
 | P11.6 | Failure and rollback | pending | P11.5 | Failed download/verify/install leaves the old version runnable; update error is surfaced once, without retry loops |
-| P11.7 | Update UI/tray flow | pending | P11.3/P11.5 | "Check for updates" shows current/latest version; auto-update notification and install-now/later choice; no silent UI restart while critical downloads run |
+| P11.7 | Update UI/tray flow | partial | P11.3/P11.5 | "Check for updates" and download UI exist; install-now/later, tray notification, and critical-download gating remain |
 
 Completion requires an end-to-end test on a clean installer build: install
 version A, publish version B, check, download, verify, upgrade, and confirm jobs

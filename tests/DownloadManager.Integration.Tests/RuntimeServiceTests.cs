@@ -191,6 +191,75 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task UpdateCheckExcludesPortableAndVerifiesSignedDownload()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var portable = await ctx.Service.CheckForUpdatesAsync();
+        Assert.Equal("notInstalled", portable.Status);
+
+        var root = Path.Combine(
+            AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"), "install");
+        Directory.CreateDirectory(root);
+        await File.WriteAllTextAsync(Path.Combine(root, "install.json"),
+            "{\"version\":\"1.0.0\",\"channel\":\"stable\"}");
+
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var package = TestContent.Generate(400, 8192);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(package))
+            .ToLowerInvariant();
+        try
+        {
+            var manifest = new UpdateManifest
+            {
+                Version = "1.0.1",
+                Channel = "stable",
+                InstallerUrl = $"{_server.BaseAddress}/update/package",
+                Size = package.Length,
+                Sha256 = hash,
+            };
+            manifest.Signature = Convert.ToBase64String(rsa.SignData(
+                System.Text.Encoding.UTF8.GetBytes(UpdateManifestVerifier.Canonical(manifest)),
+                System.Security.Cryptography.HashAlgorithmName.SHA256,
+                System.Security.Cryptography.RSASignaturePadding.Pkcs1));
+            var manifestBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+                manifest, IpcJson.Options);
+            _server.SetUpdatePayload(manifestBytes, package);
+
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.UpdateManifestUrl = $"{_server.BaseAddress}/update/manifest";
+            settings.UpdatePublicKey = rsa.ExportSubjectPublicKeyInfoPem();
+            settings.UpdateChannel = "stable";
+            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+            var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+            try
+            {
+                var check = await ctx.Service.CheckForUpdatesAsync();
+                Assert.True(check.Ok, check.Error);
+                Assert.Equal("updateAvailable", check.Status);
+                Assert.Equal("1.0.0", check.InstalledVersion);
+                Assert.Equal("1.0.1", check.AvailableVersion);
+
+                var download = await ctx.Service.DownloadUpdateAsync();
+                Assert.True(download.Ok, download.Error);
+                Assert.NotNull(download.Path);
+                Assert.True(File.Exists(download.Path));
+                Assert.Equal(package.Length, download.Size);
+                Assert.Equal(hash, download.Sha256);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SettingsUpdatePreservesUnreturnedSecrets()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

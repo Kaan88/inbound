@@ -737,6 +737,12 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.PostDownloadCommand = string.IsNullOrWhiteSpace(settings.PostDownloadCommand)
             ? null
             : settings.PostDownloadCommand.Trim();
+        settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(settings.UpdateManifestUrl)
+            ? null
+            : settings.UpdateManifestUrl.Trim();
+        settings.UpdateChannel = string.IsNullOrWhiteSpace(settings.UpdateChannel)
+            ? "stable"
+            : settings.UpdateChannel.Trim().ToLowerInvariant();
 
         settings.CategoryFolders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

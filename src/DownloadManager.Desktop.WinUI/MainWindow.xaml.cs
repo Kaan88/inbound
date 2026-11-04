@@ -882,6 +882,76 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonInactiveForegroundColor = foreground;
     }
 
+    private async void MenuUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var check = (await _connection.CheckForUpdatesAsync())
+                .GetPayload<UpdateCheckResult>();
+            if (check.Status == "notInstalled")
+            {
+                await ShowMessageAsync("Check for updates",
+                    "This portable/development build does not auto-update. Install with the installer build to enable updates.");
+                return;
+            }
+
+            if (check.Status == "notConfigured")
+            {
+                await ShowMessageAsync("Check for updates",
+                    check.Error ?? "Update settings are not configured.");
+                return;
+            }
+
+            if (!check.Ok)
+            {
+                await ShowMessageAsync("Check for updates", check.Error ?? "The update check failed.");
+                return;
+            }
+
+            if (check.Status != "updateAvailable")
+            {
+                await ShowMessageAsync("Check for updates",
+                    $"You are up to date (installed {check.InstalledVersion}, latest {check.AvailableVersion}).");
+                return;
+            }
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Update available",
+                Content = new TextBlock
+                {
+                    Text = $"Installed: {check.InstalledVersion}\nAvailable: {check.AvailableVersion}\n" +
+                           $"Size: {check.Size} bytes\n\nDownload and verify the installer now?",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "Download",
+                CloseButtonText = "Later",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var download = (await _connection.DownloadUpdateAsync())
+                .GetPayload<UpdateDownloadResult>();
+            if (!download.Ok)
+            {
+                await ShowMessageAsync("Update download", download.Error ?? "The download failed.");
+                return;
+            }
+
+            await ShowMessageAsync("Update downloaded",
+                $"Verified installer saved to:\n{download.Path}\n\n" +
+                "Automatic installation is not enabled in this build yet.");
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Check for updates", ex.Message);
+        }
+    }
+
     private async void MenuAbout_Click(object sender, RoutedEventArgs e)
     {
         await ShowMessageAsync("Download Manager",
