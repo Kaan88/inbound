@@ -1941,6 +1941,7 @@ public sealed class DownloadManagerService
             ExpectedSha256 = job.ExpectedSha256,
             QueueName = job.QueueName,
             StartMode = JsonNamingPolicy.CamelCase.ConvertName(job.StartMode.ToString()),
+            ConflictPolicy = JsonNamingPolicy.CamelCase.ConvertName(job.ConflictPolicy.ToString()),
             CanPause = job.CanPause,
             CanResume = job.CanResume,
             IsTerminal = job.IsTerminal,

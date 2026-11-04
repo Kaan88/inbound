@@ -44,6 +44,7 @@ public sealed class JobDto
     public string? ExpectedSha256 { get; set; }
     public string? QueueName { get; set; }
     public string StartMode { get; set; } = "startNow";
+    public string ConflictPolicy { get; set; } = "rename";
     public bool CanPause { get; set; }
     public bool CanResume { get; set; }
     public bool IsTerminal { get; set; }

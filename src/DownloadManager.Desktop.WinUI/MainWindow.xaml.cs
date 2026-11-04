@@ -454,6 +454,154 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void MenuExport_Click(object sender, RoutedEventArgs e)
+    {
+        var pathBox = new TextBox
+        {
+            Header = "Export file",
+            Text = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "download-manager-list.json"),
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Export download list",
+            Content = pathBox,
+            PrimaryButtonText = "Export",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+            string.IsNullOrWhiteSpace(pathBox.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = await _connection.RefreshAsync();
+            await File.WriteAllTextAsync(pathBox.Text.Trim(), JobListFile.Serialize(snapshot.Jobs));
+            await ShowMessageAsync("Export download list",
+                $"Exported {snapshot.Jobs.Count} downloads to {pathBox.Text.Trim()}.");
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Could not export download list", ex.Message);
+        }
+    }
+
+    private async void MenuImport_Click(object sender, RoutedEventArgs e)
+    {
+        var pathBox = new TextBox
+        {
+            Header = "Import file",
+            Text = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "download-manager-list.json"),
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Import download list",
+            Content = pathBox,
+            PrimaryButtonText = "Import",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+            string.IsNullOrWhiteSpace(pathBox.Text))
+        {
+            return;
+        }
+
+        IReadOnlyList<JobListEntry> entries;
+        try
+        {
+            entries = JobListFile.Deserialize(await File.ReadAllTextAsync(pathBox.Text.Trim()));
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Could not import download list", ex.Message);
+            return;
+        }
+
+        if (entries.Count == 0)
+        {
+            await ShowMessageAsync("Import download list", "The file has no downloads.");
+            return;
+        }
+
+        var confirm = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Import downloads?",
+            Content = new TextBlock
+            {
+                Text = $"Add {entries.Count} downloads from this file?",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var accepted = 0;
+        var failed = 0;
+        string? firstError = null;
+        foreach (var entry in entries)
+        {
+            if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
+                uri.Scheme is not ("http" or "https"))
+            {
+                failed++;
+                firstError ??= $"Invalid URL: {entry.Url}";
+                continue;
+            }
+
+            try
+            {
+                var reply = await _connection.AddAsync(new AddJobRequest
+                {
+                    Url = entry.Url,
+                    FileName = entry.FileName,
+                    DestinationDirectory = entry.DestinationDirectory,
+                    Description = entry.Description,
+                    QueueId = entry.QueueId,
+                    Connections = entry.RequestedConnections > 0 ? entry.RequestedConnections : null,
+                    StartMode = entry.StartMode,
+                    ConflictPolicy = entry.ConflictPolicy,
+                    ExpectedSha256 = entry.ExpectedSha256,
+                    Source = "import",
+                });
+                var add = reply.GetPayload<AddJobResponse>();
+                if (add.Accepted)
+                {
+                    accepted++;
+                }
+                else
+                {
+                    failed++;
+                    firstError ??= add.Error;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                firstError ??= ex.Message;
+            }
+        }
+
+        await RefreshAsync();
+        await ShowMessageAsync("Import download list",
+            $"Added {accepted} of {entries.Count} downloads" +
+            (failed > 0 ? $"; {failed} failed. {firstError}" : "."));
+    }
+
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);
 
     private async void MenuExit_Click(object sender, RoutedEventArgs e)

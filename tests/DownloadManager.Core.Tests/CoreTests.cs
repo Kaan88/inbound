@@ -89,6 +89,54 @@ public sealed class DownloadJobTests
     }
 }
 
+public sealed class JobListFileTests
+{
+    [Fact]
+    public void RoundTripsExportFields()
+    {
+        var jobs = new[]
+        {
+            new JobDto
+            {
+                Url = "https://example.com/a.zip",
+                FileName = "a.zip",
+                DestinationDirectory = "C:\\Downloads",
+                Description = "keep me",
+                QueueId = 3,
+                RequestedConnections = 4,
+                StartMode = "later",
+                ConflictPolicy = "overwrite",
+                ExpectedSha256 = "abc123",
+            },
+        };
+
+        var entries = JobListFile.Deserialize(JobListFile.Serialize(jobs));
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("https://example.com/a.zip", entry.Url);
+        Assert.Equal("a.zip", entry.FileName);
+        Assert.Equal("C:\\Downloads", entry.DestinationDirectory);
+        Assert.Equal("keep me", entry.Description);
+        Assert.Equal(3, entry.QueueId);
+        Assert.Equal(4, entry.RequestedConnections);
+        Assert.Equal("later", entry.StartMode);
+        Assert.Equal("overwrite", entry.ConflictPolicy);
+        Assert.Equal("abc123", entry.ExpectedSha256);
+    }
+
+    [Fact]
+    public void RejectsMalformedJson()
+    {
+        Assert.Throws<FormatException>(() => JobListFile.Deserialize("{not json"));
+    }
+
+    [Fact]
+    public void DropsEntriesWithoutUrl()
+    {
+        Assert.Empty(JobListFile.Deserialize("[{\"url\":\"\"}]"));
+    }
+}
+
 public sealed class FileCategoriesTests
 {
     [Theory]

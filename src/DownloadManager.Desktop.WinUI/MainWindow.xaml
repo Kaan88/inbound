@@ -26,6 +26,9 @@
             </MenuBarItem>
 
             <MenuBarItem Title="File">
+                <MenuFlyoutItem Text="Export download list..." Click="MenuExport_Click" />
+                <MenuFlyoutItem Text="Import download list..." Click="MenuImport_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
                 <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
                 <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />

@@ -180,6 +180,113 @@ internal static class Program
                 return 0;
             }
 
+            case "export":
+            {
+                if (optionArgs.Length < 1)
+                {
+                    Console.Error.WriteLine("usage: export <file.json>");
+                    return 2;
+                }
+
+                var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+                var content = JobListFile.Serialize(snapshot.Jobs);
+                await File.WriteAllTextAsync(optionArgs[0], content).ConfigureAwait(false);
+                Console.WriteLine($"exported {snapshot.Jobs.Count} downloads to {optionArgs[0]}");
+                return 0;
+            }
+
+            case "import":
+            {
+                if (optionArgs.Length < 1)
+                {
+                    Console.Error.WriteLine("usage: import <file.json> [--start now|later] [--yes]");
+                    return 2;
+                }
+
+                IReadOnlyList<JobListEntry> entries;
+                try
+                {
+                    entries = JobListFile.Deserialize(await File.ReadAllTextAsync(optionArgs[0])
+                        .ConfigureAwait(false));
+                }
+                catch (Exception ex) when (ex is IOException or FormatException)
+                {
+                    Console.Error.WriteLine($"import failed: {ex.Message}");
+                    return 2;
+                }
+
+                if (entries.Count == 0)
+                {
+                    Console.Error.WriteLine("import file has no downloads.");
+                    return 2;
+                }
+
+                if (entries.Count > 25 && !args.Contains("--yes", StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine(
+                        $"import contains {entries.Count} downloads; re-run with --yes to add them all.");
+                    return 2;
+                }
+
+                var startOverride = GetOption(args, "--start");
+                var accepted = 0;
+                var duplicates = 0;
+                var failed = 0;
+                string? firstError = null;
+                foreach (var entry in entries)
+                {
+                    if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
+                        uri.Scheme is not ("http" or "https"))
+                    {
+                        failed++;
+                        firstError ??= $"Invalid URL: {entry.Url}";
+                        continue;
+                    }
+
+                    try
+                    {
+                        var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
+                        {
+                            Url = entry.Url,
+                            FileName = entry.FileName,
+                            DestinationDirectory = entry.DestinationDirectory,
+                            Description = entry.Description,
+                            QueueId = entry.QueueId,
+                            Connections = entry.RequestedConnections > 0 ? entry.RequestedConnections : null,
+                            StartMode = startOverride ?? entry.StartMode,
+                            ConflictPolicy = entry.ConflictPolicy,
+                            ExpectedSha256 = entry.ExpectedSha256,
+                            Source = "import",
+                        }).ConfigureAwait(false);
+                        var result = reply.GetPayload<AddJobResponse>();
+                        if (result.Accepted)
+                        {
+                            accepted++;
+                            if (result.Duplicate)
+                            {
+                                duplicates++;
+                            }
+                        }
+                        else
+                        {
+                            failed++;
+                            firstError ??= result.Error;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        firstError ??= ex.Message;
+                    }
+                }
+
+                Console.WriteLine(
+                    $"imported {accepted} of {entries.Count} downloads" +
+                    (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
+                    (failed > 0 ? $"; {failed} failed: {firstError}" : "."));
+                return failed > 0 ? 1 : 0;
+            }
+
             case "describe":
             {
                 if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var describeId))
@@ -1152,6 +1259,8 @@ internal static class Program
               dm list [--json]
               dm status <job-id> [--json]
               dm describe <job-id> <description text>
+              dm export <file.json>
+              dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>
               dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]

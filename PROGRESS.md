@@ -574,13 +574,35 @@ random-access part file **in the destination directory**:
   shared category mapping.
 - Remaining: recent-URL history, category UI polish.
 
+## Export/import evidence (M13, 2026-11-04)
+
+- Added `JobListFile`/`JobListEntry` in Contracts; `JobDto` now exposes its
+  conflict policy so exports preserve it.
+- Core `JobListFileTests` (3 cases) cover full-field round-trip, malformed JSON,
+  and URL-less entries; core suite **44/44**.
+- Published CLI with a fresh state:
+  - added two Later jobs in `export-dest` with descriptions `export alpha` and
+    `export beta`;
+  - `export` wrote 2 JSON entries with URL/name/destination/queue/connections/
+    start mode/conflict policy;
+  - removed both jobs, then `import` added 2/2;
+  - reloaded jobs retained destination, description, queue, `startMode: later`,
+    and conflict policy.
+  - resuming both imported jobs produced 65,536-byte files with matching
+    SHA-256 `6eddea6c3f39796000cea6740cf4490cd497b19e066c2336c72a6a14d1cca863`
+    and `d39a1f0c44e90216185bb2d02e21457f77f143ad5317fa37eb562af69c7bc01b`.
+- Integration suite **39/39**.
+- WinUI File menu exposes Export/Import with a path dialog.
+- Remaining: recent-URL history; own JSON format rather than reference app's format.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **41/41 passed**, including shutdown-command construction, clipboard URL
-  extraction, batch URL expansion, and file categories.
+- Core: **44/44 passed**, including shutdown-command construction, clipboard URL
+  extraction, batch URL expansion, file categories, and download-list
+  round-trip.
 - Runtime/persistence: **39/39 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
@@ -618,10 +640,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Phase 6 remainder: recent-URL history, import/export (M13), and completion
-   dialog (M11). Clipboard monitoring (E33), batch URLs (E34), editable
-   descriptions (E35), duplicate filename policies (E36), and category/last-
-   folder rules (E37) are done.
+4. Phase 6 remainder: recent-URL history and the completion dialog (M11).
+   Clipboard monitoring (E33), batch URLs (E34), editable descriptions (E35),
+   duplicate filename policies (E36), category/last-folder rules (E37), and
+   export/import (E38) are done.
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done
