@@ -43,8 +43,8 @@
   crawl, offline link rewriting, and persistent/scheduled grabber projects
   verified).
 - Phase 11: in progress (FTP auth/resume, post-download hooks, external CLI
-  control, connection profiles, and settings transfer verified; other browsers,
-  installer/updater work, and final UI parity remain).
+  control, connection profiles, settings transfer, and installer repair verified;
+  upgrade/uninstall, updater, other browsers, and final UI parity remain).
 - Phases 6, 12: in progress/pending as tracked in `reference notes`; see
   `PROGRESS.md` for the handoff.
 

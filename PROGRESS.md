@@ -762,6 +762,24 @@ random-access part file **in the destination directory**:
 - Limitations: secrets are not portable to another install; WinUI has no
   export/import buttons yet.
 
+## Installer repair evidence (C7, 2026-11-04)
+
+- Added `scripts/repair.ps1` (`-InstallRoot`, `-AppDir`, `-Source`,
+  `-NoShortcut`, `-NoStart`):
+  - restores app files from a source if any required executable is missing;
+  - re-registers the Chrome native host with `-Force`;
+  - restores extension files and the Start Menu shortcut;
+  - writes/updates `INSTALL.txt` and optionally starts the Host.
+- Test: deleted the HKCU native-host key and manifest, then ran repair against
+  `artifacts\app` with `-NoShortcut -NoStart`.
+  - key recreated and pointed at the manifest;
+  - manifest `path` targeted `DownloadManager.NativeHost.exe` and included the
+    extension origin;
+  - `extension\manifest.json` and `INSTALL.txt` restored under the test install
+    root;
+  - starting the Host reported `tray: True native host: registered`.
+- Limitation: verified against published artifacts, not a clean Windows install.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
