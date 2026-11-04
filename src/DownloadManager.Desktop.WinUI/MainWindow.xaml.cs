@@ -942,9 +942,31 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            await ShowMessageAsync("Update downloaded",
-                $"Verified installer saved to:\n{download.Path}\n\n" +
-                "Automatic installation is not enabled in this build yet.");
+            var installDialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Install update now?",
+                Content = new TextBlock
+                {
+                    Text = $"Verified installer saved to:\n{download.Path}\n\n" +
+                           "The background Host will stop, install the update, and restart.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "Install now",
+                CloseButtonText = "Later",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            if (await installDialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var install = (await _connection.InstallUpdateAsync())
+                .GetPayload<UpdateInstallResult>();
+            await ShowMessageAsync("Install update",
+                install.Ok
+                    ? $"Update {install.Version} scheduled. The Host is restarting."
+                    : install.Error ?? "The update could not be scheduled.");
         }
         catch (Exception ex)
         {

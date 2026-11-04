@@ -37,6 +37,7 @@ public sealed class DownloadManagerService
     private readonly IGrabberProjectStore? _grabberProjectStore;
     private readonly IDownloadEngine? _ftpEngine;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    public event EventHandler? UpdateShutdownRequested;
     private readonly object _sync = new();
     private readonly List<GrabberProject> _grabberProjects = new();
     private readonly HashSet<Guid> _runningGrabberProjects = new();
@@ -1089,6 +1090,121 @@ public sealed class DownloadManagerService
             return new UpdateDownloadResult { Ok = false, Error = ex.Message };
         }
     }
+
+    public async Task<UpdateInstallResult> InstallUpdateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var install = InstalledBuild.TryLoad();
+        if (install is null)
+        {
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = "notInstalled",
+                Error = "Portable and development builds do not auto-update.",
+            };
+        }
+
+        var check = await CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false);
+        if (!check.Ok || check.Status != "updateAvailable" ||
+            string.IsNullOrWhiteSpace(check.AvailableVersion))
+        {
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = check.Status,
+                Error = check.Error ?? "No update is available to install.",
+            };
+        }
+
+        var download = await DownloadUpdateAsync(cancellationToken).ConfigureAwait(false);
+        if (!download.Ok || string.IsNullOrWhiteSpace(download.Path))
+        {
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = "downloadFailed",
+                Error = download.Error ?? "The installer could not be downloaded.",
+            };
+        }
+
+        var staging = Path.Combine(_paths.Root, "updates", $"stage-{check.AvailableVersion}");
+        try
+        {
+            if (Directory.Exists(staging))
+            {
+                Directory.Delete(staging, recursive: true);
+            }
+
+            Directory.CreateDirectory(staging);
+            System.IO.Compression.ZipFile.ExtractToDirectory(download.Path, staging, overwriteFiles: true);
+            var installer = Path.Combine(staging, "apply-update.ps1");
+            if (!File.Exists(installer))
+            {
+                return new UpdateInstallResult
+                {
+                    Ok = false,
+                    Status = "invalidPackage",
+                    Error = "The update package has no apply-update.ps1.",
+                    Version = check.AvailableVersion,
+                };
+            }
+
+            var resultPath = Path.Combine(_paths.Root, "updates", "install-result.json");
+            var start = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            foreach (var argument in new[]
+                     {
+                         "-NoProfile", "-ExecutionPolicy", "Bypass",
+                         "-File", installer,
+                         "-PackageDir", staging,
+                         "-InstallRoot", install.InstallRoot,
+                         "-Version", check.AvailableVersion,
+                         "-ResultPath", resultPath,
+                         "-HostPid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                     })
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            var helper = System.Diagnostics.Process.Start(start);
+            if (helper is null)
+            {
+                return new UpdateInstallResult
+                {
+                    Ok = false,
+                    Status = "launchFailed",
+                    Error = "The update helper could not be started.",
+                    Version = check.AvailableVersion,
+                };
+            }
+
+            _log?.Invoke(
+                $"Update {check.AvailableVersion} staged; the Host will shut down for the installer.");
+            return new UpdateInstallResult
+            {
+                Ok = true,
+                Status = "scheduled",
+                Version = check.AvailableVersion,
+                ResultPath = resultPath,
+            };
+        }
+        catch (Exception ex)
+        {
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = "failed",
+                Error = ex.Message,
+                Version = check.AvailableVersion,
+            };
+        }
+    }
+
+    public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
 
     private static bool IsNewerVersion(string candidate, string installed)
     {

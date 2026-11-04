@@ -35,6 +35,15 @@ public sealed class UpdateDownloadResult
     public string? Sha256 { get; set; }
 }
 
+public sealed class UpdateInstallResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public string Status { get; set; } = "invalid";
+    public string? Version { get; set; }
+    public string? ResultPath { get; set; }
+}
+
 public static class UpdateManifestVerifier
 {
     public static string Canonical(UpdateManifest manifest)

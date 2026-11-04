@@ -71,6 +71,7 @@ internal static class Program
 
             var controller = new HostController(service, log);
             completionExecutor.ExitHost = controller.RequestShutdown;
+            service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
             var pipe = new HostPipeServer(service, controller, log);
             pipe.Start();
 

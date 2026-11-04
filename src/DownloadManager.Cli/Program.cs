@@ -763,10 +763,34 @@ internal static class Program
         bool json)
     {
         var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "check";
-        var type = sub == "download"
-            ? MessageTypes.UpdateDownload
-            : MessageTypes.UpdateCheck;
+        var type = sub switch
+        {
+            "download" => MessageTypes.UpdateDownload,
+            "install" => MessageTypes.UpdateInstall,
+            _ => MessageTypes.UpdateCheck,
+        };
         var reply = await client.RequestAsync(type, new { }).ConfigureAwait(false);
+
+        if (sub == "install")
+        {
+            var install = reply.GetPayload<UpdateInstallResult>();
+            if (json)
+            {
+                PrintJson(install);
+            }
+            else if (!install.Ok)
+            {
+                Console.Error.WriteLine($"update install failed: {install.Error}");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"update {install.Version} scheduled; the Host is restarting and will apply it.");
+                Console.WriteLine($"  result: {install.ResultPath}");
+            }
+
+            return install.Ok ? 0 : 1;
+        }
 
         if (sub == "download")
         {
@@ -1722,7 +1746,7 @@ internal static class Program
               dm grabber list|add|run|remove
               dm grabber add <start-url> [--name NAME] [--dest DIR] [grabber options]
               dm profile list|add|remove
-              dm update check|download
+              dm update check|download|install
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>

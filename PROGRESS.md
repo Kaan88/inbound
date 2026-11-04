@@ -816,8 +816,33 @@ random-access part file **in the destination directory**:
   SHA-256.
 - Published CLI portable check printed `notInstalled`; `update download` exited
   1 with the portable-exclusion message. WinUI Help exposes check/download.
-- Remaining: periodic/auto checks, silent install, rollback, install-now/later,
-  tray notification, critical-download gating. C9 is **partial**.
+- Remaining: periodic/auto checks, tray notification, critical-download gating.
+  C9 remains **partial** (P11.3/P11.7).
+
+## Silent install/rollback evidence (C9 P11.5/P11.6, 2026-11-04)
+
+- `scripts/apply-update.ps1`:
+  - waits for the requested Host PID;
+  - backs up `app` and `install.json`;
+  - runs the package `install.ps1` with `-Source/-InstallRoot/-Version/-NoLaunch`;
+  - verifies the installed version and Host executable, removes the backup, writes
+    a JSON result, and starts the new Host;
+  - on any failure restores both backups, writes `failed`, and restarts the old
+    Host.
+- `update.install` extracts the verified zip, launches the helper with the Host
+  PID, returns `scheduled`, and raises a clean Host shutdown request. CLI
+  `update install` and WinUI Install now/Later use it.
+- Fixture test:
+  - success: 1.0.0→2.0.0, `status=succeeded`, version 2.0.0, `VersionB` created;
+  - failure: package wrote `Corrupt.txt` then exited 1; version stayed 1.0.0,
+    marker A restored, `Corrupt.txt` absent, `status=failed`.
+- Real Host test: installed 1.0.0 in a workspace root, started the Host, ran a
+  2.0.0 package with `-HostPid`, shut the Host down; helper returned `succeeded`,
+  `install.json` became 2.0.0, `VersionB` existed, and a started Host served
+  status. The helper's Host-launch was changed to hidden/explicit exit after a
+  lingering-process issue was observed.
+- Remaining: periodic auto-check, tray update notification, critical-download
+  gating.
 
 ## Browser scope decision (C3, 2026-11-04)
 

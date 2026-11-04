@@ -71,6 +71,9 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> DownloadUpdateAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.UpdateDownload, new { }, TimeSpan.FromMinutes(5), cancellationToken);
 
+    public Task<IpcMessage> InstallUpdateAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.UpdateInstall, new { }, TimeSpan.FromMinutes(2), cancellationToken);
+
     public Task<IpcMessage> GetGrabberProjectsAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.GrabberProjectsQuery, new { }, TimeSpan.FromSeconds(10), cancellationToken);
 

@@ -288,6 +288,18 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.UpdateInstall:
+                    var installResult = await _service.InstallUpdateAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    await Reply(client, message, MessageTypes.UpdateInstallResult, installResult)
+                        .ConfigureAwait(false);
+                    if (installResult.Ok)
+                    {
+                        _service.RequestUpdateShutdown();
+                    }
+
+                    break;
+
                 case MessageTypes.GrabberProjectsQuery:
                     await Reply(client, message, MessageTypes.GrabberProjectsResult,
                         _service.GetGrabberProjects()).ConfigureAwait(false);

@@ -19,6 +19,7 @@ $installText = Get-Content (Join-Path $PSScriptRoot "install.ps1") -Raw
 $installText = $installText.Replace('[string]$Version = "0.1.0"', "[string]`$Version = `"$Version`"")
 Set-Content -Path (Join-Path $packageRoot "install.ps1") -Value $installText -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot "repair.ps1") $packageRoot
+Copy-Item (Join-Path $PSScriptRoot "apply-update.ps1") $packageRoot
 Copy-Item (Join-Path $PSScriptRoot "uninstall.ps1") $packageRoot
 Copy-Item (Join-Path $PSScriptRoot "register-native-host.ps1") $packageRoot
 Copy-Item (Join-Path $root "README.md") $packageRoot
