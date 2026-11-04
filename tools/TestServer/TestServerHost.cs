@@ -761,6 +761,38 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/live/playlist.m3u8", () => Results.Text(
+            "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n" +
+            "#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:2.000000,\nseg0.ts\n" +
+            "#EXTINF:2.000000,\nseg1.ts\n",
+            "application/vnd.apple.mpegurl"));
+
+        _app.MapGet("/live/manifest.mpd", () => Results.Text(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"dynamic\" " +
+            "mediaPresentationDuration=\"PT6S\"><Period><AdaptationSet contentType=\"video\">" +
+            "<Representation id=\"0\" bandwidth=\"100000\"><SegmentTemplate " +
+            "media=\"chunk-$Number$.m4s\" duration=\"2\"/></Representation>" +
+            "</AdaptationSet></Period></MPD>",
+            "application/dash+xml"));
+
+        _app.MapGet("/drm/hls.m3u8", () => Results.Text(
+            "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:2\n" +
+            "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://key\",KEYFORMAT=\"com.apple.streamingkeydelivery\",KEYFORMATVERSIONS=\"1\"\n" +
+            "#EXTINF:2.000000,\nseg0.ts\n#EXT-X-ENDLIST\n",
+            "application/vnd.apple.mpegurl"));
+
+        _app.MapGet("/drm/manifest.mpd", () => Results.Text(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" " +
+            "mediaPresentationDuration=\"PT6S\"><Period><AdaptationSet contentType=\"video\">" +
+            "<ContentProtection schemeIdUri=\"urn:mpeg:dash:mp4protection:2011\" value=\"cenc\"/>" +
+            "<ContentProtection schemeIdUri=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"/>" +
+            "<Representation id=\"0\" bandwidth=\"100000\"><SegmentTemplate " +
+            "media=\"chunk-$Number$.m4s\" duration=\"2\"/></Representation>" +
+            "</AdaptationSet></Period></MPD>",
+            "application/dash+xml"));
+
         _app.MapGet("/media-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

@@ -31,6 +31,8 @@ public enum FailureKind
     RemoteChanged,
     InvalidContent,
     MuxingFailed,
+    LiveStream,
+    DrmProtected,
     DiskFull,
     Permission,
     DestinationUnavailable,
@@ -127,7 +129,12 @@ public sealed class DownloadJob
     public Dictionary<string, string> RequestHeaders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     [JsonIgnore]
-    public bool IsTerminal => State is DownloadState.Completed or DownloadState.Cancelled;
+    public bool IsTerminal => State is DownloadState.Completed or DownloadState.Cancelled ||
+                             (State is DownloadState.Failed && IsPermanentContentFailure);
+
+    [JsonIgnore]
+    private bool IsPermanentContentFailure =>
+        Failure is { Kind: FailureKind.DrmProtected or FailureKind.LiveStream };
 
     [JsonIgnore]
     public bool IsActive => State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting;
@@ -136,7 +143,8 @@ public sealed class DownloadJob
     public bool CanPause => State is DownloadState.Queued or DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting;
 
     [JsonIgnore]
-    public bool CanResume => State is DownloadState.Paused or DownloadState.Failed or DownloadState.Cancelled;
+    public bool CanResume => State is DownloadState.Paused or DownloadState.Cancelled ||
+                             (State is DownloadState.Failed && !IsPermanentContentFailure);
 
     [JsonIgnore]
     public double? ProgressFraction => TotalBytes is > 0 ? Math.Clamp((double)ReceivedBytes / TotalBytes.Value, 0, 1) : null;

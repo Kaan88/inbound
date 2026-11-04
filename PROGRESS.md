@@ -404,18 +404,46 @@ random-access part file **in the destination directory**:
 - Limitation: one automatic refresh per job. A playlist URL that itself expires,
   AES key rotation, and DRM license refresh are not handled.
 
+## Live and DRM evidence (2026-11-04)
+
+- Live behavior is an explicit exclusion: HLS without `#EXT-X-ENDLIST` and DASH
+  with `type="dynamic"` fail before any segment/payload work with failure kind
+  `liveStream`, non-retryable and non-resumable. The message states that a VOD
+  playlist or static MPD is required.
+- DRM detection:
+  - HLS `#EXT-X-KEY`/`#EXT-X-SESSION-KEY` with `METHOD=SAMPLE-AES`, `skd://`,
+    or Apple/Widevine/PlayReady key formats → `drmProtected`.
+  - DASH any `ContentProtection` element → `drmProtected`, with scheme IDs in
+    the message.
+  - AES-128 HLS remains separately unsupported (`InvalidContent`), not labelled
+    DRM.
+- TestServer endpoints: `/live/playlist.m3u8`, `/live/manifest.mpd`,
+  `/drm/hls.m3u8`, `/drm/manifest.mpd`.
+- `LiveStreamsAreRejectedExplicitly` and
+  `DrmProtectedMediaIsIdentifiedAndNotBypassed`: both cases failed with the
+  expected kind/message, were not retryable/resumable, and left no final or part
+  file.
+- Permanent content failures (`liveStream`, `drmProtected`) now report
+  `canResume: false` and `isTerminal: true`; other failed jobs remain retryable
+  (for example, a 401 after adding a site login).
+- Published CLI reproduced all four failures with 0 bytes and no files:
+  - `liveStream` for `/live/playlist.m3u8` and `/live/manifest.mpd`;
+  - `drmProtected` for `/drm/hls.m3u8` and `/drm/manifest.mpd`.
+- No key request, license exchange, decryption, or bypass is implemented.
+- Integration suite **36/36** with FFmpeg configured.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **34/34 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **36/36 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
-  and rotating-token segment refresh.
+  rotating-token refresh, live-stream exclusion, and DRM detection.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -436,12 +464,12 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the V7 expiring-media-token increment (signature normalization,
-   single refresh, tests, evidence).
-2. Phase 9: live HLS/DASH behavior and DRM detection (V8/V9), then additional
-   DASH modes, in-page/quality panel, HLS alternate audio, AES-128. Direct media
-   detection, popup list, unencrypted HLS, static DASH SegmentTemplate, DASH A/V
-   muxing, fragment recovery, and rotating-token refresh are done (E24–E29).
+1. Commit the V8/V9 live-exclusion + DRM-detection increment.
+2. Phase 9 remainder: in-page/quality panel (V2), additional DASH modes, HLS
+   alternate audio, and AES-128. Direct media detection, popup list, unencrypted
+   HLS, static DASH SegmentTemplate, DASH A/V muxing, fragment recovery,
+   rotating-token refresh, live exclusion, and DRM detection are done
+   (E24–E30).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
@@ -454,6 +482,10 @@ random-access part file **in the destination directory**:
    inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
 7. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
    portable and development builds must be excluded.
+8. Side quest (after parity): TorBox/account-provider integration with the
+   account manager, unrar extraction, a Linux/Docker headless host, and a web UI.
+   See ROADMAP.md A1–A5/D1–D4. Provider tokens must be supplied via environment
+   variables and never committed.
 
 ## Commands
 

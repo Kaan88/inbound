@@ -1178,6 +1178,68 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task LiveStreamsAreRejectedExplicitly()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        foreach (var (path, name) in new[]
+                 {
+                     ("/live/playlist.m3u8", "live.m3u8"),
+                     ("/live/manifest.mpd", "live.mpd"),
+                 })
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}{path}",
+                DestinationDirectory = ctx.Destination,
+                FileName = name,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var failed = await ctx.WaitFor(response.Job!.Id, j => j.State == "failed",
+                TimeSpan.FromSeconds(30));
+            Assert.Equal("liveStream", failed.Failure?.Kind);
+            Assert.Contains("Live", failed.Failure?.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(failed.Failure?.IsRetryable);
+            Assert.False(failed.Failure?.IsResumable);
+            Assert.False(failed.CanResume);
+            Assert.True(failed.IsTerminal);
+            Assert.False(File.Exists(failed.FinalFilePath));
+            Assert.False(File.Exists(failed.PartFilePath));
+        }
+    }
+
+    [Fact]
+    public async Task DrmProtectedMediaIsIdentifiedAndNotBypassed()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        foreach (var (path, name) in new[]
+                 {
+                     ("/drm/hls.m3u8", "drm.m3u8"),
+                     ("/drm/manifest.mpd", "drm.mpd"),
+                 })
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}{path}",
+                DestinationDirectory = ctx.Destination,
+                FileName = name,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var failed = await ctx.WaitFor(response.Job!.Id, j => j.State == "failed",
+                TimeSpan.FromSeconds(30));
+            Assert.Equal("drmProtected", failed.Failure?.Kind);
+            Assert.Contains("DRM", failed.Failure?.Message);
+            Assert.False(failed.Failure?.IsRetryable);
+            Assert.False(failed.Failure?.IsResumable);
+            Assert.False(failed.CanResume);
+            Assert.True(failed.IsTerminal);
+            Assert.False(File.Exists(failed.FinalFilePath));
+            Assert.False(File.Exists(failed.PartFilePath));
+        }
+    }
+
+    [Fact]
     public async Task HlsMasterAndMediaPlaylistsAssembleSegments()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

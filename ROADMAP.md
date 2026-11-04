@@ -30,9 +30,9 @@
   verified).
 - Phase 9: in progress (direct media detection, popup resource list, unencrypted
   HLS master/media assembly, static DASH SegmentTemplate assembly, DASH
-  audio/video muxing via FFmpeg, HLS/DASH fragment recovery, and expiring
-  segment-token refresh verified; live, DRM, and additional DASH/HLS modes
-  remain).
+  audio/video muxing via FFmpeg, HLS/DASH fragment recovery, expiring
+  segment-token refresh, explicit live-stream exclusion, and DRM detection
+  verified; the in-page quality panel and additional DASH/HLS modes remain).
 - Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -185,9 +185,11 @@ a playable fMP4 (V4 done; E26). Separate DASH video/audio tracks are muxed via a
 FFmpeg interface configured by PATH/`ffmpegpath` (V5 done; E27). Per-track
 media checkpoints resume HLS/DASH at completed fragment boundaries
 (V6 done; E28). Expiring HLS/DASH segment tokens trigger a safe manifest refresh
-and checkpoint resume (V7 done; E29). Remaining: in-page panel/quality variants,
-SegmentBase/SegmentList/timeline DASH, HLS alternate audio, AES-128, live
-behavior, and DRM detection.
+and checkpoint resume (V7 done; E29). Live HLS/DASH is explicitly excluded with
+a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
+`drmProtected` failure without any bypass (V8/V9 done; E30). Remaining: in-page
+panel/quality variants, SegmentBase/SegmentList/timeline DASH, HLS alternate
+audio, and AES-128.
 
 ## Phase 10 — Download All and site grabber (pending)
 
@@ -229,6 +231,28 @@ excluded.
 Coarse: window/dialog layout, menus/context menus, columns/layout persistence,
 keyboard/focus/modality, tray/notifications, settings defaults, progress/error
 presentation. Side-by-side scenario matrix and independent review.
+
+## Side quest — Account-based file storage providers, unrar, Docker/Linux web UI (queued)
+
+Requested after the reference app parity work. Starts with TorBox
+(https://api-docs.torbox.app/) behind a provider abstraction so other
+account-based storage services can be added without host changes. Test
+credentials are supplied by the user and must never be committed, logged, or
+placed in settings JSON; tests read them from `TORBOX_API_KEY` at run time. The
+provided direct link may expire, so verification may fall back to listing or
+searching the account.
+
+| ID | Task | Status | Depends on | Acceptance |
+| --- | --- | --- | --- | --- |
+| A1 | Provider abstraction + account manager | pending | Phase 7 | `IFileStorageProvider` (validate account, list/search files, resolve expiring link, refresh, quota) registered per account; tokens protected by `SecretProtector` (DPAPI on Windows, restricted file/OS keyring on Linux) and absent from logs/JSON |
+| A2 | TorBox client | pending | A1 | Token validation, account file/download listing, search, pagination, expiring direct-link resolution and API error mapping verified against the documented API with a supplied test account |
+| A3 | Provider browse/add UI + CLI | pending | A2 | Browse/search account files and queue selected items; expired direct links refresh once; CLI equivalent of the UI flow |
+| A4 | Archive extraction (unrar) | pending | A2 | Detect RAR/multi-volume archives; extract through an `IArchiveExtractor` using an external unrar/7z path (never bundled); traversal-safe paths, progress, cleanup policy, and tests with a real archive |
+| A5 | Provider expansion | pending | A1 | Adding a provider requires only a new client + capability declaration; no host/runtime changes |
+| D1 | Cross-platform headless host | pending | A2 | Host runs on Linux without WinForms/WinUI; named-pipe/Unix-socket IPC; XDG state paths; systemd unit; existing runtime tests pass on Linux |
+| D2 | Web UI | pending | D1 | Local web app covering downloads, queues, schedules, settings, and provider accounts; authenticated remote access; no WinUI dependency |
+| D3 | Docker packaging | pending | D1/D2 | Dockerfile + compose with state/download volumes, non-root user, healthcheck, host and web UI deployed together |
+| D4 | End-to-end provider/Docker test | pending | A4/D3 | TorBox link/list → queue → download → unrar through the Linux container and web UI, including expiring-link refresh; image/logs contain no token |
 
 ## Cross-cutting tasks
 

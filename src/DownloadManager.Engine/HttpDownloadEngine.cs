@@ -790,17 +790,35 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 continue;
             }
 
-            if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase))
+            if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase))
             {
-                if (!line.Contains("METHOD=NONE", StringComparison.OrdinalIgnoreCase))
+                if (line.Contains("METHOD=NONE", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var method = ExtractAttribute(line, "METHOD") ?? string.Empty;
+                var keyFormat = ExtractAttribute(line, "KEYFORMAT") ?? string.Empty;
+                var keyUri = ExtractAttribute(line, "URI") ?? string.Empty;
+                var isDrm = method.Contains("SAMPLE-AES", StringComparison.OrdinalIgnoreCase) ||
+                            keyUri.StartsWith("skd://", StringComparison.OrdinalIgnoreCase) ||
+                            keyFormat.Contains("apple", StringComparison.OrdinalIgnoreCase) ||
+                            keyFormat.Contains("widevine", StringComparison.OrdinalIgnoreCase) ||
+                            keyFormat.Contains("playready", StringComparison.OrdinalIgnoreCase) ||
+                            line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase);
+                if (isDrm)
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
-                        "Encrypted HLS is not supported yet.",
+                        FailureKind.DrmProtected,
+                        "This HLS stream is DRM-protected (SAMPLE-AES/session key). Protected content cannot be downloaded or decrypted.",
                         false, false, DateTimeOffset.UtcNow));
                 }
 
-                continue;
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent,
+                    "AES-128 encrypted HLS is not supported yet.",
+                    false, false, DateTimeOffset.UtcNow));
             }
 
             if (line.StartsWith("#EXT-X-BYTERANGE", StringComparison.OrdinalIgnoreCase))
@@ -849,7 +867,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         if (!hasEndList)
         {
             return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                FailureKind.InvalidContent, "Live HLS playlists are not supported yet.",
+                FailureKind.LiveStream,
+                "Live HLS playlists are not supported. A VOD playlist with #EXT-X-ENDLIST is required.",
                 false, false, DateTimeOffset.UtcNow));
         }
 
@@ -1138,14 +1157,23 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             if (string.Equals((string?)root.Attribute("type"), "dynamic", StringComparison.OrdinalIgnoreCase))
             {
                 return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent, "Live DASH manifests are not supported yet.",
+                    FailureKind.LiveStream,
+                    "Live DASH manifests are not supported. A static MPD is required.",
                     false, false, DateTimeOffset.UtcNow));
             }
 
-            if (root.Descendants(ns + "ContentProtection").Any())
+            var protections = root.Descendants(ns + "ContentProtection").ToList();
+            if (protections.Count > 0)
             {
+                var schemes = string.Join(", ", protections
+                    .Select(p => (string?)p.Attribute("schemeIdUri"))
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
                 return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent, "DRM-protected DASH is not supported.",
+                    FailureKind.DrmProtected,
+                    string.IsNullOrWhiteSpace(schemes)
+                        ? "This DASH stream is DRM-protected. Protected content cannot be downloaded or decrypted."
+                        : $"This DASH stream is DRM-protected ({schemes}). Protected content cannot be downloaded or decrypted.",
                     false, false, DateTimeOffset.UtcNow));
             }
 

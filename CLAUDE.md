@@ -34,8 +34,10 @@ areas: everyday management gaps, additional DASH/HLS modes, Download
 All/grabber, FTP, and clean-environment install/upgrade verification. Phase 8
 (queues/scheduler) is complete; direct media detection, popup resources,
 unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
-DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, and expiring
-segment-token refresh are implemented. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
+DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, expiring
+segment-token refresh, explicit live-stream exclusion, and DRM detection are
+implemented. Account-provider/TorBox integration, unrar, and Docker/Linux web UI
+are queued as a post-parity side quest (ROADMAP A1–A5/D1–D4). Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
 credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and
 DPAPI protection for proxy passwords remain.
 
