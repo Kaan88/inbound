@@ -20,6 +20,8 @@ public sealed partial class MainWindow : Window
     private HostStatusDto? _status;
     private bool _settingsDialogOpen;
     private bool _pendingSettingsOpen;
+    private bool _completionDialogOpen;
+    private readonly Queue<JobDto> _completionDialogs = new();
     private string _category = "all";
     private string _search = string.Empty;
     private string _sortKey = "added";
@@ -150,6 +152,77 @@ public sealed partial class MainWindow : Window
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatusText();
         UpdateButtons();
+
+        if (changeType == "completed" && _settings?.ShowCompletionDialog == true)
+        {
+            _completionDialogs.Enqueue(job);
+            _ = ShowNextCompletionDialogAsync();
+        }
+    }
+
+    private async Task ShowNextCompletionDialogAsync()
+    {
+        if (_completionDialogOpen)
+        {
+            return;
+        }
+
+        _completionDialogOpen = true;
+        try
+        {
+            while (_completionDialogs.Count > 0)
+            {
+                var job = _completionDialogs.Dequeue();
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    Title = "Download complete",
+                    Content = new TextBlock
+                    {
+                        Text = $"{job.FileName}\n{job.FinalFilePath}",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    PrimaryButtonText = "Open file",
+                    SecondaryButtonText = "Open folder",
+                    CloseButtonText = "Close",
+                    DefaultButton = ContentDialogButton.Primary,
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result == ContentDialogResult.Primary && File.Exists(job.FinalFilePath))
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo(job.FinalFilePath) { UseShellExecute = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowMessageAsync("Could not open file", ex.Message);
+                    }
+                }
+                else if (result == ContentDialogResult.Secondary)
+                {
+                    try
+                    {
+                        var argument = File.Exists(job.FinalFilePath)
+                            ? $"/select,\"{job.FinalFilePath}\""
+                            : $"\"{Path.GetDirectoryName(job.FinalFilePath)}\"";
+                        Process.Start(new ProcessStartInfo("explorer.exe", argument)
+                        {
+                            UseShellExecute = true,
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        await ShowMessageAsync("Could not open folder", ex.Message);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _completionDialogOpen = false;
+        }
     }
 
     private void ApplyConnection(bool connected, string? error)

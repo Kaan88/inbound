@@ -37,8 +37,8 @@
 - Phase 6: in progress (clipboard URL monitoring, completion notification/sound
   settings, queue-aware add dialog and batch URLs, search/sort/context actions,
   editable descriptions, duplicate filename policies, category destination
-  rules, remembered last folder, and JSON list export/import exist; recent-URL
-  history and the completion dialog remain).
+  rules, remembered last folder, JSON list export/import, and the completion
+  dialog exist; recent-URL history remains).
 - Phase 10: in progress (Download All link collection, filtering, selection, and
   batch handoff verified; crawl scope, link rewriting, and persistent projects
   remain).

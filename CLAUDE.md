@@ -35,7 +35,8 @@ site-grabber crawl/rewrite/projects work, FTP, and clean-environment
 install/upgrade verification. Phase 8 (queues/scheduler) is complete; clipboard URL monitoring, batch/numbered URLs
 (CLI + WinUI), editable descriptions, duplicate Rename/Overwrite/Fail policies,
 category destination rules, last-folder memory, JSON list export/import,
-Download All link collection/filter/selection and batch handoff are implemented;
+completion dialog/notification/sound, Download All link
+collection/filter/selection and batch handoff are implemented;
 direct media detection, in-page panel with HLS quality variants, popup resources,
 unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
 DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, expiring

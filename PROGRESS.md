@@ -595,6 +595,19 @@ random-access part file **in the destination directory**:
 - WinUI File menu exposes Export/Import with a path dialog.
 - Remaining: recent-URL history; own JSON format rather than reference app's format.
 
+## Completion dialog evidence (M11, 2026-11-04)
+
+- WinUI now shows a `Download complete` dialog when `ShowCompletionDialog` is
+  enabled and the window is open: finished file name/path plus Open file, Open
+  folder, and Close.
+- Completed jobs are queued so only one dialog is shown at a time.
+- Published build: a 65,536-byte `complete-dialog.bin` job completed while the
+  WinUI window was open; UI Automation read the title/path and all three
+  buttons, and Close dismissed it.
+- Tray notifications and sound honor `NotifyOnCompletion`/`PlayCompletionSound`
+  (E33); completion actions fire once (E22). Sound was not acoustically verified.
+- Remaining: recent-URL history.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -640,10 +653,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Phase 6 remainder: recent-URL history and the completion dialog (M11).
-   Clipboard monitoring (E33), batch URLs (E34), editable descriptions (E35),
-   duplicate filename policies (E36), category/last-folder rules (E37), and
-   export/import (E38) are done.
+4. Phase 6 remainder: recent-URL history and remaining UI polish. Clipboard
+   monitoring (E33), batch URLs (E34), editable descriptions (E35), duplicate
+   policies (E36), category/last-folder rules (E37), export/import (E38), and
+   the completion dialog (E39) are done.
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done
