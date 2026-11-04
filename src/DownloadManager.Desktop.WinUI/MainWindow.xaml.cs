@@ -83,6 +83,10 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKeyModifiers.None,
             () => MenuFindNext_Click(this, new RoutedEventArgs())));
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.M,
+            Windows.System.VirtualKeyModifiers.Control,
+            () => MenuMoveRename_Click(this, new RoutedEventArgs())));
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             () =>
@@ -498,7 +502,13 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
         flyout.Items.Add(CreateContextItem("Open with...", MenuOpenWith_Click));
         flyout.Items.Add(CreateContextItem("Open folder", MenuOpenFolder_Click));
-        flyout.Items.Add(CreateContextItem("Move/Rename...", MenuMoveRename_Click));
+        var moveRename = CreateContextItem("Move/Rename...", MenuMoveRename_Click);
+        moveRename.KeyboardAccelerators.Add(new KeyboardAccelerator
+        {
+            Key = Windows.System.VirtualKey.M,
+            Modifiers = Windows.System.VirtualKeyModifiers.Control,
+        });
+        flyout.Items.Add(moveRename);
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
         flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));

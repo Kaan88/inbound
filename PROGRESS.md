@@ -942,6 +942,23 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Keyboard/focus/modality evidence (U4, 2026-11-04)
+
+- Added `scripts/ui-keyboard-check.ps1`, which uses UI Automation metadata,
+  invocation and direct `WM_KEYDOWN` to the WinUI `InputSiteWindowClass`.
+- Live results:
+  - accelerators: Ctrl+N (Add), Ctrl+F (Find), F3 (Find next),
+    Ctrl+Shift+S (By Size), Ctrl+M (Move/Rename);
+  - `AddButton` UIA focus: `hasFocus=True focusable=True`;
+  - `Delete download?`: `modal=True`, Enter closed it, `rowsAfter=2`;
+  - `Move/Rename`: `modal=True`, Enter closed it with the same path;
+  - `Add download`: `modal=True`.
+- Limits: global `SendInput`/`SendKeys` is still blocked by the desktop
+  foreground lock; key activation was verified through the WinUI input-site
+  window instead.
+- UI-only change; build 0 errors and the existing suites remain engine 30/30,
+  core 51/51, integration 61/61.
+
 ## UI inventory verification (U1/U2, 2026-11-04)
 
 - Added `scripts/ui-inventory.ps1` (live UI Automation menu/toolbar/category/

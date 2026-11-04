@@ -252,8 +252,8 @@ excluded.
 ## Phase 12 - Final parity audit (in progress)
 
 U1/U2 are closed by the live UI Automation dump and
-`notes/ui-parity-checklist.md` (E85). U4/U5/U7 and clean-Windows
-acceptance remain.
+`notes/ui-parity-checklist.md` (E85); U4 is closed by the
+keyboard/focus/modality check (E86). U5/U7 and clean-Windows acceptance remain.
 
 Coarse: window/dialog layout, menus/context menus, columns/layout persistence,
 keyboard/focus/modality, tray/notifications, settings defaults, progress/error

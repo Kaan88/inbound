@@ -79,7 +79,7 @@ SDK, or presentation types.
 | 9 | Media detection/downloading | done | Detection, in-page/quality panel, HLS/DASH assembly (SegmentTemplate, Timeline, SegmentList, SegmentBase byte ranges), A/V muxing (DASH and HLS alternate audio), fragment recovery, token refresh, live exclusion, DRM detection, and HLS AES-128 key rotation verified (E24-E32/E55/E57-E59); dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain excluded |
 | 10 | Download All + site grabber | done | Download All collection/filter/handoff (E31), scoped crawl and offline mirror (G2/G3, E40), and persistent/resumable/scheduled grabber projects verified (G4, E41) |
 | 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI parity remains; Edge/Firefox out of scope (C3) |
-| 12 | Final visual/behavioral parity audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (side-by-side checklist/live UIA dump), U3 and U6; U4/U5/U7 and clean-Windows acceptance remain (E52–E54/E85) |
+| 12 | Final visual/behavioral parity audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (side-by-side checklist/live UIA dump), U3, U4 and U6; U5/U7 and clean-Windows acceptance remain (E52–E54/E85/E86) |
 
 ## Major decisions
 

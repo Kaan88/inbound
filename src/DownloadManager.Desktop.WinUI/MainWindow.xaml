@@ -30,6 +30,7 @@
             <MenuBarItem Title="File">
                 <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
                 <MenuFlyoutItem Text="Open folder" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutItem Text="Move/Rename..." AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Export download list..." Click="MenuExport_Click" />
                 <MenuFlyoutItem Text="Import download list..." Click="MenuImport_Click" />
@@ -71,7 +72,7 @@
                 <MenuFlyoutSubItem Text="Arrange files">
                     <MenuFlyoutItem Text="By Order Of Addition" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" Tag="size" Click="MenuSort_Click">
+                    <MenuFlyoutItem Text="By Size" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
                         <MenuFlyoutItem.KeyboardAccelerators>
                             <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
                         </MenuFlyoutItem.KeyboardAccelerators>
