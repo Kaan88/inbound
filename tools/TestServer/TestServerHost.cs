@@ -32,6 +32,10 @@ public sealed class TestServerHost : IAsyncDisposable
     private long _siteDenied;
     private string _siteUser = "siteuser";
     private string _sitePass = "sitepass";
+    private int _hlsRotatingToken = 1;
+    private bool _hlsRotateAfterSegment = true;
+    private int _dashRotatingToken = 1;
+    private bool _dashRotateAfterSegment = true;
     private bool _lastAuthCookiePresent;
     private string _lastAuthReferer = string.Empty;
     private string _lastAuthUserAgent = string.Empty;
@@ -75,6 +79,14 @@ public sealed class TestServerHost : IAsyncDisposable
     {
         _hlsSegmentRequests.Clear();
         _dashSegmentRequests.Clear();
+    }
+
+    public void ResetRotatingMedia()
+    {
+        _hlsRotatingToken = 1;
+        _hlsRotateAfterSegment = true;
+        _dashRotatingToken = 1;
+        _dashRotateAfterSegment = true;
     }
 
     public void ResetExpiringStats()
@@ -462,6 +474,55 @@ public sealed class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
         });
 
+        _app.MapGet("/hls-rotating/playlist.m3u8", () =>
+        {
+            var token = _hlsRotatingToken;
+            return Results.Text(
+                "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n" +
+                "#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n" +
+                $"#EXTINF:2.000000,\nseg0.ts?token={token}\n" +
+                $"#EXTINF:2.000000,\nseg1.ts?token={token}\n" +
+                $"#EXTINF:2.000000,\nseg2.ts?token={token}\n" +
+                "#EXT-X-ENDLIST\n",
+                "application/vnd.apple.mpegurl");
+        });
+
+        _app.MapGet("/hls-rotating/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal) ||
+                !file.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            if (QueryInt(context, "token", 0) != _hlsRotatingToken)
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Headers["X-Url-Expired"] = "true";
+                await context.Response.WriteAsync("expired media token").ConfigureAwait(false);
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "hls", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            _hlsSegmentRequests.AddOrUpdate($"rotating-{file}", 1, (_, existing) => existing + 1);
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            context.Response.ContentType = "video/mp2t";
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+            if (_hlsRotateAfterSegment)
+            {
+                _hlsRotateAfterSegment = false;
+                _hlsRotatingToken++;
+            }
+        });
+
         _app.MapGet("/hls/{file}", async (HttpContext context, string file) =>
         {
             if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
@@ -536,6 +597,57 @@ public sealed class TestServerHost : IAsyncDisposable
         {
             segments = _hlsSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
         }));
+
+        _app.MapGet("/dash-rotating/manifest.mpd", () =>
+        {
+            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "dash", "manifest.mpd"));
+            var tokenized = source.Replace(
+                "chunk-$RepresentationID$-$Number%05d$.m4s",
+                $"chunk-$RepresentationID$-$Number%05d$.m4s?token={_dashRotatingToken}",
+                StringComparison.Ordinal);
+            return Results.Text(tokenized, "application/dash+xml");
+        });
+
+        _app.MapGet("/dash-rotating/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var isChunk = file.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase) &&
+                          file.StartsWith("chunk-", StringComparison.OrdinalIgnoreCase);
+            if (isChunk && QueryInt(context, "token", 0) != _dashRotatingToken)
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Headers["X-Url-Expired"] = "true";
+                await context.Response.WriteAsync("expired media token").ConfigureAwait(false);
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "dash", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            if (isChunk)
+            {
+                _dashSegmentRequests.AddOrUpdate($"rotating-{file}", 1, (_, existing) => existing + 1);
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            context.Response.ContentType = isChunk ? "video/iso.segment" : "video/mp4";
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+            if (isChunk && _dashRotateAfterSegment)
+            {
+                _dashRotateAfterSegment = false;
+                _dashRotatingToken++;
+            }
+        });
 
         _app.MapGet("/dash/{file}", async (HttpContext context, string file) =>
         {

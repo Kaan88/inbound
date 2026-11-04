@@ -1303,6 +1303,58 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task HlsRefreshesExpiredSegmentTokens()
+    {
+        _server.ResetHlsStats();
+        _server.ResetRotatingMedia();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/hls-rotating/playlist.m3u8",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hls-expiring.m3u8",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Equal(1, _server.HlsSegmentRequests("rotating-seg0.ts"));
+        Assert.True(_server.HlsSegmentRequests("rotating-seg1.ts") >= 1);
+    }
+
+    [Fact]
+    public async Task DashRefreshesExpiredSegmentTokens()
+    {
+        _server.ResetHlsStats();
+        _server.ResetRotatingMedia();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/dash-rotating/manifest.mpd",
+            DestinationDirectory = ctx.Destination,
+            FileName = "dash-expiring.mpd",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Equal(1, _server.DashSegmentRequests("rotating-chunk-0-00001.m4s"));
+        Assert.True(_server.DashSegmentRequests("rotating-chunk-0-00002.m4s") >= 1);
+    }
+
+    [Fact]
     public async Task DashSeparateAudioVideoMuxesWhenFfmpegAvailable()
     {
         var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");

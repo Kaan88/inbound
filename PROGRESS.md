@@ -384,18 +384,38 @@ random-access part file **in the destination directory**:
 - Integration suite **32/32** with FFmpeg configured. Existing ffprobe checks
   confirm playable HLS/DASH output.
 
+## Expiring media-token evidence (2026-11-04)
+
+- Media checkpoint signatures now use scheme/host/path and intentionally ignore
+  query strings, so rotating tokens do not invalidate completed fragments.
+- A segment 403 carrying `X-Url-Expired` (or 410) makes the engine refetch the
+  playlist/manifest once and resume from the media checkpoint.
+- `HlsRefreshesExpiredSegmentTokens`: `/hls-rotating/playlist.m3u8` rotated its
+  token after `seg0.ts`; the next segment was rejected with 403 +
+  `X-Url-Expired`, the playlist was refetched, and the job completed with the
+  expected 580,732-byte SHA-256
+  `6a1384036fceb6355c2aae29504a8fa5fd899c642fd47d309685607c0031b946`.
+  `rotating-seg0.ts` was requested exactly once.
+- `DashRefreshesExpiredSegmentTokens`: `/dash-rotating/manifest.mpd` did the
+  same after `chunk-0-00001.m4s` and completed with SHA-256
+  `3a17840b06a53432f9fa9a09188b7d68e3de720201bb88b3648277c2227cfba1`;
+  the first chunk was requested exactly once.
+- Integration suite **34/34** with FFmpeg configured.
+- Limitation: one automatic refresh per job. A playlist URL that itself expires,
+  AES key rotation, and DRM license refresh are not handled.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **32/32 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **34/34 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
-  HLS master/media, DASH assembly, DASH A/V muxing, and HLS/DASH fragment
-  recovery.
+  HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
+  and rotating-token segment refresh.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -416,12 +436,12 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
-   tests, evidence).
-2. Phase 9: additional DASH modes, in-page/quality panel, HLS alternate audio,
-   AES-128, expiring segment URLs, live/DRM behavior. Direct media detection,
-   popup list, unencrypted HLS, static DASH SegmentTemplate, DASH A/V muxing,
-   and HLS/DASH fragment recovery are done (E24–E28).
+1. Commit the V7 expiring-media-token increment (signature normalization,
+   single refresh, tests, evidence).
+2. Phase 9: live HLS/DASH behavior and DRM detection (V8/V9), then additional
+   DASH modes, in-page/quality panel, HLS alternate audio, AES-128. Direct media
+   detection, popup list, unencrypted HLS, static DASH SegmentTemplate, DASH A/V
+   muxing, fragment recovery, and rotating-token refresh are done (E24–E29).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

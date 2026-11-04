@@ -30,8 +30,9 @@
   verified).
 - Phase 9: in progress (direct media detection, popup resource list, unencrypted
   HLS master/media assembly, static DASH SegmentTemplate assembly, DASH
-  audio/video muxing via FFmpeg, and HLS/DASH fragment checkpoint recovery
-  verified; live, DRM, and additional DASH/HLS modes remain).
+  audio/video muxing via FFmpeg, HLS/DASH fragment recovery, and expiring
+  segment-token refresh verified; live, DRM, and additional DASH/HLS modes
+  remain).
 - Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -183,9 +184,10 @@ E25). Static DASH `SegmentTemplate` manifests assemble init/media segments into
 a playable fMP4 (V4 done; E26). Separate DASH video/audio tracks are muxed via an
 FFmpeg interface configured by PATH/`ffmpegpath` (V5 done; E27). Per-track
 media checkpoints resume HLS/DASH at completed fragment boundaries
-(V6 done; E28). Remaining: in-page panel/quality variants,
-SegmentBase/SegmentList/timeline DASH, HLS alternate audio, AES-128, expiring
-segment URLs, live behavior, and DRM detection.
+(V6 done; E28). Expiring HLS/DASH segment tokens trigger a safe manifest refresh
+and checkpoint resume (V7 done; E29). Remaining: in-page panel/quality variants,
+SegmentBase/SegmentList/timeline DASH, HLS alternate audio, AES-128, live
+behavior, and DRM detection.
 
 ## Phase 10 — Download All and site grabber (pending)
 

@@ -176,12 +176,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         if (IsHlsPlaylist(job))
         {
-            return await ExecuteHlsAsync(job, progress, cancellationToken).ConfigureAwait(false);
+            return await ExecuteWithMediaRefreshAsync(
+                () => ExecuteHlsAsync(job, progress, cancellationToken)).ConfigureAwait(false);
         }
 
         if (IsDashManifest(job))
         {
-            return await ExecuteDashAsync(job, progress, cancellationToken).ConfigureAwait(false);
+            return await ExecuteWithMediaRefreshAsync(
+                () => ExecuteDashAsync(job, progress, cancellationToken)).ConfigureAwait(false);
         }
 
         if (job.RequestedConnections > 1 &&
@@ -596,6 +598,20 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         return uri.AbsolutePath.StartsWith(normalizedPath, StringComparison.OrdinalIgnoreCase) &&
                (uri.AbsolutePath.Length == normalizedPath.Length ||
                 uri.AbsolutePath[normalizedPath.Length] == '/');
+    }
+
+    private static async Task<DownloadResult> ExecuteWithMediaRefreshAsync(
+        Func<Task<DownloadResult>> attempt)
+    {
+        var result = await attempt().ConfigureAwait(false);
+        if (!result.Success && result.Failure?.Kind == FailureKind.ExpiredUrl)
+        {
+            // The playlist/manifest is re-fetched by the second attempt; the
+            // path-based media signature keeps completed fragments resumable.
+            result = await attempt().ConfigureAwait(false);
+        }
+
+        return result;
     }
 
     private static bool IsHlsPlaylist(DownloadJob job)
@@ -1535,10 +1551,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendSignature(hash, track);
-        AppendSignature(hash, init?.AbsoluteUri ?? string.Empty);
+        // Ignore query strings: media tokens commonly rotate while the segment
+        // identity (scheme/host/path) stays the same.
+        AppendSignature(hash, init?.GetLeftPart(UriPartial.Path) ?? string.Empty);
         foreach (var segment in segments)
         {
-            AppendSignature(hash, segment.AbsoluteUri);
+            AppendSignature(hash, segment.GetLeftPart(UriPartial.Path));
         }
 
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
