@@ -1233,6 +1233,102 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task GrabberQueuedFileRedirectIsRecheckedAgainstRobotsTxt()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        async Task<int> HitsAsync()
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync($"{_server.BaseAddress}/robo/stats"));
+            return doc.RootElement.GetProperty("disallowedHits").GetInt32();
+        }
+
+        var hitsBefore = await HitsAsync();
+        var guarded = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/robo/files/redirect.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "robots-guarded.bin",
+            Source = "grabber",
+            RespectRobotsTxt = true,
+        });
+        Assert.True(guarded.Accepted, guarded.Error);
+        var failed = await ctx.WaitFor(guarded.Job!.Id, j => j.State == "failed");
+        Assert.Contains("robots.txt", failed.Failure?.Message);
+        Assert.Equal(hitsBefore, await HitsAsync());   // the disallowed target was never requested
+
+        var unguarded = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/robo/files/redirect.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "robots-unguarded.bin",
+            Source = "cli",
+        });
+        var completed = await ctx.WaitFor(unguarded.Job!.Id, j => j.State == "completed");
+        Assert.Equal(65_536, new FileInfo(completed.FinalFilePath).Length);
+        Assert.True(await HitsAsync() > hitsBefore);
+    }
+
+    [Theory]
+    [InlineData(404, true)]
+    [InlineData(410, true)]
+    [InlineData(500, false)]
+    [InlineData(503, false)]
+    public async Task SiteGrabberRobotsStatusFollowsRfc9309(int status, bool allowed)
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        await http.GetAsync($"{_server.BaseAddress}/robo/robots-status?code={status}");
+        try
+        {
+            var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
+            {
+                StartUrl = $"{_server.BaseAddress}/robo/private/secret.html",
+                DestinationDirectory = Path.Combine(ctx.Destination, $"robots-{status}"),
+                MaxDepth = 0,
+                StartMode = "later",
+            });
+            if (allowed)
+            {
+                // 4xx: no restrictions, so even the normally disallowed page is crawled.
+                Assert.True(result.Ok, result.Error);
+                Assert.Equal(1, result.PagesCrawled);
+                Assert.Equal(0, result.RobotsBlocked);
+            }
+            else
+            {
+                // 5xx: complete disallow.
+                Assert.False(result.Ok);
+                Assert.Contains("robots.txt", result.Error);
+            }
+        }
+        finally
+        {
+            await http.GetAsync($"{_server.BaseAddress}/robo/robots-status?code=0");
+        }
+    }
+
+    [Fact]
+    public async Task SiteGrabberTreatsUnreachableRobotsAsDisallowAll()
+    {
+        // A closed port: robots.txt cannot be fetched, so the crawl must not proceed.
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
+        {
+            StartUrl = $"http://127.0.0.1:{port}/",
+            DestinationDirectory = Path.Combine(ctx.Destination, "robots-unreachable"),
+            StartMode = "later",
+        });
+        Assert.False(result.Ok);
+        Assert.Contains("robots.txt", result.Error);
+    }
+
+    [Fact]
     public async Task CategoryDestinationRulesAndLastFolderPersist()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

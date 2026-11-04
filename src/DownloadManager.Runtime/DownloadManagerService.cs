@@ -315,6 +315,7 @@ public sealed class DownloadManagerService
                 1, 32),
             SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
             Description = request.Description,
+            RespectRobotsTxt = request.RespectRobotsTxt,
             ExpectedSha256 = string.IsNullOrWhiteSpace(request.ExpectedSha256) ? null : request.ExpectedSha256.Trim(),
             ConflictPolicy = conflictPolicy,
             State = DownloadState.Queued,
@@ -912,6 +913,7 @@ public sealed class DownloadManagerService
                     QueueId = request.QueueId,
                     Connections = request.Connections > 0 ? request.Connections : null,
                     Source = "grabber",
+                    RespectRobotsTxt = request.RespectRobotsTxt,
                     ConflictPolicy = "rename",
                     RememberDestination = false,
                 }, cancellationToken);

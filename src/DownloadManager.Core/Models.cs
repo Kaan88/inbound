@@ -89,6 +89,9 @@ public sealed class DownloadJob
     public string? Referrer { get; set; }
     public string? UserAgent { get; set; }
 
+    /// <summary>Set for site-grabber jobs: redirect hops must be allowed by the target host's robots.txt.</summary>
+    public bool RespectRobotsTxt { get; set; }
+
     public string FileName { get; set; } = string.Empty;
     public string DestinationDirectory { get; set; } = string.Empty;
     public string FinalFilePath { get; set; } = string.Empty;

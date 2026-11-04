@@ -196,6 +196,8 @@ public sealed class SnapshotDto
 public sealed class AddJobRequest
 {
     public string Url { get; set; } = string.Empty;
+    /// <summary>Re-check robots.txt on every redirect hop (used by the site grabber).</summary>
+    public bool RespectRobotsTxt { get; set; }
     public string? FinalUrl { get; set; }
     public string? DestinationDirectory { get; set; }
     public string? FileName { get; set; }

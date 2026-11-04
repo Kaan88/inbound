@@ -26,6 +26,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
     private int _robotsTxtRequests;
+    private int _robotsStatusOverride;
     private int _roboDisallowedHits;
     private int _activeRangeRequests;
     private int _peakRangeRequests;
@@ -1014,9 +1015,22 @@ public sealed class TestServerHost : IAsyncDisposable
             context.Response.StatusCode = 404;
         });
 
-        _app.MapGet("/robots.txt", () =>
+        _app.MapGet("/robo/robots-status", (HttpContext context) =>
+        {
+            // 0 restores the normal robots.txt; any other value is returned as the status code.
+            Interlocked.Exchange(ref _robotsStatusOverride, QueryInt(context, "code", 0));
+            return Results.Ok();
+        });
+
+        _app.MapGet("/robots.txt", (HttpContext context) =>
         {
             Interlocked.Increment(ref _robotsTxtRequests);
+            var forced = Interlocked.CompareExchange(ref _robotsStatusOverride, 0, 0);
+            if (forced != 0)
+            {
+                return Results.StatusCode(forced);
+            }
+
             return Results.Text(
                 "# Test fixture: only /robo/ is restricted.\n" +
                 "User-agent: OtherBot\nDisallow: /\n\n" +
@@ -1045,6 +1059,14 @@ public sealed class TestServerHost : IAsyncDisposable
                 relative.StartsWith("files/blocked", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref _roboDisallowedHits);
+            }
+
+            if (relative == "files/redirect.bin")
+            {
+                // Allowed file URL that redirects into a disallowed file.
+                context.Response.StatusCode = 302;
+                context.Response.Headers.Location = "/robo/files/blocked.bin?size=65536&seed=321";
+                return;
             }
 
             if (relative == "redirect.html")
