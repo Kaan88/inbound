@@ -942,6 +942,30 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Chrome bridge enable/disable evidence (B9, 2026-11-04)
+
+- The options page now marks `body[data-settings-loaded]` after filling the form,
+  giving automation a deterministic ready signal (also used by the manual check).
+- Disabled state saved through `options.html` (`enabled=false`,
+  autoIntercept=true, 47 intercept extensions, destination
+  `test-downloads\b9`):
+  - popup: `Disabled` / `Bridge disabled` / `Enable it in Settings.`;
+  - `b9-disabled.bin` completed in Chrome at 262,144 bytes;
+  - no Host job.
+- Re-enabled (`enabled=true`):
+  - popup settled to `Connected` / `Native bridge connected` /
+    `Automatic handoff on`;
+  - `b9-enabled.bin` was erased from Chrome after takeover and completed as a
+    `chromeAuto` Host job in `test-downloads\b9`, 262,144 bytes, SHA-256
+    `517f9b65d77670d86dba9976567b202b47eacf10be47945ee95fea60db8b8334`
+    (seed 902).
+- `autoIntercept=false` with `enabled=true`: `b9-auto-off.bin` completed in
+  Chrome and created no Host job.
+- Both flags were restored to true. `npx tsc --noEmit` exited 0 and
+  `npm run build` succeeded.
+- Limits: manual context-menu/media handoffs are not gated by `enabled`; the
+  popup can briefly report Disconnected while the MV3 worker reconnects.
+
 ## Chrome interception-rule evidence (B8, 2026-11-04)
 
 - Rules were saved through `options.html` (not injected): intercept allow-list,

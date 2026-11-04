@@ -67,9 +67,11 @@ async function load(): Promise<void> {
     byId<HTMLParagraphElement>("testResult").textContent = status?.connected
       ? "Native host connected."
       : `Native host not connected${status?.lastError ? `: ${status.lastError}` : "."}`;
+    document.body.dataset.settingsLoaded = "true";
   } catch (error) {
     byId<HTMLParagraphElement>("testResult").textContent =
       `Could not read settings: ${error instanceof Error ? error.message : String(error)}`;
+    document.body.dataset.settingsLoaded = "error";
   }
 }
 
