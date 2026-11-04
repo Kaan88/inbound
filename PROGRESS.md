@@ -528,8 +528,30 @@ random-access part file **in the destination directory**:
 - Integration suite **37/37**.
 - Published CLI: `describe` returned `ok`; `status --json` showed
   `"description": "Quarterly report from UI"` before and after a Host restart.
-- Remaining: editing URL/file name/destination, duplicate policies, categories,
-  recent folders, import/export, and the completion dialog.
+- Remaining: editing URL/file name/destination, categories, recent folders,
+  import/export, and the completion dialog.
+
+## Duplicate/filename policy evidence (M6, 2026-11-04)
+
+- Fixed the overwrite path: regular, HLS, and DASH-mux completion now pass
+  `overwrite: ConflictPolicy.Overwrite`; previously Overwrite resolved to the
+  existing path but the move refused to replace it.
+- Integration `ConflictPoliciesHandleExistingFile`:
+  - pre-created `conflict.bin` with `old content`;
+  - `rename` produced `conflict (1).bin` and preserved the original;
+  - `fail` was rejected with `already exists`;
+  - `overwrite` replaced `conflict.bin` with the downloaded bytes.
+  - downloaded content was 65,536 bytes with SHA-256
+    `aca6f316de23308f512c95311ebd78be8efbe0e387748272f33f5c73bba28da0`.
+- Integration suite **38/38**.
+- Published CLI reproduced rename/fail/overwrite; rename preserved the original
+  11-byte file, overwrite replaced it, and fail exited 1 with the destination
+  error.
+- WinUI Add/Batch dialogs expose `If the file exists` with Rename/Overwrite/Fail;
+  the single Add dialog prompts Download again/Select existing on duplicate URLs,
+  and batch can skip URLs already in the list.
+- Remaining: duplicate-URL prompt automation and category/recent-folder/import
+  work.
 
 ## Tests
 
@@ -538,13 +560,13 @@ random-access part file **in the destination directory**:
   credentials, and redirect credential boundaries.
 - Core: **34/34 passed**, including shutdown-command construction, clipboard URL
   extraction, and batch URL expansion.
-- Runtime/persistence: **37/37 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **38/38 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
-  rotating-token refresh, live-stream exclusion, DRM detection, and editable
-  property persistence.
+  rotating-token refresh, live-stream exclusion, DRM detection, editable
+  property persistence, and duplicate filename policies.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -575,10 +597,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Phase 6 remainder: duplicate decisions (M6), categories/destination rules
-   (M7), remembered folders/recent URLs (M8), import/export (M13), and completion
-   dialog (M11). Clipboard monitoring (E33), batch URLs (E34), and editable
-   descriptions (E35) are done.
+4. Phase 6 remainder: categories/destination rules (M7), remembered
+   folders/recent URLs (M8), import/export (M13), and completion dialog (M11).
+   Clipboard monitoring (E33), batch URLs (E34), editable descriptions (E35),
+   and duplicate filename policies (E36) are done.
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done

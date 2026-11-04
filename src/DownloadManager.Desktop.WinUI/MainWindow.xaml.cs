@@ -725,12 +725,19 @@ public sealed partial class MainWindow : Window
             .FindIndex(q => q.Id == _settings.DefaultQueueId);
         queueBox.SelectedIndex = Math.Max(0, defaultQueueIndex);
 
+        var conflictBox = new ComboBox { Header = "If the file exists" };
+        conflictBox.Items.Add("Rename the new file");
+        conflictBox.Items.Add("Overwrite the existing file");
+        conflictBox.Items.Add("Fail the new download");
+        conflictBox.SelectedIndex = 0;
+
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(urlBox);
         panel.Children.Add(nameBox);
         panel.Children.Add(destinationBox);
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
+        panel.Children.Add(conflictBox);
 
         var dialog = new ContentDialog
         {
@@ -754,12 +761,48 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var existing = FindExistingJob(url);
+        if (existing is not null)
+        {
+            var duplicateDialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Download already exists",
+                Content = new TextBlock
+                {
+                    Text = $"{existing.FileName} ({existing.StateText}) is already in the list for this URL.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "Download again",
+                SecondaryButtonText = "Select existing",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            var duplicateResult = await duplicateDialog.ShowAsync();
+            if (duplicateResult == ContentDialogResult.Secondary)
+            {
+                JobsList.SelectedItem = existing;
+                return;
+            }
+
+            if (duplicateResult != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
         var request = new AddJobRequest
         {
             Url = url,
             FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
             DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
             StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
+            ConflictPolicy = conflictBox.SelectedIndex switch
+            {
+                1 => "overwrite",
+                2 => "fail",
+                _ => "rename",
+            },
             Source = "api",
             QueueId = _settings.Queues.OrderBy(q => q.Order)
                 .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
@@ -824,12 +867,25 @@ public sealed partial class MainWindow : Window
             .FindIndex(q => q.Id == _settings.DefaultQueueId);
         queueBox.SelectedIndex = Math.Max(0, defaultQueueIndex);
 
+        var conflictBox = new ComboBox { Header = "If a file exists" };
+        conflictBox.Items.Add("Rename the new file");
+        conflictBox.Items.Add("Overwrite the existing file");
+        conflictBox.Items.Add("Fail the new download");
+        conflictBox.SelectedIndex = 0;
+        var skipDuplicates = new CheckBox
+        {
+            Content = "Skip URLs that are already in the list",
+            IsChecked = true,
+        };
+
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(patternBox);
         panel.Children.Add(hint);
         panel.Children.Add(destinationBox);
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
+        panel.Children.Add(conflictBox);
+        panel.Children.Add(skipDuplicates);
 
         var dialog = new ContentDialog
         {
@@ -893,6 +949,7 @@ public sealed partial class MainWindow : Window
         var start = startMode.SelectedIndex == 1 ? "later" : "now";
         var accepted = 0;
         var duplicates = 0;
+        var skipped = 0;
         var failed = 0;
         string? firstError = null;
 
@@ -905,6 +962,12 @@ public sealed partial class MainWindow : Window
                 continue;
             }
 
+            if (skipDuplicates.IsChecked == true && FindExistingJob(url) is not null)
+            {
+                skipped++;
+                continue;
+            }
+
             try
             {
                 var reply = await _connection.AddAsync(new AddJobRequest
@@ -912,6 +975,12 @@ public sealed partial class MainWindow : Window
                     Url = url,
                     DestinationDirectory = destination,
                     StartMode = start,
+                    ConflictPolicy = conflictBox.SelectedIndex switch
+                    {
+                        1 => "overwrite",
+                        2 => "fail",
+                        _ => "rename",
+                    },
                     Source = "batch",
                     QueueId = queueId,
                 });
@@ -940,9 +1009,15 @@ public sealed partial class MainWindow : Window
         await RefreshAsync();
         var summary = $"Added {accepted} of {urls.Count} downloads" +
                       (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
+                      (skipped > 0 ? $"; {skipped} skipped as already listed" : string.Empty) +
                       (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
         await ShowMessageAsync("Batch download", summary);
     }
+
+    private JobViewModel? FindExistingJob(string url)
+        => _jobsById.Values.FirstOrDefault(job =>
+            string.Equals(job.Url, url, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
 
     private async Task ShowSettingsDialogAsync()
     {

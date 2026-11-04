@@ -995,7 +995,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 }
             }
 
-            File.Move(job.PartFilePath, job.FinalFilePath, overwrite: false);
+            File.Move(job.PartFilePath, job.FinalFilePath,
+                overwrite: job.ConflictPolicy is ConflictPolicy.Overwrite);
             if (_mediaCheckpoints is not null)
             {
                 await _mediaCheckpoints.DeleteAsync(job.Id, checkpointTrack, cancellationToken)
@@ -1451,7 +1452,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 }
             }
 
-            File.Move(muxPath, job.FinalFilePath, overwrite: false);
+            File.Move(muxPath, job.FinalFilePath,
+                overwrite: job.ConflictPolicy is ConflictPolicy.Overwrite);
             if (_mediaCheckpoints is not null)
             {
                 await _mediaCheckpoints.DeleteAsync(job.Id, "dash-video", cancellationToken).ConfigureAwait(false);
@@ -2529,7 +2531,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 }
             }
 
-            File.Move(job.PartFilePath, finalPath, overwrite: false);
+            File.Move(job.PartFilePath, finalPath,
+                overwrite: job.ConflictPolicy is ConflictPolicy.Overwrite);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

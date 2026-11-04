@@ -191,6 +191,55 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ConflictPoliciesHandleExistingFile()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        const string name = "conflict.bin";
+        const int size = 65_536;
+        var existingPath = Path.Combine(ctx.Destination, name);
+        await File.WriteAllTextAsync(existingPath, "old content");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(250, size))).ToLowerInvariant();
+
+        var rename = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/{name}?size={size}&seed=250",
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "rename",
+            Source = "cli",
+        });
+        var renamed = await ctx.WaitFor(rename.Job!.Id, j => j.State == "completed");
+        Assert.EndsWith("conflict (1).bin", renamed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("old content", await File.ReadAllTextAsync(existingPath));
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(renamed.FinalFilePath));
+
+        var fail = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/{name}?size={size}&seed=250",
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "fail",
+            Source = "cli",
+        });
+        Assert.False(fail.Accepted);
+        Assert.Contains("already exists", fail.Error, StringComparison.OrdinalIgnoreCase);
+
+        var overwrite = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/{name}?size={size}&seed=250",
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            ConflictPolicy = "overwrite",
+            Source = "cli",
+        });
+        Assert.True(overwrite.Accepted, overwrite.Error);
+        var overwritten = await ctx.WaitFor(overwrite.Job!.Id, j => j.State == "completed");
+        Assert.Equal(existingPath, overwritten.FinalFilePath);
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(existingPath));
+    }
+
+    [Fact]
     public async Task ConcurrencyLimitIsObserved()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 1);

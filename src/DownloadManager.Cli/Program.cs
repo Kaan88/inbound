@@ -69,12 +69,20 @@ internal static class Program
                     return 2;
                 }
 
+                var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
+                if (conflict is not null && conflict is not ("rename" or "overwrite" or "fail"))
+                {
+                    Console.Error.WriteLine("--conflict expects rename, overwrite, or fail.");
+                    return 2;
+                }
+
                 var request = new AddJobRequest
                 {
                     Url = optionArgs[0],
                     DestinationDirectory = GetOption(args, "--dest"),
                     FileName = GetOption(args, "--name"),
                     StartMode = GetOption(args, "--start") ?? "now",
+                    ConflictPolicy = conflict ?? "rename",
                     Description = GetOption(args, "--description"),
                     Referrer = GetOption(args, "--referrer"),
                     UserAgent = GetOption(args, "--user-agent"),
@@ -617,6 +625,12 @@ internal static class Program
             ? parsedQueue
             : null;
         var destination = GetOption(args, "--dest");
+        var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
+        if (conflict is not null && conflict is not ("rename" or "overwrite" or "fail"))
+        {
+            Console.Error.WriteLine("--conflict expects rename, overwrite, or fail.");
+            return 2;
+        }
 
         var results = new List<(string Url, AddJobResponse Result)>();
         foreach (var url in urls)
@@ -628,6 +642,7 @@ internal static class Program
                     Url = url,
                     DestinationDirectory = destination,
                     StartMode = startMode,
+                    ConflictPolicy = conflict ?? "rename",
                     Source = "batch",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
@@ -1095,8 +1110,9 @@ internal static class Program
             Usage:
               dm add <url> [--dest DIR] [--name NAME] [--start now|later] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
+                          [--conflict rename|overwrite|fail]
               dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
-                          [--connections N] [--queue ID]
+                          [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
               dm list [--json]
               dm status <job-id> [--json]
               dm describe <job-id> <description text>
