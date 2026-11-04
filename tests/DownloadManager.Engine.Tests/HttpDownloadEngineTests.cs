@@ -646,6 +646,76 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task SpeedAndEtaEstimatesAreStable()
+    {
+        using var ctx = new EngineContext();
+        const int size = 4 * 1024 * 1024;
+        const double expectedSpeed = 1024 * 1024;
+        var samples = new List<(TransferProgress Progress, TimeSpan At)>();
+        var gate = new object();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(
+            ctx.CreateJob(
+                $"{_server.BaseAddress}/slow/stable.bin?size={size}&seed=33&bps=1048576",
+                "stable.bin"),
+            null,
+            new InlineProgress<TransferProgress>(progress =>
+            {
+                lock (gate)
+                {
+                    samples.Add((progress, stopwatch.Elapsed));
+                }
+            }),
+            CancellationToken.None);
+        stopwatch.Stop();
+
+        Assert.True(result.Success, result.Failure?.Message);
+        List<(TransferProgress Progress, TimeSpan At)> snapshot;
+        lock (gate)
+        {
+            snapshot = samples.ToList();
+        }
+
+        var warmed = snapshot
+            .Where(sample => sample.At >= TimeSpan.FromSeconds(2) &&
+                             sample.Progress.BytesPerSecond > 0 &&
+                             sample.Progress.EstimatedRemaining is not null)
+            .ToList();
+        Assert.True(warmed.Count >= 4, $"expected at least 4 warmed samples, got {warmed.Count}");
+        foreach (var sample in warmed)
+        {
+            Assert.InRange(sample.Progress.BytesPerSecond, expectedSpeed * 0.65, expectedSpeed * 1.35);
+        }
+
+        for (var i = 1; i < warmed.Count; i++)
+        {
+            var previous = warmed[i - 1].Progress.EstimatedRemaining!.Value.TotalSeconds;
+            var current = warmed[i].Progress.EstimatedRemaining!.Value.TotalSeconds;
+            Assert.True(current <= previous + 0.75,
+                $"ETA jumped from {previous:F1}s to {current:F1}s at {warmed[i].At.TotalSeconds:F1}s");
+        }
+
+        var reference = warmed.OrderBy(sample =>
+            Math.Abs(sample.At.TotalSeconds - 2.0)).First();
+        var actualRemaining = stopwatch.Elapsed.TotalSeconds - reference.At.TotalSeconds;
+        var estimated = reference.Progress.EstimatedRemaining!.Value.TotalSeconds;
+        Assert.InRange(estimated, actualRemaining - 1.5, actualRemaining + 1.5);
+
+        var speeds = warmed.Select(sample => sample.Progress.BytesPerSecond).ToList();
+        Console.WriteLine(
+            $"A8 samples={snapshot.Count} warmed={warmed.Count} " +
+            $"speedMin={speeds.Min():F0} speedMax={speeds.Max():F0} " +
+            $"etaAt2s={estimated:F2}s actualRemaining={actualRemaining:F2}s");
+        Assert.True(speeds.Max() / speeds.Min() < 1.5,
+            $"speed oscillation {speeds.Min():F0}-{speeds.Max():F0}");
+        Assert.Equal(size, snapshot[^1].Progress.ReceivedBytes);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(33, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
     public async Task TruncatedResponseNeverReportsSuccess()
     {
         using var ctx = new EngineContext();

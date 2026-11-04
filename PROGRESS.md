@@ -942,6 +942,27 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Speed/ETA stability evidence (A8, 2026-11-04)
+
+- Engine `SpeedAndEtaEstimatesAreStable` (suite **30/30**): 4 MiB at a
+  1 MiB/s throttle produced 17 samples; 8 warmed samples stayed at
+  1,036,704-1,048,791 B/s (max/min 1.012). ETA at 2 s was 1.77 s against
+  1.75 s actual remaining; warmed ETA never rose by more than 0.75 s between
+  samples; the seed-33 hash matched.
+- Published CLI: 16 MiB at 2 MiB/s produced:
+  - `t=0.8s 1.68 MB/s ETA 9.42s`, `1.7s 1.93/7.29`, `2.5s 1.99/6.25`,
+    `3.3s 2.02/5.28`, `4.1s 2.10/4.06`, `4.9s 2.10/3.50`,
+    `5.7s 2.10/2.69`, `6.5s 2.10/1.66`, `7.3s 2.10/0.91`,
+    `8.1s 2.10/0.09`, then completed;
+  - speed stayed in 1.99-2.10 MB/s after the ramp and ETA decreased
+    monotonically;
+  - 16,777,216 bytes with SHA-256
+    `63b709bf47103077ee5271b76d97fb9b2d2b671df26e6459f8f2d333f85ac9b2`
+    matching seed 901.
+- Core **50/50**, integration **60/60**; build 0 errors.
+- Limitation: startup ramp is reported as measured; no numerical comparison
+  with reference app's own estimator.
+
 ## Cross-job per-host connection evidence (A5, 2026-11-04)
 
 - Added a shared `HostConnectionLimiter` acquired around single-stream
@@ -1271,12 +1292,12 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **29/29 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **30/30 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
   HTML-page policy, monotonic progress/ETA, transient-500 retry recovery,
   per-download speed limiting, disk-full preflight, permission failure, and
-  dynamic work redistribution.
+  dynamic work redistribution, and speed/ETA stability.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,

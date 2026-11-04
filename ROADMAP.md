@@ -19,8 +19,8 @@
   verified with hashes; failure-path recovery, disabled integration, and
   independent verification remain).
 - Phase 5: in progress (segmented transfer/resume/fallback, dynamic work
-  redistribution and per-host/global limits verified; throughput benchmark and
-  independent verification remain).
+  redistribution, per-host/global limits and stable speed/ETA estimates verified;
+  throughput benchmark and independent verification remain).
 - Phase 7: in progress (cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
   proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundaries,
   expired-URL classification, and Refresh Download Address with partial resume
@@ -135,7 +135,7 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.1 | Range probing and safe partitioning | done | P2.3 | Servers with/without ranges handled |
 | P5.2 | Concurrent segment writer + checkpoints | done | P5.1 | Assembly hash matches; crash-safe |
 | P5.3 | Per-host/global limits, fallback | done | P5.2 | Cross-job host cap and global job cap measured; single-stream fallback works (E82) |
-| P5.4 | Speed limits + estimator | done | P5.2 | Per-download and global 128 KiB/s limits measured within tolerance (E69); estimator quality remains under A8 |
+| P5.4 | Speed limits + estimator | done | P5.2 | Per-download/global 128 KiB/s limits measured (E69); stable speed/ETA samples verified (A8/E83) |
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
