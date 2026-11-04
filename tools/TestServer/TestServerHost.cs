@@ -27,6 +27,8 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly object _authLastSync = new();
     private int _activeRangeRequests;
     private int _peakRangeRequests;
+    private int _activeFileRequests;
+    private int _peakFileRequests;
     private long _authAuthorized;
     private long _authDenied;
     private long _expiringExpired;
@@ -49,6 +51,8 @@ public sealed class TestServerHost : IAsyncDisposable
     private const string AuthCookie = "dmsession=valid-auth-token";
 
     public int PeakConcurrentRangeRequests => Volatile.Read(ref _peakRangeRequests);
+
+    public int PeakConcurrentFileRequests => Volatile.Read(ref _peakFileRequests);
     public long AuthAuthorized => Interlocked.Read(ref _authAuthorized);
     public long AuthDenied => Interlocked.Read(ref _authDenied);
     public long ExpiringExpired => Interlocked.Read(ref _expiringExpired);
@@ -73,6 +77,14 @@ public sealed class TestServerHost : IAsyncDisposable
     {
         Interlocked.Exchange(ref _activeRangeRequests, 0);
         Interlocked.Exchange(ref _peakRangeRequests, 0);
+        Interlocked.Exchange(ref _activeFileRequests, 0);
+        Interlocked.Exchange(ref _peakFileRequests, 0);
+    }
+
+    public void ResetFileConcurrency()
+    {
+        Interlocked.Exchange(ref _activeFileRequests, 0);
+        Interlocked.Exchange(ref _peakFileRequests, 0);
     }
 
     public int HlsSegmentRequests(string name) => _hlsSegmentRequests.GetValueOrDefault(name);
@@ -204,6 +216,7 @@ public sealed class TestServerHost : IAsyncDisposable
 
         _app.MapGet("/file/{name}", async (HttpContext context, string name) =>
         {
+            BeginFileRequest();
             var size = QueryInt(context, "size", 1024 * 1024);
             var seed = QueryInt(context, "seed", 1);
             var isRange = !string.IsNullOrWhiteSpace(context.Request.Headers.Range);
@@ -222,8 +235,10 @@ public sealed class TestServerHost : IAsyncDisposable
             {
                 if (isRange)
                 {
-                    Interlocked.Decrement(ref _activeRangeRequests);
+                    EndRangeRequest();
                 }
+
+                EndFileRequest();
             }
         });
 
@@ -1306,6 +1321,24 @@ public sealed class TestServerHost : IAsyncDisposable
     }
 
     private void EndRangeRequest() => Interlocked.Decrement(ref _activeRangeRequests);
+
+    private void BeginFileRequest()
+    {
+        var active = Interlocked.Increment(ref _activeFileRequests);
+        var currentPeak = Volatile.Read(ref _peakFileRequests);
+        while (active > currentPeak)
+        {
+            var observed = Interlocked.CompareExchange(ref _peakFileRequests, active, currentPeak);
+            if (observed == currentPeak)
+            {
+                break;
+            }
+
+            currentPeak = observed;
+        }
+    }
+
+    private void EndFileRequest() => Interlocked.Decrement(ref _activeFileRequests);
 
     public async ValueTask DisposeAsync()
     {

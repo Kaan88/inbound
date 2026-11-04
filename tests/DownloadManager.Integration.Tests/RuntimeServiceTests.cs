@@ -552,6 +552,126 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task PerHostAndGlobalConnectionLimitsApplyAcrossParallelJobs()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);
+        const int size = 2 * 1024 * 1024;
+
+        async Task<int> MonitorAsync(IReadOnlyList<JobDto> batch)
+        {
+            var completed = new HashSet<Guid>();
+            var peakRunning = 0;
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(90);
+            while (completed.Count < batch.Count && DateTimeOffset.UtcNow < deadline)
+            {
+                var snapshot = ctx.Service.GetSnapshot();
+                peakRunning = Math.Max(peakRunning, snapshot.Jobs.Count(job =>
+                    job.State is "connecting" or "downloading" or "retrying"));
+                foreach (var job in batch)
+                {
+                    var current = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == job.Id);
+                    if (current?.State == "completed")
+                    {
+                        completed.Add(job.Id);
+                    }
+                }
+
+                await Task.Delay(50);
+            }
+
+            Assert.Equal(batch.Count, completed.Count);
+            return peakRunning;
+        }
+
+        async Task AssertHashesAsync(IReadOnlyList<JobDto> batch, int seedBase)
+        {
+            for (var i = 0; i < batch.Count; i++)
+            {
+                var final = ctx.Service.GetJob(batch[i].Id);
+                Assert.NotNull(final);
+                Assert.Equal("completed", final!.State);
+                var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    TestContent.Generate(seedBase + i, size))).ToLowerInvariant();
+                Assert.Equal(expected, await Hashing.Sha256FileAsync(final.FinalFilePath));
+            }
+        }
+
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.MaxConnectionsPerHost = 8;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.Equal(8, ctx.Engine.HostConnectionLimit);
+
+        _server.ResetFileConcurrency();
+        var globalBatch = new List<JobDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/a5-global-{i}.bin?size={size}&seed={40 + i}&bps=1048576",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"a5-global-{i}.bin",
+                Connections = 1,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            globalBatch.Add(response.Job!);
+        }
+
+        var globalPeakRunning = await MonitorAsync(globalBatch);
+        var globalPeakRequests = _server.PeakConcurrentFileRequests;
+        Assert.Equal(2, globalPeakRunning);
+        Assert.Equal(2, globalPeakRequests);
+        await AssertHashesAsync(globalBatch, 40);
+
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.MaxConcurrentDownloads = 3;
+        settings.MaxConnectionsPerHost = 2;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.Equal(2, ctx.Engine.HostConnectionLimit);
+
+        _server.ResetFileConcurrency();
+        var hostBatch = new List<JobDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/a5-host-{i}.bin?size={size}&seed={50 + i}&bps=1048576",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"a5-host-{i}.bin",
+                Connections = 1,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            hostBatch.Add(response.Job!);
+        }
+
+        var hostPeakRunning = await MonitorAsync(hostBatch);
+        var hostPeakRequests = _server.PeakConcurrentFileRequests;
+        Assert.Equal(3, hostPeakRunning);
+        Assert.Equal(2, hostPeakRequests);
+        await AssertHashesAsync(hostBatch, 50);
+
+        var capped = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/a5-cap.bin?size=65536&seed=99",
+            DestinationDirectory = ctx.Destination,
+            FileName = "a5-cap.bin",
+            Connections = 4,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.True(capped.Accepted, capped.Error);
+        Assert.Equal(2, capped.Job!.RequestedConnections);
+        await ctx.Service.CancelAsync(capped.Job.Id, deleteFile: true);
+
+        Console.WriteLine(
+            $"A5 globalPeakRunning={globalPeakRunning} globalPeakRequests={globalPeakRequests} " +
+            $"hostPeakRunning={hostPeakRunning} hostPeakRequests={hostPeakRequests} " +
+            $"perJobCap={capped.Job.RequestedConnections} hostLimiterLimit={ctx.Engine.HostConnectionLimit} " +
+            $"hostLimiterPeak={ctx.Engine.HostConnectionPeak}");
+    }
+
+    [Fact]
     public async Task ConnectionProfilesCapRequestedConnections()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -2652,6 +2772,7 @@ public sealed class RuntimeServiceTests
         public StoragePaths Paths { get; }
         public string Destination { get; }
         public DownloadManagerService Service { get; }
+        public HttpDownloadEngine Engine => _engine;
         public bool AutoResume { get; private set; }
 
         public static Task<ServiceContext> CreateAsync(

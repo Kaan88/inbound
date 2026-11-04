@@ -21,6 +21,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private readonly EngineOptions _options;
     private readonly IDownloadCheckpointStore? _checkpoints;
     private readonly IFreeSpaceProvider _freeSpace;
+    private readonly HostConnectionLimiter _hostLimiter;
     private readonly bool _ownsClient;
     private readonly object _clientSync = new();
     private readonly List<HttpClient> _retiredClients = new();
@@ -43,6 +44,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         _checkpoints = checkpoints;
         _mediaCheckpoints = mediaCheckpoints;
         _freeSpace = freeSpace ?? DriveFreeSpaceProvider.Instance;
+        _hostLimiter = new HostConnectionLimiter(_options.MaxConnectionsPerHost);
         _ffmpegPath = _options.FfmpegPath;
         _muxer = muxer ?? new FfmpegMediaMuxer(() => _ffmpegPath);
         if (handler is null)
@@ -94,6 +96,13 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     {
         _ffmpegPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
     }
+
+    public void UpdateHostConnectionLimit(int limit)
+        => _hostLimiter.UpdateLimit(limit);
+
+    public int HostConnectionLimit => _hostLimiter.Limit;
+
+    public int HostConnectionPeak => _hostLimiter.Peak;
 
     private HttpClient CurrentClient()
     {
@@ -299,6 +308,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     {
         reporter.Report(force: true, state.Bytes > 0 ? "Resuming" : "Connecting");
 
+        using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
+            .ConfigureAwait(false);
         using var response = await SendWithRedirectsAsync(job, state.Bytes, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
 
@@ -2948,6 +2959,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     private async Task<SegmentedPlan?> ProbeSegmentedAsync(DownloadJob job, CancellationToken cancellationToken)
     {
+        using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
+            .ConfigureAwait(false);
         using var response = await SendWithRedirectsAsync(job, 0, cancellationToken, rangeEnd: 0)
             .ConfigureAwait(false);
         if ((int)response.StatusCode != 206)
@@ -3084,6 +3097,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 attempt++;
                 try
                 {
+                    using var hostSlot = await _hostLimiter.AcquireAsync(run.Host, cancellationToken)
+                        .ConfigureAwait(false);
                     using var response = await SendWithRedirectsAsync(
                         job, offset, cancellationToken, requestEnd).ConfigureAwait(false);
                     var status = (int)response.StatusCode;
@@ -3479,6 +3494,9 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             Plan = plan;
             File = file;
             Segments = segments;
+            Host = Uri.TryCreate(job.Url, UriKind.Absolute, out var uri)
+                ? uri.Host
+                : string.Empty;
         }
 
         public DownloadJob Job { get; }
@@ -3486,6 +3504,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         public FileStream File { get; }
         public List<SegmentCheckpoint> Segments { get; }
         public HashSet<SegmentCheckpoint> Claimed { get; } = new();
+        public string Host { get; }
         public object Sync { get; } = new();
         public long AggregateBytes { get; set; }
         public int ActiveConnections;
@@ -3814,6 +3833,9 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             _ => false,
         };
     }
+
+    private static string HostOf(DownloadJob job)
+        => Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
 
     private static bool IsHtmlErrorPage(DownloadJob job, string? mediaType)
     {

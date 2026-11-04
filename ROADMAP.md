@@ -18,8 +18,8 @@
 - Phase 4: in progress (automatic, context-menu, and authenticated handoff
   verified with hashes; failure-path recovery, disabled integration, and
   independent verification remain).
-- Phase 5: in progress (segmented transfer/resume/fallback and dynamic work
-  redistribution verified; global/per-host limits, throughput benchmark, and
+- Phase 5: in progress (segmented transfer/resume/fallback, dynamic work
+  redistribution and per-host/global limits verified; throughput benchmark and
   independent verification remain).
 - Phase 7: in progress (cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
   proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundaries,
@@ -134,7 +134,7 @@ is in tray; failed handoffs never silently lose downloads.
 | --- | --- | --- | --- | --- |
 | P5.1 | Range probing and safe partitioning | done | P2.3 | Servers with/without ranges handled |
 | P5.2 | Concurrent segment writer + checkpoints | done | P5.1 | Assembly hash matches; crash-safe |
-| P5.3 | Per-host/global limits, fallback | partial | P5.2 | Limits observed; single-stream fallback works |
+| P5.3 | Per-host/global limits, fallback | done | P5.2 | Cross-job host cap and global job cap measured; single-stream fallback works (E82) |
 | P5.4 | Speed limits + estimator | done | P5.2 | Per-download and global 128 KiB/s limits measured within tolerance (E69); estimator quality remains under A8 |
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |

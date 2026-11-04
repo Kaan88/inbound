@@ -101,6 +101,7 @@ public sealed class DownloadManagerService
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
+        _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -748,6 +749,7 @@ public sealed class DownloadManagerService
         }
 
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
+        _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         lock (_sync)
         {
             _settings = next;

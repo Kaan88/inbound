@@ -225,6 +225,7 @@ public sealed record EngineOptions
     public int BufferSize { get; init; } = 128 * 1024;
     public int MaxRedirects { get; init; } = 10;
     public bool AllowLocalNetwork { get; init; } = true;
+    public int MaxConnectionsPerHost { get; init; } = 8;
     public string AcceptEncoding { get; init; } = "identity";
     public long MinimumFreeSpaceReserveBytes { get; init; } = 1024 * 1024;
 

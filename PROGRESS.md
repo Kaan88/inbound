@@ -942,6 +942,26 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Cross-job per-host connection evidence (A5, 2026-11-04)
+
+- Added a shared `HostConnectionLimiter` acquired around single-stream
+  requests, range probes and every segmented request. The runtime updates the
+  limit from `MaxConnectionsPerHost` on startup and settings changes; each job's
+  `RequestedConnections` is also capped by that value.
+- TestServer `/file` now exposes `PeakConcurrentFileRequests` for all requests,
+  not only range requests.
+- Integration `PerHostAndGlobalConnectionLimitsApplyAcrossParallelJobs`
+  (suite **60/60**):
+  - phase 1: `MaxConcurrentDownloads=2`, host limit 8, three 2 MiB
+    single-connection jobs -> peak running 2, peak file requests 2;
+  - phase 2: `MaxConcurrentDownloads=3`, host limit 2, three 2 MiB
+    single-connection jobs -> peak running 3, peak file requests 2;
+  - a job requesting 4 connections was capped to `RequestedConnections=2`;
+  - `hostLimiterPeak=2`; all six seed hashes matched.
+- Engine suite **29/29**, core **50/50**, build 0 errors.
+- Limits: the limiter is per process and keys redirects under the original
+  host; HLS/DASH segment requests are not yet gated.
+
 ## Dynamic work-redistribution evidence (A4, 2026-11-04)
 
 - Segmented transfers now run a worker pool capped at the requested connection
@@ -1261,7 +1281,7 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **59/59 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **60/60 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1270,7 +1290,8 @@ random-access part file **in the destination directory**:
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
   recent-URL history, pause-vs-cancel partial files, short/long/missing part
-  reconciliation, orphan-part reporting, global speed limiting, the scoped site
+  reconciliation, orphan-part reporting, per-host connection limits, global speed
+  limiting, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
   post-download hook isolation, connection profiles, secret-preserving settings
   updates, installer-only update check/download, and segment/progress details.

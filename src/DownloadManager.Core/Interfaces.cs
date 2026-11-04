@@ -35,6 +35,96 @@ public interface ISettingsStore
     Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
 
+public interface IHostConnectionLimiter
+{
+    Task<IDisposable> AcquireAsync(string host, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Caps concurrent connections per host across every job sharing the limiter.
+/// Keys include the active limit so a settings change starts a fresh gate for
+/// new acquisitions instead of resizing a semaphore still in use.
+/// </summary>
+public sealed class HostConnectionLimiter : IHostConnectionLimiter
+{
+    private readonly object _sync = new();
+    private readonly Dictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private int _limit;
+    private int _active;
+    private int _peak;
+
+    public HostConnectionLimiter(int limit)
+    {
+        _limit = Math.Max(1, limit);
+    }
+
+    public int Limit
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _limit;
+            }
+        }
+    }
+
+    public void UpdateLimit(int limit)
+    {
+        lock (_sync)
+        {
+            _limit = Math.Max(1, limit);
+        }
+    }
+
+    public async Task<IDisposable> AcquireAsync(string host, CancellationToken cancellationToken)
+    {
+        SemaphoreSlim gate;
+        lock (_sync)
+        {
+            var key = $"{host}|{_limit}";
+            if (!_gates.TryGetValue(key, out gate!))
+            {
+                gate = new SemaphoreSlim(_limit, _limit);
+                _gates[key] = gate;
+            }
+        }
+
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        lock (_sync)
+        {
+            _active++;
+            _peak = Math.Max(_peak, _active);
+        }
+
+        return new GateReleaser(gate, this);
+    }
+
+    public int Peak
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _peak;
+            }
+        }
+    }
+
+    private sealed class GateReleaser(SemaphoreSlim gate, HostConnectionLimiter owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner._sync)
+            {
+                owner._active--;
+            }
+
+            gate.Release();
+        }
+    }
+}
+
 public interface IDownloadEngine
 {
     Task<DownloadResult> ExecuteAsync(
@@ -51,6 +141,11 @@ public interface IDownloadEngine
 
     /// <summary>Updates the ffmpeg.exe path used for media muxing.</summary>
     void UpdateFfmpegPath(string? path);
+
+    /// <summary>Updates the cross-job per-host connection cap.</summary>
+    void UpdateHostConnectionLimit(int limit)
+    {
+    }
 }
 
 public interface IPostDownloadHook
