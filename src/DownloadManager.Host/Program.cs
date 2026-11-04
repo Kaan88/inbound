@@ -51,9 +51,11 @@ internal static class Program
                 },
                 checkpoints: checkpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
+            var sleepPrevention = new WindowsSleepPrevention(log.Info);
             var service = new DownloadManagerService(
                 paths, jobStore, checkpoints, settingsStore, engine, log.Info,
-                completionActions: completionExecutor);
+                completionActions: completionExecutor,
+                sleepPrevention: sleepPrevention);
             service.InitializeAsync().GetAwaiter().GetResult();
             service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
             service.TrayAvailable = true;
@@ -124,6 +126,7 @@ internal static class Program
                 log.Error($"Service shutdown: {ex.Message}");
             }
 
+            sleepPrevention.Dispose();
             engine.Dispose();
             tray.ExitNow();
             log.Info("Host stopped.");

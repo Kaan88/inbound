@@ -31,7 +31,9 @@ public sealed class DownloadManagerService
     private readonly TimeProvider _timeProvider;
     private readonly bool _enableSchedulerTimer;
     private readonly ICompletionActionExecutor _completionActions;
+    private readonly ISleepPrevention _sleepPrevention;
     private readonly object _sync = new();
+    private bool _sleepPreventionActive;
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
     private readonly HashSet<int> _completionFiredQueues = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -50,7 +52,8 @@ public sealed class DownloadManagerService
         Action<string>? log = null,
         TimeProvider? timeProvider = null,
         bool enableSchedulerTimer = true,
-        ICompletionActionExecutor? completionActions = null)
+        ICompletionActionExecutor? completionActions = null,
+        ISleepPrevention? sleepPrevention = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -61,6 +64,7 @@ public sealed class DownloadManagerService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _enableSchedulerTimer = enableSchedulerTimer;
         _completionActions = completionActions ?? NullCompletionActionExecutor.Instance;
+        _sleepPrevention = sleepPrevention ?? NullSleepPrevention.Instance;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -566,6 +570,7 @@ public sealed class DownloadManagerService
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
+            PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
@@ -600,6 +605,7 @@ public sealed class DownloadManagerService
 
         _engine.UpdateProxy(next.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(next));
+        UpdateSleepPrevention();
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -1023,6 +1029,17 @@ public sealed class DownloadManagerService
             }
         }
 
+        try
+        {
+            _sleepPrevention.SetActive(false);
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Could not release sleep prevention: {ex.Message}");
+        }
+
+        _sleepPreventionActive = false;
+
         foreach (var runtime in active)
         {
             if (runtime.Runner is not null)
@@ -1284,6 +1301,36 @@ public sealed class DownloadManagerService
         foreach (var runtime in toStart)
         {
             runtime.Runner = RunJobAsync(runtime);
+        }
+
+        UpdateSleepPrevention();
+    }
+
+    private void UpdateSleepPrevention()
+    {
+        bool active;
+        lock (_sync)
+        {
+            active = _settings.PreventSleepWhileDownloading &&
+                     _jobs.Values.Any(r =>
+                         r.Starting ||
+                         r.Job.State is DownloadState.Connecting or DownloadState.Downloading
+                             or DownloadState.RetryWaiting or DownloadState.Verifying);
+            if (active == _sleepPreventionActive)
+            {
+                return;
+            }
+
+            _sleepPreventionActive = active;
+        }
+
+        try
+        {
+            _sleepPrevention.SetActive(active);
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Could not update sleep prevention: {ex.Message}");
         }
     }
 
@@ -1865,6 +1912,7 @@ public sealed class DownloadManagerService
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
+            PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,

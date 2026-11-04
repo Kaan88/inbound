@@ -777,6 +777,9 @@ internal static class Program
                 case "allowsystemcompletionactions":
                     settings.AllowSystemCompletionActions = ParseBool(value);
                     break;
+                case "preventsleep":
+                    settings.PreventSleepWhileDownloading = ParseBool(value);
+                    break;
                 default:
                     Console.Error.WriteLine($"unknown setting '{key}'");
                     return 2;
@@ -917,6 +920,7 @@ internal static class Program
         Console.WriteLine($"auto intercept:    {settings.BrowserAutoIntercept}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
         Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
+        Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 

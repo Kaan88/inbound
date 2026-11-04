@@ -319,6 +319,7 @@ public sealed class AppSettings
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
+    public bool PreventSleepWhileDownloading { get; set; } = true;
 
     /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>
     public bool AllowSystemCompletionActions { get; set; }

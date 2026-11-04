@@ -71,6 +71,25 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
         => Task.CompletedTask;
 }
 
+public interface ISleepPrevention : IDisposable
+{
+    /// <summary>Holds or releases the system-sleep power request.</summary>
+    void SetActive(bool active);
+}
+
+public sealed class NullSleepPrevention : ISleepPrevention
+{
+    public static NullSleepPrevention Instance { get; } = new();
+
+    public void SetActive(bool active)
+    {
+    }
+
+    public void Dispose()
+    {
+    }
+}
+
 public interface IClock
 {
     DateTimeOffset UtcNow { get; }

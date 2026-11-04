@@ -25,9 +25,9 @@
   proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundaries,
   expired-URL classification, and Refresh Download Address with partial resume
   verified; SOCKS4/4a and proxy credential hardening remain).
-- Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
-  reassignment, daily/one-time schedule execution, quotas, and completion
-  actions verified; sleep prevention and DST/wall-clock tests remain).
+- Phase 8: complete (named queues, caps, start/stop, reassignment, schedules,
+  quotas, completion actions, Download Later, sleep prevention, and DST tests
+  verified).
 - Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -156,7 +156,7 @@ Download Address preserves partial data through a Range resume (`S6`, `S7`,
 `E20`). Remaining: SOCKS4/4a, proxy settings UI, and SECURITY: DPAPI protection
 for proxy passwords.
 
-## Phase 8 - Queues and scheduling (in progress)
+## Phase 8 - Queues and scheduling (done)
 
 Named queues, per-queue concurrency, start/stop, queue persistence, CLI/UI
 assignment/reassignment, and daily/one-time schedule execution are implemented
@@ -164,8 +164,9 @@ and tested (E9/E10/E13/E16). The host evaluates schedules every 30 seconds and
 on startup; schedules target one queue, honor weekday selection, and persist
 last-run dates across restart. Per-queue byte quotas and completion actions
 (open/exit/shutdown with opt-in and active-download safeguards) are verified
-(E22). Remaining: sleep prevention and DST/wall-clock behavior. CLI management
-exists as `dm schedule list|add|remove|enable|disable` and
+(E22). Download Later gating, sleep prevention, repeated DST hours, and
+overnight DST stops are verified (E23). CLI management exists as
+`dm schedule list|add|remove|enable|disable` and
 `dm queue quota <id> <MB> <hours>|off`.
 
 ## Phase 9 — Media detection and downloading (pending)

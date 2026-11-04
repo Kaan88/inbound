@@ -792,6 +792,180 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DownloadLaterWaitsForExplicitStart()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/later.bin?size=262144&seed=122",
+            DestinationDirectory = ctx.Destination,
+            FileName = "later.bin",
+            Source = "cli",
+            StartMode = "later",
+        });
+        Assert.True(response.Accepted, response.Error);
+        await Task.Delay(300);
+        Assert.Equal("queued", ctx.Service.GetJob(response.Job!.Id)!.State);
+        Assert.False(File.Exists(Path.Combine(ctx.Destination, "later.bin")));
+
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = 0,
+            Action = "stop",
+        })).Ok);
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = 0,
+            Action = "start",
+        })).Ok);
+        await Task.Delay(300);
+        Assert.Equal("queued", ctx.Service.GetJob(response.Job.Id)!.State);
+
+        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(122, 262_144))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task SleepPreventionFollowsActiveDownloads()
+    {
+        var sleep = new RecordingSleepPrevention();
+        await using var ctx = await ServiceContext.CreateAsync(_server, sleepPrevention: sleep);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/sleep.bin?size=1048576&seed=119&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "sleep.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65536);
+        await WaitForSleepAsync(sleep, expected: true);
+        Assert.Contains(true, sleep.States);
+
+        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
+        await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
+        await WaitForSleepAsync(sleep, expected: false);
+
+        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
+        await ctx.WaitFor(response.Job.Id, j => j.State == "downloading");
+        await WaitForSleepAsync(sleep, expected: true);
+
+        await ctx.WaitFor(response.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await WaitForSleepAsync(sleep, expected: false);
+        Assert.True(sleep.Activations >= 2);
+        Assert.True(sleep.Releases >= 2);
+    }
+
+    [Fact]
+    public async Task SleepPreventionSettingCanDisableAndReenable()
+    {
+        var sleep = new RecordingSleepPrevention();
+        await using var ctx = await ServiceContext.CreateAsync(_server, sleepPrevention: sleep);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.PreventSleepWhileDownloading = false;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/sleep-off.bin?size=1048576&seed=120&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "sleep-off.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65536);
+        await WaitForSleepAsync(sleep, expected: false);
+
+        var enabled = ctx.Service.GetSnapshot().Settings;
+        enabled.PreventSleepWhileDownloading = true;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(enabled)).Ok);
+        await WaitForSleepAsync(sleep, expected: true);
+
+        await ctx.Service.CancelAsync(response.Job.Id, deleteFile: true);
+        await WaitForSleepAsync(sleep, expected: false);
+    }
+
+    [Fact]
+    public async Task ScheduleHandlesRepeatedDstHour()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 1,
+            IsRunning = false,
+            Order = 1,
+        });
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "DST",
+            QueueId = 1,
+            Enabled = true,
+            Kind = "daily",
+            Days = "Sun",
+            StartTime = "01:30",
+            StopTime = "03:00",
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var firstHour = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-4));
+        Assert.Equal("start", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(firstHour)).Action);
+        Assert.True(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = 1,
+            Action = "stop",
+        })).Ok);
+
+        var repeatedHour = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-5));
+        Assert.Empty(await ctx.Service.EvaluateSchedulesAsync(repeatedHour));
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+
+        var nextSunday = new DateTimeOffset(2026, 11, 8, 1, 30, 0, TimeSpan.FromHours(-5));
+        Assert.Equal("start", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(nextSunday)).Action);
+    }
+
+    [Fact]
+    public async Task ScheduleHandlesOvernightStopAcrossDst()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Night",
+            MaxConcurrentDownloads = 1,
+            IsRunning = false,
+            Order = 1,
+        });
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Overnight",
+            QueueId = 1,
+            Enabled = true,
+            Kind = "daily",
+            Days = "Sat,Sun",
+            StartTime = "23:00",
+            StopTime = "07:00",
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var start = new DateTimeOffset(2026, 3, 7, 23, 0, 0, TimeSpan.FromHours(-5));
+        Assert.Equal("start", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(start)).Action);
+
+        var stop = new DateTimeOffset(2026, 3, 8, 7, 0, 0, TimeSpan.FromHours(-4));
+        Assert.Equal("stop", Assert.Single(await ctx.Service.EvaluateSchedulesAsync(stop)).Action);
+        Assert.False(ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).IsRunning);
+    }
+
+    [Fact]
     public async Task QueueQuotaPausesDownloadsAndBlocksNewStarts()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);
@@ -1030,6 +1204,47 @@ public sealed class RuntimeServiceTests
         Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
+    private static async Task WaitForSleepAsync(RecordingSleepPrevention sleep, bool expected)
+    {
+        for (var i = 0; i < 40; i++)
+        {
+            if (sleep.Active == expected)
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(expected, sleep.Active);
+    }
+
+    private sealed class RecordingSleepPrevention : ISleepPrevention
+    {
+        public bool Active { get; private set; }
+        public int Activations { get; private set; }
+        public int Releases { get; private set; }
+        public List<bool> States { get; } = new();
+
+        public void SetActive(bool active)
+        {
+            Active = active;
+            States.Add(active);
+            if (active)
+            {
+                Activations++;
+            }
+            else
+            {
+                Releases++;
+            }
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class RecordingCompletionExecutor : ICompletionActionExecutor
     {
         public List<string> OpenedPaths { get; } = new();
@@ -1095,7 +1310,8 @@ public sealed class RuntimeServiceTests
             TestServerHost server,
             bool autoResume = true,
             int maxConcurrent = 2,
-            ICompletionActionExecutor? completionActions = null)
+            ICompletionActionExecutor? completionActions = null,
+            ISleepPrevention? sleepPrevention = null)
         {
             var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
             var paths = new StoragePaths(Path.Combine(root, "state"));
@@ -1103,7 +1319,7 @@ public sealed class RuntimeServiceTests
             Directory.CreateDirectory(destination);
             paths.EnsureCreated();
             return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true,
-                completionActions);
+                completionActions, sleepPrevention);
         }
 
         public static Task<ServiceContext> CreateAsync(
@@ -1111,8 +1327,10 @@ public sealed class RuntimeServiceTests
             StoragePaths paths,
             string destination,
             bool autoResume = true,
-            ICompletionActionExecutor? completionActions = null)
-            => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false, completionActions);
+            ICompletionActionExecutor? completionActions = null,
+            ISleepPrevention? sleepPrevention = null)
+            => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false,
+                completionActions, sleepPrevention);
 
         private static async Task<ServiceContext> BuildAsync(
             TestServerHost server,
@@ -1121,7 +1339,8 @@ public sealed class RuntimeServiceTests
             bool autoResume,
             int maxConcurrent,
             bool ownsPaths,
-            ICompletionActionExecutor? completionActions = null)
+            ICompletionActionExecutor? completionActions = null,
+            ISleepPrevention? sleepPrevention = null)
         {
             var checkpoints = new JsonCheckpointStore(paths);
             var store = new JsonJobStore(paths);
@@ -1143,7 +1362,8 @@ public sealed class RuntimeServiceTests
                 settingsStore,
                 engine,
                 enableSchedulerTimer: false,
-                completionActions: completionActions);
+                completionActions: completionActions,
+                sleepPrevention: sleepPrevention);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

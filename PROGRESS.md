@@ -275,16 +275,35 @@ random-access part file **in the destination directory**:
   argument construction. Tests use a recording executor; no real shutdown was
   performed.
 
+## Phase 8 closure evidence (2026-11-04)
+
+- `DownloadLaterWaitsForExplicitStart`: a Later job stayed queued and absent
+  from disk across queue stop/start until `resume`, then completed with the
+  expected hash.
+- `ScheduleHandlesRepeatedDstHour`: first 01:30 (−04:00) started the queue; the
+  repeated 01:30 (−05:00) did not restart it; the next Sunday did.
+- `ScheduleHandlesOvernightStopAcrossDst`: 23:00 start before the spring-forward
+  shift stopped at 07:00 after it.
+- Sleep prevention: `SleepPreventionFollowsActiveDownloads` and
+  `SleepPreventionSettingCanDisableAndReenable` verify acquire → pause release →
+  resume acquire → complete release, plus live disable/re-enable. Published host
+  logs for an 8 MiB transfer:
+  `Sleep prevention active.` then `Sleep prevention released.` after pause.
+  `powercfg /requests` requires elevation in this shell, so the OS request was
+  confirmed through successful API calls/host logs rather than powercfg output.
+- Windows implementation uses a process-wide `PowerCreateRequest` system-required
+  request (not thread-affine `SetThreadExecutionState`).
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **22/22 passed** (`tests\DownloadManager.Integration.Tests`),
-  including queues, scheduler, quotas, completion actions, destination-local
-  payload, authenticated handoff, runtime HTTP/SOCKS5 proxy settings,
-  expired-URL refresh/resume, and DPAPI site logins.
+- Runtime/persistence: **27/27 passed** (`tests\DownloadManager.Integration.Tests`),
+  including queues, scheduler, quotas, completion actions, Download Later, DST,
+  sleep prevention, destination-local payload, authenticated handoff, runtime
+  HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, and DPAPI site logins.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -305,23 +324,21 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the site-login increment (DPAPI store, engine auth, CLI, tests,
-   evidence).
-2. Complete Phase 8: sleep prevention and DST/wall-clock tests. Quotas and
-   completion actions are done (E22).
+1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
+   tests, evidence).
+2. Phase 9: direct media detection, then HLS/DASH with FFmpeg behind an
+   interface; label DRM unsupported.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done
    (E17/E18/E19/E20/E21).
-5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
-   unsupported.
-6. Phase 10: Download All/site grabber.
-7. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
+5. Phase 10: Download All/site grabber.
+6. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
    visual/behavioral audit, final parity evidence. Continue the reference app GUI
    inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
-8. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
+7. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
    portable and development builds must be excluded.
 
 ## Commands
