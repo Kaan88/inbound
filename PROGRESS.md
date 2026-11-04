@@ -942,6 +942,33 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Chrome host-outage recovery evidence (B10, 2026-11-04)
+
+- Outage: Host and NativeHost stopped and the native-messaging registry key
+  removed, with a handoff dialog already open.
+- Manual failure: `Could not reach the Download Manager host: Specified native
+  messaging host not found.` The URL stayed in the dialog, Download was
+  re-enabled, and the pending `handoff.b10-manual-test` request remained in
+  session storage.
+- Popup failure: `Disconnected` / `Native bridge unavailable` / the same native
+  messaging error.
+- Automatic failure: `b10-auto-down.bin` completed in Chrome at 262,144 bytes,
+  not paused, with no Host job; one notification was created.
+- Restore: native host re-registered, Host started, `dm.status` connected=true,
+  lastError empty.
+- Retry in the same dialog: `Added: b10-manual.bin`; pending request cleared;
+  job completed 262,144 bytes, SHA-256
+  `57af328cfbf9256ddb56e84ba9b73ce4af2e1f6f8e015dcdae560fd38bfbcc42`
+  (seed 1001).
+- Automatic recovery: `b10-auto-up.bin` was taken over (no Chrome item) and
+  completed 262,144 bytes, SHA-256
+  `06abf2b4c3c411861eedc3f34e43e841cfadbc17e70e86d833deb61bc393c003`
+  (seed 1003).
+- Popup after restore: `Connected` / `Native bridge connected` /
+  `Automatic handoff on`.
+- Limitation: manual handoff has no automatic retry loop; the user clicks
+  Download again after the service returns.
+
 ## Chrome bridge enable/disable evidence (B9, 2026-11-04)
 
 - The options page now marks `body[data-settings-loaded]` after filling the form,

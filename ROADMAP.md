@@ -120,7 +120,7 @@ kill engine.
 | P4.4 | Context-menu “Download with Download Manager” | done | P4.1/P4.2 | Selected link creates job while UI closed |
 | P4.5 | Destination + Start/Download Later dialog | done | P4.4 | Choices persist and affect job state/destination (E77) |
 | P4.6 | Authenticated handoff (cookies/referrer/UA) | done | P4.3 | Auth endpoint accepts all segment requests; cookie absent from logs |
-| P4.7 | Failure-path recovery (host/native down) | pending | P4.3 | Chrome resumes; user sees actionable error; no silent loss |
+| P4.7 | Failure-path recovery (host/native down) | done | P4.3 | Manual retry succeeds after restore; automatic downloads stay in Chrome with actionable errors and no silent loss (E80) |
 | P4.6b | Automatic interception + filters/bypass | done | P4.4 | Allow-list intercepts; excluded extensions/hosts and popup bypass leave downloads in Chrome (E78) |
 | P4.8 | Progress back to extension | done | P4.4 | Popup shows live state, bytes, speed, ETA and progress; Host ETA parsed/derived (E76) |
 | P4.9 | Independent browser handoff verification | pending | P4.7 | Restart Chrome/host; exactly-once handoff |
