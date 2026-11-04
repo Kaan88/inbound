@@ -36,9 +36,9 @@
   AES-128 remain).
 - Phase 6: in progress (clipboard URL monitoring, completion notification/sound
   settings, queue-aware add dialog and batch URLs, search/sort/context actions,
-  editable descriptions, and duplicate filename policies exist; categories,
-  remembered folders/recent URLs, import/export, and the completion dialog
-  remain).
+  editable descriptions, duplicate filename policies, category destination
+  rules, and remembered last folder exist; recent-URL history, import/export,
+  and the completion dialog remain).
 - Phase 10: in progress (Download All link collection, filtering, selection, and
   batch handoff verified; crawl scope, link rewriting, and persistent projects
   remain).

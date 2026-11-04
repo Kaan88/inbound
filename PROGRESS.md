@@ -550,23 +550,44 @@ random-access part file **in the destination directory**:
 - WinUI Add/Batch dialogs expose `If the file exists` with Rename/Overwrite/Fail;
   the single Add dialog prompts Download again/Select existing on duplicate URLs,
   and batch can skip URLs already in the list.
-- Remaining: duplicate-URL prompt automation and category/recent-folder/import
-  work.
+- Remaining: duplicate-URL prompt automation and recent-URL/import work.
+
+## Category and remembered-folder evidence (M7/M8, 2026-11-04)
+
+- Added shared `FileCategories` (compressed/documents/music/programs/video/other)
+  used by the runtime, CLI, and WinUI sidebar.
+- Settings gained `CategoryFolders`; an add without an explicit destination uses
+  the matching category folder, otherwise the last folder/default. Explicit
+  destinations override category rules and update `LastDestinationDirectory`.
+- Core `FileCategoriesTests` (7 cases) pass; core suite **41/41**.
+- Integration `CategoryDestinationRulesAndLastFolderPersist`:
+  - music category routed a destination-less `song.mp3` to `<dest>\music`;
+  - explicit destination wrote at the root;
+  - `LastDestinationDirectory` and the category folder survived a fresh service.
+  - integration suite **39/39**.
+- Published CLI: `musicdir` routed `song-cli.mp3` to `test-downloads\music`
+  (SHA-256 `0c82b8f07b9f9b406dbfaaa3a7d6dc3887692152afd7571d786c16127d6539a2`);
+  explicit destination wrote `song-explicit.mp3` at the root (SHA-256
+  `02345a83f430ffe736fb5b1cb8325ee088f0762fddc87f64ba389860d87bb772`);
+  `settings get` showed `last folder` and the music folder after a Host restart.
+- WinUI Options exposes the five category folders; the sidebar now uses the
+  shared category mapping.
+- Remaining: recent-URL history, category UI polish.
 
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **34/34 passed**, including shutdown-command construction, clipboard URL
-  extraction, and batch URL expansion.
-- Runtime/persistence: **38/38 passed** (`tests\DownloadManager.Integration.Tests`),
+- Core: **41/41 passed**, including shutdown-command construction, clipboard URL
+  extraction, batch URL expansion, and file categories.
+- Runtime/persistence: **39/39 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, DRM detection, editable
-  property persistence, and duplicate filename policies.
+  property persistence, duplicate filename policies, and category destinations.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -597,10 +618,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Phase 6 remainder: categories/destination rules (M7), remembered
-   folders/recent URLs (M8), import/export (M13), and completion dialog (M11).
-   Clipboard monitoring (E33), batch URLs (E34), editable descriptions (E35),
-   and duplicate filename policies (E36) are done.
+4. Phase 6 remainder: recent-URL history, import/export (M13), and completion
+   dialog (M11). Clipboard monitoring (E33), batch URLs (E34), editable
+   descriptions (E35), duplicate filename policies (E36), and category/last-
+   folder rules (E37) are done.
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done

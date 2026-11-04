@@ -208,17 +208,16 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        var extension = Path.GetExtension(job.FileName).TrimStart('.').ToLowerInvariant();
         return _category switch
         {
             "all" => true,
             "finished" => job.State == "completed",
             "unfinished" => job.State is not ("completed" or "cancelled"),
-            "compressed" => extension is "zip" or "7z" or "rar" or "gz" or "gzip" or "bz2" or "tar" or "xz" or "zst",
-            "documents" => extension is "pdf" or "doc" or "docx" or "xls" or "xlsx" or "ppt" or "pptx" or "txt" or "rtf" or "epub",
-            "music" => extension is "mp3" or "flac" or "wav" or "m4a" or "aac" or "ogg" or "wma" or "opus",
-            "programs" => extension is "exe" or "msi" or "apk" or "msix" or "appx" or "bat" or "cmd",
-            "video" => extension is "mp4" or "mkv" or "avi" or "mov" or "wmv" or "webm" or "m4v" or "mpg" or "mpeg",
+            "compressed" => FileCategories.For(job.FileName) == "compressed",
+            "documents" => FileCategories.For(job.FileName) == "documents",
+            "music" => FileCategories.For(job.FileName) == "music",
+            "programs" => FileCategories.For(job.FileName) == "programs",
+            "video" => FileCategories.For(job.FileName) == "video",
             "queues" => !string.IsNullOrEmpty(job.QueueText),
             _ => true,
         };
@@ -1048,6 +1047,16 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound when a download completes", IsChecked = settings.PlayCompletionSound };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads after restart", IsChecked = settings.AutoResumeUnfinishedOnStartup };
 
+            var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
+            foreach (var category in FileCategories.Names)
+            {
+                categoryBoxes[category] = new TextBox
+                {
+                    Header = $"{char.ToUpperInvariant(category[0])}{category[1..]} folder (optional)",
+                    Text = settings.CategoryFolders.TryGetValue(category, out var folder) ? folder : string.Empty,
+                };
+            }
+
             var panel = new StackPanel { Spacing = 9 };
             panel.Children.Add(new TextBlock { Text = "Transfer" });
             panel.Children.Add(directory);
@@ -1063,6 +1072,11 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new TextBlock { Text = "Browser integration", Margin = new Thickness(0, 8, 0, 0) });
             panel.Children.Add(integration);
             panel.Children.Add(autoIntercept);
+            panel.Children.Add(new TextBlock { Text = "Category folders", Margin = new Thickness(0, 8, 0, 0) });
+            foreach (var box in categoryBoxes.Values)
+            {
+                panel.Children.Add(box);
+            }
 
             var dialog = new ContentDialog
             {
@@ -1114,6 +1128,9 @@ public sealed partial class MainWindow : Window
             settings.NotifyOnCompletion = notify.IsChecked == true;
             settings.PlayCompletionSound = sound.IsChecked == true;
             settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
+            settings.CategoryFolders = categoryBoxes
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
+                .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
 
             var reply = await _connection.UpdateSettingsAsync(settings);
             var update = reply.GetPayload<SettingsResult>();
@@ -1155,6 +1172,7 @@ public sealed partial class MainWindow : Window
             AllowLocalNetwork = source.AllowLocalNetwork,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
+            CategoryFolders = new Dictionary<string, string>(source.CategoryFolders, StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = new List<string>(source.ExcludedFileExtensions),
             ExcludedHosts = new List<string>(source.ExcludedHosts),
             InterceptedFileExtensions = new List<string>(source.InterceptedFileExtensions),

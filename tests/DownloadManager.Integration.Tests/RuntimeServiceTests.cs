@@ -191,6 +191,56 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task CategoryDestinationRulesAndLastFolderPersist()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var musicDirectory = Path.Combine(ctx.Destination, "music");
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.CategoryFolders["music"] = musicDirectory;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/song.mp3?size=65536&seed=260",
+            FileName = "song.mp3",
+            Source = "cli",
+        });
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed");
+        Assert.StartsWith(musicDirectory, completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(260, 65_536))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+
+        var explicitDestination = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/song2.mp3?size=65536&seed=261",
+            FileName = "song2.mp3",
+            DestinationDirectory = ctx.Destination,
+            Source = "cli",
+        });
+        var explicitCompleted = await ctx.WaitFor(explicitDestination.Job!.Id, j => j.State == "completed");
+        Assert.Equal(
+            Path.GetFullPath(ctx.Destination),
+            Path.GetFullPath(Path.GetDirectoryName(explicitCompleted.FinalFilePath)!));
+
+        var snapshot = ctx.Service.GetSnapshot().Settings;
+        Assert.Equal(Path.GetFullPath(ctx.Destination), Path.GetFullPath(snapshot.LastDestinationDirectory!));
+        Assert.Equal(musicDirectory, snapshot.CategoryFolders["music"]);
+
+        var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+        try
+        {
+            var reloaded = second.Service.GetSnapshot().Settings;
+            Assert.Equal(Path.GetFullPath(ctx.Destination), Path.GetFullPath(reloaded.LastDestinationDirectory!));
+            Assert.Equal(musicDirectory, reloaded.CategoryFolders["music"]);
+        }
+        finally
+        {
+            await second.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConflictPoliciesHandleExistingFile()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

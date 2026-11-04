@@ -580,6 +580,18 @@ internal static class Program
         return 2;
     }
 
+    private static void SetCategoryFolder(SettingsDto settings, string category, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            settings.CategoryFolders.Remove(category);
+        }
+        else
+        {
+            settings.CategoryFolders[category] = value.Trim();
+        }
+    }
+
     private static async Task<int> AddBatchAsync(
         CliClient client,
         string[] args,
@@ -924,6 +936,21 @@ internal static class Program
                 case "ffmpegpath":
                     settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
                     break;
+                case "compresseddir":
+                    SetCategoryFolder(settings, "compressed", value);
+                    break;
+                case "documentsdir":
+                    SetCategoryFolder(settings, "documents", value);
+                    break;
+                case "musicdir":
+                    SetCategoryFolder(settings, "music", value);
+                    break;
+                case "programsdir":
+                    SetCategoryFolder(settings, "programs", value);
+                    break;
+                case "videodir":
+                    SetCategoryFolder(settings, "video", value);
+                    break;
                 default:
                     Console.Error.WriteLine($"unknown setting '{key}'");
                     return 2;
@@ -1053,6 +1080,7 @@ internal static class Program
     private static void PrintSettings(SettingsDto settings)
     {
         Console.WriteLine($"default dir:       {settings.DefaultDownloadDirectory}");
+        Console.WriteLine($"last folder:       {settings.LastDestinationDirectory ?? "-"}");
         Console.WriteLine($"max concurrent:    {settings.MaxConcurrentDownloads}");
         Console.WriteLine($"default conns:     {settings.DefaultConnections}");
         Console.WriteLine($"global speed limit:{settings.GlobalSpeedLimitBytesPerSecond?.ToString() ?? "none"}");
@@ -1060,6 +1088,14 @@ internal static class Program
                           (string.IsNullOrWhiteSpace(settings.Proxy.Username) ? string.Empty : $" user={settings.Proxy.Username} password=***"));
         Console.WriteLine($"launch at sign-in: {settings.LaunchAtStartup}");
         Console.WriteLine($"clipboard monitor: {settings.ClipboardMonitoring}");
+        foreach (var category in FileCategories.Names)
+        {
+            if (settings.CategoryFolders.TryGetValue(category, out var folder) &&
+                !string.IsNullOrWhiteSpace(folder))
+            {
+                Console.WriteLine($"  {category,-11} {folder}");
+            }
+        }
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
         Console.WriteLine($"auto intercept:    {settings.BrowserAutoIntercept}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");

@@ -637,6 +637,20 @@ public sealed class JsonSettingsStore : ISettingsStore
             ? null
             : settings.FfmpegPath.Trim();
 
+        settings.CategoryFolders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in settings.CategoryFolders)
+        {
+            var key = pair.Key?.Trim().ToLowerInvariant();
+            var value = pair.Value?.Trim();
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                categories[key] = value;
+            }
+        }
+
+        settings.CategoryFolders = categories;
+
         settings.SiteLogins ??= new List<SiteLogin>();
         settings.SiteLogins.RemoveAll(login =>
             string.IsNullOrWhiteSpace(login.Site) || string.IsNullOrWhiteSpace(login.Username));

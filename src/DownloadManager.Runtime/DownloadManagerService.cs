@@ -179,10 +179,10 @@ public sealed class DownloadManagerService
         var source = ParseEnum(request.Source, DownloadSource.Api);
         var conflictPolicy = ParseEnum(request.ConflictPolicy, ConflictPolicy.Rename);
 
-        var destination = ResolveDestination(request.DestinationDirectory);
         var fileName = string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameResolver.Resolve(null, uri)
             : FileNameResolver.Sanitize(request.FileName);
+        var destination = ResolveDestination(request.DestinationDirectory, fileName);
         string finalPath;
         try
         {
@@ -295,6 +295,22 @@ public sealed class DownloadManagerService
 
         Raise(runtime, "added");
         Schedule();
+
+        if (!string.IsNullOrWhiteSpace(request.DestinationDirectory) &&
+            !string.Equals(_settings.LastDestinationDirectory, destination, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.LastDestinationDirectory = destination;
+            try
+            {
+                await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+                SettingsChanged?.Invoke(this, _settings);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log?.Invoke($"Could not remember the last destination: {ex.Message}");
+            }
+        }
+
         return new AddJobResponse { Accepted = true, Job = Map(job) };
     }
 
@@ -579,6 +595,9 @@ public sealed class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            CategoryFolders = new Dictionary<string, string>(
+                settings.CategoryFolders ?? new Dictionary<string, string>(),
+                StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,
@@ -1737,11 +1756,21 @@ public sealed class DownloadManagerService
         }
     }
 
-    private string ResolveDestination(string? requested)
+    private string ResolveDestination(string? requested, string fileName)
     {
-        var directory = string.IsNullOrWhiteSpace(requested)
-            ? _settings.LastDestinationDirectory ?? _settings.DefaultDownloadDirectory
-            : requested.Trim();
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            return Path.GetFullPath(requested.Trim());
+        }
+
+        var category = FileCategories.For(fileName);
+        if (_settings.CategoryFolders.TryGetValue(category, out var categoryFolder) &&
+            !string.IsNullOrWhiteSpace(categoryFolder))
+        {
+            return Path.GetFullPath(categoryFolder.Trim());
+        }
+
+        var directory = _settings.LastDestinationDirectory ?? _settings.DefaultDownloadDirectory;
         return Path.GetFullPath(directory);
     }
 
@@ -1957,6 +1986,9 @@ public sealed class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            CategoryFolders = new Dictionary<string, string>(
+                settings.CategoryFolders ?? new Dictionary<string, string>(),
+                StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,

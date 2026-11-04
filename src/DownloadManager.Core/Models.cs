@@ -354,6 +354,7 @@ public sealed class AppSettings
 
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
+    public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> ExcludedFileExtensions { get; set; } = new();
     public List<string> ExcludedHosts { get; set; } = new();
     public List<string> InterceptedFileExtensions { get; set; } = new()

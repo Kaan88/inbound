@@ -89,6 +89,22 @@ public sealed class DownloadJobTests
     }
 }
 
+public sealed class FileCategoriesTests
+{
+    [Theory]
+    [InlineData("archive.zip", "compressed")]
+    [InlineData("report.pdf", "documents")]
+    [InlineData("song.mp3", "music")]
+    [InlineData("setup.exe", "programs")]
+    [InlineData("movie.mkv", "video")]
+    [InlineData("data.bin", "other")]
+    [InlineData("UPPER.MP3", "music")]
+    public void MapsExtensions(string fileName, string expected)
+    {
+        Assert.Equal(expected, FileCategories.For(fileName));
+    }
+}
+
 public sealed class BatchUrlExpanderTests
 {
     [Fact]
