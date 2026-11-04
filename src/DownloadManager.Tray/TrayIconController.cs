@@ -11,7 +11,10 @@ public sealed record TrayActions(
     Action ResumeAll,
     Action Exit,
     Func<string> IntegrationStatus,
-    Func<int> ActiveCount);
+    Func<int> ActiveCount,
+    Func<string?> UpdateText,
+    Action InstallUpdate,
+    Action CheckForUpdates);
 
 public sealed class TrayApplicationContext : ApplicationContext
 {
@@ -40,6 +43,7 @@ public sealed class TrayIconController : IDisposable
     private readonly ToolStripMenuItem _integrationItem;
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _resumeItem;
+    private readonly ToolStripMenuItem _updateItem;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly ConcurrentQueue<(string Title, string Message)> _notifications = new();
     private bool _disposed;
@@ -60,6 +64,11 @@ public sealed class TrayIconController : IDisposable
         _resumeItem = new ToolStripMenuItem("Resume All", null, (_, _) => _actions.ResumeAll());
         _menu.Items.Add(_pauseItem);
         _menu.Items.Add(_resumeItem);
+        _updateItem = new ToolStripMenuItem("Update available", null,
+            (_, _) => _actions.InstallUpdate()) { Visible = false };
+        _menu.Items.Add(_updateItem);
+        _menu.Items.Add(new ToolStripMenuItem("Check for updates...", null,
+            (_, _) => _actions.CheckForUpdates()));
         _menu.Items.Add(new ToolStripSeparator());
 
         _integrationItem = new ToolStripMenuItem("Browser integration: checking…") { Enabled = false };
@@ -101,6 +110,9 @@ public sealed class TrayIconController : IDisposable
             _statusItem.Text = active == 0 ? "Idle" : $"{active} active download{(active == 1 ? "" : "s")}";
             _icon.Text = active == 0 ? "Download Manager" : $"Download Manager — {active} active";
             _integrationItem.Text = $"Browser integration: {_actions.IntegrationStatus()}";
+            var updateText = _actions.UpdateText();
+            _updateItem.Visible = !string.IsNullOrWhiteSpace(updateText);
+            _updateItem.Text = updateText ?? "Update available";
         }
         catch
         {

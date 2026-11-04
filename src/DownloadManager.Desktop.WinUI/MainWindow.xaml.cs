@@ -929,8 +929,10 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Later",
                 DefaultButton = ContentDialogButton.Primary,
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            var updateChoice = await dialog.ShowAsync();
+            if (updateChoice != ContentDialogResult.Primary)
             {
+                await _connection.DeferUpdateAsync(check.AvailableVersion!);
                 return;
             }
 
@@ -958,11 +960,36 @@ public sealed partial class MainWindow : Window
             };
             if (await installDialog.ShowAsync() != ContentDialogResult.Primary)
             {
+                await _connection.DeferUpdateAsync(check.AvailableVersion!);
                 return;
             }
 
             var install = (await _connection.InstallUpdateAsync())
                 .GetPayload<UpdateInstallResult>();
+            if (!install.Ok && install.Status == "busy")
+            {
+                var forceDialog = new ContentDialog
+                {
+                    XamlRoot = Content.XamlRoot,
+                    Title = "Downloads are active",
+                    Content = new TextBlock
+                    {
+                        Text = install.Error ?? "Active downloads would be interrupted.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    PrimaryButtonText = "Install anyway",
+                    CloseButtonText = "Wait",
+                    DefaultButton = ContentDialogButton.Close,
+                };
+                if (await forceDialog.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+
+                install = (await _connection.InstallUpdateAsync(force: true))
+                    .GetPayload<UpdateInstallResult>();
+            }
+
             await ShowMessageAsync("Install update",
                 install.Ok
                     ? $"Update {install.Version} scheduled. The Host is restarting."
@@ -1940,6 +1967,33 @@ public sealed partial class MainWindow : Window
                 Text = settings.PostDownloadCommand ?? string.Empty,
                 PlaceholderText = @"C:\Program Files\Scanner\scan.exe",
             };
+            var updateUrl = new TextBox
+            {
+                Header = "Update manifest URL (HTTPS)",
+                Text = settings.UpdateManifestUrl ?? string.Empty,
+            };
+            var updateKey = new TextBox
+            {
+                Header = "Update public key (PEM)",
+                Text = settings.UpdatePublicKey ?? string.Empty,
+                AcceptsReturn = true,
+                Height = 70,
+            };
+            var updateChannel = new TextBox
+            {
+                Header = "Update channel",
+                Text = settings.UpdateChannel,
+            };
+            var autoUpdate = new CheckBox
+            {
+                Content = "Automatically check for updates",
+                IsChecked = settings.AutoCheckUpdates,
+            };
+            var updateInterval = new TextBox
+            {
+                Header = "Update check interval (hours)",
+                Text = settings.UpdateCheckIntervalHours.ToString(),
+            };
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             foreach (var category in FileCategories.Names)
@@ -1973,6 +2027,13 @@ public sealed partial class MainWindow : Window
             {
                 panel.Children.Add(box);
             }
+
+            panel.Children.Add(new TextBlock { Text = "Updates", Margin = new Thickness(0, 8, 0, 0) });
+            panel.Children.Add(updateUrl);
+            panel.Children.Add(updateKey);
+            panel.Children.Add(updateChannel);
+            panel.Children.Add(autoUpdate);
+            panel.Children.Add(updateInterval);
 
             var dialog = new ContentDialog
             {
@@ -2054,6 +2115,24 @@ public sealed partial class MainWindow : Window
             settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text)
                 ? null
                 : postDownload.Text.Trim();
+            settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(updateUrl.Text)
+                ? null
+                : updateUrl.Text.Trim();
+            settings.UpdatePublicKey = string.IsNullOrWhiteSpace(updateKey.Text)
+                ? null
+                : updateKey.Text.Trim();
+            settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text)
+                ? "stable"
+                : updateChannel.Text.Trim();
+            settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
+            if (!int.TryParse(updateInterval.Text, out var checkInterval) ||
+                checkInterval < 1 || checkInterval > 168)
+            {
+                await ShowMessageAsync("Invalid setting", "Update interval must be 1-168 hours.");
+                return;
+            }
+
+            settings.UpdateCheckIntervalHours = checkInterval;
             settings.CategoryFolders = categoryBoxes
                 .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                 .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -2152,6 +2231,12 @@ public sealed partial class MainWindow : Window
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
             PostDownloadCommand = source.PostDownloadCommand,
+            UpdateManifestUrl = source.UpdateManifestUrl,
+            UpdatePublicKey = source.UpdatePublicKey,
+            UpdateChannel = source.UpdateChannel,
+            AutoCheckUpdates = source.AutoCheckUpdates,
+            UpdateCheckIntervalHours = source.UpdateCheckIntervalHours,
+            SkippedUpdateVersion = source.SkippedUpdateVersion,
             ConnectionProfiles = source.ConnectionProfiles.Select(profile => new ConnectionProfileDto
             {
                 Pattern = profile.Pattern,

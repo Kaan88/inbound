@@ -76,10 +76,12 @@ internal static class Program
             pipe.Start();
 
             var currentSettings = service.GetSnapshot().Settings;
+            using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
             service.SettingsChanged += (_, next) =>
             {
                 currentSettings = service.GetSnapshot().Settings;
+                updateMonitor.ApplySettings(currentSettings);
                 TryApplyStartup(next.LaunchAtStartup, log);
                 log.Info("Settings updated.");
             };
@@ -91,10 +93,15 @@ internal static class Program
                 ResumeAll: () => FireAndForget(service.ResumeAllAsync(), log),
                 Exit: controller.RequestShutdown,
                 IntegrationStatus: () => BrowserIntegrationText(service),
-                ActiveCount: () => service.GetSnapshot().Status.ActiveDownloads);
+                ActiveCount: () => service.GetSnapshot().Status.ActiveDownloads,
+                UpdateText: () => updateMonitor.UpdateText,
+                InstallUpdate: () => _ = updateMonitor.InstallAsync(),
+                CheckForUpdates: updateMonitor.CheckNow);
 
             var icon = LoadIcon();
             var tray = new TrayApplicationContext(trayActions, icon);
+            updateMonitor.Attach(tray.Notify);
+            updateMonitor.Start();
             controller.UiContext = SynchronizationContext.Current;
             if (controller.UiContext is null)
             {

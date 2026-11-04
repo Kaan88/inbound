@@ -402,6 +402,8 @@ public sealed class AppSettings
     public string? UpdatePublicKey { get; set; }
     public string UpdateChannel { get; set; } = "stable";
     public bool AutoCheckUpdates { get; set; }
+    public int UpdateCheckIntervalHours { get; set; } = 24;
+    public string? SkippedUpdateVersion { get; set; }
     public DateTimeOffset? LastUpdateCheck { get; set; }
 
     /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>

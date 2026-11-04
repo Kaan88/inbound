@@ -1513,6 +1513,9 @@ internal static class Program
                 case "updatekey":
                     settings.UpdatePublicKey = value;
                     break;
+                case "updatekeyfile":
+                    settings.UpdatePublicKey = File.ReadAllText(value).Trim();
+                    break;
                 case "updatechannel":
                     settings.UpdateChannel = value;
                     break;

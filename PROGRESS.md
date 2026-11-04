@@ -841,8 +841,30 @@ random-access part file **in the destination directory**:
   `install.json` became 2.0.0, `VersionB` existed, and a started Host served
   status. The helper's Host-launch was changed to hidden/explicit exit after a
   lingering-process issue was observed.
-- Remaining: periodic auto-check, tray update notification, critical-download
-  gating.
+- Remaining: clean-Windows end-to-end acceptance.
+
+## Update notification/gating evidence (C9 P11.3/P11.7, 2026-11-04)
+
+- Settings gained `AutoCheckUpdates`, `UpdateCheckIntervalHours` (1–168),
+  `SkippedUpdateVersion`, and a Host update monitor timer.
+- Host monitor:
+  - checks on startup when auto-check is enabled and every configured interval;
+  - notifies through the tray once per version unless that version was deferred;
+  - exposes tray “Install update …” and “Check for updates…” actions;
+  - blocks automatic install with active downloads and reports “Update postponed”.
+- UI Options exposes manifest URL, PEM public key, channel, auto-check, and
+  interval; Help → Check for updates shows installed/available; Later stores
+  `skippedUpdateVersion`; Install now offers “Install anyway” when downloads are
+  active.
+- Live run against an installed 1.0.0 Host and signed local 1.0.1 manifest:
+  - Host log: `Update 1.0.1 available.`;
+  - UI: `Installed: 1.0.0 / Available: 1.0.1 / Size: 8192 bytes`;
+  - clicking Later set `"skippedUpdateVersion": "1.0.1"`;
+  - with a throttled 1-connection job at 327,680/1,048,576 bytes downloading,
+    `dm update install` failed with `Downloads are active…`; the Host stayed up.
+- Integration suite **48/48** includes busy/defer assertions. Manifest and
+  installer redirects to non-HTTPS (non-loopback) are rejected.
+- Remaining: clean-Windows end-to-end acceptance.
 
 ## Browser scope decision (C3, 2026-11-04)
 

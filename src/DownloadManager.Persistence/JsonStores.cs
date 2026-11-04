@@ -743,6 +743,10 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.UpdateChannel = string.IsNullOrWhiteSpace(settings.UpdateChannel)
             ? "stable"
             : settings.UpdateChannel.Trim().ToLowerInvariant();
+        settings.UpdateCheckIntervalHours = Math.Clamp(settings.UpdateCheckIntervalHours, 1, 168);
+        settings.SkippedUpdateVersion = string.IsNullOrWhiteSpace(settings.SkippedUpdateVersion)
+            ? null
+            : settings.SkippedUpdateVersion.Trim();
 
         settings.CategoryFolders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

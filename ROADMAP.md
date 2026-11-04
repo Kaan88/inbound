@@ -43,9 +43,9 @@
   crawl, offline link rewriting, and persistent/scheduled grabber projects
   verified).
 - Phase 11: in progress (FTP auth/resume, hooks, CLI, profiles, settings
-  transfer, repair, upgrade/uninstall, and silent update install/rollback
-  verified; tray update notification, critical-download gating, and final UI
-  parity remain. Other browsers are explicitly out of scope (C3).
+  transfer, repair, upgrade/uninstall, and the installer-only updater including
+  notifications/gating verified; final UI parity remains. Other browsers are
+  explicitly out of scope (C3).
 - Phases 6, 12: in progress/pending as tracked in `reference notes`; see
   `PROGRESS.md` for the handoff.
 
@@ -235,11 +235,11 @@ registry entry), not by the executable name.
 | --- | --- | --- | --- | --- |
 | P11.1 | Installed-build detection | done | C8 | Portable/dev builds report "not installed" and expose no updater; installed builds read version/channel from install metadata (`install.json`, E49) |
 | P11.2 | Signed update manifest | done | P11.1 | HTTPS manifest includes version, channel, installer URL, size, SHA-256 and RSA signature; manifest is verified before use (E49) |
-| P11.3 | Update check policy | partial | P11.2 | Manual check, stable channel default, signature/channel/version filtering done; configurable periodic/automatic check and trusted-redirect hardening remain |
+| P11.3 | Update check policy | done | P11.2 | Manual + configurable periodic/automatic check, stable channel default, signature/channel/version filtering, HTTPS/loopback redirect enforcement, start-on-enable check (E51) |
 | P11.4 | Download and verify installer | done | P11.2 | Installer downloaded to the state updates folder; signed size and SHA-256 enforced; mismatch deletes the file (E49) |
 | P11.5 | Installer-only silent upgrade | done | P11.4/C8 | Detached helper waits for Host exit, backs up app/metadata, installs the verified package, verifies version B, and restarts the Host; data tree untouched (E50) |
 | P11.6 | Failure and rollback | done | P11.5 | Failed installer/version check restores app+install.json, writes a failed result, and restarts the old Host (E50 fixture evidence) |
-| P11.7 | Update UI/tray flow | partial | P11.3/P11.5 | Check/download and Install now/Later UI exist; tray notification and critical-download gating remain |
+| P11.7 | Update UI/tray flow | done | P11.3/P11.5 | Check shows installed/latest, update-available balloon and tray install item, Install now/Later (Later persists `skippedUpdateVersion`), and install is blocked while downloads are active unless forced (E51) |
 
 Completion requires an end-to-end test on a clean installer build: install
 version A, publish version B, check, download, verify, upgrade, and confirm jobs

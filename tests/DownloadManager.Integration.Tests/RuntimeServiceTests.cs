@@ -247,6 +247,24 @@ public sealed class RuntimeServiceTests
                 Assert.True(File.Exists(download.Path));
                 Assert.Equal(package.Length, download.Size);
                 Assert.Equal(hash, download.Sha256);
+
+                var active = await ctx.Service.AddJobAsync(new AddJobRequest
+                {
+                    Url = $"{_server.BaseAddress}/slow/update-active.bin?size=1048576&seed=410&bps=131072",
+                    DestinationDirectory = ctx.Destination,
+                    FileName = "update-active.bin",
+                    Source = "cli",
+                });
+                await ctx.WaitFor(active.Job!.Id, j => j.ReceivedBytes > 65536);
+                var blocked = await ctx.Service.InstallUpdateAsync();
+                Assert.False(blocked.Ok);
+                Assert.Equal("busy", blocked.Status);
+                await ctx.Service.CancelAsync(active.Job.Id, deleteFile: true);
+
+                var deferred = await ctx.Service.DeferUpdateAsync("1.0.1");
+                Assert.True(deferred.Ok, deferred.Error);
+                Assert.Equal("1.0.1",
+                    ctx.Service.GetSnapshot().Settings.SkippedUpdateVersion);
             }
             finally
             {

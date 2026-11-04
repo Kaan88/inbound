@@ -35,6 +35,11 @@ public sealed class UpdateDownloadResult
     public string? Sha256 { get; set; }
 }
 
+public sealed class UpdateInstallRequest
+{
+    public bool Force { get; set; }
+}
+
 public sealed class UpdateInstallResult
 {
     public bool Ok { get; set; }
@@ -42,6 +47,11 @@ public sealed class UpdateInstallResult
     public string Status { get; set; } = "invalid";
     public string? Version { get; set; }
     public string? ResultPath { get; set; }
+}
+
+public sealed class UpdateDeferRequest
+{
+    public string Version { get; set; } = string.Empty;
 }
 
 public static class UpdateManifestVerifier

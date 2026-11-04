@@ -38,6 +38,7 @@ public sealed class DownloadManagerService
     private readonly IDownloadEngine? _ftpEngine;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     public event EventHandler? UpdateShutdownRequested;
+    public event EventHandler<string>? UpdateDeferred;
     private readonly object _sync = new();
     private readonly List<GrabberProject> _grabberProjects = new();
     private readonly HashSet<Guid> _runningGrabberProjects = new();
@@ -650,6 +651,8 @@ public sealed class DownloadManagerService
             UpdatePublicKey = settings.UpdatePublicKey,
             UpdateChannel = settings.UpdateChannel,
             AutoCheckUpdates = settings.AutoCheckUpdates,
+            UpdateCheckIntervalHours = settings.UpdateCheckIntervalHours,
+            SkippedUpdateVersion = settings.SkippedUpdateVersion,
             LastUpdateCheck = settings.LastUpdateCheck,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
@@ -891,6 +894,19 @@ public sealed class DownloadManagerService
         {
             using var response = await UpdateClient.GetAsync(manifestUri, cancellationToken)
                 .ConfigureAwait(false);
+            if (response.RequestMessage?.RequestUri is { } finalManifestUri &&
+                finalManifestUri.Scheme != "https" &&
+                !finalManifestUri.IsLoopback)
+            {
+                return new UpdateCheckResult
+                {
+                    Ok = false,
+                    Status = "invalid",
+                    InstalledVersion = install.Version,
+                    Error = "The update manifest redirected to a non-HTTPS host.",
+                };
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 return new UpdateCheckResult
@@ -1016,6 +1032,17 @@ public sealed class DownloadManagerService
         {
             using var response = await UpdateClient.GetAsync(
                 installerUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.RequestMessage?.RequestUri is { } finalInstallerUri &&
+                finalInstallerUri.Scheme != "https" &&
+                !finalInstallerUri.IsLoopback)
+            {
+                return new UpdateDownloadResult
+                {
+                    Ok = false,
+                    Error = "The installer redirected to a non-HTTPS host.",
+                };
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 return new UpdateDownloadResult
@@ -1092,6 +1119,7 @@ public sealed class DownloadManagerService
     }
 
     public async Task<UpdateInstallResult> InstallUpdateAsync(
+        UpdateInstallRequest? request = null,
         CancellationToken cancellationToken = default)
     {
         var install = InstalledBuild.TryLoad();
@@ -1103,6 +1131,28 @@ public sealed class DownloadManagerService
                 Status = "notInstalled",
                 Error = "Portable and development builds do not auto-update.",
             };
+        }
+
+        if (request?.Force != true)
+        {
+            bool active;
+            lock (_sync)
+            {
+                active = _jobs.Values.Any(runtime =>
+                    runtime.Starting ||
+                    runtime.Job.State is DownloadState.Connecting or DownloadState.Downloading
+                        or DownloadState.Verifying or DownloadState.RetryWaiting);
+            }
+
+            if (active)
+            {
+                return new UpdateInstallResult
+                {
+                    Ok = false,
+                    Status = "busy",
+                    Error = "Downloads are active. Use Install anyway or wait for them to finish.",
+                };
+            }
         }
 
         var check = await CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false);
@@ -1202,6 +1252,22 @@ public sealed class DownloadManagerService
                 Version = check.AvailableVersion,
             };
         }
+    }
+
+    public async Task<SettingsResult> DeferUpdateAsync(
+        string version,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return new SettingsResult { Ok = false, Error = "Version is required." };
+        }
+
+        _settings.SkippedUpdateVersion = version.Trim();
+        await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+        SettingsChanged?.Invoke(this, _settings);
+        UpdateDeferred?.Invoke(this, _settings.SkippedUpdateVersion);
+        return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
 
     public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
@@ -2880,6 +2946,8 @@ public sealed class DownloadManagerService
             UpdatePublicKey = settings.UpdatePublicKey,
             UpdateChannel = settings.UpdateChannel,
             AutoCheckUpdates = settings.AutoCheckUpdates,
+            UpdateCheckIntervalHours = settings.UpdateCheckIntervalHours,
+            SkippedUpdateVersion = settings.SkippedUpdateVersion,
             LastUpdateCheck = settings.LastUpdateCheck,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,

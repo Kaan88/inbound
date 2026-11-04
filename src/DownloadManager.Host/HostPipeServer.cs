@@ -289,8 +289,10 @@ public sealed class HostPipeServer
                     break;
 
                 case MessageTypes.UpdateInstall:
-                    var installResult = await _service.InstallUpdateAsync(cancellationToken)
-                        .ConfigureAwait(false);
+                    var installRequest = message.GetPayload<UpdateInstallRequest>() ??
+                                         new UpdateInstallRequest();
+                    var installResult = await _service.InstallUpdateAsync(
+                        installRequest, cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.UpdateInstallResult, installResult)
                         .ConfigureAwait(false);
                     if (installResult.Ok)
@@ -298,6 +300,14 @@ public sealed class HostPipeServer
                         _service.RequestUpdateShutdown();
                     }
 
+                    break;
+
+                case MessageTypes.UpdateDefer:
+                    var deferRequest = message.GetPayload<UpdateDeferRequest>();
+                    await Reply(client, message, MessageTypes.SettingsResult,
+                        await _service.DeferUpdateAsync(deferRequest.Version, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
                     break;
 
                 case MessageTypes.GrabberProjectsQuery:

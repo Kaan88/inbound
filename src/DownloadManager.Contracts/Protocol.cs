@@ -61,6 +61,7 @@ public static class MessageTypes
     public const string UpdateDownloadResult = "update.downloadResult";
     public const string UpdateInstall = "update.install";
     public const string UpdateInstallResult = "update.installResult";
+    public const string UpdateDefer = "update.defer";
 }
 
 public static class IpcJson

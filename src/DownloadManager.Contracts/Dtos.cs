@@ -142,6 +142,8 @@ public sealed class SettingsDto
     public string? UpdatePublicKey { get; set; }
     public string UpdateChannel { get; set; } = "stable";
     public bool AutoCheckUpdates { get; set; }
+    public int UpdateCheckIntervalHours { get; set; } = 24;
+    public string? SkippedUpdateVersion { get; set; }
     public DateTimeOffset? LastUpdateCheck { get; set; }
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
