@@ -942,6 +942,24 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Chrome destination/start-mode handoff evidence (B6, 2026-11-04)
+
+- The handoff window now prefills the last confirmed destination and start mode
+  from extension settings and saves both after a successful confirm, so the same
+  choices apply to later handoffs and automatic interception.
+- Live Chrome for Testing run:
+  - `b6-now` + Start now -> `Added: b6-now (1).bin`; Host job completed
+    1,048,576 bytes in `test-downloads\b6-now`, SHA-256
+    `f1bdae78d2a683df4a995f04984a5dde44abf31aafa4c9d664ae6ca2fb5ee458`.
+  - `b6-later` + Download later -> job `queued`, 0 bytes, no file in
+    `test-downloads\b6-later`; after an explicit resume it completed
+    1,048,576 bytes there, SHA-256
+    `b3a9ed136f1834ecd5f6a922f91f4d0dac92a3c511db60d9083d00d0ed831cc2`.
+  - A third dialog prefilled `b6-later`/later, proving persistence.
+- `npx tsc --noEmit` exited 0; `npm run build` succeeded.
+- Remaining gaps: own dialog layout, no queue picker/scheduler time, no
+  per-dialog credentials.
+
 ## Chrome popup live-progress evidence (B11, 2026-11-04)
 
 - `popup.ts` now renders live state, received/total bytes, progress, speed and

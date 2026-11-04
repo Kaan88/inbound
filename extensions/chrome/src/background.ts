@@ -852,7 +852,16 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         const stored = await chrome.storage.session.get(`handoff.${id}`);
         pending = stored[`handoff.${id}`] as PendingHandoff | undefined;
       }
-      return pending ? { ok: true, handoff: pending } : { ok: false, error: "Handoff request expired." };
+      return pending
+        ? {
+            ok: true,
+            handoff: pending,
+            defaults: {
+              destination: settings.defaultDestination,
+              startMode: settings.startMode,
+            },
+          }
+        : { ok: false, error: "Handoff request expired." };
     }
 
     case "dm.confirmHandoff": {
@@ -863,6 +872,10 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         return { ok: false, error: "Handoff request expired." };
       }
 
+      const startMode: StartMode = message.startMode === "later" ? "later" : "now";
+      const destination = typeof message.destination === "string"
+        ? message.destination.trim()
+        : settings.defaultDestination;
       const ack = await requestHandoff({
         requestId: crypto.randomUUID(),
         extensionId: chrome.runtime.id,
@@ -873,16 +886,26 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         suggestedFileName: message.fileName || pending.suggestedFileName,
         mimeType: pending.mimeType,
         totalBytes: pending.totalBytes,
-        startMode: message.startMode === "later" ? "later" : "now",
+        startMode,
         isAutoIntercept: pending.isAutoIntercept,
         headers: await cookieHeaders(pending.url),
-        destinationDirectory: typeof message.destination === "string" && message.destination.trim()
-          ? message.destination.trim()
-          : settings.defaultDestination || undefined,
+        destinationDirectory: destination || undefined,
       });
 
       pendingHandoffs.delete(id);
       await chrome.storage.session.remove(`handoff.${id}`);
+
+      // Remember the confirmed choices as the defaults for future handoffs
+      // and automatic interception, mirroring reference app's last-folder behavior.
+      if (ack?.accepted) {
+        settings = {
+          ...settings,
+          startMode,
+          defaultDestination: destination,
+        };
+        await chrome.storage.local.set({ settings });
+      }
+
       return { ok: true, ack };
     }
 

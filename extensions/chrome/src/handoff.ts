@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const response = (await chrome.runtime.sendMessage({ type: "dm.getHandoff", id: handoffId })) as {
       ok?: boolean;
       handoff?: PendingHandoff;
+      defaults?: { destination?: string; startMode?: string };
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -50,7 +51,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     urlInput.value = response.handoff.url;
     nameInput.value = response.handoff.suggestedFileName || "";
-    destinationInput.value = "";
+    destinationInput.value = response.defaults?.destination ?? "";
+    startSelect.value = response.defaults?.startMode === "later" ? "later" : "now";
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
     confirmButton.disabled = true;
