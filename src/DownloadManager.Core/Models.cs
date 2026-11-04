@@ -368,6 +368,7 @@ public sealed class GrabberProject
     public bool SavePages { get; set; } = true;
     public bool RewriteLinks { get; set; } = true;
     public bool RespectRobotsTxt { get; set; } = true;
+    public bool RenderJavaScript { get; set; }
     public string StartMode { get; set; } = "now";
     public int QueueId { get; set; }
     public int Connections { get; set; }

@@ -1198,6 +1198,68 @@ public sealed partial class MainWindow : Window
         await RefreshAsync();
     }
 
+    private async void MenuCleanOrphans_Click(object sender, RoutedEventArgs e)
+    {
+        var known = _status?.OrphanPartFiles ?? new List<string>();
+        var text = known.Count == 0
+            ? "No leftover partial files were found at the last scan. The host rescans before cleaning."
+            : $"{known.Count} partial file(s) are not attached to any download:\n" +
+              string.Join("\n", known.Take(8)) + (known.Count > 8 ? "\n..." : string.Empty);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Clean up leftover partial files",
+            Content = new ScrollViewer
+            {
+                MaxHeight = 320,
+                Content = new TextBlock
+                {
+                    Text = text + "\n\nQuarantine moves them into a .dm-orphans folder next to where they were " +
+                           "found. Partial files of existing downloads are never touched.",
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true,
+                },
+            },
+            PrimaryButtonText = "Quarantine",
+            SecondaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        var choice = await dialog.ShowAsync();
+        if (choice == ContentDialogResult.None)
+        {
+            return;
+        }
+
+        var delete = choice == ContentDialogResult.Secondary;
+        try
+        {
+            var reply = await _connection.CleanOrphansAsync(delete);
+            var result = reply.GetPayload<CleanOrphansResponse>();
+            if (result is null)
+            {
+                await ShowMessageAsync("Clean up failed", "The host returned no result.");
+                return;
+            }
+
+            var summary = $"{(delete ? "Deleted" : "Quarantined")} {result.Processed.Count} file(s).";
+            if (result.Failed.Count > 0)
+            {
+                summary += $"\n{result.Failed.Count} could not be cleaned (in use?):\n" +
+                           string.Join("\n", result.Failed.Take(8));
+            }
+
+            await ShowMessageAsync("Clean up leftover partial files", summary);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Clean up failed", ex.Message);
+        }
+
+        await RefreshAsync();
+    }
+
     private async void MenuFind_Click(object sender, RoutedEventArgs e)
     {
         var box = new TextBox { Text = _search, PlaceholderText = "File name, URL or description" };
@@ -1836,6 +1898,11 @@ public sealed partial class MainWindow : Window
         var savePages = new CheckBox { Content = "Save HTML pages for offline viewing", IsChecked = true };
         var rewrite = new CheckBox { Content = "Rewrite links to local files", IsChecked = true };
         var robots = new CheckBox { Content = "Respect the site's robots.txt", IsChecked = true };
+        var renderJs = new CheckBox
+        {
+            Content = "Render JavaScript (uses the installed Edge or Chrome, slower)",
+            IsChecked = false,
+        };
         var startMode = new ComboBox { Header = "Download files" };
         startMode.Items.Add("Start now");
         startMode.Items.Add("Download later");
@@ -1862,6 +1929,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(savePages);
         panel.Children.Add(rewrite);
         panel.Children.Add(robots);
+        panel.Children.Add(renderJs);
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
 
@@ -1905,6 +1973,7 @@ public sealed partial class MainWindow : Window
             SavePages = savePages.IsChecked == true,
             RewriteLinks = rewrite.IsChecked == true,
             RespectRobotsTxt = robots.IsChecked == true,
+            RenderJavaScript = renderJs.IsChecked == true,
             StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
             QueueId = _settings.Queues.OrderBy(q => q.Order)
                 .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
@@ -1968,7 +2037,8 @@ public sealed partial class MainWindow : Window
 
             await RefreshAsync();
             var summary = $"Crawled {result.PagesCrawled} pages; queued {result.FilesQueued} files; " +
-                          $"skipped {result.FilesSkipped}; blocked by robots.txt {result.RobotsBlocked}.";
+                          $"skipped {result.FilesSkipped}; blocked by robots.txt {result.RobotsBlocked}; " +
+                          $"rendered {result.PagesRendered}.";
             if (saveProject.IsChecked == true)
             {
                 summary += "\n\nThe project was saved under Grabber Projects.";
@@ -2560,6 +2630,14 @@ public sealed partial class MainWindow : Window
                     : "Proxy password",
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyPassword, "Proxy password");
+            var forgetProxyPassword = new CheckBox
+            {
+                Content = "Forget the saved proxy password",
+                Visibility = settings.Proxy.HasPassword ? Visibility.Visible : Visibility.Collapsed,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(forgetProxyPassword, "Forget the saved proxy password");
+            forgetProxyPassword.Checked += (_, _) => proxyPassword.IsEnabled = false;
+            forgetProxyPassword.Unchecked += (_, _) => proxyPassword.IsEnabled = true;
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             foreach (var category in FileCategories.Names)
@@ -2594,6 +2672,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(proxyAddress);
             panel.Children.Add(proxyUser);
             panel.Children.Add(proxyPassword);
+            panel.Children.Add(forgetProxyPassword);
             panel.Children.Add(new TextBlock { Text = "Category folders", Margin = new Thickness(0, 8, 0, 0) });
             foreach (var box in categoryBoxes.Values)
             {
@@ -2663,9 +2742,13 @@ public sealed partial class MainWindow : Window
                 Mode = proxyModeValue,
                 Address = composedProxyAddress,
                 Username = string.IsNullOrWhiteSpace(proxyUser.Text) ? null : proxyUser.Text.Trim(),
-                // Empty keeps the stored password (the host re-applies it for an unchanged address/user).
-                Password = string.IsNullOrEmpty(proxyPassword.Password) ? null : proxyPassword.Password,
-                HasPassword = settings.Proxy.HasPassword,
+                // Empty keeps the stored password (the host re-applies it for an unchanged address/user)
+                // unless "Forget" is checked.
+                Password = forgetProxyPassword.IsChecked == true || string.IsNullOrEmpty(proxyPassword.Password)
+                    ? null
+                    : proxyPassword.Password,
+                ClearPassword = forgetProxyPassword.IsChecked == true,
+                HasPassword = settings.Proxy.HasPassword && forgetProxyPassword.IsChecked != true,
             };
             settings.DefaultDownloadDirectory = directory.Text.Trim();
             settings.MaxConcurrentDownloads = max;

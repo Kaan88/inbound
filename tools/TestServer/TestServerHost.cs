@@ -1015,6 +1015,20 @@ public sealed class TestServerHost : IAsyncDisposable
             context.Response.StatusCode = 404;
         });
 
+        _app.MapGet("/js/index.html", () => Results.Content(
+            "<html><body><a href=\"/js/files/static.bin?size=65536&seed=340\">static</a>" +
+            "<div id=\"slot\"></div><script>" +
+            "setTimeout(function(){var a=document.createElement('a');" +
+            // Built from parts and assigned via a variable so no quoted href exists in the source.
+            "var u='/js/files/'+'dynamic.bin?size=65536&seed=341';a.href=u;a.textContent='dynamic';" +
+            "document.getElementById('slot').appendChild(a);},50);" +
+            "</script></body></html>",
+            "text/html; charset=utf-8"));
+
+        _app.MapGet("/js/files/{name}", async (HttpContext context, string name) =>
+            await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 65_536), QueryInt(context, "seed", 1)),
+                name, allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false));
+
         _app.MapGet("/robo/robots-status", (HttpContext context) =>
         {
             // 0 restores the normal robots.txt; any other value is returned as the status code.

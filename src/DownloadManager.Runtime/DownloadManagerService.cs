@@ -736,7 +736,8 @@ public sealed class DownloadManagerService
             Schedules = MapSchedules(settings.Schedules, _settings.Schedules),
         };
 
-        if (string.IsNullOrEmpty(next.Proxy.Password) &&
+        if (settings.Proxy?.ClearPassword != true &&
+            string.IsNullOrEmpty(next.Proxy.Password) &&
             !string.IsNullOrEmpty(_settings.Proxy.Password) &&
             string.Equals(next.Proxy.Address, _settings.Proxy.Address, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(next.Proxy.Username, _settings.Proxy.Username, StringComparison.Ordinal))
@@ -897,7 +898,8 @@ public sealed class DownloadManagerService
         }
 
         var grabber = new SiteGrabber(
-            destination, _log, _engine.CreateAuxiliaryHandler, _engine.GetSiteAuthorization);
+            destination, _log, _engine.CreateAuxiliaryHandler, _engine.GetSiteAuthorization,
+            renderProfileRoot: Path.Combine(_paths.Root, "render-profiles"));
         return await grabber.RunAsync(
             request,
             file =>
@@ -1401,6 +1403,7 @@ public sealed class DownloadManagerService
             SavePages = request.Request.SavePages,
             RewriteLinks = request.Request.RewriteLinks,
             RespectRobotsTxt = request.Request.RespectRobotsTxt,
+            RenderJavaScript = request.Request.RenderJavaScript,
             StartMode = request.Request.StartMode,
             QueueId = request.Request.QueueId,
             Connections = request.Request.Connections,
@@ -1621,6 +1624,7 @@ public sealed class DownloadManagerService
         SavePages = project.SavePages,
         RewriteLinks = project.RewriteLinks,
         RespectRobotsTxt = project.RespectRobotsTxt,
+        RenderJavaScript = project.RenderJavaScript,
         StartMode = project.StartMode,
         QueueId = project.QueueId,
         Connections = project.Connections,

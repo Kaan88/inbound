@@ -19,8 +19,15 @@ function Check($ok, $m) { Log ("{0}: {1}" -f ($(if ($ok) { 'PASS' } else { 'FAIL
 $hostExe = Join-Path $root "src\DownloadManager.Host\bin\$Configuration\net10.0-windows\DownloadManager.Host.exe"
 $uiExe = (Get-ChildItem (Join-Path $root "src\DownloadManager.Desktop.WinUI\bin\x64\$Configuration") -Recurse `
     -Filter DownloadManager.Desktop.WinUI.exe | Select-Object -First 1).FullName
+$cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\dm.exe"
+if (-not (Test-Path $cliExe)) { $cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\DownloadManager.Cli.exe" }
 $hostProc = Start-Process $hostExe -ArgumentList '--background' -PassThru -WindowStyle Hidden
 Start-Sleep 4
+# Saved password so the "Forget" checkbox is shown; the dialog is cancelled, so it is cleared via CLI at the end.
+& $cliExe settings set proxymode manual | Out-Null
+& $cliExe settings set proxyaddress 127.0.0.1:3128 | Out-Null
+& $cliExe settings set proxyuser uicheck | Out-Null
+& $cliExe settings set proxypass ui-check-secret | Out-Null
 $ui = Start-Process $uiExe -PassThru
 try {
     $auto = [System.Windows.Automation.AutomationElement]
@@ -87,10 +94,42 @@ try {
         $expand.Collapse()
     }
 
+    $forget = Find 'Forget the saved proxy password' ([System.Windows.Automation.ControlType]::CheckBox)
+    Check ($null -ne $forget) "'Forget the saved proxy password' checkbox shown when a password is saved"
+    if ($forget) {
+        $forget.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle(); Start-Sleep 1
+        $pw = Find 'Proxy password' ([System.Windows.Automation.ControlType]::Edit)
+        Check ($pw -and -not $pw.Current.IsEnabled) 'checking Forget disables the password box'
+        $forget.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    }
+
     $cancel = Find 'Cancel' ([System.Windows.Automation.ControlType]::Button)
     if ($cancel) { $cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+    Start-Sleep 2
+
+    # Tasks -> Clean up leftover partial files...
+    $tasks = Find 'Tasks' ([System.Windows.Automation.ControlType]::MenuItem)
+    Check ($null -ne $tasks) 'Tasks menu found'
+    if ($tasks) {
+        $tasks.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand(); Start-Sleep 1
+        $cleanItem = $auto::RootElement.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
+            $auto::NameProperty, 'Clean up leftover partial files...')))
+        Check ($null -ne $cleanItem) "'Clean up leftover partial files...' menu item present"
+        if ($cleanItem) {
+            $cleanItem.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep 2
+            foreach ($b in 'Quarantine', 'Delete', 'Cancel') {
+                Check ($null -ne (Find $b ([System.Windows.Automation.ControlType]::Button))) "cleanup dialog has '$b'"
+            }
+            $c = Find 'Cancel' ([System.Windows.Automation.ControlType]::Button)
+            if ($c) { $c.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        }
+    }
 }
 finally {
+    if ($cliExe -and (Test-Path $cliExe)) {
+        & $cliExe settings set proxypass --clear | Out-Null
+        & $cliExe settings set proxymode none | Out-Null
+    }
     $dir = Split-Path -Parent $OutFile
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
     $log | Set-Content -Path $OutFile

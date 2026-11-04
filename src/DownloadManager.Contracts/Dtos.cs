@@ -99,6 +99,8 @@ public sealed class ProxyDto
     public string? Username { get; set; }
     public string? Password { get; set; }
     public bool HasPassword { get; set; }
+    /// <summary>Remove the saved proxy password instead of keeping it when <see cref="Password"/> is empty.</summary>
+    public bool ClearPassword { get; set; }
 }
 
 public sealed class SiteLoginDto
@@ -297,6 +299,8 @@ public sealed class SiteGrabberRequest
     public bool RewriteLinks { get; set; } = true;
     /// <summary>Honor each host's robots.txt for pages and files (default on).</summary>
     public bool RespectRobotsTxt { get; set; } = true;
+    /// <summary>Also render each crawled page in headless Edge/Chrome and use links added by scripts.</summary>
+    public bool RenderJavaScript { get; set; }
     public string StartMode { get; set; } = "now";
     public int QueueId { get; set; }
     public int Connections { get; set; }
@@ -310,6 +314,7 @@ public sealed class SiteGrabberResult
     public int FilesQueued { get; set; }
     public int FilesSkipped { get; set; }
     public int RobotsBlocked { get; set; }
+    public int PagesRendered { get; set; }
     public List<string> Errors { get; set; } = new();
 }
 

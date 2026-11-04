@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    # Run tests that launch a real headless Edge/Chrome. Off by default because sandboxed
+    # agent harnesses block Chromium's sandbox; run with this switch from a normal shell.
+    [switch]$IncludeBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +19,12 @@ try {
 
     foreach ($project in $projects) {
         Write-Host "Testing $project..."
-        dotnet test $project -c $Configuration --nologo
+        if ($IncludeBrowser) {
+            dotnet test $project -c $Configuration --nologo
+        }
+        else {
+            dotnet test $project -c $Configuration --nologo --filter "Category!=Browser"
+        }
         if ($LASTEXITCODE -ne 0) { throw "Tests failed: $project" }
     }
 

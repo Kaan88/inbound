@@ -1309,6 +1309,42 @@ public sealed class RuntimeServiceTests
         }
     }
 
+    // Launches a real headless Edge/Chrome; excluded from scripts\test.ps1 unless -IncludeBrowser.
+    [Fact]
+    [Trait("Category", "Browser")]
+    public async Task SiteGrabberRendersJavaScriptAddedLinks()
+    {
+        Assert.True(HeadlessRenderer.FindBrowser() is not null,
+            "This test needs Edge or Chrome (or DM_RENDER_BROWSER).");
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        SiteGrabberRequest Request(string name, bool render) => new()
+        {
+            StartUrl = $"{_server.BaseAddress}/js/index.html",
+            DestinationDirectory = Path.Combine(ctx.Destination, name),
+            MaxDepth = 0,
+            Extensions = new List<string> { "bin" },
+            RenderJavaScript = render,
+            StartMode = "later",
+        };
+
+        var plain = await ctx.Service.RunSiteGrabberAsync(Request("js-static", false));
+        Assert.True(plain.Ok, plain.Error);
+        Assert.Equal(1, plain.FilesQueued);   // only static.bin is in the served HTML
+        Assert.Equal(0, plain.PagesRendered);
+
+        var rendered = await ctx.Service.RunSiteGrabberAsync(Request("js-rendered", true));
+        Assert.True(rendered.Ok, rendered.Error);
+        Assert.True(rendered.PagesRendered == 1, "render errors: " + string.Join(" | ", rendered.Errors));
+        Assert.Equal(2, rendered.FilesQueued);   // static.bin + script-inserted dynamic.bin
+        Assert.Contains(ctx.Service.GetSnapshot().Jobs,
+            job => job.Url.Contains("/js/files/dynamic.bin", StringComparison.Ordinal));
+        var saved = await File.ReadAllTextAsync(Path.Combine(ctx.Destination, "js-rendered", "js", "index.html"));
+        Assert.Contains("dynamic.bin", saved);   // the mirror stores the rendered DOM
+        var profiles = Path.Combine(ctx.Paths.Root, "render-profiles");
+        Assert.True(!Directory.Exists(profiles) || Directory.GetDirectories(profiles).Length == 0,
+            "per-run browser profiles must be removed");
+    }
+
     [Fact]
     public async Task SiteGrabberTreatsUnreachableRobotsAsDisallowAll()
     {
@@ -1990,6 +2026,37 @@ public sealed class RuntimeServiceTests
         Assert.True(_server.SiteAuthAuthorized > authorizedBefore);
         Assert.True(proxy.Authorized > proxiedBefore);
         Assert.Equal(0, proxy.Denied);
+    }
+
+    [Fact]
+    public async Task ProxyPasswordCanBeClearedWithoutChangingAddressOrUser()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "manual", Address = "127.0.0.1:3128", Username = "keepuser", Password = "clear-me-789",
+        };
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.True(ctx.Service.GetSnapshot().Settings.Proxy.HasPassword);
+
+        // Empty password without the flag keeps the saved one (existing behaviour).
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy.Password = null;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.True(ctx.Service.GetSnapshot().Settings.Proxy.HasPassword);
+
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy.Password = null;
+        settings.Proxy.ClearPassword = true;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var cleared = ctx.Service.GetSnapshot().Settings.Proxy;
+        Assert.False(cleared.HasPassword);
+        Assert.Equal("keepuser", cleared.Username);
+        Assert.Equal("127.0.0.1:3128", cleared.Address);
+        var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
+        Assert.DoesNotContain("clear-me-789", json);
+        Assert.DoesNotContain("dpapi:v1:", json);   // no protected blob left behind (no site logins here)
     }
 
     [Fact]

@@ -25,13 +25,21 @@ internal sealed class SiteGrabber
         string destination,
         Action<string>? log,
         Func<HttpMessageHandler?>? handlerFactory = null,
-        Func<Uri, string?>? authorization = null)
+        Func<Uri, string?>? authorization = null,
+        string? renderProfileRoot = null)
     {
         _destination = destination;
         _log = log;
         _handlerFactory = handlerFactory;
         _authorization = authorization;
+        // DM_RENDER_PROFILE_ROOT overrides where throwaway browser profiles are created
+        // (the browser must be able to write there).
+        _renderProfileRoot = Environment.GetEnvironmentVariable("DM_RENDER_PROFILE_ROOT") is { Length: > 0 } overridden
+            ? overridden
+            : renderProfileRoot ?? Path.Combine(Path.GetTempPath(), "dm-render-profiles");
     }
+
+    private readonly string _renderProfileRoot;
 
     /// <summary>
     /// GET with the site login for exactly this URL. Each redirect hop is a new call, so
@@ -119,6 +127,71 @@ internal sealed class SiteGrabber
             return result;
         }
 
+        HeadlessRenderer? renderer = null;
+        string? profile = null;
+        if (request.RenderJavaScript)
+        {
+            profile = Path.Combine(_renderProfileRoot, Guid.NewGuid().ToString("N"));
+            renderer = HeadlessRenderer.TryCreate(profile);
+            if (renderer is null)
+            {
+                AddError(result, "JavaScript rendering is unavailable: no Edge or Chrome was found " +
+                                 $"(set {HeadlessRenderer.BrowserEnvironmentVariable}); crawling static HTML only.");
+            }
+            else
+            {
+                _log?.Invoke($"Grabber renders pages with {renderer.BrowserPath}.");
+            }
+        }
+
+        try
+        {
+            return await CrawlAsync(request, enqueue, cancellationToken, onProgress, result, start, startAuthority,
+                maxDepth, maxPages, maxFiles, extensions, visited, pages, files, fileUrls, localOwners, queue, http,
+                AllowedAsync, renderer).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (profile is not null)
+            {
+                try
+                {
+                    if (Directory.Exists(profile))
+                    {
+                        Directory.Delete(profile, recursive: true);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _log?.Invoke($"Could not remove render profile '{profile}': {ex.Message}");
+                }
+            }
+        }
+    }
+
+    private async Task<SiteGrabberResult> CrawlAsync(
+        SiteGrabberRequest request,
+        Func<GrabberFile, Task<AddJobResponse>> enqueue,
+        CancellationToken cancellationToken,
+        Action<int, int, int>? onProgress,
+        SiteGrabberResult result,
+        Uri start,
+        string startAuthority,
+        int maxDepth,
+        int maxPages,
+        int maxFiles,
+        HashSet<string> extensions,
+        HashSet<string> visited,
+        List<GrabberPage> pages,
+        List<GrabberFile> files,
+        HashSet<string> fileUrls,
+        Dictionary<string, string> localOwners,
+        Queue<(Uri Url, int Depth)> queue,
+        HttpClient http,
+        Func<Uri, Task<bool>> AllowedAsync,
+        HeadlessRenderer? renderer)
+    {
+
         while (queue.Count > 0 && pages.Count < maxPages)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -182,6 +255,20 @@ internal sealed class SiteGrabber
                 }
 
                 var html = Encoding.UTF8.GetString(bytes);
+                if (renderer is not null)
+                {
+                    // Only pages that already passed scope, robots and auth checks are rendered.
+                    try
+                    {
+                        html = await renderer.RenderAsync(url, cancellationToken).ConfigureAwait(false);
+                        result.PagesRendered++;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                    {
+                        AddError(result, $"{url}: rendering failed, using static HTML ({ex.Message})");
+                    }
+                }
+
                 var page = new GrabberPage(
                     url,
                     html,

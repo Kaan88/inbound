@@ -48,6 +48,7 @@
                 <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
+                <MenuFlyoutItem Text="Clean up leftover partial files..." Click="MenuCleanOrphans_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Find..." Click="MenuFind_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>

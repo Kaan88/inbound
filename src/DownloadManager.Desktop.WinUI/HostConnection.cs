@@ -66,6 +66,10 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url },
             TimeSpan.FromSeconds(10), cancellationToken);
 
+    public Task<IpcMessage> CleanOrphansAsync(bool delete, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.HostCleanOrphans, new CleanOrphansRequest { Delete = delete },
+            TimeSpan.FromSeconds(30), cancellationToken);
+
     public Task<IpcMessage> RunGrabberAsync(SiteGrabberRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.GrabberRun, request, TimeSpan.FromMinutes(5), cancellationToken);
 

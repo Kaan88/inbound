@@ -809,7 +809,7 @@ internal static class Program
             Console.Error.WriteLine(
                 "usage: grab <start-url> [--dest DIR] [--depth N] [--max-pages N] " +
                 "[--extensions zip,mp3] [--include GLOB] [--exclude GLOB] " +
-                "[--no-pages] [--no-rewrite] [--start now|later] [--queue ID]");
+                "[--no-pages] [--no-rewrite] [--ignore-robots] [--render-js] [--start now|later] [--queue ID]");
             return 2;
         }
 
@@ -828,7 +828,8 @@ internal static class Program
         {
             Console.WriteLine(
                 $"crawled {result.PagesCrawled} pages, queued {result.FilesQueued} files, " +
-                $"skipped {result.FilesSkipped}, robots.txt blocked {result.RobotsBlocked}");
+                $"skipped {result.FilesSkipped}, robots.txt blocked {result.RobotsBlocked}, " +
+                $"rendered {result.PagesRendered}");
             foreach (var error in result.Errors)
             {
                 Console.WriteLine($"  warning: {error}");
@@ -1126,6 +1127,7 @@ internal static class Program
             SavePages = !args.Contains("--no-pages", StringComparer.OrdinalIgnoreCase),
             RewriteLinks = !args.Contains("--no-rewrite", StringComparer.OrdinalIgnoreCase),
             RespectRobotsTxt = !args.Contains("--ignore-robots", StringComparer.OrdinalIgnoreCase),
+            RenderJavaScript = args.Contains("--render-js", StringComparer.OrdinalIgnoreCase),
             StartMode = GetOption(args, "--start") ?? "now",
             IncludePatterns = GetOptions(args, "--include").ToList(),
             ExcludePatterns = GetOptions(args, "--exclude").ToList(),
@@ -1573,7 +1575,16 @@ internal static class Program
                     settings.Proxy.Username = value;
                     break;
                 case "proxypass":
-                    settings.Proxy.Password = value;
+                    if (value == "--clear")
+                    {
+                        settings.Proxy.Password = null;
+                        settings.Proxy.ClearPassword = true;
+                    }
+                    else
+                    {
+                        settings.Proxy.Password = value;
+                    }
+
                     break;
                 case "allowsystemcompletionactions":
                     settings.AllowSystemCompletionActions = ParseBool(value);
