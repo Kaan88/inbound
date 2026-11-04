@@ -1641,6 +1641,8 @@ public sealed class DownloadManagerService
         CancellationToken cancellationToken = default)
     {
         JobRuntime? runtime;
+        string? moveFrom = null;
+        string? moveTo = null;
         lock (_sync)
         {
             if (!_jobs.TryGetValue(request.JobId, out runtime))
@@ -1655,7 +1657,75 @@ public sealed class DownloadManagerService
                     : request.Description.Trim();
             }
 
+            if (request.NewFilePath is not null)
+            {
+                if (runtime.Job.State != DownloadState.Completed)
+                {
+                    return new JobActionResponse
+                    {
+                        Ok = false,
+                        Error = "Move/Rename is available after the download completes.",
+                    };
+                }
+
+                string target;
+                try
+                {
+                    target = Path.GetFullPath(request.NewFilePath.Trim());
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+                {
+                    return new JobActionResponse { Ok = false, Error = ex.Message };
+                }
+
+                var directory = Path.GetDirectoryName(target);
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    return new JobActionResponse { Ok = false, Error = "The new path has no folder." };
+                }
+
+                if (!string.Equals(target, runtime.Job.FinalFilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (File.Exists(target))
+                    {
+                        return new JobActionResponse { Ok = false, Error = "The target file already exists." };
+                    }
+
+                    if (!File.Exists(runtime.Job.FinalFilePath))
+                    {
+                        return new JobActionResponse { Ok = false, Error = "The completed file no longer exists." };
+                    }
+
+                    moveFrom = runtime.Job.FinalFilePath;
+                    moveTo = target;
+                }
+            }
+
             runtime.Job.Touch();
+        }
+
+        if (moveTo is not null)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(moveTo)!);
+                File.Move(moveFrom!, moveTo);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return new JobActionResponse { Ok = false, Error = ex.Message };
+            }
+
+            lock (_sync)
+            {
+                runtime.Job.FinalFilePath = moveTo;
+                runtime.Job.FileName = Path.GetFileName(moveTo);
+                runtime.Job.DestinationDirectory = Path.GetDirectoryName(moveTo)!;
+                runtime.Job.PartFilePath = Path.Combine(
+                    runtime.Job.DestinationDirectory,
+                    $"{runtime.Job.FileName}.{runtime.Job.Id:N}.part");
+                runtime.Job.Touch();
+            }
         }
 
         await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);

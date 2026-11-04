@@ -198,6 +198,15 @@ public sealed class ShellActionsTests
     }
 
     [Fact]
+    public void OpenWithUsesOpenAsRunDll()
+    {
+        var start = ShellActions.OpenWith(@"C:\Downloads\report.pdf");
+        Assert.Equal("rundll32.exe", start.FileName);
+        Assert.Equal("shell32.dll,OpenAs_RunDLL \"C:\\Downloads\\report.pdf\"", start.Arguments);
+        Assert.True(start.UseShellExecute);
+    }
+
+    [Fact]
     public void RevealFileSelectsExistingFile()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "test-work");

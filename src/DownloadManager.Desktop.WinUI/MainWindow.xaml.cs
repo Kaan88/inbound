@@ -79,6 +79,10 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKeyModifiers.Control,
             () => MenuFind_Click(this, new RoutedEventArgs())));
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.F3,
+            Windows.System.VirtualKeyModifiers.None,
+            () => MenuFindNext_Click(this, new RoutedEventArgs())));
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             () =>
@@ -179,6 +183,7 @@ public sealed partial class MainWindow : Window
     {
         _settings = snapshot.Settings;
         _status = snapshot.Status;
+        RefreshQueueMenus();
 
         var selectedId = (JobsList.SelectedItem as JobViewModel)?.Id;
         _jobsById.Clear();
@@ -491,10 +496,15 @@ public sealed partial class MainWindow : Window
         var flyout = new MenuFlyout();
         flyout.Opening += JobsContextMenu_Opening;
         flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
+        flyout.Items.Add(CreateContextItem("Open with...", MenuOpenWith_Click));
         flyout.Items.Add(CreateContextItem("Open folder", MenuOpenFolder_Click));
+        flyout.Items.Add(CreateContextItem("Move/Rename...", MenuMoveRename_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
+        flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
+        flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
+        flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
         flyout.Items.Add(CreateContextItem("Refresh download address...", MenuRefreshUrl_Click));
+        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to queue" };
         flyout.Items.Add(_addToQueueMenu);
         flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
@@ -561,6 +571,186 @@ public sealed partial class MainWindow : Window
         if (SelectedJob is { } job && _settings is { } settings)
         {
             await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, settings.DefaultQueueId));
+        }
+    }
+
+    private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
+            !File.Exists(job.FinalFilePath))
+        {
+            await ShowMessageAsync("Open with", "The completed file was not found.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(ShellActions.OpenWith(job.FinalFilePath));
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Open with", ex.Message);
+        }
+    }
+
+    private async void MenuMoveRename_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } job)
+        {
+            return;
+        }
+
+        if (job.State != "completed")
+        {
+            await ShowMessageAsync("Move/Rename", "Move/Rename is available after the download completes.");
+            return;
+        }
+
+        var pathBox = new TextBox
+        {
+            Header = "New full path",
+            Text = job.FinalFilePath,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Move/Rename",
+            Content = pathBox,
+            PrimaryButtonText = "Move",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+            string.IsNullOrWhiteSpace(pathBox.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            var reply = await _connection.MoveJobAsync(job.Id, pathBox.Text.Trim());
+            var result = reply.GetPayload<JobActionResponse>();
+            if (!result.Ok)
+            {
+                await ShowMessageAsync("Move/Rename", result.Error ?? "The host rejected the move.");
+                return;
+            }
+
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Move/Rename", ex.Message);
+        }
+    }
+
+    private async void MenuRedownload_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } job)
+        {
+            return;
+        }
+
+        if (job.State is "connecting" or "downloading" or "queued" or "paused" or "retryWaiting")
+        {
+            await ShowMessageAsync("Redownload", "Stop the current download before redownloading.");
+            return;
+        }
+
+        try
+        {
+            var reply = await _connection.AddAsync(new AddJobRequest
+            {
+                Url = job.Url,
+                DestinationDirectory = job.Destination,
+                FileName = job.FileName,
+                ConflictPolicy = "rename",
+                Source = "api",
+            });
+            var add = reply.GetPayload<AddJobResponse>();
+            if (!add.Accepted)
+            {
+                await ShowMessageAsync("Redownload", add.Error ?? "The host rejected the redownload.");
+                return;
+            }
+
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Redownload", ex.Message);
+        }
+    }
+
+    private void MenuFindNext_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobsList.Items.Count == 0)
+        {
+            MenuFind_Click(sender, e);
+            return;
+        }
+
+        var next = JobsList.SelectedIndex >= 0
+            ? (JobsList.SelectedIndex + 1) % JobsList.Items.Count
+            : 0;
+        JobsList.SelectedIndex = next;
+        JobsList.ScrollIntoView(JobsList.Items[next]);
+        UpdateButtons();
+        UpdateStatusText();
+    }
+
+    private void RefreshQueueMenus()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        StartQueueMenu.Items.Clear();
+        StopQueueMenu.Items.Clear();
+        foreach (var queue in _settings.Queues.OrderBy(queue => queue.Order))
+        {
+            var start = new MenuFlyoutItem
+            {
+                Text = $"Start {queue.Name} download queue",
+                IsEnabled = !queue.IsRunning,
+            };
+            start.Click += async (_, _) => await QueueActionFromMenuAsync(queue.Id, "start");
+            StartQueueMenu.Items.Add(start);
+
+            var stop = new MenuFlyoutItem
+            {
+                Text = $"Stop {queue.Name} download queue",
+                IsEnabled = queue.IsRunning,
+            };
+            stop.Click += async (_, _) => await QueueActionFromMenuAsync(queue.Id, "stop");
+            StopQueueMenu.Items.Add(stop);
+        }
+    }
+
+    private async Task QueueActionFromMenuAsync(int queueId, string action)
+    {
+        try
+        {
+            var reply = await _connection.QueueActionAsync(new QueueActionRequest
+            {
+                QueueId = queueId,
+                Action = action,
+            });
+            var result = reply.GetPayload<SettingsResult>();
+            if (!result.Ok)
+            {
+                await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the action.");
+                return;
+            }
+
+            _settings = result.Settings;
+            RefreshQueueMenus();
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Queue action failed", ex.Message);
         }
     }
 

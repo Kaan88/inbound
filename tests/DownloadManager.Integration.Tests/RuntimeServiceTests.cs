@@ -432,6 +432,43 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task MoveCompletedDownloadRenamesAndUpdatesPaths()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/move-source.bin?size=65536&seed=241",
+            DestinationDirectory = ctx.Destination,
+            FileName = "move-source.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, job => job.State == "completed");
+        var newPath = Path.Combine(ctx.Destination, "moved", "renamed.bin");
+        Assert.True(File.Exists(completed.FinalFilePath));
+
+        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = completed.Id,
+            NewFilePath = newPath,
+        });
+        Assert.True(update.Ok, update.Error);
+        Assert.Equal("renamed.bin", update.Job!.FileName);
+        Assert.Equal(newPath, update.Job.FinalFilePath);
+        Assert.Equal(Path.GetDirectoryName(newPath), update.Job.DestinationDirectory);
+        Assert.True(File.Exists(newPath));
+        Assert.False(File.Exists(completed.FinalFilePath));
+
+        var duplicate = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = completed.Id,
+            NewFilePath = newPath,
+        });
+        Assert.True(duplicate.Ok, duplicate.Error);
+        Assert.Equal(newPath, duplicate.Job!.FinalFilePath);
+    }
+
+    [Fact]
     public async Task RecentUrlsAreRecordedDeduplicatedAndPersisted()
     {
         var ctx = await ServiceContext.CreateAsync(_server);

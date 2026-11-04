@@ -942,6 +942,30 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## UI inventory verification (U1/U2, 2026-11-04)
+
+- Added `scripts/ui-inventory.ps1` (live UI Automation menu/toolbar/category/
+  column dump) and `notes/ui-parity-checklist.md` (side-by-side
+  mapping against `ui-inventory.md`).
+- Live dump confirmed:
+  - five menus Tasks/File/Downloads/View/Help;
+  - toolbar Add URL, Resume, Stop, Stop All, Delete, Delete Completed, Options,
+    Scheduler, Start Queue, Stop Queue;
+  - category tree with all reference categories plus Active/Queued/Failed;
+  - all eight reference app columns.
+- Added File Stop All/Redownload, Downloads Find next plus Start/Stop queue
+  submenus, and context Open with/Move-Rename/Redownload/Resume/Stop.
+- Move/Rename is backed by `MoveCompletedDownloadRenamesAndUpdatesPaths`
+  (integration); Open with by `OpenWithUsesOpenAsRunDll` (core).
+- Documented deviations: consolidated Add URL/Options dialogs, own branding,
+  extra state views/status bar, omitted Speed Limiter submenu,
+  clipboard-batch/drop-target, URL-list/font/language customization,
+  licensing/Tell a Friend and On Double click.
+- Core **51/51**, integration **61/61**, engine **30/30**, build 0 errors.
+- A later window capture rendered black in this harness session while UI
+  Automation still exposed the full tree; the earlier `ui-audit.png` shows the
+  rendered layout.
+
 ## Segmented/reference app benchmark evidence (A9, 2026-11-04)
 
 - Added `scripts/benchmark-a9.ps1`, which starts TestServer and Host, downloads
@@ -1320,11 +1344,11 @@ random-access part file **in the destination directory**:
   HTML-page policy, monotonic progress/ETA, transient-500 retry recovery,
   per-download speed limiting, disk-full preflight, permission failure, and
   dynamic work redistribution, and speed/ETA stability.
-- Core: **50/50 passed**, including shutdown-command construction, clipboard URL
+- Core: **51/51 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **60/60 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **61/61 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1333,7 +1357,7 @@ random-access part file **in the destination directory**:
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
   recent-URL history, pause-vs-cancel partial files, short/long/missing part
-  reconciliation, orphan-part reporting, per-host connection limits, global speed
+  reconciliation, orphan-part reporting, completed-file move/rename, per-host connection limits, global speed
   limiting, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
   post-download hook isolation, connection profiles, secret-preserving settings

@@ -36,8 +36,10 @@
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Progress details..." Click="MenuProgressDetails_Click" />
                 <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
+                <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
                 <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
                 <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />
+                <MenuFlyoutItem Text="Redownload" Click="MenuRedownload_Click" />
             </MenuBarItem>
 
             <MenuBarItem Title="Downloads">
@@ -51,6 +53,14 @@
                         <KeyboardAccelerator Key="F" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Find next" Click="MenuFindNext_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F3" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start queue" />
+                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop queue" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Scheduler..." Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options..." Click="MenuOptions_Click" />
@@ -131,7 +141,8 @@
                             <TextBlock Text="Delete Completed" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource InboundToolButtonStyle}" Click="MenuOptions_Click"
+                    <Button x:Name="OptionsButton" AutomationProperties.Name="Options"
+                            Style="{StaticResource InboundToolButtonStyle}" Click="MenuOptions_Click"
                             ToolTipService.ToolTip="Open Download Manager settings">
                         <StackPanel>
                             <FontIcon Glyph="&#xE713;" FontSize="25" Foreground="#6FA8DC" />

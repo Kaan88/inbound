@@ -262,6 +262,9 @@ public sealed class JobUpdateRequest
 {
     public Guid JobId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>New absolute path for a completed download (Move/Rename).</summary>
+    public string? NewFilePath { get; set; }
 }
 
 public sealed class SiteGrabberRequest
