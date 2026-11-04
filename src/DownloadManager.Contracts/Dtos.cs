@@ -327,6 +327,15 @@ public sealed class GrabberProjectsResult
     public List<GrabberProjectDto> Projects { get; set; } = new();
 }
 
+public sealed class SegmentDto
+{
+    public long Start { get; set; }
+    public long End { get; set; }
+    public long Completed { get; set; }
+    public bool IsComplete { get; set; }
+    public double Fraction { get; set; }
+}
+
 public sealed class JobEventDto
 {
     public JobDto Job { get; set; } = new();

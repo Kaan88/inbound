@@ -276,6 +276,14 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.JobSegments:
+                    var segmentsRequest = message.GetPayload<JobActionRequest>();
+                    await Reply(client, message, MessageTypes.JobSegmentsResult,
+                        await _service.GetSegmentsAsync(segmentsRequest.JobId, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.UpdateCheck:
                     await Reply(client, message, MessageTypes.UpdateCheckResult,
                         await _service.CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false))

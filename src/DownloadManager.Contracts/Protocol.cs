@@ -47,6 +47,8 @@ public static class MessageTypes
     public const string HandoffAck = "handoff.ack";
     public const string HandoffError = "handoff.error";
     public const string JobsQuery = "jobs.query";
+    public const string JobSegments = "job.segments";
+    public const string JobSegmentsResult = "job.segmentsResult";
     public const string GrabberRun = "grabber.run";
     public const string GrabberResult = "grabber.result";
     public const string GrabberProjectsQuery = "grabber.projects.query";

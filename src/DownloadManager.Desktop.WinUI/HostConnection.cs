@@ -33,6 +33,10 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
 
+    public Task<IpcMessage> GetSegmentsAsync(Guid id, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobSegments, new JobActionRequest { JobId = id },
+            TimeSpan.FromSeconds(8), cancellationToken);
+
     public Task<IpcMessage> PauseAsync(Guid id, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobPause, new JobActionRequest { JobId = id }, TimeSpan.FromSeconds(8), cancellationToken);
 

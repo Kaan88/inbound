@@ -365,6 +365,34 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SegmentDetailsMatchTheEngineCheckpoint()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/segments.bin?size=2097152&seed=430&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "segments.bin",
+            Connections = 4,
+            Source = "cli",
+        });
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 262144, TimeSpan.FromSeconds(30));
+
+        var segments = await ctx.Service.GetSegmentsAsync(response.Job.Id);
+        Assert.True(segments.Count >= 2);
+        Assert.All(segments, segment =>
+        {
+            Assert.True(segment.End > segment.Start);
+            Assert.InRange(segment.Fraction, 0, 1);
+            Assert.True(segment.Completed >= 0);
+        });
+        Assert.True(segments.Sum(segment => segment.Completed) <=
+                    ctx.Service.GetJob(response.Job.Id)!.ReceivedBytes);
+
+        await ctx.Service.CancelAsync(response.Job.Id, deleteFile: true);
+    }
+
+    [Fact]
     public async Task PostDownloadHookRunsOnceWithExactFilePath()
     {
         var hook = new RecordingPostDownloadHook();

@@ -163,6 +163,44 @@ public sealed class DownloadManagerService
         }
     }
 
+    public async Task<IReadOnlyList<SegmentDto>> GetSegmentsAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        bool known;
+        lock (_sync)
+        {
+            known = _jobs.ContainsKey(id);
+        }
+
+        if (!known)
+        {
+            return Array.Empty<SegmentDto>();
+        }
+
+        var checkpoint = await _checkpointStore.LoadAsync(id, cancellationToken).ConfigureAwait(false);
+        if (checkpoint is null)
+        {
+            return Array.Empty<SegmentDto>();
+        }
+
+        return checkpoint.Segments
+            .OrderBy(segment => segment.Start)
+            .Select(segment =>
+            {
+                var length = Math.Max(1, segment.End - segment.Start + 1);
+                return new SegmentDto
+                {
+                    Start = segment.Start,
+                    End = segment.End,
+                    Completed = segment.Completed,
+                    IsComplete = segment.IsComplete,
+                    Fraction = Math.Clamp(segment.Completed / (double)length, 0, 1),
+                };
+            })
+            .ToList();
+    }
+
     public JobDto? GetJob(Guid id)
     {
         lock (_sync)

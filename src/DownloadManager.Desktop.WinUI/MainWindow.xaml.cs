@@ -27,10 +27,13 @@ public sealed partial class MainWindow : Window
     private string _sortKey = "added";
     private bool _sortAscending;
     private bool _toolbarLarge = true;
+    private bool _hideCategories;
+    private UiState _uiState = new();
 
     public MainWindow()
     {
         UiTrace.Write("MainWindow ctor begin");
+        _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
         RootGrid.RequestedTheme = ElementTheme.Dark;
@@ -40,7 +43,9 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            AppWindow.Resize(new SizeInt32(1180, 760));
+            var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
+            var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
+            AppWindow.Resize(new SizeInt32(width, height));
             var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
             if (File.Exists(icon))
             {
@@ -65,9 +70,63 @@ public sealed partial class MainWindow : Window
         _connection.Start();
         UiTrace.Write("MainWindow connection started");
 
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.N,
+            Windows.System.VirtualKeyModifiers.Control,
+            () => AddButton_Click(this, new RoutedEventArgs())));
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.F,
+            Windows.System.VirtualKeyModifiers.Control,
+            () => MenuFind_Click(this, new RoutedEventArgs())));
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.S,
+            Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
+            () =>
+            {
+                _sortKey = "size";
+                _sortAscending = false;
+                RebuildVisible();
+            }));
+
+        _sortKey = _uiState.SortKey is "added" or "name" or "size" or "status" or "rate" or "lastTry"
+            ? _uiState.SortKey
+            : "added";
+        _sortAscending = _uiState.SortAscending;
+        _toolbarLarge = _uiState.ToolbarLarge;
+        _hideCategories = _uiState.HideCategories;
+        HideCategoriesMenuItem.IsChecked = _hideCategories;
+        CategoryColumn.Width = _hideCategories ? new GridLength(0) : new GridLength(192);
+        SetToolbarScale(_toolbarLarge);
         CategoryList.SelectedIndex = 0;
+        if (!string.IsNullOrWhiteSpace(_uiState.Category))
+        {
+            var saved = CategoryList.Items
+                .OfType<ListBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, _uiState.Category,
+                    StringComparison.OrdinalIgnoreCase));
+            if (saved is not null && saved.IsEnabled &&
+                saved.Tag is not ("grabber" or "queues"))
+            {
+                CategoryList.SelectedItem = saved;
+            }
+        }
+
         UpdateButtons();
         UiTrace.Write("MainWindow ctor end");
+    }
+
+    private static KeyboardAccelerator CreateAccelerator(
+        Windows.System.VirtualKey key,
+        Windows.System.VirtualKeyModifiers modifiers,
+        Action action)
+    {
+        var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
+        accelerator.Invoked += (_, args) =>
+        {
+            args.Handled = true;
+            action();
+        };
+        return accelerator;
     }
 
     public void ShowFromTray()
@@ -89,8 +148,31 @@ public sealed partial class MainWindow : Window
     {
         // Closing the window hides it. Downloads and the browser bridge stay alive
         // in the background host; Exit is an explicit tray/menu action.
+        SaveUiState(sender);
         args.Cancel = true;
         sender.Hide();
+    }
+
+    private void SaveUiState(AppWindow? window = null)
+    {
+        try
+        {
+            var size = (window ?? AppWindow).Size;
+            UiStateStore.Save(new UiState
+            {
+                WindowWidth = size.Width,
+                WindowHeight = size.Height,
+                Category = _category,
+                SortKey = _sortKey,
+                SortAscending = _sortAscending,
+                ToolbarLarge = _toolbarLarge,
+                HideCategories = _hideCategories,
+            });
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"UI state save failed: {ex.Message}");
+        }
     }
 
     private void ApplySnapshot(SnapshotDto snapshot)
@@ -240,14 +322,17 @@ public sealed partial class MainWindow : Window
 
     private JobViewModel? SelectedJob => JobsList.SelectedItem as JobViewModel;
 
+    private List<JobViewModel> SelectedJobs =>
+        JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+
     private void UpdateButtons()
     {
         var connected = _connection?.IsConnected ?? false;
-        var job = SelectedJob;
+        var selection = SelectedJobs;
         AddButton.IsEnabled = connected;
-        PauseButton.IsEnabled = connected && job?.CanPause == true;
-        ResumeButton.IsEnabled = connected && job?.CanResume == true;
-        DeleteButton.IsEnabled = connected && job is not null;
+        PauseButton.IsEnabled = connected && selection.Any(job => job.CanPause);
+        ResumeButton.IsEnabled = connected && selection.Any(job => job.CanResume);
+        DeleteButton.IsEnabled = connected && selection.Count > 0;
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
         StartQueueButton.IsEnabled = connected && _settings is not null;
@@ -261,6 +346,12 @@ public sealed partial class MainWindow : Window
         var host = _status?.HostVersion;
         StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
                           (host is null ? string.Empty : $" · host {host}");
+        var selected = SelectedJobs.Count;
+        if (selected > 1)
+        {
+            StatusText.Text += $"  ({selected} selected)";
+        }
+
         if (_status?.StateDirectory is { } stateDirectory)
         {
             ToolTipService.SetToolTip(StatusText, stateDirectory);
@@ -286,12 +377,14 @@ public sealed partial class MainWindow : Window
             "all" => true,
             "finished" => job.State == "completed",
             "unfinished" => job.State is not ("completed" or "cancelled"),
+            "active" => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting",
+            "queued" => job.State is "queued" or "paused",
+            "failed" => job.State == "failed",
             "compressed" => FileCategories.For(job.FileName) == "compressed",
             "documents" => FileCategories.For(job.FileName) == "documents",
             "music" => FileCategories.For(job.FileName) == "music",
             "programs" => FileCategories.For(job.FileName) == "programs",
             "video" => FileCategories.For(job.FileName) == "video",
-            "queues" => !string.IsNullOrEmpty(job.QueueText),
             _ => true,
         };
     }
@@ -305,10 +398,10 @@ public sealed partial class MainWindow : Window
         var ordered = _sortKey switch
         {
             "name" => _sortAscending ? filtered.OrderBy(j => j.FileName) : filtered.OrderByDescending(j => j.FileName),
-            "size" => _sortAscending ? filtered.OrderBy(j => j.SizeText.Length) : filtered.OrderByDescending(j => j.SizeText.Length),
+            "size" => _sortAscending ? filtered.OrderBy(j => j.TotalSize) : filtered.OrderByDescending(j => j.TotalSize),
             "status" => _sortAscending ? filtered.OrderBy(j => j.State) : filtered.OrderByDescending(j => j.State),
-            "rate" => _sortAscending ? filtered.OrderBy(j => j.SpeedText) : filtered.OrderByDescending(j => j.SpeedText),
-            "lastTry" => _sortAscending ? filtered.OrderBy(j => j.LastTryText) : filtered.OrderByDescending(j => j.LastTryText),
+            "rate" => _sortAscending ? filtered.OrderBy(j => j.BytesPerSecond) : filtered.OrderByDescending(j => j.BytesPerSecond),
+            "lastTry" => _sortAscending ? filtered.OrderBy(j => j.LastUpdated) : filtered.OrderByDescending(j => j.LastUpdated),
             _ => _sortAscending ? filtered.OrderBy(j => j.CreatedAt) : filtered.OrderByDescending(j => j.CreatedAt),
         };
 
@@ -326,7 +419,25 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
     }
 
-    private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateButtons();
+    private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateButtons();
+        UpdateStatusText();
+    }
+
+    private async void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Delete && SelectedJobs.Count > 0)
+        {
+            e.Handled = true;
+            DeleteButton_Click(sender, e);
+        }
+        else if (e.Key == Windows.System.VirtualKey.Enter && SelectedJob is { } job)
+        {
+            e.Handled = true;
+            await OpenJobAsync(job);
+        }
+    }
 
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -335,6 +446,12 @@ public sealed partial class MainWindow : Window
             if (tag == "grabber")
             {
                 _ = ShowGrabberProjectsAsync();
+                return;
+            }
+
+            if (tag == "queues")
+            {
+                _ = ShowQueuesAsync();
                 return;
             }
 
@@ -359,7 +476,8 @@ public sealed partial class MainWindow : Window
             element = VisualTreeHelper.GetParent(element);
         }
 
-        if (element is ListViewItem { Content: JobViewModel job })
+        if (element is ListViewItem { Content: JobViewModel job } &&
+            !JobsList.SelectedItems.Contains(job))
         {
             JobsList.SelectedItem = job;
         }
@@ -378,6 +496,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_addToQueueMenu);
         flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateContextItem("Progress details...", MenuProgressDetails_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
         JobsList.ContextFlyout = flyout;
     }
@@ -472,6 +591,103 @@ public sealed partial class MainWindow : Window
         }
 
         await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, input.Text.Trim()));
+    }
+
+    private async void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } selected)
+        {
+            return;
+        }
+
+        var summary = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var overall = new ProgressBar { Maximum = 100, Height = 8 };
+        var segmentsPanel = new StackPanel { Spacing = 4 };
+        var status = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+        };
+        var refresh = new Button { Content = "Refresh" };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(summary);
+        panel.Children.Add(overall);
+        panel.Children.Add(refresh);
+        panel.Children.Add(segmentsPanel);
+        panel.Children.Add(status);
+
+        async Task LoadAsync()
+        {
+            try
+            {
+                var snapshot = await _connection.RefreshAsync();
+                var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == selected.Id);
+                if (job is null)
+                {
+                    summary.Text = "This download is no longer in the list.";
+                    segmentsPanel.Children.Clear();
+                    return;
+                }
+
+                var received = job.ReceivedBytes;
+                var total = job.TotalBytes;
+                var percent = total is > 0 ? received * 100.0 / total.Value : 0;
+                overall.Value = Math.Clamp(percent, 0, 100);
+                summary.Text =
+                    $"File: {job.FileName}\nState: {job.State}\n" +
+                    $"Bytes: {received:N0}" + (total is > 0 ? $" / {total.Value:N0} ({percent:0.0}%)" : string.Empty) +
+                    $"\nConnections: {job.ActiveConnections}/{job.RequestedConnections}\n" +
+                    $"Speed: {job.BytesPerSecond:0} B/s\nETA: {job.EstimatedRemaining}\n" +
+                    $"Part: {job.PartFilePath}";
+
+                var reply = await _connection.GetSegmentsAsync(job.Id);
+                var segments = reply.GetPayload<List<SegmentDto>>();
+                segmentsPanel.Children.Clear();
+                if (segments.Count == 0)
+                {
+                    status.Text = job.State == "completed"
+                        ? "Completed; the checkpoint was removed after the final rename."
+                        : "No segment checkpoint yet (the transfer may still be connecting).";
+                    return;
+                }
+
+                status.Text = $"{segments.Count} segment{(segments.Count == 1 ? "" : "s")} from the engine checkpoint.";
+                foreach (var segment in segments)
+                {
+                    var length = Math.Max(1, segment.End - segment.Start + 1);
+                    var row = new StackPanel { Spacing = 1 };
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = $"Bytes {segment.Start:N0}–{segment.End:N0}  " +
+                               $"{segment.Completed:N0}/{length:N0}",
+                        FontSize = 11,
+                    });
+                    row.Children.Add(new ProgressBar
+                    {
+                        Maximum = 100,
+                        Height = 5,
+                        Value = Math.Clamp(segment.Fraction * 100, 0, 100),
+                    });
+                    segmentsPanel.Children.Add(row);
+                }
+            }
+            catch (Exception ex)
+            {
+                status.Text = ex.Message;
+            }
+        }
+
+        refresh.Click += async (_, _) => await LoadAsync();
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Download progress",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        await LoadAsync();
+        await dialog.ShowAsync();
     }
 
     private async void MenuProperties_Click(object sender, RoutedEventArgs e)
@@ -699,7 +915,16 @@ public sealed partial class MainWindow : Window
 
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);
     private void MenuResume_Click(object sender, RoutedEventArgs e) => ResumeButton_Click(sender, e);
-    private void MenuRemove_Click(object sender, RoutedEventArgs e) => DeleteButton_Click(sender, e);
+    private async void MenuRemove_Click(object sender, RoutedEventArgs e)
+    {
+        var selection = SelectedJobs;
+        if (selection.Count == 0)
+        {
+            return;
+        }
+
+        await RunBulkActionAsync(selection, id => _connection.RemoveAsync(id, deleteFile: false), "Remove");
+    }
     private void MenuOptions_Click(object sender, RoutedEventArgs e) => _ = ShowSettingsDialogAsync();
 
     private async void MenuPauseAll_Click(object sender, RoutedEventArgs e)
@@ -799,7 +1024,8 @@ public sealed partial class MainWindow : Window
 
     private void MenuHideCategories_Click(object sender, RoutedEventArgs e)
     {
-        CategoryColumn.Width = HideCategoriesMenuItem.IsChecked ? new GridLength(0) : new GridLength(192);
+        _hideCategories = HideCategoriesMenuItem.IsChecked;
+        CategoryColumn.Width = _hideCategories ? new GridLength(0) : new GridLength(192);
     }
 
     private void MenuSort_Click(object sender, RoutedEventArgs e)
@@ -1555,6 +1781,98 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async Task ShowQueuesAsync()
+    {
+        var snapshot = await _connection.RefreshAsync();
+        _settings = snapshot.Settings;
+        var panel = new StackPanel { Spacing = 8 };
+        var action = string.Empty;
+        var actionQueue = 0;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Queues",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 480 },
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        foreach (var queue in _settings.Queues.OrderBy(queue => queue.Order))
+        {
+            var members = snapshot.Jobs.Count(job => job.QueueId == queue.Id);
+            var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 4, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel { Spacing = 2 };
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{queue.Name} — {(queue.IsRunning ? "running" : "stopped")}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{members} download{(members == 1 ? "" : "s")}; " +
+                       $"max {queue.MaxConcurrentDownloads} concurrent" +
+                       (queue.QuotaEnabled ? $"; quota {queue.QuotaBytes:N0} bytes" : string.Empty),
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            });
+            Grid.SetColumn(info, 0);
+            row.Children.Add(info);
+
+            var start = new Button { Content = "Start", IsEnabled = !queue.IsRunning };
+            start.Click += (_, _) =>
+            {
+                action = "start";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(start, 1);
+            row.Children.Add(start);
+
+            var stop = new Button { Content = "Stop", IsEnabled = queue.IsRunning };
+            stop.Click += (_, _) =>
+            {
+                action = "stop";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(stop, 2);
+            row.Children.Add(stop);
+
+            panel.Children.Add(row);
+            panel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 59, 76)),
+            });
+        }
+
+        await dialog.ShowAsync();
+        if (action.Length == 0)
+        {
+            return;
+        }
+
+        var reply = await _connection.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = actionQueue,
+            Action = action,
+        });
+        var result = reply.GetPayload<SettingsResult>();
+        if (!result.Ok)
+        {
+            await ShowMessageAsync("Queue action failed", result.Error ?? "The host rejected the action.");
+            return;
+        }
+
+        _settings = result.Settings;
+        await RefreshAsync();
+        await ShowQueuesAsync();
+    }
+
     private async void MenuScheduler_Click(object sender, RoutedEventArgs e)
         => await ShowSchedulerAsync();
 
@@ -2291,36 +2609,50 @@ public sealed partial class MainWindow : Window
 
     private async void PauseButton_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        var selection = SelectedJobs.Where(job => job.CanPause).ToList();
+        if (selection.Count > 0)
         {
-            await RunActionAsync(() => _connection.PauseAsync(job.Id));
+            await RunBulkActionAsync(selection, id => _connection.PauseAsync(id), "Stop");
         }
     }
 
     private async void ResumeButton_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        var selection = SelectedJobs.Where(job => job.CanResume).ToList();
+        if (selection.Count > 0)
         {
-            await RunActionAsync(() => _connection.ResumeAsync(job.Id));
+            await RunBulkActionAsync(selection, id => _connection.ResumeAsync(id), "Resume");
         }
     }
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job)
+        var selection = SelectedJobs;
+        if (selection.Count == 0)
         {
             return;
         }
 
+        var deleteFiles = new CheckBox
+        {
+            Content = "Also delete the downloaded file from disk",
+            IsChecked = true,
+        };
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = selection.Count == 1
+                ? $"Remove '{selection[0].FileName}' from the list? Partial data is always removed."
+                : $"Remove {selection.Count} downloads from the list? Partial data is always removed.",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(deleteFiles);
+
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
-            Title = "Delete download?",
-            Content = new TextBlock
-            {
-                Text = "The list entry, partial data and the downloaded file will be deleted. This cannot be undone.",
-                TextWrapping = TextWrapping.Wrap,
-            },
+            Title = selection.Count == 1 ? "Delete download?" : $"Delete {selection.Count} downloads?",
+            Content = panel,
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -2331,7 +2663,45 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        await RunActionAsync(() => _connection.RemoveAsync(job.Id, deleteFile: true));
+        var includeFiles = deleteFiles.IsChecked == true;
+        await RunBulkActionAsync(
+            selection,
+            id => _connection.RemoveAsync(id, deleteFile: includeFiles),
+            "Delete");
+    }
+
+    private async Task RunBulkActionAsync(
+        IReadOnlyList<JobViewModel> jobs,
+        Func<Guid, Task<IpcMessage>> action,
+        string label)
+    {
+        var failures = new List<string>();
+        foreach (var job in jobs)
+        {
+            try
+            {
+                var reply = await action(job.Id);
+                if (reply.Type == MessageTypes.JobActionResult)
+                {
+                    var result = reply.GetPayload<JobActionResponse>();
+                    if (!result.Ok)
+                    {
+                        failures.Add($"{job.FileName}: {result.Error}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{job.FileName}: {ex.Message}");
+            }
+        }
+
+        await RefreshAsync();
+        if (failures.Count > 0)
+        {
+            await ShowMessageAsync($"{label} incomplete",
+                string.Join(Environment.NewLine, failures.Take(5)));
+        }
     }
 
     private async Task RefreshAsync()
@@ -2375,7 +2745,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                Process.Start(new ProcessStartInfo { FileName = job.FinalFilePath, UseShellExecute = true });
+                Process.Start(ShellActions.OpenFile(job.FinalFilePath));
                 return;
             }
             catch (Exception ex)
@@ -2392,18 +2762,12 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(job.FinalFilePath) && File.Exists(job.FinalFilePath))
+            var path = !string.IsNullOrWhiteSpace(job.FinalFilePath)
+                ? job.FinalFilePath
+                : job.Destination;
+            if (!string.IsNullOrWhiteSpace(path))
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"/select,\"{job.FinalFilePath}\"",
-                    UseShellExecute = true,
-                });
-            }
-            else if (Directory.Exists(job.Destination))
-            {
-                Process.Start(new ProcessStartInfo { FileName = job.Destination, UseShellExecute = true });
+                Process.Start(ShellActions.RevealFile(path));
             }
         }
         catch (Exception ex)

@@ -55,6 +55,9 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public string LastTryText { get => _lastTryText; private set => Set(ref _lastTryText, value); }
     public string Description { get => _description; private set => Set(ref _description, value); }
     public string RawDescription { get => _rawDescription; private set => Set(ref _rawDescription, value); }
+    public long TotalSize { get; private set; }
+    public double BytesPerSecond { get; private set; }
+    public DateTimeOffset LastUpdated { get; private set; }
     public Visibility ProgressVisibility { get => _progressVisibility; private set => Set(ref _progressVisibility, value); }
     public DateTimeOffset CreatedAt { get => _createdAt; private set => Set(ref _createdAt, value); }
 
@@ -67,8 +70,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Url = job.Url;
         State = job.State;
         StateText = ToDisplayState(job.State);
-        SizeText = FormatBytes(job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes);
-        SpeedText = job.BytesPerSecond is > 0 ? $"{FormatBytes((long)job.BytesPerSecond.Value)}/s" : string.Empty;
+        TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
+        BytesPerSecond = job.BytesPerSecond ?? 0;
+        LastUpdated = job.UpdatedAt;
+        SizeText = FormatBytes(TotalSize);
+        SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
         EtaText = FormatDuration(job.EstimatedRemaining);
         DetailText = job.Failure?.Message is { Length: > 0 } failure
             ? failure

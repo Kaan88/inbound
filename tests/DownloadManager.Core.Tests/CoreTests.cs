@@ -164,6 +164,69 @@ public sealed class UpdateManifestVerifierTests
     }
 }
 
+public sealed class AppSettingsDefaultsTests
+{
+    [Fact]
+    public void DefaultsMatchObservedIdmBaseline()
+    {
+        var settings = new AppSettings();
+        Assert.Equal(8, settings.DefaultConnections);
+        Assert.Equal(8, settings.MaxConnectionsPerHost);
+        Assert.False(settings.LaunchAtStartup);
+        Assert.False(settings.ClipboardMonitoring);
+        Assert.True(settings.BrowserIntegrationEnabled);
+        Assert.True(settings.NotifyOnCompletion);
+        Assert.True(settings.PlayCompletionSound);
+        Assert.True(settings.ShowCompletionDialog);
+        Assert.True(settings.AutoResumeUnfinishedOnStartup);
+        Assert.Equal("stable", settings.UpdateChannel);
+        Assert.Equal(24, settings.UpdateCheckIntervalHours);
+        Assert.Empty(settings.CategoryFolders);
+        Assert.Empty(settings.ConnectionProfiles);
+    }
+}
+
+public sealed class ShellActionsTests
+{
+    [Fact]
+    public void OpenFileUsesShellExecute()
+    {
+        var start = ShellActions.OpenFile(@"C:\Downloads\report.pdf");
+        Assert.Equal(@"C:\Downloads\report.pdf", start.FileName);
+        Assert.True(start.UseShellExecute);
+    }
+
+    [Fact]
+    public void RevealFileSelectsExistingFile()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "test-work");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"dm-shell-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, "x");
+        try
+        {
+            var start = ShellActions.RevealFile(path);
+            Assert.Equal("explorer.exe", start.FileName);
+            Assert.Equal($"/select,\"{path}\"", start.Arguments);
+            Assert.True(start.UseShellExecute);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RevealFileFallsBackToFolderWhenMissing()
+    {
+        var path = @"C:\Downloads\missing.bin";
+        var start = ShellActions.RevealFile(path);
+        Assert.Equal("explorer.exe", start.FileName);
+        Assert.Equal("\"C:\\Downloads\"", start.Arguments);
+        Assert.True(start.UseShellExecute);
+    }
+}
+
 public sealed class PostDownloadCommandLineTests
 {
     [Fact]

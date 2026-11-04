@@ -299,6 +299,40 @@ internal static class Program
                 return failed > 0 ? 1 : 0;
             }
 
+            case "open":
+            case "reveal":
+            {
+                if (optionArgs.Length < 1 || !Guid.TryParse(optionArgs[0], out var shellJobId))
+                {
+                    Console.Error.WriteLine($"usage: {command} <job-id>");
+                    return 2;
+                }
+
+                var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+                var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == shellJobId);
+                if (job is null)
+                {
+                    Console.Error.WriteLine("job not found.");
+                    return 1;
+                }
+
+                var path = string.IsNullOrWhiteSpace(job.FinalFilePath)
+                    ? job.DestinationDirectory
+                    : job.FinalFilePath;
+                if (command == "open" && !File.Exists(path))
+                {
+                    Console.Error.WriteLine($"file does not exist: {path}");
+                    return 1;
+                }
+
+                var start = command == "open"
+                    ? ShellActions.OpenFile(path)
+                    : ShellActions.RevealFile(path);
+                Process.Start(start);
+                Console.WriteLine($"{command}: {path}");
+                return 0;
+            }
+
             case "describe":
             {
                 if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var describeId))
@@ -1742,6 +1776,7 @@ internal static class Program
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
               dm list [--json]
               dm status <job-id> [--json]
+              dm open|reveal <job-id>
               dm describe <job-id> <description text>
               dm grab <start-url> [--dest DIR] [--depth N] [--max-pages N]
                           [--extensions zip,mp3] [--include GLOB] [--exclude GLOB]

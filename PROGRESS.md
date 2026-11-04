@@ -887,15 +887,49 @@ random-access part file **in the destination directory**:
 - Settings clone deep-copy (fixed in C6) keeps queues/schedules when saving
   Options.
 
+## UI parity audit (M1/M2/M4/M5/M14, U3/U6, 2026-11-04)
+
+- M14: added `job.segments` IPC and a Progress details dialog (state, bytes,
+  percent, connections, speed, ETA, part path, overall + per-segment bars).
+  Integration `SegmentDetailsMatchTheEngineCheckpoint` validated 2+ segments
+  against an active throttled transfer. Live WinUI showed 3,145,728/33,554,432
+  bytes (9.4%), 1/1 connections, 65,525 B/s, and `1 segment from the engine
+  checkpoint` with 3 progress bars.
+- M1: live counts for seven jobs — All 7, Active 2, Queued 0, Failed 1,
+  Finished 4, Unfinished 3; the Queues manager opened. The sidebar now exposes
+  Active/Queued/Failed and a working Queues entry.
+- M2: Extended multiselect showed `(2 selected)`; bulk Stop paused both
+  bulk1.bin/bulk2.bin. Sort now uses numeric size, bytes/sec and updated time
+  instead of formatted strings.
+- M5: delete dialog has `Also delete the downloaded file from disk` checked by
+  default. Unchecking removed keep.txt from the list while keeping the file;
+  checking removed remove.txt from both the list and disk.
+- M4: shared `ShellActions` (unit-tested) and `dm open`/`dm reveal`; live
+  `reveal` opened `test-downloads - File Explorer`, and `open` opened
+  open2.txt in Notepad.
+- U3: `ui-state.json` persists window size, category, sort key/direction,
+  toolbar scale and hidden categories. A seeded 1024x640/`sortKey=size`/
+  `toolbarLarge=false` state restored a 1024x640 window, 34x32 Add URL button,
+  and size-a (1 MB) before size-b (64 KB).
+- U6: `AppSettingsDefaultsTests` pin the observed baseline (8 connections,
+  startup/clipboard off, notify/sound/dialog on, auto-resume, stable/24h).
+- U7: toolbar buttons now expose UIA names; the dark-theme layout was captured.
+- Audit limits: synthetic keyboard injection was blocked by Windows keeping
+  another process foreground, so U4 stays partial; the tray icon was hidden
+  from the overflow UIA tree, so U5 stays partial; column resize/reorder and
+  localization remain out of scope.
+- Core suite is now **50/50** (added ShellActions, defaults, and manifest tests).
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **46/46 passed**, including shutdown-command construction, clipboard URL
+- Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
-  safe post-download argument construction, and update-manifest signatures.
-- Runtime/persistence: **48/48 passed** (`tests\DownloadManager.Integration.Tests`),
+  safe post-download argument construction, update-manifest signatures,
+  shell-open/reveal command construction, and settings defaults.
+- Runtime/persistence: **49/49 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -904,7 +938,7 @@ random-access part file **in the destination directory**:
   properties, duplicate policies, category destinations, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
   post-download hook isolation, connection profiles, secret-preserving settings
-  updates, and installer-only update check/download.
+  updates, installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

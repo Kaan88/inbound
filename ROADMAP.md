@@ -246,11 +246,19 @@ version A, publish version B, check, download, verify, upgrade, and confirm jobs
 and settings survive. Portable/dev builds are tested to confirm they are
 excluded.
 
-## Phase 12 — Final parity audit (pending)
+## Phase 12 - Final parity audit (in progress)
 
 Coarse: window/dialog layout, menus/context menus, columns/layout persistence,
 keyboard/focus/modality, tray/notifications, settings defaults, progress/error
 presentation. Side-by-side scenario matrix and independent review.
+
+Done in the live audit: list views (including Active/Queued/Failed and the queue
+manager), numeric sort and multiselect bulk actions, delete-list-vs-file choice,
+shell open/reveal, progress details with segment bars, persisted window/sort/
+toolbar/category layout, and settings defaults. Remaining: exact menu ordering,
+keyboard injection validation under the desktop foreground lock, tray click-
+through (icon hidden from the overflow UIA tree), DPI/localization audit, and
+the independent visual review.
 
 ## Side quest — Account-based file storage providers, unrar, Docker/Linux web UI (queued)
 

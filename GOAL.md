@@ -73,13 +73,13 @@ SDK, or presentation types.
 | 3 | Tray + minimal WinUI frontend | done | Downloads continue with window closed; reopen restores state |
 | 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray; authenticated cookie/referrer/UA handoff verified (failure-path recovery still open) |
 | 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; measured benchmarks and independent verification pending |
-| 6 | Everyday download management | in progress | Clipboard monitoring, completion dialog/notification/sound, batch URLs, editable descriptions, duplicate policies, category destinations, last-folder memory, list export/import, search/sort, and row actions verified; recent URL history remains |
+| 6 | Everyday download management | in progress | Clipboard monitoring, completion dialog/notification/sound, batch URLs, editable descriptions, duplicate policies, category destinations, last-folder memory, list export/import, category/state views, numeric sort, multiselect bulk actions, delete-file choice, shell open/reveal, and progress details verified; recent URL history remains |
 | 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundary, and expired-URL refresh with partial resume verified; SOCKS4/4a and proxy-password hardening remain |
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
 | 9 | Media detection/downloading | in progress | Detection, in-page/quality panel, HLS/DASH assembly, A/V muxing, fragment recovery, token refresh, live exclusion, and DRM detection verified (E24–E32); additional DASH/HLS modes and AES-128 remain |
 | 10 | Download All + site grabber | done | Download All collection/filter/handoff (E31), scoped crawl and offline mirror (G2/G3, E40), and persistent/resumable/scheduled grabber projects verified (G4, E41) |
 | 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI parity remains; Edge/Firefox out of scope (C3) |
-| 12 | Final visual/behavioral parity audit | pending | Reproducible parity evidence; gaps labelled |
+| 12 | Final visual/behavioral parity audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U3, and U6; layout screenshot, state-persistence round-trip, accessibility names, and remaining U1/U2/U4/U5/U7 gaps recorded (E52–E54) |
 
 ## Major decisions
 

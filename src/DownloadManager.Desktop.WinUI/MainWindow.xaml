@@ -28,9 +28,13 @@
             </MenuBarItem>
 
             <MenuBarItem Title="File">
+                <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
+                <MenuFlyoutItem Text="Open folder" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Export download list..." Click="MenuExport_Click" />
                 <MenuFlyoutItem Text="Import download list..." Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Progress details..." Click="MenuProgressDetails_Click" />
                 <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
                 <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
                 <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />
@@ -42,7 +46,11 @@
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Find..." Click="MenuFind_Click" />
+                <MenuFlyoutItem Text="Find..." Click="MenuFind_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Scheduler..." Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options..." Click="MenuOptions_Click" />
@@ -53,7 +61,11 @@
                 <MenuFlyoutSubItem Text="Arrange files">
                     <MenuFlyoutItem Text="By Order Of Addition" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" Tag="size" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Size" Tag="size" Click="MenuSort_Click">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
                     <MenuFlyoutItem Text="By Status" Tag="status" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Transfer Rate" Tag="rate" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Last Try Date" Tag="lastTry" Click="MenuSort_Click" />
@@ -77,42 +89,42 @@
             <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="ToolbarPanel" Orientation="Horizontal" Padding="8,4" Spacing="0">
-                    <Button x:Name="AddButton" Style="{StaticResource InboundToolButtonStyle}" Click="AddButton_Click"
+                    <Button x:Name="AddButton" AutomationProperties.Name="Add URL" Style="{StaticResource InboundToolButtonStyle}" Click="AddButton_Click"
                             ToolTipService.ToolTip="Add a new download URL">
                         <StackPanel>
                             <FontIcon Glyph="&#xE710;" FontSize="25" Foreground="#E6E6E6" />
                             <TextBlock Text="Add URL" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="ResumeButton" Style="{StaticResource InboundToolButtonStyle}" Click="ResumeButton_Click"
+                    <Button x:Name="ResumeButton" AutomationProperties.Name="Resume" Style="{StaticResource InboundToolButtonStyle}" Click="ResumeButton_Click"
                             ToolTipService.ToolTip="Resume the selected download">
                         <StackPanel>
                             <FontIcon Glyph="&#xE768;" FontSize="25" Foreground="#8CCF8C" />
                             <TextBlock Text="Resume" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="PauseButton" Style="{StaticResource InboundToolButtonStyle}" Click="PauseButton_Click"
+                    <Button x:Name="PauseButton" AutomationProperties.Name="Stop" Style="{StaticResource InboundToolButtonStyle}" Click="PauseButton_Click"
                             ToolTipService.ToolTip="Stop the selected download (partial data is kept)">
                         <StackPanel>
                             <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="#E8B36A" />
                             <TextBlock Text="Stop" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="StopAllButton" Style="{StaticResource InboundToolButtonStyle}" Click="MenuStopAll_Click"
+                    <Button x:Name="StopAllButton" AutomationProperties.Name="Stop All" Style="{StaticResource InboundToolButtonStyle}" Click="MenuStopAll_Click"
                             ToolTipService.ToolTip="Stop all active downloads">
                         <StackPanel>
                             <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="#D98C8C" />
                             <TextBlock Text="Stop All" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="DeleteButton" Style="{StaticResource InboundToolButtonStyle}" Click="DeleteButton_Click"
+                    <Button x:Name="DeleteButton" AutomationProperties.Name="Delete" Style="{StaticResource InboundToolButtonStyle}" Click="DeleteButton_Click"
                             ToolTipService.ToolTip="Delete the selected download and its partial data">
                         <StackPanel>
                             <FontIcon Glyph="&#xE74D;" FontSize="25" Foreground="#D98C8C" />
                             <TextBlock Text="Delete" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="DeleteCompletedButton" Style="{StaticResource InboundToolButtonStyle}" Click="MenuDeleteCompleted_Click"
+                    <Button x:Name="DeleteCompletedButton" AutomationProperties.Name="Delete Completed" Style="{StaticResource InboundToolButtonStyle}" Click="MenuDeleteCompleted_Click"
                             ToolTipService.ToolTip="Remove completed downloads from the list">
                         <StackPanel>
                             <FontIcon Glyph="&#xE73E;" FontSize="25" Foreground="#A0A0A0" />
@@ -126,7 +138,7 @@
                             <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="SchedulerButton" Style="{StaticResource InboundToolButtonStyle}"
+                    <Button x:Name="SchedulerButton" AutomationProperties.Name="Scheduler" Style="{StaticResource InboundToolButtonStyle}"
                             Click="MenuScheduler_Click"
                             ToolTipService.ToolTip="Manage scheduled queue and grabber runs">
                         <StackPanel>
@@ -134,7 +146,7 @@
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="StartQueueButton" Style="{StaticResource InboundToolButtonStyle}"
+                    <Button x:Name="StartQueueButton" AutomationProperties.Name="Start Queue" Style="{StaticResource InboundToolButtonStyle}"
                             Click="StartQueueButton_Click"
                             ToolTipService.ToolTip="Start the selected queue">
                         <StackPanel>
@@ -142,7 +154,7 @@
                             <TextBlock Text="Start Queue" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="StopQueueButton" Style="{StaticResource InboundToolButtonStyle}"
+                    <Button x:Name="StopQueueButton" AutomationProperties.Name="Stop Queue" Style="{StaticResource InboundToolButtonStyle}"
                             Click="StopQueueButton_Click"
                             ToolTipService.ToolTip="Stop the selected queue and pause its downloads">
                         <StackPanel>
@@ -215,17 +227,34 @@
                                 <TextBlock Text="Unfinished" />
                             </StackPanel>
                         </ListBoxItem>
+                        <ListBoxItem Tag="active" Padding="30,2,8,2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE895;" FontSize="13" Foreground="#6FA8DC" />
+                                <TextBlock Text="Active" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="queued" Padding="30,2,8,2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE823;" FontSize="13" Foreground="#E8B36A" />
+                                <TextBlock Text="Queued" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="failed" Padding="30,2,8,2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE783;" FontSize="13" Foreground="#D98C8C" />
+                                <TextBlock Text="Failed" />
+                            </StackPanel>
+                        </ListBoxItem>
                         <ListBoxItem Tag="finished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="#8CCF8C" />
                                 <TextBlock Text="Finished" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="queues" Padding="14,2,8,2" IsEnabled="False"
-                                     ToolTipService.ToolTip="Queue support is not implemented yet">
+                        <ListBoxItem Tag="queues" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="#777777" />
-                                <TextBlock Text="Queues" Foreground="#777777" />
+                                <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="#C9C9C9" />
+                                <TextBlock Text="Queues" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="grabber" Padding="14,2,8,2">
@@ -273,9 +302,10 @@
                     <ListView x:Name="JobsList"
                               Background="#1E1E1E"
                               BorderThickness="0"
-                              SelectionMode="Single"
+                              SelectionMode="Extended"
                               ItemContainerStyle="{StaticResource InboundListRowStyle}"
                               SelectionChanged="JobsList_SelectionChanged"
+                              KeyDown="JobsList_KeyDown"
                               DoubleTapped="JobsList_DoubleTapped"
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Auto"
