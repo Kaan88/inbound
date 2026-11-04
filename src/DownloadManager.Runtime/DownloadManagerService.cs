@@ -72,6 +72,7 @@ public sealed class DownloadManagerService
         await _jobStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         _engine.UpdateProxy(_settings.Proxy);
+        _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var job in jobs)
@@ -566,6 +567,7 @@ public sealed class DownloadManagerService
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,
             Proxy = MapProxy(settings.Proxy),
+            SiteLogins = MapSiteLogins(settings.SiteLogins, _settings.SiteLogins),
             DefaultQueueId = settings.DefaultQueueId,
             Queues = MapQueues(settings.Queues, _settings.Queues, settings.MaxConcurrentDownloads),
             Schedules = MapSchedules(settings.Schedules, _settings.Schedules),
@@ -591,6 +593,7 @@ public sealed class DownloadManagerService
         }
 
         _engine.UpdateProxy(next.Proxy);
+        _engine.UpdateSiteLogins(BuildSiteLogins(next));
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -1646,6 +1649,13 @@ public sealed class DownloadManagerService
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             GlobalSpeedLimitBytesPerSecond = settings.GlobalSpeedLimitBytesPerSecond,
             Proxy = MapProxy(settings.Proxy),
+            SiteLogins = settings.SiteLogins.Select(login => new SiteLoginDto
+            {
+                Id = login.Id,
+                Site = login.Site,
+                Username = login.Username,
+                HasPassword = !string.IsNullOrWhiteSpace(login.PasswordProtected),
+            }).ToList(),
             LaunchAtStartup = settings.LaunchAtStartup,
             ClipboardMonitoring = settings.ClipboardMonitoring,
             BrowserIntegrationEnabled = settings.BrowserIntegrationEnabled,
@@ -1707,6 +1717,64 @@ public sealed class DownloadManagerService
             Username = string.IsNullOrWhiteSpace(proxy?.Username) ? null : proxy.Username.Trim(),
             Password = string.IsNullOrWhiteSpace(proxy?.Password) ? null : proxy.Password,
         };
+
+    private static List<SiteLoginCredential> BuildSiteLogins(AppSettings settings)
+    {
+        var result = new List<SiteLoginCredential>();
+        foreach (var login in settings.SiteLogins)
+        {
+            var password = SecretProtector.Unprotect(login.PasswordProtected);
+            if (password is null)
+            {
+                continue;
+            }
+
+            result.Add(new SiteLoginCredential(login.Site, login.Username, password));
+        }
+
+        return result;
+    }
+
+    private static List<SiteLogin> MapSiteLogins(
+        List<SiteLoginDto>? requested,
+        List<SiteLogin> existing)
+    {
+        if (requested is null)
+        {
+            return existing.ToList();
+        }
+
+        var existingById = existing.ToDictionary(login => login.Id);
+        var result = new List<SiteLogin>();
+        foreach (var login in requested)
+        {
+            var site = login.Site?.Trim() ?? string.Empty;
+            var username = login.Username?.Trim() ?? string.Empty;
+            if (site.Length == 0 || username.Length == 0)
+            {
+                continue;
+            }
+
+            var id = login.Id == Guid.Empty ? Guid.NewGuid() : login.Id;
+            existingById.TryGetValue(id, out var previous);
+            var passwordProtected = !string.IsNullOrEmpty(login.Password)
+                ? SecretProtector.Protect(login.Password)
+                : previous is not null &&
+                  string.Equals(previous.Site, site, StringComparison.OrdinalIgnoreCase) &&
+                  string.Equals(previous.Username, username, StringComparison.Ordinal)
+                    ? previous.PasswordProtected
+                    : string.Empty;
+            result.Add(new SiteLogin
+            {
+                Id = id,
+                Site = site,
+                Username = username,
+                PasswordProtected = passwordProtected,
+            });
+        }
+
+        return result;
+    }
 
     private static List<DownloadQueue> MapQueues(
         List<QueueDto>? requested,

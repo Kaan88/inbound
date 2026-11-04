@@ -226,6 +226,8 @@ internal static class Program
                 return await QueueAsync(client, args, json).ConfigureAwait(false);
             case "schedule":
                 return await ScheduleAsync(client, args, json).ConfigureAwait(false);
+            case "site":
+                return await SiteAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
             case "host":
@@ -320,6 +322,95 @@ internal static class Program
         }
 
         return action.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> SiteAsync(CliClient client, string[] args, bool json)
+    {
+        var positional = args.Skip(1)
+            .Where(a => !a.StartsWith("--", StringComparison.Ordinal))
+            .ToArray();
+        var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
+        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+        var settings = snapshot.Settings;
+
+        if (sub == "list")
+        {
+            if (json)
+            {
+                PrintJson(settings.SiteLogins);
+                return 0;
+            }
+
+            Console.WriteLine($"{"ID",-9} {"PASSWORD",-8} {"USER",-24} SITE");
+            foreach (var login in settings.SiteLogins)
+            {
+                Console.WriteLine(
+                    $"{login.Id.ToString("N")[..8],-9} " +
+                    $"{(login.HasPassword ? "stored" : "missing"),-8} " +
+                    $"{login.Username,-24} {login.Site}");
+            }
+
+            return 0;
+        }
+
+        if (sub == "add")
+        {
+            if (positional.Length < 3)
+            {
+                Console.Error.WriteLine("usage: site add <site> <username> [--password ...] [--password-env VAR]");
+                return 2;
+            }
+
+            var password = GetOption(args, "--password");
+            if (GetOption(args, "--password-env") is { } envName)
+            {
+                password = Environment.GetEnvironmentVariable(envName);
+            }
+
+            if (string.IsNullOrEmpty(password))
+            {
+                Console.Error.WriteLine("A password is required (--password or --password-env).");
+                return 2;
+            }
+
+            settings.SiteLogins.Add(new SiteLoginDto
+            {
+                Id = Guid.NewGuid(),
+                Site = positional[1],
+                Username = positional[2],
+                Password = password,
+            });
+            var added = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(added, json);
+        }
+
+        if (sub == "remove")
+        {
+            if (positional.Length < 2)
+            {
+                Console.Error.WriteLine("usage: site remove <login-id>");
+                return 2;
+            }
+
+            var selector = positional[1].Replace("-", string.Empty, StringComparison.Ordinal);
+            var matches = settings.SiteLogins
+                .Where(login => login.Id.ToString("N").StartsWith(selector, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count != 1)
+            {
+                Console.Error.WriteLine($"site '{positional[1]}' did not match exactly one entry.");
+                return 1;
+            }
+
+            settings.SiteLogins.RemoveAll(login => login.Id == matches[0].Id);
+            var removed = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(removed, json);
+        }
+
+        Console.Error.WriteLine("usage: site list|add|remove");
+        return 2;
     }
 
     private static async Task<int> ScheduleAsync(CliClient client, string[] args, bool json)
@@ -819,6 +910,7 @@ internal static class Program
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move
               dm schedule list|add|remove|enable|disable
+              dm site list|add|remove
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown
               dm doctor [--no-start]

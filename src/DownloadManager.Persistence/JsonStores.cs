@@ -550,6 +550,19 @@ public sealed class JsonSettingsStore : ISettingsStore
             ? null
             : settings.Proxy.Username.Trim();
 
+        settings.SiteLogins ??= new List<SiteLogin>();
+        settings.SiteLogins.RemoveAll(login =>
+            string.IsNullOrWhiteSpace(login.Site) || string.IsNullOrWhiteSpace(login.Username));
+        foreach (var login in settings.SiteLogins)
+        {
+            login.Site = login.Site.Trim();
+            login.Username = login.Username.Trim();
+            if (login.Id == Guid.Empty)
+            {
+                login.Id = Guid.NewGuid();
+            }
+        }
+
         settings.Queues ??= new List<DownloadQueue>();
         if (settings.Queues.Count == 0)
         {

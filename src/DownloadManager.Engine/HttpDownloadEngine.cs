@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Text;
 
 namespace DownloadManager.Core;
 
@@ -18,6 +19,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private readonly bool _ownsClient;
     private readonly object _clientSync = new();
     private readonly List<HttpClient> _retiredClients = new();
+    private readonly object _siteLoginSync = new();
+    private List<SiteLoginCredential> _siteLogins = new();
     private HttpClient _client;
 
     public HttpDownloadEngine(
@@ -62,6 +65,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     {
         client.Timeout = Timeout.InfiniteTimeSpan;
         client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
+    }
+
+    public void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins)
+    {
+        lock (_siteLoginSync)
+        {
+            _siteLogins = logins.ToList();
+        }
     }
 
     private HttpClient CurrentClient()
@@ -493,6 +504,73 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         return new AttemptResult(Complete: true, RestartFromZero: false);
     }
 
+    private SiteLoginCredential? MatchSiteLogin(Uri uri)
+    {
+        List<SiteLoginCredential> snapshot;
+        lock (_siteLoginSync)
+        {
+            snapshot = _siteLogins.ToList();
+        }
+
+        return snapshot
+            .Where(login => SiteMatches(login.Site, uri))
+            .OrderByDescending(login => login.Site.Length)
+            .FirstOrDefault();
+    }
+
+    private static bool SiteMatches(string site, Uri uri)
+    {
+        if (string.IsNullOrWhiteSpace(site))
+        {
+            return false;
+        }
+
+        site = site.Trim();
+        string host;
+        int? port = null;
+        string path;
+        if (Uri.TryCreate(site, UriKind.Absolute, out var siteUri))
+        {
+            host = siteUri.Host;
+            port = siteUri.IsDefaultPort ? null : siteUri.Port;
+            path = siteUri.AbsolutePath;
+        }
+        else
+        {
+            var separator = site.IndexOf('/');
+            var authority = separator < 0 ? site : site[..separator];
+            path = separator < 0 ? "/" : site[separator..];
+            if (!Uri.TryCreate($"http://{authority}", UriKind.Absolute, out var authorityUri))
+            {
+                return false;
+            }
+
+            host = authorityUri.Host;
+            port = authority.Contains(':', StringComparison.Ordinal) ? authorityUri.Port : null;
+        }
+
+        if (!string.Equals(uri.Host, host, StringComparison.OrdinalIgnoreCase) &&
+            !uri.Host.EndsWith("." + host, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (port is not null && uri.Port != port.Value)
+        {
+            return false;
+        }
+
+        if (path is "" or "/")
+        {
+            return true;
+        }
+
+        var normalizedPath = path.TrimEnd('/');
+        return uri.AbsolutePath.StartsWith(normalizedPath, StringComparison.OrdinalIgnoreCase) &&
+               (uri.AbsolutePath.Length == normalizedPath.Length ||
+                uri.AbsolutePath[normalizedPath.Length] == '/');
+    }
+
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
@@ -591,6 +669,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
 
             request.Headers.TryAddWithoutValidation(key, value);
+        }
+
+        if (sameOrigin && !request.Headers.Contains("Authorization"))
+        {
+            var login = MatchSiteLogin(uri);
+            if (login is not null)
+            {
+                var token = Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes($"{login.Username}:{login.Password}"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Basic", token);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(job.Referrer) && sameOrigin &&

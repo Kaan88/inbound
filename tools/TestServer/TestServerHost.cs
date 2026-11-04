@@ -26,6 +26,10 @@ public sealed class TestServerHost : IAsyncDisposable
     private long _expiringExpired;
     private long _expiringServed;
     private long _expiringRangeRequests;
+    private long _siteAuthorized;
+    private long _siteDenied;
+    private string _siteUser = "siteuser";
+    private string _sitePass = "sitepass";
     private bool _lastAuthCookiePresent;
     private string _lastAuthReferer = string.Empty;
     private string _lastAuthUserAgent = string.Empty;
@@ -40,6 +44,20 @@ public sealed class TestServerHost : IAsyncDisposable
     public long ExpiringExpired => Interlocked.Read(ref _expiringExpired);
     public long ExpiringServed => Interlocked.Read(ref _expiringServed);
     public long ExpiringRangeRequests => Interlocked.Read(ref _expiringRangeRequests);
+    public long SiteAuthAuthorized => Interlocked.Read(ref _siteAuthorized);
+    public long SiteAuthDenied => Interlocked.Read(ref _siteDenied);
+
+    public void SetSiteCredentials(string username, string password)
+    {
+        _siteUser = username;
+        _sitePass = password;
+    }
+
+    public void ResetSiteAuthStats()
+    {
+        Interlocked.Exchange(ref _siteAuthorized, 0);
+        Interlocked.Exchange(ref _siteDenied, 0);
+    }
 
     public void ResetConcurrency()
     {
@@ -360,6 +378,34 @@ public sealed class TestServerHost : IAsyncDisposable
             lastFailure = _lastAuthFailure,
         }));
 
+        _app.MapGet("/site/secure/{name}", async (HttpContext context, string name) =>
+        {
+            var expected = "Basic " + Convert.ToBase64String(
+                Encoding.UTF8.GetBytes($"{_siteUser}:{_sitePass}"));
+            if (!string.Equals(context.Request.Headers.Authorization.ToString(), expected,
+                    StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _siteDenied);
+                context.Response.StatusCode = 401;
+                context.Response.Headers.WWWAuthenticate = "Basic realm=\"site-login\"";
+                await context.Response.WriteAsync("site login required").ConfigureAwait(false);
+                return;
+            }
+
+            Interlocked.Increment(ref _siteAuthorized);
+            var size = QueryInt(context, "size", 1024 * 1024);
+            var seed = QueryInt(context, "seed", 1);
+            await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                throttleBytesPerSecond: QueryInt(context, "bps", 0),
+                unknownLength: false).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/site/stats", () => Results.Json(new
+        {
+            authorized = SiteAuthAuthorized,
+            denied = SiteAuthDenied,
+        }));
+
         _app.MapGet("/cookie/required", async (HttpContext context) =>
         {
             if (!context.Request.Headers.Cookie.ToString().Contains("session=ok", StringComparison.Ordinal))
@@ -429,6 +475,7 @@ public sealed class TestServerHost : IAsyncDisposable
             _requestCounts.Clear();
             ResetAuthStats();
             ResetExpiringStats();
+            ResetSiteAuthStats();
             return Results.Ok();
         });
     }

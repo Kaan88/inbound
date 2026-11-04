@@ -176,6 +176,21 @@ public sealed record DownloadResult(
         => new(false, state, failure, bytes, total, null, null, null, null);
 }
 
+public sealed class SiteLogin
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>Host, host:port, or URL/path prefix, for example example.com/private.</summary>
+    public string Site { get; set; } = string.Empty;
+
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>DPAPI-protected password blob. Never store the plaintext here.</summary>
+    public string PasswordProtected { get; set; } = string.Empty;
+}
+
+public sealed record SiteLoginCredential(string Site, string Username, string Password);
+
 public sealed class ProxySettings
 {
     /// <summary>none, system, or manual.</summary>
@@ -282,6 +297,7 @@ public sealed class AppSettings
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
     public ProxySettings Proxy { get; set; } = new();
+    public List<SiteLogin> SiteLogins { get; set; } = new();
     public bool LaunchAtStartup { get; set; }
     public bool ClipboardMonitoring { get; set; }
     public bool BrowserIntegrationEnabled { get; set; } = true;

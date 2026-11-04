@@ -45,6 +45,9 @@ public interface IDownloadEngine
 
     /// <summary>Applies the current proxy configuration to subsequent requests.</summary>
     void UpdateProxy(ProxySettings settings);
+
+    /// <summary>Replaces the in-memory site credentials used for Basic auth.</summary>
+    void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins);
 }
 
 public interface IClock

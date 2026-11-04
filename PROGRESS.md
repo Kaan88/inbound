@@ -230,15 +230,36 @@ random-access part file **in the destination directory**:
   **Refresh download address...** with an editable URL dialog. Both use the
   `job.refreshUrl` IPC method.
 
+## Site-login evidence (2026-11-04)
+
+- Site passwords are stored only as per-user Windows DPAPI blobs prefixed
+  `dpapi:v1:`; settings readback and `site list` never return the plaintext.
+- Engine-side Basic auth is applied for the most specific matching host/port/path;
+  it does not persist an `Authorization` header in job JSON.
+- TestServer `/site/secure/{name}` requires `siteuser`/test password and reports
+  authorized/denied counts.
+- Integration suite **18/18**: no-login job failed `unauthorized`; adding a login
+  produced settings JSON without plaintext and with a DPAPI blob; a 2 MiB
+  two-connection download matched seed-98 SHA-256 with no extra denials; a fresh
+  service instance decrypted the login and completed a 256 KiB download matching
+  seed-99.
+- Published CLI: `site add` → `site list` showed `stored`; settings JSON
+  `contains plaintext sitepass: False`, `contains dpapi marker: True`; 2 MiB
+  download SHA-256 `81953ebf30a903db33b8538341ff9caf964fe635ae7405eb137fd21c4a469b05`;
+  after a host restart a 256 KiB download matched
+  `eed4f2827224985e51fedd9ece2ca1716093ac418ad4f7db5d22e0f1e570605f`;
+  `/site/stats` ended `authorized=5, denied=0`; `site remove` left an empty list.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **11/11 passed**.
-- Runtime/persistence: **17/17 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **18/18 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, destination-local payload, authenticated handoff,
-  runtime HTTP/SOCKS5 proxy settings, and expired-URL refresh/resume.
+  runtime HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, and DPAPI site
+  logins.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -259,15 +280,16 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the scheduler increment (host timer, models, CLI, tests, evidence).
+1. Commit the site-login increment (DPAPI store, engine auth, CLI, tests,
+   evidence).
 2. Complete Phase 8: completion actions (open/exit/shutdown), quotas, sleep
    prevention, and DST/wall-clock tests.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7 remainder: site-login storage; add a proxy settings UI and DPAPI
-   protection for proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5,
-   redirect credential boundaries, and expired-URL refresh are done
-   (E17/E18/E19/E20).
+4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
+   proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
+   logins, redirect credential boundaries, and expired-URL refresh are done
+   (E17/E18/E19/E20/E21).
 5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 6. Phase 10: Download All/site grabber.

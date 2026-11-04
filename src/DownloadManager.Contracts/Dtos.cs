@@ -82,6 +82,18 @@ public sealed class ProxyDto
     public string? Password { get; set; }
 }
 
+public sealed class SiteLoginDto
+{
+    public Guid Id { get; set; }
+    public string Site { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>Plaintext is accepted on updates and never returned on reads.</summary>
+    public string? Password { get; set; }
+
+    public bool HasPassword { get; set; }
+}
+
 public sealed class SettingsDto
 {
     public string DefaultDownloadDirectory { get; set; } = string.Empty;
@@ -93,6 +105,7 @@ public sealed class SettingsDto
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
     public ProxyDto Proxy { get; set; } = new();
+    public List<SiteLoginDto> SiteLogins { get; set; } = new();
     public bool LaunchAtStartup { get; set; }
     public bool ClipboardMonitoring { get; set; }
     public bool BrowserIntegrationEnabled { get; set; } = true;

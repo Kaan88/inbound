@@ -657,6 +657,88 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task StoredSiteLoginAuthenticatesAndSurvivesRestart()
+    {
+        _server.SetSiteCredentials("siteuser", "sitepass");
+        _server.ResetSiteAuthStats();
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            // Without a stored login the secure endpoint must fail cleanly.
+            var denied = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/site/secure/no-login.bin?size=65536&seed=97",
+                DestinationDirectory = ctx.Destination,
+                FileName = "no-login.bin",
+                Source = "cli",
+            });
+            var deniedJob = await ctx.WaitFor(denied.Job!.Id, j => j.State == "failed");
+            Assert.Equal("unauthorized", deniedJob.Failure?.Kind);
+            Assert.True(_server.SiteAuthDenied > 0);
+            var deniedBefore = _server.SiteAuthDenied;
+
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.SiteLogins.Add(new SiteLoginDto
+            {
+                Id = Guid.NewGuid(),
+                Site = _server.BaseAddress,
+                Username = "siteuser",
+                Password = "sitepass",
+            });
+            var update = await ctx.Service.UpdateSettingsAsync(settings);
+            Assert.True(update.Ok, update.Error);
+
+            var readBack = Assert.Single(ctx.Service.GetSnapshot().Settings.SiteLogins);
+            Assert.Null(readBack.Password);
+            Assert.True(readBack.HasPassword);
+            var settingsJson = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
+            Assert.DoesNotContain("sitepass", settingsJson);
+            Assert.Contains("dpapi:v1:", settingsJson);
+
+            var authorizedBefore = _server.SiteAuthAuthorized;
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/site/secure/site-login.bin?size=2097152&seed=98",
+                DestinationDirectory = ctx.Destination,
+                FileName = "site-login.bin",
+                Source = "cli",
+                Connections = 2,
+            });
+            Assert.True(response.Accepted, response.Error);
+            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+                TimeSpan.FromSeconds(30));
+            var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(98, 2_097_152))).ToLowerInvariant();
+            Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+            Assert.True(_server.SiteAuthAuthorized >= authorizedBefore + 2);
+            Assert.Equal(deniedBefore, _server.SiteAuthDenied);
+
+            // A fresh service instance loads the DPAPI-protected login from disk.
+            await using var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            var secondLogin = Assert.Single(second.Service.GetSnapshot().Settings.SiteLogins);
+            Assert.Equal("siteuser", secondLogin.Username);
+            Assert.True(secondLogin.HasPassword);
+            var response2 = await second.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/site/secure/site-login2.bin?size=262144&seed=99",
+                DestinationDirectory = ctx.Destination,
+                FileName = "site-login2.bin",
+                Source = "cli",
+            });
+            var completed2 = await second.WaitFor(response2.Job!.Id, j => j.State == "completed",
+                TimeSpan.FromSeconds(30));
+            var expected2 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(99, 262_144))).ToLowerInvariant();
+            Assert.Equal(expected2, await Hashing.Sha256FileAsync(completed2.FinalFilePath));
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task RefreshDownloadAddressResumesAfterExpiredToken()
     {
         const string name = "refresh-token.bin";

@@ -1,0 +1,124 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace DownloadManager.Persistence;
+
+/// <summary>
+/// Per-user Windows DPAPI protection for stored site-login passwords. The
+/// ciphertext is bound to the current Windows user and to an application
+/// entropy value; plaintext never enters settings JSON.
+/// </summary>
+public static class SecretProtector
+{
+    private const string Prefix = "dpapi:v1:";
+    private const int CryptProtectUiForbidden = 0x1;
+
+    private static readonly byte[] Entropy =
+        Encoding.UTF8.GetBytes("DownloadManager.SiteLogin.v1");
+
+    public static string Protect(string plaintext)
+    {
+        var cipher = Transform(Encoding.UTF8.GetBytes(plaintext), protect: true);
+        return Prefix + Convert.ToBase64String(cipher);
+    }
+
+    public static string? Unprotect(string? protectedValue)
+    {
+        if (string.IsNullOrWhiteSpace(protectedValue) ||
+            !protectedValue.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            var cipher = Convert.FromBase64String(protectedValue[Prefix.Length..]);
+            return Encoding.UTF8.GetString(Transform(cipher, protect: false));
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static byte[] Transform(byte[] input, bool protect)
+    {
+        var inputBlob = CreateBlob(input);
+        var entropyBlob = CreateBlob(Entropy);
+        try
+        {
+            DataBlob output;
+            var ok = protect
+                ? CryptProtectData(ref inputBlob, "Download Manager site login", ref entropyBlob,
+                    IntPtr.Zero, IntPtr.Zero, CryptProtectUiForbidden, out output)
+                : CryptUnprotectData(ref inputBlob, IntPtr.Zero, ref entropyBlob,
+                    IntPtr.Zero, IntPtr.Zero, CryptProtectUiForbidden, out output);
+            if (!ok)
+            {
+                throw new CryptographicException(Marshal.GetLastWin32Error());
+            }
+
+            try
+            {
+                var result = new byte[output.Length];
+                Marshal.Copy(output.Data, result, 0, output.Length);
+                return result;
+            }
+            finally
+            {
+                LocalFree(output.Data);
+            }
+        }
+        finally
+        {
+            FreeBlob(inputBlob);
+            FreeBlob(entropyBlob);
+        }
+    }
+
+    private static DataBlob CreateBlob(byte[] bytes)
+    {
+        var data = Marshal.AllocHGlobal(bytes.Length);
+        Marshal.Copy(bytes, 0, data, bytes.Length);
+        return new DataBlob { Length = bytes.Length, Data = data };
+    }
+
+    private static void FreeBlob(DataBlob blob)
+    {
+        if (blob.Data != IntPtr.Zero)
+        {
+            Marshal.FreeHGlobal(blob.Data);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DataBlob
+    {
+        public int Length;
+        public IntPtr Data;
+    }
+
+    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CryptProtectData(
+        ref DataBlob dataIn,
+        string? description,
+        ref DataBlob entropy,
+        IntPtr reserved,
+        IntPtr prompt,
+        int flags,
+        out DataBlob dataOut);
+
+    [DllImport("crypt32.dll", SetLastError = true)]
+    private static extern bool CryptUnprotectData(
+        ref DataBlob dataIn,
+        IntPtr description,
+        ref DataBlob entropy,
+        IntPtr reserved,
+        IntPtr prompt,
+        int flags,
+        out DataBlob dataOut);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
+}
