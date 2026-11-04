@@ -84,6 +84,24 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
     }
 
+    public HttpMessageHandler? CreateAuxiliaryHandler() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.All,
+        ConnectTimeout = _options.ConnectTimeout,
+        Proxy = new ConfigurableProxy(_options.Proxy),
+        UseProxy = true,
+        UseCookies = false,
+    };
+
+    public string? GetSiteAuthorization(Uri uri)
+    {
+        var login = MatchSiteLogin(uri);
+        return login is null
+            ? null
+            : "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{login.Username}:{login.Password}"));
+    }
+
     public void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins)
     {
         lock (_siteLoginSync)

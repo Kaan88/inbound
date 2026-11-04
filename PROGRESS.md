@@ -631,7 +631,7 @@ random-access part file **in the destination directory**:
   - `a.bin` SHA-256 `ac4cc81ea530f1ddca9f335980323eee724a351bd5b8d21d325ffd3b7108663b`;
   - `c.bin` SHA-256 `abef0ea89918113d007c57b8d2260ea10d78d31703ad9313b0eed9859f7ee09b`.
 - WinUI Tasks → Run site grabber exposes all scope/filter/mirror controls.
-- Remaining: JS-rendered pages, auth/proxy for crawler, CSS url() (robots.txt done, E91)
+- Remaining: JS-rendered pages, CSS url() (robots.txt E91, crawler proxy/auth E92 done)
   rewriting, preview.
 
 ## Grabber project evidence (G4, 2026-11-04)
@@ -1470,7 +1470,7 @@ normal shell) and C3 (explicit Chrome-only scope).
    `DownloadManager.Desktop.WinUI.exe` (cancelled), so only the build, unit and
    integration evidence exists for the dialog.
 2. Grabber polish (Phase 10 remainder): result preview, JS-rendered pages,
-   crawler auth/proxy (robots.txt done, E91).
+   result preview and JS-rendered pages (robots.txt E91 and crawler proxy/auth E92 done).
 3. Phase 5: orphan `.part` quarantine/delete is done via CLI/IPC (E90); a WinUI affordance is still missing.
 4. Phase 11/12: clean-Windows install/upgrade/uninstall acceptance (still
    unverified outside this harness), L4 launch-at-sign-in from a normal shell,

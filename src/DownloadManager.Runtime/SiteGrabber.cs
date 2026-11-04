@@ -16,11 +16,37 @@ internal sealed class SiteGrabber
 
     private readonly string _destination;
     private readonly Action<string>? _log;
+    private readonly Func<HttpMessageHandler?>? _handlerFactory;
+    private readonly Func<Uri, string?>? _authorization;
 
-    public SiteGrabber(string destination, Action<string>? log)
+    /// <param name="handlerFactory">Supplies a proxy-aware handler (engine proxy); null uses a direct handler.</param>
+    /// <param name="authorization">Returns the stored site-login Authorization value for a URL, if any.</param>
+    public SiteGrabber(
+        string destination,
+        Action<string>? log,
+        Func<HttpMessageHandler?>? handlerFactory = null,
+        Func<Uri, string?>? authorization = null)
     {
         _destination = destination;
         _log = log;
+        _handlerFactory = handlerFactory;
+        _authorization = authorization;
+    }
+
+    /// <summary>
+    /// GET with the site login for exactly this URL. Each redirect hop is a new call, so
+    /// credentials are re-resolved per origin and never carried to another host.
+    /// </summary>
+    private Task<HttpResponseMessage> GetAsync(HttpClient http, Uri url, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var authorization = _authorization?.Invoke(url);
+        if (!string.IsNullOrEmpty(authorization))
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        }
+
+        return http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 
     public async Task<SiteGrabberResult> RunAsync(
@@ -117,8 +143,7 @@ internal sealed class SiteGrabber
             {
                 // Follow redirects by hand so every hop is checked against robots.txt
                 // before it is requested.
-                var response = await http.GetAsync(
-                    url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                var response = await GetAsync(http, url, cancellationToken).ConfigureAwait(false);
                 var hops = 0;
                 var redirectBlocked = false;
                 while ((int)response.StatusCode is 301 or 302 or 303 or 307 or 308 &&
@@ -132,8 +157,7 @@ internal sealed class SiteGrabber
                         break;
                     }
 
-                    response = await http.GetAsync(
-                        next, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                    response = await GetAsync(http, next, cancellationToken).ConfigureAwait(false);
                 }
 
                 if (redirectBlocked)
@@ -265,14 +289,15 @@ internal sealed class SiteGrabber
         return result;
     }
 
-    private static HttpClient CreateClient()
+    private HttpClient CreateClient()
     {
-        var handler = new HttpClientHandler
+        // The engine handler carries the configured proxy (HTTP/HTTPS/SOCKS, with auth).
+        var handler = _handlerFactory?.Invoke() ?? new HttpClientHandler
         {
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.All,
         };
-        var client = new HttpClient(handler)
+        var client = new HttpClient(handler, disposeHandler: true)
         {
             Timeout = TimeSpan.FromSeconds(30),
         };
@@ -290,8 +315,7 @@ internal sealed class SiteGrabber
         var robotsUrl = new Uri(authority + "/robots.txt");
         try
         {
-            var response = await http.GetAsync(robotsUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
+            var response = await GetAsync(http, robotsUrl, cancellationToken).ConfigureAwait(false);
             for (var hop = 0;
                  hop < 5 && (int)response.StatusCode is 301 or 302 or 303 or 307 or 308 &&
                  response.Headers.Location is { } location;
@@ -299,8 +323,7 @@ internal sealed class SiteGrabber
             {
                 var next = new Uri(response.RequestMessage?.RequestUri ?? robotsUrl, location);
                 response.Dispose();
-                response = await http.GetAsync(next, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                    .ConfigureAwait(false);
+                response = await GetAsync(http, next, cancellationToken).ConfigureAwait(false);
             }
 
             using var _ = response;

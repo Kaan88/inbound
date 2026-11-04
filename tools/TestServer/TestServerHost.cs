@@ -567,6 +567,18 @@ public sealed class TestServerHost : IAsyncDisposable
             }
 
             Interlocked.Increment(ref _siteAuthorized);
+            if (name == "index.html")
+            {
+                // Authenticated crawl fixture for the site grabber.
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(
+                    "<html><body>" +
+                    "<a href=\"/site/secure/crawl-a.bin?size=65536&seed=330\">A</a>" +
+                    "<a href=\"/site/secure/crawl-b.bin?size=65536&seed=331\">B</a>" +
+                    "</body></html>").ConfigureAwait(false);
+                return;
+            }
+
             var size = QueryInt(context, "size", 1024 * 1024);
             var seed = QueryInt(context, "seed", 1);
             await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,

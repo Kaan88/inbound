@@ -895,7 +895,8 @@ public sealed class DownloadManagerService
             return new SiteGrabberResult { Ok = false, Error = $"Cannot use destination: {ex.Message}" };
         }
 
-        var grabber = new SiteGrabber(destination, _log);
+        var grabber = new SiteGrabber(
+            destination, _log, _engine.CreateAuxiliaryHandler, _engine.GetSiteAuthorization);
         return await grabber.RunAsync(
             request,
             file =>

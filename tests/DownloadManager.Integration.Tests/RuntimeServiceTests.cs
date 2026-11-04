@@ -1842,6 +1842,61 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SiteGrabberUsesProxyAndStoredSiteLogin()
+    {
+        _server.SetSiteCredentials("crawluser", "crawlpass");
+        await using var proxy = TestProxyServer.Start();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        SiteGrabberRequest Request() => new()
+        {
+            StartUrl = $"{_server.BaseAddress}/site/secure/index.html",
+            DestinationDirectory = Path.Combine(ctx.Destination, "crawl-auth"),
+            MaxDepth = 1,
+            Extensions = new List<string> { "bin" },
+            StartMode = "later",
+        };
+
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "manual",
+            Address = proxy.Address,
+            Username = "proxyuser",
+            Password = "proxypass",
+        };
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        // No stored login: the page is a 401 and nothing is queued.
+        var deniedBefore = _server.SiteAuthDenied;
+        var proxiedBefore = proxy.Authorized;
+        var denied = await ctx.Service.RunSiteGrabberAsync(Request());
+        Assert.False(denied.Ok);
+        Assert.Contains("401", denied.Error);
+        Assert.True(_server.SiteAuthDenied > deniedBefore);
+        Assert.True(proxy.Authorized > proxiedBefore);   // crawl traffic went through the proxy
+
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.SiteLogins.Add(new SiteLoginDto
+        {
+            Id = Guid.NewGuid(),
+            Site = _server.BaseAddress,
+            Username = "crawluser",
+            Password = "crawlpass",
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var authorizedBefore = _server.SiteAuthAuthorized;
+        proxiedBefore = proxy.Authorized;
+        var crawled = await ctx.Service.RunSiteGrabberAsync(Request());
+        Assert.True(crawled.Ok, crawled.Error);
+        Assert.Equal(1, crawled.PagesCrawled);
+        Assert.Equal(2, crawled.FilesQueued);
+        Assert.True(_server.SiteAuthAuthorized > authorizedBefore);
+        Assert.True(proxy.Authorized > proxiedBefore);
+        Assert.Equal(0, proxy.Denied);
+    }
+
+    [Fact]
     public async Task Socks5SettingsApplyToRuntimeDownloads()
     {
         await using var socks = TestSocks5Server.Start();

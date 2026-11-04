@@ -146,6 +146,15 @@ public interface IDownloadEngine
     void UpdateHostConnectionLimit(int limit)
     {
     }
+
+    /// <summary>
+    /// A handler for auxiliary HTTP traffic (e.g. the site grabber) that uses the same proxy
+    /// as downloads. Redirects are not followed automatically. Null when not supported.
+    /// </summary>
+    HttpMessageHandler? CreateAuxiliaryHandler() => null;
+
+    /// <summary>The Basic <c>Authorization</c> value of the best stored site login for this URL.</summary>
+    string? GetSiteAuthorization(Uri uri) => null;
 }
 
 public interface IPostDownloadHook
