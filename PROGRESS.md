@@ -942,6 +942,28 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Segmented/reference app benchmark evidence (A9, 2026-11-04)
+
+- Added `scripts/benchmark-a9.ps1`, which starts TestServer and Host, downloads
+  a fixed URL with 1/4/8 connections, samples Host CPU/working set and write
+  bytes, then runs reference app's `/n /q` CLI against the same URL. The result is written
+  to `benchmarks/a9-results.md`.
+- 64 MiB at a 4 MiB/s per-connection throttle:
+  - 1 connection: 16.24 s, 3.94 MiB/s, 1.44 s CPU, 89.2 MiB peak, 65.2 MiB
+    written;
+  - 4 connections: 4.06 s, 15.78 MiB/s, 0.52 s CPU, 94.5 MiB peak, 64.4 MiB
+    written;
+  - 8 connections: 2.06 s, 31.12 MiB/s, 0.11 s CPU, 95.0 MiB peak, 64.2 MiB
+    written;
+  - reference app 6.43.12.3, 8 connections: 3.31 s, 19.35 MiB/s, 0.75 s CPU, 51.3 MiB
+    peak.
+- All four payloads matched SHA-256
+  `0abe39d939a3e805da82061b52bf07d6c12d8de3ea7e2ab3614df0aca26ec3dc`.
+- Caveats: localhost with a synthetic per-connection throttle; reference app timing
+  includes its startup/temp move; reference app write bytes were not measured.
+- Existing suites remain engine **30/30**, core **50/50**, integration
+  **60/60**; build 0 errors.
+
 ## Speed/ETA stability evidence (A8, 2026-11-04)
 
 - Engine `SpeedAndEtaEstimatesAreStable` (suite **30/30**): 4 MiB at a
