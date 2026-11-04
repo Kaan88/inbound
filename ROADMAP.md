@@ -44,8 +44,8 @@
   verified).
 - Phase 11: in progress (FTP auth/resume, post-download hooks, external CLI
   control, connection profiles, settings transfer, installer repair, and
-  upgrade/uninstall verified; updater, other browsers, and final UI parity
-  remain).
+  upgrade/uninstall verified; updater and final UI parity remain. Other browsers
+  are explicitly out of scope (C3).
 - Phases 6, 12: in progress/pending as tracked in `reference notes`; see
   `PROGRESS.md` for the handoff.
 

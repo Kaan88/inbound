@@ -795,6 +795,15 @@ random-access part file **in the destination directory**:
 - Limitation: verified with a workspace install root, not a clean Windows
   machine. Job-level preservation follows from the untouched data subtree.
 
+## Browser scope decision (C3, 2026-11-04)
+
+- Chrome is the only supported browser. Edge (Chromium), Firefox, and others are
+  explicit non-goals: no Edge native-messaging registration/package, and no
+  Firefox WebExtension/native-messaging implementation was built or verified.
+- The decision and reuse path are documented in
+  `docs/browser-integration-scope.md`. `C3` is marked **blocked** (explicit
+  scope), not implemented.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
