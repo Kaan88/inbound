@@ -294,6 +294,23 @@ random-access part file **in the destination directory**:
 - Windows implementation uses a process-wide `PowerCreateRequest` system-required
   request (not thread-affine `SetThreadExecutionState`).
 
+## Media detection evidence (2026-11-04)
+
+- Added a content script that scans `video`, `audio`, `source`, and HLS/DASH
+  links, deduplicates absolute HTTP(S) URLs, and reports them to the service
+  worker. The worker keeps a per-tab list and sets an action badge; the popup
+  lists distinct resources and sends a selection through the existing handoff
+  dialog.
+- Chrome for Testing 156, `/media-page` with video/audio/HLS link:
+  - badge count `3`;
+  - media list: `media-video.mp4` (video), `media-audio.mp3` (audio),
+    `demo.m3u8` (hls);
+  - selecting the video produced a 524,288-byte host download with SHA-256
+    `d49a100a8afd43dc7f02b4c2d34b8362b0f00d9250dd75d3ddee7afaeb05b1ce`,
+    matching seed 201.
+- V1 implemented, V2 partial (popup list; no in-page overlay/quality variants).
+  HLS detection exists, but HLS/DASH segment downloading is still pending.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -326,8 +343,9 @@ random-access part file **in the destination directory**:
 
 1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
    tests, evidence).
-2. Phase 9: direct media detection, then HLS/DASH with FFmpeg behind an
-   interface; label DRM unsupported.
+2. Phase 9: HLS/DASH segment downloading, in-page/quality panel, muxing with
+   FFmpeg behind an interface, recovery, live/DRM behavior. Direct media
+   detection and the popup list are done (E24).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

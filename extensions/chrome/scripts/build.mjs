@@ -31,6 +31,7 @@ await copyStatic();
 const options = {
   entryPoints: {
     background: path.join(root, "src", "background.ts"),
+    content: path.join(root, "src", "content.ts"),
     popup: path.join(root, "src", "popup.ts"),
     options: path.join(root, "src", "options.ts"),
     handoff: path.join(root, "src", "handoff.ts"),

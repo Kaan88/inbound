@@ -29,11 +29,27 @@ interface Status {
   jobs?: JobSummary[];
 }
 
+interface MediaItem {
+  url: string;
+  kind: string;
+  label: string;
+}
+
+interface MediaResponse {
+  ok?: boolean;
+  tabId?: number;
+  pageUrl?: string;
+  items?: MediaItem[];
+  error?: string;
+}
+
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const statusDot = document.getElementById("statusDot") as HTMLSpanElement;
 const statusLabel = document.getElementById("statusLabel") as HTMLSpanElement;
 const statusDetail = document.getElementById("statusDetail") as HTMLSpanElement;
 const jobsList = document.getElementById("jobs") as HTMLUListElement;
+const mediaCard = document.getElementById("mediaCard") as HTMLElement;
+const mediaList = document.getElementById("media") as HTMLUListElement;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 
 function showError(message: string): void {
@@ -104,6 +120,59 @@ function renderJobs(jobs: JobSummary[]): void {
   }
 }
 
+function renderMedia(items: MediaItem[], pageUrl: string): void {
+  mediaList.replaceChildren();
+  if (!items.length) {
+    mediaCard.classList.add("hidden");
+    return;
+  }
+
+  mediaCard.classList.remove("hidden");
+  for (const item of items) {
+    const row = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = item.label || item.kind;
+    name.title = item.url;
+
+    const kind = document.createElement("span");
+    kind.className = "state";
+    kind.textContent = item.kind;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "link-button";
+    button.textContent = "Download";
+    button.addEventListener("click", async () => {
+      clearError();
+      try {
+        const result = (await chrome.runtime.sendMessage({
+          type: "dm.queueMedia",
+          url: item.url,
+          pageUrl,
+        })) as { ok?: boolean; error?: string };
+        if (!result?.ok) {
+          showError(result?.error || "Could not queue this media.");
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+    row.append(name, kind, button);
+    mediaList.append(row);
+  }
+}
+
+async function refreshMedia(): Promise<void> {
+  try {
+    const media = (await chrome.runtime.sendMessage({ type: "dm.media" })) as MediaResponse;
+    renderMedia(media?.items ?? [], media?.pageUrl ?? "");
+  } catch {
+    renderMedia([], "");
+  }
+}
+
 async function refresh(): Promise<void> {
   clearError();
   try {
@@ -139,6 +208,7 @@ async function refresh(): Promise<void> {
     }
 
     renderJobs(status.jobs ?? []);
+    await refreshMedia();
   } catch (error) {
     statusDot.className = "dot bad";
     statusLabel.textContent = "Extension not ready";
@@ -153,6 +223,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   (document.getElementById("refresh") as HTMLButtonElement).addEventListener("click", () => {
     void refresh();
+  });
+
+  (document.getElementById("refreshMedia") as HTMLButtonElement).addEventListener("click", async () => {
+    try {
+      await chrome.runtime.sendMessage({ type: "dm.rescan" });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await refreshMedia();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+    }
   });
 
   (document.getElementById("openApp") as HTMLButtonElement).addEventListener("click", async () => {

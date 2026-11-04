@@ -450,6 +450,20 @@ public sealed class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
         });
 
+        _app.MapGet("/media-page", async (HttpContext context) =>
+        {
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync(
+                "<html><body style=\"font:16px sans-serif;padding:24px\">" +
+                "<h3>Media detection test</h3>" +
+                "<video id=\"video\" controls width=\"320\" " +
+                "src=\"/file/media-video.mp4?size=524288&seed=201\"></video>" +
+                "<audio id=\"audio\" controls " +
+                "src=\"/file/media-audio.mp3?size=262144&seed=202\"></audio>" +
+                "<p><a href=\"/hls/demo.m3u8\">HLS stream link</a></p>" +
+                "</body></html>").ConfigureAwait(false);
+        });
+
         _app.MapGet("/html", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

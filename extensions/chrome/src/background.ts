@@ -38,6 +38,18 @@ interface JobSummary {
   finalFilePath?: string;
 }
 
+interface MediaItem {
+  url: string;
+  kind: string;
+  label: string;
+}
+
+interface TabMedia {
+  pageUrl: string;
+  items: MediaItem[];
+  updatedAt: number;
+}
+
 interface NativeEnvelope {
   v: number;
   type: string;
@@ -81,6 +93,7 @@ const pendingRequests = new Map<
 >();
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
+const mediaByTab = new Map<number, TabMedia>();
 
 void initialize();
 
@@ -92,6 +105,15 @@ async function initialize(): Promise<void> {
   });
   chrome.downloads.onCreated.addListener((item) => {
     void onDownloadCreated(item);
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    mediaByTab.delete(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === "loading") {
+      mediaByTab.delete(tabId);
+      void updateBadge(tabId, 0);
+    }
   });
   chrome.runtime.onInstalled.addListener(() => {
     void installMenus();
@@ -467,6 +489,17 @@ function inferFileName(url: string, kind: "link" | "media"): string {
   return `${kind}-${Date.now()}`;
 }
 
+async function updateBadge(tabId: number, count: number): Promise<void> {
+  try {
+    await chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : "" });
+    if (count > 0) {
+      await chrome.action.setBadgeBackgroundColor({ tabId, color: "#4F8CFF" });
+    }
+  } catch {
+    // The tab may have closed.
+  }
+}
+
 function notify(title: string, message: string): void {
   if (!settings.notifications) {
     return;
@@ -484,15 +517,98 @@ function notify(title: string, message: string): void {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
-  void handleRuntimeMessage(message)
+chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
+  void handleRuntimeMessage(message, sender)
     .then((result) => sendResponse(result))
     .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   return true;
 });
 
-async function handleRuntimeMessage(message: any): Promise<any> {
+async function handleRuntimeMessage(message: any, sender?: chrome.runtime.MessageSender): Promise<any> {
   switch (message?.type) {
+    case "dm.mediaDetected": {
+      const tabId = sender?.tab?.id;
+      if (typeof tabId !== "number") {
+        return { ok: false, error: "No sender tab." };
+      }
+
+      const items = (Array.isArray(message.items) ? message.items : [])
+        .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url))
+        .slice(0, 40)
+        .map((item: any) => ({
+          url: item.url,
+          kind: typeof item.kind === "string" ? item.kind : "media",
+          label: typeof item.label === "string" ? item.label.slice(0, 200) : "media",
+        })) as MediaItem[];
+      mediaByTab.set(tabId, {
+        pageUrl: typeof message.pageUrl === "string" ? message.pageUrl : sender?.tab?.url ?? "",
+        items,
+        updatedAt: Date.now(),
+      });
+      await updateBadge(tabId, items.length);
+      return { ok: true, count: items.length };
+    }
+
+    case "dm.rescan": {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tabId = tabs[0]?.id;
+      if (typeof tabId === "number") {
+        try {
+          await chrome.tabs.sendMessage(tabId, { type: "dm.scan" });
+        } catch {
+          // Pages without a content script (chrome://, store, etc.).
+        }
+      }
+      return { ok: true };
+    }
+
+    case "dm.media": {
+      let tabId: number | undefined = typeof message.tabId === "number" ? message.tabId : undefined;
+      if (tabId === undefined) {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        tabId = tabs[0]?.id;
+      }
+
+      const media = typeof tabId === "number" ? mediaByTab.get(tabId) : undefined;
+      return {
+        ok: true,
+        tabId,
+        pageUrl: media?.pageUrl ?? "",
+        items: media?.items ?? [],
+      };
+    }
+
+    case "dm.queueMedia": {
+      const url = String(message.url ?? "");
+      if (!isHttpUrl(url)) {
+        return { ok: false, error: "This media URL cannot be downloaded." };
+      }
+
+      const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
+      const id = crypto.randomUUID();
+      const pending: PendingHandoff = {
+        id,
+        url,
+        pageUrl,
+        referrer: pageUrl,
+        userAgent: navigator.userAgent,
+        suggestedFileName: inferFileName(url, "media"),
+        mimeType: typeof message.mimeType === "string" ? message.mimeType : undefined,
+        isAutoIntercept: false,
+        createdAt: Date.now(),
+      };
+      pendingHandoffs.set(id, pending);
+      await chrome.storage.session.set({ [`handoff.${id}`]: pending });
+      await chrome.windows.create({
+        url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
+        type: "popup",
+        width: 560,
+        height: 500,
+      });
+      return { ok: true, id };
+    }
+
+    case "dm.status":
     case "dm.status":
       return {
         ok: true,
