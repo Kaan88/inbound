@@ -1596,6 +1596,16 @@ public sealed partial class MainWindow : Window
                     ? (settings.GlobalSpeedLimitBytesPerSecond.Value / 1024).ToString()
                     : string.Empty,
             };
+            var profilesBox = new TextBox
+            {
+                Header = "Connection profiles (host-pattern=max-connections per line)",
+                Text = string.Join(
+                    Environment.NewLine,
+                    settings.ConnectionProfiles.Select(profile => $"{profile.Pattern}={profile.MaxConnections}")),
+                AcceptsReturn = true,
+                Height = 80,
+                PlaceholderText = "*.example.com=2",
+            };
             var launch = new CheckBox { Content = "Launch Download Manager at sign-in", IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Monitor the clipboard for URLs", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Enable Chrome → Download Manager handoff", IsChecked = settings.BrowserIntegrationEnabled };
@@ -1626,6 +1636,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(maxConcurrent);
             panel.Children.Add(connections);
             panel.Children.Add(speedLimit);
+            panel.Children.Add(profilesBox);
             panel.Children.Add(new TextBlock { Text = "Behaviour", Margin = new Thickness(0, 8, 0, 0) });
             panel.Children.Add(launch);
             panel.Children.Add(clipboard);
@@ -1685,6 +1696,33 @@ public sealed partial class MainWindow : Window
             settings.MaxConcurrentDownloads = max;
             settings.DefaultConnections = connectionsValue;
             settings.GlobalSpeedLimitBytesPerSecond = limit;
+            var profiles = new List<ConnectionProfileDto>();
+            foreach (var line in profilesBox.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                var separator = trimmed.LastIndexOf('=');
+                if (separator <= 0 ||
+                    !int.TryParse(trimmed[(separator + 1)..].Trim(), out var profileLimit) ||
+                    profileLimit < 1 || profileLimit > 32)
+                {
+                    await ShowMessageAsync("Invalid setting",
+                        $"Connection profile '{trimmed}' must use pattern=max (1-32).");
+                    return;
+                }
+
+                profiles.Add(new ConnectionProfileDto
+                {
+                    Pattern = trimmed[..separator].Trim(),
+                    MaxConnections = profileLimit,
+                });
+            }
+
+            settings.ConnectionProfiles = profiles;
             settings.LaunchAtStartup = launch.IsChecked == true;
             settings.ClipboardMonitoring = clipboard.IsChecked == true;
             settings.BrowserIntegrationEnabled = integration.IsChecked == true;
@@ -1740,6 +1778,11 @@ public sealed partial class MainWindow : Window
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
             PostDownloadCommand = source.PostDownloadCommand,
+            ConnectionProfiles = source.ConnectionProfiles.Select(profile => new ConnectionProfileDto
+            {
+                Pattern = profile.Pattern,
+                MaxConnections = profile.MaxConnections,
+            }).ToList(),
             CategoryFolders = new Dictionary<string, string>(source.CategoryFolders, StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = new List<string>(source.ExcludedFileExtensions),
             ExcludedHosts = new List<string>(source.ExcludedHosts),

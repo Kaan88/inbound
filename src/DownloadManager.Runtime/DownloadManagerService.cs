@@ -264,7 +264,11 @@ public sealed class DownloadManagerService
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
             RequestHeaders = headers,
-            RequestedConnections = Math.Clamp(request.Connections ?? _settings.DefaultConnections, 1, 32),
+            RequestedConnections = Math.Clamp(
+                Math.Min(
+                    request.Connections ?? _settings.DefaultConnections,
+                    EffectiveConnectionLimit(uri)),
+                1, 32),
             SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
             Description = request.Description,
             ExpectedSha256 = string.IsNullOrWhiteSpace(request.ExpectedSha256) ? null : request.ExpectedSha256.Trim(),
@@ -618,6 +622,15 @@ public sealed class DownloadManagerService
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
+            ConnectionProfiles = settings.ConnectionProfiles
+                .Where(profile => !string.IsNullOrWhiteSpace(profile.Pattern))
+                .Select(profile => new ConnectionProfile
+                {
+                    Pattern = profile.Pattern.Trim(),
+                    MaxConnections = Math.Clamp(profile.MaxConnections, 1, 32),
+                })
+                .Take(50)
+                .ToList(),
             GlobalSpeedLimitBytesPerSecond = settings.GlobalSpeedLimitBytesPerSecond,
             LaunchAtStartup = settings.LaunchAtStartup,
             ClipboardMonitoring = settings.ClipboardMonitoring,
@@ -2218,6 +2231,36 @@ public sealed class DownloadManagerService
         }
     }
 
+    private int EffectiveConnectionLimit(Uri uri)
+    {
+        var limit = _settings.MaxConnectionsPerHost;
+        var profile = _settings.ConnectionProfiles
+            .Where(candidate => HostMatches(candidate.Pattern, uri))
+            .OrderByDescending(candidate => candidate.Pattern.Length)
+            .FirstOrDefault();
+        if (profile is not null)
+        {
+            limit = Math.Min(limit, profile.MaxConnections);
+        }
+
+        return Math.Clamp(limit, 1, 32);
+    }
+
+    private static bool HostMatches(string pattern, Uri uri)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return false;
+        }
+
+        var value = pattern.Contains(':') ? uri.Authority : uri.Host;
+        var regex = "^" + System.Text.RegularExpressions.Regex.Escape(pattern.Trim())
+            .Replace("\\*", ".*")
+            .Replace("\\?", ".") + "$";
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
     private string ResolveDestination(string? requested, string fileName)
     {
         if (!string.IsNullOrWhiteSpace(requested))
@@ -2426,6 +2469,13 @@ public sealed class DownloadManagerService
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
+            ConnectionProfiles = settings.ConnectionProfiles
+                .Select(profile => new ConnectionProfileDto
+                {
+                    Pattern = profile.Pattern,
+                    MaxConnections = profile.MaxConnections,
+                })
+                .ToList(),
             GlobalSpeedLimitBytesPerSecond = settings.GlobalSpeedLimitBytesPerSecond,
             Proxy = MapProxy(settings.Proxy),
             SiteLogins = settings.SiteLogins.Select(login => new SiteLoginDto

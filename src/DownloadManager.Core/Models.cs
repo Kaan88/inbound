@@ -357,6 +357,12 @@ public sealed class GrabberProject
     }
 }
 
+public sealed class ConnectionProfile
+{
+    public string Pattern { get; set; } = "*";
+    public int MaxConnections { get; set; } = 8;
+}
+
 public sealed class AppSettings
 {
     public const int CurrentSchemaVersion = 1;
@@ -372,6 +378,7 @@ public sealed class AppSettings
     public List<ScheduleRule> Schedules { get; set; } = new();
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
+    public List<ConnectionProfile> ConnectionProfiles { get; set; } = new();
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
     public ProxySettings Proxy { get; set; } = new();
     public List<SiteLogin> SiteLogins { get; set; } = new();

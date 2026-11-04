@@ -698,6 +698,16 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.MaxConcurrentDownloads = Math.Clamp(settings.MaxConcurrentDownloads, 1, 16);
         settings.DefaultConnections = Math.Clamp(settings.DefaultConnections, 1, 32);
         settings.MaxConnectionsPerHost = Math.Clamp(settings.MaxConnectionsPerHost, 1, 64);
+        settings.ConnectionProfiles ??= new List<ConnectionProfile>();
+        settings.ConnectionProfiles = settings.ConnectionProfiles
+            .Where(profile => !string.IsNullOrWhiteSpace(profile.Pattern))
+            .Select(profile => new ConnectionProfile
+            {
+                Pattern = profile.Pattern.Trim(),
+                MaxConnections = Math.Clamp(profile.MaxConnections, 1, 32),
+            })
+            .Take(50)
+            .ToList();
         if (settings.GlobalSpeedLimitBytesPerSecond is <= 0)
         {
             settings.GlobalSpeedLimitBytesPerSecond = null;

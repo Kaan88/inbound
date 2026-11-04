@@ -191,6 +191,58 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ConnectionProfilesCapRequestedConnections()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.MaxConnectionsPerHost = 4;
+        settings.ConnectionProfiles.Add(new ConnectionProfileDto
+        {
+            Pattern = "127.0.0.1",
+            MaxConnections = 2,
+        });
+        settings.ConnectionProfiles.Add(new ConnectionProfileDto
+        {
+            Pattern = "*.example.com",
+            MaxConnections = 1,
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var matched = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/profile.bin?size=65536&seed=330",
+            DestinationDirectory = ctx.Destination,
+            FileName = "profile.bin",
+            Connections = 8,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.Equal(2, matched.Job!.RequestedConnections);
+
+        var unmatched = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"http://localhost:{new Uri(_server.BaseAddress).Port}/file/profile2.bin?size=65536&seed=331",
+            DestinationDirectory = ctx.Destination,
+            FileName = "profile2.bin",
+            Connections = 8,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.Equal(4, unmatched.Job!.RequestedConnections);
+
+        var wildcard = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = "https://cdn.example.com/file.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "profile3.bin",
+            Connections = 8,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.Equal(1, wildcard.Job!.RequestedConnections);
+    }
+
+    [Fact]
     public async Task PostDownloadHookRunsOnceWithExactFilePath()
     {
         var hook = new RecordingPostDownloadHook();

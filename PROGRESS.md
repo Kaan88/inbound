@@ -723,6 +723,22 @@ random-access part file **in the destination directory**:
 - Limitation: our own command surface, not reference app.exe switch-compatible; no
   registered `dm:` URL protocol.
 
+## Connection profile evidence (C5, 2026-11-04)
+
+- Settings gained `ConnectionProfiles` (host pattern + max connections), with
+  normalization (trim, 1–32, max 50). `AddJobAsync` takes the minimum of the
+  requested connections, the global `MaxConnectionsPerHost`, and the
+  most-specific matching profile (`*`/`?` wildcards).
+- Integration `ConnectionProfilesCapRequestedConnections` (suite **46/46**):
+  - `127.0.0.1` profile 2 reduced a requested 8 to 2;
+  - `localhost` did not match and used the global 4;
+  - `*.example.com` reduced to 1.
+- Published CLI: `profile add 127.0.0.1 2`; `profile list` showed `2 127.0.0.1`;
+  a Later job requested with `--connections 8` reported
+  `requestedConnections: 2`; `profile remove 127.0.0.1` left an empty list.
+- WinUI Options includes a `pattern=max` multi-line profile editor.
+- Limitation: caps per job, not aggregate connections across simultaneous jobs.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -731,7 +747,7 @@ random-access part file **in the destination directory**:
 - Core: **45/45 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   and safe post-download argument construction.
-- Runtime/persistence: **45/45 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **46/46 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -739,7 +755,7 @@ random-access part file **in the destination directory**:
   rotating-token refresh, live-stream exclusion, DRM detection, editable
   properties, duplicate policies, category destinations, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
-  and post-download hook isolation.
+  post-download hook isolation, and connection profiles.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

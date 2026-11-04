@@ -65,6 +65,12 @@ public sealed class QueueDto
     public long QuotaBytesUsed { get; set; }
 }
 
+public sealed class ConnectionProfileDto
+{
+    public string Pattern { get; set; } = "*";
+    public int MaxConnections { get; set; } = 8;
+}
+
 public sealed class ScheduleDto
 {
     public Guid? GrabberProjectId { get; set; }
@@ -115,6 +121,7 @@ public sealed class SettingsDto
     public List<ScheduleDto> Schedules { get; set; } = new();
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
+    public List<ConnectionProfileDto> ConnectionProfiles { get; set; } = new();
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
     public ProxyDto Proxy { get; set; } = new();
     public List<SiteLoginDto> SiteLogins { get; set; } = new();

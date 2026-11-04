@@ -186,6 +186,9 @@ internal static class Program
             case "grabber":
                 return await GrabberAsync(client, args, optionArgs, json).ConfigureAwait(false);
 
+            case "profile":
+                return await ProfileAsync(client, optionArgs, json).ConfigureAwait(false);
+
             case "export":
             {
                 if (optionArgs.Length < 1)
@@ -749,6 +752,81 @@ internal static class Program
         }
 
         return result.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> ProfileAsync(
+        CliClient client,
+        string[] positional,
+        bool json)
+    {
+        var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
+        var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+        var settings = snapshot.Settings;
+
+        if (sub == "list")
+        {
+            if (json)
+            {
+                PrintJson(settings.ConnectionProfiles);
+                return 0;
+            }
+
+            Console.WriteLine($"{"MAX",3}  PATTERN");
+            foreach (var profile in settings.ConnectionProfiles)
+            {
+                Console.WriteLine($"{profile.MaxConnections,3}  {profile.Pattern}");
+            }
+
+            return 0;
+        }
+
+        if (sub == "add")
+        {
+            if (positional.Length < 3 ||
+                !int.TryParse(positional[2], out var maxConnections) ||
+                maxConnections < 1 || maxConnections > 32)
+            {
+                Console.Error.WriteLine("usage: profile add <host-pattern> <max-connections>");
+                return 2;
+            }
+
+            var pattern = positional[1].Trim();
+            settings.ConnectionProfiles.RemoveAll(profile =>
+                string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+            settings.ConnectionProfiles.Add(new ConnectionProfileDto
+            {
+                Pattern = pattern,
+                MaxConnections = maxConnections,
+            });
+            var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(reply, json);
+        }
+
+        if (sub == "remove")
+        {
+            if (positional.Length < 2)
+            {
+                Console.Error.WriteLine("usage: profile remove <host-pattern>");
+                return 2;
+            }
+
+            var pattern = positional[1].Trim();
+            var removed = settings.ConnectionProfiles.RemoveAll(profile =>
+                string.Equals(profile.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+            if (removed == 0)
+            {
+                Console.Error.WriteLine($"profile '{pattern}' not found.");
+                return 1;
+            }
+
+            var reply = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(reply, json);
+        }
+
+        Console.Error.WriteLine("usage: profile list|add|remove");
+        return 2;
     }
 
     private static async Task<int> GrabberAsync(
@@ -1425,6 +1503,10 @@ internal static class Program
         Console.WriteLine($"last folder:       {settings.LastDestinationDirectory ?? "-"}");
         Console.WriteLine($"max concurrent:    {settings.MaxConcurrentDownloads}");
         Console.WriteLine($"default conns:     {settings.DefaultConnections}");
+        foreach (var profile in settings.ConnectionProfiles)
+        {
+            Console.WriteLine($"  profile        {profile.Pattern} = {profile.MaxConnections}");
+        }
         Console.WriteLine($"global speed limit:{settings.GlobalSpeedLimitBytesPerSecond?.ToString() ?? "none"}");
         Console.WriteLine($"proxy:             {settings.Proxy.Mode} {settings.Proxy.Address ?? "-"}" +
                           (string.IsNullOrWhiteSpace(settings.Proxy.Username) ? string.Empty : $" user={settings.Proxy.Username} password=***"));
@@ -1500,6 +1582,7 @@ internal static class Program
                           [--no-pages] [--no-rewrite] [--start now|later]
               dm grabber list|add|run|remove
               dm grabber add <start-url> [--name NAME] [--dest DIR] [grabber options]
+              dm profile list|add|remove
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>
