@@ -203,6 +203,12 @@ public sealed class JobQueueRequest
     public int QueueId { get; set; }
 }
 
+public sealed class JobRefreshUrlRequest
+{
+    public Guid JobId { get; set; }
+    public string Url { get; set; } = string.Empty;
+}
+
 public sealed class JobEventDto
 {
     public JobDto Job { get; set; } = new();

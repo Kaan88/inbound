@@ -259,19 +259,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         using var response = await SendWithRedirectsAsync(job, state.Bytes, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
 
-        if (status is 401 or 403 or 404 or 407)
+        if (status is 401 or 403 or 404 or 407 or 410)
         {
             throw new DownloadEngineException(
-                new JobFailure(
-                    status is 401 or 407 ? FailureKind.Unauthorized
-                        : status == 403 ? FailureKind.Forbidden
-                        : FailureKind.NotFound,
-                    status == 407
-                        ? "Proxy authentication failed (HTTP 407)."
-                        : $"The server returned HTTP {status}.",
-                    false,
-                    false,
-                    DateTimeOffset.UtcNow),
+                ClassifyHttpFailure(status, response),
                 isRetryable: false);
         }
 
@@ -871,19 +862,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         throw new SegmentationUnsupportedException();
                     }
 
-                    if (status is 401 or 403 or 404 or 407)
+                    if (status is 401 or 403 or 404 or 407 or 410)
                     {
                         throw new SegmentFailureException(
-                            new JobFailure(
-                                status is 401 or 407 ? FailureKind.Unauthorized
-                                    : status == 403 ? FailureKind.Forbidden
-                                    : FailureKind.NotFound,
-                                status == 407
-                                    ? "Proxy authentication failed for a segment (HTTP 407)."
-                                    : $"The server returned HTTP {status} for a segment.",
-                                false,
-                                false,
-                                DateTimeOffset.UtcNow),
+                            ClassifyHttpFailure(status, response, segment: true),
                             retryable: false);
                     }
 
@@ -1545,6 +1527,32 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             AddressFamily.InterNetworkV6 => bytes[0] == 0xfd || bytes[0] == 0xfe,
             _ => false,
         };
+    }
+
+    private static JobFailure ClassifyHttpFailure(
+        int status,
+        HttpResponseMessage response,
+        bool segment = false)
+    {
+        var expiredHeader = response.Headers.TryGetValues("X-Url-Expired", out var values) &&
+                            values.Any(value => string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
+        var expired = status == 410 || (status == 403 && expiredHeader);
+        var kind = expired
+            ? FailureKind.ExpiredUrl
+            : status is 401 or 407 ? FailureKind.Unauthorized
+            : status == 403 ? FailureKind.Forbidden
+            : FailureKind.NotFound;
+        var message = expired
+            ? "The download URL has expired. Use Refresh Download Address and try again."
+            : status == 407
+                ? (segment
+                    ? "Proxy authentication failed for a segment (HTTP 407)."
+                    : "Proxy authentication failed (HTTP 407).")
+                : segment
+                    ? $"The server returned HTTP {status} for a segment."
+                    : $"The server returned HTTP {status}.";
+        var resumable = status is 401 or 403 or 410;
+        return new JobFailure(kind, message, false, resumable, DateTimeOffset.UtcNow);
     }
 
     private static JobFailure MapException(Exception ex, out bool retryable)

@@ -295,6 +295,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Open folder", MenuOpenFolder_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
+        flyout.Items.Add(CreateContextItem("Refresh download address...", MenuRefreshUrl_Click));
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to queue" };
         flyout.Items.Add(_addToQueueMenu);
         flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
@@ -361,6 +362,38 @@ public sealed partial class MainWindow : Window
         {
             await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, settings.DefaultQueueId));
         }
+    }
+
+    private async void MenuRefreshUrl_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedJob is not { } job)
+        {
+            return;
+        }
+
+        var input = new TextBox
+        {
+            Text = job.Url,
+            Header = "New download address",
+            AcceptsReturn = false,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Refresh download address",
+            Content = input,
+            PrimaryButtonText = "Refresh",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+            string.IsNullOrWhiteSpace(input.Text))
+        {
+            return;
+        }
+
+        await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, input.Text.Trim()));
     }
 
     private async void MenuProperties_Click(object sender, RoutedEventArgs e)

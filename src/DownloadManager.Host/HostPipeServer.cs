@@ -252,6 +252,14 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.JobRefreshUrl:
+                    var refreshUrl = message.GetPayload<JobRefreshUrlRequest>();
+                    await Reply(client, message, MessageTypes.JobActionResult,
+                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsPauseAll:
                     await _service.PauseAllAsync(cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.HostActionResult,

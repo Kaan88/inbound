@@ -23,6 +23,9 @@ public sealed class TestServerHost : IAsyncDisposable
     private int _peakRangeRequests;
     private long _authAuthorized;
     private long _authDenied;
+    private long _expiringExpired;
+    private long _expiringServed;
+    private long _expiringRangeRequests;
     private bool _lastAuthCookiePresent;
     private string _lastAuthReferer = string.Empty;
     private string _lastAuthUserAgent = string.Empty;
@@ -34,11 +37,21 @@ public sealed class TestServerHost : IAsyncDisposable
     public int PeakConcurrentRangeRequests => Volatile.Read(ref _peakRangeRequests);
     public long AuthAuthorized => Interlocked.Read(ref _authAuthorized);
     public long AuthDenied => Interlocked.Read(ref _authDenied);
+    public long ExpiringExpired => Interlocked.Read(ref _expiringExpired);
+    public long ExpiringServed => Interlocked.Read(ref _expiringServed);
+    public long ExpiringRangeRequests => Interlocked.Read(ref _expiringRangeRequests);
 
     public void ResetConcurrency()
     {
         Interlocked.Exchange(ref _activeRangeRequests, 0);
         Interlocked.Exchange(ref _peakRangeRequests, 0);
+    }
+
+    public void ResetExpiringStats()
+    {
+        Interlocked.Exchange(ref _expiringExpired, 0);
+        Interlocked.Exchange(ref _expiringServed, 0);
+        Interlocked.Exchange(ref _expiringRangeRequests, 0);
     }
 
     public void ResetAuthStats()
@@ -182,6 +195,46 @@ public sealed class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: QueryInt(context, "bps", 0),
                 unknownLength: false).ConfigureAwait(false);
         });
+
+        _app.MapGet("/expiring/{name}", async (HttpContext context, string name) =>
+        {
+            var token = QueryInt(context, "token", 1);
+            var expectedToken = _versions.GetValueOrDefault(name, 1);
+            if (token != expectedToken)
+            {
+                Interlocked.Increment(ref _expiringExpired);
+                context.Response.StatusCode = 403;
+                context.Response.Headers["X-Url-Expired"] = "true";
+                await context.Response.WriteAsync("download URL expired").ConfigureAwait(false);
+                return;
+            }
+
+            Interlocked.Increment(ref _expiringServed);
+            if (!string.IsNullOrWhiteSpace(context.Request.Headers.Range))
+            {
+                Interlocked.Increment(ref _expiringRangeRequests);
+            }
+
+            var size = QueryInt(context, "size", 1024 * 1024);
+            var seed = QueryInt(context, "seed", 1);
+            await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                throttleBytesPerSecond: QueryInt(context, "bps", 0),
+                unknownLength: false).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/expiring/rotate/{name}", (string name, int? token) =>
+        {
+            var next = token ?? GetVersion(name) + 1;
+            SetVersion(name, next);
+            return Results.Json(new { name, token = next });
+        });
+
+        _app.MapGet("/expiring/stats", () => Results.Json(new
+        {
+            expired = ExpiringExpired,
+            served = ExpiringServed,
+            rangeRequests = ExpiringRangeRequests,
+        }));
 
         _app.MapGet("/flaky-range/{name}", async (HttpContext context, string name) =>
         {
@@ -375,6 +428,7 @@ public sealed class TestServerHost : IAsyncDisposable
             _versions.Clear();
             _requestCounts.Clear();
             ResetAuthStats();
+            ResetExpiringStats();
             return Results.Ok();
         });
     }

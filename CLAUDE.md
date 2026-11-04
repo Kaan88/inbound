@@ -30,11 +30,11 @@ actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload byte
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, site logins/refresh address, schedule
-completion actions/quotas, media (HLS/DASH), Download All/grabber, FTP, and
-clean-environment install/upgrade verification. Authenticated HTTP/HTTPS proxy,
-SOCKS5, and redirect credential boundaries are verified; proxy-password storage
-is currently plaintext in settings JSON and needs DPAPI.
+areas: everyday management gaps, site logins, schedule completion actions/quotas,
+media (HLS/DASH), Download All/grabber, FTP, and clean-environment
+install/upgrade verification. Authenticated HTTP/HTTPS proxy, SOCKS5, redirect
+credential boundaries, and expired-URL refresh are verified; proxy-password
+storage is currently plaintext in settings JSON and needs DPAPI.
 
 Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
 extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu

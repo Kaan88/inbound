@@ -205,15 +205,40 @@ random-access part file **in the destination directory**:
 - Proxy password is currently stored in settings JSON; DPAPI protection and a
   proxy settings UI remain open. SOCKS4/4a and UDP ASSOCIATE are untested.
 
+## Expired URL and refresh evidence (2026-11-04)
+
+- TestServer `/expiring/{name}` accepts only the current token; stale tokens
+  return **403** with `X-Url-Expired: true`. `/expiring/stats` reports expired,
+  served, and Range requests.
+- The engine now classifies 403 + `X-Url-Expired` and 410 as
+  `expiredUrl`, marks it resumable, and preserves the part file/checkpoint.
+- `RefreshUrlAsync` validates the new URL, keeps the existing part file,
+  filename, and validators, clears the failure, requeues, and resumes. Invalid
+  URLs are rejected without touching the job.
+- Integration test **17/17** (`RefreshDownloadAddressResumesAfterExpiredToken`):
+  paused after >65,536 bytes, rotated token 1→2, resume failed with
+  `expiredUrl`/`IsResumable=true` while partial bytes stayed, rejected
+  `not-a-url`, then refreshed to token 2, completed 1,048,576 bytes with the
+  expected seed-96 SHA-256, and observed `ExpiringExpired>0` and
+  `ExpiringRangeRequests>0` (Range resume, not restart).
+- Published CLI/IPC check: paused at 589,824 of 4,194,304 bytes, rotated the
+  token, resume failed with `expiredUrl` while keeping 589,824 bytes, then
+  `dm refresh <id> <token-2-url>` completed 4,194,304 bytes with SHA-256
+  `26f44b54b4514a10a47b40a30a6b383985fbb7a2723882a97f2482ded313c24f`;
+  `/expiring/stats` showed `expired=1, served=7, rangeRequests=6`.
+- CLI: `dm refresh <job-id> <new-url>`. WinUI row menu:
+  **Refresh download address...** with an editable URL dialog. Both use the
+  `job.refreshUrl` IPC method.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **11/11 passed**.
-- Runtime/persistence: **16/16 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **17/17 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, destination-local payload, authenticated handoff,
-  and runtime HTTP/SOCKS5 proxy settings.
+  runtime HTTP/SOCKS5 proxy settings, and expired-URL refresh/resume.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -239,10 +264,10 @@ random-access part file **in the destination directory**:
    prevention, and DST/wall-clock tests.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7 remainder: site-login storage, expired-URL classification, and
-   Refresh Download Address preserving partial data; add a proxy settings UI and
-   DPAPI protection for proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy,
-   SOCKS5 and redirect credential boundaries are done (E17/E18/E19).
+4. Phase 7 remainder: site-login storage; add a proxy settings UI and DPAPI
+   protection for proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5,
+   redirect credential boundaries, and expired-URL refresh are done
+   (E17/E18/E19/E20).
 5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 6. Phase 10: Download All/site grabber.

@@ -736,6 +736,58 @@ public sealed class DownloadManagerService
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
 
+    public async Task<JobActionResponse> RefreshUrlAsync(
+        Guid id,
+        string newUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryValidateUrl(newUrl, out var uri, out var urlError))
+        {
+            return new JobActionResponse { Ok = false, Error = urlError };
+        }
+
+        JobRuntime? runtime;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(id, out runtime))
+            {
+                return new JobActionResponse { Ok = false, Error = "Job not found." };
+            }
+
+            if (runtime.Job.State == DownloadState.Completed)
+            {
+                return new JobActionResponse { Ok = false, Error = "Job is already complete.", Job = Map(runtime.Job) };
+            }
+
+            if (runtime.Starting || runtime.Runner is { IsCompleted: false })
+            {
+                return new JobActionResponse
+                {
+                    Ok = false,
+                    Error = "Pause or stop the download before refreshing its address.",
+                    Job = Map(runtime.Job),
+                };
+            }
+
+            runtime.PauseRequested = false;
+            runtime.CancelRequested = false;
+            runtime.CancelledForRemoval = false;
+            runtime.Job.Url = uri.AbsoluteUri;
+            runtime.Job.FinalUrl = null;
+            runtime.Job.State = DownloadState.Queued;
+            runtime.Job.StartMode = StartMode.StartNow;
+            runtime.Job.Failure = null;
+            runtime.Job.CompletedAt = null;
+            runtime.Job.AutoResumeAfterRestart = true;
+            runtime.Job.Touch();
+        }
+
+        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+        Raise(runtime, "refreshed");
+        Schedule();
+        return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+    }
+
     /// <summary>
     /// Evaluates the configured one-time/daily queue schedules against a local
     /// timestamp. Public so tests can drive time deterministically; the host calls

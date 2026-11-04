@@ -657,6 +657,59 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task RefreshDownloadAddressResumesAfterExpiredToken()
+    {
+        const string name = "refresh-token.bin";
+        const int size = 1_048_576;
+        const int seed = 96;
+        _server.ResetExpiringStats();
+        _server.SetVersion(name, 1);
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/expiring/{name}?token=1&size={size}&seed={seed}&bps=262144",
+            DestinationDirectory = ctx.Destination,
+            FileName = name,
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+
+        var partial = await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65_536);
+        var pause = await ctx.Service.PauseAsync(partial.Id);
+        Assert.True(pause.Ok, pause.Error);
+        var paused = await ctx.WaitFor(partial.Id, j => j.State == "paused");
+        var bytesBeforeExpiry = paused.ReceivedBytes;
+        Assert.True(bytesBeforeExpiry > 0);
+        Assert.True(File.Exists(paused.PartFilePath));
+
+        // Rotate the server token: the old URL now returns 403 + X-Url-Expired.
+        _server.SetVersion(name, 2);
+        var resume = await ctx.Service.ResumeAsync(partial.Id);
+        Assert.True(resume.Ok, resume.Error);
+        var expired = await ctx.WaitFor(partial.Id, j => j.State == "failed");
+        Assert.Equal("expiredUrl", expired.Failure?.Kind);
+        Assert.True(expired.Failure?.IsResumable);
+        Assert.True(expired.ReceivedBytes >= bytesBeforeExpiry);
+        Assert.True(File.Exists(expired.PartFilePath));
+
+        var badRefresh = await ctx.Service.RefreshUrlAsync(partial.Id, "not-a-url");
+        Assert.False(badRefresh.Ok);
+
+        var newUrl = $"{_server.BaseAddress}/expiring/{name}?token=2&size={size}&seed={seed}&bps=262144";
+        var refreshed = await ctx.Service.RefreshUrlAsync(partial.Id, newUrl);
+        Assert.True(refreshed.Ok, refreshed.Error);
+        Assert.Contains("token=2", refreshed.Job!.Url);
+        Assert.True(refreshed.Job.ReceivedBytes >= bytesBeforeExpiry);
+
+        var completed = await ctx.WaitFor(partial.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(seed, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.True(_server.ExpiringExpired > 0);
+        Assert.True(_server.ExpiringRangeRequests > 0);
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

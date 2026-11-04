@@ -174,6 +174,18 @@ internal static class Program
             case "resume":
             case "retry":
                 return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobResume, json).ConfigureAwait(false);
+            case "refresh":
+            {
+                if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var refreshId))
+                {
+                    Console.Error.WriteLine("usage: refresh <job-id> <new-url>");
+                    return 2;
+                }
+
+                var reply = await client.RequestAsync(MessageTypes.JobRefreshUrl,
+                    new JobRefreshUrlRequest { JobId = refreshId, Url = optionArgs[1] }).ConfigureAwait(false);
+                return PrintAction(reply, json);
+            }
             case "cancel":
             {
                 if (!Guid.TryParse(optionArgs.FirstOrDefault(), out var id))
@@ -802,6 +814,7 @@ internal static class Program
               dm list [--json]
               dm status <job-id> [--json]
               dm pause|resume|retry <job-id>
+              dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move

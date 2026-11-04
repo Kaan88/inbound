@@ -25,6 +25,7 @@ public enum FailureKind
     Http,
     Unauthorized,
     Forbidden,
+    ExpiredUrl,
     NotFound,
     RangeUnsupported,
     RemoteChanged,
