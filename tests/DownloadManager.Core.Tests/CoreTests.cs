@@ -87,3 +87,18 @@ public sealed class DownloadJobTests
         Assert.Equal(0.1, job.ProgressFraction);
     }
 }
+
+public sealed class ShutdownCommandTests
+{
+    [Theory]
+    [InlineData("shutdown", false, "/s /t 30")]
+    [InlineData("shutdown", true, "/s /t 30 /f")]
+    [InlineData("restart", false, "/r /t 30")]
+    [InlineData("restart", true, "/r /t 30 /f")]
+    [InlineData("logoff", false, "/l /t 30")]
+    [InlineData("bogus", false, "/s /t 30")]
+    public void BuildsSafeWindowsArguments(string mode, bool force, string expected)
+    {
+        Assert.Equal(expected, ShutdownCommand.BuildArguments(mode, force));
+    }
+}

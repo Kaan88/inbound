@@ -792,6 +792,218 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task QueueQuotaPausesDownloadsAndBlocksNewStarts()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var queue = settings.Queues.Single(q => q.Id == 0);
+        queue.QuotaEnabled = true;
+        queue.QuotaBytes = 524_288;
+        queue.QuotaWindowHours = 24;
+        queue.QuotaWindowStart = DateTimeOffset.UtcNow;
+        queue.QuotaBytesUsed = 0;
+        queue.MaxConcurrentDownloads = 2;
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        const int size = 1_048_576;
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/quota1.bin?size={size}&seed=110&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "quota1.bin",
+            Source = "cli",
+        });
+        var paused = await ctx.WaitFor(first.Job!.Id, j => j.State == "paused", TimeSpan.FromSeconds(30));
+        var afterQuota = ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 0);
+        Assert.True(afterQuota.QuotaBytesUsed >= afterQuota.QuotaBytes);
+        Assert.False(afterQuota.IsRunning);
+        Assert.True(paused.ReceivedBytes > 0);
+        Assert.True(File.Exists(paused.PartFilePath));
+
+        var second = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/quota2.bin?size=262144&seed=111",
+            DestinationDirectory = ctx.Destination,
+            FileName = "quota2.bin",
+            Source = "cli",
+        });
+        await Task.Delay(400);
+        Assert.Equal("queued", ctx.Service.GetJob(second.Job!.Id)!.State);
+
+        // A fresh window (and a larger limit) lets the queue resume.
+        var reset = ctx.Service.GetSnapshot().Settings;
+        var resetQueue = reset.Queues.Single(q => q.Id == 0);
+        resetQueue.QuotaWindowStart = DateTimeOffset.UtcNow.AddHours(-25);
+        resetQueue.QuotaBytes = 10 * 1024 * 1024;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(reset)).Ok);
+        var start = await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" });
+        Assert.True(start.Ok, start.Error);
+
+        await ctx.WaitFor(first.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(60));
+        await ctx.WaitFor(second.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(60));
+        var firstHash = await Hashing.Sha256FileAsync(Path.Combine(ctx.Destination, "quota1.bin"));
+        var expectedFirst = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(110, size))).ToLowerInvariant();
+        Assert.Equal(expectedFirst, firstHash);
+    }
+
+    [Fact]
+    public async Task CompletionActionsFireAfterQueueFinishes()
+    {
+        var executor = new RecordingCompletionExecutor();
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.AllowSystemCompletionActions = true;
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Completion",
+            QueueId = 0,
+            Enabled = true,
+            Kind = "daily",
+            StartTime = "00:00",
+            OpenFileWhenDone = true,
+            ExitWhenDone = true,
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/action1.bin?size=131072&seed=112",
+            DestinationDirectory = ctx.Destination,
+            FileName = "action1.bin",
+            Source = "cli",
+        });
+        var second = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/action2.bin?size=131072&seed=113",
+            DestinationDirectory = ctx.Destination,
+            FileName = "action2.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(first.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await ctx.WaitFor(second.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await Task.Delay(300);
+
+        Assert.Single(executor.OpenedPaths);
+        Assert.Equal(1, executor.ExitCount);
+        Assert.Equal(0, executor.ShutdownCount);
+    }
+
+    [Fact]
+    public async Task SystemCompletionActionsRequireOptInAndNoActiveDownloads()
+    {
+        var executor = new RecordingCompletionExecutor();
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2, completionActions: executor);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Exit",
+            QueueId = 0,
+            Enabled = true,
+            Kind = "daily",
+            StartTime = "00:00",
+            ExitWhenDone = true,
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/exit1.bin?size=131072&seed=114",
+            DestinationDirectory = ctx.Destination,
+            FileName = "exit1.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(first.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+        Assert.Equal(0, executor.ExitCount);
+
+        var enabled = ctx.Service.GetSnapshot().Settings;
+        enabled.AllowSystemCompletionActions = true;
+        enabled.Queues.Add(new QueueDto
+        {
+            Id = 1,
+            Name = "Other",
+            MaxConcurrentDownloads = 1,
+            IsRunning = true,
+            Order = 1,
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(enabled)).Ok);
+
+        var slow = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/other.bin?size=2097152&seed=115&bps=131072",
+            DestinationDirectory = ctx.Destination,
+            FileName = "other.bin",
+            Source = "cli",
+            QueueId = 1,
+        });
+        await ctx.WaitFor(slow.Job!.Id, j => j.ReceivedBytes > 65536);
+        var blocked = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/exit2.bin?size=131072&seed=116",
+            DestinationDirectory = ctx.Destination,
+            FileName = "exit2.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(blocked.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+        Assert.Equal(0, executor.ExitCount);
+
+        await ctx.Service.CancelAsync(slow.Job.Id, deleteFile: true);
+        var finalJob = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/exit3.bin?size=131072&seed=117",
+            DestinationDirectory = ctx.Destination,
+            FileName = "exit3.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(finalJob.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await Task.Delay(300);
+        Assert.Equal(1, executor.ExitCount);
+    }
+
+    [Fact]
+    public async Task CompletionActionFailureDoesNotFailTheDownload()
+    {
+        var executor = new RecordingCompletionExecutor { ThrowOnOpen = true };
+        await using var ctx = await ServiceContext.CreateAsync(_server, completionActions: executor);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.AllowSystemCompletionActions = true;
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Open",
+            QueueId = 0,
+            Enabled = true,
+            Kind = "daily",
+            StartTime = "00:00",
+            OpenFileWhenDone = true,
+            ShutdownWhenDone = true,
+            ShutdownMode = "restart",
+            ForceShutdown = true,
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var job = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/action-fail.bin?size=131072&seed=118",
+            DestinationDirectory = ctx.Destination,
+            FileName = "action-fail.bin",
+            Source = "cli",
+        });
+        var completed = await ctx.WaitFor(job.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        await Task.Delay(300);
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(1, executor.OpenAttempts);
+        Assert.Equal(1, executor.ShutdownCount);
+        Assert.Equal("restart", executor.LastShutdownMode);
+        Assert.True(executor.LastForce);
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -816,6 +1028,43 @@ public sealed class RuntimeServiceTests
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             TestContent.Generate(90, size))).ToLowerInvariant();
         Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    private sealed class RecordingCompletionExecutor : ICompletionActionExecutor
+    {
+        public List<string> OpenedPaths { get; } = new();
+        public int OpenAttempts { get; private set; }
+        public int ExitCount { get; private set; }
+        public int ShutdownCount { get; private set; }
+        public string? LastShutdownMode { get; private set; }
+        public bool LastForce { get; private set; }
+        public bool ThrowOnOpen { get; init; }
+
+        public Task OpenFileAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenAttempts++;
+            if (ThrowOnOpen)
+            {
+                throw new IOException("simulated open failure");
+            }
+
+            OpenedPaths.Add(path);
+            return Task.CompletedTask;
+        }
+
+        public Task RequestExitAsync(CancellationToken cancellationToken)
+        {
+            ExitCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken)
+        {
+            ShutdownCount++;
+            LastShutdownMode = mode;
+            LastForce = force;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ServiceContext : IAsyncDisposable
@@ -845,22 +1094,25 @@ public sealed class RuntimeServiceTests
         public static Task<ServiceContext> CreateAsync(
             TestServerHost server,
             bool autoResume = true,
-            int maxConcurrent = 2)
+            int maxConcurrent = 2,
+            ICompletionActionExecutor? completionActions = null)
         {
             var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
             var paths = new StoragePaths(Path.Combine(root, "state"));
             var destination = Path.Combine(root, "downloads");
             Directory.CreateDirectory(destination);
             paths.EnsureCreated();
-            return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true);
+            return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true,
+                completionActions);
         }
 
         public static Task<ServiceContext> CreateAsync(
             TestServerHost server,
             StoragePaths paths,
             string destination,
-            bool autoResume = true)
-            => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false);
+            bool autoResume = true,
+            ICompletionActionExecutor? completionActions = null)
+            => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false, completionActions);
 
         private static async Task<ServiceContext> BuildAsync(
             TestServerHost server,
@@ -868,7 +1120,8 @@ public sealed class RuntimeServiceTests
             string destination,
             bool autoResume,
             int maxConcurrent,
-            bool ownsPaths)
+            bool ownsPaths,
+            ICompletionActionExecutor? completionActions = null)
         {
             var checkpoints = new JsonCheckpointStore(paths);
             var store = new JsonJobStore(paths);
@@ -889,7 +1142,8 @@ public sealed class RuntimeServiceTests
                 checkpoints,
                 settingsStore,
                 engine,
-                enableSchedulerTimer: false);
+                enableSchedulerTimer: false,
+                completionActions: completionActions);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

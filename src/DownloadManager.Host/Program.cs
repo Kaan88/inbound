@@ -50,12 +50,16 @@ internal static class Program
                     AllowLocalNetwork = true,
                 },
                 checkpoints: checkpoints);
-            var service = new DownloadManagerService(paths, jobStore, checkpoints, settingsStore, engine, log.Info);
+            var completionExecutor = new HostCompletionActionExecutor(log.Info);
+            var service = new DownloadManagerService(
+                paths, jobStore, checkpoints, settingsStore, engine, log.Info,
+                completionActions: completionExecutor);
             service.InitializeAsync().GetAwaiter().GetResult();
             service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
+            completionExecutor.ExitHost = controller.RequestShutdown;
             var pipe = new HostPipeServer(service, controller, log);
             pipe.Start();
 

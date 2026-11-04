@@ -589,6 +589,12 @@ public sealed class JsonSettingsStore : ISettingsStore
             queue.Name = string.IsNullOrWhiteSpace(queue.Name) ? $"Queue {i + 1}" : queue.Name.Trim();
             queue.MaxConcurrentDownloads = Math.Clamp(queue.MaxConcurrentDownloads, 1, 16);
             queue.Order = i;
+            queue.QuotaBytes = Math.Clamp(queue.QuotaBytes, 1, 10L * 1024 * 1024 * 1024 * 1024);
+            queue.QuotaWindowHours = Math.Clamp(queue.QuotaWindowHours, 1, 24 * 365);
+            if (queue.QuotaBytesUsed < 0)
+            {
+                queue.QuotaBytesUsed = 0;
+            }
         }
 
         if (!settings.Queues.Any(q => q.Id == settings.DefaultQueueId))
@@ -610,6 +616,12 @@ public sealed class JsonSettingsStore : ISettingsStore
                 : "daily";
             schedule.Days = string.IsNullOrWhiteSpace(schedule.Days) ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun" : schedule.Days;
             schedule.StartTime = string.IsNullOrWhiteSpace(schedule.StartTime) ? "09:00" : schedule.StartTime;
+            schedule.ShutdownMode = schedule.ShutdownMode?.Trim().ToLowerInvariant() switch
+            {
+                "restart" => "restart",
+                "logoff" => "logoff",
+                _ => "shutdown",
+            };
         }
 
         settings.ExcludedFileExtensions ??= new List<string>();

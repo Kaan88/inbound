@@ -480,6 +480,13 @@ internal static class Program
                 stop = parsedStop;
             }
 
+            var shutdownMode = GetOption(args, "--shutdown")?.ToLowerInvariant();
+            if (shutdownMode is not null && shutdownMode is not ("shutdown" or "restart" or "logoff"))
+            {
+                Console.Error.WriteLine("--shutdown expects shutdown, restart, or logoff.");
+                return 2;
+            }
+
             var schedule = new ScheduleDto
             {
                 Id = Guid.NewGuid(),
@@ -491,6 +498,11 @@ internal static class Program
                 Days = GetOption(args, "--days") ?? "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
                 StartTime = start.ToString("HH:mm", CultureInfo.InvariantCulture),
                 StopTime = stop?.ToString("HH:mm", CultureInfo.InvariantCulture),
+                OpenFileWhenDone = args.Contains("--open", StringComparer.OrdinalIgnoreCase),
+                ExitWhenDone = args.Contains("--exit", StringComparer.OrdinalIgnoreCase),
+                ShutdownWhenDone = shutdownMode is not null,
+                ShutdownMode = shutdownMode ?? "shutdown",
+                ForceShutdown = args.Contains("--force", StringComparer.OrdinalIgnoreCase),
             };
             settings.Schedules.Add(schedule);
             var added = await client.RequestAsync(MessageTypes.SettingsUpdate,
@@ -556,10 +568,13 @@ internal static class Program
             }
             else
             {
-                Console.WriteLine($"{"ID",-4} {"STATE",-8} {"MAX",4}  NAME");
+                Console.WriteLine($"{"ID",-4} {"STATE",-8} {"MAX",4} {"QUOTA",-18}  NAME");
                 foreach (var queue in settings.Queues.OrderBy(q => q.Order))
                 {
-                    Console.WriteLine($"{queue.Id,-4} {(queue.IsRunning ? "running" : "stopped"),-8} {queue.MaxConcurrentDownloads,4}  {queue.Name}");
+                    var quota = queue.QuotaEnabled
+                        ? $"{queue.QuotaBytesUsed / (1024 * 1024)}/{queue.QuotaBytes / (1024 * 1024)}MB/{queue.QuotaWindowHours}h"
+                        : "-";
+                    Console.WriteLine($"{queue.Id,-4} {(queue.IsRunning ? "running" : "stopped"),-8} {queue.MaxConcurrentDownloads,4} {quota,-18}  {queue.Name}");
                 }
             }
 
@@ -603,6 +618,46 @@ internal static class Program
             var reply = await client.RequestAsync(MessageTypes.JobMoveToQueue,
                 new JobQueueRequest { JobId = jobId, QueueId = targetQueue }).ConfigureAwait(false);
             return PrintAction(reply, json);
+        }
+
+        if (sub == "quota")
+        {
+            if (optionArgs.Length < 3 || !int.TryParse(optionArgs[1], out var quotaQueueId))
+            {
+                Console.Error.WriteLine("usage: queue quota <queue-id> <megabytes> <window-hours> | queue quota <queue-id> off");
+                return 2;
+            }
+
+            var queue = settings.Queues.FirstOrDefault(q => q.Id == quotaQueueId);
+            if (queue is null)
+            {
+                Console.Error.WriteLine("Queue not found.");
+                return 1;
+            }
+
+            if (optionArgs[2].Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                queue.QuotaEnabled = false;
+            }
+            else
+            {
+                if (!long.TryParse(optionArgs[2], out var megabytes) || megabytes <= 0 ||
+                    optionArgs.Length < 4 || !int.TryParse(optionArgs[3], out var hours) || hours <= 0)
+                {
+                    Console.Error.WriteLine("usage: queue quota <queue-id> <megabytes> <window-hours>");
+                    return 2;
+                }
+
+                queue.QuotaEnabled = true;
+                queue.QuotaBytes = megabytes * 1024 * 1024;
+                queue.QuotaWindowHours = hours;
+                queue.QuotaWindowStart = DateTimeOffset.UtcNow;
+                queue.QuotaBytesUsed = 0;
+            }
+
+            var quotaUpdate = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = settings }).ConfigureAwait(false);
+            return PrintSettingsResult(quotaUpdate, json);
         }
 
         if (sub is "start" or "stop" or "max")
@@ -718,6 +773,9 @@ internal static class Program
                     break;
                 case "proxypass":
                     settings.Proxy.Password = value;
+                    break;
+                case "allowsystemcompletionactions":
+                    settings.AllowSystemCompletionActions = ParseBool(value);
                     break;
                 default:
                     Console.Error.WriteLine($"unknown setting '{key}'");
@@ -858,6 +916,7 @@ internal static class Program
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
         Console.WriteLine($"auto intercept:    {settings.BrowserAutoIntercept}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
+        Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 
@@ -908,8 +967,9 @@ internal static class Program
               dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
-              dm queue list|add|start|stop|max|move
+              dm queue list|add|start|stop|max|move|quota
               dm schedule list|add|remove|enable|disable
+                          [--open] [--exit] [--shutdown shutdown|restart|logoff] [--force]
               dm site list|add|remove
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown

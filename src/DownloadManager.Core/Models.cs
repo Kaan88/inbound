@@ -254,6 +254,12 @@ public sealed class DownloadQueue
     public int MaxConcurrentDownloads { get; set; } = 3;
     public bool IsRunning { get; set; } = true;
     public int Order { get; set; }
+
+    public bool QuotaEnabled { get; set; }
+    public long QuotaBytes { get; set; } = 200L * 1024 * 1024;
+    public int QuotaWindowHours { get; set; } = 5;
+    public DateTimeOffset? QuotaWindowStart { get; set; }
+    public long QuotaBytesUsed { get; set; }
 }
 
 public sealed class ScheduleRule
@@ -278,6 +284,12 @@ public sealed class ScheduleRule
 
     /// <summary>Local date the queue was last stopped by this schedule.</summary>
     public DateOnly? LastStopDate { get; set; }
+
+    public bool OpenFileWhenDone { get; set; }
+    public bool ExitWhenDone { get; set; }
+    public bool ShutdownWhenDone { get; set; }
+    public string ShutdownMode { get; set; } = "shutdown";
+    public bool ForceShutdown { get; set; }
 }
 
 public sealed class AppSettings
@@ -307,6 +319,10 @@ public sealed class AppSettings
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
+
+    /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>
+    public bool AllowSystemCompletionActions { get; set; }
+
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
     public List<string> ExcludedFileExtensions { get; set; } = new();

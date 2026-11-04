@@ -26,8 +26,8 @@
   expired-URL classification, and Refresh Download Address with partial resume
   verified; SOCKS4/4a and proxy credential hardening remain).
 - Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
-  reassignment, and daily/one-time schedule execution verified; quotas,
-  completion actions, sleep prevention, and DST/wall-clock tests remain).
+  reassignment, daily/one-time schedule execution, quotas, and completion
+  actions verified; sleep prevention and DST/wall-clock tests remain).
 - Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -162,9 +162,11 @@ Named queues, per-queue concurrency, start/stop, queue persistence, CLI/UI
 assignment/reassignment, and daily/one-time schedule execution are implemented
 and tested (E9/E10/E13/E16). The host evaluates schedules every 30 seconds and
 on startup; schedules target one queue, honor weekday selection, and persist
-last-run dates across restart. Remaining: quotas, completion actions, sleep
-prevention, and DST/wall-clock behavior. CLI management exists as
-`dm schedule list|add|remove|enable|disable`.
+last-run dates across restart. Per-queue byte quotas and completion actions
+(open/exit/shutdown with opt-in and active-download safeguards) are verified
+(E22). Remaining: sleep prevention and DST/wall-clock behavior. CLI management
+exists as `dm schedule list|add|remove|enable|disable` and
+`dm queue quota <id> <MB> <hours>|off`.
 
 ## Phase 9 — Media detection and downloading (pending)
 

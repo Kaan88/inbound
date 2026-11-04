@@ -250,16 +250,41 @@ random-access part file **in the destination directory**:
   `eed4f2827224985e51fedd9ece2ca1716093ac418ad4f7db5d22e0f1e570605f`;
   `/site/stats` ended `authorized=5, denied=0`; `site remove` left an empty list.
 
+## Quotas and completion-action evidence (2026-11-04)
+
+- Queue quotas: `QuotaEnabled/QuotaBytes/QuotaWindowHours/QuotaWindowStart/
+  QuotaBytesUsed`. Progress deltas accumulate per queue; reaching the limit
+  pauses active jobs, stops the queue, and blocks new starts. A new window
+  resets usage. CLI: `dm queue quota <id> <MB> <hours>|off`.
+- Completion actions on schedules: open file, exit host, or shutdown
+  (shutdown/restart/logoff, optional force). Exit/shutdown require
+  `AllowSystemCompletionActions`; they are suppressed while any other download
+  is unfinished; exceptions are logged and never fail the job.
+- Integration suite **22/22**:
+  - `QueueQuotaPausesDownloadsAndBlocksNewStarts` — 512 KiB quota paused a 1 MiB
+    job, stopped the queue, left the next job queued; a 25-hour-old window and a
+    larger limit allowed both jobs to complete with the expected hash.
+  - `CompletionActionsFireAfterQueueFinishes` — exactly one open and one exit
+    after the last of two queued jobs completed.
+  - `SystemCompletionActionsRequireOptInAndNoActiveDownloads` — exit suppressed
+    with opt-in off, suppressed while another queue was active, fired once after
+    cancellation.
+  - `CompletionActionFailureDoesNotFailTheDownload` — throwing open action left
+    the job completed; shutdown dispatched `restart` + force.
+- Core `ShutdownCommandTests` verify `/s`, `/r`, `/l`, `/t 30`, and `/f`
+  argument construction. Tests use a recording executor; no real shutdown was
+  performed.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **11/11 passed**.
-- Runtime/persistence: **18/18 passed** (`tests\DownloadManager.Integration.Tests`),
-  including queues, scheduler, destination-local payload, authenticated handoff,
-  runtime HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, and DPAPI site
-  logins.
+- Core: **17/17 passed**, including shutdown-command construction.
+- Runtime/persistence: **22/22 passed** (`tests\DownloadManager.Integration.Tests`),
+  including queues, scheduler, quotas, completion actions, destination-local
+  payload, authenticated handoff, runtime HTTP/SOCKS5 proxy settings,
+  expired-URL refresh/resume, and DPAPI site logins.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -282,8 +307,8 @@ random-access part file **in the destination directory**:
 
 1. Commit the site-login increment (DPAPI store, engine auth, CLI, tests,
    evidence).
-2. Complete Phase 8: completion actions (open/exit/shutdown), quotas, sleep
-   prevention, and DST/wall-clock tests.
+2. Complete Phase 8: sleep prevention and DST/wall-clock tests. Quotas and
+   completion actions are done (E22).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

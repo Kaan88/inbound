@@ -372,6 +372,20 @@ public static class Hashing
     }
 }
 
+public static class ShutdownCommand
+{
+    public static string BuildArguments(string? mode, bool force)
+    {
+        var command = mode?.Trim().ToLowerInvariant() switch
+        {
+            "restart" => "/r",
+            "logoff" => "/l",
+            _ => "/s",
+        };
+        return $"{command} /t 30" + (force ? " /f" : string.Empty);
+    }
+}
+
 public static class FormatUtil
 {
     public static string Bytes(long bytes)

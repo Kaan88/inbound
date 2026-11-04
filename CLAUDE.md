@@ -30,7 +30,7 @@ actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload byte
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, schedule completion actions/quotas, media
+areas: everyday management gaps, schedule sleep prevention/DST, media
 (HLS/DASH), Download All/grabber, FTP, and clean-environment install/upgrade
 verification. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
 credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and

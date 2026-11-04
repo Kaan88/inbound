@@ -30,8 +30,10 @@ public sealed class DownloadManagerService
     private readonly Action<string>? _log;
     private readonly TimeProvider _timeProvider;
     private readonly bool _enableSchedulerTimer;
+    private readonly ICompletionActionExecutor _completionActions;
     private readonly object _sync = new();
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
+    private readonly HashSet<int> _completionFiredQueues = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private AppSettings _settings = new();
     private CancellationTokenSource? _schedulerCts;
@@ -47,7 +49,8 @@ public sealed class DownloadManagerService
         IDownloadEngine engine,
         Action<string>? log = null,
         TimeProvider? timeProvider = null,
-        bool enableSchedulerTimer = true)
+        bool enableSchedulerTimer = true,
+        ICompletionActionExecutor? completionActions = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -57,6 +60,7 @@ public sealed class DownloadManagerService
         _log = log;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _enableSchedulerTimer = enableSchedulerTimer;
+        _completionActions = completionActions ?? NullCompletionActionExecutor.Instance;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -278,6 +282,7 @@ public sealed class DownloadManagerService
         lock (_sync)
         {
             _jobs[job.Id] = runtime;
+            _completionFiredQueues.Remove(queueId);
         }
 
         Raise(runtime, "added");
@@ -561,6 +566,7 @@ public sealed class DownloadManagerService
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
+            AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
@@ -1131,6 +1137,81 @@ public sealed class DownloadManagerService
         return changed;
     }
 
+    private void ResetQuotaWindowsLocked(DateTimeOffset now)
+    {
+        foreach (var queue in _settings.Queues)
+        {
+            ResetQuotaWindowLocked(queue, now);
+        }
+    }
+
+    private static void ResetQuotaWindowLocked(DownloadQueue queue, DateTimeOffset now)
+    {
+        if (!queue.QuotaEnabled)
+        {
+            return;
+        }
+
+        if (queue.QuotaWindowStart is null ||
+            now - queue.QuotaWindowStart.Value >= TimeSpan.FromHours(queue.QuotaWindowHours))
+        {
+            queue.QuotaWindowStart = now;
+            queue.QuotaBytesUsed = 0;
+        }
+    }
+
+    private bool AddQuotaUsageLocked(JobRuntime runtime, long received)
+    {
+        var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId);
+        if (queue is null || !queue.QuotaEnabled)
+        {
+            return false;
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        ResetQuotaWindowLocked(queue, now);
+        var delta = received - runtime.QuotaReportedBytes;
+        if (delta > 0)
+        {
+            queue.QuotaBytesUsed += delta;
+        }
+
+        runtime.QuotaReportedBytes = received;
+        if (!queue.IsRunning || queue.QuotaBytesUsed < queue.QuotaBytes)
+        {
+            return false;
+        }
+
+        queue.IsRunning = false;
+        foreach (var active in _jobs.Values.Where(r =>
+                     r.Job.QueueId == queue.Id &&
+                     (r.Starting || r.Runner is { IsCompleted: false })))
+        {
+            active.PauseRequested = true;
+            active.Job.State = DownloadState.Paused;
+            active.Job.BytesPerSecond = null;
+            active.Job.EstimatedRemaining = null;
+            active.Job.ActiveConnections = 0;
+            active.Job.Touch();
+            active.Cts?.Cancel();
+        }
+
+        return true;
+    }
+
+    private async Task SaveSettingsQuietlyAsync()
+    {
+        try
+        {
+            await _settingsStore.SaveAsync(_settings, CancellationToken.None).ConfigureAwait(false);
+            SettingsChanged?.Invoke(this, _settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not persist quota state: {ex.Message}");
+        }
+    }
+
     private void Schedule()
     {
         List<JobRuntime> toStart;
@@ -1141,6 +1222,7 @@ public sealed class DownloadManagerService
                 return;
             }
 
+            ResetQuotaWindowsLocked(_timeProvider.GetUtcNow());
             var running = _jobs.Values
                 .Where(r => r.Starting || r.Runner is { IsCompleted: false })
                 .ToList();
@@ -1173,6 +1255,12 @@ public sealed class DownloadManagerService
                 var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults;
                 if (!queue.IsRunning)
                 {
+                    continue;
+                }
+
+                if (queue.QuotaEnabled && queue.QuotaBytesUsed >= queue.QuotaBytes)
+                {
+                    queue.IsRunning = false;
                     continue;
                 }
 
@@ -1243,6 +1331,7 @@ public sealed class DownloadManagerService
         var progress = new InlineProgress<TransferProgress>(p =>
         {
             JobDto? dto = null;
+            var quotaReached = false;
             var now = DateTimeOffset.UtcNow;
             lock (_sync)
             {
@@ -1265,12 +1354,19 @@ public sealed class DownloadManagerService
                     job.State = DownloadState.Downloading;
                 }
 
+                quotaReached = AddQuotaUsageLocked(runtime, p.ReceivedBytes);
                 job.Touch();
                 if (now - lastProgressEvent >= TimeSpan.FromMilliseconds(300))
                 {
                     lastProgressEvent = now;
                     dto = Map(job);
                 }
+            }
+
+            if (quotaReached)
+            {
+                _log?.Invoke($"Queue {job.QueueId} reached its download quota; pausing.");
+                _ = SaveSettingsQuietlyAsync();
             }
 
             if (dto is not null)
@@ -1385,7 +1481,111 @@ public sealed class DownloadManagerService
             runtime.CancelledForRemoval = false;
         }
 
+        await MaybeRunCompletionActionsAsync(job, changeType, CancellationToken.None).ConfigureAwait(false);
         Schedule();
+    }
+
+    private async Task MaybeRunCompletionActionsAsync(
+        DownloadJob job,
+        string changeType,
+        CancellationToken cancellationToken)
+    {
+        if (changeType != "completed")
+        {
+            return;
+        }
+
+        ScheduleRule? schedule;
+        bool allowSystemActions;
+        bool blockedByOtherDownloads;
+        lock (_sync)
+        {
+            if (_completionFiredQueues.Contains(job.QueueId))
+            {
+                return;
+            }
+
+            schedule = _settings.Schedules.FirstOrDefault(s =>
+                s.Enabled &&
+                s.QueueId == job.QueueId &&
+                (s.OpenFileWhenDone || s.ExitWhenDone || s.ShutdownWhenDone));
+            if (schedule is null)
+            {
+                return;
+            }
+
+            var queueUnfinished = _jobs.Values.Any(r =>
+                r.Job.Id != job.Id &&
+                r.Job.QueueId == job.QueueId &&
+                r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled));
+            if (queueUnfinished)
+            {
+                return;
+            }
+
+            _completionFiredQueues.Add(job.QueueId);
+            allowSystemActions = _settings.AllowSystemCompletionActions;
+            blockedByOtherDownloads = _jobs.Values.Any(r =>
+                r.Job.Id != job.Id &&
+                r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled));
+        }
+
+        if (schedule.OpenFileWhenDone)
+        {
+            if (File.Exists(job.FinalFilePath))
+            {
+                try
+                {
+                    await _completionActions.OpenFileAsync(job.FinalFilePath, cancellationToken)
+                        .ConfigureAwait(false);
+                    _log?.Invoke($"Completion action opened '{job.FinalFilePath}'.");
+                }
+                catch (Exception ex)
+                {
+                    _log?.Invoke($"Completion action could not open '{job.FinalFilePath}': {ex.Message}");
+                }
+            }
+            else
+            {
+                _log?.Invoke($"Completion action skipped open: '{job.FinalFilePath}' does not exist.");
+            }
+        }
+
+        if (!schedule.ExitWhenDone && !schedule.ShutdownWhenDone)
+        {
+            return;
+        }
+
+        if (!allowSystemActions)
+        {
+            _log?.Invoke("Completion action exit/shutdown blocked: system completion actions are disabled.");
+            return;
+        }
+
+        if (blockedByOtherDownloads)
+        {
+            _log?.Invoke("Completion action exit/shutdown blocked: other downloads are unfinished.");
+            return;
+        }
+
+        try
+        {
+            if (schedule.ShutdownWhenDone)
+            {
+                await _completionActions.RequestShutdownAsync(
+                    schedule.ShutdownMode, schedule.ForceShutdown, cancellationToken).ConfigureAwait(false);
+                _log?.Invoke($"Completion action requested shutdown ({schedule.ShutdownMode}).");
+            }
+            else
+            {
+                await _completionActions.RequestExitAsync(cancellationToken).ConfigureAwait(false);
+                _log?.Invoke("Completion action requested host exit.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Completion action failed: {ex.Message}");
+        }
     }
 
     private async Task PersistAsync(JobRuntime runtime, CancellationToken cancellationToken)
@@ -1665,6 +1865,7 @@ public sealed class DownloadManagerService
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
+            AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
@@ -1678,6 +1879,11 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = q.MaxConcurrentDownloads,
                 IsRunning = q.IsRunning,
                 Order = q.Order,
+                QuotaEnabled = q.QuotaEnabled,
+                QuotaBytes = q.QuotaBytes,
+                QuotaWindowHours = q.QuotaWindowHours,
+                QuotaWindowStart = q.QuotaWindowStart,
+                QuotaBytesUsed = q.QuotaBytesUsed,
             }).ToList(),
             Schedules = settings.Schedules.Select(s => new ScheduleDto
             {
@@ -1690,6 +1896,11 @@ public sealed class DownloadManagerService
                 Days = s.Days,
                 StartTime = s.StartTime,
                 StopTime = s.StopTime,
+                OpenFileWhenDone = s.OpenFileWhenDone,
+                ExitWhenDone = s.ExitWhenDone,
+                ShutdownWhenDone = s.ShutdownWhenDone,
+                ShutdownMode = s.ShutdownMode,
+                ForceShutdown = s.ForceShutdown,
                 LastStartDate = s.LastStartDate,
                 LastStopDate = s.LastStopDate,
             }).ToList(),
@@ -1789,6 +2000,11 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = Math.Clamp(q.MaxConcurrentDownloads, 1, 16),
                 IsRunning = q.IsRunning,
                 Order = index,
+                QuotaEnabled = q.QuotaEnabled,
+                QuotaBytes = Math.Clamp(q.QuotaBytes, 1, 10L * 1024 * 1024 * 1024 * 1024),
+                QuotaWindowHours = Math.Clamp(q.QuotaWindowHours, 1, 24 * 365),
+                QuotaWindowStart = q.QuotaWindowStart,
+                QuotaBytesUsed = Math.Max(0, q.QuotaBytesUsed),
             }).ToList()
             : existing.Select((q, index) => new DownloadQueue
             {
@@ -1797,6 +2013,11 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = q.MaxConcurrentDownloads,
                 IsRunning = q.IsRunning,
                 Order = index,
+                QuotaEnabled = q.QuotaEnabled,
+                QuotaBytes = q.QuotaBytes,
+                QuotaWindowHours = q.QuotaWindowHours,
+                QuotaWindowStart = q.QuotaWindowStart,
+                QuotaBytesUsed = q.QuotaBytesUsed,
             }).ToList();
 
         if (source.Count == 0)
@@ -1854,6 +2075,11 @@ public sealed class DownloadManagerService
                 Days = s.Days,
                 StartTime = s.StartTime,
                 StopTime = s.StopTime,
+                OpenFileWhenDone = s.OpenFileWhenDone,
+                ExitWhenDone = s.ExitWhenDone,
+                ShutdownWhenDone = s.ShutdownWhenDone,
+                ShutdownMode = s.ShutdownMode,
+                ForceShutdown = s.ForceShutdown,
                 // Run state is owned by the host scheduler, never by a UI payload.
                 LastStartDate = previous?.LastStartDate,
                 LastStopDate = previous?.LastStopDate,
@@ -1866,9 +2092,11 @@ public sealed class DownloadManagerService
         public JobRuntime(DownloadJob job)
         {
             Job = job;
+            QuotaReportedBytes = job.ReceivedBytes;
         }
 
         public DownloadJob Job { get; }
+        public long QuotaReportedBytes { get; set; }
         public CancellationTokenSource? Cts { get; set; }
         public Task? Runner { get; set; }
         public bool Starting { get; set; }

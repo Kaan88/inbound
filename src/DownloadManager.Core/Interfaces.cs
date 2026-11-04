@@ -50,6 +50,27 @@ public interface IDownloadEngine
     void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins);
 }
 
+public interface ICompletionActionExecutor
+{
+    Task OpenFileAsync(string path, CancellationToken cancellationToken);
+
+    Task RequestExitAsync(CancellationToken cancellationToken);
+
+    Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken);
+}
+
+public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
+{
+    public static NullCompletionActionExecutor Instance { get; } = new();
+
+    public Task OpenFileAsync(string path, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task RequestExitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+}
+
 public interface IClock
 {
     DateTimeOffset UtcNow { get; }
