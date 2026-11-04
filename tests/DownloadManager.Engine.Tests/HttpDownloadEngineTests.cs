@@ -403,6 +403,128 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task ReportsHttpDnsTlsAndTimeoutFailureClasses()
+    {
+        using var ctx = new EngineContext();
+
+        using (var engine = CreateEngine(maxAttempts: 1))
+        {
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob($"{_server.BaseAddress}/error/404", "not-found.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.NotFound, result.Failure!.Kind);
+            Assert.False(result.Failure.IsRetryable);
+        }
+
+        using (var engine = CreateEngine(maxAttempts: 2))
+        {
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob($"{_server.BaseAddress}/error/500", "server-error.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.Http, result.Failure!.Kind);
+            Assert.True(result.Failure.IsRetryable);
+        }
+
+        using (var engine = CreateEngine(maxAttempts: 1, connectTimeout: TimeSpan.FromSeconds(3)))
+        {
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob("http://download-manager-no-such-host.invalid/file.bin", "dns.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            _output.WriteLine($"dns failure: {result.Failure!.Kind} {result.Failure.Message}");
+            Assert.True(result.Failure.Kind is FailureKind.Dns or FailureKind.Network,
+                $"unexpected DNS failure: {result.Failure.Kind} {result.Failure.Message}");
+        }
+
+        using (var engine = CreateEngine(maxAttempts: 1, connectTimeout: TimeSpan.FromSeconds(3)))
+        {
+            var port = new Uri(_server.BaseAddress).Port;
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob($"https://127.0.0.1:{port}/file/tls.bin?size=1024", "tls.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            _output.WriteLine($"tls failure: {result.Failure!.Kind} {result.Failure.Message}");
+            Assert.True(result.Failure.Kind is FailureKind.Tls or FailureKind.Network,
+                $"unexpected TLS failure: {result.Failure.Kind} {result.Failure.Message}");
+        }
+
+        using (var engine = CreateEngine(
+                   maxAttempts: 1, readTimeout: TimeSpan.FromMilliseconds(250)))
+        {
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob(
+                    $"{_server.BaseAddress}/slow/timeout.bin?size=1048576&seed=12&bps=1024",
+                    "timeout.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.Timeout, result.Failure!.Kind);
+        }
+    }
+
+    [Fact]
+    public async Task HtmlPageIsSavedOnlyForHtmlLikeTargets()
+    {
+        using var ctx = new EngineContext();
+        var htmlJob = ctx.CreateJob($"{_server.BaseAddress}/html", "legit.html");
+        using (var engine = CreateEngine())
+        {
+            var result = await engine.ExecuteAsync(htmlJob, null, null, CancellationToken.None);
+            Assert.True(result.Success, result.Failure?.Message);
+            var text = await File.ReadAllTextAsync(result.FinalFilePath!);
+            Assert.Contains("downloadable html", text);
+        }
+
+        using (var engine = CreateEngine())
+        {
+            var result = await engine.ExecuteAsync(
+                ctx.CreateJob($"{_server.BaseAddress}/html", "error-page.bin"),
+                null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.InvalidContent, result.Failure!.Kind);
+            Assert.Contains("HTML page", result.Failure.Message);
+            Assert.False(File.Exists(Path.Combine(ctx.Destination, "error-page.bin")));
+        }
+    }
+
+    [Fact]
+    public async Task ProgressReportsAreMonotonicAndComplete()
+    {
+        using var ctx = new EngineContext();
+        const int size = 1_048_576;
+        var reports = new List<TransferProgress>();
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(
+            ctx.CreateJob(
+                $"{_server.BaseAddress}/slow/progress.bin?size={size}&seed=13&bps=262144",
+                "progress.bin"),
+            null,
+            new InlineProgress<TransferProgress>(reports.Add),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(reports.Count >= 3, $"expected multiple progress reports, got {reports.Count}");
+        for (var i = 1; i < reports.Count; i++)
+        {
+            Assert.True(reports[i].ReceivedBytes >= reports[i - 1].ReceivedBytes,
+                "progress bytes decreased");
+        }
+
+        var last = reports[^1];
+        Assert.Equal(size, last.ReceivedBytes);
+        Assert.True(last.TotalBytes is null or size);
+        Assert.True(reports.Any(report => report.BytesPerSecond > 0));
+        Assert.All(reports, report =>
+        {
+            Assert.True(report.EstimatedRemaining is null ||
+                        report.EstimatedRemaining >= TimeSpan.Zero);
+            Assert.True(report.EstimatedRemaining is null ||
+                        report.EstimatedRemaining < TimeSpan.FromMinutes(5));
+        });
+    }
+
+    [Fact]
     public async Task TruncatedResponseNeverReportsSuccess()
     {
         using var ctx = new EngineContext();
@@ -550,15 +672,17 @@ public sealed class HttpDownloadEngineTests
     private HttpDownloadEngine CreateEngine(
         JsonCheckpointStore? store = null,
         int maxAttempts = 3,
-        ProxySettings? proxy = null)
+        ProxySettings? proxy = null,
+        TimeSpan? readTimeout = null,
+        TimeSpan? connectTimeout = null)
         => new(
             new EngineOptions
             {
                 MaxAttempts = maxAttempts,
                 InitialRetryDelay = TimeSpan.FromMilliseconds(10),
                 MaxRetryDelay = TimeSpan.FromMilliseconds(50),
-                ReadTimeout = TimeSpan.FromSeconds(10),
-                ConnectTimeout = TimeSpan.FromSeconds(5),
+                ReadTimeout = readTimeout ?? TimeSpan.FromSeconds(10),
+                ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(5),
                 AllowLocalNetwork = true,
                 Proxy = proxy ?? new ProxySettings(),
             },

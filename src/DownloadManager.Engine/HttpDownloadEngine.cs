@@ -421,6 +421,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 isRetryable: false);
         }
 
+        if (IsHtmlErrorPage(job, response.Content.Headers.ContentType?.MediaType))
+        {
+            throw new DownloadEngineException(
+                new JobFailure(
+                    FailureKind.InvalidContent,
+                    "The server returned an HTML page instead of the requested file. " +
+                    "Rename the target to .html to save it as a page.",
+                    false, false, DateTimeOffset.UtcNow),
+                isRetryable: false);
+        }
+
         state.Total = responseTotal ?? state.Total;
         state.ETag = responseEtag ?? state.ETag;
         state.LastModified = responseLastModified ?? state.LastModified;
@@ -3647,6 +3658,19 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             AddressFamily.InterNetworkV6 => bytes[0] == 0xfd || bytes[0] == 0xfe,
             _ => false,
         };
+    }
+
+    private static bool IsHtmlErrorPage(DownloadJob job, string? mediaType)
+    {
+        if (string.IsNullOrWhiteSpace(mediaType) ||
+            (!mediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase) &&
+             !mediaType.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(job.FileName).TrimStart('.').ToLowerInvariant();
+        return extension is not ("html" or "htm" or "xhtml" or "txt" or "xml" or "json" or "mhtml" or "mht");
     }
 
     private static JobFailure ClassifyHttpFailure(

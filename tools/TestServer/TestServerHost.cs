@@ -243,6 +243,68 @@ public sealed class TestServerHost : IAsyncDisposable
                 unknownLength: true).ConfigureAwait(false);
         });
 
+        _app.MapGet("/large/{name}", async (HttpContext context, string name) =>
+        {
+            if (!string.Equals(Path.GetFileName(name), name, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var size = Math.Clamp(
+                QueryInt(context, "size", 200 * 1024 * 1024), 1, 512 * 1024 * 1024);
+            var seed = QueryInt(context, "seed", 1);
+            var throttle = QueryInt(context, "bps", 0);
+            context.Response.ContentType = "application/octet-stream";
+            context.Response.ContentLength = size;
+            context.Response.Headers.AcceptRanges = "none";
+            var buffer = new byte[64 * 1024];
+            var state = (uint)(seed == 0 ? 1 : seed);
+            var remaining = (long)size;
+            var written = 0L;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (remaining > 0)
+            {
+                var count = (int)Math.Min(buffer.Length, remaining);
+                TestContent.Fill(ref state, buffer.AsSpan(0, count));
+                await context.Response.Body.WriteAsync(
+                    buffer.AsMemory(0, count), context.RequestAborted).ConfigureAwait(false);
+                written += count;
+                remaining -= count;
+                if (throttle > 0)
+                {
+                    var expected = written / (double)throttle;
+                    var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
+                    if (delay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay, context.RequestAborted).ConfigureAwait(false);
+                    }
+                }
+            }
+        });
+
+        _app.MapGet("/large/expected", (int? size, int? seed) =>
+        {
+            var length = Math.Clamp(size ?? 200 * 1024 * 1024, 1, 512 * 1024 * 1024);
+            var state = (uint)((seed ?? 1) == 0 ? 1 : (seed ?? 1));
+            var buffer = new byte[64 * 1024];
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var remaining = (long)length;
+            while (remaining > 0)
+            {
+                var count = (int)Math.Min(buffer.Length, remaining);
+                TestContent.Fill(ref state, buffer.AsSpan(0, count));
+                hash.AppendData(buffer, 0, count);
+                remaining -= count;
+            }
+
+            return Results.Json(new
+            {
+                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),
+                bytes = length,
+            });
+        });
+
         _app.MapGet("/slow/{name}", async (HttpContext context, string name) =>
         {
             var size = QueryInt(context, "size", 512 * 1024);
@@ -1200,14 +1262,18 @@ public static class TestContent
     {
         var bytes = new byte[size];
         var state = (uint)(seed == 0 ? 1 : seed);
-        for (var i = 0; i < bytes.Length; i++)
+        Fill(ref state, bytes);
+        return bytes;
+    }
+
+    public static void Fill(ref uint state, Span<byte> buffer)
+    {
+        for (var i = 0; i < buffer.Length; i++)
         {
             state ^= state << 13;
             state ^= state >> 17;
             state ^= state << 5;
-            bytes[i] = (byte)(state & 0xFF);
+            buffer[i] = (byte)(state & 0xFF);
         }
-
-        return bytes;
     }
 }

@@ -69,13 +69,13 @@ handoff strategy.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P1.1 | Core job model and explicit terminal states | pending | P0.6 | State-machine unit tests distinguish pause/cancel/recoverable/permanent/success |
-| P1.2 | HTTP GET streaming engine, redirects, errors, timeouts | pending | P1.1 | Local server downloads produce expected SHA-256 |
-| P1.3 | Filename resolution, safe names, conflict policy | pending | P1.2 | Header/URL filename tests pass; no traversal |
-| P1.4 | Unknown length, empty file, unexpected HTML handling | pending | P1.2 | Truncated/error bodies fail; legitimate HTML succeeds |
-| P1.5 | Cancellation and temp-file cleanup | pending | P1.2 | Cancel removes/retains temp per policy; no success state |
-| P1.6 | CLI add/list/status/cancel | pending | P1.2 | CLI end-to-end download with JSON output |
-| P1.7 | Phase 1 verification report | pending | P1.6 | Hashes and failure cases recorded in PARITY/PROGRESS |
+| P1.1 | Core job model and explicit terminal states | done | P0.6 | Core/job tests and integration pause/cancel/failure tests cover terminal states (E1/E61/E63) |
+| P1.2 | HTTP GET streaming engine, redirects, errors, timeouts | done | P1.1 | Local hashes match; 404/500/DNS/TLS/timeout classes verified (E1/E3/E61) |
+| P1.3 | Filename resolution, safe names, conflict policy | done | P1.2 | Core filename traversal/reserved-name tests and live conflict policies pass (E36) |
+| P1.4 | Unknown length, empty file, unexpected HTML handling | done | P1.2 | Truncated/error bodies fail; legitimate HTML succeeds and error pages are rejected (E64) |
+| P1.5 | Cancellation and temp-file cleanup | done | P1.2 | Pause keeps the part, cancel deletes it, no success state (E63) |
+| P1.6 | CLI add/list/status/cancel | done | P1.2 | CLI end-to-end and JSON status verified (E6/E44) |
+| P1.7 | Phase 1 verification report | done | P1.6 | Hashes and failure cases recorded in PARITY/PROGRESS (E1/E3/E60-E64) |
 
 **Exit gate:** controlled downloads hash correctly; partial/truncated transfers
 never appear successful.

@@ -895,6 +895,35 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task PausePreservesPartialAndCancelDeletesIt()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/pause-cancel.bin?size=4194304&seed=14&bps=262144",
+            DestinationDirectory = ctx.Destination,
+            FileName = "pause-cancel.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        await ctx.WaitFor(response.Job!.Id, j => j.ReceivedBytes > 65_536);
+        Assert.True((await ctx.Service.PauseAsync(response.Job.Id)).Ok);
+        var paused = await ctx.WaitFor(response.Job.Id, j => j.State == "paused");
+        Assert.True(paused.ReceivedBytes > 0);
+        Assert.True(File.Exists(paused.PartFilePath));
+        Assert.False(File.Exists(paused.FinalFilePath));
+
+        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
+        await ctx.WaitFor(response.Job.Id,
+            j => j.ReceivedBytes > paused.ReceivedBytes + 32_768,
+            TimeSpan.FromSeconds(30));
+        Assert.True((await ctx.Service.CancelAsync(response.Job.Id, deleteFile: true)).Ok);
+        var cancelled = await ctx.WaitFor(response.Job.Id, j => j.State == "cancelled");
+        Assert.False(File.Exists(cancelled.PartFilePath));
+        Assert.False(File.Exists(cancelled.FinalFilePath));
+    }
+
+    [Fact]
     public async Task CancelDeletesPartialPayload()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

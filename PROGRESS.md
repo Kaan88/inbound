@@ -902,6 +902,30 @@ random-access part file **in the destination directory**:
   `hist-two.bin` and `hist-one.bin`.
 - Phase 6 is complete; M8's previous "no recent history" limitation is closed.
 
+## T4/T3/T7/T8/T10 evidence (2026-11-04)
+
+- T4: the published Host downloaded a 200 MB (209,715,200-byte) file with one
+  connection at 16 MB/s. Across 117 samples at 100 ms:
+  - working set 66,809,856 -> peak 80,457,728 bytes (delta 13.0 MiB);
+  - private memory 19,447,808 -> 29,179,904 bytes (delta 9.3 MiB);
+  - elapsed 12.92 s; SHA-256
+    `99f8eb83d20ba51b3c79aeba226031f1bf79bdc9d281d4e494735b79f0a0bedc`
+    matched `/large/expected`.
+- T3: engine `ReportsHttpDnsTlsAndTimeoutFailureClasses` maps 404 -> `NotFound`
+  (non-retryable), 500 -> `Http` (retryable), DNS -> `Dns`, TLS -> `Tls`, and a
+  250 ms read timeout -> `Timeout`; every case fails without a final file.
+- T7: engine `ProgressReportsAreMonotonicAndComplete` saw at least three
+  reports, non-decreasing bytes, final 1,048,576 bytes, positive speed, and ETA
+  values within 0-5 minutes.
+- T8: integration `PausePreservesPartialAndCancelDeletesIt` paused at 65,536
+  bytes with the part present/final absent, resumed past another 32,768 bytes,
+  then deleted both on cancel.
+- T10: engine `HtmlPageIsSavedOnlyForHtmlLikeTargets` saved `/html` as
+  `legit.html`, while `error-page.bin` received the same `text/html` body and
+  failed `invalidContent` with an actionable message and no final file.
+- TestServer now has `/large/{name}` (streams 200 MB without allocating it) and
+  `/large/expected` for the streaming hash.
+
 ## DASH SegmentBase/SegmentList range evidence (V4, 2026-11-04)
 
 - Media segments now carry inclusive byte ranges. Range requests are issued with
@@ -1025,14 +1049,15 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **24/24 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
-  credentials, and redirect credential boundaries.
+  credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
+  HTML-page policy, and monotonic progress/ETA.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **54/54 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **55/55 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1040,10 +1065,10 @@ random-access part file **in the destination directory**:
   SegmentTemplate/Timeline/SegmentList/SegmentBase byte ranges, DASH A/V muxing,
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
-  recent-URL history, the scoped site grabber/offline mirror,
-  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
-  isolation, connection profiles, secret-preserving settings updates,
-  installer-only update check/download, and segment/progress details.
+  recent-URL history, pause-vs-cancel partial files, the scoped site
+  grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
+  post-download hook isolation, connection profiles, secret-preserving settings
+  updates, installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
