@@ -902,6 +902,31 @@ random-access part file **in the destination directory**:
   `hist-two.bin` and `hist-one.bin`.
 - Phase 6 is complete; M8's previous "no recent history" limitation is closed.
 
+## HLS alternate-audio evidence (V11, 2026-11-04)
+
+- HLS master parsing now understands `#EXT-X-MEDIA:TYPE=AUDIO` entries
+  (GROUP-ID, NAME, DEFAULT, AUTOSELECT, URI) and the variant `AUDIO` attribute.
+  Selection prefers `DEFAULT=YES`, then `AUTOSELECT=YES`, then the first
+  rendition with a URI; in-band-only audio leaves the single-variant path.
+- HLS media parsing was extracted into `PrepareHlsMediaAsync`; a reusable
+  `DownloadMediaTrackToFileAsync` now feeds both DASH and HLS muxing with
+  per-track `hls-video`/`hls-audio` checkpoints and signatures.
+- TestServer `/hls/av-master.m3u8` lists `Commentary` first and `English`
+  `DEFAULT=YES` second, pointing at different audio playlists. The video/audio
+  tracks are fMP4 init+segments derived from the DASH A/V fixture.
+- Integration `HlsAlternateAudioMuxesWhenFfmpegAvailable`:
+  - downloaded the default English audio, not the first-listed commentary;
+  - muxed to an MP4 matching `/hls/av-expected`;
+  - integration suite **52/52**.
+- Published CLI:
+  - `hls-av.mp4` completed at 364,524 bytes;
+  - SHA-256
+    `03cfeddb0e614f8189f7a7502ed08731f66cdf204ab2ad1cf81cda07f7fc1ce5`
+    matched the reference;
+  - ffprobe reported H.264 320x180 + AAC, 4.0 s.
+- Remaining media work: additional DASH modes. Alternate-language selection UI
+  is not exposed.
+
 ## HLS AES-128 evidence (V10, 2026-11-04)
 
 - HLS parsing now supports `#EXT-X-KEY:METHOD=AES-128` with an identity key
@@ -967,16 +992,16 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **51/51 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **52/52 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
-  HLS master/media, HLS AES-128 key rotation, DASH assembly, DASH A/V muxing,
-  HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
-  detection, editable properties, duplicate policies, category destinations,
-  recent-URL history, the scoped site grabber/offline mirror,
-  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
-  isolation, connection profiles, secret-preserving settings updates,
+  HLS master/media, HLS AES-128 key rotation, HLS alternate-audio muxing, DASH
+  assembly, DASH A/V muxing, HLS/DASH fragment recovery, rotating-token refresh,
+  live-stream exclusion, DRM detection, editable properties, duplicate policies,
+  category destinations, recent-URL history, the scoped site grabber/offline
+  mirror, persistent/scheduled grabber projects, FTP auth/resume, post-download
+  hook isolation, connection profiles, secret-preserving settings updates,
   installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).

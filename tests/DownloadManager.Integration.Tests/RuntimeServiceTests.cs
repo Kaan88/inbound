@@ -2023,6 +2023,38 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task HlsAlternateAudioMuxesWhenFfmpegAvailable()
+    {
+        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
+        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
+        {
+            return;
+        }
+
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/hls/av-expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/hls/av-master.m3u8",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hls-av.m3u8",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(60));
+        Assert.Null(completed.Failure);
+        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task DashManifestDownloadsInitAndMediaSegments()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

@@ -638,8 +638,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             var playlist = await FetchHlsTextAsync(job, playlistUri, cancellationToken).ConfigureAwait(false);
             if (playlist.Text.Contains("#EXT-X-STREAM-INF", StringComparison.OrdinalIgnoreCase))
             {
-                var variant = SelectHlsVariant(playlist.Text, playlist.FinalUri);
-                if (variant is null)
+                var selection = SelectHlsMaster(playlist.Text, playlist.FinalUri);
+                if (selection is null)
                 {
                     return DownloadResult.Fail(DownloadState.Failed,
                         new JobFailure(FailureKind.InvalidContent,
@@ -647,7 +647,21 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             false, false, DateTimeOffset.UtcNow));
                 }
 
-                playlist = await FetchHlsTextAsync(job, variant, cancellationToken).ConfigureAwait(false);
+                playlist = await FetchHlsTextAsync(job, selection.Variant, cancellationToken)
+                    .ConfigureAwait(false);
+                if (selection.Audio is not null)
+                {
+                    var audioPlaylist = await FetchHlsTextAsync(job, selection.Audio, cancellationToken)
+                        .ConfigureAwait(false);
+                    return await DownloadHlsMuxedAsync(
+                        job,
+                        playlist.Text,
+                        playlist.FinalUri,
+                        audioPlaylist.Text,
+                        audioPlaylist.FinalUri,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                }
             }
 
             return await DownloadHlsMediaAsync(job, playlist.Text, playlist.FinalUri, progress, cancellationToken)
@@ -723,14 +737,40 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             false, false, DateTimeOffset.UtcNow), isRetryable: false);
     }
 
-    private static Uri? SelectHlsVariant(string playlist, Uri baseUri)
+    private static HlsMasterSelection? SelectHlsMaster(string playlist, Uri baseUri)
     {
         long bestBandwidth = -1;
-        Uri? best = null;
+        Uri? bestVariant = null;
+        string? bestAudioGroup = null;
+        var audioRenditions = new List<HlsAudioRendition>();
         var lines = playlist.Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i].Trim();
+            if (line.StartsWith("#EXT-X-MEDIA:", StringComparison.OrdinalIgnoreCase))
+            {
+                var type = ExtractAttribute(line, "TYPE");
+                if (!string.Equals(type, "AUDIO", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var groupId = ExtractAttribute(line, "GROUP-ID") ?? string.Empty;
+                var uriText = ExtractAttribute(line, "URI");
+                Uri? uri = null;
+                if (!string.IsNullOrWhiteSpace(uriText))
+                {
+                    Uri.TryCreate(baseUri, uriText, out uri);
+                }
+
+                audioRenditions.Add(new HlsAudioRendition(
+                    groupId,
+                    uri,
+                    IsYes(ExtractAttribute(line, "DEFAULT")),
+                    IsYes(ExtractAttribute(line, "AUTOSELECT"))));
+                continue;
+            }
+
             if (!line.StartsWith("#EXT-X-STREAM-INF:", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -746,6 +786,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 }
             }
 
+            var audioGroup = ExtractAttribute(line, "AUDIO");
             for (var j = i + 1; j < lines.Length; j++)
             {
                 var candidate = lines[j].Trim();
@@ -757,21 +798,67 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 if (Uri.TryCreate(baseUri, candidate, out var resolved) && bandwidth >= bestBandwidth)
                 {
                     bestBandwidth = bandwidth;
-                    best = resolved;
+                    bestVariant = resolved;
+                    bestAudioGroup = audioGroup;
                 }
 
                 break;
             }
         }
 
-        return best;
+        if (bestVariant is null)
+        {
+            return null;
+        }
+
+        Uri? audio = null;
+        if (!string.IsNullOrWhiteSpace(bestAudioGroup))
+        {
+            audio = audioRenditions
+                .Where(rendition =>
+                    string.Equals(rendition.GroupId, bestAudioGroup, StringComparison.Ordinal) &&
+                    rendition.Uri is not null)
+                .OrderByDescending(rendition => rendition.IsDefault)
+                .ThenByDescending(rendition => rendition.AutoSelect)
+                .Select(rendition => rendition.Uri)
+                .FirstOrDefault();
+        }
+
+        return new HlsMasterSelection(bestVariant, audio);
     }
+
+    private static bool IsYes(string? value)
+        => string.Equals(value, "YES", StringComparison.OrdinalIgnoreCase);
 
     private async Task<DownloadResult> DownloadHlsMediaAsync(
         DownloadJob job,
         string playlist,
         Uri playlistUri,
         IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var media = await PrepareHlsMediaAsync(job, playlist, playlistUri, cancellationToken)
+            .ConfigureAwait(false);
+        var isFragmentedMp4 = media.InitUri is not null ||
+                              media.Segments.Any(segment =>
+                                  segment.Uri.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
+        return await AssembleMediaSegmentsAsync(
+            job,
+            media.InitUri,
+            media.Segments,
+            isFragmentedMp4 ? ".mp4" : ".ts",
+            isFragmentedMp4 ? "video/mp4" : "video/mp2t",
+            "Downloading HLS",
+            "hls",
+            ComputeMediaSignature("hls", media.InitUri, media.Segments),
+            progress,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HlsMediaPlaylist> PrepareHlsMediaAsync(
+        DownloadJob job,
+        string playlist,
+        Uri playlistUri,
         CancellationToken cancellationToken)
     {
         Uri? initUri = null;
@@ -801,10 +888,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
             if (line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase))
             {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                throw new DownloadEngineException(new JobFailure(
                     FailureKind.DrmProtected,
                     "This HLS stream is DRM-protected (session key). Protected content cannot be downloaded or decrypted.",
-                    false, false, DateTimeOffset.UtcNow));
+                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
             }
 
             if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase))
@@ -819,10 +906,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             keyFormat.Contains("playready", StringComparison.OrdinalIgnoreCase);
                 if (isDrm)
                 {
-                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    throw new DownloadEngineException(new JobFailure(
                         FailureKind.DrmProtected,
                         "This HLS stream is DRM-protected (SAMPLE-AES/session key). Protected content cannot be downloaded or decrypted.",
-                        false, false, DateTimeOffset.UtcNow));
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
                 }
 
                 if (method.Equals("NONE", StringComparison.OrdinalIgnoreCase))
@@ -836,19 +923,19 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     (!string.IsNullOrEmpty(keyFormat) &&
                      !keyFormat.Equals("identity", StringComparison.OrdinalIgnoreCase)))
                 {
-                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    throw new DownloadEngineException(new JobFailure(
                         FailureKind.InvalidContent,
                         $"Unsupported HLS encryption method '{method}' or key format '{keyFormat}'.",
-                        false, false, DateTimeOffset.UtcNow));
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
                 }
 
                 if (string.IsNullOrWhiteSpace(keyUriText) ||
                     !Uri.TryCreate(playlistUri, keyUriText, out var keyUri))
                 {
-                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    throw new DownloadEngineException(new JobFailure(
                         FailureKind.InvalidContent,
                         "The HLS AES-128 key URI is missing or invalid.",
-                        false, false, DateTimeOffset.UtcNow));
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
                 }
 
                 currentKeyUri = keyUri;
@@ -858,10 +945,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
             if (line.StartsWith("#EXT-X-BYTERANGE", StringComparison.OrdinalIgnoreCase))
             {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                throw new DownloadEngineException(new JobFailure(
                     FailureKind.InvalidContent,
                     "HLS byte-range segments are not supported yet.",
-                    false, false, DateTimeOffset.UtcNow));
+                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
             }
 
             if (line.StartsWith("#EXT-X-MAP:", StringComparison.OrdinalIgnoreCase))
@@ -896,17 +983,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         if (parsedSegments.Count == 0)
         {
-            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+            throw new DownloadEngineException(new JobFailure(
                 FailureKind.InvalidContent, "The HLS media playlist has no segments.",
-                false, false, DateTimeOffset.UtcNow));
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
         }
 
         if (!hasEndList)
         {
-            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+            throw new DownloadEngineException(new JobFailure(
                 FailureKind.LiveStream,
                 "Live HLS playlists are not supported. A VOD playlist with #EXT-X-ENDLIST is required.",
-                false, false, DateTimeOffset.UtcNow));
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
         }
 
         var keyCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -931,19 +1018,124 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 parsed.KeyUri is null ? null : parsed.Iv));
         }
 
-        var isFragmentedMp4 = initUri is not null ||
-                              segments.Any(s => s.Uri.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
-        return await AssembleMediaSegmentsAsync(
-            job,
-            initUri,
-            segments,
-            isFragmentedMp4 ? ".mp4" : ".ts",
-            isFragmentedMp4 ? "video/mp4" : "video/mp2t",
-            "Downloading HLS",
-            "hls",
-            ComputeMediaSignature("hls", initUri, segments),
-            progress,
-            cancellationToken).ConfigureAwait(false);
+        return new HlsMediaPlaylist(initUri, segments);
+    }
+
+    private async Task<DownloadResult> DownloadHlsMuxedAsync(
+        DownloadJob job,
+        string videoPlaylist,
+        Uri videoUri,
+        string audioPlaylist,
+        Uri audioUri,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var video = await PrepareHlsMediaAsync(job, videoPlaylist, videoUri, cancellationToken)
+            .ConfigureAwait(false);
+        var audio = await PrepareHlsMediaAsync(job, audioPlaylist, audioUri, cancellationToken)
+            .ConfigureAwait(false);
+        var videoSignature = ComputeMediaSignature("hls-video", video.InitUri, video.Segments);
+        var audioSignature = ComputeMediaSignature("hls-audio", audio.InitUri, audio.Segments);
+
+        var baseName = Path.GetFileNameWithoutExtension(job.FileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "stream";
+        }
+
+        var directory = string.IsNullOrWhiteSpace(job.DestinationDirectory)
+            ? Path.GetDirectoryName(job.FinalFilePath) ?? AppSettings.GetDefaultDownloadDirectory()
+            : job.DestinationDirectory;
+        job.FinalFilePath = FileNameResolver.ResolveUniquePath(
+            directory, baseName + ".mp4", job.ConflictPolicy);
+        job.FileName = Path.GetFileName(job.FinalFilePath);
+        var videoPath = job.PartFilePath + ".video";
+        var audioPath = job.PartFilePath + ".audio";
+        var muxPath = job.PartFilePath + ".mux.mp4";
+        var received = 0L;
+        try
+        {
+            received += await DownloadMediaTrackToFileAsync(
+                job,
+                video.InitUri,
+                video.Segments,
+                videoSignature,
+                videoPath,
+                received,
+                "Downloading HLS video",
+                "hls-video",
+                progress,
+                cancellationToken).ConfigureAwait(false);
+            received += await DownloadMediaTrackToFileAsync(
+                job,
+                audio.InitUri,
+                audio.Segments,
+                audioSignature,
+                audioPath,
+                received,
+                "Downloading HLS audio",
+                "hls-audio",
+                progress,
+                cancellationToken).ConfigureAwait(false);
+
+            progress?.Report(new TransferProgress(received, null, 0, null, 0, "Muxing audio/video"));
+            var mux = await _muxer.MuxAsync(videoPath, audioPath, muxPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!mux.Success)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.MuxingFailed,
+                    mux.Error ?? "Audio/video muxing failed.",
+                    false, true, DateTimeOffset.UtcNow), received, received);
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.ExpectedSha256))
+            {
+                var actual = await Hashing.Sha256FileAsync(muxPath, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"The muxed output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
+                        false, true, DateTimeOffset.UtcNow), received, received);
+                }
+            }
+
+            File.Move(muxPath, job.FinalFilePath,
+                overwrite: job.ConflictPolicy is ConflictPolicy.Overwrite);
+            if (_mediaCheckpoints is not null)
+            {
+                await _mediaCheckpoints.DeleteAsync(job.Id, "hls-video", cancellationToken)
+                    .ConfigureAwait(false);
+                await _mediaCheckpoints.DeleteAsync(job.Id, "hls-audio", cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var finalBytes = new FileInfo(job.FinalFilePath).Length;
+            progress?.Report(new TransferProgress(finalBytes, finalBytes, 0, TimeSpan.Zero, 0, "Completed"));
+            return DownloadResult.Ok(finalBytes, finalBytes, job.FinalFilePath, null, null, "video/mp4");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DownloadResult.Fail(DownloadState.Cancelled, new JobFailure(
+                FailureKind.Cancelled, "The HLS download was cancelled.", false, true,
+                DateTimeOffset.UtcNow), received, received);
+        }
+        catch (DownloadEngineException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure, received, received);
+        }
+        catch (Exception ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _), received, received);
+        }
+        finally
+        {
+            DeleteFileQuietly(videoPath);
+            DeleteFileQuietly(audioPath);
+            DeleteFileQuietly(muxPath);
+        }
     }
 
     private async Task<DownloadResult> AssembleMediaSegmentsAsync(
@@ -1660,12 +1852,28 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         var received = 0L;
         try
         {
-            received += await DownloadDashTrackToFileAsync(
-                job, videoTrack, videoPath, received, "Downloading DASH video",
-                "dash-video", progress, cancellationToken).ConfigureAwait(false);
-            received += await DownloadDashTrackToFileAsync(
-                job, audioTrack, audioPath, received, "Downloading DASH audio",
-                "dash-audio", progress, cancellationToken).ConfigureAwait(false);
+            received += await DownloadMediaTrackToFileAsync(
+                job,
+                videoTrack.InitUri,
+                videoTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                videoTrack.Signature,
+                videoPath,
+                received,
+                "Downloading DASH video",
+                "dash-video",
+                progress,
+                cancellationToken).ConfigureAwait(false);
+            received += await DownloadMediaTrackToFileAsync(
+                job,
+                audioTrack.InitUri,
+                audioTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                audioTrack.Signature,
+                audioPath,
+                received,
+                "Downloading DASH audio",
+                "dash-audio",
+                progress,
+                cancellationToken).ConfigureAwait(false);
 
             progress?.Report(new TransferProgress(received, null, 0, null, 0, "Muxing audio/video"));
             var mux = await _muxer.MuxAsync(videoPath, audioPath, muxPath, cancellationToken)
@@ -1727,9 +1935,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         }
     }
 
-    private async Task<long> DownloadDashTrackToFileAsync(
+    private async Task<long> DownloadMediaTrackToFileAsync(
         DownloadJob job,
-        DashTrack track,
+        Uri? initUri,
+        IReadOnlyList<MediaSegment> segments,
+        string signature,
         string path,
         long receivedBase,
         string phase,
@@ -1745,10 +1955,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 .ConfigureAwait(false);
             var length = File.Exists(path) ? new FileInfo(path).Length : -1;
             if (existing is not null &&
-                string.Equals(existing.Signature, track.Signature, StringComparison.Ordinal) &&
+                string.Equals(existing.Signature, signature, StringComparison.Ordinal) &&
                 length >= existing.CompletedBytes)
             {
-                completedSegments = Math.Min(existing.CompletedSegments, track.Segments.Count);
+                completedSegments = Math.Min(existing.CompletedSegments, segments.Count);
                 received = existing.CompletedBytes;
             }
             else if (existing is not null)
@@ -1771,17 +1981,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 file.Position = received;
             }
 
-            if (track.InitUri is not null && completedSegments == 0)
+            if (initUri is not null && completedSegments == 0)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, new MediaSegment(track.InitUri, null, null), file, receivedBase + received,
+                    job, new MediaSegment(initUri, null, null), file, receivedBase + received,
                     progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
             }
 
-            for (var i = completedSegments; i < track.Segments.Count; i++)
+            for (var i = completedSegments; i < segments.Count; i++)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, new MediaSegment(track.Segments[i], null, null), file, receivedBase + received,
+                    job, segments[i], file, receivedBase + received,
                     progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
                 await file.FlushAsync(cancellationToken).ConfigureAwait(false);
                 if (_mediaCheckpoints is not null)
@@ -1790,7 +2000,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     {
                         JobId = job.Id,
                         Track = checkpointTrack,
-                        Signature = track.Signature,
+                        Signature = signature,
                         CompletedSegments = i + 1,
                         CompletedBytes = received,
                     }, cancellationToken).ConfigureAwait(false);
@@ -1868,6 +2078,16 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private sealed record ParsedHlsSegment(Uri Uri, Uri? KeyUri, byte[] Iv);
 
     private sealed record MediaSegment(Uri Uri, byte[]? Key, byte[]? Iv);
+
+    private sealed record HlsMasterSelection(Uri Variant, Uri? Audio);
+
+    private sealed record HlsAudioRendition(
+        string GroupId,
+        Uri? Uri,
+        bool IsDefault,
+        bool AutoSelect);
+
+    private sealed record HlsMediaPlaylist(Uri? InitUri, List<MediaSegment> Segments);
 
     private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
     {

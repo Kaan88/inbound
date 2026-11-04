@@ -626,6 +626,17 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/hls/av-expected", () =>
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(
+                AppContext.BaseDirectory, "hls", "av-muxed.mp4"));
+            return Results.Json(new
+            {
+                sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                bytes = bytes.Length,
+            });
+        });
+
         _app.MapGet("/hls/stats", () => Results.Json(new
         {
             segments = _hlsSegmentRequests.ToDictionary(pair => pair.Key, pair => pair.Value),
