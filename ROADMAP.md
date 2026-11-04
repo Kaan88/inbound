@@ -28,9 +28,9 @@
 - Phase 8: complete (named queues, caps, start/stop, reassignment, schedules,
   quotas, completion actions, Download Later, sleep prevention, and DST tests
   verified).
-- Phase 9: in progress (direct media detection, popup resource list, and
-  unencrypted HLS master/media assembly verified; DASH, muxing, recovery, live
-  and DRM handling remain).
+- Phase 9: in progress (direct media detection, popup resource list, unencrypted
+  HLS master/media assembly, and static DASH SegmentTemplate assembly verified;
+  muxing, recovery, live, DRM, and additional DASH modes remain).
 - Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
 
 ## Phase 0 — Baseline and setup (done)
@@ -178,9 +178,11 @@ Direct media detection is implemented: a content script scans video/audio/source
 elements and HLS/DASH links, the extension popup lists distinct resources, and
 selection uses the handoff flow (V1 done, V2 partial; E24). Unencrypted HLS
 master/media playlists download segments into a playable TS output (V3 done;
-E25). Remaining: in-page panel/quality variants, DASH manifests, audio/video
-muxing, fragment checkpoint recovery, AES-128, expiring segment URLs, live
-behavior, and DRM detection. FFmpeg behind an interface if adopted.
+E25). Static DASH `SegmentTemplate` manifests assemble init/media segments into
+a playable fMP4 (V4 done; E26). Remaining: in-page panel/quality variants,
+SegmentBase/SegmentList/timeline DASH, audio/video muxing, fragment checkpoint
+recovery, AES-128, expiring segment URLs, live behavior, and DRM detection.
+FFmpeg behind an interface if adopted.
 
 ## Phase 10 — Download All and site grabber (pending)
 

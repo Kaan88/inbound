@@ -330,7 +330,22 @@ random-access part file **in the destination directory**:
 - Published CLI download produced the same hash. ffprobe:
   H.264 320×180, AAC, duration `6.023222` s.
 - Limitations: no AES-128, live, byte-range, or cross-restart HLS checkpoint;
-  fMP4 assembly not yet playability-tested; no audio/video muxing.
+  no audio/video muxing.
+
+## DASH evidence (2026-11-04)
+
+- Static DASH MPD support for `SegmentTemplate` with `initialization`, `media`,
+  `$RepresentationID$`, `$Bandwidth$`, `$Number%05d$`, and `$Time$`; highest
+  bandwidth representation selected.
+- Rejects dynamic/live manifests, ContentProtection/DRM, and
+  SegmentBase/SegmentList with clear failures.
+- Test assets: ffmpeg 9.0.2 video-only MPD, init + three fMP4 chunks, served by
+  TestServer with `/dash/expected`.
+- Integration `DashManifestDownloadsInitAndMediaSegments` (**29/29 suite**):
+  produced 498,366 bytes and matched SHA-256
+  `3a17840b06a53432f9fa9a09188b7d68e3de720201bb88b3648277c2227cfba1`.
+- Published CLI produced the same size/hash; ffprobe reported H.264 320×180,
+  duration `6.000000` s. Output is video-only; separate audio/muxing remains V5.
 
 ## Tests
 
@@ -338,11 +353,11 @@ random-access part file **in the destination directory**:
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **28/28 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **29/29 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
-  HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins, and
-  HLS master/media assembly.
+  HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
+  HLS master/media, and DASH assembly.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -365,10 +380,10 @@ random-access part file **in the destination directory**:
 
 1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
    tests, evidence).
-2. Phase 9: DASH manifest support, in-page/quality panel, muxing with FFmpeg
-   behind an interface, HLS checkpoint recovery/AES-128, live/DRM behavior.
-   Direct media detection, popup list, and unencrypted HLS are done
-   (E24/E25).
+2. Phase 9: audio/video muxing with FFmpeg behind an interface, additional DASH
+   modes, in-page/quality panel, HLS checkpoint recovery/AES-128, live/DRM
+   behavior. Direct media detection, popup list, unencrypted HLS, and static
+   DASH SegmentTemplate are done (E24/E25/E26).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

@@ -1208,6 +1208,32 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DashManifestDownloadsInitAndMediaSegments()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/dash/manifest.mpd",
+            DestinationDirectory = ctx.Destination,
+            FileName = "dash-test.mpd",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(expectedBytes, completed.ReceivedBytes);
+        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

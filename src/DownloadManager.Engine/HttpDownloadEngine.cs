@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace DownloadManager.Core;
 
@@ -160,6 +163,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         if (IsHlsPlaylist(job))
         {
             return await ExecuteHlsAsync(job, progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (IsDashManifest(job))
+        {
+            return await ExecuteDashAsync(job, progress, cancellationToken).ConfigureAwait(false);
         }
 
         if (job.RequestedConnections > 1 &&
@@ -817,7 +825,27 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         var isFragmentedMp4 = initUri is not null ||
                               segments.Any(s => s.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
-        var extension = isFragmentedMp4 ? ".mp4" : ".ts";
+        return await AssembleMediaSegmentsAsync(
+            job,
+            initUri,
+            segments,
+            isFragmentedMp4 ? ".mp4" : ".ts",
+            isFragmentedMp4 ? "video/mp4" : "video/mp2t",
+            "Downloading HLS",
+            progress,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DownloadResult> AssembleMediaSegmentsAsync(
+        DownloadJob job,
+        Uri? initUri,
+        IReadOnlyList<Uri> segments,
+        string extension,
+        string mimeType,
+        string phase,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         var baseName = Path.GetFileNameWithoutExtension(job.FileName);
         if (string.IsNullOrWhiteSpace(baseName))
         {
@@ -847,14 +875,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 if (initUri is not null)
                 {
                     received += await DownloadHlsSegmentAsync(
-                        job, initUri, part, received, progress, stopwatch, progressState, cancellationToken)
+                        job, initUri, part, received, progress, stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
                 foreach (var segment in segments)
                 {
                     received += await DownloadHlsSegmentAsync(
-                        job, segment, part, received, progress, stopwatch, progressState, cancellationToken)
+                        job, segment, part, received, progress, stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
@@ -866,7 +894,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
                         FailureKind.InvalidContent,
-                        $"The HLS output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
+                        $"The media output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
                         false, true, DateTimeOffset.UtcNow), received, received);
                 }
             }
@@ -875,13 +903,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             progress?.Report(new TransferProgress(
                 received, received, received / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds),
                 TimeSpan.Zero, 1, "Completed"));
-            return DownloadResult.Ok(received, received, job.FinalFilePath, null, null,
-                isFragmentedMp4 ? "video/mp4" : "video/mp2t");
+            return DownloadResult.Ok(received, received, job.FinalFilePath, null, null, mimeType);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return DownloadResult.Fail(DownloadState.Cancelled, new JobFailure(
-                FailureKind.Cancelled, "The HLS download was cancelled.", false, true, DateTimeOffset.UtcNow),
+                FailureKind.Cancelled, "The media download was cancelled.", false, true, DateTimeOffset.UtcNow),
                 received, received);
         }
         catch (DownloadEngineException ex)
@@ -902,6 +929,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         IProgress<TransferProgress>? progress,
         Stopwatch stopwatch,
         HlsProgressState progressState,
+        string phase,
         CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
@@ -955,7 +983,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         var bytes = alreadyReceived + segmentBytes;
                         var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
                         progress?.Report(new TransferProgress(
-                            bytes, null, speed, null, 1, "Downloading HLS"));
+                            bytes, null, speed, null, 1, phase));
                     }
                 }
 
@@ -997,6 +1025,272 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                originalUri.GetLeftPart(UriPartial.Authority),
                current.GetLeftPart(UriPartial.Authority),
                StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDashManifest(DownloadJob job)
+    {
+        if (Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
+            uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var hint = job.Description ?? string.Empty;
+        return hint.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ||
+               hint.Contains(".mpd", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<DownloadResult> ExecuteDashAsync(
+        DownloadJob job,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var manifestUri = new Uri(job.Url, UriKind.Absolute);
+            var manifest = await FetchHlsTextAsync(job, manifestUri, cancellationToken).ConfigureAwait(false);
+            var document = XDocument.Parse(manifest.Text);
+            var root = document.Root ?? throw new InvalidDataException("The DASH manifest is empty.");
+            var ns = root.Name.Namespace;
+
+            if (string.Equals((string?)root.Attribute("type"), "dynamic", StringComparison.OrdinalIgnoreCase))
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "Live DASH manifests are not supported yet.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            if (root.Descendants(ns + "ContentProtection").Any())
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "DRM-protected DASH is not supported.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var period = root.Elements(ns + "Period").FirstOrDefault();
+            if (period is null)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "The DASH manifest has no Period.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var adaptationSets = period.Elements(ns + "AdaptationSet").ToList();
+            var adaptation = adaptationSets.FirstOrDefault(a =>
+                                 (string?)a.Attribute("contentType") == "video" ||
+                                 ((string?)a.Attribute("mimeType"))?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
+                             ?? adaptationSets.FirstOrDefault();
+            if (adaptation is null)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "The DASH manifest has no usable AdaptationSet.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var representations = adaptation.Elements(ns + "Representation").ToList();
+            var representation = representations
+                .OrderByDescending(r => ParseLong((string?)r.Attribute("bandwidth")))
+                .FirstOrDefault();
+            if (representation is null)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "The DASH manifest has no Representation.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var template = representation.Elements(ns + "SegmentTemplate").FirstOrDefault()
+                           ?? adaptation.Elements(ns + "SegmentTemplate").FirstOrDefault()
+                           ?? period.Elements(ns + "SegmentTemplate").FirstOrDefault();
+            if (template is null)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent,
+                    "This DASH manifest uses SegmentBase/SegmentList, which is not supported yet.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var baseUri = ResolveDashBase(manifest.FinalUri, root, ns);
+            baseUri = ResolveDashBase(baseUri, period, ns);
+            baseUri = ResolveDashBase(baseUri, adaptation, ns);
+            baseUri = ResolveDashBase(baseUri, representation, ns);
+
+            var mediaTemplate = (string?)template.Attribute("media");
+            if (string.IsNullOrWhiteSpace(mediaTemplate))
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "The DASH SegmentTemplate has no media template.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            var representationId = (string?)representation.Attribute("id") ?? "0";
+            var bandwidth = ParseLong((string?)representation.Attribute("bandwidth"));
+            var timescale = Math.Max(1, ParseLong((string?)template.Attribute("timescale"), 1));
+            var duration = ParseLong((string?)template.Attribute("duration"));
+            var startNumber = ParseLong((string?)template.Attribute("startNumber"), 1);
+            var initTemplate = (string?)template.Attribute("initialization");
+            Uri? initUri = null;
+            if (!string.IsNullOrWhiteSpace(initTemplate))
+            {
+                initUri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                    initTemplate, representationId, bandwidth, null, null));
+            }
+
+            var segmentUris = new List<Uri>();
+            var timeline = template.Element(ns + "SegmentTimeline");
+            if (timeline is not null)
+            {
+                long time = 0;
+                foreach (var s in timeline.Elements(ns + "S"))
+                {
+                    time = ParseLong((string?)s.Attribute("t"), time);
+                    var step = ParseLong((string?)s.Attribute("d"));
+                    if (step <= 0)
+                    {
+                        continue;
+                    }
+
+                    var repeat = ParseLong((string?)s.Attribute("r"));
+                    for (var i = 0; i <= repeat; i++)
+                    {
+                        var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                            mediaTemplate, representationId, bandwidth, null, time));
+                        if (uri is not null)
+                        {
+                            segmentUris.Add(uri);
+                        }
+
+                        time += step;
+                    }
+                }
+            }
+            else
+            {
+                if (duration <= 0)
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        "The DASH SegmentTemplate has no duration or SegmentTimeline.",
+                        false, false, DateTimeOffset.UtcNow));
+                }
+
+                TimeSpan totalDuration;
+                try
+                {
+                    totalDuration = XmlConvert.ToTimeSpan(
+                        (string?)root.Attribute("mediaPresentationDuration") ?? string.Empty);
+                }
+                catch (FormatException)
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        "The DASH manifest has no valid mediaPresentationDuration.",
+                        false, false, DateTimeOffset.UtcNow));
+                }
+
+                var segmentSeconds = duration / (double)timescale;
+                var count = (int)Math.Ceiling(totalDuration.TotalSeconds / Math.Max(0.001, segmentSeconds));
+                for (var i = 0; i < count; i++)
+                {
+                    var number = startNumber + i;
+                    var time = (long)i * duration;
+                    var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                        mediaTemplate, representationId, bandwidth, number, time));
+                    if (uri is not null)
+                    {
+                        segmentUris.Add(uri);
+                    }
+                }
+            }
+
+            if (segmentUris.Count == 0)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent, "The DASH manifest produced no segments.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            return await AssembleMediaSegmentsAsync(
+                job, initUri, segmentUris, ".mp4", "video/mp4", "Downloading DASH", progress, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DownloadResult.Fail(DownloadState.Cancelled, new JobFailure(
+                FailureKind.Cancelled, "The DASH download was cancelled.", false, true, DateTimeOffset.UtcNow));
+        }
+        catch (DownloadEngineException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure);
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                FailureKind.InvalidContent, $"The DASH manifest is invalid: {ex.Message}",
+                false, false, DateTimeOffset.UtcNow));
+        }
+        catch (Exception ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _));
+        }
+    }
+
+    private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
+    {
+        var baseUrl = element.Element(ns + "BaseURL")?.Value?.Trim();
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return current;
+        }
+
+        return Uri.TryCreate(current, baseUrl, out var resolved) ? resolved : current;
+    }
+
+    private static Uri? ResolveDashUri(Uri baseUri, string relative)
+    {
+        if (string.IsNullOrWhiteSpace(relative))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(baseUri, relative.Trim(), out var uri) ? uri : null;
+    }
+
+    private static string ExpandDashTemplate(
+        string template,
+        string representationId,
+        long bandwidth,
+        long? number,
+        long? time)
+    {
+        var result = template
+            .Replace("$RepresentationID$", representationId, StringComparison.Ordinal)
+            .Replace("$Bandwidth$", bandwidth.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        if (number is { } value)
+        {
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"\$Number(?:%0?(\d+)d)?\$",
+                match => value.ToString(
+                    match.Groups[1].Success ? "D" + match.Groups[1].Value : "D",
+                    CultureInfo.InvariantCulture));
+        }
+
+        if (time is { } timeValue)
+        {
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"\$Time(?:%0?(\d+)d)?\$",
+                match => timeValue.ToString(
+                    match.Groups[1].Success ? "D" + match.Groups[1].Value : "D",
+                    CultureInfo.InvariantCulture));
+        }
+
+        return result;
+    }
+
+    private static long ParseLong(string? value, long fallback = 0)
+        => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
 
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,

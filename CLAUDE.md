@@ -30,10 +30,11 @@ actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload byte
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, DASH media downloading/muxing, Download
+areas: everyday management gaps, media muxing/additional DASH modes, Download
 All/grabber, FTP, and clean-environment install/upgrade verification. Phase 8
-(queues/scheduler) is complete; direct media detection, the popup resource
-list, and unencrypted HLS master/media assembly are implemented. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
+(queues/scheduler) is complete; direct media detection, the popup resource list,
+unencrypted HLS master/media assembly, and static DASH SegmentTemplate assembly
+are implemented. Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
 credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and
 DPAPI protection for proxy passwords remain.
 

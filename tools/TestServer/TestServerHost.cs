@@ -492,6 +492,49 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/dash/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "dash", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            context.Response.ContentType = file.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
+                ? "application/dash+xml"
+                : "video/mp4";
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/dash/expected", () =>
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "dash");
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            long length = 0;
+            var files = new[] { "init-0.m4s", "chunk-0-00001.m4s", "chunk-0-00002.m4s", "chunk-0-00003.m4s" };
+            foreach (var name in files)
+            {
+                var bytes = File.ReadAllBytes(Path.Combine(directory, name));
+                hash.AppendData(bytes);
+                length += bytes.Length;
+            }
+
+            return Results.Json(new
+            {
+                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),
+                bytes = length,
+            });
+        });
+
         _app.MapGet("/media-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

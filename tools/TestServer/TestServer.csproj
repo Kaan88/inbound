@@ -20,6 +20,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>hls\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
+    <Content Include="assets\dash\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>dash\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
 
 </Project>
