@@ -942,6 +942,27 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Chrome popup live-progress evidence (B11, 2026-11-04)
+
+- `popup.ts` now renders live state, received/total bytes, progress, speed and
+  ETA for active jobs. The popup polls `jobs.query` every second while open and
+  still listens for `job.event` pushes.
+- `estimatedRemaining` (Host TimeSpan) is parsed from clock, ISO-8601 or tick
+  forms; if absent, ETA is derived from remaining bytes and bytes/sec.
+  Terminal jobs show bytes only, so stale speed/ETA never linger.
+- Chrome for Testing 156.0.8078.80 loaded `extensions\chrome\dist` as
+  `pknddmneejadnnngffojnoecojhdfalc` and opened `popup.html`.
+- A 32 MB throttled job produced four DOM samples 7 s apart:
+  - `downloading 5.3 MB / 32.0 MB; 512.1 KB/s; ETA 53s` (16.4%)
+  - `8.7 MB / 32.0 MB; 512.1 KB/s; ETA 47s` (27.1%)
+  - `12.2 MB / 32.0 MB; 511.8 KB/s; ETA 40s` (38.1%)
+  - `15.6 MB / 32.0 MB; 512.0 KB/s; ETA 33s` (48.8%)
+- A 16 MB job showed `13.4 MB / 16.0 MB; 512.1 KB/s; ETA 5s`, then
+  `Completed; 16.0 MB / 16.0 MB`.
+- The completed 32 MB file matched seed 612 SHA-256
+  `13e0dd0871c4264d9bb52006c51b1700c22b04680c4935ae97e96c836cbb51f4`.
+- `npx tsc --noEmit` exited 0; `npm run build` produced `dist\popup.js`.
+
 ## Host lifecycle/tray evidence (L2/L5/L7/L8, 2026-11-04)
 
 - L2: new `tools/HostChecks` constructs a TrayIconController with recording

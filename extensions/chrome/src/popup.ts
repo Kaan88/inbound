@@ -14,6 +14,7 @@ interface JobSummary {
   totalBytes?: number;
   progress?: number;
   bytesPerSecond?: number;
+  estimatedRemaining?: string | number | null;
   failure?: { message?: string };
 }
 
@@ -84,6 +85,65 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function isActiveState(state: string): boolean {
+  return state === "connecting" || state === "downloading" ||
+    state === "retrying" || state === "retryWaiting" ||
+    state === "verifying" || state === "muxing";
+}
+
+function parseEtaSeconds(job: JobSummary): number | null {
+  const value = job.estimatedRemaining;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    // Ticks are far larger than any plausible second count.
+    return value > 1_000_000_000 ? value / 10_000_000 : value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const text = value.trim();
+    const iso = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?)?$/i.exec(text);
+    if (iso) {
+      const days = Number(iso[1] ?? 0);
+      const hours = Number(iso[2] ?? 0);
+      const minutes = Number(iso[3] ?? 0);
+      const seconds = Number(iso[4] ?? 0);
+      const total = days * 86_400 + hours * 3_600 + minutes * 60 + seconds;
+      return total > 0 ? total : null;
+    }
+
+    const parts = text.split(":").map((part) => Number(part));
+    if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
+      let total = 0;
+      for (const part of parts) {
+        total = total * 60 + part;
+      }
+      return total > 0 ? total : null;
+    }
+  }
+
+  const speed = job.bytesPerSecond ?? 0;
+  if (speed > 0 && typeof job.totalBytes === "number" &&
+      job.totalBytes > job.receivedBytes) {
+    return (job.totalBytes - job.receivedBytes) / speed;
+  }
+
+  return null;
+}
+
+function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "";
+  }
+  const total = Math.max(1, Math.round(seconds));
+  if (total < 60) {
+    return `${total}s`;
+  }
+  if (total < 3_600) {
+    return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
+  }
+  return `${Math.floor(total / 3_600)}h ` +
+    `${String(Math.floor((total % 3_600) / 60)).padStart(2, "0")}m`;
+}
+
 function renderJobs(jobs: JobSummary[]): void {
   jobsList.replaceChildren();
   if (!jobs.length) {
@@ -108,7 +168,19 @@ function renderJobs(jobs: JobSummary[]): void {
     const meta = document.createElement("span");
     meta.className = "meta";
     const total = job.totalBytes && job.totalBytes > 0 ? formatBytes(job.totalBytes) : "unknown size";
-    meta.textContent = `${formatBytes(job.receivedBytes)} / ${total}`;
+    const parts = [`${formatBytes(job.receivedBytes)} / ${total}`];
+    if (isActiveState(job.state)) {
+      const speed = job.bytesPerSecond ?? 0;
+      if (speed > 0) {
+        parts.push(`${formatBytes(speed)}/s`);
+      }
+      const eta = parseEtaSeconds(job);
+      if (eta !== null) {
+        parts.push(`ETA ${formatEta(eta)}`);
+      }
+    }
+
+    meta.textContent = parts.join(" · ");
     if (job.failure?.message) {
       meta.textContent += ` — ${job.failure.message}`;
     }
@@ -254,6 +326,21 @@ async function refresh(): Promise<void> {
 
 document.addEventListener("DOMContentLoaded", () => {
   void refresh();
+
+  const liveTimer = window.setInterval(async () => {
+    try {
+      const result = (await chrome.runtime.sendMessage({ type: "dm.jobs" })) as {
+        ok?: boolean;
+        jobs?: JobSummary[];
+      };
+      if (Array.isArray(result?.jobs)) {
+        renderJobs(result.jobs);
+      }
+    } catch {
+      // The worker may be restarting; the manual Refresh button still works.
+    }
+  }, 1000);
+  window.addEventListener("unload", () => window.clearInterval(liveTimer));
 
   (document.getElementById("refresh") as HTMLButtonElement).addEventListener("click", () => {
     void refresh();

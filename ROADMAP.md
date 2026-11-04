@@ -121,9 +121,9 @@ kill engine.
 | P4.5 | Destination + Start/Download Later dialog | done | P4.4 | Choices persist and affect job |
 | P4.6 | Authenticated handoff (cookies/referrer/UA) | done | P4.3 | Auth endpoint accepts all segment requests; cookie absent from logs |
 | P4.7 | Failure-path recovery (host/native down) | pending | P4.3 | Chrome resumes; user sees actionable error; no silent loss |
-| P4.6 | Automatic interception + filters/bypass | pending | P4.4 | Allowed types intercepted; exclusions pass through |
-| P4.7 | Progress back to extension + failure recovery | pending | P4.4 | Extension shows state; unavailable host gives actionable error |
-| P4.8 | Independent browser handoff verification | pending | P4.7 | Restart Chrome/host; exactly-once handoff |
+| P4.6b | Automatic interception + filters/bypass | pending | P4.4 | Allowed types intercepted; exclusions pass through |
+| P4.8 | Progress back to extension | done | P4.4 | Popup shows live state, bytes, speed, ETA and progress; Host ETA parsed/derived (E76) |
+| P4.9 | Independent browser handoff verification | pending | P4.7 | Restart Chrome/host; exactly-once handoff |
 
 **Exit gate:** one supported Chrome request reliably creates one job while host
 is in tray; failed handoffs never silently lose downloads.
