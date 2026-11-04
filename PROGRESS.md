@@ -942,6 +942,28 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Accessibility, DPI and localization evidence (U7, 2026-11-04)
+
+- Added `scripts/ui-accessibility-check.ps1`.
+- Accessibility: no unnamed visible interactive controls; `JobsList`,
+  `CategoryList`, status and host-connection text have names; Add dialog
+  fields are all named.
+- Focus order through the WinUI input site: Options -> Scheduler -> Start Queue
+  -> Stop Queue -> Tasks -> Add URL (disabled actions are skipped).
+- Contrast: 4.55:1 to 12.59:1 across the explicit dark palette; all normal-text
+  pairs pass 4.5:1.
+- DPI: system/window 96 (100%). Simulated effective layouts:
+  - 100%: 3440x1392
+  - 125%: 2752x1114
+  - 150%: 2293x928
+  - 200%: 1720x696
+  All keep the toolbar and Description column inside the window. Actual
+  125/150/200 scaling requires sign-out and was not exercised.
+- Localization: no `.resw`/`.resx` resources; all UI strings are hardcoded
+  English.
+- U7 checks passed; build 0. Existing suites engine 30/30, core 51/51,
+  integration 61/61.
+
 ## Tray interaction evidence (U5, 2026-11-04)
 
 - Extended `tools/HostChecks` with a hidden WinForms message loop so the

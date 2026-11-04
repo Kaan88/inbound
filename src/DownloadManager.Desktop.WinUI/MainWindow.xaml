@@ -192,7 +192,7 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="Categories" FontSize="12" FontWeight="SemiBold"
                                Foreground="#D7D7D7" Margin="22,9,8,3" />
-                    <ListBox x:Name="CategoryList" Grid.Row="1" Background="Transparent"
+                    <ListBox x:Name="CategoryList" AutomationProperties.Name="Categories" Grid.Row="1" Background="Transparent"
                              BorderThickness="0" SelectionMode="Single"
                              SelectionChanged="CategoryList_SelectionChanged"
                              ItemContainerStyle="{StaticResource InboundCategoryItemStyle}">
@@ -312,6 +312,7 @@
 
                 <Grid Grid.Row="1">
                     <ListView x:Name="JobsList"
+                              AutomationProperties.Name="Downloads"
                               Background="#1E1E1E"
                               BorderThickness="0"
                               SelectionMode="Extended"
@@ -378,9 +379,9 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" Text="Starting…" FontSize="11" Foreground="#A0A0A0"
+                <TextBlock x:Name="StatusText" AutomationProperties.Name="Status" Text="Starting…" FontSize="11" Foreground="#A0A0A0"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="ConnectionText" Grid.Column="1" Text="Connecting…" FontSize="11"
+                <TextBlock x:Name="ConnectionText" AutomationProperties.Name="Host connection" Grid.Column="1" Text="Connecting…" FontSize="11"
                            Foreground="#A0A0A0" VerticalAlignment="Center" />
             </Grid>
         </Border>
