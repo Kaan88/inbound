@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Source,
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "DownloadManager"),
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -8,7 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$installRoot = Join-Path $env:LOCALAPPDATA "DownloadManager"
+$installRoot = $InstallRoot
 $appDir = Join-Path $installRoot "app"
 
 if (-not $Source) {

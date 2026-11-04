@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "DownloadManager"),
     [switch]$RemoveData
 )
 
 $ErrorActionPreference = "Stop"
-$installRoot = Join-Path $env:LOCALAPPDATA "DownloadManager"
+$installRoot = $InstallRoot
 $appDir = Join-Path $installRoot "app"
 
 Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |

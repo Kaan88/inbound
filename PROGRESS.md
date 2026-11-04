@@ -780,6 +780,21 @@ random-access part file **in the destination directory**:
   - starting the Host reported `tray: True native host: registered`.
 - Limitation: verified against published artifacts, not a clean Windows install.
 
+## Upgrade/uninstall evidence (C8, 2026-11-04)
+
+- `install.ps1` and `uninstall.ps1` now accept `-InstallRoot` for isolated tests.
+- Workspace test in `test-upgrade`:
+  - install A created app, extension, `INSTALL.txt`, and native-host
+    registration;
+  - created `data\marker.txt` to represent durable state;
+  - re-running install refreshed the app and preserved the data marker;
+  - uninstall without flags removed app files, extension files, and the
+    native-host key while keeping `data\marker.txt`;
+  - `uninstall -RemoveData` removed the entire install root.
+- Dev native-host registration was restored after the test.
+- Limitation: verified with a workspace install root, not a clean Windows
+  machine. Job-level preservation follows from the untouched data subtree.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
