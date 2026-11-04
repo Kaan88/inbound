@@ -887,6 +887,29 @@ random-access part file **in the destination directory**:
 - Settings clone deep-copy (fixed in C6) keeps queues/schedules when saving
   Options.
 
+## HLS AES-128 evidence (V10, 2026-11-04)
+
+- HLS parsing now supports `#EXT-X-KEY:METHOD=AES-128` with an identity key
+  format, relative/absolute key URIs, explicit `IV` attributes, sequence-derived
+  IVs, `METHOD=NONE`, and per-segment key rotation. SAMPLE-AES and session keys
+  remain `drmProtected`.
+- Keys are fetched with the job's headers/auth and cached per key path; any key
+  that is not 16 bytes is rejected. Segments are CBC-decrypted with PKCS7
+  padding before being appended to the output. Checkpoint signatures include the
+  key bytes and IVs.
+- TestServer fixtures:
+  - `/hls/aes.m3u8` — one key, sequence-derived IVs;
+  - `/hls/aes-rotate.m3u8` — key1 for seg0, key2 for seg1/seg2.
+- Integration `HlsAes128AndRotatingKeysDecryptToExpectedOutput`:
+  both playlists completed at 580,732 bytes with the clear seg0-2 SHA-256;
+  integration suite **50/50**.
+- Published CLI: `aes-live.ts` and `aes-rotate-live.ts` both completed at
+  580,732 bytes with SHA-256
+  `6a1384036fceb6355c2aae29504a8fa5fd899c642fd47d309685607c0031b946`,
+  matching the concatenated clear segments.
+- Remaining media work: additional DASH modes and HLS alternate audio; live
+  recording stays out of scope and SAMPLE-AES stays DRM-detected.
+
 ## UI parity audit (M1/M2/M4/M5/M14, U3/U6, 2026-11-04)
 
 - M14: added `job.segments` IPC and a Progress details dialog (state, bytes,
@@ -929,16 +952,17 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **49/49 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **50/50 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
-  HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
-  rotating-token refresh, live-stream exclusion, DRM detection, editable
-  properties, duplicate policies, category destinations, the scoped site
-  grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
-  post-download hook isolation, connection profiles, secret-preserving settings
-  updates, installer-only update check/download, and segment/progress details.
+  HLS master/media, HLS AES-128 key rotation, DASH assembly, DASH A/V muxing,
+  HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
+  detection, editable properties, duplicate policies, category destinations, the
+  scoped site grabber/offline mirror, persistent/scheduled grabber projects, FTP
+  auth/resume, post-download hook isolation, connection profiles, secret-
+  preserving settings updates, installer-only update check/download, and
+  segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

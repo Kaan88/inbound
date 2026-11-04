@@ -45,10 +45,10 @@ scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, and persisted layout are implemented.
 Edge/Firefox integration is explicitly out of scope (C3);
 direct media detection, in-page panel with HLS quality variants, popup resources,
-unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
-DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, expiring
-segment-token refresh, explicit live-stream exclusion, and DRM detection are
-implemented. Account-provider/TorBox integration, unrar, and Docker/Linux web UI
+HLS master/media assembly including AES-128 (single and rotating keys), static
+DASH SegmentTemplate assembly, DASH A/V muxing via FFmpeg, HLS/DASH fragment
+checkpoint recovery, expiring segment-token refresh, explicit live-stream
+exclusion, and DRM detection are implemented. Account-provider/TorBox integration, unrar, and Docker/Linux web UI
 are queued as a post-parity side quest (ROADMAP A1–A5/D1–D4). Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
 credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and
 DPAPI protection for proxy passwords remain.

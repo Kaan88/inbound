@@ -1940,6 +1940,35 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task HlsAes128AndRotatingKeysDecryptToExpectedOutput()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
+
+        foreach (var playlist in new[] { "aes.m3u8", "aes-rotate.m3u8" })
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/hls/{playlist}",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"hls-{Path.GetFileNameWithoutExtension(playlist)}.m3u8",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+                TimeSpan.FromSeconds(30));
+            Assert.EndsWith(".ts", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(expectedBytes, completed.ReceivedBytes);
+            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
+            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        }
+    }
+
+    [Fact]
     public async Task DashManifestDownloadsInitAndMediaSegments()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

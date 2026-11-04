@@ -775,38 +775,48 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         CancellationToken cancellationToken)
     {
         Uri? initUri = null;
-        var segments = new List<Uri>();
+        var parsedSegments = new List<ParsedHlsSegment>();
         var hasEndList = false;
+        long mediaSequence = 0;
+        Uri? currentKeyUri = null;
+        byte[]? currentIv = null;
         foreach (var rawLine in playlist.Split('\n'))
         {
             var line = rawLine.Trim();
             if (line.Length == 0 || line.StartsWith("#EXTINF", StringComparison.OrdinalIgnoreCase) ||
                 line.StartsWith("#EXT-X-TARGETDURATION", StringComparison.OrdinalIgnoreCase) ||
                 line.StartsWith("#EXT-X-VERSION", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("#EXT-X-MEDIA-SEQUENCE", StringComparison.OrdinalIgnoreCase) ||
                 line.StartsWith("#EXT-X-PLAYLIST-TYPE", StringComparison.OrdinalIgnoreCase) ||
                 line.StartsWith("#EXT-X-DISCONTINUITY", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase))
+            if (line.StartsWith("#EXT-X-MEDIA-SEQUENCE", StringComparison.OrdinalIgnoreCase))
             {
-                if (line.Contains("METHOD=NONE", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                var value = line[(line.IndexOf(':') + 1)..].Trim();
+                long.TryParse(value, out mediaSequence);
+                continue;
+            }
 
-                var method = ExtractAttribute(line, "METHOD") ?? string.Empty;
-                var keyFormat = ExtractAttribute(line, "KEYFORMAT") ?? string.Empty;
-                var keyUri = ExtractAttribute(line, "URI") ?? string.Empty;
+            if (line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase))
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.DrmProtected,
+                    "This HLS stream is DRM-protected (session key). Protected content cannot be downloaded or decrypted.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase))
+            {
+                var method = (ExtractAttribute(line, "METHOD") ?? string.Empty).Trim();
+                var keyFormat = (ExtractAttribute(line, "KEYFORMAT") ?? string.Empty).Trim();
+                var keyUriText = ExtractAttribute(line, "URI") ?? string.Empty;
                 var isDrm = method.Contains("SAMPLE-AES", StringComparison.OrdinalIgnoreCase) ||
-                            keyUri.StartsWith("skd://", StringComparison.OrdinalIgnoreCase) ||
+                            keyUriText.StartsWith("skd://", StringComparison.OrdinalIgnoreCase) ||
                             keyFormat.Contains("apple", StringComparison.OrdinalIgnoreCase) ||
                             keyFormat.Contains("widevine", StringComparison.OrdinalIgnoreCase) ||
-                            keyFormat.Contains("playready", StringComparison.OrdinalIgnoreCase) ||
-                            line.StartsWith("#EXT-X-SESSION-KEY:", StringComparison.OrdinalIgnoreCase);
+                            keyFormat.Contains("playready", StringComparison.OrdinalIgnoreCase);
                 if (isDrm)
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
@@ -815,10 +825,35 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         false, false, DateTimeOffset.UtcNow));
                 }
 
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent,
-                    "AES-128 encrypted HLS is not supported yet.",
-                    false, false, DateTimeOffset.UtcNow));
+                if (method.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentKeyUri = null;
+                    currentIv = null;
+                    continue;
+                }
+
+                if (!method.Equals("AES-128", StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(keyFormat) &&
+                     !keyFormat.Equals("identity", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"Unsupported HLS encryption method '{method}' or key format '{keyFormat}'.",
+                        false, false, DateTimeOffset.UtcNow));
+                }
+
+                if (string.IsNullOrWhiteSpace(keyUriText) ||
+                    !Uri.TryCreate(playlistUri, keyUriText, out var keyUri))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        "The HLS AES-128 key URI is missing or invalid.",
+                        false, false, DateTimeOffset.UtcNow));
+                }
+
+                currentKeyUri = keyUri;
+                currentIv = ParseHlsIv(ExtractAttribute(line, "IV"));
+                continue;
             }
 
             if (line.StartsWith("#EXT-X-BYTERANGE", StringComparison.OrdinalIgnoreCase))
@@ -853,11 +888,13 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
             if (Uri.TryCreate(playlistUri, line, out var segmentUri))
             {
-                segments.Add(segmentUri);
+                var sequence = mediaSequence + parsedSegments.Count;
+                var iv = currentIv ?? SequenceIv(sequence);
+                parsedSegments.Add(new ParsedHlsSegment(segmentUri, currentKeyUri, iv));
             }
         }
 
-        if (segments.Count == 0)
+        if (parsedSegments.Count == 0)
         {
             return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
                 FailureKind.InvalidContent, "The HLS media playlist has no segments.",
@@ -872,8 +909,30 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 false, false, DateTimeOffset.UtcNow));
         }
 
+        var keyCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var segments = new List<MediaSegment>(parsedSegments.Count);
+        foreach (var parsed in parsedSegments)
+        {
+            byte[]? key = null;
+            if (parsed.KeyUri is not null)
+            {
+                var keyId = parsed.KeyUri.GetLeftPart(UriPartial.Path);
+                if (!keyCache.TryGetValue(keyId, out key))
+                {
+                    key = await DownloadHlsKeyAsync(job, parsed.KeyUri, cancellationToken)
+                        .ConfigureAwait(false);
+                    keyCache[keyId] = key;
+                }
+            }
+
+            segments.Add(new MediaSegment(
+                parsed.Uri,
+                key,
+                parsed.KeyUri is null ? null : parsed.Iv));
+        }
+
         var isFragmentedMp4 = initUri is not null ||
-                              segments.Any(s => s.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
+                              segments.Any(s => s.Uri.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
         return await AssembleMediaSegmentsAsync(
             job,
             initUri,
@@ -890,7 +949,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private async Task<DownloadResult> AssembleMediaSegmentsAsync(
         DownloadJob job,
         Uri? initUri,
-        IReadOnlyList<Uri> segments,
+        IReadOnlyList<MediaSegment> segments,
         string extension,
         string mimeType,
         string phase,
@@ -959,7 +1018,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 if (initUri is not null && completedSegments == 0)
                 {
                     received += await DownloadHlsSegmentAsync(
-                        job, initUri, part, received, progress, stopwatch, progressState, phase, cancellationToken)
+                        job, new MediaSegment(initUri, null, null), part, received, progress,
+                        stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
@@ -1026,7 +1086,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     private async Task<long> DownloadHlsSegmentAsync(
         DownloadJob job,
-        Uri segmentUri,
+        MediaSegment segment,
         Stream output,
         long alreadyReceived,
         IProgress<TransferProgress>? progress,
@@ -1039,6 +1099,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             try
             {
+                var segmentUri = segment.Uri;
                 using var request = BuildRequest(job, segmentUri, 0, SameAuthority(job.Url, segmentUri));
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_options.ReadTimeout);
@@ -1069,25 +1130,52 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 var segmentBytes = 0L;
                 await using var segmentStream = await response.Content.ReadAsStreamAsync(timeout.Token)
                     .ConfigureAwait(false);
-                while (true)
+                if (segment.Key is null)
                 {
-                    var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
-                    if (read == 0)
+                    while (true)
                     {
-                        break;
+                        var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                            .ConfigureAwait(false);
+                        segmentBytes += read;
+                        var now = DateTimeOffset.UtcNow;
+                        if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
+                        {
+                            progressState.LastReport = now;
+                            var bytes = alreadyReceived + segmentBytes;
+                            var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+                            progress?.Report(new TransferProgress(
+                                bytes, null, speed, null, 1, phase));
+                        }
+                    }
+                }
+                else
+                {
+                    using var encrypted = new MemoryStream();
+                    while (true)
+                    {
+                        var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+
+                        encrypted.Write(buffer, 0, read);
                     }
 
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                    segmentBytes += read;
-                    var now = DateTimeOffset.UtcNow;
-                    if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
-                    {
-                        progressState.LastReport = now;
-                        var bytes = alreadyReceived + segmentBytes;
-                        var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-                        progress?.Report(new TransferProgress(
-                            bytes, null, speed, null, 1, phase));
-                    }
+                    var plain = DecryptHlsSegment(
+                        encrypted.ToArray(), segment.Key, segment.Iv ?? new byte[16]);
+                    await output.WriteAsync(plain, cancellationToken).ConfigureAwait(false);
+                    segmentBytes = plain.LongLength;
+                    progressState.LastReport = DateTimeOffset.UtcNow;
+                    var bytes = alreadyReceived + segmentBytes;
+                    var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+                    progress?.Report(new TransferProgress(bytes, null, speed, null, 1, phase));
                 }
 
                 return segmentBytes;
@@ -1100,6 +1188,154 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task<byte[]> DownloadHlsKeyAsync(
+        DownloadJob job,
+        Uri keyUri,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var request = BuildRequest(job, keyUri, 0, SameAuthority(job.Url, keyUri));
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(_options.ReadTimeout);
+                using var response = await CurrentClient()
+                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                    .ConfigureAwait(false);
+                var status = (int)response.StatusCode;
+                if (status is 401 or 403 or 404 or 407 or 410)
+                {
+                    throw new DownloadEngineException(
+                        ClassifyHttpFailure(status, response), isRetryable: false);
+                }
+
+                if (status is < 200 or >= 300)
+                {
+                    if (status >= 500 && attempt < _options.MaxAttempts)
+                    {
+                        await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                            .ConfigureAwait(false);
+                        continue;
+                    }
+
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.Http, $"HLS key returned HTTP {status}.",
+                        status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
+                }
+
+                var key = await response.Content.ReadAsByteArrayAsync(timeout.Token)
+                    .ConfigureAwait(false);
+                if (key.Length != 16)
+                {
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"The HLS AES-128 key must be 16 bytes (got {key.Length}).",
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                }
+
+                return key;
+            }
+            catch (Exception ex) when (
+                attempt < _options.MaxAttempts &&
+                (ex is IOException or HttpRequestException or TaskCanceledException) &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static byte[] DecryptHlsSegment(byte[] ciphertext, byte[] key, byte[] iv)
+    {
+        if (key.Length != 16 || iv.Length != 16)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent,
+                "The HLS AES-128 key or IV has an invalid length.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+
+        try
+        {
+            using var aes = Aes.Create();
+            aes.KeySize = 128;
+            aes.Mode = CipherMode.CBC;
+            aes.Padding = PaddingMode.PKCS7;
+            aes.Key = key;
+            aes.IV = iv;
+            using var decryptor = aes.CreateDecryptor();
+            return decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent,
+                $"HLS AES-128 decryption failed: {ex.Message}",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+    }
+
+    private static byte[]? ParseHlsIv(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var text = value.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[2..];
+        }
+
+        if (text.Length == 0 || text.Length > 32)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent, "The HLS AES-128 IV is invalid.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+
+        if (text.Length % 2 != 0)
+        {
+            text = "0" + text;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromHexString(text);
+        }
+        catch (FormatException)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent, "The HLS AES-128 IV is not hexadecimal.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+
+        if (bytes.Length == 16)
+        {
+            return bytes;
+        }
+
+        var padded = new byte[16];
+        Buffer.BlockCopy(bytes, 0, padded, 16 - bytes.Length, bytes.Length);
+        return padded;
+    }
+
+    private static byte[] SequenceIv(long sequence)
+    {
+        var iv = new byte[16];
+        for (var i = 15; i >= 0 && sequence > 0; i--)
+        {
+            iv[i] = (byte)(sequence & 0xFF);
+            sequence >>= 8;
+        }
+
+        return iv;
     }
 
     private static string? ExtractAttribute(string line, string name)
@@ -1247,7 +1483,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             var singleTrack = videoTrack ?? audioTrack!;
             var singleTrackName = videoTrack is not null ? "dash-video" : "dash-audio";
             return await AssembleMediaSegmentsAsync(
-                job, singleTrack.InitUri, singleTrack.Segments, ".mp4",
+                job,
+                singleTrack.InitUri,
+                singleTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                ".mp4",
                 videoTrack is not null ? "video/mp4" : "audio/mp4",
                 "Downloading DASH",
                 singleTrackName,
@@ -1535,15 +1774,15 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             if (track.InitUri is not null && completedSegments == 0)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, track.InitUri, file, receivedBase + received, progress, stopwatch, state, phase,
-                    cancellationToken).ConfigureAwait(false);
+                    job, new MediaSegment(track.InitUri, null, null), file, receivedBase + received,
+                    progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
             }
 
             for (var i = completedSegments; i < track.Segments.Count; i++)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, track.Segments[i], file, receivedBase + received, progress, stopwatch, state, phase,
-                    cancellationToken).ConfigureAwait(false);
+                    job, new MediaSegment(track.Segments[i], null, null), file, receivedBase + received,
+                    progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
                 await file.FlushAsync(cancellationToken).ConfigureAwait(false);
                 if (_mediaCheckpoints is not null)
                 {
@@ -1592,6 +1831,31 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
+    private static string ComputeMediaSignature(
+        string track,
+        Uri? init,
+        IReadOnlyList<MediaSegment> segments)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendSignature(hash, track);
+        AppendSignature(hash, init?.GetLeftPart(UriPartial.Path) ?? string.Empty);
+        foreach (var segment in segments)
+        {
+            AppendSignature(hash, segment.Uri.GetLeftPart(UriPartial.Path));
+            if (segment.Key is not null)
+            {
+                AppendSignature(hash, Convert.ToHexString(segment.Key));
+            }
+
+            if (segment.Iv is not null)
+            {
+                AppendSignature(hash, Convert.ToHexString(segment.Iv));
+            }
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
     private static void AppendSignature(IncrementalHash hash, string value)
     {
         var bytes = Encoding.UTF8.GetBytes(value);
@@ -1600,6 +1864,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     }
 
     private sealed record DashTrack(Uri? InitUri, List<Uri> Segments, string Signature);
+
+    private sealed record ParsedHlsSegment(Uri Uri, Uri? KeyUri, byte[] Iv);
+
+    private sealed record MediaSegment(Uri Uri, byte[]? Key, byte[]? Iv);
 
     private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
     {
