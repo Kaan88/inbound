@@ -942,6 +942,22 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Tray interaction evidence (U5, 2026-11-04)
+
+- Extended `tools/HostChecks` with a hidden WinForms message loop so the
+  NotifyIcon is registered with the shell (`_added=True`).
+- Verified:
+  - tray menu callbacks Open, Settings, Pause All, Resume All, Exit;
+  - active/integration text and icon tooltip;
+  - notification queue `0 -> 1 -> 0` after `RefreshState`;
+  - direct `ShowBalloonTip` handed without exception.
+- Click-through constraint: `Shell_NotifyIconGetRect` returned `0x80004005`
+  and `scripts/open-tray-overflow.ps1` reported `NO OVERFLOW CHEVRON`, so a
+  real mouse click on the hidden shell icon could not be automated. The menu
+  callbacks are invoked in-process.
+- `tools/HostChecks` reports `ALL CHECKS PASSED`; build 0 errors. Existing
+  suites remain engine 30/30, core 51/51, integration 61/61.
+
 ## Keyboard/focus/modality evidence (U4, 2026-11-04)
 
 - Added `scripts/ui-keyboard-check.ps1`, which uses UI Automation metadata,

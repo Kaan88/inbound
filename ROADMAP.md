@@ -253,7 +253,8 @@ excluded.
 
 U1/U2 are closed by the live UI Automation dump and
 `notes/ui-parity-checklist.md` (E85); U4 is closed by the
-keyboard/focus/modality check (E86). U5/U7 and clean-Windows acceptance remain.
+keyboard/focus/modality check (E86) and U5 by the tray check (E87). U7 and
+clean-Windows acceptance remain.
 
 Coarse: window/dialog layout, menus/context menus, columns/layout persistence,
 keyboard/focus/modality, tray/notifications, settings defaults, progress/error
