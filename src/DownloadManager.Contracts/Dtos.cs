@@ -129,6 +129,7 @@ public sealed class SettingsDto
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
     public string? FfmpegPath { get; set; }
+    public string? PostDownloadCommand { get; set; }
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }

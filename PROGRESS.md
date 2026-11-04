@@ -688,23 +688,43 @@ random-access part file **in the destination directory**:
 - Limitations: no FTPS, single-stream FTP, no proxy integration; FTP credentials
   come from site logins or URL userinfo.
 
+## Post-download hook evidence (C4, 2026-11-04)
+
+- Settings gained `PostDownloadCommand`. After a successful download, the Host
+  runs the command with the final path as one `ProcessStartInfo.ArgumentList`
+  entry and `UseShellExecute=false`; a 5-minute timeout kills the process and
+  failures are logged without changing the completed job.
+- Core `PostDownloadCommandLineTests` verify the command name, no shell, and the
+  exact single argument.
+- Integration suite **45/45**:
+  - `PostDownloadHookRunsOnceWithExactFilePath` delivered
+    `hook file (1).bin` unchanged;
+  - `PostDownloadHookFailureDoesNotFailDownload` left the job completed after a
+    throwing hook.
+- Added `tools/HookSpy` (writes its received arguments). Published Host with a
+  65,536-byte download named `hook live (2).bin` produced the exact path in the
+  hook log and `Post-download hook ran` in the Host log; the CLI showed the
+  configured command.
+- Remaining: fixed file-path argument only; no custom argument template or
+  scanner verdict handling.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **44/44 passed**, including shutdown-command construction, clipboard URL
-  extraction, batch URL expansion, file categories, and download-list
-  round-trip.
-- Runtime/persistence: **43/43 passed** (`tests\DownloadManager.Integration.Tests`),
+- Core: **45/45 passed**, including shutdown-command construction, clipboard URL
+  extraction, batch URL expansion, file categories, download-list round-trip,
+  and safe post-download argument construction.
+- Runtime/persistence: **45/45 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, DRM detection, editable
   properties, duplicate policies, category destinations, the scoped site
-  grabber/offline mirror, persistent/scheduled grabber projects, and FTP
-  auth/resume.
+  grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
+  and post-download hook isolation.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

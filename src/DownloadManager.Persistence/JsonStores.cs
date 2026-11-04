@@ -724,6 +724,9 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.FfmpegPath = string.IsNullOrWhiteSpace(settings.FfmpegPath)
             ? null
             : settings.FfmpegPath.Trim();
+        settings.PostDownloadCommand = string.IsNullOrWhiteSpace(settings.PostDownloadCommand)
+            ? null
+            : settings.PostDownloadCommand.Trim();
 
         settings.CategoryFolders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

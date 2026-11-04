@@ -1603,6 +1603,12 @@ public sealed partial class MainWindow : Window
             var notify = new CheckBox { Content = "Notify when a download completes", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound when a download completes", IsChecked = settings.PlayCompletionSound };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads after restart", IsChecked = settings.AutoResumeUnfinishedOnStartup };
+            var postDownload = new TextBox
+            {
+                Header = "Run this program after each download (optional)",
+                Text = settings.PostDownloadCommand ?? string.Empty,
+                PlaceholderText = @"C:\Program Files\Scanner\scan.exe",
+            };
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             foreach (var category in FileCategories.Names)
@@ -1624,6 +1630,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(launch);
             panel.Children.Add(clipboard);
             panel.Children.Add(autoResume);
+            panel.Children.Add(postDownload);
             panel.Children.Add(notify);
             panel.Children.Add(sound);
             panel.Children.Add(new TextBlock { Text = "Browser integration", Margin = new Thickness(0, 8, 0, 0) });
@@ -1685,6 +1692,9 @@ public sealed partial class MainWindow : Window
             settings.NotifyOnCompletion = notify.IsChecked == true;
             settings.PlayCompletionSound = sound.IsChecked == true;
             settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
+            settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text)
+                ? null
+                : postDownload.Text.Trim();
             settings.CategoryFolders = categoryBoxes
                 .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                 .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -1729,6 +1739,7 @@ public sealed partial class MainWindow : Window
             AllowLocalNetwork = source.AllowLocalNetwork,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
+            PostDownloadCommand = source.PostDownloadCommand,
             CategoryFolders = new Dictionary<string, string>(source.CategoryFolders, StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = new List<string>(source.ExcludedFileExtensions),
             ExcludedHosts = new List<string>(source.ExcludedHosts),

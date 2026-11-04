@@ -191,6 +191,56 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task PostDownloadHookRunsOnceWithExactFilePath()
+    {
+        var hook = new RecordingPostDownloadHook();
+        await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook);
+        var command = @"C:\Program Files\Scanner\scan.exe";
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.PostDownloadCommand = command;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/hook.bin?size=65536&seed=310",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hook file (1).bin",
+            Source = "cli",
+        });
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+
+        var call = Assert.Single(hook.Calls);
+        Assert.Equal(command, call.Command);
+        Assert.Equal(completed.FinalFilePath, call.FilePath);
+        Assert.True(File.Exists(call.FilePath));
+    }
+
+    [Fact]
+    public async Task PostDownloadHookFailureDoesNotFailDownload()
+    {
+        var hook = new RecordingPostDownloadHook { Throw = true };
+        await using var ctx = await ServiceContext.CreateAsync(_server, postDownloadHook: hook);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.PostDownloadCommand = "C:\\Scanner\\missing.exe";
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/hook-fail.bin?size=65536&seed=311",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hook-fail.bin",
+            Source = "cli",
+        });
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+        Assert.Equal("completed", completed.State);
+        Assert.Single(hook.Calls);
+    }
+
+    [Fact]
     public async Task FtpRequiresLoginAndResumesFromPartialBytes()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1934,6 +1984,23 @@ public sealed class RuntimeServiceTests
         }
     }
 
+    private sealed class RecordingPostDownloadHook : IPostDownloadHook
+    {
+        public List<(string Command, string FilePath)> Calls { get; } = new();
+        public bool Throw { get; init; }
+
+        public Task RunAsync(string command, string filePath, CancellationToken cancellationToken)
+        {
+            Calls.Add((command, filePath));
+            if (Throw)
+            {
+                throw new IOException("simulated hook failure");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class RecordingCompletionExecutor : ICompletionActionExecutor
     {
         public List<string> OpenedPaths { get; } = new();
@@ -2000,7 +2067,8 @@ public sealed class RuntimeServiceTests
             bool autoResume = true,
             int maxConcurrent = 2,
             ICompletionActionExecutor? completionActions = null,
-            ISleepPrevention? sleepPrevention = null)
+            ISleepPrevention? sleepPrevention = null,
+            IPostDownloadHook? postDownloadHook = null)
         {
             var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
             var paths = new StoragePaths(Path.Combine(root, "state"));
@@ -2008,7 +2076,7 @@ public sealed class RuntimeServiceTests
             Directory.CreateDirectory(destination);
             paths.EnsureCreated();
             return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true,
-                completionActions, sleepPrevention);
+                completionActions, sleepPrevention, postDownloadHook);
         }
 
         public static Task<ServiceContext> CreateAsync(
@@ -2017,9 +2085,10 @@ public sealed class RuntimeServiceTests
             string destination,
             bool autoResume = true,
             ICompletionActionExecutor? completionActions = null,
-            ISleepPrevention? sleepPrevention = null)
+            ISleepPrevention? sleepPrevention = null,
+            IPostDownloadHook? postDownloadHook = null)
             => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false,
-                completionActions, sleepPrevention);
+                completionActions, sleepPrevention, postDownloadHook);
 
         private static async Task<ServiceContext> BuildAsync(
             TestServerHost server,
@@ -2029,7 +2098,8 @@ public sealed class RuntimeServiceTests
             int maxConcurrent,
             bool ownsPaths,
             ICompletionActionExecutor? completionActions = null,
-            ISleepPrevention? sleepPrevention = null)
+            ISleepPrevention? sleepPrevention = null,
+            IPostDownloadHook? postDownloadHook = null)
         {
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
@@ -2059,7 +2129,8 @@ public sealed class RuntimeServiceTests
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
                 grabberProjects: grabberProjects,
-                ftpEngine: ftpEngine);
+                ftpEngine: ftpEngine,
+                postDownloadHook: postDownloadHook);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

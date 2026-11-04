@@ -389,6 +389,9 @@ public sealed class AppSettings
     /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
     public string? FfmpegPath { get; set; }
 
+    /// <summary>Program run once after each successful download; file path is one argument.</summary>
+    public string? PostDownloadCommand { get; set; }
+
     /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>
     public bool AllowSystemCompletionActions { get; set; }
 

@@ -42,7 +42,7 @@
 - Phase 10: complete (Download All link collection/filtering/handoff, scoped
   crawl, offline link rewriting, and persistent/scheduled grabber projects
   verified).
-- Phase 11: in progress (FTP with authentication/resume verified; other
+- Phase 11: in progress (FTP auth/resume and post-download hooks verified; other
   compatibility rows, installer/updater work, and final UI parity remain).
 - Phases 6, 12: in progress/pending as tracked in `reference notes`; see
   `PROGRESS.md` for the handoff.

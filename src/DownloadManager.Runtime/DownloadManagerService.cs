@@ -31,6 +31,7 @@ public sealed class DownloadManagerService
     private readonly TimeProvider _timeProvider;
     private readonly bool _enableSchedulerTimer;
     private readonly ICompletionActionExecutor _completionActions;
+    private readonly IPostDownloadHook _postDownloadHook;
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IGrabberProjectStore? _grabberProjectStore;
@@ -62,7 +63,8 @@ public sealed class DownloadManagerService
         ISleepPrevention? sleepPrevention = null,
         IMediaCheckpointStore? mediaCheckpoints = null,
         IGrabberProjectStore? grabberProjects = null,
-        IDownloadEngine? ftpEngine = null)
+        IDownloadEngine? ftpEngine = null,
+        IPostDownloadHook? postDownloadHook = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -77,6 +79,7 @@ public sealed class DownloadManagerService
         _mediaCheckpoints = mediaCheckpoints;
         _grabberProjectStore = grabberProjects;
         _ftpEngine = ftpEngine;
+        _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -627,6 +630,7 @@ public sealed class DownloadManagerService
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             FfmpegPath = settings.FfmpegPath,
+            PostDownloadCommand = settings.PostDownloadCommand,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
@@ -2006,8 +2010,40 @@ public sealed class DownloadManagerService
             runtime.CancelledForRemoval = false;
         }
 
+        await MaybeRunPostDownloadHookAsync(job, changeType).ConfigureAwait(false);
         await MaybeRunCompletionActionsAsync(job, changeType, CancellationToken.None).ConfigureAwait(false);
         Schedule();
+    }
+
+    private async Task MaybeRunPostDownloadHookAsync(DownloadJob job, string changeType)
+    {
+        if (changeType != "completed")
+        {
+            return;
+        }
+
+        var command = _settings.PostDownloadCommand;
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        if (!File.Exists(job.FinalFilePath))
+        {
+            _log?.Invoke($"Post-download hook skipped: '{job.FinalFilePath}' does not exist.");
+            return;
+        }
+
+        try
+        {
+            await _postDownloadHook.RunAsync(command, job.FinalFilePath, CancellationToken.None)
+                .ConfigureAwait(false);
+            _log?.Invoke($"Post-download hook ran for '{job.FileName}'.");
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Post-download hook failed for '{job.FileName}': {ex.Message}");
+        }
     }
 
     private async Task MaybeRunCompletionActionsAsync(
@@ -2410,6 +2446,7 @@ public sealed class DownloadManagerService
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
             FfmpegPath = settings.FfmpegPath,
+            PostDownloadCommand = settings.PostDownloadCommand,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,

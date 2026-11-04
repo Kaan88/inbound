@@ -53,6 +53,36 @@ public interface IDownloadEngine
     void UpdateFfmpegPath(string? path);
 }
 
+public interface IPostDownloadHook
+{
+    Task RunAsync(string command, string filePath, CancellationToken cancellationToken);
+}
+
+public sealed class NullPostDownloadHook : IPostDownloadHook
+{
+    public static NullPostDownloadHook Instance { get; } = new();
+
+    public Task RunAsync(string command, string filePath, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+}
+
+public static class PostDownloadCommandLine
+{
+    public static System.Diagnostics.ProcessStartInfo Create(string command, string filePath)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(command)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        // ArgumentList passes the path as one argument without shell parsing.
+        start.ArgumentList.Add(filePath);
+        return start;
+    }
+}
+
 public interface ICompletionActionExecutor
 {
     Task OpenFileAsync(string path, CancellationToken cancellationToken);

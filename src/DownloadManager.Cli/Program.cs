@@ -1274,6 +1274,10 @@ internal static class Program
                 case "ffmpegpath":
                     settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
                     break;
+                case "postdownload":
+                    settings.PostDownloadCommand =
+                        string.IsNullOrWhiteSpace(value) || value is "none" or "-" ? null : value;
+                    break;
                 case "compresseddir":
                     SetCategoryFolder(settings, "compressed", value);
                     break;
@@ -1440,6 +1444,7 @@ internal static class Program
         Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
         Console.WriteLine($"ffmpeg path:       {settings.FfmpegPath ?? "auto"}");
+        Console.WriteLine($"post-download:     {settings.PostDownloadCommand ?? "none"}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 

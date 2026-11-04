@@ -137,6 +137,20 @@ public sealed class JobListFileTests
     }
 }
 
+public sealed class PostDownloadCommandLineTests
+{
+    [Fact]
+    public void PassesFilePathAsSingleArgumentWithoutShell()
+    {
+        var path = @"C:\Downloads\hook file (1).bin";
+        var start = PostDownloadCommandLine.Create(@"C:\Program Files\Scanner\scan.exe", path);
+
+        Assert.False(start.UseShellExecute);
+        Assert.Equal(@"C:\Program Files\Scanner\scan.exe", start.FileName);
+        Assert.Equal(path, Assert.Single(start.ArgumentList));
+    }
+}
+
 public sealed class FileCategoriesTests
 {
     [Theory]
