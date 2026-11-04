@@ -608,7 +608,119 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true, id };
     }
 
-    case "dm.status":
+    case "dm.openBatch": {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabs[0];
+      if (typeof tab?.id !== "number") {
+        return { ok: false, error: "No active page to scan." };
+      }
+
+      await chrome.windows.create({
+        url: chrome.runtime.getURL(`batch.html?tabId=${tab.id}`),
+        type: "popup",
+        width: 780,
+        height: 680,
+      });
+      return { ok: true, tabId: tab.id };
+    }
+
+    case "dm.pageLinks": {
+      let tabId: number | undefined = typeof message.tabId === "number" ? message.tabId : undefined;
+      if (tabId === undefined) {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        tabId = tabs[0]?.id;
+      }
+
+      if (typeof tabId !== "number") {
+        return { ok: false, error: "No active page to scan." };
+      }
+
+      try {
+        const response = (await chrome.tabs.sendMessage(tabId, { type: "dm.collectLinks" })) as {
+          ok?: boolean;
+          pageUrl?: string;
+          links?: any[];
+        };
+        const links = (Array.isArray(response?.links) ? response.links : [])
+          .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url))
+          .slice(0, 2000)
+          .map((item: any) => ({
+            url: item.url,
+            text: typeof item.text === "string" ? item.text.slice(0, 160) : "link",
+            kind: typeof item.kind === "string" ? item.kind.slice(0, 32) : "link",
+            extension: typeof item.extension === "string" ? item.extension.slice(0, 16) : "",
+            host: typeof item.host === "string" ? item.host.slice(0, 255) : "",
+          }));
+        return {
+          ok: true,
+          tabId,
+          pageUrl: typeof response?.pageUrl === "string" ? response.pageUrl : "",
+          links,
+        };
+      } catch {
+        return {
+          ok: false,
+          error: "This page cannot be scanned. Reload it and try again.",
+        };
+      }
+    }
+
+    case "dm.confirmBatch": {
+      const urls = (Array.isArray(message.urls) ? message.urls : [])
+        .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url))
+        .slice(0, 200);
+      if (urls.length === 0) {
+        return { ok: false, error: "No HTTP(S) links were selected." };
+      }
+
+      const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
+      const startMode = message.startMode === "later" ? "later" : "now";
+      const destination = typeof message.destination === "string" && message.destination.trim()
+        ? message.destination.trim()
+        : settings.defaultDestination || undefined;
+      const results: Array<Record<string, unknown>> = [];
+      for (const item of urls) {
+        try {
+          const ack = await requestHandoff({
+            requestId: crypto.randomUUID(),
+            extensionId: chrome.runtime.id,
+            url: item.url,
+            pageUrl,
+            referrer: pageUrl,
+            userAgent: navigator.userAgent,
+            suggestedFileName: typeof item.fileName === "string" && item.fileName.trim()
+              ? item.fileName.trim().slice(0, 200)
+              : inferFileName(item.url, "link"),
+            startMode,
+            isAutoIntercept: false,
+            headers: await cookieHeaders(item.url),
+            destinationDirectory: destination,
+          });
+          results.push({
+            url: item.url,
+            accepted: !!ack?.accepted,
+            duplicate: !!ack?.duplicate,
+            error: ack?.error,
+            job: ack?.job,
+          });
+        } catch (error) {
+          results.push({
+            url: item.url,
+            accepted: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const accepted = results.filter((result) => result.accepted === true).length;
+      return {
+        ok: true,
+        accepted,
+        failed: results.length - accepted,
+        results,
+      };
+    }
+
     case "dm.status":
       return {
         ok: true,

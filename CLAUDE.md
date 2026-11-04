@@ -30,9 +30,11 @@ actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload byte
 written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, additional DASH/HLS modes, Download
-All/grabber, FTP, and clean-environment install/upgrade verification. Phase 8
-(queues/scheduler) is complete; direct media detection, popup resources,
+areas: everyday management gaps, additional DASH/HLS modes, the site-grabber
+crawl/rewrite/projects work, FTP, and clean-environment install/upgrade
+verification. Phase 8 (queues/scheduler) is complete; Download All link
+collection/filter/selection and batch handoff are implemented; direct media
+detection, popup resources,
 unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
 DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, expiring
 segment-token refresh, explicit live-stream exclusion, and DRM detection are

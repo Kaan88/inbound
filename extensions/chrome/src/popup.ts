@@ -247,6 +247,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  (document.getElementById("downloadAll") as HTMLButtonElement).addEventListener("click", async () => {
+    clearError();
+    try {
+      const result = (await chrome.runtime.sendMessage({ type: "dm.openBatch" })) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!result?.ok) {
+        showError(result?.error || "Could not scan this page.");
+        return;
+      }
+      window.close();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+    }
+  });
+
   (document.getElementById("options") as HTMLButtonElement).addEventListener("click", () => {
     void chrome.runtime.openOptionsPage();
   });

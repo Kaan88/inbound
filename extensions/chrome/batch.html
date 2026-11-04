@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download All - Download Manager</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="batch">
+  <main class="page">
+    <header class="brand large">
+      <img src="icons/icon48.png" alt="" width="36" height="36" />
+      <div>
+        <h1>Download All</h1>
+        <p class="muted small">Pick the links from this page that should become download jobs.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <strong id="pageTitle">Links on this page</strong>
+        <span id="count" class="muted small">Scanning...</span>
+      </div>
+      <div class="filter-row">
+        <input id="filter" type="text" spellcheck="false" placeholder="Filter by name, type, or host" />
+        <label class="inline-check">
+          <input id="selectAll" type="checkbox" />
+          Select all shown
+        </label>
+      </div>
+      <ul id="links" class="link-list">
+        <li class="empty">Scanning page...</li>
+      </ul>
+    </section>
+
+    <section class="card form-card batch-options">
+      <label class="field">
+        <span>Destination folder (optional)</span>
+        <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
+      </label>
+      <label class="field">
+        <span>Start</span>
+        <select id="startMode">
+          <option value="now">Start immediately</option>
+          <option value="later">Download later</option>
+        </select>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button id="confirm" class="primary" type="button" disabled>Download selected</button>
+      <button id="cancel" type="button">Close</button>
+      <span id="selection" class="muted small">0 selected</span>
+    </div>
+    <p id="error" class="error hidden"></p>
+    <p id="success" class="success hidden"></p>
+  </main>
+  <script src="batch.js"></script>
+</body>
+</html>

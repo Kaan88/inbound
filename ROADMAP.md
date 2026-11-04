@@ -33,7 +33,11 @@
   audio/video muxing via FFmpeg, HLS/DASH fragment recovery, expiring
   segment-token refresh, explicit live-stream exclusion, and DRM detection
   verified; the in-page quality panel and additional DASH/HLS modes remain).
-- Phases 6, 9–12: pending. See `reference notes` E1–E17 and `PROGRESS.md`.
+- Phase 10: in progress (Download All link collection, filtering, selection, and
+  batch handoff verified; crawl scope, link rewriting, and persistent projects
+  remain).
+- Phases 6, 11–12: pending. See `reference notes` for evidence and `PROGRESS.md` for
+  the handoff.
 
 ## Phase 0 — Baseline and setup (done)
 
@@ -191,11 +195,14 @@ a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
 panel/quality variants, SegmentBase/SegmentList/timeline DASH, HLS alternate
 audio, and AES-128.
 
-## Phase 10 — Download All and site grabber (pending)
+## Phase 10 - Download All and site grabber (in progress)
 
-Coarse: page link collection/filtering/selection, crawl scope/depth, filters,
-asset discovery, relative paths, link rewriting, preview, persistent projects,
-scheduled runs.
+Download All link collection is implemented: the extension scans anchors,
+images, and media sources, deduplicates and filters them, supports selection and
+select-all-visible, and batch-adds selected URLs through authenticated handoffs
+(G1 done; E31). Remaining: crawl scope/depth/filters, relative paths and link
+rewriting for offline mirrors, preview, and persistent/scheduled grabber
+projects (G2–G4).
 
 ## Phase 11 — Remaining compatibility and integration (pending)
 

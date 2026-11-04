@@ -6,6 +6,14 @@ interface MediaCandidate {
   label: string;
 }
 
+interface PageLink {
+  url: string;
+  text: string;
+  kind: string;
+  extension: string;
+  host: string;
+}
+
 const seen = new Map<string, MediaCandidate>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -89,6 +97,93 @@ function send(): void {
   }
 }
 
+function extensionFor(url: URL): string {
+  const name = url.pathname.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot >= name.length - 1) {
+    return "";
+  }
+
+  return name.slice(dot + 1).toLowerCase().slice(0, 16);
+}
+
+function linkLabel(element: Element, url: URL): string {
+  const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
+  if (text) {
+    return text.slice(0, 160);
+  }
+
+  const title = (element.getAttribute("title") ?? "").trim();
+  if (title) {
+    return title.slice(0, 160);
+  }
+
+  const alt = (element.getAttribute("alt") ?? "").trim();
+  if (alt) {
+    return alt.slice(0, 160);
+  }
+
+  const name = url.pathname.split("/").pop() ?? "";
+  try {
+    return decodeURIComponent(name || url.hostname).slice(0, 160);
+  } catch {
+    return (name || url.hostname).slice(0, 160);
+  }
+}
+
+function collectLinks(): PageLink[] {
+  const found = new Map<string, PageLink>();
+  const addLink = (raw: string | null | undefined, kind: string, element: Element): void => {
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const url = new URL(raw, location.href);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return;
+      }
+
+      url.hash = "";
+      const absolute = url.href;
+      if (found.has(absolute)) {
+        return;
+      }
+
+      found.set(absolute, {
+        url: absolute,
+        text: linkLabel(element, url),
+        kind,
+        extension: extensionFor(url),
+        host: url.host,
+      });
+    } catch {
+      // ignore malformed links
+    }
+  };
+
+  for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
+    const href = anchor.getAttribute("href") ?? "";
+    if (!href || href.startsWith("#")) {
+      continue;
+    }
+
+    addLink(href, "link", anchor);
+  }
+
+  for (const image of Array.from(document.querySelectorAll("img[src]"))) {
+    addLink(image.getAttribute("src"), "image", image);
+  }
+
+  for (const media of Array.from(
+    document.querySelectorAll("video[src], audio[src], video source[src], audio source[src]"),
+  )) {
+    addLink(media.getAttribute("src"), media.tagName.toLowerCase(), media);
+  }
+
+  return [...found.values()];
+}
+
 function scheduleScan(): void {
   if (timer) {
     clearTimeout(timer);
@@ -104,8 +199,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "dm.scan") {
     scan();
     sendResponse({ ok: true });
+    return true;
   }
-  return true;
+
+  if (message?.type === "dm.collectLinks") {
+    sendResponse({ ok: true, pageUrl: location.href, links: collectLinks() });
+    return true;
+  }
+
+  return false;
 });
 
 scan();

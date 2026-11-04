@@ -793,6 +793,23 @@ public sealed class TestServerHost : IAsyncDisposable
             "</AdaptationSet></Period></MPD>",
             "application/dash+xml"));
 
+        _app.MapGet("/download-all-page", async (HttpContext context) =>
+        {
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync(
+                "<html><body style=\"font:16px sans-serif;padding:24px\">" +
+                "<h3>Download All test</h3>" +
+                "<a href=\"/file/all-a.bin?size=262144&seed=210\">Report A</a><br>" +
+                "<a href=\"/file/all-b.bin?size=131072&seed=211\">Report B</a><br>" +
+                "<a href=\"/file/all-a.bin?size=262144&seed=210\">Duplicate A</a><br>" +
+                "<a href=\"mailto:test@example.com\">Mail</a><br>" +
+                "<a href=\"javascript:void(0)\">JavaScript</a><br>" +
+                "<a href=\"#section\">Anchor</a><br>" +
+                "<img alt=\"Image asset\" src=\"/file/all-image.png?size=65536&seed=212\"><br>" +
+                "<a href=\"/hls/master.m3u8\">HLS stream</a>" +
+                "</body></html>").ConfigureAwait(false);
+        });
+
         _app.MapGet("/media-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

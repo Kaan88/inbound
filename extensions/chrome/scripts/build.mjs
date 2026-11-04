@@ -12,6 +12,7 @@ const staticFiles = [
   "popup.html",
   "options.html",
   "handoff.html",
+  "batch.html",
   "styles.css",
 ];
 
@@ -35,6 +36,7 @@ const options = {
     popup: path.join(root, "src", "popup.ts"),
     options: path.join(root, "src", "options.ts"),
     handoff: path.join(root, "src", "handoff.ts"),
+    batch: path.join(root, "src", "batch.ts"),
   },
   bundle: true,
   format: "iife",

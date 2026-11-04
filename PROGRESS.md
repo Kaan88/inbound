@@ -432,6 +432,30 @@ random-access part file **in the destination directory**:
 - No key request, license exchange, decryption, or bypass is implemented.
 - Integration suite **36/36** with FFmpeg configured.
 
+## Download All evidence (G1, 2026-11-04)
+
+- The content script collects unique HTTP(S) URLs from anchors, images, and
+  media sources; it resolves relative URLs, strips fragments, excludes
+  mailto/javascript/hash links, and reports name, kind, extension, and host.
+- The service worker exposes `dm.pageLinks` / `dm.confirmBatch` and opens a
+  Download All window. The window lists links with type/host, filters by name,
+  type, host, or URL, supports per-link and select-all-visible selection, and
+  sends the selected URLs as authenticated batch handoffs.
+- TestServer `/download-all-page` contained: A, B, duplicate A, `mailto:`,
+  `javascript:`, `#hash`, an image, and an HLS link.
+- Chrome for Testing 156 with the extension collected exactly 4 unique links
+  (A, B, HLS, image); the duplicate and non-downloadable schemes were excluded.
+- UI: 4 rows with `BIN`/`M3U8`/`PNG` labels; filtering `all-a` showed 1 row;
+  selecting A and B displayed `2 selected`, enabled Download, and reported
+  `Added 2 downloads.`
+- Host: `all-a.bin` 262,144 bytes SHA-256
+  `af96c694df7c1c1d8ec660ce45083576aea5c4a619ae6336a02124f428526d48`
+  (seed 210) and `all-b.bin` 131,072 bytes SHA-256
+  `96e8343a81a63c25ee1871936870371b385f8ac045d17937a09d0b1a65ec5e39`
+  (seed 211), both matching.
+- G2–G4 remain: crawl scope/depth, relative path/link rewriting, preview,
+  persistent/scheduled projects.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -444,7 +468,8 @@ random-access part file **in the destination directory**:
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, and DRM detection.
-- Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
+- Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
+  new `batch.js` Download All window).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
 
@@ -464,19 +489,22 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the V8/V9 live-exclusion + DRM-detection increment.
+1. Commit the G1 Download All increment (collection, filter/selection UI, batch
+   handoff, evidence).
 2. Phase 9 remainder: in-page/quality panel (V2), additional DASH modes, HLS
    alternate audio, and AES-128. Direct media detection, popup list, unencrypted
    HLS, static DASH SegmentTemplate, DASH A/V muxing, fragment recovery,
    rotating-token refresh, live exclusion, and DRM detection are done
    (E24–E30).
-3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
+3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
+   rewriting for an offline mirror, and G4 persistent/scheduled grabber
+   projects. G1 is done (E31).
+4. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
+5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done
    (E17/E18/E19/E20/E21).
-5. Phase 10: Download All/site grabber.
 6. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
    visual/behavioral audit, final parity evidence. Continue the reference app GUI
    inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
