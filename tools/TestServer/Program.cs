@@ -25,6 +25,7 @@ var host = await TestServerHost.StartAsync(port);
 TestProxyServer? proxy = null;
 TestSocks5Server? socks5 = null;
 Console.WriteLine($"Test server listening at {host.BaseAddress}");
+Console.WriteLine($"FTP listening at 127.0.0.1:{host.Ftp.Port} (ftpuser/ftppass)");
 if (withProxy)
 {
     proxy = TestProxyServer.Start();

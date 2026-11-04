@@ -31,14 +31,14 @@ written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
 complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
 areas: everyday management gaps, additional DASH/HLS modes and AES-128, the
-remaining grabber polish, FTP, and clean-environment install/upgrade
-verification. Phase 8 (queues/scheduler) is complete; clipboard
+remaining grabber polish, installer/updater work, and clean-environment
+install/upgrade verification. Phase 8 (queues/scheduler) is complete; clipboard
 URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
 duplicate Rename/Overwrite/Fail policies, category destination rules,
 last-folder memory, JSON list export/import, completion dialog/notification/
 sound, Download All link collection/filter/selection, batch handoff, a scoped
-site grabber with offline link rewriting, and persistent/scheduled grabber
-projects are implemented;
+site grabber with offline link rewriting, persistent/scheduled grabber projects,
+and FTP auth/resume are implemented;
 direct media detection, in-page panel with HLS quality variants, popup resources,
 unencrypted HLS master/media assembly, static DASH SegmentTemplate assembly,
 DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery, expiring

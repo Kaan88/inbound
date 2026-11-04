@@ -55,12 +55,14 @@ internal static class Program
                 mediaCheckpoints: mediaCheckpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
             var service = new DownloadManagerService(
                 paths, jobStore, checkpoints, settingsStore, engine, log.Info,
                 completionActions: completionExecutor,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
-                grabberProjects: grabberProjects);
+                grabberProjects: grabberProjects,
+                ftpEngine: ftpEngine);
             service.InitializeAsync().GetAwaiter().GetResult();
             service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
             service.TrayAvailable = true;

@@ -116,6 +116,7 @@ public sealed class TestServerHost : IAsyncDisposable
     }
 
     public string BaseAddress { get; private set; } = string.Empty;
+    public FtpServer Ftp { get; private set; } = null!;
 
     public static async Task<TestServerHost> StartAsync(
         int port = 0,
@@ -133,6 +134,7 @@ public sealed class TestServerHost : IAsyncDisposable
         host.MapEndpoints();
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         host.BaseAddress = app.Urls.First().TrimEnd('/');
+        host.Ftp = await FtpServer.StartAsync(cancellationToken).ConfigureAwait(false);
         return host;
     }
 
@@ -151,6 +153,19 @@ public sealed class TestServerHost : IAsyncDisposable
     private void MapEndpoints()
     {
         _app.MapGet("/health", () => Results.Text("ok"));
+
+        _app.MapGet("/ftp/info", () => Results.Json(new
+        {
+            port = Ftp.Port,
+            user = "ftpuser",
+        }));
+
+        _app.MapGet("/ftp/stats", () => Results.Json(new
+        {
+            slowBytesServed = Ftp.BytesServed("slow.bin"),
+            slowRetr = Ftp.RetrCount("slow.bin"),
+            rest = Ftp.RestCount,
+        }));
 
         _app.MapGet("/file/{name}", async (HttpContext context, string name) =>
         {
@@ -1111,6 +1126,11 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Ftp is not null)
+        {
+            await Ftp.DisposeAsync().ConfigureAwait(false);
+        }
+
         await _app.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         await _app.DisposeAsync().ConfigureAwait(false);
     }

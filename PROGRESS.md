@@ -662,6 +662,32 @@ random-access part file **in the destination directory**:
 - WinUI: Tasks → Grabber projects lists name/status/URL/counts with Run, Remove,
   and New project; the grabber dialog can save a reusable project.
 
+## FTP evidence (C1, 2026-11-04)
+
+- Added `FtpDownloadEngine` behind the engine interface:
+  - passive binary FTP; URL userinfo or matching DPAPI site login;
+  - SIZE for total bytes, REST/ContentOffset for resume from the
+    destination-local part file;
+  - cancellation, progress, expected-hash verification, overwrite policy;
+  - falls back to a zero restart once if a server rejects REST.
+- Added a local `FtpServer` to TestServer (USER/PASS, SIZE, PASV/EPSV, REST, RETR)
+  with `plain.bin` (65,536), `auth.bin` (131,072), and throttled `slow.bin`
+  (524,288 at 128 KiB/s), plus byte/REST counters.
+- Integration `FtpRequiresLoginAndResumesFromPartialBytes` (suite **43/43**):
+  - anonymous request failed `unauthorized`;
+  - after adding the FTP site login, `plain.bin` completed with source hash match;
+  - `slow.bin` paused at 229,376/524,288, resumed with REST, completed 524,288
+    bytes with SHA-256
+    `ba2e57b4683ec0881913a6a0637e7c78e6215e263102a45e23bb345a2cb7a681`,
+    and the server served less than 1.5× the file.
+- Published CLI:
+  - `plain.bin` SHA-256
+    `d565bfa5c214b4851b4622b9cfa6bd5d1c2eed814d88cf8d9140ae4689002c0b`;
+  - `slow.bin` paused at 229,376, resumed to 524,288 with matching hash;
+  - `/ftp/stats`: `slowRetr=2, rest=1, slowBytesServed=294912`.
+- Limitations: no FTPS, single-stream FTP, no proxy integration; FTP credentials
+  come from site logins or URL userinfo.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -670,14 +696,15 @@ random-access part file **in the destination directory**:
 - Core: **44/44 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, and download-list
   round-trip.
-- Runtime/persistence: **42/42 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **43/43 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, DRM detection, editable
   properties, duplicate policies, category destinations, the scoped site
-  grabber/offline mirror, and persistent/scheduled grabber projects.
+  grabber/offline mirror, persistent/scheduled grabber projects, and FTP
+  auth/resume.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -715,9 +742,10 @@ random-access part file **in the destination directory**:
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done
    (E17/E18/E19/E20/E21).
-6. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
-   visual/behavioral audit, final parity evidence. Continue the reference app GUI
-   inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
+6. Phase 11/12: remaining compatibility rows, clean-environment
+   install/upgrade/uninstall verification, visual/behavioral audit, final parity
+   evidence. Continue the reference app GUI inventory for U1/U2/U4 (see
+   `notes/ui-inventory.md`). FTP auth/resume is done (E42).
 7. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
    portable and development builds must be excluded.
 8. Side quest (after parity): TorBox/account-provider integration with the

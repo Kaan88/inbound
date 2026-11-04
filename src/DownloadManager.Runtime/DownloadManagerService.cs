@@ -34,6 +34,7 @@ public sealed class DownloadManagerService
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IGrabberProjectStore? _grabberProjectStore;
+    private readonly IDownloadEngine? _ftpEngine;
     private readonly object _sync = new();
     private readonly List<GrabberProject> _grabberProjects = new();
     private readonly HashSet<Guid> _runningGrabberProjects = new();
@@ -60,7 +61,8 @@ public sealed class DownloadManagerService
         ICompletionActionExecutor? completionActions = null,
         ISleepPrevention? sleepPrevention = null,
         IMediaCheckpointStore? mediaCheckpoints = null,
-        IGrabberProjectStore? grabberProjects = null)
+        IGrabberProjectStore? grabberProjects = null,
+        IDownloadEngine? ftpEngine = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -74,6 +76,7 @@ public sealed class DownloadManagerService
         _sleepPrevention = sleepPrevention ?? NullSleepPrevention.Instance;
         _mediaCheckpoints = mediaCheckpoints;
         _grabberProjectStore = grabberProjects;
+        _ftpEngine = ftpEngine;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -91,6 +94,9 @@ public sealed class DownloadManagerService
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
+        _ftpEngine?.UpdateProxy(_settings.Proxy);
+        _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
+        _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
         if (_grabberProjectStore is not null)
         {
             var projects = await _grabberProjectStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
@@ -659,6 +665,9 @@ public sealed class DownloadManagerService
         _engine.UpdateProxy(next.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(next));
         _engine.UpdateFfmpegPath(next.FfmpegPath);
+        _ftpEngine?.UpdateProxy(next.Proxy);
+        _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(next));
+        _ftpEngine?.UpdateFfmpegPath(next.FfmpegPath);
         UpdateSleepPrevention();
         SettingsChanged?.Invoke(this, next);
         Schedule();
@@ -1893,7 +1902,15 @@ public sealed class DownloadManagerService
         try
         {
             var checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
-            result = await _engine.ExecuteAsync(job, checkpoint, progress, cts.Token).ConfigureAwait(false);
+            var engine = job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase)
+                ? _ftpEngine
+                : _engine;
+            if (engine is null)
+            {
+                throw new InvalidOperationException("FTP support is not configured.");
+            }
+
+            result = await engine.ExecuteAsync(job, checkpoint, progress, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -2217,9 +2234,9 @@ public sealed class DownloadManagerService
             return false;
         }
 
-        if (parsed.Scheme is not ("http" or "https"))
+        if (parsed.Scheme is not ("http" or "https" or "ftp"))
         {
-            error = "Only http and https URLs are supported.";
+            error = "Only http, https, and ftp URLs are supported.";
             return false;
         }
 

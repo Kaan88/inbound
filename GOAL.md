@@ -78,7 +78,7 @@ SDK, or presentation types.
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
 | 9 | Media detection/downloading | in progress | Detection, in-page/quality panel, HLS/DASH assembly, A/V muxing, fragment recovery, token refresh, live exclusion, and DRM detection verified (E24–E32); additional DASH/HLS modes and AES-128 remain |
 | 10 | Download All + site grabber | done | Download All collection/filter/handoff (E31), scoped crawl and offline mirror (G2/G3, E40), and persistent/resumable/scheduled grabber projects verified (G4, E41) |
-| 11 | Remaining compatibility/integration | pending | Every inventory row implemented or explicitly scoped |
+| 11 | Remaining compatibility/integration | in progress | FTP auth/resume verified (E42); command-line, event hooks, settings transfer, installer/updater, and final UI parity remain |
 | 12 | Final visual/behavioral parity audit | pending | Reproducible parity evidence; gaps labelled |
 
 ## Major decisions

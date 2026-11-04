@@ -191,6 +191,72 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task FtpRequiresLoginAndResumesFromPartialBytes()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var ftpBase = $"ftp://127.0.0.1:{_server.Ftp.Port}";
+
+        var denied = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{ftpBase}/auth.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-denied.bin",
+            Source = "cli",
+        });
+        var deniedJob = await ctx.WaitFor(denied.Job!.Id, j => j.State == "failed",
+            TimeSpan.FromSeconds(30));
+        Assert.Equal("unauthorized", deniedJob.Failure?.Kind);
+
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.SiteLogins.Add(new SiteLoginDto
+        {
+            Site = ftpBase,
+            Username = "ftpuser",
+            Password = "ftppass",
+        });
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var plain = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{ftpBase}/plain.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-plain.bin",
+            Source = "cli",
+        });
+        var plainCompleted = await ctx.WaitFor(plain.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(30));
+        Assert.Equal(65_536, plainCompleted.ReceivedBytes);
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "plain.bin")),
+            await Hashing.Sha256FileAsync(plainCompleted.FinalFilePath));
+
+        var slow = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{ftpBase}/slow.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-slow.bin",
+            Source = "cli",
+        });
+        await ctx.WaitFor(slow.Job!.Id, j => j.ReceivedBytes > 131_072, TimeSpan.FromSeconds(30));
+        Assert.True((await ctx.Service.PauseAsync(slow.Job.Id)).Ok);
+        var paused = await ctx.WaitFor(slow.Job.Id, j => j.State == "paused");
+        Assert.True(paused.ReceivedBytes > 0);
+        Assert.True(File.Exists(paused.PartFilePath));
+        var restBefore = _server.Ftp.RestCount;
+
+        Assert.True((await ctx.Service.ResumeAsync(slow.Job.Id)).Ok);
+        var resumed = await ctx.WaitFor(slow.Job.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(60));
+        Assert.Equal(524_288, resumed.ReceivedBytes);
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
+            await Hashing.Sha256FileAsync(resumed.FinalFilePath));
+        Assert.True(_server.Ftp.RestCount > restBefore);
+        Assert.True(_server.Ftp.BytesServed("slow.bin") < 524_288 * 3 / 2);
+    }
+
+    [Fact]
     public async Task GrabberProjectPersistsAndResumesWithoutRedownload()
     {
         var ctx = await ServiceContext.CreateAsync(_server);
@@ -1981,6 +2047,7 @@ public sealed class RuntimeServiceTests
                 },
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
             var service = new DownloadManagerService(
                 paths,
                 store,
@@ -1991,7 +2058,8 @@ public sealed class RuntimeServiceTests
                 completionActions: completionActions,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
-                grabberProjects: grabberProjects);
+                grabberProjects: grabberProjects,
+                ftpEngine: ftpEngine);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;
