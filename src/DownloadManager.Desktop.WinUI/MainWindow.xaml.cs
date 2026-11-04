@@ -1436,6 +1436,235 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void MenuScheduler_Click(object sender, RoutedEventArgs e)
+        => await ShowSchedulerAsync();
+
+    private sealed record ScheduleTarget(int? QueueId, Guid? ProjectId, string Label);
+
+    private async Task ShowSchedulerAsync()
+    {
+        var snapshot = await _connection.RefreshAsync();
+        _settings = snapshot.Settings;
+        var projects = (await _connection.GetGrabberProjectsAsync())
+            .GetPayload<GrabberProjectsResult>().Projects;
+
+        var settings = CloneSettings(_settings);
+        var targets = new List<ScheduleTarget>();
+        targets.AddRange(settings.Queues
+            .OrderBy(queue => queue.Order)
+            .Select(queue => new ScheduleTarget(queue.Id, null, $"Queue: {queue.Name}")));
+        targets.AddRange(projects.Select(project =>
+            new ScheduleTarget(null, project.Id, $"Grabber: {project.Name}")));
+
+        var panel = new StackPanel { Spacing = 8 };
+        if (settings.Schedules.Count == 0)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "No schedules yet.",
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            });
+        }
+
+        var action = string.Empty;
+        Guid? actionId = null;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Scheduler",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
+            PrimaryButtonText = "Add schedule",
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        foreach (var schedule in settings.Schedules.OrderBy(schedule => schedule.StartTime))
+        {
+            var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 4, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var target = schedule.GrabberProjectId is { } projectId
+                ? projects.FirstOrDefault(project => project.Id == projectId)?.Name ?? "missing grabber"
+                : settings.Queues.FirstOrDefault(queue => queue.Id == schedule.QueueId)?.Name ?? "missing queue";
+            var info = new StackPanel { Spacing = 2 };
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{schedule.Name} — {(schedule.Enabled ? "enabled" : "disabled")}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{schedule.Kind} {schedule.StartTime}" +
+                       (schedule.StopTime is { } stop ? $"–{stop}" : string.Empty) +
+                       $" [{schedule.Days}] → {target}",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            Grid.SetColumn(info, 0);
+            row.Children.Add(info);
+
+            var toggle = new Button { Content = schedule.Enabled ? "Disable" : "Enable" };
+            toggle.Click += (_, _) =>
+            {
+                action = "toggle";
+                actionId = schedule.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(toggle, 1);
+            row.Children.Add(toggle);
+
+            var remove = new Button { Content = "Remove" };
+            remove.Click += (_, _) =>
+            {
+                action = "remove";
+                actionId = schedule.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(remove, 2);
+            row.Children.Add(remove);
+
+            panel.Children.Add(row);
+            panel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 59, 76)),
+            });
+        }
+
+        var nameBox = new TextBox { Header = "Name", PlaceholderText = "Nightly queue" };
+        var targetBox = new ComboBox { Header = "Target" };
+        foreach (var target in targets)
+        {
+            targetBox.Items.Add(target.Label);
+        }
+
+        targetBox.SelectedIndex = targets.Count > 0 ? 0 : -1;
+        var startBox = new TextBox { Header = "Start (HH:mm)", Text = "09:00" };
+        var stopBox = new TextBox { Header = "Stop (HH:mm, optional)" };
+        var daysBox = new TextBox
+        {
+            Header = "Days",
+            Text = "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+        };
+        var onceBox = new TextBox
+        {
+            Header = "One-time date (yyyy-MM-dd, optional)",
+        };
+
+        panel.Children.Add(new TextBlock { Text = "Add schedule", Margin = new Thickness(0, 8, 0, 0) });
+        panel.Children.Add(nameBox);
+        panel.Children.Add(targetBox);
+        panel.Children.Add(startBox);
+        panel.Children.Add(stopBox);
+        panel.Children.Add(daysBox);
+        panel.Children.Add(onceBox);
+
+        var dialogResult = await dialog.ShowAsync();
+        if (actionId is Guid scheduleId && (action == "toggle" || action == "remove"))
+        {
+            var updated = CloneSettings(settings);
+            var existing = updated.Schedules.FirstOrDefault(schedule => schedule.Id == scheduleId);
+            if (existing is not null)
+            {
+                if (action == "toggle")
+                {
+                    existing.Enabled = !existing.Enabled;
+                }
+                else
+                {
+                    updated.Schedules.Remove(existing);
+                }
+
+                var reply = await _connection.UpdateSettingsAsync(updated);
+                var result = reply.GetPayload<SettingsResult>();
+                if (!result.Ok)
+                {
+                    await ShowMessageAsync("Scheduler", result.Error ?? "The host rejected the change.");
+                    return;
+                }
+            }
+
+            await ShowSchedulerAsync();
+            return;
+        }
+
+        if (dialogResult != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        if (!TimeOnly.TryParse(startBox.Text.Trim(), out var start))
+        {
+            await ShowMessageAsync("Scheduler", "Start time must be HH:mm.");
+            return;
+        }
+
+        TimeOnly? stopTime = null;
+        if (!string.IsNullOrWhiteSpace(stopBox.Text))
+        {
+            if (!TimeOnly.TryParse(stopBox.Text.Trim(), out var parsedStop))
+            {
+                await ShowMessageAsync("Scheduler", "Stop time must be HH:mm.");
+                return;
+            }
+
+            stopTime = parsedStop;
+        }
+
+        DateOnly? once = null;
+        var kind = "daily";
+        if (!string.IsNullOrWhiteSpace(onceBox.Text))
+        {
+            if (!DateOnly.TryParse(onceBox.Text.Trim(), out var parsedDate))
+            {
+                await ShowMessageAsync("Scheduler", "One-time date must be yyyy-MM-dd.");
+                return;
+            }
+
+            once = parsedDate;
+            kind = "oneTime";
+        }
+
+        var selectedTarget = targetBox.SelectedIndex >= 0 && targetBox.SelectedIndex < targets.Count
+            ? targets[targetBox.SelectedIndex]
+            : null;
+        if (selectedTarget is null)
+        {
+            await ShowMessageAsync("Scheduler", "Choose a queue or grabber project.");
+            return;
+        }
+
+        var added = CloneSettings(settings);
+        added.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = string.IsNullOrWhiteSpace(nameBox.Text) ? $"Schedule {added.Schedules.Count + 1}" : nameBox.Text.Trim(),
+            QueueId = selectedTarget.QueueId ?? 0,
+            GrabberProjectId = selectedTarget.ProjectId,
+            Enabled = true,
+            Kind = kind,
+            StartDate = once,
+            Days = string.IsNullOrWhiteSpace(daysBox.Text)
+                ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
+                : daysBox.Text.Trim(),
+            StartTime = start.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            StopTime = stopTime?.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+        });
+
+        var addReply = await _connection.UpdateSettingsAsync(added);
+        var addResult = addReply.GetPayload<SettingsResult>();
+        if (!addResult.Ok)
+        {
+            await ShowMessageAsync("Scheduler", addResult.Error ?? "The host rejected the schedule.");
+            return;
+        }
+
+        await ShowSchedulerAsync();
+    }
+
     private async void MenuGrabberProjects_Click(object sender, RoutedEventArgs e)
         => await ShowGrabberProjectsAsync();
 

@@ -44,6 +44,7 @@
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Find..." Click="MenuFind_Click" />
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Scheduler..." Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options..." Click="MenuOptions_Click" />
             </MenuBarItem>
 
@@ -123,10 +124,11 @@
                             <TextBlock Text="Options" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource InboundToolButtonStyle}" IsEnabled="False"
-                            ToolTipService.ToolTip="Scheduled queues are not implemented yet">
+                    <Button x:Name="SchedulerButton" Style="{StaticResource InboundToolButtonStyle}"
+                            Click="MenuScheduler_Click"
+                            ToolTipService.ToolTip="Manage scheduled queue and grabber runs">
                         <StackPanel>
-                            <FontIcon Glyph="&#xE787;" FontSize="25" Foreground="#777777" />
+                            <FontIcon Glyph="&#xE787;" FontSize="25" Foreground="#E8B36A" />
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>

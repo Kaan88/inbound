@@ -804,6 +804,18 @@ random-access part file **in the destination directory**:
   `docs/browser-integration-scope.md`. `C3` is marked **blocked** (explicit
   scope), not implemented.
 
+## WinUI scheduler (2026-11-04)
+
+- Enabled the toolbar Scheduler button and Downloads → Scheduler.
+- The dialog lists schedules with target, kind, start/stop, days and status;
+  Enable/Disable and Remove act immediately; Add schedule supports a queue or
+  grabber-project target, daily/one-time dates, start/stop, and days.
+- Verified with UI Automation: added `UI Scheduler` daily 10:30 on the Main
+  queue, the reopened dialog showed `UI Scheduler - enabled` / `daily 10:30
+  [...] Main`, and `dm schedule list` showed the same schedule.
+- Settings clone deep-copy (fixed in C6) keeps queues/schedules when saving
+  Options.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
