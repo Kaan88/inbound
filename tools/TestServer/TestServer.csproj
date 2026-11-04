@@ -24,6 +24,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>dash\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
+    <Content Include="assets\dash-range\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>dash-range\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
     <Content Include="assets\dash-av\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>dash-av\%(RecursiveDir)%(Filename)%(Extension)</Link>

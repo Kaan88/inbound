@@ -844,7 +844,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                                   segment.Uri.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
         return await AssembleMediaSegmentsAsync(
             job,
-            media.InitUri,
+            media.InitUri is null ? null : new MediaSegment(media.InitUri, null, null),
             media.Segments,
             isFragmentedMp4 ? ".mp4" : ".ts",
             isFragmentedMp4 ? "video/mp4" : "video/mp2t",
@@ -1057,7 +1057,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                video.InitUri,
+                video.InitUri is null ? null : new MediaSegment(video.InitUri, null, null),
                 video.Segments,
                 videoSignature,
                 videoPath,
@@ -1068,7 +1068,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 cancellationToken).ConfigureAwait(false);
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                audio.InitUri,
+                audio.InitUri is null ? null : new MediaSegment(audio.InitUri, null, null),
                 audio.Segments,
                 audioSignature,
                 audioPath,
@@ -1140,7 +1140,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     private async Task<DownloadResult> AssembleMediaSegmentsAsync(
         DownloadJob job,
-        Uri? initUri,
+        MediaSegment? initSegment,
         IReadOnlyList<MediaSegment> segments,
         string extension,
         string mimeType,
@@ -1207,10 +1207,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     part.Position = received;
                 }
 
-                if (initUri is not null && completedSegments == 0)
+                if (initSegment is not null && completedSegments == 0)
                 {
                     received += await DownloadHlsSegmentAsync(
-                        job, new MediaSegment(initUri, null, null), part, received, progress,
+                        job, initSegment, part, received, progress,
                         stopwatch, progressState, phase, cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -1292,7 +1292,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             try
             {
                 var segmentUri = segment.Uri;
-                using var request = BuildRequest(job, segmentUri, 0, SameAuthority(job.Url, segmentUri));
+                var rangeStart = segment.RangeStart ?? 0;
+                var rangeEnd = segment.RangeEnd;
+                var expectedRangeLength = rangeEnd is null
+                    ? (long?)null
+                    : rangeEnd.Value - rangeStart + 1;
+                using var request = BuildRequest(
+                    job, segmentUri, rangeStart, SameAuthority(job.Url, segmentUri), rangeEnd,
+                    includeValidators: false);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_options.ReadTimeout);
                 using var response = await CurrentClient()
@@ -1322,6 +1329,26 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 var segmentBytes = 0L;
                 await using var segmentStream = await response.Content.ReadAsStreamAsync(timeout.Token)
                     .ConfigureAwait(false);
+                if (status == 200 && rangeStart > 0)
+                {
+                    var remaining = rangeStart;
+                    while (remaining > 0)
+                    {
+                        var read = await segmentStream.ReadAsync(
+                            buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), timeout.Token)
+                            .ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            throw new DownloadEngineException(new JobFailure(
+                                FailureKind.InvalidContent,
+                                "The media server ignored the byte range and ended early.",
+                                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                        }
+
+                        remaining -= read;
+                    }
+                }
+
                 if (segment.Key is null)
                 {
                     while (true)
@@ -1330,6 +1357,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         if (read == 0)
                         {
                             break;
+                        }
+
+                        if (expectedRangeLength is { } wanted)
+                        {
+                            var allowed = (int)Math.Min(read, wanted - segmentBytes);
+                            if (allowed <= 0)
+                            {
+                                break;
+                            }
+
+                            read = allowed;
                         }
 
                         await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
@@ -1357,6 +1395,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             break;
                         }
 
+                        if (expectedRangeLength is { } wanted)
+                        {
+                            var allowed = (int)Math.Min(read, wanted - encrypted.Length);
+                            if (allowed <= 0)
+                            {
+                                break;
+                            }
+
+                            read = allowed;
+                        }
+
                         encrypted.Write(buffer, 0, read);
                     }
 
@@ -1368,6 +1417,16 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     var bytes = alreadyReceived + segmentBytes;
                     var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
                     progress?.Report(new TransferProgress(bytes, null, speed, null, 1, phase));
+                }
+
+                if (segment.Key is null &&
+                    expectedRangeLength is { } wantedTotal &&
+                    segmentBytes != wantedTotal)
+                {
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"The media byte range returned {segmentBytes} of {wantedTotal} bytes.",
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
                 }
 
                 return segmentBytes;
@@ -1640,12 +1699,15 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         false, false, DateTimeOffset.UtcNow));
                 }
 
-                videoTrack = BuildDashTrack(root, period, videoAdaptation, representation, ns,
-                    manifest.FinalUri, out var videoError);
+                var videoResult = await BuildDashTrackAsync(
+                    job, root, period, videoAdaptation, representation, ns, manifest.FinalUri,
+                    cancellationToken).ConfigureAwait(false);
+                videoTrack = videoResult.Track;
                 if (videoTrack is null)
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent, videoError ?? "The DASH video track is invalid.",
+                        FailureKind.InvalidContent,
+                        videoResult.Error ?? "The DASH video track is invalid.",
                         false, false, DateTimeOffset.UtcNow));
                 }
             }
@@ -1655,12 +1717,15 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 var representation = SelectDashRepresentation(audioAdaptation, ns);
                 if (representation is not null)
                 {
-                    audioTrack = BuildDashTrack(root, period, audioAdaptation, representation, ns,
-                        manifest.FinalUri, out var audioError);
+                    var audioResult = await BuildDashTrackAsync(
+                        job, root, period, audioAdaptation, representation, ns, manifest.FinalUri,
+                        cancellationToken).ConfigureAwait(false);
+                    audioTrack = audioResult.Track;
                     if (audioTrack is null && videoTrack is null)
                     {
                         return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                            FailureKind.InvalidContent, audioError ?? "The DASH audio track is invalid.",
+                            FailureKind.InvalidContent,
+                            audioResult.Error ?? "The DASH audio track is invalid.",
                             false, false, DateTimeOffset.UtcNow));
                     }
                 }
@@ -1676,8 +1741,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             var singleTrackName = videoTrack is not null ? "dash-video" : "dash-audio";
             return await AssembleMediaSegmentsAsync(
                 job,
-                singleTrack.InitUri,
-                singleTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                singleTrack.Init,
+                singleTrack.Segments,
                 ".mp4",
                 videoTrack is not null ? "video/mp4" : "audio/mp4",
                 "Downloading DASH",
@@ -1711,55 +1776,140 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             .OrderByDescending(r => ParseLong((string?)r.Attribute("bandwidth")))
             .FirstOrDefault();
 
-    private static DashTrack? BuildDashTrack(
+    private async Task<(DashTrack? Track, string? Error)> BuildDashTrackAsync(
+        DownloadJob job,
         XElement root,
         XElement period,
         XElement adaptation,
         XElement representation,
         XNamespace ns,
         Uri manifestUri,
-        out string? error)
+        CancellationToken cancellationToken)
     {
-        error = null;
         var baseUri = ResolveDashBase(manifestUri, root, ns);
         baseUri = ResolveDashBase(baseUri, period, ns);
         baseUri = ResolveDashBase(baseUri, adaptation, ns);
         baseUri = ResolveDashBase(baseUri, representation, ns);
+
+        var segmentBase = representation.Elements(ns + "SegmentBase").FirstOrDefault()
+                          ?? adaptation.Elements(ns + "SegmentBase").FirstOrDefault()
+                          ?? period.Elements(ns + "SegmentBase").FirstOrDefault();
+        if (segmentBase is not null)
+        {
+            var baseUrlElement = representation.Element(ns + "BaseURL")
+                                 ?? adaptation.Element(ns + "BaseURL")
+                                 ?? period.Element(ns + "BaseURL")
+                                 ?? root.Element(ns + "BaseURL");
+            if (baseUrlElement is null)
+            {
+                return (null, "This DASH SegmentBase has no BaseURL.");
+            }
+
+            var initElement = segmentBase.Element(ns + "Initialization");
+            MediaSegment? baseInit = null;
+            if (initElement is not null)
+            {
+                var initSource = (string?)initElement.Attribute("sourceURL");
+                var initUri = string.IsNullOrWhiteSpace(initSource)
+                    ? baseUri
+                    : ResolveDashUri(baseUri, initSource);
+                if (initUri is null)
+                {
+                    return (null, "The DASH SegmentBase initialization URL is invalid.");
+                }
+
+                var initRange = ParseDashRange((string?)initElement.Attribute("range"));
+                baseInit = new MediaSegment(initUri, null, null, initRange?.Start, initRange?.End);
+            }
+
+            var indexText = (string?)segmentBase.Attribute("indexRange");
+            if (string.IsNullOrWhiteSpace(indexText))
+            {
+                var whole = new List<MediaSegment> { new(baseUri, null, null) };
+                return (new DashTrack(baseInit, whole,
+                    ComputeMediaSignature("dash", baseInit, whole)), null);
+            }
+
+            var indexRange = ParseDashRange(indexText);
+            if (indexRange is null)
+            {
+                return (null, "The DASH SegmentBase indexRange is invalid.");
+            }
+
+            byte[] indexBytes;
+            try
+            {
+                indexBytes = await DownloadDashRangeAsync(
+                    job,
+                    new MediaSegment(baseUri, null, null, indexRange.Value.Start, indexRange.Value.End),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (DownloadEngineException ex)
+            {
+                return (null, ex.Failure.Message);
+            }
+
+            if (!TryParseSidx(indexBytes, indexRange.Value.End, out var ranges, out var sidxError))
+            {
+                return (null, sidxError);
+            }
+
+            var rangedSegments = ranges
+                .Select(range => new MediaSegment(baseUri, null, null, range.Start, range.End))
+                .ToList();
+            return (new DashTrack(baseInit, rangedSegments,
+                ComputeMediaSignature("dash", baseInit, rangedSegments)), null);
+        }
 
         var segmentList = representation.Elements(ns + "SegmentList").FirstOrDefault()
                           ?? adaptation.Elements(ns + "SegmentList").FirstOrDefault()
                           ?? period.Elements(ns + "SegmentList").FirstOrDefault();
         if (segmentList is not null)
         {
-            var initialization = segmentList.Element(ns + "Initialization");
-            var initUrl = (string?)initialization?.Attribute("sourceURL") ??
-                          (string?)segmentList.Attribute("initialization");
-            var listInitUri = ResolveDashUri(baseUri, initUrl ?? string.Empty);
-            var segmentUrls = segmentList.Elements(ns + "SegmentURL").ToList();
-            if (segmentUrls.Any(segment => segment.Attribute("mediaRange") is not null))
+            var initElement = segmentList.Element(ns + "Initialization");
+            MediaSegment? listInit = null;
+            if (initElement is not null)
             {
-                error = "DASH SegmentList mediaRange is not supported yet.";
-                return null;
+                var initSource = (string?)initElement.Attribute("sourceURL") ??
+                                 (string?)segmentList.Attribute("initialization");
+                var initUri = string.IsNullOrWhiteSpace(initSource)
+                    ? baseUri
+                    : ResolveDashUri(baseUri, initSource);
+                if (initUri is null)
+                {
+                    return (null, "The DASH SegmentList initialization URL is invalid.");
+                }
+
+                var initRange = ParseDashRange((string?)initElement.Attribute("range"));
+                listInit = new MediaSegment(initUri, null, null, initRange?.Start, initRange?.End);
             }
 
-            var listed = new List<Uri>();
-            foreach (var segment in segmentUrls)
+            var listed = new List<MediaSegment>();
+            foreach (var segment in segmentList.Elements(ns + "SegmentURL"))
             {
-                var uri = ResolveDashUri(baseUri, (string?)segment.Attribute("media") ?? string.Empty);
-                if (uri is not null)
+                var media = (string?)segment.Attribute("media");
+                if (string.IsNullOrWhiteSpace(media))
                 {
-                    listed.Add(uri);
+                    continue;
                 }
+
+                var uri = ResolveDashUri(baseUri, media);
+                if (uri is null)
+                {
+                    continue;
+                }
+
+                var range = ParseDashRange((string?)segment.Attribute("mediaRange"));
+                listed.Add(new MediaSegment(uri, null, null, range?.Start, range?.End));
             }
 
             if (listed.Count == 0)
             {
-                error = "The DASH SegmentList has no media segments.";
-                return null;
+                return (null, "The DASH SegmentList has no media segments.");
             }
 
-            return new DashTrack(
-                listInitUri, listed, ComputeMediaSignature("dash", listInitUri, listed));
+            return (new DashTrack(listInit, listed,
+                ComputeMediaSignature("dash", listInit, listed)), null);
         }
 
         var template = representation.Elements(ns + "SegmentTemplate").FirstOrDefault()
@@ -1767,15 +1917,13 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                        ?? period.Elements(ns + "SegmentTemplate").FirstOrDefault();
         if (template is null)
         {
-            error = "This DASH manifest uses SegmentBase or an unsupported indexing mode.";
-            return null;
+            return (null, "This DASH manifest uses an unsupported indexing mode.");
         }
 
         var mediaTemplate = (string?)template.Attribute("media");
         if (string.IsNullOrWhiteSpace(mediaTemplate))
         {
-            error = "The DASH SegmentTemplate has no media template.";
-            return null;
+            return (null, "The DASH SegmentTemplate has no media template.");
         }
 
         var representationId = (string?)representation.Attribute("id") ?? "0";
@@ -1784,14 +1932,18 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         var duration = ParseLong((string?)template.Attribute("duration"));
         var startNumber = ParseLong((string?)template.Attribute("startNumber"), 1);
         var initTemplate = (string?)template.Attribute("initialization");
-        Uri? initUri = null;
+        MediaSegment? init = null;
         if (!string.IsNullOrWhiteSpace(initTemplate))
         {
-            initUri = ResolveDashUri(baseUri, ExpandDashTemplate(
+            var initUri = ResolveDashUri(baseUri, ExpandDashTemplate(
                 initTemplate, representationId, bandwidth, null, null));
+            if (initUri is not null)
+            {
+                init = new MediaSegment(initUri, null, null);
+            }
         }
 
-        var segments = new List<Uri>();
+        var segments = new List<MediaSegment>();
         var timeline = template.Element(ns + "SegmentTimeline");
         if (timeline is not null)
         {
@@ -1813,7 +1965,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         mediaTemplate, representationId, bandwidth, number, time));
                     if (uri is not null)
                     {
-                        segments.Add(uri);
+                        segments.Add(new MediaSegment(uri, null, null));
                     }
 
                     time += step;
@@ -1825,8 +1977,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             if (duration <= 0)
             {
-                error = "The DASH SegmentTemplate has no duration or SegmentTimeline.";
-                return null;
+                return (null, "The DASH SegmentTemplate has no duration or SegmentTimeline.");
             }
 
             TimeSpan totalDuration;
@@ -1837,8 +1988,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
             catch (FormatException)
             {
-                error = "The DASH manifest has no valid mediaPresentationDuration.";
-                return null;
+                return (null, "The DASH manifest has no valid mediaPresentationDuration.");
             }
 
             var segmentSeconds = duration / (double)timescale;
@@ -1851,19 +2001,232 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     mediaTemplate, representationId, bandwidth, number, time));
                 if (uri is not null)
                 {
-                    segments.Add(uri);
+                    segments.Add(new MediaSegment(uri, null, null));
                 }
             }
         }
 
         if (segments.Count == 0)
         {
-            error = "The DASH manifest produced no segments.";
+            return (null, "The DASH manifest produced no segments.");
+        }
+
+        return (new DashTrack(init, segments,
+            ComputeMediaSignature("dash", init, segments)), null);
+    }
+
+    private async Task<byte[]> DownloadDashRangeAsync(
+        DownloadJob job,
+        MediaSegment segment,
+        CancellationToken cancellationToken)
+    {
+        var start = segment.RangeStart ?? 0;
+        var end = segment.RangeEnd;
+        var expectedLength = end is null ? (long?)null : end.Value - start + 1;
+        using var request = BuildRequest(
+            job, segment.Uri, start, SameAuthority(job.Url, segment.Uri), end,
+            includeValidators: false);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_options.ReadTimeout);
+        using var response = await CurrentClient()
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+            .ConfigureAwait(false);
+        var status = (int)response.StatusCode;
+        if (status is 401 or 403 or 404 or 407 or 410)
+        {
+            throw new DownloadEngineException(
+                ClassifyHttpFailure(status, response), isRetryable: false);
+        }
+
+        if (status is not (200 or 206))
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.Http, $"DASH byte range returned HTTP {status}.",
+                status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token)
+            .ConfigureAwait(false);
+        var buffer = new byte[81_920];
+        if (status == 200 && start > 0)
+        {
+            var remaining = start;
+            while (remaining > 0)
+            {
+                var read = await stream.ReadAsync(
+                    buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), timeout.Token)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.InvalidContent,
+                        "The DASH server ignored the byte range and ended early.",
+                        false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                }
+
+                remaining -= read;
+            }
+        }
+
+        using var memory = new MemoryStream();
+        long total = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (expectedLength is { } wanted)
+            {
+                var allowed = (int)Math.Min(read, wanted - total);
+                if (allowed <= 0)
+                {
+                    break;
+                }
+
+                memory.Write(buffer, 0, allowed);
+                total += allowed;
+                if (total >= wanted)
+                {
+                    break;
+                }
+            }
+            else
+            {
+                memory.Write(buffer, 0, read);
+                total += read;
+            }
+        }
+
+        if (expectedLength is { } length && total != length)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.InvalidContent,
+                $"The DASH byte range returned {total} of {length} expected bytes.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
+
+        return memory.ToArray();
+    }
+
+    private static (long Start, long End)? ParseDashRange(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
             return null;
         }
 
-        return new DashTrack(initUri, segments, ComputeMediaSignature("dash", initUri, segments));
+        var separator = text.IndexOf('-');
+        if (separator <= 0 ||
+            !long.TryParse(text[..separator].Trim(), out var start) ||
+            !long.TryParse(text[(separator + 1)..].Trim(), out var end) ||
+            start < 0 || end < start)
+        {
+            return null;
+        }
+
+        return (start, end);
     }
+
+    private static bool TryParseSidx(
+        byte[] data,
+        long indexEnd,
+        out List<(long Start, long End)> ranges,
+        out string? error)
+    {
+        ranges = new List<(long Start, long End)>();
+        error = null;
+        if (data.Length < 12 ||
+            !string.Equals(
+                System.Text.Encoding.ASCII.GetString(data, 4, 4),
+                "sidx",
+                StringComparison.Ordinal))
+        {
+            error = "The DASH SegmentBase index range does not contain a SIDX box.";
+            return false;
+        }
+
+        var headerSize = ReadUInt32BE(data, 0) == 1 ? 16 : 8;
+        if (data.Length < headerSize + 4)
+        {
+            error = "The DASH SIDX box is truncated.";
+            return false;
+        }
+
+        var position = headerSize;
+        var version = data[position];
+        position += 4;
+        position += 4; // reference_ID
+        position += 4; // timescale
+        ulong firstOffset;
+        if (version == 0)
+        {
+            position += 4; // earliest_presentation_time
+            firstOffset = ReadUInt32BE(data, position);
+            position += 4;
+        }
+        else
+        {
+            position += 8; // earliest_presentation_time (64-bit)
+            firstOffset = ReadUInt64BE(data, position);
+            position += 8;
+        }
+
+        position += 2; // reserved
+        if (position + 2 > data.Length)
+        {
+            error = "The DASH SIDX box is truncated.";
+            return false;
+        }
+
+        var count = (data[position] << 8) | data[position + 1];
+        position += 2;
+        long next = indexEnd + 1 + (long)firstOffset;
+        for (var i = 0; i < count; i++)
+        {
+            if (position + 12 > data.Length)
+            {
+                error = "The DASH SIDX reference table is truncated.";
+                return false;
+            }
+
+            var sizeWord = ReadUInt32BE(data, position);
+            var isIndex = (sizeWord & 0x80000000) != 0;
+            var size = sizeWord & 0x7FFFFFFF;
+            position += 12;
+            if (isIndex)
+            {
+                error = "Hierarchical DASH SIDX references are not supported yet.";
+                return false;
+            }
+
+            if (size <= 0)
+            {
+                error = "The DASH SIDX contains an empty reference.";
+                return false;
+            }
+
+            ranges.Add((next, next + size - 1));
+            next += size;
+        }
+
+        if (ranges.Count == 0)
+        {
+            error = "The DASH SIDX contains no media references.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static uint ReadUInt32BE(byte[] data, int offset)
+        => (uint)((data[offset] << 24) | (data[offset + 1] << 16) |
+                  (data[offset + 2] << 8) | data[offset + 3]);
+
+    private static ulong ReadUInt64BE(byte[] data, int offset)
+        => ((ulong)ReadUInt32BE(data, offset) << 32) | ReadUInt32BE(data, offset + 4);
 
     private async Task<DownloadResult> DownloadAndMuxDashTracksAsync(
         DownloadJob job,
@@ -1892,8 +2255,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                videoTrack.InitUri,
-                videoTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                videoTrack.Init,
+                videoTrack.Segments,
                 videoTrack.Signature,
                 videoPath,
                 received,
@@ -1903,8 +2266,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 cancellationToken).ConfigureAwait(false);
             received += await DownloadMediaTrackToFileAsync(
                 job,
-                audioTrack.InitUri,
-                audioTrack.Segments.Select(uri => new MediaSegment(uri, null, null)).ToList(),
+                audioTrack.Init,
+                audioTrack.Segments,
                 audioTrack.Signature,
                 audioPath,
                 received,
@@ -1975,7 +2338,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     private async Task<long> DownloadMediaTrackToFileAsync(
         DownloadJob job,
-        Uri? initUri,
+        MediaSegment? initSegment,
         IReadOnlyList<MediaSegment> segments,
         string signature,
         string path,
@@ -2019,10 +2382,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 file.Position = received;
             }
 
-            if (initUri is not null && completedSegments == 0)
+            if (initSegment is not null && completedSegments == 0)
             {
                 received += await DownloadHlsSegmentAsync(
-                    job, new MediaSegment(initUri, null, null), file, receivedBase + received,
+                    job, initSegment, file, receivedBase + received,
                     progress, stopwatch, state, phase, cancellationToken).ConfigureAwait(false);
             }
 
@@ -2104,6 +2467,45 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
+    private static string ComputeMediaSignature(
+        string track,
+        MediaSegment? init,
+        IReadOnlyList<MediaSegment> segments)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendSignature(hash, track);
+        if (init is not null)
+        {
+            AppendMediaSegmentSignature(hash, init);
+        }
+
+        foreach (var segment in segments)
+        {
+            AppendMediaSegmentSignature(hash, segment);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void AppendMediaSegmentSignature(IncrementalHash hash, MediaSegment segment)
+    {
+        AppendSignature(hash, segment.Uri.GetLeftPart(UriPartial.Path));
+        if (segment.Key is not null)
+        {
+            AppendSignature(hash, Convert.ToHexString(segment.Key));
+        }
+
+        if (segment.Iv is not null)
+        {
+            AppendSignature(hash, Convert.ToHexString(segment.Iv));
+        }
+
+        if (segment.RangeStart is { } start && segment.RangeEnd is { } end)
+        {
+            AppendSignature(hash, $"{start}-{end}");
+        }
+    }
+
     private static void AppendSignature(IncrementalHash hash, string value)
     {
         var bytes = Encoding.UTF8.GetBytes(value);
@@ -2111,11 +2513,19 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         hash.AppendData([0]);
     }
 
-    private sealed record DashTrack(Uri? InitUri, List<Uri> Segments, string Signature);
+    private sealed record DashTrack(
+        MediaSegment? Init,
+        List<MediaSegment> Segments,
+        string Signature);
 
     private sealed record ParsedHlsSegment(Uri Uri, Uri? KeyUri, byte[] Iv);
 
-    private sealed record MediaSegment(Uri Uri, byte[]? Key, byte[]? Iv);
+    private sealed record MediaSegment(
+        Uri Uri,
+        byte[]? Key,
+        byte[]? Iv,
+        long? RangeStart = null,
+        long? RangeEnd = null);
 
     private sealed record HlsMasterSelection(Uri Variant, Uri? Audio);
 
@@ -2257,7 +2667,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         Uri uri,
         long offset,
         bool sameOrigin,
-        long? rangeEnd = null)
+        long? rangeEnd = null,
+        bool includeValidators = true)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.AcceptEncoding.Clear();
@@ -2306,13 +2717,17 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         if (offset > 0 || rangeEnd is not null)
         {
             request.Headers.Range = new RangeHeaderValue(offset, rangeEnd);
-            if (!string.IsNullOrWhiteSpace(job.ETag) && !job.ETag.StartsWith("W/", StringComparison.Ordinal))
+            if (includeValidators)
             {
-                request.Headers.IfRange = new RangeConditionHeaderValue(job.ETag);
-            }
-            else if (DateTimeOffset.TryParse(job.LastModified, out var lastModified))
-            {
-                request.Headers.IfRange = new RangeConditionHeaderValue(lastModified);
+                if (!string.IsNullOrWhiteSpace(job.ETag) &&
+                    !job.ETag.StartsWith("W/", StringComparison.Ordinal))
+                {
+                    request.Headers.IfRange = new RangeConditionHeaderValue(job.ETag);
+                }
+                else if (DateTimeOffset.TryParse(job.LastModified, out var lastModified))
+                {
+                    request.Headers.IfRange = new RangeConditionHeaderValue(lastModified);
+                }
             }
         }
 

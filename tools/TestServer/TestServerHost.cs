@@ -20,6 +20,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _dashRangeRequests = new(StringComparer.Ordinal);
     private byte[]? _updateManifest;
     private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
@@ -77,10 +78,13 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public int DashSegmentRequests(string name) => _dashSegmentRequests.GetValueOrDefault(name);
 
+    public int DashRangeRequests(string name) => _dashRangeRequests.GetValueOrDefault(name);
+
     public void ResetHlsStats()
     {
         _hlsSegmentRequests.Clear();
         _dashSegmentRequests.Clear();
+        _dashRangeRequests.Clear();
     }
 
     public void SetUpdatePayload(byte[] manifest, byte[] package)
@@ -691,6 +695,31 @@ public sealed class TestServerHost : IAsyncDisposable
                 _dashRotateAfterSegment = false;
                 _dashRotatingToken++;
             }
+        });
+
+        _app.MapGet("/dash-range/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "dash-range", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(context.Request.Headers.Range))
+            {
+                _dashRangeRequests.AddOrUpdate(file, 1, (_, existing) => existing + 1);
+            }
+
+            await ServeAsync(context, bytes, file, allowRanges: true,
+                throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
         });
 
         _app.MapGet("/dash/{file}", async (HttpContext context, string file) =>

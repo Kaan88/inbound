@@ -2110,6 +2110,38 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DashSegmentBaseAndSegmentListRangesMatchExpectedOutput()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/dash/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
+
+        foreach (var manifest in new[] { "segmentbase.mpd", "segmentlist-range.mpd" })
+        {
+            _server.ResetHlsStats();
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/dash-range/{manifest}",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"dash-{Path.GetFileNameWithoutExtension(manifest)}.mpd",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+                TimeSpan.FromSeconds(30));
+            Assert.Null(completed.Failure);
+            Assert.Equal(expectedBytes, completed.ReceivedBytes);
+            Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
+            Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+            Assert.True(_server.DashRangeRequests("single.mp4") >= 4,
+                $"{manifest} used {_server.DashRangeRequests("single.mp4")} range requests.");
+        }
+    }
+
+    [Fact]
     public async Task HlsResumesAtCompletedSegmentAfterInterruption()
     {
         _server.ResetHlsStats();

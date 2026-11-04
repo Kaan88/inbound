@@ -902,6 +902,28 @@ random-access part file **in the destination directory**:
   `hist-two.bin` and `hist-one.bin`.
 - Phase 6 is complete; M8's previous "no recent history" limitation is closed.
 
+## DASH SegmentBase/SegmentList range evidence (V4, 2026-11-04)
+
+- Media segments now carry inclusive byte ranges. Range requests are issued with
+  `Range`, don't send `If-Range` for sub-resources, accept `206`, and handle a
+  server that ignores `Range` with a `200` skip/limit fallback.
+- `SegmentBase` requires a `BaseURL`; it reads `Initialization@range` and parses
+  the SIDX in `indexRange` (versions 0/1, `first_offset`, 31-bit media
+  references). Hierarchical SIDX returns a clear error.
+- `SegmentList` now accepts `Initialization@range` and
+  `SegmentURL@mediaRange`; the previous `mediaRange` rejection is removed.
+- TestServer `/dash-range/single.mp4` is 498,434 bytes: an 806-byte init,
+  68-byte SIDX, and three media chunks. `/dash-range/segmentbase.mpd` points at
+  the SIDX and `/dash-range/segmentlist-range.mpd` lists the media ranges.
+- Integration `DashSegmentBaseAndSegmentListRangesMatchExpectedOutput`:
+  - both completed at 498,366 bytes with the reference SHA-256;
+  - at least 4 ranged requests were observed per manifest;
+  - integration suite **54/54**.
+- Published CLI reproduced both at 498,366 bytes with SHA-256
+  `3a17840b06a53432f9fa9a09188b7d68e3de720201bb88b3648277c2227cfba1`.
+- Phase 9 is complete; dynamic/live, multi-period, hierarchical SIDX, and DRM
+  decryption remain excluded.
+
 ## DASH SegmentTimeline/SegmentList evidence (V4, 2026-11-04)
 
 - `SegmentTimeline` now advances `startNumber` for each expanded segment, so
@@ -1010,13 +1032,13 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **53/53 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **54/54 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, HLS AES-128 key rotation, HLS alternate-audio muxing, DASH
-  SegmentTemplate/Timeline/SegmentList assembly, DASH A/V muxing, HLS/DASH
-  fragment recovery, rotating-token refresh, live-stream exclusion, DRM
+  SegmentTemplate/Timeline/SegmentList/SegmentBase byte ranges, DASH A/V muxing,
+  HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
   recent-URL history, the scoped site grabber/offline mirror,
   persistent/scheduled grabber projects, FTP auth/resume, post-download hook

@@ -28,13 +28,11 @@
 - Phase 8: complete (named queues, caps, start/stop, reassignment, schedules,
   quotas, completion actions, Download Later, sleep prevention, and DST tests
   verified).
-- Phase 9: in progress (direct media detection, popup resource list, unencrypted
-  HLS master/media assembly, static DASH SegmentTemplate assembly, DASH
-  audio/video muxing via FFmpeg, HLS/DASH fragment recovery, expiring
-  segment-token refresh, explicit live-stream exclusion, DRM detection, HLS
-  AES-128 (single and rotating keys), HLS alternate-audio muxing, DASH
-  SegmentTimeline/SegmentList, in-page media panel, and HLS quality selection
-  verified; SegmentBase/byte-range DASH remains).
+- Phase 9: complete (direct media detection, popup/in-page resource list, HLS
+  and DASH assembly including SegmentTemplate/Timeline/SegmentList/SegmentBase
+  byte ranges, DASH and HLS alternate-audio muxing via FFmpeg, fragment
+  recovery, expiring-token refresh, explicit live exclusion, DRM detection, HLS
+  AES-128 key rotation, and quality selection verified).
 - Phase 6: complete (clipboard URL monitoring, completion notification/sound,
   batch URLs, search/sort/context actions, editable descriptions, duplicate
   policies, category destinations, remembered last folder and recent URLs, JSON
@@ -189,7 +187,7 @@ overnight DST stops are verified (E23). CLI management exists as
 `dm schedule list|add|remove|enable|disable` and
 `dm queue quota <id> <MB> <hours>|off`.
 
-## Phase 9 — Media detection and downloading (in progress)
+## Phase 9 - Media detection and downloading (done)
 
 Direct media detection is implemented: a content script scans video/audio/source
 elements and HLS/DASH links, the extension popup lists distinct resources, and
@@ -206,8 +204,10 @@ a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
 shadow-DOM media panel and HLS quality-variant selection are verified (V2 done;
 E32). HLS AES-128 with single and rotating keys is verified (V10 done; E55).
 HLS alternate audio groups are selected and muxed with video (V11 done; E57).
-DASH SegmentTimeline and full-URL SegmentList are verified (E58). Remaining:
-SegmentBase and SegmentList mediaRange/byte ranges.
+DASH SegmentTimeline and full-URL SegmentList are verified (E58), and
+SegmentBase/SIDX plus SegmentList `mediaRange` byte ranges are verified (E59).
+Dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain
+excluded; all advertised media rows are implemented.
 
 ## Phase 10 - Download All and site grabber (done)
 
