@@ -34,11 +34,11 @@
   segment-token refresh, explicit live-stream exclusion, DRM detection, HLS
   AES-128 (single and rotating keys), in-page media panel, and HLS quality
   selection verified; additional DASH modes and HLS alternate audio remain).
-- Phase 6: in progress (clipboard URL monitoring, completion notification/sound
-  settings, queue-aware add dialog and batch URLs, search/sort/context actions,
-  editable descriptions, duplicate filename policies, category destination
-  rules, remembered last folder, JSON list export/import, and the completion
-  dialog exist; recent-URL history remains).
+- Phase 6: complete (clipboard URL monitoring, completion notification/sound,
+  batch URLs, search/sort/context actions, editable descriptions, duplicate
+  policies, category destinations, remembered last folder and recent URLs, JSON
+  list export/import, completion dialog, state views, multiselect bulk actions,
+  delete-file choice, shell open/reveal, and progress details verified).
 - Phase 10: complete (Download All link collection/filtering/handoff, scoped
   crawl, offline link rewriting, and persistent/scheduled grabber projects
   verified).

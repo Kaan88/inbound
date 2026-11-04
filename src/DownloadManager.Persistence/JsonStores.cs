@@ -762,6 +762,16 @@ public sealed class JsonSettingsStore : ISettingsStore
 
         settings.CategoryFolders = categories;
 
+        settings.RecentUrls ??= new List<string>();
+        settings.RecentUrls = settings.RecentUrls
+            .Where(value => !string.IsNullOrWhiteSpace(value) &&
+                            Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+                            uri.Scheme is "http" or "https" or "ftp")
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+
         settings.SiteLogins ??= new List<SiteLogin>();
         settings.SiteLogins.RemoveAll(login =>
             string.IsNullOrWhiteSpace(login.Site) || string.IsNullOrWhiteSpace(login.Username));

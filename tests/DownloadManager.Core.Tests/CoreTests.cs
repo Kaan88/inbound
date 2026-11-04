@@ -181,6 +181,7 @@ public sealed class AppSettingsDefaultsTests
         Assert.True(settings.AutoResumeUnfinishedOnStartup);
         Assert.Equal("stable", settings.UpdateChannel);
         Assert.Equal(24, settings.UpdateCheckIntervalHours);
+        Assert.Empty(settings.RecentUrls);
         Assert.Empty(settings.CategoryFolders);
         Assert.Empty(settings.ConnectionProfiles);
     }

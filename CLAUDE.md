@@ -42,7 +42,8 @@ FTP auth/resume, post-download hooks, external CLI control, connection profiles,
 settings transfer, installer/native-host repair, upgrade/uninstall, installer-
 only updater (check/download/install/rollback/notifications/gating), the WinUI
 scheduler, list state views, multiselect bulk actions, delete-file choice,
-shell open/reveal, progress details, and persisted layout are implemented.
+shell open/reveal, progress details, persisted layout, and recent-URL history are
+implemented.
 Edge/Firefox integration is explicitly out of scope (C3);
 direct media detection, in-page panel with HLS quality variants, popup resources,
 HLS master/media assembly including AES-128 (single and rotating keys), static

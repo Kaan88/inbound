@@ -278,6 +278,60 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task RecentUrlsAreRecordedDeduplicatedAndPersisted()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var firstUrl = $"{_server.BaseAddress}/file/history-a.bin?size=1024&seed=550";
+            var secondUrl = $"{_server.BaseAddress}/file/history-b.bin?size=1024&seed=551";
+            foreach (var (url, name) in new[]
+                     {
+                         (firstUrl, "history-a.bin"),
+                         (secondUrl, "history-b.bin"),
+                     })
+            {
+                var response = await ctx.Service.AddJobAsync(new AddJobRequest
+                {
+                    Url = url,
+                    DestinationDirectory = ctx.Destination,
+                    FileName = name,
+                    StartMode = "later",
+                    Source = "cli",
+                });
+                Assert.True(response.Accepted, response.Error);
+            }
+
+            var refresh = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = firstUrl,
+                DestinationDirectory = ctx.Destination,
+                FileName = "history-a-again.bin",
+                StartMode = "later",
+                Source = "cli",
+            });
+            Assert.True(refresh.Accepted, refresh.Error);
+
+            var recent = ctx.Service.GetSnapshot().Settings.RecentUrls;
+            Assert.Equal(new[] { firstUrl, secondUrl }, recent);
+
+            var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+            try
+            {
+                Assert.Equal(recent, second.Service.GetSnapshot().Settings.RecentUrls);
+            }
+            finally
+            {
+                await second.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task SettingsUpdatePreservesUnreturnedSecrets()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

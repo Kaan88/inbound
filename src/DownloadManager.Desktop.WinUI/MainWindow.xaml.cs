@@ -1263,12 +1263,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var urlBox = new TextBox
+        var urlBox = new ComboBox
         {
             Header = "URL",
             PlaceholderText = "https://example.com/file.zip",
-            TextWrapping = TextWrapping.Wrap,
+            IsEditable = true,
         };
+        foreach (var recent in _settings.RecentUrls.Take(20))
+        {
+            urlBox.Items.Add(recent);
+        }
         var nameBox = new TextBox
         {
             Header = "File name (optional)",

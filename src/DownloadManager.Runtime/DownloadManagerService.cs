@@ -378,11 +378,34 @@ public sealed class DownloadManagerService
         Raise(runtime, "added");
         Schedule();
 
+        var settingsChanged = false;
         if (request.RememberDestination != false &&
             !string.IsNullOrWhiteSpace(request.DestinationDirectory) &&
             !string.Equals(_settings.LastDestinationDirectory, destination, StringComparison.OrdinalIgnoreCase))
         {
             _settings.LastDestinationDirectory = destination;
+            settingsChanged = true;
+        }
+
+        if (source is not (DownloadSource.Grabber or DownloadSource.Import))
+        {
+            lock (_sync)
+            {
+                _settings.RecentUrls ??= new List<string>();
+                _settings.RecentUrls.RemoveAll(url =>
+                    string.Equals(url, job.Url, StringComparison.OrdinalIgnoreCase));
+                _settings.RecentUrls.Insert(0, job.Url);
+                if (_settings.RecentUrls.Count > 20)
+                {
+                    _settings.RecentUrls.RemoveRange(20, _settings.RecentUrls.Count - 20);
+                }
+            }
+
+            settingsChanged = true;
+        }
+
+        if (settingsChanged)
+        {
             try
             {
                 await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
@@ -390,7 +413,7 @@ public sealed class DownloadManagerService
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _log?.Invoke($"Could not remember the last destination: {ex.Message}");
+                _log?.Invoke($"Could not remember recent settings: {ex.Message}");
             }
         }
 
@@ -695,6 +718,7 @@ public sealed class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            RecentUrls = new List<string>(settings.RecentUrls ?? new List<string>()),
             CategoryFolders = new Dictionary<string, string>(
                 settings.CategoryFolders ?? new Dictionary<string, string>(),
                 StringComparer.OrdinalIgnoreCase),
@@ -2990,6 +3014,7 @@ public sealed class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            RecentUrls = new List<string>(settings.RecentUrls ?? new List<string>()),
             CategoryFolders = new Dictionary<string, string>(
                 settings.CategoryFolders ?? new Dictionary<string, string>(),
                 StringComparer.OrdinalIgnoreCase),

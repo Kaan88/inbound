@@ -887,6 +887,21 @@ random-access part file **in the destination directory**:
 - Settings clone deep-copy (fixed in C6) keeps queues/schedules when saving
   Options.
 
+## Recent-URL history evidence (M8, 2026-11-04)
+
+- Settings gained `RecentUrls` (normalized to valid HTTP/HTTPS/FTP URLs, deduped,
+  newest first, max 20). Every accepted add except grabber/import sources moves
+  its URL to the front and persists settings.
+- WinUI's Add URL field is an editable ComboBox populated from the history;
+  CLI `settings get` prints the three newest URLs.
+- Integration `RecentUrlsAreRecordedDeduplicatedAndPersisted`:
+  - added history-a then history-b, re-added history-a;
+  - observed `[history-a, history-b]`;
+  - a fresh service loaded the same order. Integration suite **51/51**.
+- Published CLI showed both URLs newest-first; expanding the Add URL combo listed
+  `hist-two.bin` and `hist-one.bin`.
+- Phase 6 is complete; M8's previous "no recent history" limitation is closed.
+
 ## HLS AES-128 evidence (V10, 2026-11-04)
 
 - HLS parsing now supports `#EXT-X-KEY:METHOD=AES-128` with an identity key
@@ -952,17 +967,17 @@ random-access part file **in the destination directory**:
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **50/50 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **51/51 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, HLS AES-128 key rotation, DASH assembly, DASH A/V muxing,
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
-  detection, editable properties, duplicate policies, category destinations, the
-  scoped site grabber/offline mirror, persistent/scheduled grabber projects, FTP
-  auth/resume, post-download hook isolation, connection profiles, secret-
-  preserving settings updates, installer-only update check/download, and
-  segment/progress details.
+  detection, editable properties, duplicate policies, category destinations,
+  recent-URL history, the scoped site grabber/offline mirror,
+  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
+  isolation, connection profiles, secret-preserving settings updates,
+  installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

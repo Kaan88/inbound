@@ -1701,6 +1701,10 @@ internal static class Program
     {
         Console.WriteLine($"default dir:       {settings.DefaultDownloadDirectory}");
         Console.WriteLine($"last folder:       {settings.LastDestinationDirectory ?? "-"}");
+        foreach (var recent in settings.RecentUrls.Take(3))
+        {
+            Console.WriteLine($"  recent           {recent}");
+        }
         Console.WriteLine($"max concurrent:    {settings.MaxConcurrentDownloads}");
         Console.WriteLine($"default conns:     {settings.DefaultConnections}");
         foreach (var profile in settings.ConnectionProfiles)

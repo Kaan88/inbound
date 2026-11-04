@@ -148,6 +148,7 @@ public sealed class SettingsDto
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
+    public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> ExcludedFileExtensions { get; set; } = new();
     public List<string> ExcludedHosts { get; set; } = new();
