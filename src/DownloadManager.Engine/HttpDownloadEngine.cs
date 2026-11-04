@@ -34,7 +34,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 ConnectTimeout = _options.ConnectTimeout,
                 PooledConnectionLifetime = TimeSpan.FromMinutes(10),
                 MaxConnectionsPerServer = 64,
+                Proxy = new ConfigurableProxy(_options.Proxy),
+                UseProxy = true,
+                UseCookies = false,
             };
+
             _client = new HttpClient(sockets, disposeHandler: true);
             _ownsClient = true;
         }
@@ -45,6 +49,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         _client.Timeout = Timeout.InfiniteTimeSpan;
         _client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
+    }
+
+    public void UpdateProxy(ProxySettings settings)
+    {
+        _options.Proxy.Mode = settings.Mode;
+        _options.Proxy.Address = settings.Address;
+        _options.Proxy.Username = settings.Username;
+        _options.Proxy.Password = settings.Password;
     }
 
     public async Task<DownloadResult> ExecuteAsync(
@@ -201,12 +213,16 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         using var response = await SendWithRedirectsAsync(job, state.Bytes, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
 
-        if (status is 401 or 403 or 404)
+        if (status is 401 or 403 or 404 or 407)
         {
             throw new DownloadEngineException(
                 new JobFailure(
-                    status == 401 ? FailureKind.Unauthorized : status == 403 ? FailureKind.Forbidden : FailureKind.NotFound,
-                    $"The server returned HTTP {status}.",
+                    status is 401 or 407 ? FailureKind.Unauthorized
+                        : status == 403 ? FailureKind.Forbidden
+                        : FailureKind.NotFound,
+                    status == 407
+                        ? "Proxy authentication failed (HTTP 407)."
+                        : $"The server returned HTTP {status}.",
                     false,
                     false,
                     DateTimeOffset.UtcNow),
@@ -809,12 +825,16 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         throw new SegmentationUnsupportedException();
                     }
 
-                    if (status is 401 or 403 or 404)
+                    if (status is 401 or 403 or 404 or 407)
                     {
                         throw new SegmentFailureException(
                             new JobFailure(
-                                status == 401 ? FailureKind.Unauthorized : status == 403 ? FailureKind.Forbidden : FailureKind.NotFound,
-                                $"The server returned HTTP {status} for a segment.",
+                                status is 401 or 407 ? FailureKind.Unauthorized
+                                    : status == 403 ? FailureKind.Forbidden
+                                    : FailureKind.NotFound,
+                                status == 407
+                                    ? "Proxy authentication failed for a segment (HTTP 407)."
+                                    : $"The server returned HTTP {status} for a segment.",
                                 false,
                                 false,
                                 DateTimeOffset.UtcNow),
@@ -1638,4 +1658,42 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         public JobFailure Failure { get; }
         public bool IsRetryable { get; }
     }
+}
+
+internal sealed class ConfigurableProxy(ProxySettings settings) : IWebProxy
+{
+    public ICredentials? Credentials
+    {
+        get => string.IsNullOrWhiteSpace(settings.Username)
+            ? null
+            : new NetworkCredential(settings.Username, settings.Password);
+        set
+        {
+            // Credentials come from the live settings object.
+        }
+    }
+
+    public Uri? GetProxy(Uri destination)
+    {
+        var mode = settings.Mode?.Trim().ToLowerInvariant();
+        if (mode == "system")
+        {
+            return HttpClient.DefaultProxy.GetProxy(destination);
+        }
+
+        if (mode != "manual" || string.IsNullOrWhiteSpace(settings.Address))
+        {
+            return null;
+        }
+
+        var address = settings.Address.Trim();
+        if (!address.Contains("://", StringComparison.Ordinal))
+        {
+            address = "http://" + address;
+        }
+
+        return Uri.TryCreate(address, UriKind.Absolute, out var proxy) ? proxy : null;
+    }
+
+    public bool IsBypassed(Uri host) => GetProxy(host) is null;
 }

@@ -175,6 +175,18 @@ public sealed record DownloadResult(
         => new(false, state, failure, bytes, total, null, null, null, null);
 }
 
+public sealed class ProxySettings
+{
+    /// <summary>none, system, or manual.</summary>
+    public string Mode { get; set; } = "none";
+
+    /// <summary>host:port or scheme://host:port for manual mode.</summary>
+    public string? Address { get; set; }
+
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+}
+
 public sealed record EngineOptions
 {
     public int MaxAttempts { get; init; } = 5;
@@ -188,6 +200,9 @@ public sealed record EngineOptions
     public int MaxRedirects { get; init; } = 10;
     public bool AllowLocalNetwork { get; init; } = true;
     public string AcceptEncoding { get; init; } = "identity";
+
+    /// <summary>Mutable proxy state; updated at runtime when settings change.</summary>
+    public ProxySettings Proxy { get; init; } = new();
 }
 
 public sealed class DownloadCheckpoint
@@ -265,6 +280,7 @@ public sealed class AppSettings
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
+    public ProxySettings Proxy { get; set; } = new();
     public bool LaunchAtStartup { get; set; }
     public bool ClipboardMonitoring { get; set; }
     public bool BrowserIntegrationEnabled { get; set; } = true;

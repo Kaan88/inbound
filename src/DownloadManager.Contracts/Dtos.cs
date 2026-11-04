@@ -74,6 +74,14 @@ public sealed class ScheduleDto
     public DateOnly? LastStopDate { get; set; }
 }
 
+public sealed class ProxyDto
+{
+    public string Mode { get; set; } = "none";
+    public string? Address { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+}
+
 public sealed class SettingsDto
 {
     public string DefaultDownloadDirectory { get; set; } = string.Empty;
@@ -84,6 +92,7 @@ public sealed class SettingsDto
     public int DefaultConnections { get; set; } = 8;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
+    public ProxyDto Proxy { get; set; } = new();
     public bool LaunchAtStartup { get; set; }
     public bool ClipboardMonitoring { get; set; }
     public bool BrowserIntegrationEnabled { get; set; } = true;

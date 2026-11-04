@@ -42,6 +42,9 @@ public interface IDownloadEngine
         DownloadCheckpoint? checkpoint,
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken);
+
+    /// <summary>Applies the current proxy configuration to subsequent requests.</summary>
+    void UpdateProxy(ProxySettings settings);
 }
 
 public interface IClock

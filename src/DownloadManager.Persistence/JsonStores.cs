@@ -536,6 +536,20 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.DefaultDownloadDirectory = AppSettings.GetDefaultDownloadDirectory();
         }
 
+        settings.Proxy ??= new ProxySettings();
+        settings.Proxy.Mode = settings.Proxy.Mode?.Trim().ToLowerInvariant() switch
+        {
+            "system" => "system",
+            "manual" => "manual",
+            _ => "none",
+        };
+        settings.Proxy.Address = string.IsNullOrWhiteSpace(settings.Proxy.Address)
+            ? null
+            : settings.Proxy.Address.Trim();
+        settings.Proxy.Username = string.IsNullOrWhiteSpace(settings.Proxy.Username)
+            ? null
+            : settings.Proxy.Username.Trim();
+
         settings.Queues ??= new List<DownloadQueue>();
         if (settings.Queues.Count == 0)
         {

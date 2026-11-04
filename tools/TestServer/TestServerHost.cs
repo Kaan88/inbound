@@ -62,7 +62,9 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public string BaseAddress { get; private set; } = string.Empty;
 
-    public static async Task<TestServerHost> StartAsync(int port = 0, CancellationToken cancellationToken = default)
+    public static async Task<TestServerHost> StartAsync(
+        int port = 0,
+        CancellationToken cancellationToken = default)
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -328,6 +330,14 @@ public sealed class TestServerHost : IAsyncDisposable
 
             await context.Response.WriteAsync("header ok").ConfigureAwait(false);
         });
+
+        _app.MapGet("/sensitive/echo", (HttpContext context) => Results.Json(new
+        {
+            cookie = !string.IsNullOrWhiteSpace(context.Request.Headers.Cookie.ToString()),
+            authorization = !string.IsNullOrWhiteSpace(context.Request.Headers.Authorization.ToString()),
+            referer = !string.IsNullOrWhiteSpace(context.Request.Headers.Referer.ToString()),
+            userAgent = context.Request.Headers.UserAgent.ToString(),
+        }));
 
         _app.MapGet("/filename/{name}", async (HttpContext context, string name) =>
         {

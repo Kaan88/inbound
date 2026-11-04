@@ -171,15 +171,40 @@ random-access part file **in the destination directory**:
   contained neither `dmsession` nor the cookie value. The value is redacted from
   all committed records.
 
+## Proxy and credential-boundary evidence (2026-11-04)
+
+- Added dynamic manual/system proxy settings (`ProxySettings`) to the engine and
+  runtime settings, exposed via CLI (`proxymode`, `proxyaddress`, `proxyuser`,
+  `proxypass`) and IPC.
+- TestServer now includes `TestProxyServer`, a local Basic-auth proxy supporting
+  absolute-form HTTP forwarding and HTTPS CONNECT. It tracks challenge, denied,
+  authorized, and tunnel counts.
+- Engine tests (**19/19**):
+  - `DownloadsThroughAuthenticatedHttpProxy` — 524,288 bytes, expected hash,
+    zero wrong-credential denials.
+  - `ProxyRejectsWrongCredentials` — job fails with a proxy denial.
+  - `CrossOriginRedirectDropsSensitiveHeaders` — target sees
+    `cookie=false, authorization=false, referer=false`.
+  - `SameOriginRedirectKeepsSensitiveHeaders` — all three remain true.
+- Runtime test (**15/15**): `ProxySettingsApplyToRuntimeDownloads` updates the
+  service settings, downloads through the proxy, and verifies the hash.
+- Real HTTPS/CONNECT test: published host downloaded the Alpine 3.24.3 virt ISO
+  (`70,254,592` bytes) through `127.0.0.1:5965` using 5 authenticated CONNECT
+  tunnels (`authorized=5, denied=0, tunnels=5`, last target
+  `dl-cdn.alpinelinux.org:443`). SHA-256 matched the official checksum
+  `cdc1bc0efc64d8d611bf3733f54868172a545888dfd726f518bf279bcb0ff1af`.
+- Proxy password is currently stored in settings JSON; DPAPI protection and a
+  proxy settings UI remain open.
+
 ## Tests
 
-- Engine: **15/15 passed** (`tests\DownloadManager.Engine.Tests`), including
-  segmented transfer, segmented resume, no-range fallback, changed content,
-  truncation, single-stream resume, and authenticated header propagation.
+- Engine: **19/19 passed** (`tests\DownloadManager.Engine.Tests`), including
+  segmented transfer/resume, authentication, proxy HTTP auth, wrong credentials,
+  and redirect credential boundaries.
 - Core: **11/11 passed**.
-- Runtime/persistence: **14/14 passed** (`tests\DownloadManager.Integration.Tests`),
-  including queues, reassignment, destination-local payload, and three scheduler
-  tests.
+- Runtime/persistence: **15/15 passed** (`tests\DownloadManager.Integration.Tests`),
+  including queues, scheduler, destination-local payload, authenticated handoff,
+  and runtime proxy settings.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -205,9 +230,10 @@ random-access part file **in the destination directory**:
    prevention, and DST/wall-clock tests.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7 remainder: proxy/SOCKS support, site-login storage, redirect
-   credential-boundary tests, expired-URL classification, and Refresh Download
-   Address preserving partial data. Cookie/referrer/UA handoff is done (E17).
+4. Phase 7 remainder: SOCKS, site-login storage, expired-URL classification, and
+   Refresh Download Address preserving partial data; add a proxy settings UI and
+   DPAPI protection for the proxy password. Cookie/referrer/UA, HTTP/HTTPS proxy
+   and redirect credential boundaries are done (E17/E18).
 5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 6. Phase 10: Download All/site grabber.

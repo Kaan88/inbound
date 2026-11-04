@@ -71,6 +71,7 @@ public sealed class DownloadManagerService
     {
         await _jobStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        _engine.UpdateProxy(_settings.Proxy);
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var job in jobs)
@@ -564,6 +565,7 @@ public sealed class DownloadManagerService
             ExcludedFileExtensions = settings.ExcludedFileExtensions,
             ExcludedHosts = settings.ExcludedHosts,
             InterceptedFileExtensions = settings.InterceptedFileExtensions,
+            Proxy = MapProxy(settings.Proxy),
             DefaultQueueId = settings.DefaultQueueId,
             Queues = MapQueues(settings.Queues, _settings.Queues, settings.MaxConcurrentDownloads),
             Schedules = MapSchedules(settings.Schedules, _settings.Schedules),
@@ -588,6 +590,7 @@ public sealed class DownloadManagerService
             }
         }
 
+        _engine.UpdateProxy(next.Proxy);
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -1590,6 +1593,7 @@ public sealed class DownloadManagerService
             DefaultConnections = settings.DefaultConnections,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             GlobalSpeedLimitBytesPerSecond = settings.GlobalSpeedLimitBytesPerSecond,
+            Proxy = MapProxy(settings.Proxy),
             LaunchAtStartup = settings.LaunchAtStartup,
             ClipboardMonitoring = settings.ClipboardMonitoring,
             BrowserIntegrationEnabled = settings.BrowserIntegrationEnabled,
@@ -1627,6 +1631,29 @@ public sealed class DownloadManagerService
                 LastStartDate = s.LastStartDate,
                 LastStopDate = s.LastStopDate,
             }).ToList(),
+        };
+
+    private static ProxyDto MapProxy(ProxySettings? proxy)
+        => new()
+        {
+            Mode = proxy?.Mode ?? "none",
+            Address = proxy?.Address,
+            Username = proxy?.Username,
+            Password = proxy?.Password,
+        };
+
+    private static ProxySettings MapProxy(ProxyDto? proxy)
+        => new()
+        {
+            Mode = proxy?.Mode?.Trim().ToLowerInvariant() switch
+            {
+                "system" => "system",
+                "manual" => "manual",
+                _ => "none",
+            },
+            Address = string.IsNullOrWhiteSpace(proxy?.Address) ? null : proxy.Address.Trim(),
+            Username = string.IsNullOrWhiteSpace(proxy?.Username) ? null : proxy.Username.Trim(),
+            Password = string.IsNullOrWhiteSpace(proxy?.Password) ? null : proxy.Password,
         };
 
     private static List<DownloadQueue> MapQueues(

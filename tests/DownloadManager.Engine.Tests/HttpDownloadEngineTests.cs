@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DownloadManager.Core;
 using DownloadManager.Persistence;
 using TestServer;
@@ -11,21 +12,32 @@ public sealed class HttpServerCollection : ICollectionFixture<TestServerFixture>
 public sealed class TestServerFixture : IAsyncLifetime
 {
     public TestServerHost Server { get; private set; } = null!;
+    public TestProxyServer Proxy { get; private set; } = null!;
 
-    public async Task InitializeAsync() => Server = await TestServerHost.StartAsync();
+    public async Task InitializeAsync()
+    {
+        Server = await TestServerHost.StartAsync();
+        Proxy = TestProxyServer.Start();
+    }
 
-    public async Task DisposeAsync() => await Server.DisposeAsync();
+    public async Task DisposeAsync()
+    {
+        await Proxy.DisposeAsync();
+        await Server.DisposeAsync();
+    }
 }
 
 [Collection("http-server")]
 public sealed class HttpDownloadEngineTests
 {
     private readonly TestServerHost _server;
+    private readonly TestProxyServer _proxy;
     private readonly ITestOutputHelper _output;
 
     public HttpDownloadEngineTests(TestServerFixture fixture, ITestOutputHelper output)
     {
         _server = fixture.Server;
+        _proxy = fixture.Proxy;
         _output = output;
     }
 
@@ -90,6 +102,112 @@ public sealed class HttpDownloadEngineTests
         Assert.Contains("Chrome/156", stats);
         Assert.DoesNotContain("valid-auth-token", stats);
     }
+
+    [Fact]
+    public async Task DownloadsThroughAuthenticatedHttpProxy()
+    {
+        const int size = 524_288;
+        _proxy.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/proxy.bin?size={size}&seed=71",
+            "proxy.bin");
+
+        using var engine = CreateEngine(proxy: ProxyCredentials());
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_proxy.Authorized > 0);
+        Assert.Equal(0, _proxy.Denied);
+        Assert.True(_proxy.LastAuthorizationPresent);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(71, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task ProxyRejectsWrongCredentials()
+    {
+        _proxy.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/proxy-bad.bin?size=65536&seed=72",
+            "proxy-bad.bin");
+
+        using var engine = CreateEngine(
+            maxAttempts: 1,
+            proxy: new ProxySettings
+            {
+                Mode = "manual",
+                Address = _proxy.Address,
+                Username = "proxyuser",
+                Password = "wrong-password",
+            });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.True(_proxy.Denied > 0);
+        Assert.NotEqual(DownloadState.Completed, result.FinalState);
+    }
+
+    [Fact]
+    public async Task CrossOriginRedirectDropsSensitiveHeaders()
+    {
+        await using var target = await TestServerHost.StartAsync();
+        _proxy.ResetStats();
+        using var ctx = new EngineContext();
+        var redirect = Uri.EscapeDataString($"{target.BaseAddress}/sensitive/echo");
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/redirect?to={redirect}",
+            "cross-origin.json");
+        job.Referrer = $"{_server.BaseAddress}/page";
+        job.RequestHeaders["Cookie"] = "session=secret";
+        job.RequestHeaders["Authorization"] = "Bearer secret";
+
+        using var engine = CreateEngine(proxy: ProxyCredentials());
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.FinalFilePath!));
+        var root = json.RootElement;
+        Assert.False(root.GetProperty("cookie").GetBoolean());
+        Assert.False(root.GetProperty("authorization").GetBoolean());
+        Assert.False(root.GetProperty("referer").GetBoolean());
+        Assert.True(_proxy.Authorized > 0);
+    }
+
+    [Fact]
+    public async Task SameOriginRedirectKeepsSensitiveHeaders()
+    {
+        _proxy.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/redirect?to=%2Fsensitive%2Fecho",
+            "same-origin.json");
+        job.Referrer = $"{_server.BaseAddress}/page";
+        job.RequestHeaders["Cookie"] = "session=secret";
+        job.RequestHeaders["Authorization"] = "Bearer secret";
+
+        using var engine = CreateEngine(proxy: ProxyCredentials());
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.FinalFilePath!));
+        var root = json.RootElement;
+        Assert.True(root.GetProperty("cookie").GetBoolean());
+        Assert.True(root.GetProperty("authorization").GetBoolean());
+        Assert.True(root.GetProperty("referer").GetBoolean());
+        Assert.True(_proxy.Authorized > 0);
+    }
+
+    private ProxySettings ProxyCredentials()
+        => new()
+        {
+            Mode = "manual",
+            Address = _proxy.Address,
+            Username = "proxyuser",
+            Password = "proxypass",
+        };
 
     [Fact]
     public async Task DownloadsWithoutRangeSupport()
@@ -371,7 +489,10 @@ public sealed class HttpDownloadEngineTests
         }
     }
 
-    private HttpDownloadEngine CreateEngine(JsonCheckpointStore? store = null, int maxAttempts = 3)
+    private HttpDownloadEngine CreateEngine(
+        JsonCheckpointStore? store = null,
+        int maxAttempts = 3,
+        ProxySettings? proxy = null)
         => new(
             new EngineOptions
             {
@@ -381,6 +502,7 @@ public sealed class HttpDownloadEngineTests
                 ReadTimeout = TimeSpan.FromSeconds(10),
                 ConnectTimeout = TimeSpan.FromSeconds(5),
                 AllowLocalNetwork = true,
+                Proxy = proxy ?? new ProxySettings(),
             },
             checkpoints: store);
 

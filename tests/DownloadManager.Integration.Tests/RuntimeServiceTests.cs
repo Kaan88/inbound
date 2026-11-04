@@ -591,6 +591,39 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ProxySettingsApplyToRuntimeDownloads()
+    {
+        await using var proxy = TestProxyServer.Start();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "manual",
+            Address = proxy.Address,
+            Username = "proxyuser",
+            Password = "proxypass",
+        };
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+        Assert.Equal("manual", ctx.Service.GetSnapshot().Settings.Proxy.Mode);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/runtime-proxy.bin?size=524288&seed=94",
+            DestinationDirectory = ctx.Destination,
+            FileName = "runtime-proxy.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.True(proxy.Authorized > 0);
+        Assert.Equal(0, proxy.Denied);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(94, 524_288))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

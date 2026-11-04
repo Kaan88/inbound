@@ -21,9 +21,9 @@
 - Phase 5: in progress (segmented transfer/resume/fallback verified; dynamic
   redistribution, global/per-host limits, throughput benchmark, and independent
   verification remain).
-- Phase 7: in progress (cookie/referrer/UA/custom-header propagation verified
-  end to end; site logins, proxies, credential-boundary redirects, expired URL
-  classification, and Refresh Download Address remain).
+- Phase 7: in progress (cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
+  proxy, and redirect credential boundaries verified; site logins, SOCKS,
+  expired URL classification, and Refresh Download Address remain).
 - Phase 8: in progress (named queues, per-queue caps, start/stop, persistence,
   reassignment, and daily/one-time schedule execution verified; quotas,
   completion actions, sleep prevention, and DST/wall-clock tests remain).
@@ -145,9 +145,12 @@ progress/segment view.
 ## Phase 7 - Authentication and refreshed addresses (in progress)
 
 Cookies, referrer, user-agent, and custom headers are verified end to end for
-CLI/engine and Chrome handoff (`S1`, `E17`). Remaining: site logins, HTTP/SOCKS
-proxies, redirect credential rules, expired URL errors, and Refresh Download
-Address with partial-data preservation and content validation.
+CLI/engine and Chrome handoff (`S1`, `E17`). Authenticated manual HTTP proxies
+and HTTPS CONNECT are verified, including wrong-credential failure, runtime
+settings propagation, and same/cross-origin redirect credential boundaries
+(`S3`, `S5`, `E18`). Remaining: site logins (`S2`), SOCKS (`S4`), expired URL
+classification (`S6`), and Refresh Download Address (`S7`), plus proxy settings
+UI and secure proxy-password storage.
 
 ## Phase 8 - Queues and scheduling (in progress)
 

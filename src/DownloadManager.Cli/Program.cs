@@ -604,6 +604,18 @@ internal static class Program
                 case "speedlimit":
                     settings.GlobalSpeedLimitBytesPerSecond = long.Parse(value, CultureInfo.InvariantCulture);
                     break;
+                case "proxymode":
+                    settings.Proxy.Mode = value.ToLowerInvariant();
+                    break;
+                case "proxyaddress":
+                    settings.Proxy.Address = value;
+                    break;
+                case "proxyuser":
+                    settings.Proxy.Username = value;
+                    break;
+                case "proxypass":
+                    settings.Proxy.Password = value;
+                    break;
                 default:
                     Console.Error.WriteLine($"unknown setting '{key}'");
                     return 2;
@@ -736,6 +748,8 @@ internal static class Program
         Console.WriteLine($"max concurrent:    {settings.MaxConcurrentDownloads}");
         Console.WriteLine($"default conns:     {settings.DefaultConnections}");
         Console.WriteLine($"global speed limit:{settings.GlobalSpeedLimitBytesPerSecond?.ToString() ?? "none"}");
+        Console.WriteLine($"proxy:             {settings.Proxy.Mode} {settings.Proxy.Address ?? "-"}" +
+                          (string.IsNullOrWhiteSpace(settings.Proxy.Username) ? string.Empty : $" user={settings.Proxy.Username} password=***"));
         Console.WriteLine($"launch at sign-in: {settings.LaunchAtStartup}");
         Console.WriteLine($"clipboard monitor: {settings.ClipboardMonitoring}");
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
