@@ -191,6 +191,41 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SettingsUpdatePreservesUnreturnedSecrets()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.SiteLogins.Add(new SiteLoginDto
+        {
+            Site = "http://example.com",
+            Username = "user",
+            Password = "site-secret",
+        });
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "none",
+            Address = "http://proxy.example:8080",
+            Username = "proxy-user",
+            Password = "proxy-secret",
+        };
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var snapshot = ctx.Service.GetSnapshot().Settings;
+        Assert.True(snapshot.Proxy.HasPassword);
+        Assert.Null(snapshot.Proxy.Password);
+        var login = Assert.Single(snapshot.SiteLogins);
+        Assert.True(login.HasPassword);
+        Assert.Null(login.Password);
+
+        snapshot.MaxConcurrentDownloads = 5;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(snapshot)).Ok);
+        var after = ctx.Service.GetSnapshot().Settings;
+        Assert.True(after.Proxy.HasPassword);
+        Assert.True(Assert.Single(after.SiteLogins).HasPassword);
+        Assert.Equal(5, after.MaxConcurrentDownloads);
+    }
+
+    [Fact]
     public async Task ConnectionProfilesCapRequestedConnections()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

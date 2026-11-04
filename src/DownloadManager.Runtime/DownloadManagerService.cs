@@ -660,6 +660,14 @@ public sealed class DownloadManagerService
             Schedules = MapSchedules(settings.Schedules, _settings.Schedules),
         };
 
+        if (string.IsNullOrEmpty(next.Proxy.Password) &&
+            !string.IsNullOrEmpty(_settings.Proxy.Password) &&
+            string.Equals(next.Proxy.Address, _settings.Proxy.Address, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(next.Proxy.Username, _settings.Proxy.Username, StringComparison.Ordinal))
+        {
+            next.Proxy.Password = _settings.Proxy.Password;
+        }
+
         if (!next.Queues.Any(q => q.Id == next.DefaultQueueId))
         {
             next.DefaultQueueId = next.Queues[0].Id;
@@ -2548,7 +2556,8 @@ public sealed class DownloadManagerService
             Mode = proxy?.Mode ?? "none",
             Address = proxy?.Address,
             Username = proxy?.Username,
-            Password = proxy?.Password,
+            Password = null,
+            HasPassword = !string.IsNullOrEmpty(proxy?.Password),
         };
 
     private static ProxySettings MapProxy(ProxyDto? proxy)

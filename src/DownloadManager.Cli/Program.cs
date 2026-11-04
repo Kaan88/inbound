@@ -1295,9 +1295,69 @@ internal static class Program
             return 0;
         }
 
+        if (optionArgs[0].Equals("export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (optionArgs.Length < 2)
+            {
+                Console.Error.WriteLine("usage: settings export <file.json>");
+                return 2;
+            }
+
+            var current = await client.SnapshotAsync().ConfigureAwait(false);
+            current.Settings.Proxy.Password = null;
+            foreach (var login in current.Settings.SiteLogins)
+            {
+                login.Password = null;
+            }
+
+            await File.WriteAllTextAsync(
+                optionArgs[1],
+                JsonSerializer.Serialize(current.Settings, PrettyJson)).ConfigureAwait(false);
+            Console.WriteLine($"exported settings to {optionArgs[1]}");
+            return 0;
+        }
+
+        if (optionArgs[0].Equals("import", StringComparison.OrdinalIgnoreCase))
+        {
+            if (optionArgs.Length < 2)
+            {
+                Console.Error.WriteLine("usage: settings import <file.json>");
+                return 2;
+            }
+
+            SettingsDto? imported;
+            try
+            {
+                imported = JsonSerializer.Deserialize<SettingsDto>(
+                    await File.ReadAllTextAsync(optionArgs[1]).ConfigureAwait(false),
+                    IpcJson.Options);
+            }
+            catch (Exception ex) when (ex is IOException or JsonException)
+            {
+                Console.Error.WriteLine($"import failed: {ex.Message}");
+                return 2;
+            }
+
+            if (imported is null)
+            {
+                Console.Error.WriteLine("import file is empty or invalid.");
+                return 2;
+            }
+
+            imported.Proxy.Password = null;
+            foreach (var login in imported.SiteLogins)
+            {
+                login.Password = null;
+            }
+
+            var importedReply = await client.RequestAsync(MessageTypes.SettingsUpdate,
+                new SettingsUpdateRequest { Settings = imported }).ConfigureAwait(false);
+            return PrintSettingsResult(importedReply, json);
+        }
+
         if (!optionArgs[0].Equals("set", StringComparison.OrdinalIgnoreCase))
         {
-            Console.Error.WriteLine("usage: settings [get|set key value]");
+            Console.Error.WriteLine("usage: settings [get|set key value|export|import]");
             return 2;
         }
 
@@ -1595,6 +1655,7 @@ internal static class Program
                           [--shutdown shutdown|restart|logoff] [--force]
               dm site list|add|remove
               dm settings [get] | settings set <key> <value>
+              | settings export <file.json> | settings import <file.json>
               dm host status|open|shutdown
               dm doctor [--no-start]
 

@@ -739,6 +739,29 @@ random-access part file **in the destination directory**:
 - WinUI Options includes a `pattern=max` multi-line profile editor.
 - Limitation: caps per job, not aggregate connections across simultaneous jobs.
 
+## Settings transfer evidence (C6, 2026-11-04)
+
+- CLI `settings export <file>` writes the full settings snapshot with proxy and
+  site-login passwords cleared; `settings import <file>` applies it via
+  SettingsUpdate.
+- Proxy DTOs now expose `HasPassword` instead of returning the password over IPC;
+  UpdateSettings preserves the existing password when address/username match.
+  Site logins already preserve DPAPI passwords by id/site/user.
+- Fixed a UI bug where the Options clone omitted proxy, site logins, queues,
+  schedules, profiles, sleep/system flags, and ffmpeg path; saving Options could
+  wipe them.
+- Integration `SettingsUpdatePreservesUnreturnedSecrets` (suite **47/47**):
+  a snapshot with no passwords kept both proxy and site-login `HasPassword`
+  flags after an update.
+- Published CLI:
+  - export contained neither `site-secret-123` nor `proxy-secret-456`, but did
+    contain `hasPassword`, the music folder, and `127.0.0.1`;
+  - after mutating max-concurrent/profiles/music, import restored max 4,
+    `127.0.0.1 = 3`, the music folder, site login `PASSWORD stored`, and proxy
+    `password=***`.
+- Limitations: secrets are not portable to another install; WinUI has no
+  export/import buttons yet.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -747,7 +770,7 @@ random-access part file **in the destination directory**:
 - Core: **45/45 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   and safe post-download argument construction.
-- Runtime/persistence: **46/46 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **47/47 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -755,7 +778,8 @@ random-access part file **in the destination directory**:
   rotating-token refresh, live-stream exclusion, DRM detection, editable
   properties, duplicate policies, category destinations, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
-  post-download hook isolation, and connection profiles.
+  post-download hook isolation, connection profiles, and secret-preserving
+  settings updates.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
