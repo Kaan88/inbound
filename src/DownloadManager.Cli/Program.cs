@@ -1537,6 +1537,22 @@ internal static class Program
 
         var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
         var settings = snapshot.Settings;
+        // `settings set proxypass --clear`: "--" arguments are filtered from optionArgs above,
+        // so the flag is read from the raw arguments.
+        var clearProxyPassword = optionArgs.Length == 2 &&
+                                 optionArgs[1].Equals("proxypass", StringComparison.OrdinalIgnoreCase) &&
+                                 args.Contains("--clear", StringComparer.OrdinalIgnoreCase);
+        if (clearProxyPassword)
+        {
+            settings.Proxy.Password = null;
+            settings.Proxy.ClearPassword = true;
+        }
+        else if (optionArgs.Length < 3)
+        {
+            Console.Error.WriteLine("usage: settings set <key> <value> (or: settings set proxypass --clear)");
+            return 2;
+        }
+
         for (var i = 1; i + 1 < optionArgs.Length; i += 2)
         {
             var key = optionArgs[i].ToLowerInvariant();
@@ -1575,16 +1591,7 @@ internal static class Program
                     settings.Proxy.Username = value;
                     break;
                 case "proxypass":
-                    if (value == "--clear")
-                    {
-                        settings.Proxy.Password = null;
-                        settings.Proxy.ClearPassword = true;
-                    }
-                    else
-                    {
-                        settings.Proxy.Password = value;
-                    }
-
+                    settings.Proxy.Password = value;
                     break;
                 case "allowsystemcompletionactions":
                     settings.AllowSystemCompletionActions = ParseBool(value);

@@ -1464,11 +1464,7 @@ Status refreshed after the Phase 7 closure (E89). Phases 6-11 are implemented
 and evidenced in `reference notes` (E1-E89); the only `blocked` rows are L4 (needs a
 normal shell) and C3 (explicit Chrome-only scope).
 
-1. Live-verify the new Options -> Proxy controls: run
-   `scripts\ui-proxy-options-check.ps1`. The first attempt was stopped by the
-   Windows "publisher could not be verified" prompt for the freshly built
-   `DownloadManager.Desktop.WinUI.exe` (cancelled), so only the build, unit and
-   integration evidence exists for the dialog.
+1. Done: Options -> Proxy controls, the Forget-password checkbox and the orphan cleanup dialog were live-verified (E93).
 2. Grabber polish (Phase 10 remainder): result preview, JS-rendered pages,
    result preview (robots.txt E91, crawler proxy/auth E92, JS rendering E93 done; sandboxed rendering needs a normal-shell run).
 3. Phase 5: orphan `.part` quarantine/delete is done via CLI/IPC (E90); a WinUI affordance is still missing.

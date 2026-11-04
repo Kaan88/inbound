@@ -23,11 +23,16 @@ $cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\dm
 if (-not (Test-Path $cliExe)) { $cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\DownloadManager.Cli.exe" }
 $hostProc = Start-Process $hostExe -ArgumentList '--background' -PassThru -WindowStyle Hidden
 Start-Sleep 4
-# Saved password so the "Forget" checkbox is shown; the dialog is cancelled, so it is cleared via CLI at the end.
+# Remember the user's proxy settings and restore them afterwards. A test password is only
+# set (and later cleared) when none was saved, so a real saved password is never touched.
+$original = (& $cliExe settings get --json | Out-String | ConvertFrom-Json).proxy
+$setTestPassword = -not $original.hasPassword
 & $cliExe settings set proxymode manual | Out-Null
-& $cliExe settings set proxyaddress 127.0.0.1:3128 | Out-Null
-& $cliExe settings set proxyuser uicheck | Out-Null
-& $cliExe settings set proxypass ui-check-secret | Out-Null
+if (-not $original.address) { & $cliExe settings set proxyaddress 127.0.0.1:3128 | Out-Null }
+if ($setTestPassword) {
+    if (-not $original.username) { & $cliExe settings set proxyuser uicheck | Out-Null }
+    & $cliExe settings set proxypass ui-check-secret | Out-Null
+}
 $ui = Start-Process $uiExe -PassThru
 try {
     $auto = [System.Windows.Automation.AutomationElement]
@@ -82,6 +87,7 @@ try {
     }
 
     $type = Find 'Proxy type' ([System.Windows.Automation.ControlType]::ComboBox)
+    Check ($null -ne $type) 'Proxy type combo box found for the SOCKS check'
     if ($type) {
         $expand = $type.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
         $expand.Expand(); Start-Sleep 1
@@ -107,13 +113,34 @@ try {
     if ($cancel) { $cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
     Start-Sleep 2
 
-    # Tasks -> Clean up leftover partial files...
-    $tasks = Find 'Tasks' ([System.Windows.Automation.ControlType]::MenuItem)
-    Check ($null -ne $tasks) 'Tasks menu found'
+    # Downloads -> Clean up leftover partial files...
+    $tasks = Find 'Downloads' ([System.Windows.Automation.ControlType]::MenuItem)
+    Check ($null -ne $tasks) 'Downloads menu found'
     if ($tasks) {
-        $tasks.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand(); Start-Sleep 1
-        $cleanItem = $auto::RootElement.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
-            $auto::NameProperty, 'Clean up leftover partial files...')))
+        $pattern = $null
+        if ($tasks.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$pattern)) {
+            $pattern.Expand()
+        }
+        elseif ($tasks.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+            $pattern.Invoke()
+        }
+        Start-Sleep 2
+        # WinUI flyouts open in separate popup windows owned by the app process.
+        $byPid = New-Object System.Windows.Automation.PropertyCondition($auto::ProcessIdProperty, $ui.Id)
+        $itemName = New-Object System.Windows.Automation.PropertyCondition($auto::NameProperty, 'Clean up leftover partial files...')
+        $cleanItem = $null
+        foreach ($top in $auto::RootElement.FindAll($scope::Children, $byPid)) {
+            $cleanItem = $top.FindFirst($scope::Descendants, $itemName)
+            if ($cleanItem) { break }
+        }
+        if (-not $cleanItem) {
+            $seen = foreach ($top in $auto::RootElement.FindAll($scope::Children, $byPid)) {
+                $top.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
+                    $auto::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem))) |
+                    ForEach-Object { $_.Current.Name }
+            }
+            Log ("menu items visible: " + (($seen | Select-Object -Unique) -join ' | '))
+        }
         Check ($null -ne $cleanItem) "'Clean up leftover partial files...' menu item present"
         if ($cleanItem) {
             $cleanItem.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep 2
@@ -126,9 +153,20 @@ try {
     }
 }
 finally {
-    if ($cliExe -and (Test-Path $cliExe)) {
-        & $cliExe settings set proxypass --clear | Out-Null
-        & $cliExe settings set proxymode none | Out-Null
+    if ($cliExe -and (Test-Path $cliExe) -and $original) {
+        # PowerShell 5 drops empty native arguments, so '""' passes an explicit empty value.
+        function Restore($key, $value) {
+            if ([string]::IsNullOrEmpty($value)) { & $cliExe settings set $key '""' | Out-Null }
+            else { & $cliExe settings set $key $value | Out-Null }
+        }
+        if ($setTestPassword) { & $cliExe settings set proxypass --clear | Out-Null }
+        Restore 'proxyaddress' $original.address
+        Restore 'proxyuser' $original.username
+        Restore 'proxymode' $original.mode
+        $after = (& $cliExe settings get --json | Out-String | ConvertFrom-Json).proxy
+        Check (($after.mode -eq $original.mode) -and ($after.address -eq $original.address) -and
+            ($after.username -eq $original.username) -and ($after.hasPassword -eq $original.hasPassword)) `
+            'proxy settings restored to their pre-run values'
     }
     $dir = Split-Path -Parent $OutFile
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
