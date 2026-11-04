@@ -345,7 +345,25 @@ random-access part file **in the destination directory**:
   produced 498,366 bytes and matched SHA-256
   `3a17840b06a53432f9fa9a09188b7d68e3de720201bb88b3648277c2227cfba1`.
 - Published CLI produced the same size/hash; ffprobe reported H.264 320×180,
-  duration `6.000000` s. Output is video-only; separate audio/muxing remains V5.
+  duration `6.000000` s. Output is video-only when the MPD has no audio.
+
+## Audio/video muxing evidence (2026-11-04)
+
+- Added `IMediaMuxer` and `FfmpegMediaMuxer` behind an explicit FFmpeg path
+  setting (`ffmpegpath` or PATH; optional `DOWNLOADMANAGER_FFMPEG` test hook).
+  FFmpeg is invoked with `ArgumentList`, `-c copy`, deterministic `-bitexact`
+  flags, a 5-minute timeout, and output validation.
+- DASH now selects separate video and audio AdaptationSets, downloads each track
+  to a destination-local temp file, muxes to `.mp4`, validates the optional hash,
+  and cleans up temp tracks.
+- `/dash-av` test assets and a reference `muxed.mp4` (364,519 bytes, SHA-256
+  `6074bcc38ce18a4507e84d27173d7d77d9f6931801c7173b437c649b1e5088ab`).
+- Integration `DashSeparateAudioVideoMuxesWhenFfmpegAvailable` (**30/30 suite**
+  with `DOWNLOADMANAGER_FFMPEG`): output matched the reference size/hash.
+- Published CLI with `ffmpegpath` configured produced the same 364,519-byte
+  output/hash; ffprobe reported H.264 320×180 + AAC, duration `4.000000` s.
+- The test returns early when FFmpeg is absent; the recorded run had FFmpeg
+  9.0.2 configured. FFmpeg is not bundled.
 
 ## Tests
 
@@ -353,11 +371,11 @@ random-access part file **in the destination directory**:
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **29/29 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **30/30 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
-  HLS master/media, and DASH assembly.
+  HLS master/media, DASH assembly, and DASH A/V muxing.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -380,10 +398,10 @@ random-access part file **in the destination directory**:
 
 1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
    tests, evidence).
-2. Phase 9: audio/video muxing with FFmpeg behind an interface, additional DASH
-   modes, in-page/quality panel, HLS checkpoint recovery/AES-128, live/DRM
-   behavior. Direct media detection, popup list, unencrypted HLS, and static
-   DASH SegmentTemplate are done (E24/E25/E26).
+2. Phase 9: additional DASH modes, in-page/quality panel, HLS alternate audio,
+   checkpoint recovery/AES-128, live/DRM behavior. Direct media detection, popup
+   list, unencrypted HLS, static DASH SegmentTemplate, and DASH A/V muxing are
+   done (E24/E25/E26/E27).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

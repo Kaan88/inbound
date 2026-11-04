@@ -1234,6 +1234,38 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DashSeparateAudioVideoMuxesWhenFfmpegAvailable()
+    {
+        var ffmpeg = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
+        if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
+        {
+            return;
+        }
+
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/dash-av/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var expectedBytes = expectedJson.RootElement.GetProperty("bytes").GetInt64();
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/dash-av/manifest.mpd",
+            DestinationDirectory = ctx.Destination,
+            FileName = "dash-av.mpd",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed",
+            TimeSpan.FromSeconds(60));
+        Assert.Null(completed.Failure);
+        Assert.EndsWith(".mp4", completed.FinalFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(expectedBytes, new FileInfo(completed.FinalFilePath).Length);
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1427,6 +1459,7 @@ public sealed class RuntimeServiceTests
             settings.MaxConcurrentDownloads = maxConcurrent;
             settings.DefaultConnections = 1;
             settings.AutoResumeUnfinishedOnStartup = autoResume;
+            settings.FfmpegPath = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_FFMPEG");
             var update = await service.UpdateSettingsAsync(settings);
             if (!update.Ok)
             {

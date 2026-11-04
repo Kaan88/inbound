@@ -126,6 +126,7 @@ public sealed class SettingsDto
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+    public string? FfmpegPath { get; set; }
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }

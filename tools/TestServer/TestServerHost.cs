@@ -535,6 +535,42 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/dash-av/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "dash-av", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            context.Response.ContentType = file.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
+                ? "application/dash+xml"
+                : file.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+                    ? "video/mp4"
+                    : "video/iso.segment";
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/dash-av/expected", () =>
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "dash-av", "muxed.mp4");
+            var bytes = File.ReadAllBytes(path);
+            return Results.Json(new
+            {
+                sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                bytes = bytes.Length,
+            });
+        });
+
         _app.MapGet("/media-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

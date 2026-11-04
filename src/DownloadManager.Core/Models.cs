@@ -30,6 +30,7 @@ public enum FailureKind
     RangeUnsupported,
     RemoteChanged,
     InvalidContent,
+    MuxingFailed,
     DiskFull,
     Permission,
     DestinationUnavailable,
@@ -219,6 +220,9 @@ public sealed record EngineOptions
 
     /// <summary>Mutable proxy state; updated at runtime when settings change.</summary>
     public ProxySettings Proxy { get; init; } = new();
+
+    /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
+    public string? FfmpegPath { get; init; }
 }
 
 public sealed class DownloadCheckpoint
@@ -320,6 +324,9 @@ public sealed class AppSettings
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
     public bool PreventSleepWhileDownloading { get; set; } = true;
+
+    /// <summary>Explicit ffmpeg.exe path; empty means PATH/auto-detect.</summary>
+    public string? FfmpegPath { get; set; }
 
     /// <summary>Enables schedule exit/shutdown completion actions. Off by default.</summary>
     public bool AllowSystemCompletionActions { get; set; }

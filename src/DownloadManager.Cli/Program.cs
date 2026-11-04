@@ -780,6 +780,9 @@ internal static class Program
                 case "preventsleep":
                     settings.PreventSleepWhileDownloading = ParseBool(value);
                     break;
+                case "ffmpegpath":
+                    settings.FfmpegPath = string.IsNullOrWhiteSpace(value) ? null : value;
+                    break;
                 default:
                     Console.Error.WriteLine($"unknown setting '{key}'");
                     return 2;
@@ -921,6 +924,7 @@ internal static class Program
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
         Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");
+        Console.WriteLine($"ffmpeg path:       {settings.FfmpegPath ?? "auto"}");
         Console.WriteLine($"queues:            {string.Join(", ", settings.Queues.Select(q => $"{q.Id}:{q.Name}"))}");
     }
 

@@ -24,15 +24,20 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     private readonly List<HttpClient> _retiredClients = new();
     private readonly object _siteLoginSync = new();
     private List<SiteLoginCredential> _siteLogins = new();
+    private readonly IMediaMuxer _muxer;
+    private string? _ffmpegPath;
     private HttpClient _client;
 
     public HttpDownloadEngine(
         EngineOptions? options = null,
         HttpMessageHandler? handler = null,
-        IDownloadCheckpointStore? checkpoints = null)
+        IDownloadCheckpointStore? checkpoints = null,
+        IMediaMuxer? muxer = null)
     {
         _options = options ?? new EngineOptions();
         _checkpoints = checkpoints;
+        _ffmpegPath = _options.FfmpegPath;
+        _muxer = muxer ?? new FfmpegMediaMuxer(() => _ffmpegPath);
         if (handler is null)
         {
             _client = CreateDefaultClient();
@@ -76,6 +81,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             _siteLogins = logins.ToList();
         }
+    }
+
+    public void UpdateFfmpegPath(string? path)
+    {
+        _ffmpegPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
     }
 
     private HttpClient CurrentClient()
@@ -1075,142 +1085,68 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
 
             var adaptationSets = period.Elements(ns + "AdaptationSet").ToList();
-            var adaptation = adaptationSets.FirstOrDefault(a =>
-                                 (string?)a.Attribute("contentType") == "video" ||
-                                 ((string?)a.Attribute("mimeType"))?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
-                             ?? adaptationSets.FirstOrDefault();
-            if (adaptation is null)
+            var videoAdaptation = adaptationSets.FirstOrDefault(a =>
+                (string?)a.Attribute("contentType") == "video" ||
+                ((string?)a.Attribute("mimeType"))?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true);
+            var audioAdaptation = adaptationSets.FirstOrDefault(a =>
+                (string?)a.Attribute("contentType") == "audio" ||
+                ((string?)a.Attribute("mimeType"))?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) == true);
+            if (videoAdaptation is null && audioAdaptation is null)
             {
                 return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
                     FailureKind.InvalidContent, "The DASH manifest has no usable AdaptationSet.",
                     false, false, DateTimeOffset.UtcNow));
             }
 
-            var representations = adaptation.Elements(ns + "Representation").ToList();
-            var representation = representations
-                .OrderByDescending(r => ParseLong((string?)r.Attribute("bandwidth")))
-                .FirstOrDefault();
-            if (representation is null)
+            DashTrack? videoTrack = null;
+            DashTrack? audioTrack = null;
+            if (videoAdaptation is not null)
             {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent, "The DASH manifest has no Representation.",
-                    false, false, DateTimeOffset.UtcNow));
-            }
-
-            var template = representation.Elements(ns + "SegmentTemplate").FirstOrDefault()
-                           ?? adaptation.Elements(ns + "SegmentTemplate").FirstOrDefault()
-                           ?? period.Elements(ns + "SegmentTemplate").FirstOrDefault();
-            if (template is null)
-            {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent,
-                    "This DASH manifest uses SegmentBase/SegmentList, which is not supported yet.",
-                    false, false, DateTimeOffset.UtcNow));
-            }
-
-            var baseUri = ResolveDashBase(manifest.FinalUri, root, ns);
-            baseUri = ResolveDashBase(baseUri, period, ns);
-            baseUri = ResolveDashBase(baseUri, adaptation, ns);
-            baseUri = ResolveDashBase(baseUri, representation, ns);
-
-            var mediaTemplate = (string?)template.Attribute("media");
-            if (string.IsNullOrWhiteSpace(mediaTemplate))
-            {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent, "The DASH SegmentTemplate has no media template.",
-                    false, false, DateTimeOffset.UtcNow));
-            }
-
-            var representationId = (string?)representation.Attribute("id") ?? "0";
-            var bandwidth = ParseLong((string?)representation.Attribute("bandwidth"));
-            var timescale = Math.Max(1, ParseLong((string?)template.Attribute("timescale"), 1));
-            var duration = ParseLong((string?)template.Attribute("duration"));
-            var startNumber = ParseLong((string?)template.Attribute("startNumber"), 1);
-            var initTemplate = (string?)template.Attribute("initialization");
-            Uri? initUri = null;
-            if (!string.IsNullOrWhiteSpace(initTemplate))
-            {
-                initUri = ResolveDashUri(baseUri, ExpandDashTemplate(
-                    initTemplate, representationId, bandwidth, null, null));
-            }
-
-            var segmentUris = new List<Uri>();
-            var timeline = template.Element(ns + "SegmentTimeline");
-            if (timeline is not null)
-            {
-                long time = 0;
-                foreach (var s in timeline.Elements(ns + "S"))
-                {
-                    time = ParseLong((string?)s.Attribute("t"), time);
-                    var step = ParseLong((string?)s.Attribute("d"));
-                    if (step <= 0)
-                    {
-                        continue;
-                    }
-
-                    var repeat = ParseLong((string?)s.Attribute("r"));
-                    for (var i = 0; i <= repeat; i++)
-                    {
-                        var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
-                            mediaTemplate, representationId, bandwidth, null, time));
-                        if (uri is not null)
-                        {
-                            segmentUris.Add(uri);
-                        }
-
-                        time += step;
-                    }
-                }
-            }
-            else
-            {
-                if (duration <= 0)
+                var representation = SelectDashRepresentation(videoAdaptation, ns);
+                if (representation is null)
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
-                        "The DASH SegmentTemplate has no duration or SegmentTimeline.",
+                        FailureKind.InvalidContent, "The DASH video AdaptationSet has no Representation.",
                         false, false, DateTimeOffset.UtcNow));
                 }
 
-                TimeSpan totalDuration;
-                try
-                {
-                    totalDuration = XmlConvert.ToTimeSpan(
-                        (string?)root.Attribute("mediaPresentationDuration") ?? string.Empty);
-                }
-                catch (FormatException)
+                videoTrack = BuildDashTrack(root, period, videoAdaptation, representation, ns,
+                    manifest.FinalUri, out var videoError);
+                if (videoTrack is null)
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
-                        "The DASH manifest has no valid mediaPresentationDuration.",
+                        FailureKind.InvalidContent, videoError ?? "The DASH video track is invalid.",
                         false, false, DateTimeOffset.UtcNow));
                 }
+            }
 
-                var segmentSeconds = duration / (double)timescale;
-                var count = (int)Math.Ceiling(totalDuration.TotalSeconds / Math.Max(0.001, segmentSeconds));
-                for (var i = 0; i < count; i++)
+            if (audioAdaptation is not null)
+            {
+                var representation = SelectDashRepresentation(audioAdaptation, ns);
+                if (representation is not null)
                 {
-                    var number = startNumber + i;
-                    var time = (long)i * duration;
-                    var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
-                        mediaTemplate, representationId, bandwidth, number, time));
-                    if (uri is not null)
+                    audioTrack = BuildDashTrack(root, period, audioAdaptation, representation, ns,
+                        manifest.FinalUri, out var audioError);
+                    if (audioTrack is null && videoTrack is null)
                     {
-                        segmentUris.Add(uri);
+                        return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                            FailureKind.InvalidContent, audioError ?? "The DASH audio track is invalid.",
+                            false, false, DateTimeOffset.UtcNow));
                     }
                 }
             }
 
-            if (segmentUris.Count == 0)
+            if (videoTrack is not null && audioTrack is not null)
             {
-                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent, "The DASH manifest produced no segments.",
-                    false, false, DateTimeOffset.UtcNow));
+                return await DownloadAndMuxDashTracksAsync(
+                    job, videoTrack, audioTrack, progress, cancellationToken).ConfigureAwait(false);
             }
 
+            var singleTrack = videoTrack ?? audioTrack!;
             return await AssembleMediaSegmentsAsync(
-                job, initUri, segmentUris, ".mp4", "video/mp4", "Downloading DASH", progress, cancellationToken)
-                .ConfigureAwait(false);
+                job, singleTrack.InitUri, singleTrack.Segments, ".mp4",
+                videoTrack is not null ? "video/mp4" : "audio/mp4",
+                "Downloading DASH", progress, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1232,6 +1168,263 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _));
         }
     }
+
+    private static XElement? SelectDashRepresentation(XElement adaptation, XNamespace ns)
+        => adaptation.Elements(ns + "Representation")
+            .OrderByDescending(r => ParseLong((string?)r.Attribute("bandwidth")))
+            .FirstOrDefault();
+
+    private static DashTrack? BuildDashTrack(
+        XElement root,
+        XElement period,
+        XElement adaptation,
+        XElement representation,
+        XNamespace ns,
+        Uri manifestUri,
+        out string? error)
+    {
+        error = null;
+        var template = representation.Elements(ns + "SegmentTemplate").FirstOrDefault()
+                       ?? adaptation.Elements(ns + "SegmentTemplate").FirstOrDefault()
+                       ?? period.Elements(ns + "SegmentTemplate").FirstOrDefault();
+        if (template is null)
+        {
+            error = "This DASH manifest uses SegmentBase/SegmentList, which is not supported yet.";
+            return null;
+        }
+
+        var baseUri = ResolveDashBase(manifestUri, root, ns);
+        baseUri = ResolveDashBase(baseUri, period, ns);
+        baseUri = ResolveDashBase(baseUri, adaptation, ns);
+        baseUri = ResolveDashBase(baseUri, representation, ns);
+
+        var mediaTemplate = (string?)template.Attribute("media");
+        if (string.IsNullOrWhiteSpace(mediaTemplate))
+        {
+            error = "The DASH SegmentTemplate has no media template.";
+            return null;
+        }
+
+        var representationId = (string?)representation.Attribute("id") ?? "0";
+        var bandwidth = ParseLong((string?)representation.Attribute("bandwidth"));
+        var timescale = Math.Max(1, ParseLong((string?)template.Attribute("timescale"), 1));
+        var duration = ParseLong((string?)template.Attribute("duration"));
+        var startNumber = ParseLong((string?)template.Attribute("startNumber"), 1);
+        var initTemplate = (string?)template.Attribute("initialization");
+        Uri? initUri = null;
+        if (!string.IsNullOrWhiteSpace(initTemplate))
+        {
+            initUri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                initTemplate, representationId, bandwidth, null, null));
+        }
+
+        var segments = new List<Uri>();
+        var timeline = template.Element(ns + "SegmentTimeline");
+        if (timeline is not null)
+        {
+            long time = 0;
+            foreach (var s in timeline.Elements(ns + "S"))
+            {
+                time = ParseLong((string?)s.Attribute("t"), time);
+                var step = ParseLong((string?)s.Attribute("d"));
+                if (step <= 0)
+                {
+                    continue;
+                }
+
+                var repeat = ParseLong((string?)s.Attribute("r"));
+                for (var i = 0; i <= repeat; i++)
+                {
+                    var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                        mediaTemplate, representationId, bandwidth, null, time));
+                    if (uri is not null)
+                    {
+                        segments.Add(uri);
+                    }
+
+                    time += step;
+                }
+            }
+        }
+        else
+        {
+            if (duration <= 0)
+            {
+                error = "The DASH SegmentTemplate has no duration or SegmentTimeline.";
+                return null;
+            }
+
+            TimeSpan totalDuration;
+            try
+            {
+                totalDuration = XmlConvert.ToTimeSpan(
+                    (string?)root.Attribute("mediaPresentationDuration") ?? string.Empty);
+            }
+            catch (FormatException)
+            {
+                error = "The DASH manifest has no valid mediaPresentationDuration.";
+                return null;
+            }
+
+            var segmentSeconds = duration / (double)timescale;
+            var count = (int)Math.Ceiling(totalDuration.TotalSeconds / Math.Max(0.001, segmentSeconds));
+            for (var i = 0; i < count; i++)
+            {
+                var number = startNumber + i;
+                var time = (long)i * duration;
+                var uri = ResolveDashUri(baseUri, ExpandDashTemplate(
+                    mediaTemplate, representationId, bandwidth, number, time));
+                if (uri is not null)
+                {
+                    segments.Add(uri);
+                }
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            error = "The DASH manifest produced no segments.";
+            return null;
+        }
+
+        return new DashTrack(initUri, segments);
+    }
+
+    private async Task<DownloadResult> DownloadAndMuxDashTracksAsync(
+        DownloadJob job,
+        DashTrack videoTrack,
+        DashTrack audioTrack,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var baseName = Path.GetFileNameWithoutExtension(job.FileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "stream";
+        }
+
+        var directory = string.IsNullOrWhiteSpace(job.DestinationDirectory)
+            ? Path.GetDirectoryName(job.FinalFilePath) ?? AppSettings.GetDefaultDownloadDirectory()
+            : job.DestinationDirectory;
+        job.FinalFilePath = FileNameResolver.ResolveUniquePath(
+            directory, baseName + ".mp4", job.ConflictPolicy);
+        job.FileName = Path.GetFileName(job.FinalFilePath);
+        var videoPath = job.PartFilePath + ".video";
+        var audioPath = job.PartFilePath + ".audio";
+        var muxPath = job.PartFilePath + ".mux.mp4";
+        var received = 0L;
+        try
+        {
+            received += await DownloadDashTrackToFileAsync(
+                job, videoTrack, videoPath, received, "Downloading DASH video", progress, cancellationToken)
+                .ConfigureAwait(false);
+            received += await DownloadDashTrackToFileAsync(
+                job, audioTrack, audioPath, received, "Downloading DASH audio", progress, cancellationToken)
+                .ConfigureAwait(false);
+
+            progress?.Report(new TransferProgress(received, null, 0, null, 0, "Muxing audio/video"));
+            var mux = await _muxer.MuxAsync(videoPath, audioPath, muxPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!mux.Success)
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.MuxingFailed,
+                    mux.Error ?? "Audio/video muxing failed.",
+                    false, true,
+                    DateTimeOffset.UtcNow), received, received);
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.ExpectedSha256))
+            {
+                var actual = await Hashing.Sha256FileAsync(muxPath, cancellationToken).ConfigureAwait(false);
+                if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"The muxed output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
+                        false, true, DateTimeOffset.UtcNow), received, received);
+                }
+            }
+
+            File.Move(muxPath, job.FinalFilePath, overwrite: false);
+            var finalBytes = new FileInfo(job.FinalFilePath).Length;
+            DeleteFileQuietly(videoPath);
+            DeleteFileQuietly(audioPath);
+            progress?.Report(new TransferProgress(finalBytes, finalBytes, 0, TimeSpan.Zero, 0, "Completed"));
+            return DownloadResult.Ok(finalBytes, finalBytes, job.FinalFilePath, null, null, "video/mp4");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DownloadResult.Fail(DownloadState.Cancelled, new JobFailure(
+                FailureKind.Cancelled, "The DASH download was cancelled.", false, true, DateTimeOffset.UtcNow),
+                received, received);
+        }
+        catch (DownloadEngineException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure, received, received);
+        }
+        catch (Exception ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _), received, received);
+        }
+        finally
+        {
+            DeleteFileQuietly(videoPath);
+            DeleteFileQuietly(audioPath);
+            DeleteFileQuietly(muxPath);
+        }
+    }
+
+    private async Task<long> DownloadDashTrackToFileAsync(
+        DownloadJob job,
+        DashTrack track,
+        string path,
+        long receivedBase,
+        string phase,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var received = 0L;
+        var stopwatch = Stopwatch.StartNew();
+        var state = new HlsProgressState();
+        await using (var file = new FileStream(
+                         path, FileMode.Create, FileAccess.Write, FileShare.Read,
+                         _options.BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            if (track.InitUri is not null)
+            {
+                received += await DownloadHlsSegmentAsync(
+                    job, track.InitUri, file, receivedBase + received, progress, stopwatch, state, phase,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (var segment in track.Segments)
+            {
+                received += await DownloadHlsSegmentAsync(
+                    job, segment, file, receivedBase + received, progress, stopwatch, state, phase,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return received;
+    }
+
+    private static void DeleteFileQuietly(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // best effort cleanup
+        }
+    }
+
+    private sealed record DashTrack(Uri? InitUri, List<Uri> Segments);
 
     private static Uri ResolveDashBase(Uri current, XElement element, XNamespace ns)
     {

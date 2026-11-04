@@ -81,6 +81,7 @@ public sealed class DownloadManagerService
         _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         _engine.UpdateProxy(_settings.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
+        _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var job in jobs)
@@ -571,6 +572,7 @@ public sealed class DownloadManagerService
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
+            FfmpegPath = settings.FfmpegPath,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
@@ -605,6 +607,7 @@ public sealed class DownloadManagerService
 
         _engine.UpdateProxy(next.Proxy);
         _engine.UpdateSiteLogins(BuildSiteLogins(next));
+        _engine.UpdateFfmpegPath(next.FfmpegPath);
         UpdateSleepPrevention();
         SettingsChanged?.Invoke(this, next);
         Schedule();
@@ -1913,6 +1916,7 @@ public sealed class DownloadManagerService
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
             PreventSleepWhileDownloading = settings.PreventSleepWhileDownloading,
+            FfmpegPath = settings.FfmpegPath,
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,

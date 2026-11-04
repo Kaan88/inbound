@@ -549,6 +549,9 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.Proxy.Username = string.IsNullOrWhiteSpace(settings.Proxy.Username)
             ? null
             : settings.Proxy.Username.Trim();
+        settings.FfmpegPath = string.IsNullOrWhiteSpace(settings.FfmpegPath)
+            ? null
+            : settings.FfmpegPath.Trim();
 
         settings.SiteLogins ??= new List<SiteLogin>();
         settings.SiteLogins.RemoveAll(login =>

@@ -48,6 +48,9 @@ public interface IDownloadEngine
 
     /// <summary>Replaces the in-memory site credentials used for Basic auth.</summary>
     void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins);
+
+    /// <summary>Updates the ffmpeg.exe path used for media muxing.</summary>
+    void UpdateFfmpegPath(string? path);
 }
 
 public interface ICompletionActionExecutor
@@ -69,6 +72,17 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
 
     public Task RequestShutdownAsync(string mode, bool force, CancellationToken cancellationToken)
         => Task.CompletedTask;
+}
+
+public sealed record MediaMuxResult(bool Success, string? Error);
+
+public interface IMediaMuxer
+{
+    Task<MediaMuxResult> MuxAsync(
+        string videoPath,
+        string audioPath,
+        string outputPath,
+        CancellationToken cancellationToken);
 }
 
 public interface ISleepPrevention : IDisposable
