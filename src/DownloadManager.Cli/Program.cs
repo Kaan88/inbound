@@ -440,6 +440,33 @@ internal static class Program
                     return 0;
                 }
 
+                if (sub == "clean-orphans")
+                {
+                    var delete = args.Contains("--delete", StringComparer.OrdinalIgnoreCase);
+                    var reply = await client.RequestAsync(MessageTypes.HostCleanOrphans,
+                        new CleanOrphansRequest { Delete = delete }).ConfigureAwait(false);
+                    var result = reply.GetPayload<CleanOrphansResponse>();
+                    if (json)
+                    {
+                        PrintJson(result);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{(delete ? "deleted" : "quarantined")}: {result?.Processed.Count ?? 0}");
+                        foreach (var path in result?.Processed ?? new List<string>())
+                        {
+                            Console.WriteLine($"  {path}");
+                        }
+
+                        foreach (var path in result?.Failed ?? new List<string>())
+                        {
+                            Console.WriteLine($"  failed: {path}");
+                        }
+                    }
+
+                    return result?.Ok == true ? 0 : 1;
+                }
+
                 if (sub == "open")
                 {
                     var reply = await client.RequestAsync(MessageTypes.HostOpenUi,

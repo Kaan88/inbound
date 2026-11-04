@@ -193,6 +193,14 @@ public sealed class HostPipeServer
                         _service.GetSnapshot().Status).ConfigureAwait(false);
                     break;
 
+                case MessageTypes.HostCleanOrphans:
+                    var cleanOrphans = message.GetPayload<CleanOrphansRequest>();
+                    await Reply(client, message, MessageTypes.HostCleanOrphansResult,
+                        await _service.CleanOrphanPartFilesAsync(cleanOrphans.Delete, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
                     await Reply(client, message, MessageTypes.JobsSnapshot, _service.GetSnapshot())

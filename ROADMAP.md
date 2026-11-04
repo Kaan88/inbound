@@ -140,7 +140,7 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
 | P5.8 | Destination free-space preflight | done | P5.7 | Known-length jobs check destination free space with a 1 MiB reserve and fail `diskFull` before writing (E70). |
-| P5.9 | Stale destination part cleanup | partial | P5.7 | Unattached `.part` files in known dest/category folders are reported in host status/logs; automatic removal/quarantine remains (E71). |
+| P5.9 | Stale destination part cleanup | done | P5.7 | Unattached `.part` files are reported (E71) and can be quarantined to `.dm-orphans` or deleted via `dm host clean-orphans [--delete]` (E90). No WinUI button yet. |
 
 **Payload placement decision (2026-11-04):** unlike reference app's fixed temporary
 directory plus post-download stitching, our engine writes every range directly

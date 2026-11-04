@@ -228,6 +228,52 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task OrphanPartFilesCanBeQuarantinedOrDeleted()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var attached = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/attached.bin?size=8192&seed=310",
+                DestinationDirectory = ctx.Destination,
+                FileName = "attached.bin",
+                StartMode = "later",
+                Source = "cli",
+            });
+            Assert.True(attached.Accepted, attached.Error);
+            var attachedPart = attached.Job!.PartFilePath;
+            await File.WriteAllBytesAsync(attachedPart, new byte[20]);
+            var first = Path.Combine(ctx.Destination, $"orphan-a.{Guid.NewGuid():N}.part");
+            var second = Path.Combine(ctx.Destination, $"orphan-b.{Guid.NewGuid():N}.part");
+            await File.WriteAllBytesAsync(first, new byte[10]);
+
+            var quarantined = await ctx.Service.CleanOrphanPartFilesAsync(false, CancellationToken.None);
+            Assert.True(quarantined.Ok);
+            Assert.Contains(first, quarantined.Processed, StringComparer.OrdinalIgnoreCase);
+            Assert.False(File.Exists(first));
+            var quarantine = Path.Combine(ctx.Destination, DownloadManagerService.OrphanQuarantineFolderName);
+            Assert.True(File.Exists(Path.Combine(quarantine, Path.GetFileName(first))));
+
+            await File.WriteAllBytesAsync(second, new byte[10]);
+            var deleted = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
+            Assert.True(deleted.Ok);
+            Assert.Single(deleted.Processed);
+            Assert.False(File.Exists(second));
+            Assert.Empty(ctx.Service.GetSnapshot().Status.OrphanPartFiles);
+            // Quarantined files are not rescanned or deleted, and the job is untouched.
+            Assert.True(File.Exists(Path.Combine(quarantine, Path.GetFileName(first))));
+            Assert.True(File.Exists(attachedPart));
+            Assert.DoesNotContain(attachedPart, quarantined.Processed.Concat(deleted.Processed),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task OrphanPartFilesAreReported()
     {
         var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);

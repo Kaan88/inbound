@@ -42,6 +42,8 @@ public static class MessageTypes
     public const string HostShutdown = "host.shutdown";
     public const string HostPing = "host.ping";
     public const string HostOpenUi = "host.openUi";
+    public const string HostCleanOrphans = "host.cleanOrphans";
+    public const string HostCleanOrphansResult = "host.cleanOrphansResult";
     public const string HostActionResult = "host.actionResult";
     public const string HandoffRequest = "handoff.request";
     public const string HandoffAck = "handoff.ack";

@@ -239,6 +239,20 @@ public sealed class JobActionResponse
     public string? Error { get; set; }
 }
 
+public sealed class CleanOrphansRequest
+{
+    /// <summary>When true orphans are deleted; otherwise moved to a per-folder quarantine.</summary>
+    public bool Delete { get; set; }
+}
+
+public sealed class CleanOrphansResponse
+{
+    public bool Ok { get; set; }
+    public List<string> Processed { get; set; } = new();
+    public List<string> Failed { get; set; } = new();
+    public string? Error { get; set; }
+}
+
 public sealed class QueueActionRequest
 {
     public int QueueId { get; set; }

@@ -1471,8 +1471,7 @@ normal shell) and C3 (explicit Chrome-only scope).
    integration evidence exists for the dialog.
 2. Grabber polish (Phase 10 remainder): result preview, JS-rendered pages,
    robots.txt, crawler auth/proxy.
-3. Phase 5: automatic removal/quarantine of orphan `.part` files (P5.9 is
-   `partial`; they are only reported today).
+3. Phase 5: orphan `.part` quarantine/delete is done via CLI/IPC (E90); a WinUI affordance is still missing.
 4. Phase 11/12: clean-Windows install/upgrade/uninstall acceptance (still
    unverified outside this harness), L4 launch-at-sign-in from a normal shell,
    independent visual review, independent kill/restart verification (P2.7,

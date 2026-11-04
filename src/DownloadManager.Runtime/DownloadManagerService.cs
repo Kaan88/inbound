@@ -2156,6 +2156,83 @@ public sealed class DownloadManagerService
         _schedulerTask = null;
     }
 
+    public const string OrphanQuarantineFolderName = ".dm-orphans";
+
+    /// <summary>
+    /// Rescans for unattached <c>.part</c> files and either deletes them or moves them
+    /// into a <see cref="OrphanQuarantineFolderName"/> folder next to where they were found.
+    /// Files that became attached to a job since the last scan are never touched.
+    /// </summary>
+    public Task<CleanOrphansResponse> CleanOrphanPartFilesAsync(bool delete, CancellationToken cancellationToken)
+    {
+        ScanOrphanPartFiles();
+        List<string> candidates;
+        lock (_sync)
+        {
+            candidates = _orphanPartFiles.ToList();
+        }
+
+        var attached = _jobs.Values
+            .Select(runtime => runtime.Job.PartFilePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.GetFullPath(path!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var response = new CleanOrphansResponse { Ok = true };
+        foreach (var path in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (attached.Contains(Path.GetFullPath(path)) || !File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (delete)
+                {
+                    File.Delete(path);
+                    _log?.Invoke($"Deleted orphan partial file: {path}");
+                }
+                else
+                {
+                    var folder = Path.Combine(Path.GetDirectoryName(path)!, OrphanQuarantineFolderName);
+                    Directory.CreateDirectory(folder);
+                    var target = Path.Combine(folder, Path.GetFileName(path));
+                    var counter = 1;
+                    while (File.Exists(target))
+                    {
+                        target = Path.Combine(folder,
+                            $"{Path.GetFileNameWithoutExtension(path)} ({counter++}){Path.GetExtension(path)}");
+                    }
+
+                    File.Move(path, target);
+                    _log?.Invoke($"Quarantined orphan partial file: {path} -> {target}");
+                }
+
+                response.Processed.Add(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                response.Failed.Add(path);
+                _log?.Invoke($"Could not clean orphan partial file '{path}': {ex.Message}");
+            }
+        }
+
+        lock (_sync)
+        {
+            _orphanPartFiles.RemoveAll(response.Processed.Contains);
+        }
+
+        response.Ok = response.Failed.Count == 0;
+        if (!response.Ok)
+        {
+            response.Error = $"{response.Failed.Count} orphan file(s) could not be cleaned";
+        }
+
+        return Task.FromResult(response);
+    }
+
     private void ScanOrphanPartFiles()
     {
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
