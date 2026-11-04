@@ -926,6 +926,21 @@ random-access part file **in the destination directory**:
 - TestServer now has `/large/{name}` (streams 200 MB without allocating it) and
   `/large/expected` for the streaming hash.
 
+## Retry/reconciliation evidence (R5/R7/R8, 2026-11-04)
+
+- R5: engine `RetriesTransientServerErrors` hit `/flaky/retry.bin` with two
+  injected 500 responses; the third request completed 65,536 bytes with the
+  expected SHA-256, and the server saw exactly 3 requests.
+- R7: integration `CrashReconciliationClampsMetadataToPartFile` shortened a
+  1,024-byte part while its checkpoint claimed 3,000 bytes; a fresh service
+  reported `ReceivedBytes=1024`. Removing the part made a fresh service report
+  `ReceivedBytes=0`.
+- R8: existing `ServerIgnoringRangeRestartsFromZero`,
+  `ChangedRemoteContentRestartsSafely`, and
+  `AlwaysBadRangeFailsWithoutCorruption` cover safe zero restarts and the
+  terminal `RangeUnsupported` case.
+- Engine suite **25/25**, integration **56/56**.
+
 ## DASH SegmentBase/SegmentList range evidence (V4, 2026-11-04)
 
 - Media segments now carry inclusive byte ranges. Range requests are issued with
@@ -1049,15 +1064,15 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **24/24 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **25/25 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
-  HTML-page policy, and monotonic progress/ETA.
+  HTML-page policy, monotonic progress/ETA, and transient-500 retry recovery.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **55/55 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **56/56 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1065,10 +1080,11 @@ random-access part file **in the destination directory**:
   SegmentTemplate/Timeline/SegmentList/SegmentBase byte ranges, DASH A/V muxing,
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
-  recent-URL history, pause-vs-cancel partial files, the scoped site
-  grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
-  post-download hook isolation, connection profiles, secret-preserving settings
-  updates, installer-only update check/download, and segment/progress details.
+  recent-URL history, pause-vs-cancel partial files, crash metadata clamping,
+  the scoped site grabber/offline mirror, persistent/scheduled grabber projects,
+  FTP auth/resume, post-download hook isolation, connection profiles,
+  secret-preserving settings updates, installer-only update check/download, and
+  segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

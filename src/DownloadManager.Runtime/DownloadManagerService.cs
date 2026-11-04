@@ -2112,11 +2112,21 @@ public sealed class DownloadManagerService
             job.ContentType ??= checkpoint.ContentType;
         }
 
-        if (job.ReceivedBytes > 0 && !File.Exists(job.PartFilePath))
+        var partLength = File.Exists(job.PartFilePath)
+            ? new FileInfo(job.PartFilePath).Length
+            : (long?)null;
+        if (job.ReceivedBytes > 0 && partLength is null)
         {
             // The partial payload is gone. Resume will start from zero rather than
             // pretend the missing bytes are present.
             job.ReceivedBytes = 0;
+            changed = true;
+        }
+        else if (partLength is { } length && job.ReceivedBytes > length)
+        {
+            // A truncated or externally shortened part file cannot support the
+            // metadata byte count; clamp it so resume never trusts phantom bytes.
+            job.ReceivedBytes = length;
             changed = true;
         }
 

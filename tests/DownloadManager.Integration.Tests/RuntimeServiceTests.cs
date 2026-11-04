@@ -103,6 +103,75 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task CrashReconciliationClampsMetadataToPartFile()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/clamp.bin?size=4096&seed=15",
+                DestinationDirectory = ctx.Destination,
+                FileName = "clamp.bin",
+                StartMode = "later",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var jobId = response.Job!.Id;
+            var partPath = response.Job.PartFilePath;
+            await File.WriteAllBytesAsync(partPath, new byte[1024]);
+            var checkpoints = new JsonCheckpointStore(ctx.Paths);
+            await checkpoints.SaveAsync(new DownloadCheckpoint
+            {
+                JobId = jobId,
+                Url = response.Job.Url,
+                TotalBytes = 4096,
+                Segments =
+                {
+                    new SegmentCheckpoint
+                    {
+                        Start = 0,
+                        End = 4095,
+                        Completed = 3000,
+                    },
+                },
+            });
+
+            var shortened = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            try
+            {
+                var job = shortened.Service.GetJob(jobId);
+                Assert.NotNull(job);
+                Assert.Equal(1024, job!.ReceivedBytes);
+                Assert.Equal(4096, job.TotalBytes);
+            }
+            finally
+            {
+                await shortened.DisposeAsync();
+            }
+
+            File.Delete(partPath);
+            var missing = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            try
+            {
+                var job = missing.Service.GetJob(jobId);
+                Assert.NotNull(job);
+                Assert.Equal(0, job!.ReceivedBytes);
+            }
+            finally
+            {
+                await missing.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task RestartServiceAndResumeFromDisk()
     {
         var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);

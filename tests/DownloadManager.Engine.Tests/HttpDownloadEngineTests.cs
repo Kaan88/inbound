@@ -464,6 +464,27 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task RetriesTransientServerErrors()
+    {
+        using var ctx = new EngineContext();
+        const int size = 65_536;
+        using var engine = CreateEngine(maxAttempts: 4);
+        var result = await engine.ExecuteAsync(
+            ctx.CreateJob(
+                $"{_server.BaseAddress}/flaky/retry.bin?size={size}&seed=16&failures=2",
+                "retry.bin"),
+            null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(size, new FileInfo(result.FinalFilePath!).Length);
+        Assert.Equal(3, _server.FlakyRequests("retry.bin"));
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(16, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
     public async Task HtmlPageIsSavedOnlyForHtmlLikeTargets()
     {
         using var ctx = new EngineContext();

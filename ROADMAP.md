@@ -84,12 +84,12 @@ never appear successful.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P2.1 | Durable job store with atomic writes and migration | pending | P1.1 | Kill between writes leaves loadable state |
-| P2.2 | Checkpoint + `.part` file protocol | pending | P2.1 | Restart resumes at exact byte |
-| P2.3 | Range validation (206, Content-Range, validators) | pending | P2.2 | Ignored/invalid ranges restart safely |
-| P2.4 | Changed remote content detection | pending | P2.3 | ETag/Last-Modified/length mismatch restarts, never combines |
-| P2.5 | Retry/backoff/offline/disk-full/permission recovery | pending | P2.2 | Fault tests produce recoverable vs permanent states |
-| P2.6 | Crash reconciliation | pending | P2.1 | Orphan/missing part files are classified and reported |
+| P2.1 | Durable job store with atomic writes and migration | done | P1.1 | Restart tests load jobs, settings, queues and metadata (E12/E23/E35) |
+| P2.2 | Checkpoint + `.part` file protocol | done | P2.1 | Destination-local part and byte-exact resume verified (E12/E28) |
+| P2.3 | Range validation (206, Content-Range, validators) | done | P2.2 | Ignored/invalid ranges restart safely; bad ranges fail without corruption (E67) |
+| P2.4 | Changed remote content detection | done | P2.3 | Length/validator mismatch restarts instead of combining (E28/E67) |
+| P2.5 | Retry/backoff/offline/disk-full/permission recovery | partial | P2.2 | Transient 500 retry, timeout and DNS/TLS classes done (E61/E65); disk-full and permission failure remain untested |
+| P2.6 | Crash reconciliation | partial | P2.1 | Short/missing part metadata is clamped safely (E66); long/orphan part handling remains |
 | P2.7 | Independent verification of interruption/recovery | pending | P2.6 | Subagent runs kill/restart matrix; hashes match |
 
 **Exit gate:** forced termination/restart preserves safe recovery; incompatible

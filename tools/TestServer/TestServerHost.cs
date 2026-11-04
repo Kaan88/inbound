@@ -80,6 +80,8 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public int DashRangeRequests(string name) => _dashRangeRequests.GetValueOrDefault(name);
 
+    public int FlakyRequests(string name) => _requestCounts.GetValueOrDefault($"flaky-{name}");
+
     public void ResetHlsStats()
     {
         _hlsSegmentRequests.Clear();
@@ -1030,6 +1032,31 @@ public sealed class TestServerHost : IAsyncDisposable
         {
             context.Response.StatusCode = code;
             await context.Response.WriteAsync($"error {code}").ConfigureAwait(false);
+        });
+
+        _app.MapGet("/flaky/{name}", async (HttpContext context, string name) =>
+        {
+            if (!string.Equals(Path.GetFileName(name), name, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var count = _requestCounts.AddOrUpdate(
+                $"flaky-{name}", 1, (_, existing) => existing + 1);
+            var failures = QueryInt(context, "failures", 1);
+            if (count <= failures)
+            {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("temporary failure").ConfigureAwait(false);
+                return;
+            }
+
+            var size = QueryInt(context, "size", 65536);
+            var seed = QueryInt(context, "seed", 1);
+            await ServeAsync(context, ContentFor(name, size, seed), name,
+                allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false)
+                .ConfigureAwait(false);
         });
 
         _app.MapPost("/admin/reset", () =>
