@@ -303,6 +303,37 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task DynamicWorkRedistributionStealsSlowSegment()
+    {
+        const int size = 4 * 1024 * 1024;
+        using var ctx = new EngineContext();
+        _server.ResetSlowFirstStats();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/slowfirst/steal.bin?size={size}&seed=31&bps=262144",
+            "steal.bin");
+        job.RequestedConnections = 2;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        stopwatch.Stop();
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(7),
+            $"segmented transfer took {stopwatch.Elapsed}; slow work was not redistributed");
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(31, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+
+        var starts = _server.SlowFirstRanges()
+            .Select(range => range.Replace("bytes=", string.Empty, StringComparison.OrdinalIgnoreCase))
+            .Select(range => range.Split('-')[0])
+            .Select(long.Parse)
+            .ToList();
+        Assert.Contains(starts, start => start > 0 && start < size / 2);
+    }
+
+    [Fact]
     public async Task SegmentedDownloadResumesFromCheckpoint()
     {
         const int size = 2 * 1024 * 1024;

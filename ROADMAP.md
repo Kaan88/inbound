@@ -18,9 +18,9 @@
 - Phase 4: in progress (automatic, context-menu, and authenticated handoff
   verified with hashes; failure-path recovery, disabled integration, and
   independent verification remain).
-- Phase 5: in progress (segmented transfer/resume/fallback verified; dynamic
-  redistribution, global/per-host limits, throughput benchmark, and independent
-  verification remain).
+- Phase 5: in progress (segmented transfer/resume/fallback and dynamic work
+  redistribution verified; global/per-host limits, throughput benchmark, and
+  independent verification remain).
 - Phase 7: in progress (cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
   proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundaries,
   expired-URL classification, and Refresh Download Address with partial resume

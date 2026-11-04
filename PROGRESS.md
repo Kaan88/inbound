@@ -942,6 +942,24 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Dynamic work-redistribution evidence (A4, 2026-11-04)
+
+- Segmented transfers now run a worker pool capped at the requested connection
+  count. Idle workers split the in-flight segment with the largest remaining
+  range at its midpoint and download the tail; the original worker stops at the
+  reduced boundary. Split segments join the checkpoint list under the same lock
+  as snapshots, so resume state stays contiguous.
+- Engine `DynamicWorkRedistributionStealsSlowSegment` (suite **29/29**):
+  - 4 MiB, 2 connections, 256 KiB/s throttle for requests starting at byte 0;
+  - completed in about 1 s (the 2 MiB slow range alone needs about 8 s);
+  - matched the seed-31 hash and recorded a stolen mid-range request.
+- Published CLI: `steal-live.bin` 4 MiB / 2 connections completed in **1.66 s**.
+  Range requests: `0-0`, `0-2097151`, `2097152-4194303`, then stolen
+  `1050472-2097151`, `527132-1050471`, `296334-527131`.
+- SHA-256 `db7013ecafc99eb74cdbfdc3ce75f096a8e1098692ea132a70902d715cd21b00`
+  matched seed 777; file size 4,194,304 bytes.
+- Stealing requires at least 256 KiB remaining; no cross-job stealing.
+
 ## Chrome host-outage recovery evidence (B10, 2026-11-04)
 
 - Outage: Host and NativeHost stopped and the native-messaging registry key
@@ -1233,11 +1251,12 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **28/28 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **29/29 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
   HTML-page policy, monotonic progress/ETA, transient-500 retry recovery,
-  per-download speed limiting, disk-full preflight, and permission failure.
+  per-download speed limiting, disk-full preflight, permission failure, and
+  dynamic work redistribution.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,

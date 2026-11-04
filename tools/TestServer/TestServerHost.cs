@@ -21,6 +21,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashRangeRequests = new(StringComparer.Ordinal);
+    private readonly ConcurrentQueue<string> _slowFirstRanges = new();
     private byte[]? _updateManifest;
     private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
@@ -87,6 +88,16 @@ public sealed class TestServerHost : IAsyncDisposable
         _hlsSegmentRequests.Clear();
         _dashSegmentRequests.Clear();
         _dashRangeRequests.Clear();
+    }
+
+    public IReadOnlyList<string> SlowFirstRanges()
+        => _slowFirstRanges.ToArray();
+
+    public void ResetSlowFirstStats()
+    {
+        while (_slowFirstRanges.TryDequeue(out _))
+        {
+        }
     }
 
     public void SetUpdatePayload(byte[] manifest, byte[] package)
@@ -315,6 +326,27 @@ public sealed class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: QueryInt(context, "bps", 64 * 1024),
                 unknownLength: false).ConfigureAwait(false);
         });
+
+        _app.MapGet("/slowfirst/{name}", async (HttpContext context, string name) =>
+        {
+            var size = QueryInt(context, "size", 4 * 1024 * 1024);
+            var seed = QueryInt(context, "seed", 1);
+            var range = context.Request.Headers.Range.ToString();
+            if (!string.IsNullOrWhiteSpace(range))
+            {
+                _slowFirstRanges.Enqueue(range);
+            }
+
+            await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                throttleBytesPerSecond: QueryInt(context, "bps", 256 * 1024),
+                unknownLength: false,
+                throttleWhenStartIsZero: true).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/slowfirst/stats", () => Results.Json(new
+        {
+            ranges = _slowFirstRanges.ToArray(),
+        }));
 
         _app.MapGet("/truncate/{name}", async (HttpContext context, string name) =>
         {
@@ -1107,7 +1139,8 @@ public sealed class TestServerHost : IAsyncDisposable
         bool badRange = false,
         int? cutAt = null,
         bool forceFullForRange = false,
-        bool forcePartial = false)
+        bool forcePartial = false,
+        bool throttleWhenStartIsZero = false)
     {
         var etag = $"\"{etagName}-{content.Length}-{Convert.ToHexString(SHA256.HashData(content))[..12]}\"";
         var lastModified = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(content.Length % 1000);
@@ -1164,6 +1197,9 @@ public sealed class TestServerHost : IAsyncDisposable
             totalToWrite = Math.Min(totalToWrite, cutAt.Value);
         }
 
+        var effectiveThrottle = throttleWhenStartIsZero && start != 0
+            ? 0
+            : throttleBytesPerSecond;
         var buffer = new byte[64 * 1024];
         var written = 0L;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -1177,9 +1213,9 @@ public sealed class TestServerHost : IAsyncDisposable
                     .ConfigureAwait(false);
                 written += count;
 
-                if (throttleBytesPerSecond > 0)
+                if (effectiveThrottle > 0)
                 {
-                    var expected = written / (double)throttleBytesPerSecond;
+                    var expected = written / (double)effectiveThrottle;
                     var delay = TimeSpan.FromSeconds(expected) - stopwatch.Elapsed;
                     if (delay > TimeSpan.Zero)
                     {

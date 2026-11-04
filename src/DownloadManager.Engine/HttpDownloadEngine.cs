@@ -2855,7 +2855,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         run.Reporter = reporter;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         run.Cancellation = linked;
-        var tasks = segments.Select(segment => DownloadSegmentAsync(run, segment, linked.Token)).ToArray();
+        var workerCount = Math.Max(1, Math.Min(job.RequestedConnections, Math.Max(1, segments.Count)));
+        var tasks = Enumerable.Range(0, workerCount)
+            .Select(_ => RunSegmentWorkerAsync(run, linked.Token))
+            .ToArray();
         DownloadResult? failure = null;
 
         try
@@ -2965,26 +2968,124 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             response.Content.Headers.ContentType?.ToString());
     }
 
+    private async Task RunSegmentWorkerAsync(
+        SegmentedRun run,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SegmentCheckpoint? work = null;
+            lock (run.Sync)
+            {
+                foreach (var candidate in run.Segments)
+                {
+                    if (run.Claimed.Contains(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (candidate.Completed < candidate.End - candidate.Start + 1)
+                    {
+                        run.Claimed.Add(candidate);
+                        work = candidate;
+                        break;
+                    }
+                }
+            }
+
+            work ??= TryStealSegment(run);
+            if (work is null)
+            {
+                return;
+            }
+
+            await DownloadSegmentAsync(run, work, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private const long MinimumStealBytes = 256 * 1024;
+
+    private static SegmentCheckpoint? TryStealSegment(SegmentedRun run)
+    {
+        lock (run.Sync)
+        {
+            SegmentCheckpoint? victim = null;
+            long bestRemaining = 0;
+            foreach (var segment in run.Segments)
+            {
+                if (!run.Claimed.Contains(segment))
+                {
+                    continue;
+                }
+
+                var remaining = segment.End - (segment.Start + segment.Completed) + 1;
+                if (remaining > bestRemaining)
+                {
+                    bestRemaining = remaining;
+                    victim = segment;
+                }
+            }
+
+            if (victim is null || bestRemaining < MinimumStealBytes)
+            {
+                return null;
+            }
+
+            var nextByte = victim.Start + victim.Completed;
+            var oldEnd = victim.End;
+            var split = nextByte + bestRemaining / 2;
+            if (split <= nextByte || split > oldEnd)
+            {
+                return null;
+            }
+
+            victim.End = split - 1;
+            var stolen = new SegmentCheckpoint
+            {
+                Start = split,
+                End = oldEnd,
+                Completed = 0,
+            };
+            run.Segments.Add(stolen);
+            run.Claimed.Add(stolen);
+            return stolen;
+        }
+    }
+
     private async Task DownloadSegmentAsync(
         SegmentedRun run,
         SegmentCheckpoint segment,
         CancellationToken cancellationToken)
     {
         var job = run.Job;
-        var length = segment.End - segment.Start + 1;
         var attempt = 0;
         Interlocked.Increment(ref run.ActiveConnections);
         try
         {
-            while (segment.Completed < length)
+            while (true)
             {
+                long length;
+                long offset;
+                long requestEnd;
+                lock (run.Sync)
+                {
+                    length = segment.End - segment.Start + 1;
+                    if (segment.Completed >= length)
+                    {
+                        break;
+                    }
+
+                    offset = segment.Start + segment.Completed;
+                    requestEnd = segment.End;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
                 try
                 {
-                    var offset = segment.Start + segment.Completed;
-                    using var response = await SendWithRedirectsAsync(job, offset, cancellationToken, segment.End)
-                        .ConfigureAwait(false);
+                    using var response = await SendWithRedirectsAsync(
+                        job, offset, cancellationToken, requestEnd).ConfigureAwait(false);
                     var status = (int)response.StatusCode;
 
                     if (status == 200)
@@ -2994,7 +3095,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
                     if (status == 416)
                     {
-                        if (segment.Completed == length)
+                        lock (run.Sync)
+                        {
+                            length = segment.End - segment.Start + 1;
+                        }
+
+                        if (segment.Completed >= length)
                         {
                             break;
                         }
@@ -3012,7 +3118,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     if (status is 408 or 425 or 429 || status >= 500)
                     {
                         throw new SegmentFailureException(
-                            new JobFailure(FailureKind.Http, $"The server returned HTTP {status} for a segment.",
+                            new JobFailure(FailureKind.Http,
+                                $"The server returned HTTP {status} for a segment.",
                                 true, true, DateTimeOffset.UtcNow),
                             retryable: true);
                     }
@@ -3020,13 +3127,14 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     if (status != 206)
                     {
                         throw new SegmentFailureException(
-                            new JobFailure(FailureKind.Http, $"Unexpected HTTP {status} for a segment.",
+                            new JobFailure(FailureKind.Http,
+                                $"Unexpected HTTP {status} for a segment.",
                                 false, false, DateTimeOffset.UtcNow),
                             retryable: false);
                     }
 
                     var range = response.Content.Headers.ContentRange;
-                    if (range?.From != offset || range.To is null || range.To > segment.End)
+                    if (range?.From != offset || range.To is null || range.To < offset)
                     {
                         throw new SegmentationUnsupportedException();
                     }
@@ -3051,9 +3159,19 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             retryable: false);
                     }
 
-                    var remaining = length - segment.Completed;
+                    long remaining;
+                    lock (run.Sync)
+                    {
+                        remaining = segment.End - offset + 1;
+                    }
+
+                    if (remaining <= 0)
+                    {
+                        break;
+                    }
+
                     var contentLength = response.Content.Headers.ContentLength;
-                    if (contentLength is > 0 && contentLength != remaining)
+                    if (contentLength is > 0 && contentLength < remaining)
                     {
                         throw new SegmentFailureException(
                             new JobFailure(FailureKind.InvalidContent,
@@ -3062,9 +3180,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             retryable: true);
                     }
 
-                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                        .ConfigureAwait(false);
                     var buffer = new byte[_options.BufferSize];
                     var writeOffset = offset;
+                    var truncated = false;
                     while (true)
                     {
                         var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken)
@@ -3076,34 +3196,54 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             break;
                         }
 
-                        if (read > length - segment.Completed)
+                        int allowed;
+                        lock (run.Sync)
                         {
-                            throw new SegmentFailureException(
-                                new JobFailure(FailureKind.InvalidContent,
-                                    "A segment response exceeded its range.",
-                                    false, false, DateTimeOffset.UtcNow),
-                                retryable: false);
+                            var remainingToWrite = segment.End - writeOffset + 1;
+                            allowed = (int)Math.Min(read, Math.Max(0, remainingToWrite));
+                        }
+
+                        if (allowed <= 0)
+                        {
+                            truncated = true;
+                            break;
+                        }
+
+                        if (allowed < read)
+                        {
+                            truncated = true;
                         }
 
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
-                                buffer.AsMemory(0, read),
+                                buffer.AsMemory(0, allowed),
                                 writeOffset,
                                 cancellationToken)
                             .ConfigureAwait(false);
-                        writeOffset += read;
+                        writeOffset += allowed;
 
                         lock (run.Sync)
                         {
-                            segment.Completed += read;
-                            run.AggregateBytes += read;
+                            segment.Completed += allowed;
+                            run.AggregateBytes += allowed;
                         }
 
                         run.Reporter.Report(force: false, "Downloading");
-                        await MaybeSaveSegmentedCheckpointAsync(run, cancellationToken).ConfigureAwait(false);
+                        await MaybeSaveSegmentedCheckpointAsync(run, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (truncated)
+                        {
+                            break;
+                        }
                     }
 
-                    if (segment.Completed < length)
+                    lock (run.Sync)
+                    {
+                        length = segment.End - segment.Start + 1;
+                    }
+
+                    if (!truncated && segment.Completed < length)
                     {
                         throw new SegmentFailureException(
                             new JobFailure(FailureKind.Network,
@@ -3127,8 +3267,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         throw;
                     }
 
-                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
-                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                        .ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -3138,8 +3280,10 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                         throw new SegmentFailureException(failure, retryable);
                     }
 
-                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
-                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                        .ConfigureAwait(false);
                 }
             }
         }
@@ -3341,6 +3485,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         public SegmentedPlan Plan { get; }
         public FileStream File { get; }
         public List<SegmentCheckpoint> Segments { get; }
+        public HashSet<SegmentCheckpoint> Claimed { get; } = new();
         public object Sync { get; } = new();
         public long AggregateBytes { get; set; }
         public int ActiveConnections;
