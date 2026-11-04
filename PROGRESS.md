@@ -942,6 +942,27 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Chrome interception-rule evidence (B8, 2026-11-04)
+
+- Rules were saved through `options.html` (not injected): intercept allow-list,
+  excluded extensions and excluded hosts.
+- Automatic-interception matrix (`downloads.download` uses the same
+  `downloads.onCreated` path as page downloads):
+  - allow-all: `b8-baseline.bin` produced no Chrome item and one `chromeAuto`
+    Host job in `test-downloads\b8`, 262,144 bytes, SHA-256
+    `af45672194af38d11fd2ef7a2b65bf7da7a8f7274528b9c3900ef5f8128338bd`.
+  - `interceptedExtensions=['zip']`: `b8-type.dat` completed in Chrome, no Host
+    job.
+  - `excludedExtensions=['bin']`: `b8-excluded-ext.bin` completed in Chrome, no
+    Host job.
+  - `excludedHosts=['127.0.0.1']`: `b8-excluded-host.bin` completed in Chrome,
+    no Host job.
+- Temporary bypass: the popup button changed the persisted `bypassUntil` from 0
+  to `1793767884661` and displayed `Bypassed (5 min)`; `b8-bypass.bin` completed
+  in Chrome with no Host job.
+- Limits: host patterns are exact/subdomain strings (no ports or URL globs);
+  rules apply only to automatic interception, not manual handoff.
+
 ## Chrome destination/start-mode handoff evidence (B6, 2026-11-04)
 
 - The handoff window now prefills the last confirmed destination and start mode
