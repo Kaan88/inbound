@@ -820,7 +820,7 @@ public sealed class TestServerHost : IAsyncDisposable
                 "src=\"/file/media-video.mp4?size=524288&seed=201\"></video>" +
                 "<audio id=\"audio\" controls " +
                 "src=\"/file/media-audio.mp3?size=262144&seed=202\"></audio>" +
-                "<p><a href=\"/hls/demo.m3u8\">HLS stream link</a></p>" +
+                "<p><a href=\"/hls/multi.m3u8\">HLS stream link</a></p>" +
                 "</body></html>").ConfigureAwait(false);
         });
 

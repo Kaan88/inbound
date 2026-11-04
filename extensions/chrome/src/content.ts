@@ -78,7 +78,120 @@ function scan(): void {
     }
   }
 
+  updatePanel();
   send();
+}
+
+let panelHost: HTMLDivElement | null = null;
+let panelRoot: ShadowRoot | null = null;
+
+const PANEL_STYLE = `
+  :host { all: initial; }
+  .wrap { display: flex; flex-direction: column; align-items: flex-end; font: 12px/1.4 "Segoe UI", system-ui, sans-serif; }
+  #dm-toggle { border: 0; border-radius: 999px; background: #185abc; color: #fff; padding: 7px 12px;
+    font: 600 12px/1 "Segoe UI", system-ui, sans-serif; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  .panel { margin-top: 6px; width: 300px; max-height: 340px; overflow: auto; background: #fff; color: #172033;
+    border: 1px solid #dbe3f0; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); padding: 8px; }
+  .head { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 6px; }
+  .head strong { font-size: 12px; }
+  .close { border: 0; background: transparent; color: #627089; font-size: 15px; cursor: pointer; padding: 0 4px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 2px; border-top: 1px solid #eef3fb; }
+  .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kind { color: #627089; font-size: 11px; }
+  .dl { grid-column: 2; grid-row: 1 / 3; align-self: center; border: 1px solid #dbe3f0; background: #eef3fb;
+    color: #185abc; border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; }
+  @media (prefers-color-scheme: dark) {
+    .panel { background: #1a202b; color: #e8edf6; border-color: #303b4c; }
+    .row { border-color: #303b4c; }
+    .kind { color: #a0aec2; }
+    .dl { background: #222b39; border-color: #303b4c; color: #6ea8ff; }
+    .close { color: #a0aec2; }
+  }
+`;
+
+function ensurePanel(): ShadowRoot {
+  if (panelRoot) {
+    return panelRoot;
+  }
+
+  const host = document.createElement("div");
+  host.id = "dm-media-panel-host";
+  host.style.cssText = "position:fixed;top:14px;right:14px;z-index:2147483647;";
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML = `<style>${PANEL_STYLE}</style>
+    <div class="wrap">
+      <button id="dm-toggle" type="button">Media</button>
+      <div id="dm-panel" class="panel" hidden>
+        <div class="head"><strong>Media on this page</strong><button id="dm-close" class="close" type="button">×</button></div>
+        <div id="dm-list"></div>
+      </div>
+    </div>`;
+  document.documentElement.append(host);
+  const toggle = root.getElementById("dm-toggle") as HTMLButtonElement;
+  const panel = root.getElementById("dm-panel") as HTMLDivElement;
+  toggle.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+  });
+  (root.getElementById("dm-close") as HTMLButtonElement).addEventListener("click", () => {
+    panel.hidden = true;
+  });
+  panelHost = host;
+  panelRoot = root;
+  return root;
+}
+
+function updatePanel(): void {
+  const items = [...seen.values()];
+  if (items.length === 0) {
+    panelHost?.remove();
+    panelHost = null;
+    panelRoot = null;
+    return;
+  }
+
+  const root = ensurePanel();
+  (root.getElementById("dm-toggle") as HTMLButtonElement).textContent = `Media (${items.length})`;
+  const list = root.getElementById("dm-list") as HTMLDivElement;
+  list.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = item.label || item.kind;
+    name.title = item.url;
+
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = item.kind;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dl";
+    button.textContent = "Download";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "Sending...";
+      try {
+        const result = (await chrome.runtime.sendMessage({
+          type: "dm.queueMedia",
+          url: item.url,
+          pageUrl: location.href,
+        })) as { ok?: boolean; error?: string };
+        button.textContent = result?.ok ? "Sent" : "Retry";
+        button.title = result?.error ?? "";
+      } catch (error) {
+        button.textContent = "Retry";
+        button.title = error instanceof Error ? error.message : String(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    row.append(name, kind, button);
+    list.append(row);
+  }
 }
 
 function send(): void {

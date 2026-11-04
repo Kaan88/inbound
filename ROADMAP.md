@@ -31,8 +31,9 @@
 - Phase 9: in progress (direct media detection, popup resource list, unencrypted
   HLS master/media assembly, static DASH SegmentTemplate assembly, DASH
   audio/video muxing via FFmpeg, HLS/DASH fragment recovery, expiring
-  segment-token refresh, explicit live-stream exclusion, and DRM detection
-  verified; the in-page quality panel and additional DASH/HLS modes remain).
+  segment-token refresh, explicit live-stream exclusion, DRM detection, in-page
+  media panel, and HLS quality selection verified; additional DASH/HLS modes and
+  AES-128 remain).
 - Phase 10: in progress (Download All link collection, filtering, selection, and
   batch handoff verified; crawl scope, link rewriting, and persistent projects
   remain).
@@ -191,9 +192,10 @@ media checkpoints resume HLS/DASH at completed fragment boundaries
 (V6 done; E28). Expiring HLS/DASH segment tokens trigger a safe manifest refresh
 and checkpoint resume (V7 done; E29). Live HLS/DASH is explicitly excluded with
 a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
-`drmProtected` failure without any bypass (V8/V9 done; E30). Remaining: in-page
-panel/quality variants, SegmentBase/SegmentList/timeline DASH, HLS alternate
-audio, and AES-128.
+`drmProtected` failure without any bypass (V8/V9 done; E30). An in-page
+shadow-DOM media panel and HLS quality-variant selection are verified (V2 done;
+E32). Remaining: SegmentBase/SegmentList/timeline DASH, HLS alternate audio, and
+AES-128.
 
 ## Phase 10 - Download All and site grabber (in progress)
 
@@ -256,7 +258,7 @@ searching the account.
 | A3 | Provider browse/add UI + CLI | pending | A2 | Browse/search account files and queue selected items; expired direct links refresh once; CLI equivalent of the UI flow |
 | A4 | Archive extraction (unrar) | pending | A2 | Detect RAR/multi-volume archives; extract through an `IArchiveExtractor` using an external unrar/7z path (never bundled); traversal-safe paths, progress, cleanup policy, and tests with a real archive |
 | A5 | Provider expansion | pending | A1 | Adding a provider requires only a new client + capability declaration; no host/runtime changes |
-| D1 | Cross-platform headless host | pending | A2 | Host runs on Linux without WinForms/WinUI; named-pipe/Unix-socket IPC; XDG state paths; systemd unit; existing runtime tests pass on Linux |
+| D1 | Cross-platform headless host | pending | A2 | Host runs on Linux without WinForms/WinUI; named-pipe/Unix-socket IPC; XDG state paths; systemd unit; existing runtime tests pass on Linux. A user-provided LAN VM is available for verification; credentials are held outside the repository |
 | D2 | Web UI | pending | D1 | Local web app covering downloads, queues, schedules, settings, and provider accounts; authenticated remote access; no WinUI dependency |
 | D3 | Docker packaging | pending | D1/D2 | Dockerfile + compose with state/download volumes, non-root user, healthcheck, host and web UI deployed together |
 | D4 | End-to-end provider/Docker test | pending | A4/D3 | TorBox link/list → queue → download → unrar through the Linux container and web UI, including expiring-link refresh; image/logs contain no token |

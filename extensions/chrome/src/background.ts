@@ -38,10 +38,17 @@ interface JobSummary {
   finalFilePath?: string;
 }
 
+interface MediaVariant {
+  url: string;
+  label: string;
+  bandwidth?: number;
+}
+
 interface MediaItem {
   url: string;
   kind: string;
   label: string;
+  variants?: MediaVariant[];
 }
 
 interface TabMedia {
@@ -94,6 +101,7 @@ const pendingRequests = new Map<
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
 const mediaByTab = new Map<number, TabMedia>();
+const variantCache = new Map<string, { expires: number; variants: MediaVariant[] }>();
 
 void initialize();
 
@@ -489,6 +497,98 @@ function inferFileName(url: string, kind: "link" | "media"): string {
   return `${kind}-${Date.now()}`;
 }
 
+function parseHlsVariants(text: string, baseUrl: string): MediaVariant[] {
+  const lines = text.split(/\r?\n/);
+  const variants: MediaVariant[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] ?? "").trim();
+    if (!line.startsWith("#EXT-X-STREAM-INF:")) {
+      continue;
+    }
+
+    let bandwidth = 0;
+    let resolution = "";
+    let name = "";
+    for (const attribute of line.slice("#EXT-X-STREAM-INF:".length).split(",")) {
+      const separator = attribute.indexOf("=");
+      if (separator < 0) {
+        continue;
+      }
+
+      const key = attribute.slice(0, separator).trim().toUpperCase();
+      const value = attribute.slice(separator + 1).trim().replace(/^"|"$/g, "");
+      if (key === "BANDWIDTH") {
+        bandwidth = Number(value) || 0;
+      } else if (key === "RESOLUTION") {
+        resolution = value;
+      } else if (key === "NAME") {
+        name = value;
+      }
+    }
+
+    let uri = "";
+    for (let j = i + 1; j < lines.length; j++) {
+      const candidate = (lines[j] ?? "").trim();
+      if (!candidate || candidate.startsWith("#")) {
+        continue;
+      }
+
+      uri = candidate;
+      break;
+    }
+
+    if (!uri) {
+      continue;
+    }
+
+    try {
+      const url = new URL(uri, baseUrl).href;
+      const height = Number((resolution.split("x")[1] ?? "").replace("p", ""));
+      const label = name || (height > 0
+        ? `${height}p`
+        : bandwidth > 0 ? `${Math.round(bandwidth / 1000)} kbps` : "variant");
+      variants.push({ url, label, bandwidth });
+    } catch {
+      // ignore malformed variant entries
+    }
+  }
+
+  return variants.sort((a, b) => (b.bandwidth ?? 0) - (a.bandwidth ?? 0));
+}
+
+async function enrichMediaItem(item: MediaItem): Promise<MediaItem> {
+  const isHls = item.kind === "hls" || /\.m3u8(\?|#|$)/i.test(item.url);
+  if (!isHls) {
+    return item;
+  }
+
+  const cached = variantCache.get(item.url);
+  if (cached && cached.expires > Date.now()) {
+    return { ...item, variants: cached.variants.length ? cached.variants : undefined };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    let response: Response;
+    try {
+      response = await fetch(item.url, { credentials: "include", signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+      return item;
+    }
+
+    const variants = parseHlsVariants(await response.text(), response.url || item.url);
+    variantCache.set(item.url, { expires: Date.now() + 5 * 60_000, variants });
+    return { ...item, variants: variants.length ? variants : undefined };
+  } catch {
+    return item;
+  }
+}
+
 async function updateBadge(tabId: number, count: number): Promise<void> {
   try {
     await chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : "" });
@@ -570,11 +670,12 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       }
 
       const media = typeof tabId === "number" ? mediaByTab.get(tabId) : undefined;
+      const items = await Promise.all((media?.items ?? []).map(enrichMediaItem));
       return {
         ok: true,
         tabId,
         pageUrl: media?.pageUrl ?? "",
-        items: media?.items ?? [],
+        items,
       };
     }
 

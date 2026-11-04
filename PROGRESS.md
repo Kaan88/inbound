@@ -456,6 +456,29 @@ random-access part file **in the destination directory**:
 - G2–G4 remain: crawl scope/depth, relative path/link rewriting, preview,
   persistent/scheduled projects.
 
+## In-page panel and quality evidence (V2, 2026-11-04)
+
+- The content script injects a shadow-DOM panel (`#dm-media-panel-host`) with a
+  `Media (N)` badge and a list of detected resources, each with a Download
+  action. The popup additionally lists distinct resources and HLS master
+  variants with quality labels.
+- Background HLS enrichment fetches master playlists (4 s timeout, 5 min cache)
+  and parses `BANDWIDTH`, `RESOLUTION`, and `NAME`; variants are sorted by
+  bandwidth.
+- TestServer `/hls/multi.m3u8` advertises:
+  - `90p`: 160×90, 250 kbps, `media-low.m3u8`;
+  - `180p`: 320×180, 800 kbps, `media.m3u8`.
+- Chrome for Testing 156, `/media-page`:
+  - panel existed with badge `Media (3)` and rows video/audio/HLS (panel was
+    visibly open in the first run);
+  - popup rows: video, audio, HLS, `180p`, `90p`.
+- Selecting `90p` queued `media-low.m3u8`; host completed `v2-low.ts`:
+  - 279,368 bytes, equal to the concatenated low segments;
+  - SHA-256 `e72c04e62c10eb2e926dda45f1af03b3fcc7693c34e6a7c2cda9641b9dea079e`
+    matched;
+  - ffprobe: H.264 160×90 + AAC.
+- Remaining media work: additional DASH modes, HLS alternate audio, AES-128.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -469,7 +492,7 @@ random-access part file **in the destination directory**:
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, and DRM detection.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
-  new `batch.js` Download All window).
+  `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
 
@@ -491,11 +514,10 @@ random-access part file **in the destination directory**:
 
 1. Commit the G1 Download All increment (collection, filter/selection UI, batch
    handoff, evidence).
-2. Phase 9 remainder: in-page/quality panel (V2), additional DASH modes, HLS
-   alternate audio, and AES-128. Direct media detection, popup list, unencrypted
-   HLS, static DASH SegmentTemplate, DASH A/V muxing, fragment recovery,
-   rotating-token refresh, live exclusion, and DRM detection are done
-   (E24–E30).
+2. Phase 9 remainder: additional DASH modes, HLS alternate audio, and AES-128.
+   Direct media detection, in-page/quality panel, unencrypted HLS, static DASH
+   SegmentTemplate, DASH A/V muxing, fragment recovery, rotating-token refresh,
+   live exclusion, and DRM detection are done (E24–E32).
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).

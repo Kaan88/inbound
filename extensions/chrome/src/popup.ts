@@ -29,10 +29,17 @@ interface Status {
   jobs?: JobSummary[];
 }
 
+interface MediaVariant {
+  url: string;
+  label: string;
+  bandwidth?: number;
+}
+
 interface MediaItem {
   url: string;
   kind: string;
   label: string;
+  variants?: MediaVariant[];
 }
 
 interface MediaResponse {
@@ -43,6 +50,7 @@ interface MediaResponse {
   error?: string;
 }
 
+const pageTabId = Number(new URLSearchParams(location.search).get("tabId") ?? "");
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const statusDot = document.getElementById("statusDot") as HTMLSpanElement;
 const statusLabel = document.getElementById("statusLabel") as HTMLSpanElement;
@@ -120,6 +128,32 @@ function renderJobs(jobs: JobSummary[]): void {
   }
 }
 
+function mediaButton(url: string, pageUrl: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "link-button";
+  button.textContent = "Download";
+  button.addEventListener("click", async () => {
+    clearError();
+    button.disabled = true;
+    try {
+      const result = (await chrome.runtime.sendMessage({
+        type: "dm.queueMedia",
+        url,
+        pageUrl,
+      })) as { ok?: boolean; error?: string };
+      if (!result?.ok) {
+        showError(result?.error || "Could not queue this media.");
+      }
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
 function renderMedia(items: MediaItem[], pageUrl: string): void {
   mediaList.replaceChildren();
   if (!items.length) {
@@ -139,34 +173,34 @@ function renderMedia(items: MediaItem[], pageUrl: string): void {
     kind.className = "state";
     kind.textContent = item.kind;
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "link-button";
-    button.textContent = "Download";
-    button.addEventListener("click", async () => {
-      clearError();
-      try {
-        const result = (await chrome.runtime.sendMessage({
-          type: "dm.queueMedia",
-          url: item.url,
-          pageUrl,
-        })) as { ok?: boolean; error?: string };
-        if (!result?.ok) {
-          showError(result?.error || "Could not queue this media.");
-        }
-      } catch (error) {
-        showError(error instanceof Error ? error.message : String(error));
-      }
-    });
-
-    row.append(name, kind, button);
+    row.append(name, kind, mediaButton(item.url, pageUrl));
     mediaList.append(row);
+
+    for (const variant of item.variants ?? []) {
+      const variantRow = document.createElement("li");
+      variantRow.className = "variant";
+
+      const variantName = document.createElement("span");
+      variantName.className = "name";
+      variantName.textContent = variant.label;
+      variantName.title = variant.url;
+
+      const variantKind = document.createElement("span");
+      variantKind.className = "state";
+      variantKind.textContent = "quality";
+
+      variantRow.append(variantName, variantKind, mediaButton(variant.url, pageUrl));
+      mediaList.append(variantRow);
+    }
   }
 }
 
 async function refreshMedia(): Promise<void> {
   try {
-    const media = (await chrome.runtime.sendMessage({ type: "dm.media" })) as MediaResponse;
+    const media = (await chrome.runtime.sendMessage({
+      type: "dm.media",
+      tabId: Number.isFinite(pageTabId) && pageTabId > 0 ? pageTabId : undefined,
+    })) as MediaResponse;
     renderMedia(media?.items ?? [], media?.pageUrl ?? "");
   } catch {
     renderMedia([], "");
