@@ -146,15 +146,6 @@ public interface IDownloadEngine
     void UpdateHostConnectionLimit(int limit)
     {
     }
-
-    /// <summary>
-    /// A handler for auxiliary HTTP traffic (e.g. the site grabber) that uses the same proxy
-    /// as downloads. Redirects are not followed automatically. Null when not supported.
-    /// </summary>
-    HttpMessageHandler? CreateAuxiliaryHandler() => null;
-
-    /// <summary>The Basic <c>Authorization</c> value of the best stored site login for this URL.</summary>
-    string? GetSiteAuthorization(Uri uri) => null;
 }
 
 public interface IPostDownloadHook
@@ -209,15 +200,6 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
 }
 
 public sealed record MediaMuxResult(bool Success, string? Error);
-
-public interface IGrabberProjectStore
-{
-    Task<IReadOnlyList<GrabberProject>> LoadAllAsync(CancellationToken cancellationToken = default);
-
-    Task SaveAsync(GrabberProject project, CancellationToken cancellationToken = default);
-
-    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-}
 
 public interface IMediaCheckpointStore
 {

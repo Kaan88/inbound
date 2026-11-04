@@ -39,7 +39,6 @@ internal static class Program
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
-            var grabberProjects = new JsonGrabberProjectStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
                 new EngineOptions
@@ -62,7 +61,6 @@ internal static class Program
                 completionActions: completionExecutor,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
-                grabberProjects: grabberProjects,
                 ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook);
             service.InitializeAsync().GetAwaiter().GetResult();

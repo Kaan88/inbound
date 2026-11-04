@@ -1465,7 +1465,7 @@ and evidenced in `reference notes` (E1-E89); the only `blocked` rows are L4 (nee
 normal shell) and C3 (explicit Chrome-only scope).
 
 1. Done: Options -> Proxy controls, the Forget-password checkbox and the orphan cleanup dialog were live-verified (E93).
-2. Grabber polish (Phase 10 remainder): result preview, JS-rendered pages,
+2. (Removed) Site grabber was removed on 2026-11-04 by owner decision; no grabber work remains. Previously listed: result preview, JS-rendered pages,
    result preview (robots.txt E91, crawler proxy/auth E92, JS rendering E93 done; sandboxed rendering needs a normal-shell run).
 3. Phase 5: orphan `.part` quarantine/delete is done via CLI/IPC (E90); a WinUI affordance is still missing.
 4. Phase 11/12: clean-Windows install/upgrade/uninstall acceptance (still
@@ -1515,3 +1515,9 @@ headless MCP (`http://127.0.0.1:8081/mcp`, project `reference_project`; loaded
 `/reference app.exe`, SHA-256 matches the pinned executable, 18,988 functions).
 Created the private repo, initial parity inventory, initial architecture, and
 the first engine/host/IPC implementation.
+
+## Site grabber removed (2026-11-04)
+
+- Owner decision: the site grabber is out of scope. Deleted `SiteGrabber`, `HeadlessRenderer`, `RobotsRules`, grabber projects (model, `JsonGrabberProjectStore`, `grabber-projects.json` is no longer read), `grabber.*` IPC, CLI `grab`/`grabber`/`schedule add --grabber`, WinUI Tasks menu items, Grabber Projects category and scheduler targets, engine robots.txt redirect checks and the auxiliary crawler handler, TestServer `/grab`, `/robo`, `/robots.txt`, `/js` fixtures, and `scripts\test.ps1 -IncludeBrowser`.
+- Kept: G1 Download All (page link collection in the extension). `DownloadSource.Grabber` and `ScheduleRule.GrabberProjectId` stay only so old state files load; legacy grabber schedules are removed and persisted on startup.
+- Tests: core 78/78 (26 robots cases removed), engine 33/33, integration 65/65 (11 grabber tests removed, `LegacyGrabberSchedulesAreDroppedOnLoad` added).

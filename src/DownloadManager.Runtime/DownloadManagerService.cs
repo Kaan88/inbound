@@ -34,16 +34,12 @@ public sealed class DownloadManagerService
     private readonly IPostDownloadHook _postDownloadHook;
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
-    private readonly IGrabberProjectStore? _grabberProjectStore;
     private readonly IDownloadEngine? _ftpEngine;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     public event EventHandler? UpdateShutdownRequested;
     public event EventHandler<string>? UpdateDeferred;
     private readonly object _sync = new();
-    private readonly List<GrabberProject> _grabberProjects = new();
     private readonly List<string> _orphanPartFiles = new();
-    private readonly HashSet<Guid> _runningGrabberProjects = new();
-    private readonly Dictionary<Guid, DateTimeOffset> _grabberProgressSaved = new();
     private bool _sleepPreventionActive;
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
     private readonly HashSet<int> _completionFiredQueues = new();
@@ -66,7 +62,6 @@ public sealed class DownloadManagerService
         ICompletionActionExecutor? completionActions = null,
         ISleepPrevention? sleepPrevention = null,
         IMediaCheckpointStore? mediaCheckpoints = null,
-        IGrabberProjectStore? grabberProjects = null,
         IDownloadEngine? ftpEngine = null,
         IPostDownloadHook? postDownloadHook = null)
     {
@@ -81,7 +76,6 @@ public sealed class DownloadManagerService
         _completionActions = completionActions ?? NullCompletionActionExecutor.Instance;
         _sleepPrevention = sleepPrevention ?? NullSleepPrevention.Instance;
         _mediaCheckpoints = mediaCheckpoints;
-        _grabberProjectStore = grabberProjects;
         _ftpEngine = ftpEngine;
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
     }
@@ -105,26 +99,13 @@ public sealed class DownloadManagerService
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
-        if (_grabberProjectStore is not null)
-        {
-            var projects = await _grabberProjectStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
-            var interrupted = new List<GrabberProject>();
-            lock (_sync)
-            {
-                _grabberProjects.AddRange(projects);
-                foreach (var project in _grabberProjects.Where(project =>
-                             string.Equals(project.Status, "running", StringComparison.OrdinalIgnoreCase)))
-                {
-                    project.Status = "interrupted";
-                    project.UpdatedAt = _timeProvider.GetUtcNow();
-                    interrupted.Add(project.Clone());
-                }
-            }
 
-            foreach (var project in interrupted)
-            {
-                await _grabberProjectStore.SaveAsync(project, cancellationToken).ConfigureAwait(false);
-            }
+        // The site grabber was removed; schedules that ran a grabber project are dropped.
+        var legacyGrabberSchedules = _settings.Schedules.RemoveAll(schedule => schedule.GrabberProjectId is not null);
+        if (legacyGrabberSchedules > 0)
+        {
+            _log?.Invoke($"Removed {legacyGrabberSchedules} schedule(s) for the removed site grabber.");
+            await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
         }
 
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
@@ -315,7 +296,6 @@ public sealed class DownloadManagerService
                 1, 32),
             SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
             Description = request.Description,
-            RespectRobotsTxt = request.RespectRobotsTxt,
             ExpectedSha256 = string.IsNullOrWhiteSpace(request.ExpectedSha256) ? null : request.ExpectedSha256.Trim(),
             ConflictPolicy = conflictPolicy,
             State = DownloadState.Queued,
@@ -873,57 +853,6 @@ public sealed class DownloadManagerService
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
 
-    public async Task<SiteGrabberResult> RunSiteGrabberAsync(
-        SiteGrabberRequest request,
-        CancellationToken cancellationToken = default,
-        Action<int, int, int>? progress = null)
-    {
-        if (!TryValidateUrl(request.StartUrl, out _, out var urlError))
-        {
-            return new SiteGrabberResult { Ok = false, Error = urlError };
-        }
-
-        string destination;
-        try
-        {
-            destination = string.IsNullOrWhiteSpace(request.DestinationDirectory)
-                ? _settings.DefaultDownloadDirectory
-                : request.DestinationDirectory.Trim();
-            destination = Path.GetFullPath(destination);
-            Directory.CreateDirectory(destination);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return new SiteGrabberResult { Ok = false, Error = $"Cannot use destination: {ex.Message}" };
-        }
-
-        var grabber = new SiteGrabber(
-            destination, _log, _engine.CreateAuxiliaryHandler, _engine.GetSiteAuthorization,
-            renderProfileRoot: Path.Combine(_paths.Root, "render-profiles"));
-        return await grabber.RunAsync(
-            request,
-            file =>
-            {
-                var fullPath = Path.Combine(
-                    destination, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                return AddJobAsync(new AddJobRequest
-                {
-                    Url = file.Url.AbsoluteUri,
-                    DestinationDirectory = Path.GetDirectoryName(fullPath),
-                    FileName = Path.GetFileName(fullPath),
-                    StartMode = request.StartMode,
-                    QueueId = request.QueueId,
-                    Connections = request.Connections > 0 ? request.Connections : null,
-                    Source = "grabber",
-                    RespectRobotsTxt = request.RespectRobotsTxt,
-                    ConflictPolicy = "rename",
-                    RememberDestination = false,
-                }, cancellationToken);
-            },
-            cancellationToken,
-            progress).ConfigureAwait(false);
-    }
-
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
         var install = InstalledBuild.TryLoad();
@@ -1351,300 +1280,6 @@ public sealed class DownloadManagerService
                candidateVersion > installedVersion;
     }
 
-    public GrabberProjectsResult GetGrabberProjects()
-    {
-        lock (_sync)
-        {
-            return new GrabberProjectsResult
-            {
-                Projects = _grabberProjects
-                    .OrderByDescending(project => project.CreatedAt)
-                    .Select(MapGrabberProject)
-                    .ToList(),
-            };
-        }
-    }
-
-    public async Task<GrabberProjectResult> CreateGrabberProjectAsync(
-        GrabberProjectCreateRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        if (!TryValidateUrl(request.Request.StartUrl, out var uri, out var urlError))
-        {
-            return new GrabberProjectResult { Ok = false, Error = urlError };
-        }
-
-        var now = _timeProvider.GetUtcNow();
-        var project = new GrabberProject
-        {
-            Id = Guid.NewGuid(),
-            Name = string.IsNullOrWhiteSpace(request.Name)
-                ? $"Grab {uri.Host}"
-                : request.Name.Trim(),
-            StartUrl = uri.AbsoluteUri,
-            DestinationDirectory = string.IsNullOrWhiteSpace(request.Request.DestinationDirectory)
-                ? null
-                : request.Request.DestinationDirectory.Trim(),
-            MaxDepth = Math.Clamp(request.Request.MaxDepth, 0, 5),
-            MaxPages = Math.Clamp(request.Request.MaxPages, 1, 500),
-            SameHostOnly = request.Request.SameHostOnly,
-            Extensions = request.Request.Extensions
-                .Select(value => value.Trim().TrimStart('.'))
-                .Where(value => value.Length > 0)
-                .ToList(),
-            IncludePatterns = request.Request.IncludePatterns
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Select(value => value.Trim())
-                .ToList(),
-            ExcludePatterns = request.Request.ExcludePatterns
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Select(value => value.Trim())
-                .ToList(),
-            SavePages = request.Request.SavePages,
-            RewriteLinks = request.Request.RewriteLinks,
-            RespectRobotsTxt = request.Request.RespectRobotsTxt,
-            RenderJavaScript = request.Request.RenderJavaScript,
-            StartMode = request.Request.StartMode,
-            QueueId = request.Request.QueueId,
-            Connections = request.Request.Connections,
-            Status = "pending",
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-
-        lock (_sync)
-        {
-            _grabberProjects.Add(project);
-        }
-
-        if (_grabberProjectStore is not null)
-        {
-            await _grabberProjectStore.SaveAsync(project.Clone(), cancellationToken).ConfigureAwait(false);
-        }
-
-        return new GrabberProjectResult { Ok = true, Project = MapGrabberProject(project) };
-    }
-
-    public async Task<GrabberProjectResult> RunGrabberProjectAsync(
-        Guid id,
-        CancellationToken cancellationToken = default)
-    {
-        GrabberProject project;
-        GrabberProject snapshot;
-        lock (_sync)
-        {
-            var existing = _grabberProjects.FirstOrDefault(candidate => candidate.Id == id);
-            if (existing is null)
-            {
-                return new GrabberProjectResult { Ok = false, Error = "Grabber project not found." };
-            }
-
-            if (!_runningGrabberProjects.Add(id))
-            {
-                return new GrabberProjectResult
-                {
-                    Ok = false,
-                    Error = "This grabber project is already running.",
-                    Project = MapGrabberProject(existing),
-                };
-            }
-
-            existing.Status = "running";
-            existing.LastRunAt = _timeProvider.GetUtcNow();
-            existing.UpdatedAt = existing.LastRunAt.Value;
-            existing.LastError = null;
-            existing.PagesCrawled = 0;
-            existing.FilesQueued = 0;
-            existing.FilesSkipped = 0;
-            project = existing;
-            snapshot = existing.Clone();
-        }
-
-        if (_grabberProjectStore is not null)
-        {
-            await _grabberProjectStore.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
-        }
-
-        var lastProgressSave = DateTimeOffset.MinValue;
-        var run = new SiteGrabberResult();
-        try
-        {
-            run = await RunSiteGrabberAsync(
-                ToGrabberRequest(snapshot),
-                cancellationToken,
-                (pages, queued, skipped) =>
-                {
-                    GrabberProject? save = null;
-                    lock (_sync)
-                    {
-                        project.PagesCrawled = pages;
-                        project.FilesQueued = queued;
-                        project.FilesSkipped = skipped;
-                        project.UpdatedAt = _timeProvider.GetUtcNow();
-                        if (project.UpdatedAt - lastProgressSave >= TimeSpan.FromSeconds(2))
-                        {
-                            lastProgressSave = project.UpdatedAt;
-                            save = project.Clone();
-                        }
-                    }
-
-                    if (save is not null)
-                    {
-                        _ = SaveGrabberProjectQuietlyAsync(save);
-                    }
-                }).ConfigureAwait(false);
-
-            lock (_sync)
-            {
-                project.PagesCrawled = run.PagesCrawled;
-                project.FilesQueued = run.FilesQueued;
-                project.FilesSkipped = run.FilesSkipped;
-                project.LastError = run.Ok
-                    ? null
-                    : run.Error ?? (run.Errors.Count > 0 ? run.Errors[0] : "The grabber failed.");
-                project.Status = run.Ok ? "completed" : "failed";
-                project.UpdatedAt = _timeProvider.GetUtcNow();
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            lock (_sync)
-            {
-                project.Status = "interrupted";
-                project.LastError = "The grabber was cancelled.";
-                project.UpdatedAt = _timeProvider.GetUtcNow();
-            }
-
-            run = new SiteGrabberResult { Ok = false, Error = project.LastError };
-        }
-        catch (Exception ex)
-        {
-            lock (_sync)
-            {
-                project.Status = "failed";
-                project.LastError = ex.Message;
-                project.UpdatedAt = _timeProvider.GetUtcNow();
-            }
-
-            run = new SiteGrabberResult { Ok = false, Error = ex.Message };
-        }
-        finally
-        {
-            lock (_sync)
-            {
-                _runningGrabberProjects.Remove(id);
-            }
-        }
-
-        GrabberProjectDto dto;
-        lock (_sync)
-        {
-            dto = MapGrabberProject(project);
-        }
-
-        if (_grabberProjectStore is not null)
-        {
-            await _grabberProjectStore.SaveAsync(project.Clone(), cancellationToken).ConfigureAwait(false);
-        }
-
-        _log?.Invoke(
-            $"Grabber project '{project.Name}' {project.Status}: {project.PagesCrawled} pages, " +
-            $"{project.FilesQueued} queued, {project.FilesSkipped} skipped.");
-        return new GrabberProjectResult
-        {
-            Ok = run.Ok,
-            Error = run.Ok ? null : run.Error,
-            Project = dto,
-            Run = run,
-        };
-    }
-
-    public async Task<GrabberProjectResult> RemoveGrabberProjectAsync(
-        Guid id,
-        CancellationToken cancellationToken = default)
-    {
-        GrabberProject? removed = null;
-        lock (_sync)
-        {
-            var project = _grabberProjects.FirstOrDefault(candidate => candidate.Id == id);
-            if (project is null)
-            {
-                return new GrabberProjectResult { Ok = false, Error = "Grabber project not found." };
-            }
-
-            if (_runningGrabberProjects.Contains(id))
-            {
-                return new GrabberProjectResult
-                {
-                    Ok = false,
-                    Error = "Stop the running grabber before removing its project.",
-                    Project = MapGrabberProject(project),
-                };
-            }
-
-            _grabberProjects.Remove(project);
-            removed = project;
-        }
-
-        if (_grabberProjectStore is not null)
-        {
-            await _grabberProjectStore.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
-        }
-
-        return new GrabberProjectResult { Ok = true, Project = removed is null ? null : MapGrabberProject(removed) };
-    }
-
-    private async Task SaveGrabberProjectQuietlyAsync(GrabberProject project)
-    {
-        if (_grabberProjectStore is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _grabberProjectStore.SaveAsync(project, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _log?.Invoke($"Could not save grabber progress: {ex.Message}");
-        }
-    }
-
-    private static SiteGrabberRequest ToGrabberRequest(GrabberProject project) => new()
-    {
-        StartUrl = project.StartUrl,
-        DestinationDirectory = project.DestinationDirectory,
-        MaxDepth = project.MaxDepth,
-        MaxPages = project.MaxPages,
-        SameHostOnly = project.SameHostOnly,
-        Extensions = new List<string>(project.Extensions),
-        IncludePatterns = new List<string>(project.IncludePatterns),
-        ExcludePatterns = new List<string>(project.ExcludePatterns),
-        SavePages = project.SavePages,
-        RewriteLinks = project.RewriteLinks,
-        RespectRobotsTxt = project.RespectRobotsTxt,
-        RenderJavaScript = project.RenderJavaScript,
-        StartMode = project.StartMode,
-        QueueId = project.QueueId,
-        Connections = project.Connections,
-    };
-
-    private static GrabberProjectDto MapGrabberProject(GrabberProject project) => new()
-    {
-        Id = project.Id,
-        Name = project.Name,
-        Request = ToGrabberRequest(project),
-        Status = project.Status,
-        PagesCrawled = project.PagesCrawled,
-        FilesQueued = project.FilesQueued,
-        FilesSkipped = project.FilesSkipped,
-        LastError = project.LastError,
-        CreatedAt = project.CreatedAt,
-        UpdatedAt = project.UpdatedAt,
-        LastRunAt = project.LastRunAt,
-    };
-
     public async Task<JobActionResponse> UpdateJobAsync(
         JobUpdateRequest request,
         CancellationToken cancellationToken = default)
@@ -1849,7 +1484,7 @@ public sealed class DownloadManagerService
     {
         var today = DateOnly.FromDateTime(localNow.DateTime);
         var nowTime = TimeOnly.FromDateTime(localNow.DateTime);
-        var due = new List<(Guid Id, int QueueId, string Action, Guid? GrabberProjectId)>();
+        var due = new List<(Guid Id, int QueueId, string Action)>();
 
         lock (_sync)
         {
@@ -1865,14 +1500,7 @@ public sealed class DownloadManagerService
                     continue;
                 }
 
-                if (schedule.GrabberProjectId is null &&
-                    !_settings.Queues.Any(q => q.Id == schedule.QueueId))
-                {
-                    continue;
-                }
-
-                if (schedule.GrabberProjectId is { } configuredProject &&
-                    _grabberProjects.All(project => project.Id != configuredProject))
+                if (!_settings.Queues.Any(q => q.Id == schedule.QueueId))
                 {
                     continue;
                 }
@@ -1907,12 +1535,7 @@ public sealed class DownloadManagerService
 
                 if (startDue)
                 {
-                    due.Add((schedule.Id, schedule.QueueId, "start", schedule.GrabberProjectId));
-                    continue;
-                }
-
-                if (schedule.GrabberProjectId is not null)
-                {
+                    due.Add((schedule.Id, schedule.QueueId, "start"));
                     continue;
                 }
 
@@ -1926,7 +1549,7 @@ public sealed class DownloadManagerService
                     : schedule.LastStartDate == today;
                 if (startedInWindow)
                 {
-                    due.Add((schedule.Id, schedule.QueueId, "stop", null));
+                    due.Add((schedule.Id, schedule.QueueId, "stop"));
                 }
             }
         }
@@ -1940,36 +1563,6 @@ public sealed class DownloadManagerService
                 {
                     break;
                 }
-            }
-
-            if (action.GrabberProjectId is Guid projectId)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await RunGrabberProjectAsync(projectId, CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log?.Invoke($"Scheduled grabber project {projectId} failed: {ex}");
-                    }
-                });
-
-                lock (_sync)
-                {
-                    var schedule = _settings.Schedules.FirstOrDefault(s => s.Id == action.Id);
-                    if (schedule is not null)
-                    {
-                        schedule.LastStartDate = today;
-                    }
-                }
-
-                await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
-                SettingsChanged?.Invoke(this, _settings);
-                _log?.Invoke($"Scheduler started grabber project {projectId} for {today:yyyy-MM-dd}.");
-                results.Add(new ScheduleAction(action.Id, action.QueueId, "grabber", today, true, null));
-                continue;
             }
 
             var reply = await QueueActionAsync(
@@ -3358,7 +2951,6 @@ public sealed class DownloadManagerService
                 Id = s.Id,
                 Name = s.Name,
                 QueueId = s.QueueId,
-                GrabberProjectId = s.GrabberProjectId,
                 Enabled = s.Enabled,
                 Kind = s.Kind,
                 StartDate = s.StartDate,
@@ -3537,7 +3129,6 @@ public sealed class DownloadManagerService
                 Id = id,
                 Name = s.Name,
                 QueueId = s.QueueId,
-                GrabberProjectId = s.GrabberProjectId,
                 Enabled = s.Enabled,
                 Kind = string.Equals(s.Kind, "oneTime", StringComparison.OrdinalIgnoreCase)
                     ? "oneTime"

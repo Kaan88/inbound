@@ -84,24 +84,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
     }
 
-    public HttpMessageHandler? CreateAuxiliaryHandler() => new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.All,
-        ConnectTimeout = _options.ConnectTimeout,
-        Proxy = new ConfigurableProxy(_options.Proxy),
-        UseProxy = true,
-        UseCookies = false,
-    };
-
-    public string? GetSiteAuthorization(Uri uri)
-    {
-        var login = MatchSiteLogin(uri);
-        return login is null
-            ? null
-            : "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{login.Username}:{login.Password}"));
-    }
-
     public void UpdateSiteLogins(IReadOnlyList<SiteLoginCredential> logins)
     {
         lock (_siteLoginSync)
@@ -2641,86 +2623,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             ? parsed
             : fallback;
 
-    private const string RobotsUserAgent = "DownloadManagerGrabber/0.1";
-    private static readonly TimeSpan RobotsCacheLifetime = TimeSpan.FromHours(1);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (RobotsRules Rules, DateTimeOffset Expires)>
-        _robotsCache = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// RFC 9309 status handling, matching the site grabber: 2xx parses the first 500 KiB,
-    /// 4xx allows everything, 5xx/unreachable disallows everything. Cached per authority.
-    /// </summary>
-    private async Task<bool> RobotsAllowsAsync(Uri target, CancellationToken cancellationToken)
-    {
-        var authority = target.GetLeftPart(UriPartial.Authority);
-        if (!_robotsCache.TryGetValue(authority, out var entry) || entry.Expires < DateTimeOffset.UtcNow)
-        {
-            entry = (await FetchRobotsRulesAsync(new Uri(authority + "/robots.txt"), cancellationToken)
-                .ConfigureAwait(false), DateTimeOffset.UtcNow + RobotsCacheLifetime);
-            _robotsCache[authority] = entry;
-        }
-
-        return entry.Rules.IsAllowed(target.PathAndQuery);
-    }
-
-    private async Task<RobotsRules> FetchRobotsRulesAsync(Uri robotsUrl, CancellationToken cancellationToken)
-    {
-        var disallowAll = RobotsRules.Parse("User-agent: *\nDisallow: /\n", RobotsUserAgent);
-        try
-        {
-            var uri = robotsUrl;
-            for (var hop = 0; hop <= 5; hop++)
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-                request.Headers.UserAgent.Clear();
-                request.Headers.TryAddWithoutValidation("User-Agent", RobotsUserAgent);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(_options.ConnectTimeout);
-                using var response = await CurrentClient()
-                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                    .ConfigureAwait(false);
-                var status = (int)response.StatusCode;
-                if (status is 301 or 302 or 303 or 307 or 308 && response.Headers.Location is { } location)
-                {
-                    uri = location.IsAbsoluteUri ? location : new Uri(uri, location);
-                    continue;
-                }
-
-                if (status is >= 400 and < 500)
-                {
-                    return RobotsRules.AllowAll;
-                }
-
-                if (status is < 200 or >= 300)
-                {
-                    return disallowAll;
-                }
-
-                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-                var buffer = new byte[500 * 1024];
-                var total = 0;
-                int read;
-                while (total < buffer.Length &&
-                       (read = await stream.ReadAsync(buffer.AsMemory(total), timeout.Token).ConfigureAwait(false)) > 0)
-                {
-                    total += read;
-                }
-
-                return RobotsRules.Parse(Encoding.UTF8.GetString(buffer, 0, total), RobotsUserAgent);
-            }
-
-            return disallowAll;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
-        {
-            return disallowAll;
-        }
-    }
-
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
@@ -2772,15 +2674,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 {
                     throw new DownloadEngineException(
                         new JobFailure(FailureKind.Forbidden, "The redirect target uses an unsupported scheme.", false, false, DateTimeOffset.UtcNow),
-                        isRetryable: false);
-                }
-
-                if (job.RespectRobotsTxt && !await RobotsAllowsAsync(next, cancellationToken).ConfigureAwait(false))
-                {
-                    throw new DownloadEngineException(
-                        new JobFailure(FailureKind.Forbidden,
-                            $"The redirect target {next.GetLeftPart(UriPartial.Path)} is disallowed by robots.txt.",
-                            false, false, DateTimeOffset.UtcNow),
                         isRetryable: false);
                 }
 

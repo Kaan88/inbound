@@ -971,400 +971,6 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task GrabberProjectPersistsAndResumesWithoutRedownload()
-    {
-        var ctx = await ServiceContext.CreateAsync(_server);
-        try
-        {
-            var mirror = Path.Combine(ctx.Destination, "project-mirror");
-            var created = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
-            {
-                Name = "Docs mirror",
-                Request = new SiteGrabberRequest
-                {
-                    StartUrl = $"{_server.BaseAddress}/grab/",
-                    DestinationDirectory = mirror,
-                    MaxDepth = 2,
-                    MaxPages = 10,
-                    Extensions = new List<string> { "bin" },
-                    ExcludePatterns = new List<string> { "*/files/b.bin*" },
-                    StartMode = "now",
-                },
-            });
-            Assert.True(created.Ok, created.Error);
-            var projectId = created.Project!.Id;
-
-            var first = await ctx.Service.RunGrabberProjectAsync(projectId);
-            Assert.True(first.Ok, first.Error);
-            Assert.Equal("completed", first.Project!.Status);
-            Assert.Equal(3, first.Project.PagesCrawled);
-            Assert.Equal(2, first.Project.FilesQueued);
-            Assert.Equal(1, first.Project.FilesSkipped);
-
-            var jobs = ctx.Service.GetSnapshot().Jobs
-                .Where(job => job.Url.Contains("/grab/files/", StringComparison.Ordinal))
-                .ToList();
-            Assert.Equal(2, jobs.Count);
-            foreach (var job in jobs)
-            {
-                await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-            }
-
-            var aPath = Path.Combine(mirror, "grab", "files", "a.bin");
-            var aHash = await Hashing.Sha256FileAsync(aPath);
-            var aModified = File.GetLastWriteTimeUtc(aPath);
-
-            var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
-            try
-            {
-                var persisted = Assert.Single(second.Service.GetGrabberProjects().Projects);
-                Assert.Equal(projectId, persisted.Id);
-                Assert.Equal("completed", persisted.Status);
-                Assert.Equal(2, persisted.FilesQueued);
-
-                var jobsBefore = second.Service.GetSnapshot().Jobs.Count;
-                var resume = await second.Service.RunGrabberProjectAsync(projectId);
-                Assert.True(resume.Ok, resume.Error);
-                Assert.Equal(0, resume.Project!.FilesQueued);
-                Assert.True(resume.Project.FilesSkipped >= 3);
-                Assert.Equal(jobsBefore, second.Service.GetSnapshot().Jobs.Count);
-                Assert.Equal(aHash, await Hashing.Sha256FileAsync(aPath));
-                Assert.Equal(aModified, File.GetLastWriteTimeUtc(aPath));
-
-                var removed = await second.Service.RemoveGrabberProjectAsync(projectId);
-                Assert.True(removed.Ok, removed.Error);
-                Assert.Empty(second.Service.GetGrabberProjects().Projects);
-            }
-            finally
-            {
-                await second.DisposeAsync();
-            }
-
-            var badProject = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
-            {
-                Name = "Bad start",
-                Request = new SiteGrabberRequest
-                {
-                    StartUrl = $"{_server.BaseAddress}/grab/missing-page",
-                    DestinationDirectory = Path.Combine(ctx.Destination, "bad-mirror"),
-                    MaxDepth = 0,
-                    MaxPages = 1,
-                },
-            });
-            Assert.True(badProject.Ok, badProject.Error);
-            var badRun = await ctx.Service.RunGrabberProjectAsync(badProject.Project!.Id);
-            Assert.False(badRun.Ok);
-            Assert.Equal("failed", badRun.Project!.Status);
-            Assert.False(string.IsNullOrWhiteSpace(badRun.Project.LastError));
-        }
-        finally
-        {
-            await ctx.DisposeAsync();
-        }
-    }
-
-    [Fact]
-    public async Task ScheduledGrabberProjectRunsOncePerDay()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var mirror = Path.Combine(ctx.Destination, "scheduled-mirror");
-        var created = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
-        {
-            Name = "Scheduled mirror",
-            Request = new SiteGrabberRequest
-            {
-                StartUrl = $"{_server.BaseAddress}/grab/",
-                DestinationDirectory = mirror,
-                MaxDepth = 1,
-                MaxPages = 5,
-                Extensions = new List<string> { "bin" },
-                StartMode = "now",
-            },
-        });
-        Assert.True(created.Ok, created.Error);
-
-        var settings = ctx.Service.GetSnapshot().Settings;
-        settings.Schedules.Add(new ScheduleDto
-        {
-            Id = Guid.NewGuid(),
-            Name = "Nightly grab",
-            QueueId = 0,
-            GrabberProjectId = created.Project!.Id,
-            Enabled = true,
-            Kind = "daily",
-            StartTime = "00:00",
-            Days = "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
-        });
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-        var now = new DateTimeOffset(DateTime.Today.AddHours(12));
-        var actions = await ctx.Service.EvaluateSchedulesAsync(now);
-        Assert.Contains(actions, action => action.Action == "grabber" && action.Ok);
-
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        GrabberProjectDto project;
-        do
-        {
-            await Task.Delay(200);
-            project = Assert.Single(ctx.Service.GetGrabberProjects().Projects);
-        } while ((project.Status is "pending" or "running") && DateTime.UtcNow < deadline);
-
-        Assert.Equal("completed", project.Status);
-        Assert.True(project.FilesQueued > 0);
-
-        var second = await ctx.Service.EvaluateSchedulesAsync(now);
-        Assert.DoesNotContain(second, action => action.Action == "grabber");
-    }
-
-    [Fact]
-    public async Task SiteGrabberCrawlsScopeAndRewritesLinks()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var mirror = Path.Combine(ctx.Destination, "mirror");
-        var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
-        {
-            StartUrl = $"{_server.BaseAddress}/grab/",
-            DestinationDirectory = mirror,
-            MaxDepth = 2,
-            MaxPages = 10,
-            SameHostOnly = true,
-            Extensions = new List<string> { "bin" },
-            ExcludePatterns = new List<string> { "*/files/b.bin*" },
-            SavePages = true,
-            RewriteLinks = true,
-            StartMode = "now",
-        });
-
-        Assert.True(result.Ok, result.Error);
-        Assert.Equal(3, result.PagesCrawled);
-        Assert.Equal(2, result.FilesQueued);
-        Assert.Equal(1, result.FilesSkipped);
-
-        var jobs = ctx.Service.GetSnapshot().Jobs
-            .Where(job => job.Url.Contains("/grab/files/", StringComparison.Ordinal))
-            .ToList();
-        Assert.Equal(2, jobs.Count);
-        foreach (var job in jobs)
-        {
-            await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-        }
-
-        var filesDirectory = Path.Combine(mirror, "grab", "files");
-        var aPath = Path.Combine(filesDirectory, "a.bin");
-        var cPath = Path.Combine(filesDirectory, "c.bin");
-        Assert.True(File.Exists(aPath));
-        Assert.True(File.Exists(cPath));
-        Assert.False(File.Exists(Path.Combine(filesDirectory, "b.bin")));
-        Assert.Equal(65_536, new FileInfo(aPath).Length);
-        Assert.Equal(
-            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                TestContent.Generate(290, 65_536))).ToLowerInvariant(),
-            await Hashing.Sha256FileAsync(aPath));
-        Assert.Equal(
-            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                TestContent.Generate(293, 65_536))).ToLowerInvariant(),
-            await Hashing.Sha256FileAsync(cPath));
-
-        var index = await File.ReadAllTextAsync(Path.Combine(mirror, "grab", "index.html"));
-        Assert.Contains("href=\"page1.html\"", index);
-        Assert.Contains("files/a.bin", index);
-        Assert.DoesNotContain("/grab/files/a.bin", index);
-        Assert.Contains("https://example.com/external", index);
-        Assert.True(File.Exists(Path.Combine(mirror, "grab", "page1.html")));
-        Assert.True(File.Exists(Path.Combine(mirror, "grab", "page2.html")));
-        Assert.False(File.Exists(Path.Combine(mirror, "grab", "page3.html")));
-    }
-
-    [Fact]
-    public async Task SiteGrabberHonorsRobotsTxtUnlessDisabled()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        async Task<int> StatAsync(string name)
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(
-                await http.GetStringAsync($"{_server.BaseAddress}/robo/stats"));
-            return doc.RootElement.GetProperty(name).GetInt32();
-        }
-
-        Task<int> DisallowedHitsAsync() => StatAsync("disallowedHits");
-
-        SiteGrabberRequest Request(string mirror, bool respect) => new()
-        {
-            StartUrl = $"{_server.BaseAddress}/robo/",
-            DestinationDirectory = mirror,
-            MaxDepth = 2,
-            MaxPages = 10,
-            Extensions = new List<string> { "bin" },
-            RespectRobotsTxt = respect,
-            StartMode = "later",
-        };
-
-        var hitsBefore = await DisallowedHitsAsync();
-        var robotsBefore = await StatAsync("robotsTxtRequests");
-        var honored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-on"), true));
-        Assert.True(honored.Ok, honored.Error);
-        Assert.Equal(2, honored.PagesCrawled);   // index + Allow-overridden private/open.html
-        Assert.Equal(2, honored.FilesQueued);    // ok.bin + open.bin
-        // private/secret.html (linked directly and via redirect.html, counted once) + files/blocked.bin
-        Assert.Equal(2, honored.RobotsBlocked);
-        Assert.Equal(hitsBefore, await DisallowedHitsAsync());   // the redirect hop was not followed
-        Assert.Equal(robotsBefore + 1, await StatAsync("robotsTxtRequests"));   // fetched once per host
-        var queued = ctx.Service.GetSnapshot().Jobs.Select(job => job.Url).ToList();
-        Assert.DoesNotContain(queued, url => url.Contains("blocked.bin", StringComparison.Ordinal));
-        Assert.DoesNotContain(queued, url => url.Contains("secret.bin", StringComparison.Ordinal));
-
-        var blockedStart = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
-        {
-            StartUrl = $"{_server.BaseAddress}/robo/private/secret.html",
-            DestinationDirectory = Path.Combine(ctx.Destination, "robo-start"),
-            StartMode = "later",
-        });
-        Assert.False(blockedStart.Ok);
-        Assert.Contains("robots.txt", blockedStart.Error);
-        Assert.Equal(hitsBefore, await DisallowedHitsAsync());
-
-        var ignored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-off"), false));
-        Assert.True(ignored.Ok, ignored.Error);
-        Assert.Equal(4, ignored.PagesCrawled);   // index, open, secret, and secret again via redirect.html
-        Assert.Equal(4, ignored.FilesQueued);
-        Assert.Equal(0, ignored.RobotsBlocked);
-        Assert.True(await DisallowedHitsAsync() > hitsBefore);
-    }
-
-    [Fact]
-    public async Task GrabberQueuedFileRedirectIsRecheckedAgainstRobotsTxt()
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        async Task<int> HitsAsync()
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(
-                await http.GetStringAsync($"{_server.BaseAddress}/robo/stats"));
-            return doc.RootElement.GetProperty("disallowedHits").GetInt32();
-        }
-
-        var hitsBefore = await HitsAsync();
-        var guarded = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/robo/files/redirect.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "robots-guarded.bin",
-            Source = "grabber",
-            RespectRobotsTxt = true,
-        });
-        Assert.True(guarded.Accepted, guarded.Error);
-        var failed = await ctx.WaitFor(guarded.Job!.Id, j => j.State == "failed");
-        Assert.Contains("robots.txt", failed.Failure?.Message);
-        Assert.Equal(hitsBefore, await HitsAsync());   // the disallowed target was never requested
-
-        var unguarded = await ctx.Service.AddJobAsync(new AddJobRequest
-        {
-            Url = $"{_server.BaseAddress}/robo/files/redirect.bin",
-            DestinationDirectory = ctx.Destination,
-            FileName = "robots-unguarded.bin",
-            Source = "cli",
-        });
-        var completed = await ctx.WaitFor(unguarded.Job!.Id, j => j.State == "completed");
-        Assert.Equal(65_536, new FileInfo(completed.FinalFilePath).Length);
-        Assert.True(await HitsAsync() > hitsBefore);
-    }
-
-    [Theory]
-    [InlineData(404, true)]
-    [InlineData(410, true)]
-    [InlineData(500, false)]
-    [InlineData(503, false)]
-    public async Task SiteGrabberRobotsStatusFollowsRfc9309(int status, bool allowed)
-    {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        using var http = new HttpClient();
-        await http.GetAsync($"{_server.BaseAddress}/robo/robots-status?code={status}");
-        try
-        {
-            var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
-            {
-                StartUrl = $"{_server.BaseAddress}/robo/private/secret.html",
-                DestinationDirectory = Path.Combine(ctx.Destination, $"robots-{status}"),
-                MaxDepth = 0,
-                StartMode = "later",
-            });
-            if (allowed)
-            {
-                // 4xx: no restrictions, so even the normally disallowed page is crawled.
-                Assert.True(result.Ok, result.Error);
-                Assert.Equal(1, result.PagesCrawled);
-                Assert.Equal(0, result.RobotsBlocked);
-            }
-            else
-            {
-                // 5xx: complete disallow.
-                Assert.False(result.Ok);
-                Assert.Contains("robots.txt", result.Error);
-            }
-        }
-        finally
-        {
-            await http.GetAsync($"{_server.BaseAddress}/robo/robots-status?code=0");
-        }
-    }
-
-    // Launches a real headless Edge/Chrome; excluded from scripts\test.ps1 unless -IncludeBrowser.
-    [Fact]
-    [Trait("Category", "Browser")]
-    public async Task SiteGrabberRendersJavaScriptAddedLinks()
-    {
-        Assert.True(HeadlessRenderer.FindBrowser() is not null,
-            "This test needs Edge or Chrome (or DM_RENDER_BROWSER).");
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        SiteGrabberRequest Request(string name, bool render) => new()
-        {
-            StartUrl = $"{_server.BaseAddress}/js/index.html",
-            DestinationDirectory = Path.Combine(ctx.Destination, name),
-            MaxDepth = 0,
-            Extensions = new List<string> { "bin" },
-            RenderJavaScript = render,
-            StartMode = "later",
-        };
-
-        var plain = await ctx.Service.RunSiteGrabberAsync(Request("js-static", false));
-        Assert.True(plain.Ok, plain.Error);
-        Assert.Equal(1, plain.FilesQueued);   // only static.bin is in the served HTML
-        Assert.Equal(0, plain.PagesRendered);
-
-        var rendered = await ctx.Service.RunSiteGrabberAsync(Request("js-rendered", true));
-        Assert.True(rendered.Ok, rendered.Error);
-        Assert.True(rendered.PagesRendered == 1, "render errors: " + string.Join(" | ", rendered.Errors));
-        Assert.Equal(2, rendered.FilesQueued);   // static.bin + script-inserted dynamic.bin
-        Assert.Contains(ctx.Service.GetSnapshot().Jobs,
-            job => job.Url.Contains("/js/files/dynamic.bin", StringComparison.Ordinal));
-        var saved = await File.ReadAllTextAsync(Path.Combine(ctx.Destination, "js-rendered", "js", "index.html"));
-        Assert.Contains("dynamic.bin", saved);   // the mirror stores the rendered DOM
-        var profiles = Path.Combine(ctx.Paths.Root, "render-profiles");
-        Assert.True(!Directory.Exists(profiles) || Directory.GetDirectories(profiles).Length == 0,
-            "per-run browser profiles must be removed");
-    }
-
-    [Fact]
-    public async Task SiteGrabberTreatsUnreachableRobotsAsDisallowAll()
-    {
-        // A closed port: robots.txt cannot be fetched, so the crawl must not proceed.
-        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
-        {
-            StartUrl = $"http://127.0.0.1:{port}/",
-            DestinationDirectory = Path.Combine(ctx.Destination, "robots-unreachable"),
-            StartMode = "later",
-        });
-        Assert.False(result.Ok);
-        Assert.Contains("robots.txt", result.Error);
-    }
-
-    [Fact]
     public async Task CategoryDestinationRulesAndLastFolderPersist()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1758,6 +1364,33 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task LegacyGrabberSchedulesAreDroppedOnLoad()
+    {
+        // State written before the site grabber was removed: one grabber schedule, one queue schedule.
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        var legacy = new AppSettings();
+        var queueScheduleId = Guid.NewGuid();
+        legacy.Schedules.Add(new ScheduleRule { Name = "Old grabber", GrabberProjectId = Guid.NewGuid(), StartTime = "00:00" });
+        legacy.Schedules.Add(new ScheduleRule { Id = queueScheduleId, Name = "Main", QueueId = 0, StartTime = "09:00" });
+        await new JsonSettingsStore(paths).SaveAsync(legacy);
+
+        await using (var ctx = await ServiceContext.CreateAsync(_server, paths, destination))
+        {
+            var schedule = Assert.Single(ctx.Service.GetSnapshot().Settings.Schedules);
+            Assert.Equal(queueScheduleId, schedule.Id);
+        }
+
+        // The removal was persisted, not just filtered in memory.
+        var reloaded = await new JsonSettingsStore(paths).LoadAsync();
+        Assert.Equal(queueScheduleId, Assert.Single(reloaded.Schedules).Id);
+        Directory.Delete(root, recursive: true);
+    }
+
+    [Fact]
     public async Task DailyScheduleStartsAndStopsOnlyItsQueue()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
@@ -1971,61 +1604,6 @@ public sealed class RuntimeServiceTests
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             TestContent.Generate(94, 524_288))).ToLowerInvariant();
         Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
-    }
-
-    [Fact]
-    public async Task SiteGrabberUsesProxyAndStoredSiteLogin()
-    {
-        _server.SetSiteCredentials("crawluser", "crawlpass");
-        await using var proxy = TestProxyServer.Start();
-        await using var ctx = await ServiceContext.CreateAsync(_server);
-        SiteGrabberRequest Request() => new()
-        {
-            StartUrl = $"{_server.BaseAddress}/site/secure/index.html",
-            DestinationDirectory = Path.Combine(ctx.Destination, "crawl-auth"),
-            MaxDepth = 1,
-            Extensions = new List<string> { "bin" },
-            StartMode = "later",
-        };
-
-        var settings = ctx.Service.GetSnapshot().Settings;
-        settings.Proxy = new ProxyDto
-        {
-            Mode = "manual",
-            Address = proxy.Address,
-            Username = "proxyuser",
-            Password = "proxypass",
-        };
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-        // No stored login: the page is a 401 and nothing is queued.
-        var deniedBefore = _server.SiteAuthDenied;
-        var proxiedBefore = proxy.Authorized;
-        var denied = await ctx.Service.RunSiteGrabberAsync(Request());
-        Assert.False(denied.Ok);
-        Assert.Contains("401", denied.Error);
-        Assert.True(_server.SiteAuthDenied > deniedBefore);
-        Assert.True(proxy.Authorized > proxiedBefore);   // crawl traffic went through the proxy
-
-        settings = ctx.Service.GetSnapshot().Settings;
-        settings.SiteLogins.Add(new SiteLoginDto
-        {
-            Id = Guid.NewGuid(),
-            Site = _server.BaseAddress,
-            Username = "crawluser",
-            Password = "crawlpass",
-        });
-        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-        var authorizedBefore = _server.SiteAuthAuthorized;
-        proxiedBefore = proxy.Authorized;
-        var crawled = await ctx.Service.RunSiteGrabberAsync(Request());
-        Assert.True(crawled.Ok, crawled.Error);
-        Assert.Equal(1, crawled.PagesCrawled);
-        Assert.Equal(2, crawled.FilesQueued);
-        Assert.True(_server.SiteAuthAuthorized > authorizedBefore);
-        Assert.True(proxy.Authorized > proxiedBefore);
-        Assert.Equal(0, proxy.Denied);
     }
 
     [Fact]
@@ -3360,7 +2938,6 @@ public sealed class RuntimeServiceTests
         {
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
-            var grabberProjects = new JsonGrabberProjectStore(paths);
             var store = new JsonJobStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
@@ -3385,7 +2962,6 @@ public sealed class RuntimeServiceTests
                 completionActions: completionActions,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
-                grabberProjects: grabberProjects,
                 ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook);
             await service.InitializeAsync();

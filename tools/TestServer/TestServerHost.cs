@@ -25,9 +25,6 @@ public sealed class TestServerHost : IAsyncDisposable
     private byte[]? _updateManifest;
     private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
-    private int _robotsTxtRequests;
-    private int _robotsStatusOverride;
-    private int _roboDisallowedHits;
     private int _activeRangeRequests;
     private int _peakRangeRequests;
     private int _activeFileRequests;
@@ -568,17 +565,6 @@ public sealed class TestServerHost : IAsyncDisposable
             }
 
             Interlocked.Increment(ref _siteAuthorized);
-            if (name == "index.html")
-            {
-                // Authenticated crawl fixture for the site grabber.
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(
-                    "<html><body>" +
-                    "<a href=\"/site/secure/crawl-a.bin?size=65536&seed=330\">A</a>" +
-                    "<a href=\"/site/secure/crawl-b.bin?size=65536&seed=331\">B</a>" +
-                    "</body></html>").ConfigureAwait(false);
-                return;
-            }
 
             var size = QueryInt(context, "size", 1024 * 1024);
             var seed = QueryInt(context, "seed", 1);
@@ -958,172 +944,6 @@ public sealed class TestServerHost : IAsyncDisposable
                 sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
                 bytes = bytes.Length,
             });
-        });
-
-        _app.MapGet("/grab/{**path}", async (HttpContext context, string? path) =>
-        {
-            var relative = (path ?? string.Empty).Replace('\\', '/').Trim('/');
-            if (relative.Length == 0)
-            {
-                relative = "index.html";
-            }
-
-            var html = relative switch
-            {
-                "index.html" =>
-                    "<html><body><h3>Grab root</h3>" +
-                    "<a href=\"/grab/page1.html\">Page 1</a>" +
-                    "<a href=\"/grab/files/a.bin?size=65536&seed=290\">File A</a>" +
-                    "<img src=\"/grab/img/pic.png?size=32768&seed=291\">" +
-                    "<a href=\"https://example.com/external\">External</a>" +
-                    "</body></html>",
-                "page1.html" =>
-                    "<html><body><h3>Page 1</h3>" +
-                    "<a href=\"/grab/page2.html\">Page 2</a>" +
-                    "<a href=\"/grab/files/b.bin?size=65536&seed=292\">File B</a>" +
-                    "<a href=\"/grab/files/a.bin?size=65536&seed=290\">A again</a>" +
-                    "</body></html>",
-                "page2.html" =>
-                    "<html><body><h3>Page 2</h3>" +
-                    "<a href=\"/grab/page3.html\">Page 3</a>" +
-                    "<a href=\"/grab/files/c.bin?size=65536&seed=293\">File C</a>" +
-                    "</body></html>",
-                "page3.html" =>
-                    "<html><body><h3>Page 3</h3>" +
-                    "<a href=\"/grab/files/d.bin?size=65536&seed=294\">File D</a>" +
-                    "</body></html>",
-                _ => null,
-            };
-
-            if (html is not null)
-            {
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(html).ConfigureAwait(false);
-                return;
-            }
-
-            if (relative.StartsWith("files/", StringComparison.Ordinal) || relative == "img/pic.png")
-            {
-                var name = Path.GetFileName(relative);
-                var size = QueryInt(context, "size", 65_536);
-                var seed = QueryInt(context, "seed", 1);
-                await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
-                    throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
-                return;
-            }
-
-            context.Response.StatusCode = 404;
-        });
-
-        _app.MapGet("/js/index.html", () => Results.Content(
-            "<html><body><a href=\"/js/files/static.bin?size=65536&seed=340\">static</a>" +
-            "<div id=\"slot\"></div><script>" +
-            "setTimeout(function(){var a=document.createElement('a');" +
-            // Built from parts and assigned via a variable so no quoted href exists in the source.
-            "var u='/js/files/'+'dynamic.bin?size=65536&seed=341';a.href=u;a.textContent='dynamic';" +
-            "document.getElementById('slot').appendChild(a);},50);" +
-            "</script></body></html>",
-            "text/html; charset=utf-8"));
-
-        _app.MapGet("/js/files/{name}", async (HttpContext context, string name) =>
-            await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 65_536), QueryInt(context, "seed", 1)),
-                name, allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false));
-
-        _app.MapGet("/robo/robots-status", (HttpContext context) =>
-        {
-            // 0 restores the normal robots.txt; any other value is returned as the status code.
-            Interlocked.Exchange(ref _robotsStatusOverride, QueryInt(context, "code", 0));
-            return Results.Ok();
-        });
-
-        _app.MapGet("/robots.txt", (HttpContext context) =>
-        {
-            Interlocked.Increment(ref _robotsTxtRequests);
-            var forced = Interlocked.CompareExchange(ref _robotsStatusOverride, 0, 0);
-            if (forced != 0)
-            {
-                return Results.StatusCode(forced);
-            }
-
-            return Results.Text(
-                "# Test fixture: only /robo/ is restricted.\n" +
-                "User-agent: OtherBot\nDisallow: /\n\n" +
-                "User-agent: *\n" +
-                "Disallow: /robo/private/\n" +
-                "Allow: /robo/private/open.html\n" +
-                "Disallow: /robo/files/blocked*\n",
-                "text/plain");
-        });
-
-        _app.MapGet("/robo/stats", () => Results.Json(new
-        {
-            robotsTxtRequests = Interlocked.CompareExchange(ref _robotsTxtRequests, 0, 0),
-            disallowedHits = Interlocked.CompareExchange(ref _roboDisallowedHits, 0, 0),
-        }));
-
-        _app.MapGet("/robo/{**path}", async (HttpContext context, string? path) =>
-        {
-            var relative = (path ?? string.Empty).Replace('\\', '/').Trim('/');
-            if (relative.Length == 0)
-            {
-                relative = "index.html";
-            }
-
-            if ((relative.StartsWith("private/", StringComparison.Ordinal) && relative != "private/open.html") ||
-                relative.StartsWith("files/blocked", StringComparison.Ordinal))
-            {
-                Interlocked.Increment(ref _roboDisallowedHits);
-            }
-
-            if (relative == "files/redirect.bin")
-            {
-                // Allowed file URL that redirects into a disallowed file.
-                context.Response.StatusCode = 302;
-                context.Response.Headers.Location = "/robo/files/blocked.bin?size=65536&seed=321";
-                return;
-            }
-
-            if (relative == "redirect.html")
-            {
-                // Allowed URL that redirects into a disallowed one.
-                context.Response.StatusCode = 302;
-                context.Response.Headers.Location = "/robo/private/secret.html";
-                return;
-            }
-
-            var html = relative switch
-            {
-                "index.html" =>
-                    "<html><body>" +
-                    "<a href=\"/robo/redirect.html\">Redirect</a>" +
-                    "<a href=\"/robo/private/secret.html\">Secret</a>" +
-                    "<a href=\"/robo/private/open.html\">Open</a>" +
-                    "<a href=\"/robo/files/ok.bin?size=65536&seed=320\">OK</a>" +
-                    "<a href=\"/robo/files/blocked.bin?size=65536&seed=321\">Blocked</a>" +
-                    "</body></html>",
-                "private/secret.html" =>
-                    "<html><body><a href=\"/robo/files/secret.bin?size=65536&seed=322\">S</a></body></html>",
-                "private/open.html" =>
-                    "<html><body><a href=\"/robo/files/open.bin?size=65536&seed=323\">O</a></body></html>",
-                _ => null,
-            };
-
-            if (html is not null)
-            {
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(html).ConfigureAwait(false);
-                return;
-            }
-
-            if (relative.StartsWith("files/", StringComparison.Ordinal))
-            {
-                var name = Path.GetFileName(relative);
-                await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 65_536), QueryInt(context, "seed", 1)),
-                    name, allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
-                return;
-            }
-
-            context.Response.StatusCode = 404;
         });
 
         _app.MapGet("/live/playlist.m3u8", () => Results.Text(

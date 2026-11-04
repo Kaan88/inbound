@@ -21,8 +21,6 @@
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutItem Text="Add batch download..." Click="MenuAddBatch_Click" />
-                <MenuFlyoutItem Text="Run site grabber..." Click="MenuGrabber_Click" />
-                <MenuFlyoutItem Text="Grabber projects..." Click="MenuGrabberProjects_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
             </MenuBarItem>
@@ -153,7 +151,7 @@
                     </Button>
                     <Button x:Name="SchedulerButton" AutomationProperties.Name="Scheduler" Style="{StaticResource InboundToolButtonStyle}"
                             Click="MenuScheduler_Click"
-                            ToolTipService.ToolTip="Manage scheduled queue and grabber runs">
+                            ToolTipService.ToolTip="Manage scheduled queue runs">
                         <StackPanel>
                             <FontIcon Glyph="&#xE787;" FontSize="25" Foreground="#E8B36A" />
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
@@ -268,12 +266,6 @@
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="#C9C9C9" />
                                 <TextBlock Text="Queues" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="grabber" Padding="14,2,8,2">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="#C9C9C9" />
-                                <TextBlock Text="Grabber Projects" />
                             </StackPanel>
                         </ListBoxItem>
                     </ListBox>

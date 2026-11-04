@@ -73,7 +73,6 @@ public sealed class ConnectionProfileDto
 
 public sealed class ScheduleDto
 {
-    public Guid? GrabberProjectId { get; set; }
     public Guid Id { get; set; }
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
@@ -198,8 +197,6 @@ public sealed class SnapshotDto
 public sealed class AddJobRequest
 {
     public string Url { get; set; } = string.Empty;
-    /// <summary>Re-check robots.txt on every redirect hop (used by the site grabber).</summary>
-    public bool RespectRobotsTxt { get; set; }
     public string? FinalUrl { get; set; }
     public string? DestinationDirectory { get; set; }
     public string? FileName { get; set; }
@@ -283,78 +280,6 @@ public sealed class JobUpdateRequest
 
     /// <summary>New absolute path for a completed download (Move/Rename).</summary>
     public string? NewFilePath { get; set; }
-}
-
-public sealed class SiteGrabberRequest
-{
-    public string StartUrl { get; set; } = string.Empty;
-    public string? DestinationDirectory { get; set; }
-    public int MaxDepth { get; set; } = 2;
-    public int MaxPages { get; set; } = 50;
-    public bool SameHostOnly { get; set; } = true;
-    public List<string> Extensions { get; set; } = new();
-    public List<string> IncludePatterns { get; set; } = new();
-    public List<string> ExcludePatterns { get; set; } = new();
-    public bool SavePages { get; set; } = true;
-    public bool RewriteLinks { get; set; } = true;
-    /// <summary>Honor each host's robots.txt for pages and files (default on).</summary>
-    public bool RespectRobotsTxt { get; set; } = true;
-    /// <summary>Also render each crawled page in headless Edge/Chrome and use links added by scripts.</summary>
-    public bool RenderJavaScript { get; set; }
-    public string StartMode { get; set; } = "now";
-    public int QueueId { get; set; }
-    public int Connections { get; set; }
-}
-
-public sealed class SiteGrabberResult
-{
-    public bool Ok { get; set; }
-    public string? Error { get; set; }
-    public int PagesCrawled { get; set; }
-    public int FilesQueued { get; set; }
-    public int FilesSkipped { get; set; }
-    public int RobotsBlocked { get; set; }
-    public int PagesRendered { get; set; }
-    public List<string> Errors { get; set; } = new();
-}
-
-public sealed class GrabberProjectDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public SiteGrabberRequest Request { get; set; } = new();
-    public string Status { get; set; } = "pending";
-    public int PagesCrawled { get; set; }
-    public int FilesQueued { get; set; }
-    public int FilesSkipped { get; set; }
-    public string? LastError { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; }
-    public DateTimeOffset? LastRunAt { get; set; }
-}
-
-public sealed class GrabberProjectCreateRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public SiteGrabberRequest Request { get; set; } = new();
-}
-
-public sealed class GrabberProjectActionRequest
-{
-    public Guid Id { get; set; }
-}
-
-public sealed class GrabberProjectResult
-{
-    public bool Ok { get; set; }
-    public string? Error { get; set; }
-    public GrabberProjectDto? Project { get; set; }
-    public SiteGrabberResult? Run { get; set; }
-}
-
-public sealed class GrabberProjectsResult
-{
-    public List<GrabberProjectDto> Projects { get; set; } = new();
 }
 
 public sealed class SegmentDto

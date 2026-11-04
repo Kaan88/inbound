@@ -50,6 +50,7 @@ public enum DownloadSource
     Batch,
     ClipboardMonitor,
     Import,
+    /// <summary>Legacy: jobs queued by the removed site grabber.</summary>
     Grabber,
 }
 
@@ -89,8 +90,6 @@ public sealed class DownloadJob
     public string? Referrer { get; set; }
     public string? UserAgent { get; set; }
 
-    /// <summary>Set for site-grabber jobs: redirect hops must be allowed by the target host's robots.txt.</summary>
-    public bool RespectRobotsTxt { get; set; }
 
     public string FileName { get; set; } = string.Empty;
     public string DestinationDirectory { get; set; } = string.Empty;
@@ -327,6 +326,7 @@ public sealed class ScheduleRule
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
+    /// <summary>Legacy: set on schedules for the removed site grabber; such schedules are dropped on load.</summary>
     public Guid? GrabberProjectId { get; set; }
     public bool Enabled { get; set; } = true;
 
@@ -351,46 +351,6 @@ public sealed class ScheduleRule
     public bool ShutdownWhenDone { get; set; }
     public string ShutdownMode { get; set; } = "shutdown";
     public bool ForceShutdown { get; set; }
-}
-
-public sealed class GrabberProject
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public string Name { get; set; } = "Grabber project";
-    public string StartUrl { get; set; } = string.Empty;
-    public string? DestinationDirectory { get; set; }
-    public int MaxDepth { get; set; } = 2;
-    public int MaxPages { get; set; } = 50;
-    public bool SameHostOnly { get; set; } = true;
-    public List<string> Extensions { get; set; } = new();
-    public List<string> IncludePatterns { get; set; } = new();
-    public List<string> ExcludePatterns { get; set; } = new();
-    public bool SavePages { get; set; } = true;
-    public bool RewriteLinks { get; set; } = true;
-    public bool RespectRobotsTxt { get; set; } = true;
-    public bool RenderJavaScript { get; set; }
-    public string StartMode { get; set; } = "now";
-    public int QueueId { get; set; }
-    public int Connections { get; set; }
-
-    /// <summary>pending, running, completed, failed, interrupted.</summary>
-    public string Status { get; set; } = "pending";
-    public int PagesCrawled { get; set; }
-    public int FilesQueued { get; set; }
-    public int FilesSkipped { get; set; }
-    public string? LastError { get; set; }
-    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset? LastRunAt { get; set; }
-
-    public GrabberProject Clone()
-    {
-        var clone = (GrabberProject)MemberwiseClone();
-        clone.Extensions = new List<string>(Extensions);
-        clone.IncludePatterns = new List<string>(IncludePatterns);
-        clone.ExcludePatterns = new List<string>(ExcludePatterns);
-        return clone;
-    }
 }
 
 public sealed class ConnectionProfile

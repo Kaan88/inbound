@@ -209,7 +209,7 @@ SegmentBase/SIDX plus SegmentList `mediaRange` byte ranges are verified (E59).
 Dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain
 excluded; all advertised media rows are implemented.
 
-## Phase 10 - Download All and site grabber (done)
+## Phase 10 - Download All and site grabber (Download All done; site grabber removed 2026-11-04 by owner decision)
 
 Download All link collection is implemented: the extension scans anchors,
 images, and media sources, deduplicates and filters them, supports selection and
@@ -218,7 +218,7 @@ select-all-visible, and batch-adds selected URLs through authenticated handoffs
 filters, saves pages and files under their URL paths, and rewrites mirrored links
 to relative local paths (G2/G3 done; E40). Projects persist config/status/progress
 and can be run, resumed, removed, or scheduled; resume skips existing files
-(G4 done; E41). Remaining polish: grabber preview and a WinUI schedule editor.
+(G4 done; E41). The site grabber (G2-G4) was later removed as out of scope.
 
 ## Phase 11 — Remaining compatibility and integration (pending)
 
