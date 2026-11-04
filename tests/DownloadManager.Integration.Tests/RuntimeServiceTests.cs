@@ -191,6 +191,152 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task GrabberProjectPersistsAndResumesWithoutRedownload()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var mirror = Path.Combine(ctx.Destination, "project-mirror");
+            var created = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
+            {
+                Name = "Docs mirror",
+                Request = new SiteGrabberRequest
+                {
+                    StartUrl = $"{_server.BaseAddress}/grab/",
+                    DestinationDirectory = mirror,
+                    MaxDepth = 2,
+                    MaxPages = 10,
+                    Extensions = new List<string> { "bin" },
+                    ExcludePatterns = new List<string> { "*/files/b.bin*" },
+                    StartMode = "now",
+                },
+            });
+            Assert.True(created.Ok, created.Error);
+            var projectId = created.Project!.Id;
+
+            var first = await ctx.Service.RunGrabberProjectAsync(projectId);
+            Assert.True(first.Ok, first.Error);
+            Assert.Equal("completed", first.Project!.Status);
+            Assert.Equal(3, first.Project.PagesCrawled);
+            Assert.Equal(2, first.Project.FilesQueued);
+            Assert.Equal(1, first.Project.FilesSkipped);
+
+            var jobs = ctx.Service.GetSnapshot().Jobs
+                .Where(job => job.Url.Contains("/grab/files/", StringComparison.Ordinal))
+                .ToList();
+            Assert.Equal(2, jobs.Count);
+            foreach (var job in jobs)
+            {
+                await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            }
+
+            var aPath = Path.Combine(mirror, "grab", "files", "a.bin");
+            var aHash = await Hashing.Sha256FileAsync(aPath);
+            var aModified = File.GetLastWriteTimeUtc(aPath);
+
+            var second = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+            try
+            {
+                var persisted = Assert.Single(second.Service.GetGrabberProjects().Projects);
+                Assert.Equal(projectId, persisted.Id);
+                Assert.Equal("completed", persisted.Status);
+                Assert.Equal(2, persisted.FilesQueued);
+
+                var jobsBefore = second.Service.GetSnapshot().Jobs.Count;
+                var resume = await second.Service.RunGrabberProjectAsync(projectId);
+                Assert.True(resume.Ok, resume.Error);
+                Assert.Equal(0, resume.Project!.FilesQueued);
+                Assert.True(resume.Project.FilesSkipped >= 3);
+                Assert.Equal(jobsBefore, second.Service.GetSnapshot().Jobs.Count);
+                Assert.Equal(aHash, await Hashing.Sha256FileAsync(aPath));
+                Assert.Equal(aModified, File.GetLastWriteTimeUtc(aPath));
+
+                var removed = await second.Service.RemoveGrabberProjectAsync(projectId);
+                Assert.True(removed.Ok, removed.Error);
+                Assert.Empty(second.Service.GetGrabberProjects().Projects);
+            }
+            finally
+            {
+                await second.DisposeAsync();
+            }
+
+            var badProject = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
+            {
+                Name = "Bad start",
+                Request = new SiteGrabberRequest
+                {
+                    StartUrl = $"{_server.BaseAddress}/grab/missing-page",
+                    DestinationDirectory = Path.Combine(ctx.Destination, "bad-mirror"),
+                    MaxDepth = 0,
+                    MaxPages = 1,
+                },
+            });
+            Assert.True(badProject.Ok, badProject.Error);
+            var badRun = await ctx.Service.RunGrabberProjectAsync(badProject.Project!.Id);
+            Assert.False(badRun.Ok);
+            Assert.Equal("failed", badRun.Project!.Status);
+            Assert.False(string.IsNullOrWhiteSpace(badRun.Project.LastError));
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ScheduledGrabberProjectRunsOncePerDay()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var mirror = Path.Combine(ctx.Destination, "scheduled-mirror");
+        var created = await ctx.Service.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
+        {
+            Name = "Scheduled mirror",
+            Request = new SiteGrabberRequest
+            {
+                StartUrl = $"{_server.BaseAddress}/grab/",
+                DestinationDirectory = mirror,
+                MaxDepth = 1,
+                MaxPages = 5,
+                Extensions = new List<string> { "bin" },
+                StartMode = "now",
+            },
+        });
+        Assert.True(created.Ok, created.Error);
+
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Schedules.Add(new ScheduleDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Nightly grab",
+            QueueId = 0,
+            GrabberProjectId = created.Project!.Id,
+            Enabled = true,
+            Kind = "daily",
+            StartTime = "00:00",
+            Days = "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+        });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var now = new DateTimeOffset(DateTime.Today.AddHours(12));
+        var actions = await ctx.Service.EvaluateSchedulesAsync(now);
+        Assert.Contains(actions, action => action.Action == "grabber" && action.Ok);
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        GrabberProjectDto project;
+        do
+        {
+            await Task.Delay(200);
+            project = Assert.Single(ctx.Service.GetGrabberProjects().Projects);
+        } while ((project.Status is "pending" or "running") && DateTime.UtcNow < deadline);
+
+        Assert.Equal("completed", project.Status);
+        Assert.True(project.FilesQueued > 0);
+
+        var second = await ctx.Service.EvaluateSchedulesAsync(now);
+        Assert.DoesNotContain(second, action => action.Action == "grabber");
+    }
+
+    [Fact]
     public async Task SiteGrabberCrawlsScopeAndRewritesLinks()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1821,6 +1967,7 @@ public sealed class RuntimeServiceTests
         {
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
+            var grabberProjects = new JsonGrabberProjectStore(paths);
             var store = new JsonJobStore(paths);
             var settingsStore = new JsonSettingsStore(paths);
             var engine = new HttpDownloadEngine(
@@ -1843,7 +1990,8 @@ public sealed class RuntimeServiceTests
                 enableSchedulerTimer: false,
                 completionActions: completionActions,
                 sleepPrevention: sleepPrevention,
-                mediaCheckpoints: mediaCheckpoints);
+                mediaCheckpoints: mediaCheckpoints,
+                grabberProjects: grabberProjects);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

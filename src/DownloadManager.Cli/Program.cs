@@ -183,6 +183,9 @@ internal static class Program
             case "grab":
                 return await GrabAsync(client, args, optionArgs, json).ConfigureAwait(false);
 
+            case "grabber":
+                return await GrabberAsync(client, args, optionArgs, json).ConfigureAwait(false);
+
             case "export":
             {
                 if (optionArgs.Length < 1)
@@ -575,6 +578,7 @@ internal static class Program
                     $"{(schedule.Enabled ? "on" : "off"),-4} " +
                     $"{schedule.Kind,-8} {schedule.StartTime,-5} {schedule.StopTime ?? "-",-5} " +
                     $"{schedule.QueueId,3}  {schedule.Name} [{schedule.Days}]" +
+                    (schedule.GrabberProjectId is { } grabber ? $" grabber={grabber:N}" : string.Empty) +
                     (schedule.LastStartDate is { } lastStart ? $" last-start={lastStart:yyyy-MM-dd}" : string.Empty));
             }
 
@@ -587,7 +591,7 @@ internal static class Program
                 !int.TryParse(positional[1], out var queueId) ||
                 !TimeOnly.TryParse(positional[2], CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
             {
-                Console.Error.WriteLine("usage: schedule add <queue-id> <HH:mm> [--days ...] [--stop HH:mm] [--once yyyy-MM-dd] [--name ...] [--disabled]");
+                Console.Error.WriteLine("usage: schedule add <queue-id> <HH:mm> [--grabber PROJECT-ID] [--days ...] [--stop HH:mm] [--once yyyy-MM-dd] [--name ...] [--disabled]");
                 return 2;
             }
 
@@ -624,11 +628,23 @@ internal static class Program
                 return 2;
             }
 
+            Guid? grabberProjectId = null;
+            if (GetOption(args, "--grabber") is { } grabberSelector)
+            {
+                grabberProjectId = await ResolveGrabberProjectIdAsync(client, grabberSelector)
+                    .ConfigureAwait(false);
+                if (grabberProjectId is null)
+                {
+                    return 2;
+                }
+            }
+
             var schedule = new ScheduleDto
             {
                 Id = Guid.NewGuid(),
                 Name = GetOption(args, "--name") ?? $"Schedule {settings.Schedules.Count + 1}",
                 QueueId = queueId,
+                GrabberProjectId = grabberProjectId,
                 Enabled = !args.Contains("--disabled", StringComparer.OrdinalIgnoreCase),
                 Kind = kind,
                 StartDate = startDate,
@@ -647,7 +663,12 @@ internal static class Program
             var addedResult = added.GetPayload<SettingsResult>();
             if (addedResult.Ok)
             {
-                Console.WriteLine($"added: {schedule.Id:N} {schedule.Kind} queue {schedule.QueueId} at {schedule.StartTime}");
+                Console.WriteLine(
+                    $"added: {schedule.Id:N} {schedule.Kind} " +
+                    (schedule.GrabberProjectId is { } grabber
+                        ? $"grabber {grabber:N}"
+                        : $"queue {schedule.QueueId}") +
+                    $" at {schedule.StartTime}");
             }
 
             return PrintSettingsResult(added, json);
@@ -705,9 +726,150 @@ internal static class Program
             return 2;
         }
 
+        var request = ParseGrabberRequest(args, positional[0]);
+        var reply = await client.RequestAsync(MessageTypes.GrabberRun, request).ConfigureAwait(false);
+        var result = reply.GetPayload<SiteGrabberResult>();
+        if (json)
+        {
+            PrintJson(result);
+        }
+        else if (!result.Ok)
+        {
+            Console.Error.WriteLine($"grab failed: {result.Error}");
+        }
+        else
+        {
+            Console.WriteLine(
+                $"crawled {result.PagesCrawled} pages, queued {result.FilesQueued} files, " +
+                $"skipped {result.FilesSkipped}");
+            foreach (var error in result.Errors)
+            {
+                Console.WriteLine($"  warning: {error}");
+            }
+        }
+
+        return result.Ok ? 0 : 1;
+    }
+
+    private static async Task<int> GrabberAsync(
+        CliClient client,
+        string[] args,
+        string[] positional,
+        bool json)
+    {
+        var sub = positional.FirstOrDefault()?.ToLowerInvariant() ?? "list";
+        if (sub == "list")
+        {
+            var reply = await client.RequestAsync(MessageTypes.GrabberProjectsQuery, new { })
+                .ConfigureAwait(false);
+            var result = reply.GetPayload<GrabberProjectsResult>();
+            if (json)
+            {
+                PrintJson(result.Projects);
+                return 0;
+            }
+
+            Console.WriteLine($"{"ID",-9} {"STATUS",-12} {"PAGES",5} {"QUEUED",6} {"SKIPPED",7}  NAME");
+            foreach (var project in result.Projects)
+            {
+                Console.WriteLine(
+                    $"{project.Id.ToString("N")[..8],-9} {project.Status,-12} " +
+                    $"{project.PagesCrawled,5} {project.FilesQueued,6} {project.FilesSkipped,7}  " +
+                    $"{project.Name}  {project.Request.StartUrl}");
+            }
+
+            return 0;
+        }
+
+        if (sub == "add")
+        {
+            if (positional.Length < 2)
+            {
+                Console.Error.WriteLine("usage: grabber add <start-url> [--name NAME] [--dest DIR] [grabber options]");
+                return 2;
+            }
+
+            var request = ParseGrabberRequest(args, positional[1]);
+            var defaultName = Uri.TryCreate(request.StartUrl, UriKind.Absolute, out var startUri)
+                ? $"Grab {startUri.Host}"
+                : "Grabber project";
+            var created = await client.RequestAsync(MessageTypes.GrabberProjectCreate,
+                new GrabberProjectCreateRequest
+                {
+                    Name = GetOption(args, "--name") ?? defaultName,
+                    Request = request,
+                }).ConfigureAwait(false);
+            var result = created.GetPayload<GrabberProjectResult>();
+            if (json)
+            {
+                PrintJson(result);
+            }
+            else if (!result.Ok)
+            {
+                Console.Error.WriteLine($"grabber add failed: {result.Error}");
+            }
+            else
+            {
+                Console.WriteLine($"added: {result.Project!.Id:N}  {result.Project.Name}");
+            }
+
+            return result.Ok ? 0 : 1;
+        }
+
+        if (sub is "run" or "remove")
+        {
+            if (positional.Length < 2)
+            {
+                Console.Error.WriteLine($"usage: grabber {sub} <project-id>");
+                return 2;
+            }
+
+            var projectId = await ResolveGrabberProjectIdAsync(client, positional[1]).ConfigureAwait(false);
+            if (projectId is null)
+            {
+                return 1;
+            }
+
+            var type = sub == "run" ? MessageTypes.GrabberProjectRun : MessageTypes.GrabberProjectRemove;
+            var reply = await client.RequestAsync(type,
+                new GrabberProjectActionRequest { Id = projectId.Value }).ConfigureAwait(false);
+            var result = reply.GetPayload<GrabberProjectResult>();
+            if (json)
+            {
+                PrintJson(result);
+            }
+            else if (!result.Ok)
+            {
+                Console.Error.WriteLine($"grabber {sub} failed: {result.Error}");
+            }
+            else if (sub == "run")
+            {
+                var project = result.Project!;
+                Console.WriteLine(
+                    $"{project.Name}: {project.Status}; {project.PagesCrawled} pages, " +
+                    $"{project.FilesQueued} queued, {project.FilesSkipped} skipped");
+                foreach (var error in result.Run?.Errors ?? new List<string>())
+                {
+                    Console.WriteLine($"  warning: {error}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"removed: {projectId.Value:N}");
+            }
+
+            return result.Ok ? 0 : 1;
+        }
+
+        Console.Error.WriteLine("usage: grabber list|add|run|remove");
+        return 2;
+    }
+
+    private static SiteGrabberRequest ParseGrabberRequest(string[] args, string startUrl)
+    {
         var request = new SiteGrabberRequest
         {
-            StartUrl = positional[0],
+            StartUrl = startUrl,
             DestinationDirectory = GetOption(args, "--dest"),
             MaxDepth = int.TryParse(GetOption(args, "--depth"), out var depth) ? depth : 2,
             MaxPages = int.TryParse(GetOption(args, "--max-pages"), out var pages) ? pages : 50,
@@ -735,28 +897,25 @@ internal static class Program
             request.Connections = connections;
         }
 
-        var reply = await client.RequestAsync(MessageTypes.GrabberRun, request).ConfigureAwait(false);
-        var result = reply.GetPayload<SiteGrabberResult>();
-        if (json)
+        return request;
+    }
+
+    private static async Task<Guid?> ResolveGrabberProjectIdAsync(CliClient client, string selector)
+    {
+        var reply = await client.RequestAsync(MessageTypes.GrabberProjectsQuery, new { })
+            .ConfigureAwait(false);
+        var projects = reply.GetPayload<GrabberProjectsResult>().Projects;
+        var normalized = selector.Replace("-", string.Empty, StringComparison.Ordinal);
+        var matches = projects
+            .Where(project => project.Id.ToString("N").StartsWith(normalized, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matches.Count != 1)
         {
-            PrintJson(result);
-        }
-        else if (!result.Ok)
-        {
-            Console.Error.WriteLine($"grab failed: {result.Error}");
-        }
-        else
-        {
-            Console.WriteLine(
-                $"crawled {result.PagesCrawled} pages, queued {result.FilesQueued} files, " +
-                $"skipped {result.FilesSkipped}");
-            foreach (var error in result.Errors)
-            {
-                Console.WriteLine($"  warning: {error}");
-            }
+            Console.Error.WriteLine($"grabber '{selector}' did not match exactly one project.");
+            return null;
         }
 
-        return result.Ok ? 0 : 1;
+        return matches[0].Id;
     }
 
     private static void SetCategoryFolder(SettingsDto settings, string category, string value)
@@ -1334,6 +1493,8 @@ internal static class Program
               dm grab <start-url> [--dest DIR] [--depth N] [--max-pages N]
                           [--extensions zip,mp3] [--include GLOB] [--exclude GLOB]
                           [--no-pages] [--no-rewrite] [--start now|later]
+              dm grabber list|add|run|remove
+              dm grabber add <start-url> [--name NAME] [--dest DIR] [grabber options]
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>
@@ -1342,7 +1503,8 @@ internal static class Program
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move|quota
               dm schedule list|add|remove|enable|disable
-                          [--open] [--exit] [--shutdown shutdown|restart|logoff] [--force]
+                          [--grabber PROJECT-ID] [--open] [--exit]
+                          [--shutdown shutdown|restart|logoff] [--force]
               dm site list|add|remove
               dm settings [get] | settings set <key> <value>
               dm host status|open|shutdown

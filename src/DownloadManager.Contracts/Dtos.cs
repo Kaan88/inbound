@@ -67,6 +67,7 @@ public sealed class QueueDto
 
 public sealed class ScheduleDto
 {
+    public Guid? GrabberProjectId { get; set; }
     public Guid Id { get; set; }
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
@@ -269,6 +270,45 @@ public sealed class SiteGrabberResult
     public int FilesQueued { get; set; }
     public int FilesSkipped { get; set; }
     public List<string> Errors { get; set; } = new();
+}
+
+public sealed class GrabberProjectDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public SiteGrabberRequest Request { get; set; } = new();
+    public string Status { get; set; } = "pending";
+    public int PagesCrawled { get; set; }
+    public int FilesQueued { get; set; }
+    public int FilesSkipped { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+}
+
+public sealed class GrabberProjectCreateRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public SiteGrabberRequest Request { get; set; } = new();
+}
+
+public sealed class GrabberProjectActionRequest
+{
+    public Guid Id { get; set; }
+}
+
+public sealed class GrabberProjectResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public GrabberProjectDto? Project { get; set; }
+    public SiteGrabberResult? Run { get; set; }
+}
+
+public sealed class GrabberProjectsResult
+{
+    public List<GrabberProjectDto> Projects { get; set; } = new();
 }
 
 public sealed class JobEventDto

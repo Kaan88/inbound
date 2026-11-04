@@ -276,6 +276,35 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.GrabberProjectsQuery:
+                    await Reply(client, message, MessageTypes.GrabberProjectsResult,
+                        _service.GetGrabberProjects()).ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.GrabberProjectCreate:
+                    var projectCreate = message.GetPayload<GrabberProjectCreateRequest>();
+                    await Reply(client, message, MessageTypes.GrabberProjectResult,
+                        await _service.CreateGrabberProjectAsync(projectCreate, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.GrabberProjectRun:
+                    var projectRun = message.GetPayload<GrabberProjectActionRequest>();
+                    await Reply(client, message, MessageTypes.GrabberProjectResult,
+                        await _service.RunGrabberProjectAsync(projectRun.Id, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.GrabberProjectRemove:
+                    var projectRemove = message.GetPayload<GrabberProjectActionRequest>();
+                    await Reply(client, message, MessageTypes.GrabberProjectResult,
+                        await _service.RemoveGrabberProjectAsync(projectRemove.Id, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsPauseAll:
                     await _service.PauseAllAsync(cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.HostActionResult,

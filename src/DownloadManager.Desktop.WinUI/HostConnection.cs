@@ -65,6 +65,22 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> RunGrabberAsync(SiteGrabberRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.GrabberRun, request, TimeSpan.FromMinutes(5), cancellationToken);
 
+    public Task<IpcMessage> GetGrabberProjectsAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.GrabberProjectsQuery, new { }, TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> CreateGrabberProjectAsync(
+        GrabberProjectCreateRequest request,
+        CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.GrabberProjectCreate, request, TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> RunGrabberProjectAsync(Guid id, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.GrabberProjectRun, new GrabberProjectActionRequest { Id = id },
+            TimeSpan.FromMinutes(10), cancellationToken);
+
+    public Task<IpcMessage> RemoveGrabberProjectAsync(Guid id, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.GrabberProjectRemove, new GrabberProjectActionRequest { Id = id },
+            TimeSpan.FromSeconds(10), cancellationToken);
+
     public Task<IpcMessage> UpdateJobAsync(Guid jobId, string description, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Description = description },
             TimeSpan.FromSeconds(10), cancellationToken);

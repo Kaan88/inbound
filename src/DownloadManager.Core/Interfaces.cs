@@ -76,6 +76,15 @@ public sealed class NullCompletionActionExecutor : ICompletionActionExecutor
 
 public sealed record MediaMuxResult(bool Success, string? Error);
 
+public interface IGrabberProjectStore
+{
+    Task<IReadOnlyList<GrabberProject>> LoadAllAsync(CancellationToken cancellationToken = default);
+
+    Task SaveAsync(GrabberProject project, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+}
+
 public interface IMediaCheckpointStore
 {
     Task<MediaCheckpoint?> LoadAsync(Guid jobId, string track, CancellationToken cancellationToken = default);

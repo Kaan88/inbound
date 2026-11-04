@@ -39,9 +39,9 @@
   editable descriptions, duplicate filename policies, category destination
   rules, remembered last folder, JSON list export/import, and the completion
   dialog exist; recent-URL history remains).
-- Phase 10: in progress (Download All link collection, filtering, selection, and
-  batch handoff verified; crawl scope, link rewriting, and persistent projects
-  remain).
+- Phase 10: complete (Download All link collection/filtering/handoff, scoped
+  crawl, offline link rewriting, and persistent/scheduled grabber projects
+  verified).
 - Phases 6, 11–12: pending. See `reference notes` for evidence and `PROGRESS.md` for
   the handoff.
 
@@ -202,15 +202,16 @@ shadow-DOM media panel and HLS quality-variant selection are verified (V2 done;
 E32). Remaining: SegmentBase/SegmentList/timeline DASH, HLS alternate audio, and
 AES-128.
 
-## Phase 10 - Download All and site grabber (in progress)
+## Phase 10 - Download All and site grabber (done)
 
 Download All link collection is implemented: the extension scans anchors,
 images, and media sources, deduplicates and filters them, supports selection and
 select-all-visible, and batch-adds selected URLs through authenticated handoffs
 (G1 done; E31). A scoped site grabber crawls by depth/page/host/extension/URL
 filters, saves pages and files under their URL paths, and rewrites mirrored links
-to relative local paths (G2/G3 done; E40). Remaining: preview, persistent
-grabber projects, and scheduled runs (G4).
+to relative local paths (G2/G3 done; E40). Projects persist config/status/progress
+and can be run, resumed, removed, or scheduled; resume skips existing files
+(G4 done; E41). Remaining polish: grabber preview and a WinUI schedule editor.
 
 ## Phase 11 — Remaining compatibility and integration (pending)
 

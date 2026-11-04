@@ -22,6 +22,7 @@
                 </MenuFlyoutItem>
                 <MenuFlyoutItem Text="Add batch download..." Click="MenuAddBatch_Click" />
                 <MenuFlyoutItem Text="Run site grabber..." Click="MenuGrabber_Click" />
+                <MenuFlyoutItem Text="Grabber projects..." Click="MenuGrabberProjects_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
             </MenuBarItem>
@@ -223,11 +224,10 @@
                                 <TextBlock Text="Queues" Foreground="#777777" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="grabber" Padding="14,2,8,2" IsEnabled="False"
-                                     ToolTipService.ToolTip="Site grabber is not implemented yet">
+                        <ListBoxItem Tag="grabber" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="#777777" />
-                                <TextBlock Text="Grabber Projects" Foreground="#777777" />
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="#C9C9C9" />
+                                <TextBlock Text="Grabber Projects" />
                             </StackPanel>
                         </ListBoxItem>
                     </ListBox>

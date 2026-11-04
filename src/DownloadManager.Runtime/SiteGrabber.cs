@@ -25,7 +25,8 @@ internal sealed class SiteGrabber
     public async Task<SiteGrabberResult> RunAsync(
         SiteGrabberRequest request,
         Func<GrabberFile, Task<AddJobResponse>> enqueue,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int, int, int>? onProgress = null)
     {
         var result = new SiteGrabberResult();
         if (!Uri.TryCreate(request.StartUrl, UriKind.Absolute, out var start) ||
@@ -100,6 +101,7 @@ internal sealed class SiteGrabber
                     html,
                     AssignPath(url, true, localOwners));
                 pages.Add(page);
+                onProgress?.Invoke(pages.Count, result.FilesQueued, result.FilesSkipped);
                 _log?.Invoke($"Grabber crawled {url} (depth {depth}, {html.Length} chars).");
 
                 foreach (var link in ExtractLinks(html, url))
@@ -137,6 +139,14 @@ internal sealed class SiteGrabber
         }
 
         result.PagesCrawled = pages.Count;
+        if (pages.Count == 0 && files.Count == 0)
+        {
+            result.Ok = false;
+            result.Error = result.Errors.FirstOrDefault() ??
+                           "The start URL could not be crawled.";
+            return result;
+        }
+
         var pageMap = pages.ToDictionary(page => Normalize(page.Url), page => page.RelativePath, StringComparer.OrdinalIgnoreCase);
 
         if (request.SavePages)
@@ -161,6 +171,7 @@ internal sealed class SiteGrabber
             if (File.Exists(fullPath))
             {
                 result.FilesSkipped++;
+                onProgress?.Invoke(pages.Count, result.FilesQueued, result.FilesSkipped);
                 continue;
             }
 
@@ -180,6 +191,8 @@ internal sealed class SiteGrabber
             {
                 AddError(result, $"{file.Url}: {ex.Message}");
             }
+
+            onProgress?.Invoke(pages.Count, result.FilesQueued, result.FilesSkipped);
         }
 
         result.Ok = true;

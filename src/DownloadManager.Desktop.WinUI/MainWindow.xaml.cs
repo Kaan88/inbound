@@ -332,6 +332,12 @@ public sealed partial class MainWindow : Window
     {
         if (CategoryList.SelectedItem is ListBoxItem { Tag: string tag })
         {
+            if (tag == "grabber")
+            {
+                _ = ShowGrabberProjectsAsync();
+                return;
+            }
+
             _category = tag;
             RebuildVisible();
         }
@@ -1251,6 +1257,12 @@ public sealed partial class MainWindow : Window
             Header = "Mirror folder",
             Text = Path.Combine(_settings.DefaultDownloadDirectory, "mirror"),
         };
+        var nameBox = new TextBox
+        {
+            Header = "Project name (optional)",
+            PlaceholderText = "Docs mirror",
+        };
+        var saveProject = new CheckBox { Content = "Save as a reusable project" };
         var depthBox = new TextBox { Header = "Maximum depth", Text = "2" };
         var pagesBox = new TextBox { Header = "Maximum pages", Text = "50" };
         var extensionsBox = new TextBox
@@ -1286,6 +1298,8 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(urlBox);
         panel.Children.Add(destinationBox);
+        panel.Children.Add(nameBox);
+        panel.Children.Add(saveProject);
         panel.Children.Add(depthBox);
         panel.Children.Add(pagesBox);
         panel.Children.Add(extensionsBox);
@@ -1353,8 +1367,44 @@ public sealed partial class MainWindow : Window
         StatusText.Text = "Site grabber is crawling...";
         try
         {
-            var reply = await _connection.RunGrabberAsync(request);
-            var result = reply.GetPayload<SiteGrabberResult>();
+            SiteGrabberResult result;
+            if (saveProject.IsChecked == true)
+            {
+                var createdReply = await _connection.CreateGrabberProjectAsync(new GrabberProjectCreateRequest
+                {
+                    Name = nameBox.Text.Trim(),
+                    Request = request,
+                });
+                var created = createdReply.GetPayload<GrabberProjectResult>();
+                if (!created.Ok || created.Project is null)
+                {
+                    await ShowMessageAsync("Site grabber", created.Error ?? "Could not create the project.");
+                    return;
+                }
+
+                StatusText.Text = $"Running grabber project '{created.Project.Name}'...";
+                var runReply = await _connection.RunGrabberProjectAsync(created.Project.Id);
+                var run = runReply.GetPayload<GrabberProjectResult>();
+                if (!run.Ok || run.Project is null)
+                {
+                    await ShowMessageAsync("Site grabber", run.Error ?? "The crawl failed.");
+                    return;
+                }
+
+                result = run.Run ?? new SiteGrabberResult
+                {
+                    Ok = true,
+                    PagesCrawled = run.Project.PagesCrawled,
+                    FilesQueued = run.Project.FilesQueued,
+                    FilesSkipped = run.Project.FilesSkipped,
+                };
+            }
+            else
+            {
+                var reply = await _connection.RunGrabberAsync(request);
+                result = reply.GetPayload<SiteGrabberResult>();
+            }
+
             if (!result.Ok)
             {
                 await ShowMessageAsync("Site grabber", result.Error ?? "The crawl failed.");
@@ -1364,6 +1414,11 @@ public sealed partial class MainWindow : Window
             await RefreshAsync();
             var summary = $"Crawled {result.PagesCrawled} pages; queued {result.FilesQueued} files; " +
                           $"skipped {result.FilesSkipped}.";
+            if (saveProject.IsChecked == true)
+            {
+                summary += "\n\nThe project was saved under Grabber Projects.";
+            }
+
             if (result.Errors.Count > 0)
             {
                 summary += $"\n\nFirst warning: {result.Errors[0]}";
@@ -1378,6 +1433,140 @@ public sealed partial class MainWindow : Window
         finally
         {
             UpdateStatusText();
+        }
+    }
+
+    private async void MenuGrabberProjects_Click(object sender, RoutedEventArgs e)
+        => await ShowGrabberProjectsAsync();
+
+    private async Task ShowGrabberProjectsAsync()
+    {
+        var reply = await _connection.GetGrabberProjectsAsync();
+        var result = reply.GetPayload<GrabberProjectsResult>();
+        var panel = new StackPanel { Spacing = 8 };
+        if (result.Projects.Count == 0)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "No grabber projects yet. Use Tasks → Run site grabber and save a project.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            });
+        }
+
+        var action = string.Empty;
+        Guid? actionId = null;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Grabber projects",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
+            PrimaryButtonText = "New project...",
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        foreach (var project in result.Projects)
+        {
+            var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 4, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel { Spacing = 2 };
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{project.Name} — {project.Status}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{project.Request.StartUrl}\n{project.PagesCrawled} pages, " +
+                       $"{project.FilesQueued} queued, {project.FilesSkipped} skipped",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            Grid.SetColumn(info, 0);
+            row.Children.Add(info);
+
+            var runButton = new Button { Content = "Run", Tag = project.Id };
+            runButton.Click += (_, _) =>
+            {
+                action = "run";
+                actionId = project.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(runButton, 1);
+            row.Children.Add(runButton);
+
+            var removeButton = new Button { Content = "Remove", Tag = project.Id };
+            removeButton.Click += (_, _) =>
+            {
+                action = "remove";
+                actionId = project.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(removeButton, 2);
+            row.Children.Add(removeButton);
+
+            panel.Children.Add(row);
+            panel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 59, 76)),
+            });
+        }
+
+        var dialogResult = await dialog.ShowAsync();
+        if (actionId is Guid id)
+        {
+            if (action == "run")
+            {
+                StatusText.Text = "Running grabber project...";
+                try
+                {
+                    var runReply = await _connection.RunGrabberProjectAsync(id);
+                    var run = runReply.GetPayload<GrabberProjectResult>();
+                    if (!run.Ok)
+                    {
+                        await ShowMessageAsync("Grabber project", run.Error ?? "The crawl failed.");
+                    }
+                    else
+                    {
+                        var project = run.Project!;
+                        await ShowMessageAsync("Grabber project",
+                            $"{project.Name}: {project.Status}\n" +
+                            $"{project.PagesCrawled} pages, {project.FilesQueued} queued, " +
+                            $"{project.FilesSkipped} skipped.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await ShowMessageAsync("Grabber project", ex.Message);
+                }
+                finally
+                {
+                    UpdateStatusText();
+                }
+
+                await ShowGrabberProjectsAsync();
+            }
+            else if (action == "remove")
+            {
+                var removeReply = await _connection.RemoveGrabberProjectAsync(id);
+                var removed = removeReply.GetPayload<GrabberProjectResult>();
+                if (!removed.Ok)
+                {
+                    await ShowMessageAsync("Grabber project", removed.Error ?? "Could not remove the project.");
+                }
+
+                await ShowGrabberProjectsAsync();
+            }
+        }
+        else if (dialogResult == ContentDialogResult.Primary)
+        {
+            MenuGrabber_Click(this, new RoutedEventArgs());
         }
     }
 

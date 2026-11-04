@@ -631,8 +631,36 @@ random-access part file **in the destination directory**:
   - `a.bin` SHA-256 `ac4cc81ea530f1ddca9f335980323eee724a351bd5b8d21d325ffd3b7108663b`;
   - `c.bin` SHA-256 `abef0ea89918113d007c57b8d2260ea10d78d31703ad9313b0eed9859f7ee09b`.
 - WinUI Tasks → Run site grabber exposes all scope/filter/mirror controls.
-- Remaining: G4 project persistence/scheduling, JS-rendered pages, robots.txt,
-  auth/proxy for crawler, CSS url() rewriting, preview.
+- Remaining: JS-rendered pages, robots.txt, auth/proxy for crawler, CSS url()
+  rewriting, preview.
+
+## Grabber project evidence (G4, 2026-11-04)
+
+- Added durable `grabber-projects.json` with project config, status, page/file
+  counts, last error, created/updated/last-run times; `running` projects become
+  `interrupted` after a restart.
+- Runtime project API: create/list/run/remove, one run per project, progress
+  saves throttled to 2 s; the same project can be resumed after restart.
+- Schedules gained `GrabberProjectId`; a due start time launches the project once
+  per day on the Host timer and records `LastStartDate`; stop times are ignored
+  for grabber schedules.
+- Integration (suite **42/42**):
+  - `GrabberProjectPersistsAndResumesWithoutRedownload`: first run 3 pages,
+    2 queued, 1 skipped; fresh service loaded the completed project; resume
+    reported 0 queued/3 skipped, the job count stayed unchanged, and a.bin
+    hash/mtime stayed unchanged; removal left an empty list; a bad start URL
+    produced status `failed` with LastError (fixes the previous false
+    "completed 0 pages").
+  - `ScheduledGrabberProjectRunsOncePerDay`: schedule action `grabber` ran the
+    project with files queued; the second same-day evaluation produced no action.
+- Published CLI:
+  - `grabber add/list/run/remove`; resume printed `0 queued, 3 skipped` and both
+    job JSON and a.bin mtime were unchanged;
+  - `schedule add 0 00:00 --grabber <id>` displayed `grabber=<id>`;
+  - the live Host timer ran a scheduled project (2 pages, 2 files, 1 skipped)
+    and recorded `last-start=2026-11-04`.
+- WinUI: Tasks → Grabber projects lists name/status/URL/counts with Run, Remove,
+  and New project; the grabber dialog can save a reusable project.
 
 ## Tests
 
@@ -642,14 +670,14 @@ random-access part file **in the destination directory**:
 - Core: **44/44 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, and download-list
   round-trip.
-- Runtime/persistence: **40/40 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **42/42 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, DRM detection, editable
-  property persistence, duplicate policies, category destinations, and the
-  scoped site grabber/offline mirror.
+  properties, duplicate policies, category destinations, the scoped site
+  grabber/offline mirror, and persistent/scheduled grabber projects.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -677,8 +705,8 @@ random-access part file **in the destination directory**:
    Direct media detection, in-page/quality panel, unencrypted HLS, static DASH
    SegmentTemplate, DASH A/V muxing, fragment recovery, rotating-token refresh,
    live exclusion, and DRM detection are done (E24–E32).
-3. Phase 10 remainder: G4 persistent/scheduled grabber projects and grabber
-   preview. G1 (E31), G2/G3 (E40) are done.
+3. Phase 10 is complete (G1–G4; E31/E40/E41). Remaining grabber polish: preview,
+   WinUI schedule editor, JS-rendered pages, robots.txt, crawler auth/proxy.
 4. Phase 6 remainder: recent-URL history and remaining UI polish. Clipboard
    monitoring (E33), batch URLs (E34), editable descriptions (E35), duplicate
    policies (E36), category/last-folder rules (E37), export/import (E38), and
