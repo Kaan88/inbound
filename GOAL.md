@@ -76,7 +76,7 @@ SDK, or presentation types.
 | 6 | Everyday download management | pending | Practical daily use without CLI |
 | 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundary, and expired-URL refresh with partial resume verified; SOCKS4/4a and proxy-password hardening remain |
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
-| 9 | Media detection/downloading | in progress | Direct media detection and popup list verified (E24); HLS/DASH download, muxing, and playable-output verification pending |
+| 9 | Media detection/downloading | in progress | Direct media detection and popup list verified (E24); unencrypted HLS master/media assembly verified playable (E25); DASH, muxing, recovery, live/DRM remain |
 | 10 | Download All + site grabber | pending | Controlled offline mirror within crawl boundaries |
 | 11 | Remaining compatibility/integration | pending | Every inventory row implemented or explicitly scoped |
 | 12 | Final visual/behavioral parity audit | pending | Reproducible parity evidence; gaps labelled |

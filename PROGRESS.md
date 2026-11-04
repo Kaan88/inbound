@@ -311,16 +311,38 @@ random-access part file **in the destination directory**:
 - V1 implemented, V2 partial (popup list; no in-page overlay/quality variants).
   HLS detection exists, but HLS/DASH segment downloading is still pending.
 
+## HLS evidence (2026-11-04)
+
+- Engine detects `.m3u8` targets and downloads HLS playlists:
+  - master playlist selects the highest-bandwidth variant;
+  - media playlist downloads `#EXTINF` segments sequentially into the
+    destination-local part file;
+  - concatenated TS output is renamed to `.ts`; fMP4 (`#EXT-X-MAP`) output uses
+    `.mp4`.
+- Rejections are explicit: encrypted HLS (`#EXT-X-KEY` other than NONE),
+  byte-range segments, live playlists without `#EXT-X-ENDLIST`.
+- Test assets were generated with ffmpeg 9.0.2: H.264 320×180 + AAC, three 2 s TS
+  segments, served by TestServer with master/media playlists and
+  `/hls/expected`.
+- Integration `HlsMasterAndMediaPlaylistsAssembleSegments` (**28/28 suite**):
+  both playlists produced 580,732-byte `.ts` files with SHA-256
+  `6a1384036fceb6355c2aae29504a8fa5fd899c642fd47d309685607c0031b946`.
+- Published CLI download produced the same hash. ffprobe:
+  H.264 320×180, AAC, duration `6.023222` s.
+- Limitations: no AES-128, live, byte-range, or cross-restart HLS checkpoint;
+  fMP4 assembly not yet playability-tested; no audio/video muxing.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
 - Core: **17/17 passed**, including shutdown-command construction.
-- Runtime/persistence: **27/27 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **28/28 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
-  HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, and DPAPI site logins.
+  HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins, and
+  HLS master/media assembly.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -343,9 +365,10 @@ random-access part file **in the destination directory**:
 
 1. Commit the Phase 8 closure increment (sleep prevention, DST, Download Later,
    tests, evidence).
-2. Phase 9: HLS/DASH segment downloading, in-page/quality panel, muxing with
-   FFmpeg behind an interface, recovery, live/DRM behavior. Direct media
-   detection and the popup list are done (E24).
+2. Phase 9: DASH manifest support, in-page/quality panel, muxing with FFmpeg
+   behind an interface, HLS checkpoint recovery/AES-128, live/DRM behavior.
+   Direct media detection, popup list, and unencrypted HLS are done
+   (E24/E25).
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
 4. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for

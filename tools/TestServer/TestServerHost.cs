@@ -450,6 +450,48 @@ public sealed class TestServerHost : IAsyncDisposable
                 throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
         });
 
+        _app.MapGet("/hls/{file}", async (HttpContext context, string file) =>
+        {
+            if (!string.Equals(Path.GetFileName(file), file, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var path = Path.Combine(AppContext.BaseDirectory, "hls", file);
+            if (!File.Exists(path))
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+            context.Response.ContentType = file.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+                ? "application/vnd.apple.mpegurl"
+                : "video/mp2t";
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes).ConfigureAwait(false);
+        });
+
+        _app.MapGet("/hls/expected", () =>
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "hls");
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            long length = 0;
+            foreach (var name in new[] { "seg0.ts", "seg1.ts", "seg2.ts" })
+            {
+                var bytes = File.ReadAllBytes(Path.Combine(directory, name));
+                hash.AppendData(bytes);
+                length += bytes.Length;
+            }
+
+            return Results.Json(new
+            {
+                sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),
+                bytes = length,
+            });
+        });
+
         _app.MapGet("/media-page", async (HttpContext context) =>
         {
             context.Response.ContentType = "text/html";

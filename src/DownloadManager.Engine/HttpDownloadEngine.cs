@@ -157,6 +157,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             }
         }
 
+        if (IsHlsPlaylist(job))
+        {
+            return await ExecuteHlsAsync(job, progress, cancellationToken).ConfigureAwait(false);
+        }
+
         if (job.RequestedConnections > 1 &&
             job.SpeedLimitBytesPerSecond is not > 0 &&
             (checkpoint is null || checkpoint.Segments.Count > 1))
@@ -570,6 +575,428 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                (uri.AbsolutePath.Length == normalizedPath.Length ||
                 uri.AbsolutePath[normalizedPath.Length] == '/');
     }
+
+    private static bool IsHlsPlaylist(DownloadJob job)
+    {
+        if (Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
+            uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var hint = job.Description ?? string.Empty;
+        return hint.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) ||
+               hint.Contains("m3u8", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<DownloadResult> ExecuteHlsAsync(
+        DownloadJob job,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var playlistUri = new Uri(job.Url, UriKind.Absolute);
+            var playlist = await FetchHlsTextAsync(job, playlistUri, cancellationToken).ConfigureAwait(false);
+            if (playlist.Text.Contains("#EXT-X-STREAM-INF", StringComparison.OrdinalIgnoreCase))
+            {
+                var variant = SelectHlsVariant(playlist.Text, playlist.FinalUri);
+                if (variant is null)
+                {
+                    return DownloadResult.Fail(DownloadState.Failed,
+                        new JobFailure(FailureKind.InvalidContent,
+                            "The HLS master playlist has no usable variant.",
+                            false, false, DateTimeOffset.UtcNow));
+                }
+
+                playlist = await FetchHlsTextAsync(job, variant, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await DownloadHlsMediaAsync(job, playlist.Text, playlist.FinalUri, progress, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DownloadResult.Fail(DownloadState.Cancelled,
+                new JobFailure(FailureKind.Cancelled, "The HLS download was cancelled.", false, true, DateTimeOffset.UtcNow));
+        }
+        catch (DownloadEngineException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure);
+        }
+        catch (Exception ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _));
+        }
+    }
+
+    private async Task<(string Text, Uri FinalUri)> FetchHlsTextAsync(
+        DownloadJob job,
+        Uri uri,
+        CancellationToken cancellationToken)
+    {
+        for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
+        {
+            using var request = BuildRequest(job, uri, 0, SameAuthority(job.Url, uri));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_options.ConnectTimeout);
+            using var response = await CurrentClient()
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                .ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            if (status is 301 or 302 or 303 or 307 or 308)
+            {
+                var location = response.Headers.Location ??
+                               throw new DownloadEngineException(new JobFailure(
+                                   FailureKind.InvalidContent, "HLS redirect had no Location header.",
+                                   false, false, DateTimeOffset.UtcNow), isRetryable: false);
+                uri = location.IsAbsoluteUri ? location : new Uri(uri, location);
+                continue;
+            }
+
+            if (status is 401 or 403 or 404 or 407 or 410)
+            {
+                throw new DownloadEngineException(ClassifyHttpFailure(status, response), isRetryable: false);
+            }
+
+            if (status != 200)
+            {
+                throw new DownloadEngineException(new JobFailure(
+                    FailureKind.Http,
+                    $"The HLS playlist returned HTTP {status}.",
+                    status >= 500,
+                    false,
+                    DateTimeOffset.UtcNow), isRetryable: status >= 500);
+            }
+
+            var text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+            if (text.Length > 4 * 1024 * 1024)
+            {
+                throw new DownloadEngineException(new JobFailure(
+                    FailureKind.InvalidContent, "The HLS playlist is too large.",
+                    false, false, DateTimeOffset.UtcNow), isRetryable: false);
+            }
+
+            return (text, uri);
+        }
+
+        throw new DownloadEngineException(new JobFailure(
+            FailureKind.InvalidContent, "Too many HLS playlist redirects.",
+            false, false, DateTimeOffset.UtcNow), isRetryable: false);
+    }
+
+    private static Uri? SelectHlsVariant(string playlist, Uri baseUri)
+    {
+        long bestBandwidth = -1;
+        Uri? best = null;
+        var lines = playlist.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (!line.StartsWith("#EXT-X-STREAM-INF:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var bandwidth = 0L;
+            foreach (var attribute in line["#EXT-X-STREAM-INF:".Length..].Split(','))
+            {
+                var pair = attribute.Split('=', 2);
+                if (pair.Length == 2 && pair[0].Trim().Equals("BANDWIDTH", StringComparison.OrdinalIgnoreCase))
+                {
+                    long.TryParse(pair[1].Trim(), out bandwidth);
+                }
+            }
+
+            for (var j = i + 1; j < lines.Length; j++)
+            {
+                var candidate = lines[j].Trim();
+                if (candidate.Length == 0 || candidate.StartsWith('#'))
+                {
+                    continue;
+                }
+
+                if (Uri.TryCreate(baseUri, candidate, out var resolved) && bandwidth >= bestBandwidth)
+                {
+                    bestBandwidth = bandwidth;
+                    best = resolved;
+                }
+
+                break;
+            }
+        }
+
+        return best;
+    }
+
+    private async Task<DownloadResult> DownloadHlsMediaAsync(
+        DownloadJob job,
+        string playlist,
+        Uri playlistUri,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        Uri? initUri = null;
+        var segments = new List<Uri>();
+        var hasEndList = false;
+        foreach (var rawLine in playlist.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith("#EXTINF", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-TARGETDURATION", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-VERSION", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-MEDIA-SEQUENCE", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-PLAYLIST-TYPE", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("#EXT-X-DISCONTINUITY", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (line.StartsWith("#EXT-X-KEY:", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!line.Contains("METHOD=NONE", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        "Encrypted HLS is not supported yet.",
+                        false, false, DateTimeOffset.UtcNow));
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("#EXT-X-BYTERANGE", StringComparison.OrdinalIgnoreCase))
+            {
+                return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                    FailureKind.InvalidContent,
+                    "HLS byte-range segments are not supported yet.",
+                    false, false, DateTimeOffset.UtcNow));
+            }
+
+            if (line.StartsWith("#EXT-X-MAP:", StringComparison.OrdinalIgnoreCase))
+            {
+                var uriValue = ExtractAttribute(line, "URI");
+                if (uriValue is not null && Uri.TryCreate(playlistUri, uriValue, out var mapUri))
+                {
+                    initUri = mapUri;
+                }
+
+                continue;
+            }
+
+            if (line.Equals("#EXT-X-ENDLIST", StringComparison.OrdinalIgnoreCase))
+            {
+                hasEndList = true;
+                continue;
+            }
+
+            if (line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (Uri.TryCreate(playlistUri, line, out var segmentUri))
+            {
+                segments.Add(segmentUri);
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                FailureKind.InvalidContent, "The HLS media playlist has no segments.",
+                false, false, DateTimeOffset.UtcNow));
+        }
+
+        if (!hasEndList)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                FailureKind.InvalidContent, "Live HLS playlists are not supported yet.",
+                false, false, DateTimeOffset.UtcNow));
+        }
+
+        var isFragmentedMp4 = initUri is not null ||
+                              segments.Any(s => s.AbsolutePath.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase));
+        var extension = isFragmentedMp4 ? ".mp4" : ".ts";
+        var baseName = Path.GetFileNameWithoutExtension(job.FileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "stream";
+        }
+
+        var directory = string.IsNullOrWhiteSpace(job.DestinationDirectory)
+            ? Path.GetDirectoryName(job.FinalFilePath) ?? AppSettings.GetDefaultDownloadDirectory()
+            : job.DestinationDirectory;
+        job.FinalFilePath = FileNameResolver.ResolveUniquePath(
+            directory, baseName + extension, job.ConflictPolicy);
+        job.FileName = Path.GetFileName(job.FinalFilePath);
+
+        var received = 0L;
+        var stopwatch = Stopwatch.StartNew();
+        var progressState = new HlsProgressState();
+        try
+        {
+            await using (var part = new FileStream(
+                             job.PartFilePath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.Read,
+                             _options.BufferSize,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                if (initUri is not null)
+                {
+                    received += await DownloadHlsSegmentAsync(
+                        job, initUri, part, received, progress, stopwatch, progressState, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                foreach (var segment in segments)
+                {
+                    received += await DownloadHlsSegmentAsync(
+                        job, segment, part, received, progress, stopwatch, progressState, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.ExpectedSha256))
+            {
+                var actual = await Hashing.Sha256FileAsync(job.PartFilePath, cancellationToken).ConfigureAwait(false);
+                if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                        FailureKind.InvalidContent,
+                        $"The HLS output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
+                        false, true, DateTimeOffset.UtcNow), received, received);
+                }
+            }
+
+            File.Move(job.PartFilePath, job.FinalFilePath, overwrite: false);
+            progress?.Report(new TransferProgress(
+                received, received, received / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds),
+                TimeSpan.Zero, 1, "Completed"));
+            return DownloadResult.Ok(received, received, job.FinalFilePath, null, null,
+                isFragmentedMp4 ? "video/mp4" : "video/mp2t");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return DownloadResult.Fail(DownloadState.Cancelled, new JobFailure(
+                FailureKind.Cancelled, "The HLS download was cancelled.", false, true, DateTimeOffset.UtcNow),
+                received, received);
+        }
+        catch (DownloadEngineException ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, ex.Failure, received, received);
+        }
+        catch (Exception ex)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _), received, received);
+        }
+    }
+
+    private async Task<long> DownloadHlsSegmentAsync(
+        DownloadJob job,
+        Uri segmentUri,
+        Stream output,
+        long alreadyReceived,
+        IProgress<TransferProgress>? progress,
+        Stopwatch stopwatch,
+        HlsProgressState progressState,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var request = BuildRequest(job, segmentUri, 0, SameAuthority(job.Url, segmentUri));
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(_options.ReadTimeout);
+                using var response = await CurrentClient()
+                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                    .ConfigureAwait(false);
+                var status = (int)response.StatusCode;
+                if (status is 401 or 403 or 404 or 407 or 410)
+                {
+                    throw new DownloadEngineException(ClassifyHttpFailure(status, response), isRetryable: false);
+                }
+
+                if (status is < 200 or >= 300)
+                {
+                    if (status >= 500 && attempt < _options.MaxAttempts)
+                    {
+                        await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                            .ConfigureAwait(false);
+                        continue;
+                    }
+
+                    throw new DownloadEngineException(new JobFailure(
+                        FailureKind.Http, $"HLS segment returned HTTP {status}.",
+                        status >= 500, false, DateTimeOffset.UtcNow), isRetryable: status >= 500);
+                }
+
+                var buffer = new byte[_options.BufferSize];
+                var segmentBytes = 0L;
+                await using var segmentStream = await response.Content.ReadAsStreamAsync(timeout.Token)
+                    .ConfigureAwait(false);
+                while (true)
+                {
+                    var read = await segmentStream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    segmentBytes += read;
+                    var now = DateTimeOffset.UtcNow;
+                    if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
+                    {
+                        progressState.LastReport = now;
+                        var bytes = alreadyReceived + segmentBytes;
+                        var speed = bytes / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+                        progress?.Report(new TransferProgress(
+                            bytes, null, speed, null, 1, "Downloading HLS"));
+                    }
+                }
+
+                return segmentBytes;
+            }
+            catch (Exception ex) when (
+                attempt < _options.MaxAttempts &&
+                (ex is IOException or HttpRequestException or TaskCanceledException) &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static string? ExtractAttribute(string line, string name)
+    {
+        var marker = name + "=";
+        var index = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var value = line[(index + marker.Length)..].Trim();
+        if (value.StartsWith('"'))
+        {
+            var end = value.IndexOf('"', 1);
+            return end > 0 ? value[1..end] : null;
+        }
+
+        var comma = value.IndexOf(',');
+        return comma >= 0 ? value[..comma] : value;
+    }
+
+    private static bool SameAuthority(string original, Uri current)
+        => Uri.TryCreate(original, UriKind.Absolute, out var originalUri) &&
+           string.Equals(
+               originalUri.GetLeftPart(UriPartial.Authority),
+               current.GetLeftPart(UriPartial.Authority),
+               StringComparison.OrdinalIgnoreCase);
 
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
@@ -1796,6 +2223,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         // Set by ExecuteAsync's caller below; kept here to make state self-contained.
         public string PartPath { get; set; } = string.Empty;
+    }
+
+    private sealed class HlsProgressState
+    {
+        public DateTimeOffset LastReport { get; set; } = DateTimeOffset.MinValue;
     }
 
     private sealed record AttemptResult(bool Complete, bool RestartFromZero);
