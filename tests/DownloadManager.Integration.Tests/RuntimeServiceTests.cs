@@ -1180,12 +1180,14 @@ public sealed class RuntimeServiceTests
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
         using var http = new HttpClient();
-        async Task<int> DisallowedHitsAsync()
+        async Task<int> StatAsync(string name)
         {
             using var doc = System.Text.Json.JsonDocument.Parse(
                 await http.GetStringAsync($"{_server.BaseAddress}/robo/stats"));
-            return doc.RootElement.GetProperty("disallowedHits").GetInt32();
+            return doc.RootElement.GetProperty(name).GetInt32();
         }
+
+        Task<int> DisallowedHitsAsync() => StatAsync("disallowedHits");
 
         SiteGrabberRequest Request(string mirror, bool respect) => new()
         {
@@ -1199,12 +1201,15 @@ public sealed class RuntimeServiceTests
         };
 
         var hitsBefore = await DisallowedHitsAsync();
+        var robotsBefore = await StatAsync("robotsTxtRequests");
         var honored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-on"), true));
         Assert.True(honored.Ok, honored.Error);
         Assert.Equal(2, honored.PagesCrawled);   // index + Allow-overridden private/open.html
         Assert.Equal(2, honored.FilesQueued);    // ok.bin + open.bin
-        Assert.Equal(2, honored.RobotsBlocked);  // private/secret.html + files/blocked.bin
-        Assert.Equal(hitsBefore, await DisallowedHitsAsync());
+        // private/secret.html (linked directly and via redirect.html, counted once) + files/blocked.bin
+        Assert.Equal(2, honored.RobotsBlocked);
+        Assert.Equal(hitsBefore, await DisallowedHitsAsync());   // the redirect hop was not followed
+        Assert.Equal(robotsBefore + 1, await StatAsync("robotsTxtRequests"));   // fetched once per host
         var queued = ctx.Service.GetSnapshot().Jobs.Select(job => job.Url).ToList();
         Assert.DoesNotContain(queued, url => url.Contains("blocked.bin", StringComparison.Ordinal));
         Assert.DoesNotContain(queued, url => url.Contains("secret.bin", StringComparison.Ordinal));
@@ -1221,7 +1226,7 @@ public sealed class RuntimeServiceTests
 
         var ignored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-off"), false));
         Assert.True(ignored.Ok, ignored.Error);
-        Assert.Equal(3, ignored.PagesCrawled);
+        Assert.Equal(4, ignored.PagesCrawled);   // index, open, secret, and secret again via redirect.html
         Assert.Equal(4, ignored.FilesQueued);
         Assert.Equal(0, ignored.RobotsBlocked);
         Assert.True(await DisallowedHitsAsync() > hitsBefore);

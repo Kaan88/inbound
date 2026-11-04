@@ -115,8 +115,33 @@ internal sealed class SiteGrabber
 
             try
             {
-                using var response = await http.GetAsync(
+                // Follow redirects by hand so every hop is checked against robots.txt
+                // before it is requested.
+                var response = await http.GetAsync(
                     url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                var hops = 0;
+                var redirectBlocked = false;
+                while ((int)response.StatusCode is 301 or 302 or 303 or 307 or 308 &&
+                       response.Headers.Location is { } location && hops++ < 10)
+                {
+                    var next = new Uri(response.RequestMessage?.RequestUri ?? url, location);
+                    response.Dispose();
+                    if (next.Scheme is not ("http" or "https") || !await AllowedAsync(next).ConfigureAwait(false))
+                    {
+                        redirectBlocked = true;
+                        break;
+                    }
+
+                    response = await http.GetAsync(
+                        next, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (redirectBlocked)
+                {
+                    continue;
+                }
+
+                using var _ = response;
                 if (!response.IsSuccessStatusCode)
                 {
                     AddError(result, $"{url}: HTTP {(int)response.StatusCode}");
@@ -143,20 +168,24 @@ internal sealed class SiteGrabber
 
                 foreach (var link in ExtractLinks(html, url))
                 {
-                    if (!InScope(link, startAuthority, request) || !await AllowedAsync(link).ConfigureAwait(false))
+                    if (!InScope(link, startAuthority, request))
                     {
                         continue;
                     }
 
+                    // Robots is checked only for links that would actually be crawled or queued,
+                    // so depth/extension skips neither fetch other hosts' robots.txt nor count as blocked.
                     if (IsPageCandidate(link))
                     {
-                        if (depth < maxDepth && visited.Add(Normalize(link)))
+                        if (depth < maxDepth && !visited.Contains(Normalize(link)) &&
+                            await AllowedAsync(link).ConfigureAwait(false) && visited.Add(Normalize(link)))
                         {
                             queue.Enqueue((link, depth + 1));
                         }
                     }
-                    else
+                    else if (!WouldQueueFile(link, extensions) || await AllowedAsync(link).ConfigureAwait(false))
                     {
+                        // Extension-filtered files still go through AddFile so they count as skipped.
                         AddFile(link, request, extensions, files, fileUrls, localOwners, result);
                         if (files.Count >= maxFiles)
                         {
@@ -240,8 +269,7 @@ internal sealed class SiteGrabber
     {
         var handler = new HttpClientHandler
         {
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 10,
+            AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.All,
         };
         var client = new HttpClient(handler)
@@ -262,8 +290,20 @@ internal sealed class SiteGrabber
         var robotsUrl = new Uri(authority + "/robots.txt");
         try
         {
-            using var response = await http.GetAsync(robotsUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            var response = await http.GetAsync(robotsUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
+            for (var hop = 0;
+                 hop < 5 && (int)response.StatusCode is 301 or 302 or 303 or 307 or 308 &&
+                 response.Headers.Location is { } location;
+                 hop++)
+            {
+                var next = new Uri(response.RequestMessage?.RequestUri ?? robotsUrl, location);
+                response.Dispose();
+                response = await http.GetAsync(next, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            using var _ = response;
             var status = (int)response.StatusCode;
             if (status is >= 400 and < 500)
             {
@@ -276,7 +316,8 @@ internal sealed class SiteGrabber
                 return RobotsRules.Parse("User-agent: *\nDisallow: /\n", RobotsUserAgent);
             }
 
-            var bytes = await ReadLimitedAsync(response.Content, 500 * 1024, cancellationToken).ConfigureAwait(false);
+            // RFC 9309 2.5: parse at least the first 500 KiB; ignore anything beyond.
+            var bytes = await ReadPrefixAsync(response.Content, 500 * 1024, cancellationToken).ConfigureAwait(false);
             var rules = RobotsRules.Parse(Encoding.UTF8.GetString(bytes), RobotsUserAgent);
             _log?.Invoke($"Loaded robots.txt for {authority} ({rules.RuleCount} rule(s)).");
             return rules;
@@ -285,7 +326,8 @@ internal sealed class SiteGrabber
         {
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException
+                                       or IOException)
         {
             _log?.Invoke($"robots.txt at {robotsUrl} could not be read ({ex.Message}); treating the host as disallowed.");
             return RobotsRules.Parse("User-agent: *\nDisallow: /\n", RobotsUserAgent);
@@ -331,6 +373,10 @@ internal sealed class SiteGrabber
         var extension = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
         return extension is "" or "html" or "htm" or "xhtml" or "php" or "asp" or "aspx" or "jsp";
     }
+
+    private static bool WouldQueueFile(Uri url, HashSet<string> extensions)
+        => extensions.Count == 0 ||
+           extensions.Contains(Path.GetExtension(url.AbsolutePath).TrimStart('.').ToLowerInvariant());
 
     private void AddFile(
         Uri url,
@@ -468,6 +514,22 @@ internal sealed class SiteGrabber
 
             return $"{match.Groups["attr"].Value}={match.Groups["quote"].Value}{relative}{match.Groups["quote"].Value}";
         });
+    }
+
+    private static async Task<byte[]> ReadPrefixAsync(HttpContent content, int limit, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[limit];
+        var total = 0;
+        int read;
+        while (total < limit &&
+               (read = await stream.ReadAsync(buffer.AsMemory(total, limit - total), cancellationToken)
+                   .ConfigureAwait(false)) > 0)
+        {
+            total += read;
+        }
+
+        return buffer[..total];
     }
 
     private static async Task<byte[]> ReadLimitedAsync(

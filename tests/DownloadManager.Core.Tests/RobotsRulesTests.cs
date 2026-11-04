@@ -61,6 +61,41 @@ public sealed class RobotsRulesTests
         => Assert.True(RobotsRules.Parse(content, Agent).IsAllowed("/anything"));
 
     [Fact]
+    public void LeadingBomDoesNotDropTheFirstGroup()
+    {
+        var rules = RobotsRules.Parse("﻿User-agent: *\nDisallow: /p\n", Agent);
+        Assert.False(rules.IsAllowed("/p"));
+    }
+
+    [Fact]
+    public void EmptyUserAgentLineDoesNotMatchUs()
+    {
+        var rules = RobotsRules.Parse("User-agent:\nAllow: /\n\nUser-agent: *\nDisallow: /p\n", Agent);
+        Assert.False(rules.IsAllowed("/p"));
+    }
+
+    [Fact]
+    public void PrefixOfOurTokenIsNotOurGroup()
+    {
+        var rules = RobotsRules.Parse("User-agent: download\nDisallow: /\n\nUser-agent: *\nDisallow: /p\n", Agent);
+        Assert.True(rules.IsAllowed("/index.html"));
+        Assert.False(rules.IsAllowed("/p"));
+    }
+
+    [Theory]
+    [InlineData("Disallow: /my folder/", "/my%20folder/x")]
+    [InlineData("Disallow: /my%20folder/", "/my%20folder/x")]
+    [InlineData("Disallow: /private/", "/%70rivate/x")]
+    [InlineData("Disallow: /café/", "/caf%C3%A9/menu")]
+    [InlineData("Disallow: /caf%c3%a9/", "/caf%C3%A9/menu")]
+    public void PercentEncodingIsCanonicalizedOnBothSides(string rule, string path)
+        => Assert.False(RobotsRules.Parse($"User-agent: *\n{rule}\n", Agent).IsAllowed(path));
+
+    [Fact]
+    public void EncodedSlashStaysDistinctFromSlash()
+        => Assert.True(RobotsRules.Parse("User-agent: *\nDisallow: /a/b\n", Agent).IsAllowed("/a%2Fb"));
+
+    [Fact]
     public void EqualLengthTieGoesToAllow()
     {
         var rules = RobotsRules.Parse("User-agent: *\nDisallow: /page\nAllow: /page\n", Agent);

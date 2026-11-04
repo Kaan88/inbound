@@ -24,6 +24,7 @@ public sealed class RobotsRules
             return AllowAll;
         }
 
+        content = content.TrimStart('﻿');
         var token = ProductToken(userAgent);
         var groups = new List<(List<string> Agents, List<Rule> Rules)>();
         List<string>? agents = null;
@@ -55,7 +56,11 @@ public sealed class RobotsRules
                     groups.Add((agents, rules));
                 }
 
-                agents.Add(value.ToLowerInvariant());
+                if (value.Length > 0)
+                {
+                    agents.Add(value.ToLowerInvariant());
+                }
+
                 lastWasAgent = true;
                 continue;
             }
@@ -69,14 +74,13 @@ public sealed class RobotsRules
             // An empty Disallow means "allow everything" and adds no rule.
             if (value.Length > 0)
             {
-                rules.Add(new Rule(value, key == "allow"));
+                rules.Add(new Rule(NormalizeEncoding(value), key == "allow"));
             }
         }
 
-        // Groups naming our product token win over "*"; all matching groups are merged.
-        var specific = groups
-            .Where(g => g.Agents.Any(a => a != "*" && token.StartsWith(a, StringComparison.Ordinal)))
-            .ToList();
+        // RFC 9309 2.2.1: a group naming our product token (case-insensitive, exact) wins
+        // over "*"; several groups naming it are merged.
+        var specific = groups.Where(g => g.Agents.Contains(token)).ToList();
         var chosen = specific.Count > 0 ? specific : groups.Where(g => g.Agents.Contains("*")).ToList();
         var selected = chosen.SelectMany(g => g.Rules).ToList();
 
@@ -91,6 +95,7 @@ public sealed class RobotsRules
             pathAndQuery = "/";
         }
 
+        pathAndQuery = NormalizeEncoding(pathAndQuery);
         Rule? best = null;
         foreach (var rule in _rules)
         {
@@ -107,6 +112,54 @@ public sealed class RobotsRules
         }
 
         return best?.Allow ?? true;
+    }
+
+    /// <summary>
+    /// Canonical percent-encoding (RFC 9309 2.2.2): decode escapes except reserved
+    /// '/', '?', '%' and '#', then re-encode space, controls and non-ASCII as uppercase
+    /// UTF-8 escapes, so "/my folder/", "/my%20folder/" and "/%6Dy%20folder/" compare equal.
+    /// </summary>
+    public static string NormalizeEncoding(string value)
+    {
+        var bytes = new List<byte>(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '%' && i + 2 < value.Length &&
+                Uri.IsHexDigit(value[i + 1]) && Uri.IsHexDigit(value[i + 2]))
+            {
+                var hex = value.Substring(i + 1, 2).ToUpperInvariant();
+                var b = Convert.ToByte(hex, 16);
+                if (b is (byte)'/' or (byte)'?' or (byte)'%' or (byte)'#')
+                {
+                    bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("%" + hex));
+                }
+                else
+                {
+                    bytes.Add(b);
+                }
+
+                i += 2;
+                continue;
+            }
+
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(value[i].ToString()));
+        }
+
+        var builder = new System.Text.StringBuilder(bytes.Count);
+        foreach (var b in bytes)
+        {
+            // Reserved escapes were re-inserted as ASCII ("%2F"), so they pass through as-is.
+            if (b <= 0x20 || b >= 0x7F)
+            {
+                builder.Append('%').Append(b.ToString("X2"));
+            }
+            else
+            {
+                builder.Append((char)b);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string ProductToken(string userAgent)
@@ -126,7 +179,7 @@ public sealed class RobotsRules
             var anchored = pattern.EndsWith('$');
             var body = anchored ? pattern[..^1] : pattern;
             var regex = "^" + Regex.Escape(body).Replace("\\*", ".*") + (anchored ? "$" : string.Empty);
-            _regex = new Regex(regex, RegexOptions.CultureInvariant);
+            _regex = new Regex(regex, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
         }
 
         public string Pattern { get; }

@@ -1035,10 +1035,19 @@ public sealed class TestServerHost : IAsyncDisposable
                 Interlocked.Increment(ref _roboDisallowedHits);
             }
 
+            if (relative == "redirect.html")
+            {
+                // Allowed URL that redirects into a disallowed one.
+                context.Response.StatusCode = 302;
+                context.Response.Headers.Location = "/robo/private/secret.html";
+                return;
+            }
+
             var html = relative switch
             {
                 "index.html" =>
                     "<html><body>" +
+                    "<a href=\"/robo/redirect.html\">Redirect</a>" +
                     "<a href=\"/robo/private/secret.html\">Secret</a>" +
                     "<a href=\"/robo/private/open.html\">Open</a>" +
                     "<a href=\"/robo/files/ok.bin?size=65536&seed=320\">OK</a>" +
