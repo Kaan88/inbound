@@ -193,6 +193,7 @@ public sealed class AddJobRequest
     public string ConflictPolicy { get; set; } = "rename";
     public string? ExpectedSha256 { get; set; }
     public bool? AutoResumeAfterRestart { get; set; }
+    public bool? RememberDestination { get; set; }
     public int QueueId { get; set; }
 }
 
@@ -241,6 +242,33 @@ public sealed class JobUpdateRequest
 {
     public Guid JobId { get; set; }
     public string? Description { get; set; }
+}
+
+public sealed class SiteGrabberRequest
+{
+    public string StartUrl { get; set; } = string.Empty;
+    public string? DestinationDirectory { get; set; }
+    public int MaxDepth { get; set; } = 2;
+    public int MaxPages { get; set; } = 50;
+    public bool SameHostOnly { get; set; } = true;
+    public List<string> Extensions { get; set; } = new();
+    public List<string> IncludePatterns { get; set; } = new();
+    public List<string> ExcludePatterns { get; set; } = new();
+    public bool SavePages { get; set; } = true;
+    public bool RewriteLinks { get; set; } = true;
+    public string StartMode { get; set; } = "now";
+    public int QueueId { get; set; }
+    public int Connections { get; set; }
+}
+
+public sealed class SiteGrabberResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int PagesCrawled { get; set; }
+    public int FilesQueued { get; set; }
+    public int FilesSkipped { get; set; }
+    public List<string> Errors { get; set; } = new();
 }
 
 public sealed class JobEventDto

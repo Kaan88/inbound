@@ -296,7 +296,8 @@ public sealed class DownloadManagerService
         Raise(runtime, "added");
         Schedule();
 
-        if (!string.IsNullOrWhiteSpace(request.DestinationDirectory) &&
+        if (request.RememberDestination != false &&
+            !string.IsNullOrWhiteSpace(request.DestinationDirectory) &&
             !string.Equals(_settings.LastDestinationDirectory, destination, StringComparison.OrdinalIgnoreCase))
         {
             _settings.LastDestinationDirectory = destination;
@@ -730,6 +731,52 @@ public sealed class DownloadManagerService
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
+    }
+
+    public async Task<SiteGrabberResult> RunSiteGrabberAsync(
+        SiteGrabberRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryValidateUrl(request.StartUrl, out _, out var urlError))
+        {
+            return new SiteGrabberResult { Ok = false, Error = urlError };
+        }
+
+        string destination;
+        try
+        {
+            destination = string.IsNullOrWhiteSpace(request.DestinationDirectory)
+                ? _settings.DefaultDownloadDirectory
+                : request.DestinationDirectory.Trim();
+            destination = Path.GetFullPath(destination);
+            Directory.CreateDirectory(destination);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new SiteGrabberResult { Ok = false, Error = $"Cannot use destination: {ex.Message}" };
+        }
+
+        var grabber = new SiteGrabber(destination, _log);
+        return await grabber.RunAsync(
+            request,
+            file =>
+            {
+                var fullPath = Path.Combine(
+                    destination, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                return AddJobAsync(new AddJobRequest
+                {
+                    Url = file.Url.AbsoluteUri,
+                    DestinationDirectory = Path.GetDirectoryName(fullPath),
+                    FileName = Path.GetFileName(fullPath),
+                    StartMode = request.StartMode,
+                    QueueId = request.QueueId,
+                    Connections = request.Connections > 0 ? request.Connections : null,
+                    Source = "grabber",
+                    ConflictPolicy = "rename",
+                    RememberDestination = false,
+                }, cancellationToken);
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<JobActionResponse> UpdateJobAsync(

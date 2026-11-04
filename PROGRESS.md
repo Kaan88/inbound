@@ -608,6 +608,32 @@ random-access part file **in the destination directory**:
   (E33); completion actions fire once (E22). Sound was not acoustically verified.
 - Remaining: recent-URL history.
 
+## Site grabber evidence (G2/G3, 2026-11-04)
+
+- Added a runtime `SiteGrabber` service behind `grabber.run` IPC:
+  - BFS page crawl with depth 0–5 and page cap;
+  - same-host scope, extension include-list, include/exclude URL globs, and
+    existing-file skip;
+  - URL-path preservation under the mirror folder;
+  - HTML `href`/`src` rewriting to relative local paths when the target was
+    mirrored; external links stay unchanged;
+  - a separate HTTP client with redirects/decompression and a 5 MB page cap.
+- TestServer `/grab/` graph: index → page1 → page2 → page3, with `a.bin`,
+  `b.bin`, `c.bin`, `d.bin`, and `pic.png`.
+- Integration `SiteGrabberCrawlsScopeAndRewritesLinks` (suite **40/40**):
+  - depth 2 crawled exactly index/page1/page2, not page3;
+  - extension filter `bin` skipped the PNG;
+  - exclude glob `*/files/b.bin*` skipped b.bin;
+  - queued a.bin/c.bin completed with seed 290/293 hashes;
+  - saved `grab/index.html` had `href="page1.html"` and `files/a.bin`,
+    preserved the external link, and page3/b.bin were absent.
+- Published CLI reproduced 3 pages/2 queued/1 skipped:
+  - `a.bin` SHA-256 `ac4cc81ea530f1ddca9f335980323eee724a351bd5b8d21d325ffd3b7108663b`;
+  - `c.bin` SHA-256 `abef0ea89918113d007c57b8d2260ea10d78d31703ad9313b0eed9859f7ee09b`.
+- WinUI Tasks → Run site grabber exposes all scope/filter/mirror controls.
+- Remaining: G4 project persistence/scheduling, JS-rendered pages, robots.txt,
+  auth/proxy for crawler, CSS url() rewriting, preview.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
@@ -616,13 +642,14 @@ random-access part file **in the destination directory**:
 - Core: **44/44 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, and download-list
   round-trip.
-- Runtime/persistence: **39/39 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **40/40 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
   HLS master/media, DASH assembly, DASH A/V muxing, HLS/DASH fragment recovery,
   rotating-token refresh, live-stream exclusion, DRM detection, editable
-  property persistence, duplicate filename policies, and category destinations.
+  property persistence, duplicate policies, category destinations, and the
+  scoped site grabber/offline mirror.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -650,9 +677,8 @@ random-access part file **in the destination directory**:
    Direct media detection, in-page/quality panel, unencrypted HLS, static DASH
    SegmentTemplate, DASH A/V muxing, fragment recovery, rotating-token refresh,
    live exclusion, and DRM detection are done (E24–E32).
-3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
-   rewriting for an offline mirror, and G4 persistent/scheduled grabber
-   projects. G1 is done (E31).
+3. Phase 10 remainder: G4 persistent/scheduled grabber projects and grabber
+   preview. G1 (E31), G2/G3 (E40) are done.
 4. Phase 6 remainder: recent-URL history and remaining UI polish. Clipboard
    monitoring (E33), batch URLs (E34), editable descriptions (E35), duplicate
    policies (E36), category/last-folder rules (E37), export/import (E38), and

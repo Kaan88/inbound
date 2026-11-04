@@ -50,6 +50,7 @@ public enum DownloadSource
     Batch,
     ClipboardMonitor,
     Import,
+    Grabber,
 }
 
 public enum StartMode

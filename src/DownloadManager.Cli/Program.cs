@@ -180,6 +180,9 @@ internal static class Program
                 return 0;
             }
 
+            case "grab":
+                return await GrabAsync(client, args, optionArgs, json).ConfigureAwait(false);
+
             case "export":
             {
                 if (optionArgs.Length < 1)
@@ -685,6 +688,75 @@ internal static class Program
 
         Console.Error.WriteLine("usage: schedule list|add|remove|enable|disable");
         return 2;
+    }
+
+    private static async Task<int> GrabAsync(
+        CliClient client,
+        string[] args,
+        string[] positional,
+        bool json)
+    {
+        if (positional.Length == 0)
+        {
+            Console.Error.WriteLine(
+                "usage: grab <start-url> [--dest DIR] [--depth N] [--max-pages N] " +
+                "[--extensions zip,mp3] [--include GLOB] [--exclude GLOB] " +
+                "[--no-pages] [--no-rewrite] [--start now|later] [--queue ID]");
+            return 2;
+        }
+
+        var request = new SiteGrabberRequest
+        {
+            StartUrl = positional[0],
+            DestinationDirectory = GetOption(args, "--dest"),
+            MaxDepth = int.TryParse(GetOption(args, "--depth"), out var depth) ? depth : 2,
+            MaxPages = int.TryParse(GetOption(args, "--max-pages"), out var pages) ? pages : 50,
+            SameHostOnly = !args.Contains("--any-host", StringComparer.OrdinalIgnoreCase),
+            SavePages = !args.Contains("--no-pages", StringComparer.OrdinalIgnoreCase),
+            RewriteLinks = !args.Contains("--no-rewrite", StringComparer.OrdinalIgnoreCase),
+            StartMode = GetOption(args, "--start") ?? "now",
+            IncludePatterns = GetOptions(args, "--include").ToList(),
+            ExcludePatterns = GetOptions(args, "--exclude").ToList(),
+        };
+        if (GetOption(args, "--extensions") is { } extensions)
+        {
+            request.Extensions = extensions
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+        }
+
+        if (int.TryParse(GetOption(args, "--queue"), out var queueId))
+        {
+            request.QueueId = queueId;
+        }
+
+        if (int.TryParse(GetOption(args, "--connections"), out var connections))
+        {
+            request.Connections = connections;
+        }
+
+        var reply = await client.RequestAsync(MessageTypes.GrabberRun, request).ConfigureAwait(false);
+        var result = reply.GetPayload<SiteGrabberResult>();
+        if (json)
+        {
+            PrintJson(result);
+        }
+        else if (!result.Ok)
+        {
+            Console.Error.WriteLine($"grab failed: {result.Error}");
+        }
+        else
+        {
+            Console.WriteLine(
+                $"crawled {result.PagesCrawled} pages, queued {result.FilesQueued} files, " +
+                $"skipped {result.FilesSkipped}");
+            foreach (var error in result.Errors)
+            {
+                Console.WriteLine($"  warning: {error}");
+            }
+        }
+
+        return result.Ok ? 0 : 1;
     }
 
     private static void SetCategoryFolder(SettingsDto settings, string category, string value)
@@ -1259,6 +1331,9 @@ internal static class Program
               dm list [--json]
               dm status <job-id> [--json]
               dm describe <job-id> <description text>
+              dm grab <start-url> [--dest DIR] [--depth N] [--max-pages N]
+                          [--extensions zip,mp3] [--include GLOB] [--exclude GLOB]
+                          [--no-pages] [--no-rewrite] [--start now|later]
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>

@@ -761,6 +761,61 @@ public sealed class TestServerHost : IAsyncDisposable
             });
         });
 
+        _app.MapGet("/grab/{**path}", async (HttpContext context, string? path) =>
+        {
+            var relative = (path ?? string.Empty).Replace('\\', '/').Trim('/');
+            if (relative.Length == 0)
+            {
+                relative = "index.html";
+            }
+
+            var html = relative switch
+            {
+                "index.html" =>
+                    "<html><body><h3>Grab root</h3>" +
+                    "<a href=\"/grab/page1.html\">Page 1</a>" +
+                    "<a href=\"/grab/files/a.bin?size=65536&seed=290\">File A</a>" +
+                    "<img src=\"/grab/img/pic.png?size=32768&seed=291\">" +
+                    "<a href=\"https://example.com/external\">External</a>" +
+                    "</body></html>",
+                "page1.html" =>
+                    "<html><body><h3>Page 1</h3>" +
+                    "<a href=\"/grab/page2.html\">Page 2</a>" +
+                    "<a href=\"/grab/files/b.bin?size=65536&seed=292\">File B</a>" +
+                    "<a href=\"/grab/files/a.bin?size=65536&seed=290\">A again</a>" +
+                    "</body></html>",
+                "page2.html" =>
+                    "<html><body><h3>Page 2</h3>" +
+                    "<a href=\"/grab/page3.html\">Page 3</a>" +
+                    "<a href=\"/grab/files/c.bin?size=65536&seed=293\">File C</a>" +
+                    "</body></html>",
+                "page3.html" =>
+                    "<html><body><h3>Page 3</h3>" +
+                    "<a href=\"/grab/files/d.bin?size=65536&seed=294\">File D</a>" +
+                    "</body></html>",
+                _ => null,
+            };
+
+            if (html is not null)
+            {
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(html).ConfigureAwait(false);
+                return;
+            }
+
+            if (relative.StartsWith("files/", StringComparison.Ordinal) || relative == "img/pic.png")
+            {
+                var name = Path.GetFileName(relative);
+                var size = QueryInt(context, "size", 65_536);
+                var seed = QueryInt(context, "seed", 1);
+                await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
+                    throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
+                return;
+            }
+
+            context.Response.StatusCode = 404;
+        });
+
         _app.MapGet("/live/playlist.m3u8", () => Results.Text(
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n" +
             "#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:2.000000,\nseg0.ts\n" +

@@ -191,6 +191,65 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SiteGrabberCrawlsScopeAndRewritesLinks()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var mirror = Path.Combine(ctx.Destination, "mirror");
+        var result = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
+        {
+            StartUrl = $"{_server.BaseAddress}/grab/",
+            DestinationDirectory = mirror,
+            MaxDepth = 2,
+            MaxPages = 10,
+            SameHostOnly = true,
+            Extensions = new List<string> { "bin" },
+            ExcludePatterns = new List<string> { "*/files/b.bin*" },
+            SavePages = true,
+            RewriteLinks = true,
+            StartMode = "now",
+        });
+
+        Assert.True(result.Ok, result.Error);
+        Assert.Equal(3, result.PagesCrawled);
+        Assert.Equal(2, result.FilesQueued);
+        Assert.Equal(1, result.FilesSkipped);
+
+        var jobs = ctx.Service.GetSnapshot().Jobs
+            .Where(job => job.Url.Contains("/grab/files/", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, jobs.Count);
+        foreach (var job in jobs)
+        {
+            await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        }
+
+        var filesDirectory = Path.Combine(mirror, "grab", "files");
+        var aPath = Path.Combine(filesDirectory, "a.bin");
+        var cPath = Path.Combine(filesDirectory, "c.bin");
+        Assert.True(File.Exists(aPath));
+        Assert.True(File.Exists(cPath));
+        Assert.False(File.Exists(Path.Combine(filesDirectory, "b.bin")));
+        Assert.Equal(65_536, new FileInfo(aPath).Length);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(290, 65_536))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(aPath));
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(293, 65_536))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(cPath));
+
+        var index = await File.ReadAllTextAsync(Path.Combine(mirror, "grab", "index.html"));
+        Assert.Contains("href=\"page1.html\"", index);
+        Assert.Contains("files/a.bin", index);
+        Assert.DoesNotContain("/grab/files/a.bin", index);
+        Assert.Contains("https://example.com/external", index);
+        Assert.True(File.Exists(Path.Combine(mirror, "grab", "page1.html")));
+        Assert.True(File.Exists(Path.Combine(mirror, "grab", "page2.html")));
+        Assert.False(File.Exists(Path.Combine(mirror, "grab", "page3.html")));
+    }
+
+    [Fact]
     public async Task CategoryDestinationRulesAndLastFolderPersist()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

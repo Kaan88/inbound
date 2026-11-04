@@ -21,6 +21,7 @@
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutItem Text="Add batch download..." Click="MenuAddBatch_Click" />
+                <MenuFlyoutItem Text="Run site grabber..." Click="MenuGrabber_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
             </MenuBarItem>

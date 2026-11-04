@@ -268,6 +268,14 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.GrabberRun:
+                    var grabberRequest = message.GetPayload<SiteGrabberRequest>();
+                    await Reply(client, message, MessageTypes.GrabberResult,
+                        await _service.RunSiteGrabberAsync(grabberRequest, cancellationToken)
+                            .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsPauseAll:
                     await _service.PauseAllAsync(cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.HostActionResult,

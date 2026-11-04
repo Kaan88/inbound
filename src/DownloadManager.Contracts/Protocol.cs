@@ -47,6 +47,8 @@ public static class MessageTypes
     public const string HandoffAck = "handoff.ack";
     public const string HandoffError = "handoff.error";
     public const string JobsQuery = "jobs.query";
+    public const string GrabberRun = "grabber.run";
+    public const string GrabberResult = "grabber.result";
 }
 
 public static class IpcJson

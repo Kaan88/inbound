@@ -1234,6 +1234,153 @@ public sealed partial class MainWindow : Window
         await ShowMessageAsync("Batch download", summary);
     }
 
+    private async void MenuGrabber_Click(object sender, RoutedEventArgs e)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        var urlBox = new TextBox
+        {
+            Header = "Start URL",
+            PlaceholderText = "https://example.com/docs/",
+        };
+        var destinationBox = new TextBox
+        {
+            Header = "Mirror folder",
+            Text = Path.Combine(_settings.DefaultDownloadDirectory, "mirror"),
+        };
+        var depthBox = new TextBox { Header = "Maximum depth", Text = "2" };
+        var pagesBox = new TextBox { Header = "Maximum pages", Text = "50" };
+        var extensionsBox = new TextBox
+        {
+            Header = "File extensions (comma separated, empty for all)",
+            PlaceholderText = "zip, pdf, mp3",
+        };
+        var includeBox = new TextBox
+        {
+            Header = "Include URL patterns (comma separated, optional)",
+            PlaceholderText = "*docs*",
+        };
+        var excludeBox = new TextBox
+        {
+            Header = "Exclude URL patterns (comma separated, optional)",
+            PlaceholderText = "*/logout*",
+        };
+        var sameHost = new CheckBox { Content = "Stay on the start host", IsChecked = true };
+        var savePages = new CheckBox { Content = "Save HTML pages for offline viewing", IsChecked = true };
+        var rewrite = new CheckBox { Content = "Rewrite links to local files", IsChecked = true };
+        var startMode = new ComboBox { Header = "Download files" };
+        startMode.Items.Add("Start now");
+        startMode.Items.Add("Download later");
+        startMode.SelectedIndex = 0;
+        var queueBox = new ComboBox { Header = "Queue" };
+        foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
+        {
+            queueBox.Items.Add(queue.Name);
+        }
+
+        queueBox.SelectedIndex = 0;
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(urlBox);
+        panel.Children.Add(destinationBox);
+        panel.Children.Add(depthBox);
+        panel.Children.Add(pagesBox);
+        panel.Children.Add(extensionsBox);
+        panel.Children.Add(includeBox);
+        panel.Children.Add(excludeBox);
+        panel.Children.Add(sameHost);
+        panel.Children.Add(savePages);
+        panel.Children.Add(rewrite);
+        panel.Children.Add(startMode);
+        panel.Children.Add(queueBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Run site grabber",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 560 },
+            PrimaryButtonText = "Start",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var startUri) ||
+            startUri.Scheme is not ("http" or "https"))
+        {
+            await ShowMessageAsync("Invalid URL", "Enter an absolute http or https start URL.");
+            return;
+        }
+
+        if (!int.TryParse(depthBox.Text, out var depth) || depth < 0 || depth > 5 ||
+            !int.TryParse(pagesBox.Text, out var maxPages) || maxPages < 1 || maxPages > 500)
+        {
+            await ShowMessageAsync("Invalid grabber settings", "Depth must be 0-5 and pages 1-500.");
+            return;
+        }
+
+        var request = new SiteGrabberRequest
+        {
+            StartUrl = startUri.AbsoluteUri,
+            DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text)
+                ? null
+                : destinationBox.Text.Trim(),
+            MaxDepth = depth,
+            MaxPages = maxPages,
+            SameHostOnly = sameHost.IsChecked == true,
+            SavePages = savePages.IsChecked == true,
+            RewriteLinks = rewrite.IsChecked == true,
+            StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
+            QueueId = _settings.Queues.OrderBy(q => q.Order)
+                .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
+            Extensions = extensionsBox.Text
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList(),
+            IncludePatterns = includeBox.Text
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList(),
+            ExcludePatterns = excludeBox.Text
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList(),
+        };
+
+        StatusText.Text = "Site grabber is crawling...";
+        try
+        {
+            var reply = await _connection.RunGrabberAsync(request);
+            var result = reply.GetPayload<SiteGrabberResult>();
+            if (!result.Ok)
+            {
+                await ShowMessageAsync("Site grabber", result.Error ?? "The crawl failed.");
+                return;
+            }
+
+            await RefreshAsync();
+            var summary = $"Crawled {result.PagesCrawled} pages; queued {result.FilesQueued} files; " +
+                          $"skipped {result.FilesSkipped}.";
+            if (result.Errors.Count > 0)
+            {
+                summary += $"\n\nFirst warning: {result.Errors[0]}";
+            }
+
+            await ShowMessageAsync("Site grabber", summary);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Site grabber", ex.Message);
+        }
+        finally
+        {
+            UpdateStatusText();
+        }
+    }
+
     private JobViewModel? FindExistingJob(string url)
         => _jobsById.Values.FirstOrDefault(job =>
             string.Equals(job.Url, url, StringComparison.OrdinalIgnoreCase) &&

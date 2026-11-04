@@ -207,9 +207,10 @@ AES-128.
 Download All link collection is implemented: the extension scans anchors,
 images, and media sources, deduplicates and filters them, supports selection and
 select-all-visible, and batch-adds selected URLs through authenticated handoffs
-(G1 done; E31). Remaining: crawl scope/depth/filters, relative paths and link
-rewriting for offline mirrors, preview, and persistent/scheduled grabber
-projects (G2–G4).
+(G1 done; E31). A scoped site grabber crawls by depth/page/host/extension/URL
+filters, saves pages and files under their URL paths, and rewrites mirrored links
+to relative local paths (G2/G3 done; E40). Remaining: preview, persistent
+grabber projects, and scheduled runs (G4).
 
 ## Phase 11 — Remaining compatibility and integration (pending)
 
