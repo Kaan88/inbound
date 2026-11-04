@@ -708,6 +708,21 @@ random-access part file **in the destination directory**:
 - Remaining: fixed file-path argument only; no custom argument template or
   scanner verdict handling.
 
+## CLI integration evidence (C2, 2026-11-04)
+
+- The published CLI drove the background host externally:
+  - `dm add ... --wait` created/completed `cli-c2.bin` (65,536 bytes,
+    SHA-256 `abca4b11e6670203f950742f7a62c0702583539630781014785ad32057243292`);
+  - `dm list --json` showed `state: completed`, source `cli`, queue/conflict
+    policy, ETag, and Last-Modified;
+  - `dm host status` returned host/protocol/state/jobs plus tray and native-host
+    health;
+  - `dm queue list`, `dm schedule list`, and `dm site list` responded via IPC.
+- The same CLI surface covers pause/resume/retry/cancel/remove, settings,
+  grabber projects, FTP, and export/import (E9/E16/E31/E38/E41/E42).
+- Limitation: our own command surface, not reference app.exe switch-compatible; no
+  registered `dm:` URL protocol.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
