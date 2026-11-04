@@ -13,15 +13,18 @@ public sealed class TestServerFixture : IAsyncLifetime
 {
     public TestServerHost Server { get; private set; } = null!;
     public TestProxyServer Proxy { get; private set; } = null!;
+    public TestSocks5Server Socks5 { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
         Server = await TestServerHost.StartAsync();
         Proxy = TestProxyServer.Start();
+        Socks5 = TestSocks5Server.Start();
     }
 
     public async Task DisposeAsync()
     {
+        await Socks5.DisposeAsync();
         await Proxy.DisposeAsync();
         await Server.DisposeAsync();
     }
@@ -32,12 +35,14 @@ public sealed class HttpDownloadEngineTests
 {
     private readonly TestServerHost _server;
     private readonly TestProxyServer _proxy;
+    private readonly TestSocks5Server _socks5;
     private readonly ITestOutputHelper _output;
 
     public HttpDownloadEngineTests(TestServerFixture fixture, ITestOutputHelper output)
     {
         _server = fixture.Server;
         _proxy = fixture.Proxy;
+        _socks5 = fixture.Socks5;
         _output = output;
     }
 
@@ -123,6 +128,59 @@ public sealed class HttpDownloadEngineTests
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             TestContent.Generate(71, size))).ToLowerInvariant();
         Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task DownloadsThroughAuthenticatedSocks5Proxy()
+    {
+        const int size = 524_288;
+        _socks5.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/socks5.bin?size={size}&seed=75",
+            "socks5.bin");
+        job.RequestedConnections = 4;
+
+        using var engine = CreateEngine(proxy: new ProxySettings
+        {
+            Mode = "manual",
+            Address = $"socks5://{_socks5.Address}",
+            Username = "socksuser",
+            Password = "sockspass",
+        });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_socks5.Authorized > 0);
+        Assert.True(_socks5.Connects > 0);
+        Assert.Equal(0, _socks5.Denied);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(75, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task Socks5RejectsWrongCredentials()
+    {
+        _socks5.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/socks5-bad.bin?size=65536&seed=76",
+            "socks5-bad.bin");
+
+        using var engine = CreateEngine(
+            maxAttempts: 1,
+            proxy: new ProxySettings
+            {
+                Mode = "manual",
+                Address = $"socks5://{_socks5.Address}",
+                Username = "socksuser",
+                Password = "wrong-password",
+            });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.True(_socks5.Denied > 0);
     }
 
     [Fact]

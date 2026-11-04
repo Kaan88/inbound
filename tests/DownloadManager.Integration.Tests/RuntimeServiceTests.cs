@@ -624,6 +624,39 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task Socks5SettingsApplyToRuntimeDownloads()
+    {
+        await using var socks = TestSocks5Server.Start();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "manual",
+            Address = $"socks5://{socks.Address}",
+            Username = "socksuser",
+            Password = "sockspass",
+        };
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/runtime-socks5.bin?size=524288&seed=95",
+            DestinationDirectory = ctx.Destination,
+            FileName = "runtime-socks5.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.True(socks.Authorized > 0);
+        Assert.True(socks.Connects > 0);
+        Assert.Equal(0, socks.Denied);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(95, 524_288))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task PartialPayloadLivesOnDestinationVolume()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

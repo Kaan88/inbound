@@ -74,7 +74,7 @@ SDK, or presentation types.
 | 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray; authenticated cookie/referrer/UA handoff verified (failure-path recovery still open) |
 | 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; measured benchmarks and independent verification pending |
 | 6 | Everyday download management | pending | Practical daily use without CLI |
-| 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, and redirect credential boundary verified; site logins, SOCKS, and Refresh Download Address pending |
+| 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, and redirect credential boundary verified; site logins and Refresh Download Address pending |
 | 8 | Queues + scheduler | in progress | Named queues, per-queue caps, start/stop, reassignment, and daily/one-time schedule execution verified (E9/E10/E13/E16); quotas, completion actions, sleep prevention, and DST tests pending |
 | 9 | Media detection/downloading | pending | Playable media with correct tracks and recovery |
 | 10 | Download All + site grabber | pending | Controlled offline mirror within crawl boundaries |

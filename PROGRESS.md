@@ -193,18 +193,27 @@ random-access part file **in the destination directory**:
   tunnels (`authorized=5, denied=0, tunnels=5`, last target
   `dl-cdn.alpinelinux.org:443`). SHA-256 matched the official checksum
   `cdc1bc0efc64d8d611bf3733f54868172a545888dfd726f518bf279bcb0ff1af`.
+- SOCKS5 (`socks5://host:port` + username/password): added `TestSocks5Server`
+  with RFC 1929 auth. Engine tests **21/21**: local HTTP via SOCKS5 with 4
+  connections and expected hash; wrong credentials recorded and rejected.
+  Runtime **16/16** includes `Socks5SettingsApplyToRuntimeDownloads`. Published
+  host downloaded the same Alpine ISO through 4 authenticated SOCKS5
+  connections (`authorized=4, denied=0, connects=4`, target
+  `dl-cdn.alpinelinux.org:443`), matching the official SHA-256.
+- Switching proxy schemes at runtime exposed a stale-handler bug: the client is
+  now rebuilt when proxy settings change, so HTTP→SOCKS5 changes apply.
 - Proxy password is currently stored in settings JSON; DPAPI protection and a
-  proxy settings UI remain open.
+  proxy settings UI remain open. SOCKS4/4a and UDP ASSOCIATE are untested.
 
 ## Tests
 
-- Engine: **19/19 passed** (`tests\DownloadManager.Engine.Tests`), including
-  segmented transfer/resume, authentication, proxy HTTP auth, wrong credentials,
-  and redirect credential boundaries.
+- Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
+  segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
+  credentials, and redirect credential boundaries.
 - Core: **11/11 passed**.
-- Runtime/persistence: **15/15 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **16/16 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, destination-local payload, authenticated handoff,
-  and runtime proxy settings.
+  and runtime HTTP/SOCKS5 proxy settings.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds.
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
   the WinUI x64 build.
@@ -230,10 +239,10 @@ random-access part file **in the destination directory**:
    prevention, and DST/wall-clock tests.
 3. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
    categories/destination rules, batch URLs, batch download from clipboard).
-4. Phase 7 remainder: SOCKS, site-login storage, expired-URL classification, and
+4. Phase 7 remainder: site-login storage, expired-URL classification, and
    Refresh Download Address preserving partial data; add a proxy settings UI and
-   DPAPI protection for the proxy password. Cookie/referrer/UA, HTTP/HTTPS proxy
-   and redirect credential boundaries are done (E17/E18).
+   DPAPI protection for proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy,
+   SOCKS5 and redirect credential boundaries are done (E17/E18/E19).
 5. Phase 9: media detection/HLS/DASH with FFmpeg behind an interface; label DRM
    unsupported.
 6. Phase 10: Download All/site grabber.

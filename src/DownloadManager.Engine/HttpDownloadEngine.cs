@@ -14,9 +14,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     };
 
     private readonly EngineOptions _options;
-    private readonly HttpClient _client;
     private readonly IDownloadCheckpointStore? _checkpoints;
     private readonly bool _ownsClient;
+    private readonly object _clientSync = new();
+    private readonly List<HttpClient> _retiredClients = new();
+    private HttpClient _client;
 
     public HttpDownloadEngine(
         EngineOptions? options = null,
@@ -27,36 +29,80 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         _checkpoints = checkpoints;
         if (handler is null)
         {
-            var sockets = new SocketsHttpHandler
-            {
-                AllowAutoRedirect = false,
-                AutomaticDecompression = DecompressionMethods.None,
-                ConnectTimeout = _options.ConnectTimeout,
-                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-                MaxConnectionsPerServer = 64,
-                Proxy = new ConfigurableProxy(_options.Proxy),
-                UseProxy = true,
-                UseCookies = false,
-            };
-
-            _client = new HttpClient(sockets, disposeHandler: true);
+            _client = CreateDefaultClient();
             _ownsClient = true;
         }
         else
         {
             _client = new HttpClient(handler, disposeHandler: false);
+            ConfigureClient(_client);
         }
+    }
 
-        _client.Timeout = Timeout.InfiniteTimeSpan;
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
+    private HttpClient CreateDefaultClient()
+    {
+        var sockets = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.None,
+            ConnectTimeout = _options.ConnectTimeout,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            MaxConnectionsPerServer = 64,
+            Proxy = new ConfigurableProxy(_options.Proxy),
+            UseProxy = true,
+            UseCookies = false,
+        };
+
+        var client = new HttpClient(sockets, disposeHandler: true);
+        ConfigureClient(client);
+        return client;
+    }
+
+    private static void ConfigureClient(HttpClient client)
+    {
+        client.Timeout = Timeout.InfiniteTimeSpan;
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManager/0.1");
+    }
+
+    private HttpClient CurrentClient()
+    {
+        lock (_clientSync)
+        {
+            return _client;
+        }
     }
 
     public void UpdateProxy(ProxySettings settings)
     {
+        var changed = !string.Equals(_options.Proxy.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase) ||
+                      !string.Equals(_options.Proxy.Address, settings.Address, StringComparison.Ordinal) ||
+                      !string.Equals(_options.Proxy.Username, settings.Username, StringComparison.Ordinal) ||
+                      !string.Equals(_options.Proxy.Password, settings.Password, StringComparison.Ordinal);
+        if (!changed)
+        {
+            return;
+        }
+
         _options.Proxy.Mode = settings.Mode;
         _options.Proxy.Address = settings.Address;
         _options.Proxy.Username = settings.Username;
         _options.Proxy.Password = settings.Password;
+
+        if (!_ownsClient)
+        {
+            return;
+        }
+
+        // SocketsHttpHandler can pin the proxy scheme/credentials to an existing
+        // connection. Rebuild the client so switching between HTTP and SOCKS5 (or
+        // changing credentials) applies to new requests instead of reusing a stale
+        // tunnel configuration.
+        lock (_clientSync)
+        {
+            var previous = _client;
+            _client = CreateDefaultClient();
+            _retiredClients.Add(previous);
+        }
     }
 
     public async Task<DownloadResult> ExecuteAsync(
@@ -475,7 +521,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             HttpResponseMessage response;
             try
             {
-                response = await _client
+                response = await CurrentClient()
                     .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                     .ConfigureAwait(false);
             }
@@ -1561,9 +1607,20 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     public void Dispose()
     {
-        if (_ownsClient)
+        if (!_ownsClient)
+        {
+            return;
+        }
+
+        lock (_clientSync)
         {
             _client.Dispose();
+            foreach (var retired in _retiredClients)
+            {
+                retired.Dispose();
+            }
+
+            _retiredClients.Clear();
         }
     }
 
