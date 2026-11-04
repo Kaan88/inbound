@@ -274,6 +274,8 @@ random-access part file **in the destination directory**:
 7. Phase 11/12: FTP, clean-environment install/upgrade/uninstall verification,
    visual/behavioral audit, final parity evidence. Continue the reference app GUI
    inventory for U1/U2/U4 (see `notes/ui-inventory.md`).
+8. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
+   portable and development builds must be excluded.
 
 ## Commands
 
