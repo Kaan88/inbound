@@ -68,10 +68,11 @@ internal static class Program
             var pipe = new HostPipeServer(service, controller, log);
             pipe.Start();
 
-            var settings = service.GetSnapshot().Settings;
-            TryApplyStartup(settings.LaunchAtStartup, log);
+            var currentSettings = service.GetSnapshot().Settings;
+            TryApplyStartup(currentSettings.LaunchAtStartup, log);
             service.SettingsChanged += (_, next) =>
             {
+                currentSettings = service.GetSnapshot().Settings;
                 TryApplyStartup(next.LaunchAtStartup, log);
                 log.Info("Settings updated.");
             };
@@ -95,11 +96,33 @@ internal static class Program
                 controller.UiContext = context;
             }
 
+            using var clipboardMonitor = new HostClipboardMonitor(
+                () => currentSettings.ClipboardMonitoring,
+                url => _ = AddClipboardDownloadAsync(service, tray, url, log),
+                log.Info);
+            clipboardMonitor.Start();
+
             service.JobChanged += (_, e) =>
             {
+                var current = currentSettings;
                 if (e.ChangeType == "completed")
                 {
-                    tray.Notify("Download complete", e.Job.FileName);
+                    if (current.NotifyOnCompletion)
+                    {
+                        tray.Notify("Download complete", e.Job.FileName);
+                    }
+
+                    if (current.PlayCompletionSound)
+                    {
+                        try
+                        {
+                            System.Media.SystemSounds.Asterisk.Play();
+                        }
+                        catch (Exception ex)
+                        {
+                            log.Warn($"Completion sound failed: {ex.Message}");
+                        }
+                    }
                 }
                 else if (e.ChangeType == "failed")
                 {
@@ -156,6 +179,36 @@ internal static class Program
             {
                 // not the owner
             }
+        }
+    }
+
+    private static async Task AddClipboardDownloadAsync(
+        DownloadManagerService service,
+        TrayApplicationContext tray,
+        string url,
+        FileLogger log)
+    {
+        try
+        {
+            var result = await service.AddJobAsync(new AddJobRequest
+            {
+                Url = url,
+                Source = "clipboardMonitor",
+                StartMode = "now",
+            }).ConfigureAwait(false);
+
+            if (result.Accepted && !result.Duplicate)
+            {
+                tray.Notify("Clipboard download added", result.Job?.FileName ?? url);
+            }
+            else if (!result.Accepted)
+            {
+                log.Warn($"Clipboard URL rejected ({url}): {result.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Error($"Clipboard download failed ({url}): {ex}");
         }
     }
 

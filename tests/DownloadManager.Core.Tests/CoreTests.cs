@@ -88,6 +88,29 @@ public sealed class DownloadJobTests
     }
 }
 
+public sealed class ClipboardUrlExtractorTests
+{
+    [Theory]
+    [InlineData("https://example.com/file.zip", "https://example.com/file.zip")]
+    [InlineData("Download this: https://example.com/a.bin now.", "https://example.com/a.bin")]
+    [InlineData("(https://example.com/a?x=1)", "https://example.com/a?x=1")]
+    [InlineData("one\nhttp://example.com/b\nthree", "http://example.com/b")]
+    public void FindsFirstHttpUrl(string text, string expected)
+    {
+        Assert.Equal(expected, ClipboardUrlExtractor.FirstHttpUrl(text));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("no links here")]
+    [InlineData("ftp://example.com/file.zip")]
+    [InlineData("javascript:alert(1)")]
+    public void RejectsNonHttpText(string text)
+    {
+        Assert.Null(ClipboardUrlExtractor.FirstHttpUrl(text));
+    }
+}
+
 public sealed class ShutdownCommandTests
 {
     [Theory]

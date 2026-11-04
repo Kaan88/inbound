@@ -73,7 +73,7 @@ SDK, or presentation types.
 | 3 | Tray + minimal WinUI frontend | done | Downloads continue with window closed; reopen restores state |
 | 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray; authenticated cookie/referrer/UA handoff verified (failure-path recovery still open) |
 | 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; measured benchmarks and independent verification pending |
-| 6 | Everyday download management | pending | Practical daily use without CLI |
+| 6 | Everyday download management | in progress | Clipboard monitoring, completion notification/sound settings, queue-aware add dialog, search/sort, and row actions verified; editable properties, batch URLs, categories, and import/export remain |
 | 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundary, and expired-URL refresh with partial resume verified; SOCKS4/4a and proxy-password hardening remain |
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
 | 9 | Media detection/downloading | in progress | Detection, in-page/quality panel, HLS/DASH assembly, A/V muxing, fragment recovery, token refresh, live exclusion, and DRM detection verified (E24–E32); additional DASH/HLS modes and AES-128 remain |

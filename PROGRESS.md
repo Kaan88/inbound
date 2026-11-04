@@ -479,12 +479,33 @@ random-access part file **in the destination directory**:
   - ffprobe: H.264 160×90 + AAC.
 - Remaining media work: additional DASH modes, HLS alternate audio, AES-128.
 
+## Clipboard monitoring evidence (M9, 2026-11-04)
+
+- `ClipboardUrlExtractor` finds the first absolute HTTP(S) URL in arbitrary
+  clipboard text and trims trailing punctuation; it rejects non-URL text,
+  `ftp://`, and `javascript:`.
+- The Host polls the clipboard on its STA UI thread every 600 ms only when
+  `ClipboardMonitoring` is enabled, suppresses the same URL for one minute, and
+  adds a `clipboardMonitor` job through the normal durable pipeline.
+- Core `ClipboardUrlExtractorTests` (8 cases) pass; core suite **25/25**.
+- Published Host live check:
+  - enabled monitoring, copied
+    `http://127.0.0.1:6411/file/clip.bin?size=131072&seed=220`;
+  - Host log: `Clipboard URL detected`;
+  - job completed 131,072 bytes with SHA-256
+    `7fd83e6ce6d28fc1854455a80d41dff387c913cf661602d14dc24064fd9868dc`;
+  - disabled monitoring, copied `clip2.bin`; no job and no file appeared.
+- Completion notifications and sound now honor `NotifyOnCompletion` and
+  `PlayCompletionSound`; failures still notify. `ShowCompletionDialog` remains
+  unimplemented.
+
 ## Tests
 
 - Engine: **21/21 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, and redirect credential boundaries.
-- Core: **17/17 passed**, including shutdown-command construction.
+- Core: **25/25 passed**, including shutdown-command construction and clipboard
+  URL extraction.
 - Runtime/persistence: **36/36 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
@@ -521,8 +542,10 @@ random-access part file **in the destination directory**:
 3. Phase 10 remainder: G2 crawl scope/depth/filters, G3 relative paths/link
    rewriting for an offline mirror, and G4 persistent/scheduled grabber
    projects. G1 is done (E31).
-4. Implement Phase 6 management gaps exercised by the UI (duplicate decisions,
-   categories/destination rules, batch URLs, batch download from clipboard).
+4. Phase 6 remainder: editable properties (M3), duplicate decisions (M6),
+   categories/destination rules (M7), remembered folders/recent URLs (M8),
+   batch URLs (M12), import/export (M13), and completion dialog (M11).
+   Clipboard monitoring and completion notification/sound are done (E33).
 5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
    proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
    logins, redirect credential boundaries, and expired-URL refresh are done

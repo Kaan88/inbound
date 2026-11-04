@@ -372,6 +372,53 @@ public static class Hashing
     }
 }
 
+public static class ClipboardUrlExtractor
+{
+    private static readonly System.Text.RegularExpressions.Regex UrlPattern = new(
+        @"https?://[^\s<>""']+",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Returns the first valid absolute HTTP(S) URL in clipboard text.</summary>
+    public static string? FirstHttpUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        foreach (System.Text.RegularExpressions.Match match in UrlPattern.Matches(text))
+        {
+            var candidate = TrimTrailingPunctuation(match.Value);
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) &&
+                uri.Scheme is "http" or "https")
+            {
+                return uri.AbsoluteUri;
+            }
+        }
+
+        return null;
+    }
+
+    private static string TrimTrailingPunctuation(string value)
+    {
+        var end = value.Length;
+        while (end > 0)
+        {
+            var ch = value[end - 1];
+            if (ch is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}' or '>' or '"' or '\'')
+            {
+                end--;
+                continue;
+            }
+
+            break;
+        }
+
+        return value[..end];
+    }
+}
+
 public static class ShutdownCommand
 {
     public static string BuildArguments(string? mode, bool force)
