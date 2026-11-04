@@ -41,6 +41,7 @@ public sealed class DownloadManagerService
     public event EventHandler<string>? UpdateDeferred;
     private readonly object _sync = new();
     private readonly List<GrabberProject> _grabberProjects = new();
+    private readonly List<string> _orphanPartFiles = new();
     private readonly HashSet<Guid> _runningGrabberProjects = new();
     private readonly Dictionary<Guid, DateTimeOffset> _grabberProgressSaved = new();
     private bool _sleepPreventionActive;
@@ -142,6 +143,7 @@ public sealed class DownloadManagerService
             }
         }
 
+        ScanOrphanPartFiles();
         _initialized = true;
         Schedule();
         StartSchedulerLoop();
@@ -2082,6 +2084,76 @@ public sealed class DownloadManagerService
         _schedulerTask = null;
     }
 
+    private void ScanOrphanPartFiles()
+    {
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var runtime in _jobs.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(runtime.Job.DestinationDirectory))
+            {
+                directories.Add(runtime.Job.DestinationDirectory);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.DefaultDownloadDirectory))
+        {
+            directories.Add(_settings.DefaultDownloadDirectory);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.LastDestinationDirectory))
+        {
+            directories.Add(_settings.LastDestinationDirectory);
+        }
+
+        foreach (var folder in _settings.CategoryFolders.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                directories.Add(folder);
+            }
+        }
+
+        var known = _jobs.Values
+            .Select(runtime => runtime.Job.PartFilePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lock (_sync)
+        {
+            _orphanPartFiles.Clear();
+        }
+
+        foreach (var directory in directories)
+        {
+            if (!Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(
+                             directory, "*.part", SearchOption.TopDirectoryOnly))
+                {
+                    if (known.Contains(path))
+                    {
+                        continue;
+                    }
+
+                    lock (_sync)
+                    {
+                        _orphanPartFiles.Add(path);
+                    }
+
+                    _log?.Invoke($"Orphan partial file detected (not attached to a job): {path}");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log?.Invoke($"Could not scan '{directory}' for orphan partial files: {ex.Message}");
+            }
+        }
+    }
+
     private async Task<bool> ReconcileAsync(JobRuntime runtime, CancellationToken cancellationToken)
     {
         var changed = false;
@@ -2115,6 +2187,30 @@ public sealed class DownloadManagerService
         var partLength = File.Exists(job.PartFilePath)
             ? new FileInfo(job.PartFilePath).Length
             : (long?)null;
+        if (checkpoint is not null &&
+            partLength is { } longPartLength &&
+            longPartLength > checkpoint.CompletedBytes)
+        {
+            try
+            {
+                using (var stream = new FileStream(
+                           job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.Read))
+                {
+                    stream.SetLength(checkpoint.CompletedBytes);
+                }
+
+                job.ReceivedBytes = checkpoint.CompletedBytes;
+                changed = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // If the extra bytes cannot be removed safely, discard the
+                // metadata claim rather than resuming over unknown data.
+                job.ReceivedBytes = 0;
+                changed = true;
+            }
+        }
+
         if (job.ReceivedBytes > 0 && partLength is null)
         {
             // The partial payload is gone. Resume will start from zero rather than
@@ -2924,6 +3020,7 @@ public sealed class DownloadManagerService
             QueuedDownloads = queued,
             TotalJobs = _jobs.Count,
             StateDirectory = _paths.Root,
+            OrphanPartFiles = _orphanPartFiles.ToList(),
         };
     }
 

@@ -20,6 +20,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
     private readonly EngineOptions _options;
     private readonly IDownloadCheckpointStore? _checkpoints;
+    private readonly IFreeSpaceProvider _freeSpace;
     private readonly bool _ownsClient;
     private readonly object _clientSync = new();
     private readonly List<HttpClient> _retiredClients = new();
@@ -35,11 +36,13 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         HttpMessageHandler? handler = null,
         IDownloadCheckpointStore? checkpoints = null,
         IMediaMuxer? muxer = null,
-        IMediaCheckpointStore? mediaCheckpoints = null)
+        IMediaCheckpointStore? mediaCheckpoints = null,
+        IFreeSpaceProvider? freeSpace = null)
     {
         _options = options ?? new EngineOptions();
         _checkpoints = checkpoints;
         _mediaCheckpoints = mediaCheckpoints;
+        _freeSpace = freeSpace ?? DriveFreeSpaceProvider.Instance;
         _ffmpegPath = _options.FfmpegPath;
         _muxer = muxer ?? new FfmpegMediaMuxer(() => _ffmpegPath);
         if (handler is null)
@@ -390,6 +393,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             responseTotal = response.Content.Headers.ContentLength;
         }
+
+        EnsureFreeSpace(job, responseTotal, state.Bytes);
 
         if (state.Total is > 0 && responseTotal is > 0 && state.Total != responseTotal)
         {
@@ -2770,6 +2775,11 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             return null;
         }
 
+        var existingBytes = checkpoint is not null && File.Exists(job.PartFilePath)
+            ? new FileInfo(job.PartFilePath).Length
+            : 0;
+        EnsureFreeSpace(job, plan.Total, existingBytes);
+
         if (checkpoint is not null)
         {
             if (checkpoint.TotalBytes != plan.Total ||
@@ -3671,6 +3681,42 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         var extension = Path.GetExtension(job.FileName).TrimStart('.').ToLowerInvariant();
         return extension is not ("html" or "htm" or "xhtml" or "txt" or "xml" or "json" or "mhtml" or "mht");
+    }
+
+    private void EnsureFreeSpace(DownloadJob job, long? total, long alreadyBytes)
+    {
+        if (total is not > 0)
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(job.PartFilePath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = job.DestinationDirectory;
+        }
+
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        var available = _freeSpace.GetAvailableFreeSpace(directory);
+        if (available is null)
+        {
+            return;
+        }
+
+        var remaining = Math.Max(0, total.Value - Math.Max(0, alreadyBytes));
+        var required = remaining + _options.MinimumFreeSpaceReserveBytes;
+        if (available.Value < required)
+        {
+            throw new DownloadEngineException(new JobFailure(
+                FailureKind.DiskFull,
+                $"Not enough free space at '{directory}': need {required:N0} bytes, " +
+                $"{available.Value:N0} available.",
+                false, false, DateTimeOffset.UtcNow), isRetryable: false);
+        }
     }
 
     private static JobFailure ClassifyHttpFailure(

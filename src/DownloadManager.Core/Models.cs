@@ -226,6 +226,7 @@ public sealed record EngineOptions
     public int MaxRedirects { get; init; } = 10;
     public bool AllowLocalNetwork { get; init; } = true;
     public string AcceptEncoding { get; init; } = "identity";
+    public long MinimumFreeSpaceReserveBytes { get; init; } = 1024 * 1024;
 
     /// <summary>Mutable proxy state; updated at runtime when settings change.</summary>
     public ProxySettings Proxy { get; init; } = new();

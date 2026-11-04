@@ -508,6 +508,52 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task DiskFullPreflightFailsBeforeWriting()
+    {
+        using var ctx = new EngineContext();
+        using var engine = CreateEngine(freeSpace: new FixedFreeSpaceProvider(1024));
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/diskfull.bin?size=65536&seed=19",
+            "diskfull.bin");
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(FailureKind.DiskFull, result.Failure!.Kind);
+        Assert.Contains(ctx.Destination, result.Failure.Message);
+        Assert.False(File.Exists(job.FinalFilePath));
+        Assert.False(File.Exists(job.PartFilePath));
+    }
+
+    [Fact]
+    public async Task PermissionFailureIsReportedWithoutSuccess()
+    {
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/denied.bin?size=65536&seed=20",
+            "denied.bin");
+        Directory.CreateDirectory(job.PartFilePath);
+        try
+        {
+            using var engine = CreateEngine();
+            var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(FailureKind.Permission, result.Failure!.Kind);
+            Assert.False(File.Exists(job.FinalFilePath));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(job.PartFilePath);
+            }
+            catch (IOException)
+            {
+                // best effort
+            }
+        }
+    }
+
+    [Fact]
     public async Task HtmlPageIsSavedOnlyForHtmlLikeTargets()
     {
         using var ctx = new EngineContext();
@@ -718,7 +764,8 @@ public sealed class HttpDownloadEngineTests
         int maxAttempts = 3,
         ProxySettings? proxy = null,
         TimeSpan? readTimeout = null,
-        TimeSpan? connectTimeout = null)
+        TimeSpan? connectTimeout = null,
+        IFreeSpaceProvider? freeSpace = null)
         => new(
             new EngineOptions
             {
@@ -730,7 +777,8 @@ public sealed class HttpDownloadEngineTests
                 AllowLocalNetwork = true,
                 Proxy = proxy ?? new ProxySettings(),
             },
-            checkpoints: store);
+            checkpoints: store,
+            freeSpace: freeSpace);
 
     private static string WriteReference(string root, string name, byte[] bytes)
     {
@@ -742,6 +790,11 @@ public sealed class HttpDownloadEngineTests
     private sealed class InlineProgress<T>(Action<T> action) : IProgress<T>
     {
         public void Report(T value) => action(value);
+    }
+
+    private sealed class FixedFreeSpaceProvider(long available) : IFreeSpaceProvider
+    {
+        public long? GetAvailableFreeSpace(string directory) => available;
     }
 
     private sealed class EngineContext : IDisposable

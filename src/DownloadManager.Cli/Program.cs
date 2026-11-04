@@ -426,6 +426,14 @@ internal static class Program
                         Console.WriteLine($"state: {status.StateDirectory}");
                         Console.WriteLine($"jobs: {status.TotalJobs}  active: {status.ActiveDownloads}  queued: {status.QueuedDownloads}");
                         Console.WriteLine($"tray: {status.TrayAvailable}  native host: {(status.NativeHostRegistered ? "registered" : "not registered")}");
+                        if (status.OrphanPartFiles.Count > 0)
+                        {
+                            Console.WriteLine($"orphan parts: {status.OrphanPartFiles.Count}");
+                            foreach (var orphan in status.OrphanPartFiles.Take(5))
+                            {
+                                Console.WriteLine($"  {orphan}");
+                            }
+                        }
                     }
 
                     return 0;

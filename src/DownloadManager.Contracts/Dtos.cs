@@ -167,6 +167,7 @@ public sealed class HostStatusDto
     public int TotalJobs { get; set; }
     public string StateDirectory { get; set; } = string.Empty;
     public string? LastError { get; set; }
+    public List<string> OrphanPartFiles { get; set; } = new();
 }
 
 public sealed class HostHelloDto

@@ -942,6 +942,26 @@ random-access part file **in the destination directory**:
   limited jobs is not enforced.
 - Engine suite **26/26**, integration **57/57**.
 
+## Disk-space, permission, and part-reconciliation evidence (R6/R7, 2026-11-04)
+
+- R6:
+  - `DiskFullPreflightFailsBeforeWriting` injected a 1,024-byte free-space
+    provider with a 1 MiB reserve; a 65,536-byte job failed `DiskFull` with the
+    destination in the message and no part/final file.
+  - `PermissionFailureIsReportedWithoutSuccess` placed a directory at the part
+    path; the engine failed `Permission` and wrote no final file.
+- R7:
+  - `CrashReconciliationTruncatesLongPartFile`: a 5,000-byte part with a
+    3,000-byte checkpoint was truncated to 3,000 and reloaded as
+    `ReceivedBytes=3000`.
+  - `OrphanPartFilesAreReported`: an unattached `.part` file appeared in
+    `HostStatusDto.OrphanPartFiles`; `dm host status` prints orphan paths.
+  - Short and missing part cases from E66 still pass.
+- Limitations: disk-full is provider-injected, not a physically full volume;
+  HLS/DASH total size is unknown before download; orphans are reported, not
+  deleted or quarantined.
+- Engine suite **28/28**, integration **59/59**.
+
 ## Retry/reconciliation evidence (R5/R7/R8, 2026-11-04)
 
 - R5: engine `RetriesTransientServerErrors` hit `/flaky/retry.bin` with two
@@ -1080,16 +1100,16 @@ random-access part file **in the destination directory**:
 
 ## Tests
 
-- Engine: **26/26 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **28/28 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
-  HTML-page policy, monotonic progress/ETA, transient-500 retry recovery, and
-  per-download speed limiting.
+  HTML-page policy, monotonic progress/ETA, transient-500 retry recovery,
+  per-download speed limiting, disk-full preflight, and permission failure.
 - Core: **50/50 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **57/57 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **59/59 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1097,11 +1117,11 @@ random-access part file **in the destination directory**:
   SegmentTemplate/Timeline/SegmentList/SegmentBase byte ranges, DASH A/V muxing,
   HLS/DASH fragment recovery, rotating-token refresh, live-stream exclusion, DRM
   detection, editable properties, duplicate policies, category destinations,
-  recent-URL history, pause-vs-cancel partial files, crash metadata clamping,
-  global speed limiting, the scoped site grabber/offline mirror,
-  persistent/scheduled grabber projects, FTP auth/resume, post-download hook
-  isolation, connection profiles, secret-preserving settings updates,
-  installer-only update check/download, and segment/progress details.
+  recent-URL history, pause-vs-cancel partial files, short/long/missing part
+  reconciliation, orphan-part reporting, global speed limiting, the scoped site
+  grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
+  post-download hook isolation, connection profiles, secret-preserving settings
+  updates, installer-only update check/download, and segment/progress details.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including

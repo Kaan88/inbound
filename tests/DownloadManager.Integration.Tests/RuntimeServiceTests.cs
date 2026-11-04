@@ -172,6 +172,91 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task CrashReconciliationTruncatesLongPartFile()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/long-clamp.bin?size=8192&seed=21",
+                DestinationDirectory = ctx.Destination,
+                FileName = "long-clamp.bin",
+                StartMode = "later",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var jobId = response.Job!.Id;
+            var partPath = response.Job.PartFilePath;
+            await File.WriteAllBytesAsync(partPath, new byte[5000]);
+            var checkpoints = new JsonCheckpointStore(ctx.Paths);
+            await checkpoints.SaveAsync(new DownloadCheckpoint
+            {
+                JobId = jobId,
+                Url = response.Job.Url,
+                TotalBytes = 8192,
+                Segments =
+                {
+                    new SegmentCheckpoint
+                    {
+                        Start = 0,
+                        End = 8191,
+                        Completed = 3000,
+                    },
+                },
+            });
+
+            var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            try
+            {
+                var job = second.Service.GetJob(jobId);
+                Assert.NotNull(job);
+                Assert.Equal(3000, job!.ReceivedBytes);
+                Assert.Equal(3000, new FileInfo(partPath).Length);
+                Assert.Empty(second.Service.GetSnapshot().Status.OrphanPartFiles);
+            }
+            finally
+            {
+                await second.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task OrphanPartFilesAreReported()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        try
+        {
+            var orphanPath = Path.Combine(
+                ctx.Destination, $"orphan.{Guid.NewGuid():N}.part");
+            await File.WriteAllBytesAsync(orphanPath, new byte[123]);
+            var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            try
+            {
+                var status = second.Service.GetSnapshot().Status;
+                Assert.Contains(
+                    Path.GetFullPath(orphanPath),
+                    status.OrphanPartFiles.Select(Path.GetFullPath));
+            }
+            finally
+            {
+                await second.DisposeAsync();
+            }
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task RestartServiceAndResumeFromDisk()
     {
         var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);

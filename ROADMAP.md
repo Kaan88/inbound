@@ -88,8 +88,8 @@ never appear successful.
 | P2.2 | Checkpoint + `.part` file protocol | done | P2.1 | Destination-local part and byte-exact resume verified (E12/E28) |
 | P2.3 | Range validation (206, Content-Range, validators) | done | P2.2 | Ignored/invalid ranges restart safely; bad ranges fail without corruption (E67) |
 | P2.4 | Changed remote content detection | done | P2.3 | Length/validator mismatch restarts instead of combining (E28/E67) |
-| P2.5 | Retry/backoff/offline/disk-full/permission recovery | partial | P2.2 | Transient 500 retry, timeout and DNS/TLS classes done (E61/E65); disk-full and permission failure remain untested |
-| P2.6 | Crash reconciliation | partial | P2.1 | Short/missing part metadata is clamped safely (E66); long/orphan part handling remains |
+| P2.5 | Retry/backoff/offline/disk-full/permission recovery | done | P2.2 | Transient 500 retry, timeout/DNS/TLS, disk-full preflight and permission failure verified (E61/E65/E70) |
+| P2.6 | Crash reconciliation | done | P2.1 | Short/missing part clamping, long-part truncation and orphan reporting verified (E66/E71) |
 | P2.7 | Independent verification of interruption/recovery | pending | P2.6 | Subagent runs kill/restart matrix; hashes match |
 
 **Exit gate:** forced termination/restart preserves safe recovery; incompatible
@@ -139,8 +139,8 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.5 | Benchmarks vs single stream/reference app | pending | P5.4 | Recorded throughput/CPU/memory/disk |
 | P5.6 | Segmented interruption verification | pending | P5.2 | Subagent kill/restart matrix passes |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
-| P5.8 | Destination free-space preflight | pending | P5.7 | Before starting, check free space on the destination volume; fail early with the destination path, not the state drive. |
-| P5.9 | Stale destination part cleanup | pending | P5.7 | Orphaned `<final>.<jobId>.part` files are identified safely and removed or surfaced without touching active jobs. |
+| P5.8 | Destination free-space preflight | done | P5.7 | Known-length jobs check destination free space with a 1 MiB reserve and fail `diskFull` before writing (E70). |
+| P5.9 | Stale destination part cleanup | partial | P5.7 | Unattached `.part` files in known dest/category folders are reported in host status/logs; automatic removal/quarantine remains (E71). |
 
 **Payload placement decision (2026-11-04):** unlike reference app's fixed temporary
 directory plus post-download stitching, our engine writes every range directly
