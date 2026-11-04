@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime;
 
@@ -55,12 +56,48 @@ internal sealed class SiteGrabber
         visited.Add(Normalize(start));
 
         using var http = CreateClient();
+        var robotsCache = new Dictionary<string, RobotsRules>(StringComparer.OrdinalIgnoreCase);
+        var robotsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        async Task<bool> AllowedAsync(Uri target)
+        {
+            if (!request.RespectRobotsTxt)
+            {
+                return true;
+            }
+
+            var authority = target.GetLeftPart(UriPartial.Authority);
+            if (!robotsCache.TryGetValue(authority, out var rules))
+            {
+                rules = await FetchRobotsAsync(http, authority, cancellationToken).ConfigureAwait(false);
+                robotsCache[authority] = rules;
+            }
+
+            if (rules.IsAllowed(target.PathAndQuery))
+            {
+                return true;
+            }
+
+            if (robotsSeen.Add(Normalize(target)))
+            {
+                result.RobotsBlocked++;
+                _log?.Invoke($"Grabber skipped {target} (disallowed by robots.txt).");
+            }
+
+            return false;
+        }
+
+        if (!await AllowedAsync(start).ConfigureAwait(false))
+        {
+            result.Error = "The start URL is disallowed by the site's robots.txt.";
+            return result;
+        }
 
         while (queue.Count > 0 && pages.Count < maxPages)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (url, depth) = queue.Dequeue();
-            if (!InScope(url, startAuthority, request))
+            if (!InScope(url, startAuthority, request) || !await AllowedAsync(url).ConfigureAwait(false))
             {
                 continue;
             }
@@ -106,7 +143,7 @@ internal sealed class SiteGrabber
 
                 foreach (var link in ExtractLinks(html, url))
                 {
-                    if (!InScope(link, startAuthority, request))
+                    if (!InScope(link, startAuthority, request) || !await AllowedAsync(link).ConfigureAwait(false))
                     {
                         continue;
                     }
@@ -211,8 +248,48 @@ internal sealed class SiteGrabber
         {
             Timeout = TimeSpan.FromSeconds(30),
         };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("DownloadManagerGrabber/0.1");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(RobotsUserAgent);
         return client;
+    }
+
+    private const string RobotsUserAgent = "DownloadManagerGrabber/0.1";
+
+    /// <summary>
+    /// RFC 9309: 4xx means no restrictions; 5xx or an unreachable host means full disallow.
+    /// </summary>
+    private async Task<RobotsRules> FetchRobotsAsync(HttpClient http, string authority, CancellationToken cancellationToken)
+    {
+        var robotsUrl = new Uri(authority + "/robots.txt");
+        try
+        {
+            using var response = await http.GetAsync(robotsUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            if (status is >= 400 and < 500)
+            {
+                return RobotsRules.AllowAll;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _log?.Invoke($"robots.txt at {robotsUrl} returned HTTP {status}; treating the host as disallowed.");
+                return RobotsRules.Parse("User-agent: *\nDisallow: /\n", RobotsUserAgent);
+            }
+
+            var bytes = await ReadLimitedAsync(response.Content, 500 * 1024, cancellationToken).ConfigureAwait(false);
+            var rules = RobotsRules.Parse(Encoding.UTF8.GetString(bytes), RobotsUserAgent);
+            _log?.Invoke($"Loaded robots.txt for {authority} ({rules.RuleCount} rule(s)).");
+            return rules;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException)
+        {
+            _log?.Invoke($"robots.txt at {robotsUrl} could not be read ({ex.Message}); treating the host as disallowed.");
+            return RobotsRules.Parse("User-agent: *\nDisallow: /\n", RobotsUserAgent);
+        }
     }
 
     private static bool InScope(Uri url, string startAuthority, SiteGrabberRequest request)

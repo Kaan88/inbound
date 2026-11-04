@@ -1176,6 +1176,58 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SiteGrabberHonorsRobotsTxtUnlessDisabled()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        async Task<int> DisallowedHitsAsync()
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync($"{_server.BaseAddress}/robo/stats"));
+            return doc.RootElement.GetProperty("disallowedHits").GetInt32();
+        }
+
+        SiteGrabberRequest Request(string mirror, bool respect) => new()
+        {
+            StartUrl = $"{_server.BaseAddress}/robo/",
+            DestinationDirectory = mirror,
+            MaxDepth = 2,
+            MaxPages = 10,
+            Extensions = new List<string> { "bin" },
+            RespectRobotsTxt = respect,
+            StartMode = "later",
+        };
+
+        var hitsBefore = await DisallowedHitsAsync();
+        var honored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-on"), true));
+        Assert.True(honored.Ok, honored.Error);
+        Assert.Equal(2, honored.PagesCrawled);   // index + Allow-overridden private/open.html
+        Assert.Equal(2, honored.FilesQueued);    // ok.bin + open.bin
+        Assert.Equal(2, honored.RobotsBlocked);  // private/secret.html + files/blocked.bin
+        Assert.Equal(hitsBefore, await DisallowedHitsAsync());
+        var queued = ctx.Service.GetSnapshot().Jobs.Select(job => job.Url).ToList();
+        Assert.DoesNotContain(queued, url => url.Contains("blocked.bin", StringComparison.Ordinal));
+        Assert.DoesNotContain(queued, url => url.Contains("secret.bin", StringComparison.Ordinal));
+
+        var blockedStart = await ctx.Service.RunSiteGrabberAsync(new SiteGrabberRequest
+        {
+            StartUrl = $"{_server.BaseAddress}/robo/private/secret.html",
+            DestinationDirectory = Path.Combine(ctx.Destination, "robo-start"),
+            StartMode = "later",
+        });
+        Assert.False(blockedStart.Ok);
+        Assert.Contains("robots.txt", blockedStart.Error);
+        Assert.Equal(hitsBefore, await DisallowedHitsAsync());
+
+        var ignored = await ctx.Service.RunSiteGrabberAsync(Request(Path.Combine(ctx.Destination, "robo-off"), false));
+        Assert.True(ignored.Ok, ignored.Error);
+        Assert.Equal(3, ignored.PagesCrawled);
+        Assert.Equal(4, ignored.FilesQueued);
+        Assert.Equal(0, ignored.RobotsBlocked);
+        Assert.True(await DisallowedHitsAsync() > hitsBefore);
+    }
+
+    [Fact]
     public async Task CategoryDestinationRulesAndLastFolderPersist()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

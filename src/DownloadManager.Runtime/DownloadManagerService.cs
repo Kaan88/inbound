@@ -1397,6 +1397,7 @@ public sealed class DownloadManagerService
                 .ToList(),
             SavePages = request.Request.SavePages,
             RewriteLinks = request.Request.RewriteLinks,
+            RespectRobotsTxt = request.Request.RespectRobotsTxt,
             StartMode = request.Request.StartMode,
             QueueId = request.Request.QueueId,
             Connections = request.Request.Connections,
@@ -1616,6 +1617,7 @@ public sealed class DownloadManagerService
         ExcludePatterns = new List<string>(project.ExcludePatterns),
         SavePages = project.SavePages,
         RewriteLinks = project.RewriteLinks,
+        RespectRobotsTxt = project.RespectRobotsTxt,
         StartMode = project.StartMode,
         QueueId = project.QueueId,
         Connections = project.Connections,
@@ -2800,6 +2802,7 @@ public sealed class DownloadManagerService
         await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
         Raise(runtime, changeType);
 
+        var lateResume = false;
         lock (_sync)
         {
             runtime.Starting = false;
@@ -2807,6 +2810,29 @@ public sealed class DownloadManagerService
             runtime.Cts?.Dispose();
             runtime.Cts = null;
             runtime.CancelledForRemoval = false;
+
+            // A queue start can land after the final state was decided above but while the
+            // runner still looked alive; it then only set ResumeWhenStopped. Honor it here so
+            // the job is not left paused forever.
+            if (runtime.ResumeWhenStopped)
+            {
+                runtime.ResumeWhenStopped = false;
+                if (job.State == DownloadState.Paused && !_shuttingDown && !runtime.CancelRequested)
+                {
+                    runtime.PauseRequested = false;
+                    job.State = DownloadState.Queued;
+                    job.StartMode = StartMode.StartNow;
+                    job.Failure = null;
+                    job.Touch();
+                    lateResume = true;
+                }
+            }
+        }
+
+        if (lateResume)
+        {
+            await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
+            Raise(runtime, "queued");
         }
 
         await MaybeRunPostDownloadHookAsync(job, changeType).ConfigureAwait(false);

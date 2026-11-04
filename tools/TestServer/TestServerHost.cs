@@ -25,6 +25,8 @@ public sealed class TestServerHost : IAsyncDisposable
     private byte[]? _updateManifest;
     private byte[]? _updatePackage;
     private readonly object _authLastSync = new();
+    private int _robotsTxtRequests;
+    private int _roboDisallowedHits;
     private int _activeRangeRequests;
     private int _peakRangeRequests;
     private int _activeFileRequests;
@@ -994,6 +996,73 @@ public sealed class TestServerHost : IAsyncDisposable
                 var seed = QueryInt(context, "seed", 1);
                 await ServeAsync(context, ContentFor(name, size, seed), name, allowRanges: true,
                     throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
+                return;
+            }
+
+            context.Response.StatusCode = 404;
+        });
+
+        _app.MapGet("/robots.txt", () =>
+        {
+            Interlocked.Increment(ref _robotsTxtRequests);
+            return Results.Text(
+                "# Test fixture: only /robo/ is restricted.\n" +
+                "User-agent: OtherBot\nDisallow: /\n\n" +
+                "User-agent: *\n" +
+                "Disallow: /robo/private/\n" +
+                "Allow: /robo/private/open.html\n" +
+                "Disallow: /robo/files/blocked*\n",
+                "text/plain");
+        });
+
+        _app.MapGet("/robo/stats", () => Results.Json(new
+        {
+            robotsTxtRequests = Interlocked.CompareExchange(ref _robotsTxtRequests, 0, 0),
+            disallowedHits = Interlocked.CompareExchange(ref _roboDisallowedHits, 0, 0),
+        }));
+
+        _app.MapGet("/robo/{**path}", async (HttpContext context, string? path) =>
+        {
+            var relative = (path ?? string.Empty).Replace('\\', '/').Trim('/');
+            if (relative.Length == 0)
+            {
+                relative = "index.html";
+            }
+
+            if ((relative.StartsWith("private/", StringComparison.Ordinal) && relative != "private/open.html") ||
+                relative.StartsWith("files/blocked", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _roboDisallowedHits);
+            }
+
+            var html = relative switch
+            {
+                "index.html" =>
+                    "<html><body>" +
+                    "<a href=\"/robo/private/secret.html\">Secret</a>" +
+                    "<a href=\"/robo/private/open.html\">Open</a>" +
+                    "<a href=\"/robo/files/ok.bin?size=65536&seed=320\">OK</a>" +
+                    "<a href=\"/robo/files/blocked.bin?size=65536&seed=321\">Blocked</a>" +
+                    "</body></html>",
+                "private/secret.html" =>
+                    "<html><body><a href=\"/robo/files/secret.bin?size=65536&seed=322\">S</a></body></html>",
+                "private/open.html" =>
+                    "<html><body><a href=\"/robo/files/open.bin?size=65536&seed=323\">O</a></body></html>",
+                _ => null,
+            };
+
+            if (html is not null)
+            {
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(html).ConfigureAwait(false);
+                return;
+            }
+
+            if (relative.StartsWith("files/", StringComparison.Ordinal))
+            {
+                var name = Path.GetFileName(relative);
+                await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 65_536), QueryInt(context, "seed", 1)),
+                    name, allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
                 return;
             }
 

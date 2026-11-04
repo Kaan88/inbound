@@ -293,6 +293,8 @@ public sealed class SiteGrabberRequest
     public List<string> ExcludePatterns { get; set; } = new();
     public bool SavePages { get; set; } = true;
     public bool RewriteLinks { get; set; } = true;
+    /// <summary>Honor each host's robots.txt for pages and files (default on).</summary>
+    public bool RespectRobotsTxt { get; set; } = true;
     public string StartMode { get; set; } = "now";
     public int QueueId { get; set; }
     public int Connections { get; set; }
@@ -305,6 +307,7 @@ public sealed class SiteGrabberResult
     public int PagesCrawled { get; set; }
     public int FilesQueued { get; set; }
     public int FilesSkipped { get; set; }
+    public int RobotsBlocked { get; set; }
     public List<string> Errors { get; set; } = new();
 }
 

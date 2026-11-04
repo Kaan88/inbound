@@ -1835,6 +1835,7 @@ public sealed partial class MainWindow : Window
         var sameHost = new CheckBox { Content = "Stay on the start host", IsChecked = true };
         var savePages = new CheckBox { Content = "Save HTML pages for offline viewing", IsChecked = true };
         var rewrite = new CheckBox { Content = "Rewrite links to local files", IsChecked = true };
+        var robots = new CheckBox { Content = "Respect the site's robots.txt", IsChecked = true };
         var startMode = new ComboBox { Header = "Download files" };
         startMode.Items.Add("Start now");
         startMode.Items.Add("Download later");
@@ -1860,6 +1861,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(sameHost);
         panel.Children.Add(savePages);
         panel.Children.Add(rewrite);
+        panel.Children.Add(robots);
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
 
@@ -1902,6 +1904,7 @@ public sealed partial class MainWindow : Window
             SameHostOnly = sameHost.IsChecked == true,
             SavePages = savePages.IsChecked == true,
             RewriteLinks = rewrite.IsChecked == true,
+            RespectRobotsTxt = robots.IsChecked == true,
             StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
             QueueId = _settings.Queues.OrderBy(q => q.Order)
                 .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
@@ -1965,7 +1968,7 @@ public sealed partial class MainWindow : Window
 
             await RefreshAsync();
             var summary = $"Crawled {result.PagesCrawled} pages; queued {result.FilesQueued} files; " +
-                          $"skipped {result.FilesSkipped}.";
+                          $"skipped {result.FilesSkipped}; blocked by robots.txt {result.RobotsBlocked}.";
             if (saveProject.IsChecked == true)
             {
                 summary += "\n\nThe project was saved under Grabber Projects.";

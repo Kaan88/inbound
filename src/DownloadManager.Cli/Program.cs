@@ -828,7 +828,7 @@ internal static class Program
         {
             Console.WriteLine(
                 $"crawled {result.PagesCrawled} pages, queued {result.FilesQueued} files, " +
-                $"skipped {result.FilesSkipped}");
+                $"skipped {result.FilesSkipped}, robots.txt blocked {result.RobotsBlocked}");
             foreach (var error in result.Errors)
             {
                 Console.WriteLine($"  warning: {error}");
@@ -1125,6 +1125,7 @@ internal static class Program
             SameHostOnly = !args.Contains("--any-host", StringComparer.OrdinalIgnoreCase),
             SavePages = !args.Contains("--no-pages", StringComparer.OrdinalIgnoreCase),
             RewriteLinks = !args.Contains("--no-rewrite", StringComparer.OrdinalIgnoreCase),
+            RespectRobotsTxt = !args.Contains("--ignore-robots", StringComparer.OrdinalIgnoreCase),
             StartMode = GetOption(args, "--start") ?? "now",
             IncludePatterns = GetOptions(args, "--include").ToList(),
             ExcludePatterns = GetOptions(args, "--exclude").ToList(),

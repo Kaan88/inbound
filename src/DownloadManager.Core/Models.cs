@@ -364,6 +364,7 @@ public sealed class GrabberProject
     public List<string> ExcludePatterns { get; set; } = new();
     public bool SavePages { get; set; } = true;
     public bool RewriteLinks { get; set; } = true;
+    public bool RespectRobotsTxt { get; set; } = true;
     public string StartMode { get; set; } = "now";
     public int QueueId { get; set; }
     public int Connections { get; set; }
