@@ -1752,6 +1752,172 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ProxyPasswordIsDpapiProtectedOnDiskAndSurvivesRestart()
+    {
+        await using var proxy = TestProxyServer.Start();
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.Proxy = new ProxyDto
+            {
+                Mode = "manual",
+                Address = proxy.Address,
+                Username = "proxyuser",
+                Password = "proxypass",
+            };
+            var update = await ctx.Service.UpdateSettingsAsync(settings);
+            Assert.True(update.Ok, update.Error);
+
+            var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
+            Assert.DoesNotContain("proxypass", json);
+            Assert.Contains("dpapi:v1:", json);
+            Assert.DoesNotContain("\"password\"", json, StringComparison.OrdinalIgnoreCase);
+
+            // A fresh service instance decrypts the blob and authenticates to the proxy.
+            await using var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            Assert.True(second.Service.GetSnapshot().Settings.Proxy.HasPassword);
+            Assert.Null(second.Service.GetSnapshot().Settings.Proxy.Password);
+            var response = await second.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/proxy-restart.bin?size=262144&seed=101",
+                DestinationDirectory = ctx.Destination,
+                FileName = "proxy-restart.bin",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            var completed = await second.WaitFor(response.Job!.Id, j => j.State == "completed",
+                TimeSpan.FromSeconds(30));
+            Assert.True(proxy.Authorized > 0);
+            Assert.Equal(0, proxy.Denied);
+            var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                TestContent.Generate(101, 262_144))).ToLowerInvariant();
+            Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task LegacyPlaintextProxyPasswordIsMigratedOffDisk()
+    {
+        await using var proxy = TestProxyServer.Start();
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.Proxy = new ProxyDto
+            {
+                Mode = "manual",
+                Address = proxy.Address,
+                Username = "proxyuser",
+                Password = "proxypass",
+            };
+            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+            // Rewrite the file the way a pre-DPAPI build wrote it.
+            var node = System.Text.Json.Nodes.JsonNode.Parse(
+                await File.ReadAllTextAsync(ctx.Paths.SettingsFile))!.AsObject();
+            var proxyNode = node["proxy"]!.AsObject();
+            proxyNode.Remove("passwordProtected");
+            proxyNode["password"] = "proxypass";
+            await File.WriteAllTextAsync(ctx.Paths.SettingsFile, node.ToJsonString());
+            Assert.Contains("proxypass", await File.ReadAllTextAsync(ctx.Paths.SettingsFile));
+
+            await using var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
+            Assert.DoesNotContain("proxypass", json);
+            Assert.Contains("dpapi:v1:", json);
+            Assert.True(second.Service.GetSnapshot().Settings.Proxy.HasPassword);
+
+            var response = await second.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/proxy-legacy.bin?size=131072&seed=102",
+                DestinationDirectory = ctx.Destination,
+                FileName = "proxy-legacy.bin",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            await second.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            Assert.True(proxy.Authorized > 0);
+            Assert.Equal(0, proxy.Denied);
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UndecryptableProxyBlobYieldsNoPasswordWithoutCrashing()
+    {
+        var ctx = await ServiceContext.CreateAsync(_server);
+        try
+        {
+            var settings = ctx.Service.GetSnapshot().Settings;
+            settings.Proxy = new ProxyDto
+            {
+                Mode = "manual",
+                Address = "http://proxy.example:8080",
+                Username = "proxyuser",
+                Password = "proxypass",
+            };
+            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+            var node = System.Text.Json.Nodes.JsonNode.Parse(
+                await File.ReadAllTextAsync(ctx.Paths.SettingsFile))!.AsObject();
+            node["proxy"]!.AsObject()["passwordProtected"] = "dpapi:v1:AAAAAAAA";
+            await File.WriteAllTextAsync(ctx.Paths.SettingsFile, node.ToJsonString());
+
+            await using var second = await ServiceContext.CreateAsync(
+                _server, ctx.Paths, ctx.Destination, autoResume: false);
+            var proxySettings = second.Service.GetSnapshot().Settings.Proxy;
+            Assert.Equal("proxyuser", proxySettings.Username);
+            Assert.False(proxySettings.HasPassword);
+        }
+        finally
+        {
+            await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Socks4SettingsApplyToRuntimeDownloads()
+    {
+        await using var socks = TestSocks4Server.Start();
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Proxy = new ProxyDto
+        {
+            Mode = "manual",
+            Address = $"socks4://{socks.Address}",
+            Username = "socks4user",
+        };
+        var update = await ctx.Service.UpdateSettingsAsync(settings);
+        Assert.True(update.Ok, update.Error);
+
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/runtime-socks4.bin?size=524288&seed=103",
+            DestinationDirectory = ctx.Destination,
+            FileName = "runtime-socks4.bin",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var completed = await ctx.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.True(socks.Connects > 0);
+        Assert.Equal(0, socks.Denied);
+        Assert.Equal("socks4user", socks.LastUserId);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(103, 524_288))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task StoredSiteLoginAuthenticatesAndSurvivesRestart()
     {
         _server.SetSiteCredentials("siteuser", "sitepass");

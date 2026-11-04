@@ -14,16 +14,19 @@ public sealed class TestServerFixture : IAsyncLifetime
     public TestServerHost Server { get; private set; } = null!;
     public TestProxyServer Proxy { get; private set; } = null!;
     public TestSocks5Server Socks5 { get; private set; } = null!;
+    public TestSocks4Server Socks4 { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
         Server = await TestServerHost.StartAsync();
         Proxy = TestProxyServer.Start();
         Socks5 = TestSocks5Server.Start();
+        Socks4 = TestSocks4Server.Start();
     }
 
     public async Task DisposeAsync()
     {
+        await Socks4.DisposeAsync();
         await Socks5.DisposeAsync();
         await Proxy.DisposeAsync();
         await Server.DisposeAsync();
@@ -36,6 +39,7 @@ public sealed class HttpDownloadEngineTests
     private readonly TestServerHost _server;
     private readonly TestProxyServer _proxy;
     private readonly TestSocks5Server _socks5;
+    private readonly TestSocks4Server _socks4;
     private readonly ITestOutputHelper _output;
 
     public HttpDownloadEngineTests(TestServerFixture fixture, ITestOutputHelper output)
@@ -43,6 +47,7 @@ public sealed class HttpDownloadEngineTests
         _server = fixture.Server;
         _proxy = fixture.Proxy;
         _socks5 = fixture.Socks5;
+        _socks4 = fixture.Socks4;
         _output = output;
     }
 
@@ -157,6 +162,86 @@ public sealed class HttpDownloadEngineTests
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             TestContent.Generate(75, size))).ToLowerInvariant();
         Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task DownloadsThroughSocks4ProxyWithUserId()
+    {
+        const int size = 524_288;
+        _socks4.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/socks4.bin?size={size}&seed=77",
+            "socks4.bin");
+        job.RequestedConnections = 4;
+
+        using var engine = CreateEngine(proxy: new ProxySettings
+        {
+            Mode = "manual",
+            Address = $"socks4://{_socks4.Address}",
+            Username = "socks4user",
+        });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_socks4.Connects > 0);
+        Assert.Equal(0, _socks4.HostnameConnects);
+        Assert.Equal(0, _socks4.Denied);
+        Assert.Equal("socks4user", _socks4.LastUserId);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(77, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task Socks4aResolvesTheHostnameAtTheProxy()
+    {
+        const int size = 262_144;
+        _socks4.ResetStats();
+        using var ctx = new EngineContext();
+        var port = new Uri(_server.BaseAddress).Port;
+        var job = ctx.CreateJob(
+            $"http://localhost:{port}/file/socks4a.bin?size={size}&seed=78",
+            "socks4a.bin");
+
+        using var engine = CreateEngine(proxy: new ProxySettings
+        {
+            Mode = "manual",
+            Address = $"socks4a://{_socks4.Address}",
+            Username = "socks4user",
+        });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(_socks4.HostnameConnects > 0);
+        Assert.StartsWith("localhost:", _socks4.LastTarget);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            TestContent.Generate(78, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task Socks4RejectsWrongUserId()
+    {
+        _socks4.ResetStats();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/file/socks4-bad.bin?size=65536&seed=79",
+            "socks4-bad.bin");
+
+        using var engine = CreateEngine(
+            maxAttempts: 1,
+            proxy: new ProxySettings
+            {
+                Mode = "manual",
+                Address = $"socks4://{_socks4.Address}",
+                Username = "somebody-else",
+            });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.True(_socks4.Denied > 0);
+        Assert.Equal(0, _socks4.Connects);
     }
 
     [Fact]

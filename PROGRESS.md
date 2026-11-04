@@ -1391,19 +1391,39 @@ random-access part file **in the destination directory**:
   localization remain out of scope.
 - Core suite is now **50/50** (added ShellActions, defaults, and manifest tests).
 
+## SOCKS4/4a, proxy UI and DPAPI proxy password (E89, 2026-11-04)
+
+- `ProxySettings.Password` is in-memory only (`[JsonIgnore]`); the settings
+  store writes `proxy.passwordProtected` (DPAPI, entropy distinct from site
+  logins). A legacy plaintext `password` is adopted on load and the file is
+  rewritten without it; an undecryptable blob yields "no password" instead of
+  a crash.
+- SOCKS4 and SOCKS4a work through .NET's native `socks4://` / `socks4a://`
+  proxy URIs; verified with the new `TestSocks4Server` (user id sent, hostname
+  resolved at the proxy for 4a, wrong user id refused).
+- Options -> Proxy: mode (none/system/manual), type (HTTP/SOCKS4/SOCKS4a/
+  SOCKS5), host:port, user, masked password. Address handling is the
+  unit-tested `ProxyAddress` helper in Contracts (the WinUI project must not
+  reference Core).
+- Results: Engine 33/33, Core 78/78, Integration 65/65, solution build 0 errors.
+- **Not verified live:** the Options dialog itself.
+  `scripts/ui-proxy-options-check.ps1` was blocked by Windows' unverified-
+  publisher prompt and cancelled; rerun it after allowing the build once.
+
 ## Tests
 
-- Engine: **30/30 passed** (`tests\DownloadManager.Engine.Tests`), including
+- Engine: **33/33 passed** (`tests\DownloadManager.Engine.Tests`), including
   segmented transfer/resume, authentication, HTTP/SOCKS5 proxy auth, wrong
   credentials, redirect credential boundaries, 404/500/DNS/TLS/timeout classes,
   HTML-page policy, monotonic progress/ETA, transient-500 retry recovery,
   per-download speed limiting, disk-full preflight, permission failure, and
-  dynamic work redistribution, and speed/ETA stability.
-- Core: **51/51 passed**, including shutdown-command construction, clipboard URL
+  dynamic work redistribution, speed/ETA stability, and SOCKS4/SOCKS4a (user ID,
+  hostname resolution, rejection).
+- Core: **78/78 passed**, including shutdown-command construction, clipboard URL
   extraction, batch URL expansion, file categories, download-list round-trip,
   safe post-download argument construction, update-manifest signatures,
   shell-open/reveal command construction, and settings defaults.
-- Runtime/persistence: **61/61 passed** (`tests\DownloadManager.Integration.Tests`),
+- Runtime/persistence: **65/65 passed** (`tests\DownloadManager.Integration.Tests`),
   including queues, scheduler, quotas, completion actions, Download Later, DST,
   sleep prevention, destination-local payload, authenticated handoff, runtime
   HTTP/SOCKS5 proxy settings, expired-URL refresh/resume, DPAPI site logins,
@@ -1416,7 +1436,9 @@ random-access part file **in the destination directory**:
   limiting, the scoped site
   grabber/offline mirror, persistent/scheduled grabber projects, FTP auth/resume,
   post-download hook isolation, connection profiles, secret-preserving settings
-  updates, installer-only update check/download, and segment/progress details.
+  updates, installer-only update check/download, segment/progress details, and the
+  DPAPI-protected proxy password (on disk, restart, legacy migration, bad blob)
+  plus SOCKS4 runtime settings.
 - Extension: `npx tsc --noEmit` passes; `npm run build` succeeds (including the
   `batch.js` Download All window and the media panel/quality UI).
 - Solution: `dotnet build DownloadManager.slnx -c Release` succeeds, including
@@ -1438,26 +1460,27 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-1. Commit the G1 Download All increment (collection, filter/selection UI, batch
-   handoff, evidence).
-2. Phase 9 remainder: additional DASH modes, HLS alternate audio, and AES-128.
-   Direct media detection, in-page/quality panel, unencrypted HLS, static DASH
-   SegmentTemplate, DASH A/V muxing, fragment recovery, rotating-token refresh,
-   live exclusion, and DRM detection are done (E24–E32).
-3. Phase 10 is complete (G1–G4; E31/E40/E41). Remaining grabber polish: preview,
-   WinUI schedule editor, JS-rendered pages, robots.txt, crawler auth/proxy.
-4. Phase 6 remainder: recent-URL history and remaining UI polish. Clipboard
-   monitoring (E33), batch URLs (E34), editable descriptions (E35), duplicate
-   policies (E36), category/last-folder rules (E37), export/import (E38), and
-   the completion dialog (E39) are done.
-5. Phase 7 remainder: SOCKS4/4a, a proxy settings UI, and DPAPI protection for
-   proxy passwords. Cookie/referrer/UA, HTTP/HTTPS proxy, SOCKS5, DPAPI site
-   logins, redirect credential boundaries, and expired-URL refresh are done
-   (E17/E18/E19/E20/E21).
-6. Phase 11/12: remaining compatibility rows, clean-environment
-   install/upgrade/uninstall verification, visual/behavioral audit, final parity
-   evidence. Continue the reference app GUI inventory for U1/U2/U4 (see
-   `notes/ui-inventory.md`). FTP auth/resume is done (E42).
+Status refreshed after the Phase 7 closure (E89). Phases 6-11 are implemented
+and evidenced in `reference notes` (E1-E89); the only `blocked` rows are L4 (needs a
+normal shell) and C3 (explicit Chrome-only scope).
+
+1. Live-verify the new Options -> Proxy controls: run
+   `scripts\ui-proxy-options-check.ps1`. The first attempt was stopped by the
+   Windows "publisher could not be verified" prompt for the freshly built
+   `DownloadManager.Desktop.WinUI.exe` (cancelled), so only the build, unit and
+   integration evidence exists for the dialog.
+2. Grabber polish (Phase 10 remainder): result preview, JS-rendered pages,
+   robots.txt, crawler auth/proxy.
+3. Phase 5: automatic removal/quarantine of orphan `.part` files (P5.9 is
+   `partial`; they are only reported today).
+4. Phase 11/12: clean-Windows install/upgrade/uninstall acceptance (still
+   unverified outside this harness), L4 launch-at-sign-in from a normal shell,
+   independent visual review, independent kill/restart verification (P2.7,
+   P5.6, X.5), and final parity evidence. ROADMAP Phase 0-3 task rows still
+   say `pending` although the work is done; reconcile them.
+5. Proxy polish: no UI affordance to clear a saved proxy password without
+   changing the address/user; system-proxy mode passthrough is untested.
+6. SOCKS5 UDP ASSOCIATE is not supported (not needed for HTTP downloads).
 7. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
    portable and development builds must be excluded.
 8. Side quest (after parity): TorBox/account-provider integration with the

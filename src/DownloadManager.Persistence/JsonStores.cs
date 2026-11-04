@@ -655,6 +655,19 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
 
             Normalize(settings);
+            var hadLegacyPlaintext = settings.Proxy.Password is { Length: > 0 } &&
+                                     string.IsNullOrEmpty(settings.Proxy.PasswordProtected);
+            if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
+            {
+                settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
+            }
+
+            if (hadLegacyPlaintext)
+            {
+                // Rewrite a pre-DPAPI settings file so the plaintext password leaves disk.
+                await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
+            }
+
             return settings;
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException)
@@ -683,6 +696,9 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             _paths.EnsureCreated();
             Normalize(settings);
+            settings.Proxy.PasswordProtected = string.IsNullOrEmpty(settings.Proxy.Password)
+                ? null
+                : SecretProtector.ProtectProxy(settings.Proxy.Password);
             var json = JsonSerializer.Serialize(settings, PersistenceJson.Options);
             await AtomicFile.WriteAsync(_paths.SettingsFile, json, cancellationToken).ConfigureAwait(false);
         }

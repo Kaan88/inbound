@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -353,8 +353,8 @@ public sealed partial class MainWindow : Window
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "retryWaiting" or "verifying");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
-                          (host is null ? string.Empty : $" · host {host}")
+        StatusText.Text = $"{_jobsById.Count} downloads Â· {active} active Â· {queued} queued" +
+                          (host is null ? string.Empty : $" Â· host {host}")
                           + (_status?.BrowserIntegration is { Length: > 0 } integration
                               ? $" | browser {integration}"
                               : string.Empty);
@@ -861,7 +861,7 @@ public sealed partial class MainWindow : Window
                     var row = new StackPanel { Spacing = 1 };
                     row.Children.Add(new TextBlock
                     {
-                        Text = $"Bytes {segment.Start:N0}–{segment.End:N0}  " +
+                        Text = $"Bytes {segment.Start:N0}â€“{segment.End:N0}  " +
                                $"{segment.Completed:N0}/{length:N0}",
                         FontSize = 11,
                     });
@@ -2015,7 +2015,7 @@ public sealed partial class MainWindow : Window
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{queue.Name} — {(queue.IsRunning ? "running" : "stopped")}",
+                Text = $"{queue.Name} â€” {(queue.IsRunning ? "running" : "stopped")}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
@@ -2135,14 +2135,14 @@ public sealed partial class MainWindow : Window
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{schedule.Name} — {(schedule.Enabled ? "enabled" : "disabled")}",
+                Text = $"{schedule.Name} â€” {(schedule.Enabled ? "enabled" : "disabled")}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
             {
                 Text = $"{schedule.Kind} {schedule.StartTime}" +
-                       (schedule.StopTime is { } stop ? $"–{stop}" : string.Empty) +
-                       $" [{schedule.Days}] → {target}",
+                       (schedule.StopTime is { } stop ? $"â€“{stop}" : string.Empty) +
+                       $" [{schedule.Days}] â†’ {target}",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
                 TextWrapping = TextWrapping.Wrap,
@@ -2321,7 +2321,7 @@ public sealed partial class MainWindow : Window
         {
             panel.Children.Add(new TextBlock
             {
-                Text = "No grabber projects yet. Use Tasks → Run site grabber and save a project.",
+                Text = "No grabber projects yet. Use Tasks â†’ Run site grabber and save a project.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
             });
@@ -2349,7 +2349,7 @@ public sealed partial class MainWindow : Window
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{project.Name} — {project.Status}",
+                Text = $"{project.Name} â€” {project.Status}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
@@ -2461,7 +2461,7 @@ public sealed partial class MainWindow : Window
             var settings = CloneSettings(_settings);
             var directory = new TextBox { Header = "Default download folder", Text = settings.DefaultDownloadDirectory };
             var maxConcurrent = new TextBox { Header = "Maximum simultaneous downloads", Text = settings.MaxConcurrentDownloads.ToString() };
-            var connections = new TextBox { Header = "Connections per download (1–32)", Text = settings.DefaultConnections.ToString() };
+            var connections = new TextBox { Header = "Connections per download (1â€“32)", Text = settings.DefaultConnections.ToString() };
             var speedLimit = new TextBox
             {
                 Header = "Global speed limit (KB/s, empty for unlimited)",
@@ -2481,7 +2481,7 @@ public sealed partial class MainWindow : Window
             };
             var launch = new CheckBox { Content = "Launch Download Manager at sign-in", IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Monitor the clipboard for URLs", IsChecked = settings.ClipboardMonitoring };
-            var integration = new CheckBox { Content = "Enable Chrome → Download Manager handoff", IsChecked = settings.BrowserIntegrationEnabled };
+            var integration = new CheckBox { Content = "Enable Chrome â†’ Download Manager handoff", IsChecked = settings.BrowserIntegrationEnabled };
             var autoIntercept = new CheckBox { Content = "Automatically take over eligible Chrome downloads", IsChecked = settings.BrowserAutoIntercept };
             var notify = new CheckBox { Content = "Notify when a download completes", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound when a download completes", IsChecked = settings.PlayCompletionSound };
@@ -2520,6 +2520,44 @@ public sealed partial class MainWindow : Window
                 Text = settings.UpdateCheckIntervalHours.ToString(),
             };
 
+            var (proxyProtocolIndex, proxyHostText) = ProxyAddress.Split(settings.Proxy.Address);
+            var proxyMode = new ComboBox
+            {
+                Header = "Proxy",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ItemsSource = new[] { "No proxy", "Use system proxy", "Manual proxy" },
+                SelectedIndex = settings.Proxy.Mode switch { "system" => 1, "manual" => 2, _ => 0 },
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyMode, "Proxy mode");
+            var proxyProtocol = new ComboBox
+            {
+                Header = "Proxy type",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ItemsSource = ProxyAddress.ProtocolNames,
+                SelectedIndex = proxyProtocolIndex,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyProtocol, "Proxy type");
+            var proxyAddress = new TextBox
+            {
+                Header = "Proxy address (host:port)",
+                Text = proxyHostText,
+                PlaceholderText = "proxy.example.com:8080",
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyAddress, "Proxy address");
+            var proxyUser = new TextBox
+            {
+                Header = "Proxy user name (SOCKS4/4a send it as the user ID)",
+                Text = settings.Proxy.Username ?? string.Empty,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyUser, "Proxy user name");
+            var proxyPassword = new PasswordBox
+            {
+                Header = settings.Proxy.HasPassword
+                    ? "Proxy password (saved - leave empty to keep it)"
+                    : "Proxy password",
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyPassword, "Proxy password");
+
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             foreach (var category in FileCategories.Names)
             {
@@ -2547,6 +2585,12 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new TextBlock { Text = "Browser integration", Margin = new Thickness(0, 8, 0, 0) });
             panel.Children.Add(integration);
             panel.Children.Add(autoIntercept);
+            panel.Children.Add(new TextBlock { Text = "Proxy", Margin = new Thickness(0, 8, 0, 0) });
+            panel.Children.Add(proxyMode);
+            panel.Children.Add(proxyProtocol);
+            panel.Children.Add(proxyAddress);
+            panel.Children.Add(proxyUser);
+            panel.Children.Add(proxyPassword);
             panel.Children.Add(new TextBlock { Text = "Category folders", Margin = new Thickness(0, 8, 0, 0) });
             foreach (var box in categoryBoxes.Values)
             {
@@ -2599,6 +2643,27 @@ public sealed partial class MainWindow : Window
                 limit = kb * 1024;
             }
 
+            var proxyModeValue = proxyMode.SelectedIndex switch { 1 => "system", 2 => "manual", _ => "none" };
+            string? composedProxyAddress = null;
+            if (proxyModeValue == "manual")
+            {
+                composedProxyAddress = ProxyAddress.Compose(proxyProtocol.SelectedIndex, proxyAddress.Text);
+                if (composedProxyAddress is null)
+                {
+                    await ShowMessageAsync("Invalid setting", "Enter the proxy address as host:port (port 1-65535).");
+                    return;
+                }
+            }
+
+            settings.Proxy = new ProxyDto
+            {
+                Mode = proxyModeValue,
+                Address = composedProxyAddress,
+                Username = string.IsNullOrWhiteSpace(proxyUser.Text) ? null : proxyUser.Text.Trim(),
+                // Empty keeps the stored password (the host re-applies it for an unchanged address/user).
+                Password = string.IsNullOrEmpty(proxyPassword.Password) ? null : proxyPassword.Password,
+                HasPassword = settings.Proxy.HasPassword,
+            };
             settings.DefaultDownloadDirectory = directory.Text.Trim();
             settings.MaxConcurrentDownloads = max;
             settings.DefaultConnections = connectionsValue;

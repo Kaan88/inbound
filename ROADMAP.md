@@ -21,7 +21,7 @@
 - Phase 5: in progress (segmented transfer/resume/fallback, dynamic work
   redistribution, per-host/global limits, stable estimates and the A9 benchmark
   verified; independent interruption verification remains).
-- Phase 7: in progress (cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
+- Phase 7: complete (SOCKS4/4a, proxy UI and DPAPI proxy password added; cookie/referrer/UA/custom headers, authenticated HTTP/HTTPS
   proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundaries,
   expired-URL classification, and Refresh Download Address with partial resume
   verified; SOCKS4/4a and proxy credential hardening remain).
@@ -161,7 +161,7 @@ duplicates, categories/destination rules, clipboard monitoring, Download Later,
 notifications, batch URLs/numbered patterns, import/export, per-download
 progress/segment view.
 
-## Phase 7 - Authentication and refreshed addresses (in progress)
+## Phase 7 - Authentication and refreshed addresses (done)
 
 Cookies, referrer, user-agent, and custom headers are verified end to end for
 CLI/engine and Chrome handoff (`S1`, `E17`). Authenticated manual HTTP proxies
@@ -171,8 +171,8 @@ settings propagation, and same/cross-origin redirect credential boundaries
 (`S4`, `E19`). Site logins use a DPAPI-protected password store and matching
 host/path Basic auth (`S2`, `E21`). Expired URLs are classified and Refresh
 Download Address preserves partial data through a Range resume (`S6`, `S7`,
-`E20`). Remaining: SOCKS4/4a, proxy settings UI, and SECURITY: DPAPI protection
-for proxy passwords.
+`E20`). SOCKS4/4a, a proxy settings UI in Options, and DPAPI protection for proxy
+passwords are verified (`S3`, `S4`, `E89`). Phase 7 is complete.
 
 ## Phase 8 - Queues and scheduling (done)
 

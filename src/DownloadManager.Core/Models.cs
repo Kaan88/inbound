@@ -210,7 +210,36 @@ public sealed class ProxySettings
     public string? Address { get; set; }
 
     public string? Username { get; set; }
+
+    /// <summary>
+    /// In-memory plaintext only; never serialized. Persisted as
+    /// <see cref="PasswordProtected"/> (DPAPI).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public string? Password { get; set; }
+
+    /// <summary>DPAPI-protected password blob written by the settings store.</summary>
+    public string? PasswordProtected { get; set; }
+
+    /// <summary>
+    /// Read-only migration hook for settings files written before DPAPI
+    /// protection: a legacy plaintext <c>password</c> value is adopted on load
+    /// and is never written back.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("password")]
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyPlaintextPassword
+    {
+        get => null;
+        set
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                Password ??= value;
+            }
+        }
+    }
 }
 
 public sealed record EngineOptions

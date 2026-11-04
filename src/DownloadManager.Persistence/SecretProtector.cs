@@ -17,13 +17,25 @@ public static class SecretProtector
     private static readonly byte[] Entropy =
         Encoding.UTF8.GetBytes("DownloadManager.SiteLogin.v1");
 
-    public static string Protect(string plaintext)
+    private static readonly byte[] ProxyEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.Proxy.v1");
+
+    public static string Protect(string plaintext) => Protect(plaintext, Entropy);
+
+    public static string? Unprotect(string? protectedValue) => Unprotect(protectedValue, Entropy);
+
+    /// <summary>Proxy passwords use separate entropy so blobs are not interchangeable with site logins.</summary>
+    public static string ProtectProxy(string plaintext) => Protect(plaintext, ProxyEntropy);
+
+    public static string? UnprotectProxy(string? protectedValue) => Unprotect(protectedValue, ProxyEntropy);
+
+    private static string Protect(string plaintext, byte[] entropy)
     {
-        var cipher = Transform(Encoding.UTF8.GetBytes(plaintext), protect: true);
+        var cipher = Transform(Encoding.UTF8.GetBytes(plaintext), protect: true, entropy);
         return Prefix + Convert.ToBase64String(cipher);
     }
 
-    public static string? Unprotect(string? protectedValue)
+    private static string? Unprotect(string? protectedValue, byte[] entropy)
     {
         if (string.IsNullOrWhiteSpace(protectedValue) ||
             !protectedValue.StartsWith(Prefix, StringComparison.Ordinal))
@@ -34,7 +46,7 @@ public static class SecretProtector
         try
         {
             var cipher = Convert.FromBase64String(protectedValue[Prefix.Length..]);
-            return Encoding.UTF8.GetString(Transform(cipher, protect: false));
+            return Encoding.UTF8.GetString(Transform(cipher, protect: false, entropy));
         }
         catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
         {
@@ -42,10 +54,10 @@ public static class SecretProtector
         }
     }
 
-    private static byte[] Transform(byte[] input, bool protect)
+    private static byte[] Transform(byte[] input, bool protect, byte[] entropy)
     {
         var inputBlob = CreateBlob(input);
-        var entropyBlob = CreateBlob(Entropy);
+        var entropyBlob = CreateBlob(entropy);
         try
         {
             DataBlob output;
