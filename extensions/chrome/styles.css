@@ -371,8 +371,11 @@ code {
   border-top: 1px solid var(--line);
 }
 
+/* Short windows only. The popup is excluded: it sizes to its content, so a vh cap
+   there shrank the recent list to about two rows. */
 @media (max-height: 650px) {
   .page { padding-top: 14px; padding-bottom: 14px; }
-  .link-list { max-height: 30vh; }
-  .job-list { max-height: 22vh; }
+  .page .link-list { max-height: 30vh; }
+  .page .job-list { max-height: 22vh; }
 }
+.popup .job-list { max-height: 300px; }

@@ -157,6 +157,13 @@ async function loadLinks(): Promise<void> {
 
     links = response.links ?? [];
     pageUrl = response.pageUrl ?? "";
+    // Pre-tick links that point at files; plain page links stay unticked.
+    selected.clear();
+    for (const link of links) {
+      if (link.extension && !["htm", "html", "php", "asp", "aspx", "jsp"].includes(link.extension.toLowerCase())) {
+        selected.add(link.url);
+      }
+    }
     try {
       pageTitle = new URL(pageUrl).host;
     } catch {

@@ -372,10 +372,12 @@ public sealed partial class MainWindow : Window
 
     private void UpdateStatusText()
     {
-        var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "retryWaiting" or "verifying");
+        var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "verifying");
+        var retrying = _jobsById.Values.Count(j => j.State == "retryWaiting");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued";
+        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
+                          (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
         if (_graphConnected)
         {
             ConnectionText.Text = "Host connected" + (host is null ? string.Empty : $" · {host}")
@@ -477,6 +479,33 @@ public sealed partial class MainWindow : Window
 
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
+    }
+
+    private void PackageChevron_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is JobViewModel { IsPackage: true } row)
+        {
+            e.Handled = true;
+            TogglePackage(row);
+        }
+    }
+
+    // A fast second click on the chevron is another toggle, not a row double-click.
+    private void PackageChevron_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if ((sender as FrameworkElement)?.DataContext is JobViewModel { IsPackage: true } row) TogglePackage(row);
+    }
+
+    private void PackageChevron_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Border border)
+            border.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80)); // reads on light and dark
+    }
+
+    private void PackageChevron_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Border border) border.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 
     private void TogglePackage(JobViewModel row)

@@ -369,6 +369,11 @@
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                               ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <!-- No entrance/add animations: the list is rebuilt on expand, collapse and
+                             view changes, and the default transition slid every row up from below. -->
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
@@ -391,10 +396,18 @@
                                         <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
                                                Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Grid>
-                                    <FontIcon Glyph="{Binding ChevronGlyph}" FontSize="11" Visibility="{Binding ChevronVisibility}"
-                                              Foreground="{ThemeResource InboundSecondaryTextBrush}"
-                                              VerticalAlignment="Center" HorizontalAlignment="Center"
-                                              AutomationProperties.Name="Expand or collapse package" />
+                                    <Border Width="22" Height="22" CornerRadius="4" Background="Transparent"
+                                            Visibility="{Binding ChevronVisibility}"
+                                            VerticalAlignment="Center" HorizontalAlignment="Center"
+                                            Tapped="PackageChevron_Tapped" DoubleTapped="PackageChevron_DoubleTapped"
+                                            PointerEntered="PackageChevron_PointerEntered"
+                                            PointerExited="PackageChevron_PointerExited"
+                                            ToolTipService.ToolTip="Expand or collapse"
+                                            AutomationProperties.Name="Expand or collapse package">
+                                        <FontIcon Glyph="{Binding ChevronGlyph}" FontSize="11"
+                                                  Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                    </Border>
                                     <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"

@@ -2766,9 +2766,17 @@ public sealed partial class DownloadManagerService
                 job.BytesPerSecond = p.BytesPerSecond;
                 job.EstimatedRemaining = p.EstimatedRemaining;
                 job.ActiveConnections = p.ActiveConnections;
-                if (job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting)
+                // Follow the engine's phase so a job waiting between retries (or still
+                // connecting) is not shown as downloading at 0 B/s.
+                if (job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
+                    or DownloadState.Downloading)
                 {
-                    job.State = DownloadState.Downloading;
+                    job.State = p.Phase switch
+                    {
+                        var phase when phase.StartsWith("Retrying", StringComparison.Ordinal) => DownloadState.RetryWaiting,
+                        "Connecting" when p.BytesPerSecond <= 0 => DownloadState.Connecting,
+                        _ => DownloadState.Downloading,
+                    };
                 }
 
                 quotaReached = AddQuotaUsageLocked(runtime, p.ReceivedBytes);

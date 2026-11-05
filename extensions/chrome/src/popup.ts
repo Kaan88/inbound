@@ -194,7 +194,8 @@ function renderJobs(jobs: JobSummary[]): void {
     }
 
     meta.textContent = parts.join(" · ");
-    if (job.failure?.message) {
+    // The state badge already says "Cancelled"; only real errors add detail.
+    if (job.failure?.message && job.state !== "cancelled") {
       meta.textContent += ` — ${job.failure.message}`;
     }
 

@@ -73,7 +73,16 @@ function add(url: string | null | undefined, tag: string, label: string): void {
 
     const absolute = resolved.href;
     if (!seen.has(absolute)) {
-      seen.set(absolute, { url: absolute, kind: kindFor(absolute, tag), label });
+      // Prefer the file name over a generic fallback label such as "video" or a MIME type.
+      let fileName = "";
+      try {
+        fileName = decodeURIComponent(resolved.pathname.split("/").pop() ?? "");
+      } catch {
+        fileName = resolved.pathname.split("/").pop() ?? "";
+      }
+      const generic = label === tag || label === "stream" || label.includes("/");
+      const shown = generic && fileName ? fileName : label;
+      seen.set(absolute, { url: absolute, kind: kindFor(absolute, tag), label: shown });
     }
   } catch {
     // ignore malformed sources
