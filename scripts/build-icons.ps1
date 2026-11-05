@@ -1,9 +1,9 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
 $iconRoot = Split-Path -Parent $PSScriptRoot
 Add-Type -AssemblyName System.Drawing
-$iconSource = [System.Drawing.Bitmap]::new((Join-Path $iconRoot 'assets\rill-icon.png'))
+$iconSource = [System.Drawing.Bitmap]::new((Join-Path $iconRoot 'assets\inbound-icon.png'))
 try {
     $iconSizes = @(16,20,24,32,48,64,128,256)
     $iconFrames = [System.Collections.Generic.List[byte[]]]::new()

@@ -8,7 +8,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// Code-behind access to the shared palette in App.xaml, resolved for a specific element theme
 /// (windows carry their own RequestedTheme, so Application-level lookup alone would pick the wrong variant).
 /// </summary>
-internal static class RillTheme
+internal static class InboundTheme
 {
     public static Brush Brush(string key, ElementTheme theme)
     {
@@ -28,7 +28,7 @@ internal static class RillTheme
     /// <summary>Applies the shared progress-bar look to a bar created in code.</summary>
     public static ProgressBar Styled(ProgressBar bar)
     {
-        if (Application.Current.Resources.TryGetValue("RillProgressBarStyle", out var style) && style is Style s)
+        if (Application.Current.Resources.TryGetValue("InboundProgressBarStyle", out var style) && style is Style s)
         {
             bar.Style = s;
         }

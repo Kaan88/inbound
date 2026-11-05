@@ -1876,3 +1876,10 @@ Scoped Host launch now checks the same named mutex as IPC rather than global pro
 - Progress window: reference app-style segmented map replaces the overall bar; segment table (N./progress/downloaded/speed/info) uses live stream positions with a monotonic high-water mark (verified live: values only increase); DPI-scaled default size; fixed invisible text cells.
 - Evidence: isolated `uiqa` profile with throttled TestServer downloads, dark and light captures. Core 88/88, clean Release build. Not yet packaged; scheduler/options/groups windows not re-reviewed visually.
 
+
+## 2026-11-05 — Rebrand to Inbound
+
+- Display name changed from Rill to Inbound Download Manager (UI, tray, installer AppVerName, Chrome extension, README). Install/data paths, native-host name, extension key and update identity unchanged for upgrade compatibility.
+- New original icon (plane landing on a runway) drawn by `scripts/draw-inbound-icon.ps1`; ICO/PNG/extension icons rebuilt. Internal theme tokens renamed to `Inbound*`.
+- Verified: clean Release build, extension 34/34, renamed window captured in isolated profile. Not yet packaged as a release.
+

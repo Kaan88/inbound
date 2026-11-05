@@ -19,7 +19,7 @@ public sealed class StatisticsWindow : Window
 
     public StatisticsWindow()
     {
-        Title = "Statistics — Rill Download Manager";
+        Title = "Statistics — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 650, 650);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -72,7 +72,7 @@ public sealed class StatisticsWindow : Window
             HorizontalScrollMode = ScrollMode.Disabled,
         };
 
-        void ApplyBackground() => scroller.Background = RillTheme.Brush("RillSurfaceBrush", scroller);
+        void ApplyBackground() => scroller.Background = InboundTheme.Brush("InboundSurfaceBrush", scroller);
         scroller.ActualThemeChanged += (_, _) => ApplyBackground();
         scroller.Loaded += (_, _) => ApplyBackground();
         Content = scroller;

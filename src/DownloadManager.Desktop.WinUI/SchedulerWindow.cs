@@ -101,7 +101,7 @@ public sealed class SchedulerWindow : Window
 
     public SchedulerWindow()
     {
-        Title = "Scheduler — Rill Download Manager";
+        Title = "Scheduler — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 1000, 720);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -188,7 +188,7 @@ public sealed class SchedulerWindow : Window
         Content = windowFrame;
         void ApplyBackground()
         {
-            var brush = RillTheme.Brush("RillSurfaceBrush", root);
+            var brush = InboundTheme.Brush("InboundSurfaceBrush", root);
             root.Background = brush;
             windowFrame.Background = brush;
         }

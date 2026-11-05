@@ -87,8 +87,8 @@ public sealed class DownloadSpeedGraph : Grid
         const double left = 77, upper = 8, lower = 22;
         var chartWidth = width - left - 8;
         var chartHeight = height - upper - lower;
-        var foreground = RillTheme.Brush("RillSecondaryTextBrush", this);
-        var gridBrush = RillTheme.Brush("RillDividerBrush", this);
+        var foreground = InboundTheme.Brush("InboundSecondaryTextBrush", this);
+        var gridBrush = InboundTheme.Brush("InboundDividerBrush", this);
         void Label(string text, double x, double y)
         {
             var label = new TextBlock { Text = text, FontSize = 10, Foreground = foreground };
@@ -109,7 +109,7 @@ public sealed class DownloadSpeedGraph : Grid
             var minutes = _seconds * (4 - column) / 240d;
             Label(column == 4 ? "Now" : $"−{minutes:0.#} min", Math.Clamp(x - 18, left, width - 40), upper + chartHeight + 3);
         }
-        var stroke = RillTheme.Brush("RillProgressFillBrush", this);
+        var stroke = InboundTheme.Brush("InboundProgressFillBrush", this);
         Polyline? line = null;
         // Keep peaks/troughs when a period contains more samples than horizontal pixels.
         var bucketWidth = Math.Max(1, (int)chartWidth);

@@ -1,4 +1,4 @@
-﻿# UI design guidelines
+# UI design guidelines
 
 How the WinUI frontend should look and behave. The goal is a dense, reference app-style
 utility (reference captures in `reference-screens/`) that looks the same in dark
@@ -11,23 +11,23 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 | Token | Use | Dark | Light |
 |---|---|---|---|
-| `RillChromeBrush` | menu bar, toolbar, sidebar, list header, status bar | `#202020` | `#F3F3F3` |
-| `RillSurfaceBrush` | window/page background, download list, dialog bodies | `#181818` | `#FFFFFF` |
-| `RillDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
-| `RillSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
-| `RillProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
-| `RillProgressTrackBrush` | progress track | `#383838` | `#E2E2E2` |
-| `RillErrorTextBrush` | inline error messages | `#F07A7A` | `#C42B1C` |
-| `RillHighlightBrush` | informational banners and highlighted panels | `#2B3A4F` | `#DCE9F7` |
+| `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar | `#202020` | `#F3F3F3` |
+| `InboundSurfaceBrush` | window/page background, download list, dialog bodies | `#181818` | `#FFFFFF` |
+| `InboundDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
+| `InboundSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
+| `InboundProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
+| `InboundProgressTrackBrush` | progress track | `#383838` | `#E2E2E2` |
+| `InboundErrorTextBrush` | inline error messages | `#F07A7A` | `#C42B1C` |
+| `InboundHighlightBrush` | informational banners and highlighted panels | `#2B3A4F` | `#DCE9F7` |
 
-- In XAML, use `{ThemeResource RillXxxBrush}`.
-- In code-behind, use `RillTheme.Brush("RillXxxBrush", element)`. Pass the
+- In XAML, use `{ThemeResource InboundXxxBrush}`.
+- In code-behind, use `InboundTheme.Brush("InboundXxxBrush", element)`. Pass the
   window's root element. Each window sets its own `RequestedTheme`, so an
   application-level lookup can return the wrong variant.
 - New windows read `UiStateStore.Load().DarkMode`, set `RequestedTheme` on the
-  root, and use `RillSurfaceBrush` for the background.
+  root, and use `InboundSurfaceBrush` for the background.
 - The title bar colors in `MainWindow.ApplyTitleBarTheme` match
-  `RillChromeBrush`. Keep them in sync if the chrome color changes.
+  `InboundChromeBrush`. Keep them in sync if the chrome color changes.
 
 ## 2. Status colors
 
@@ -46,9 +46,9 @@ Color only the status text. Don't tint whole rows.
 
 ## 3. Progress bars
 
-- Every `ProgressBar` uses `RillProgressBarStyle`: 6px tall, rounded,
+- Every `ProgressBar` uses `InboundProgressBarStyle`: 6px tall, rounded,
   blue fill on a neutral track. For bars created in code, wrap them with
-  `RillTheme.Styled(new ProgressBar { ... })`.
+  `InboundTheme.Styled(new ProgressBar { ... })`.
 - In the list, the bar sits under the status text inside the 140px Status
   column. Show it only while a job is active or paused with progress above 0.
 - The progress dialog has one main bar, `SegmentMapBar` (14px, radius 2). It
@@ -70,7 +70,7 @@ Color only the status text. Don't tint whole rows.
 ## 4. Layout and density
 
 - List rows are 27px with 11–12px text. Column headers are 12px SemiBold on
-  `RillChromeBrush`, with a 1px bottom divider.
+  `InboundChromeBrush`, with a 1px bottom divider.
 - Header and row column widths must match exactly. Change both definitions in
   `MainWindow.xaml` together.
 - Leave unknown values blank: no "0 B" for an unknown size and no empty speeds.
@@ -97,7 +97,7 @@ Color only the status text. Don't tint whole rows.
 - Use `TabView` or `Pivot` tabs for multi-page settings, like reference app's Options.
   Each page scrolls on its own inside fixed outer bounds.
 - Secondary text uses `TextFillColorSecondaryBrush` in XAML or
-  `RillSecondaryTextBrush` in code. Error text uses `RillErrorTextBrush`.
+  `InboundSecondaryTextBrush` in code. Error text uses `InboundErrorTextBrush`.
 
 ## 7. Verifying a UI change
 

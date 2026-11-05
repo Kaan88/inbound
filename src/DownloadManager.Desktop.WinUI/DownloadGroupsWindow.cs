@@ -34,7 +34,7 @@ public sealed class DownloadGroupsWindow : Window
 
     public DownloadGroupsWindow()
     {
-        Title = "Download Groups — Rill Download Manager";
+        Title = "Download Groups — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 850, 650);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -52,7 +52,7 @@ public sealed class DownloadGroupsWindow : Window
             null => ElementTheme.Default
         };
 
-        void ApplyBackground() => root.Background = RillTheme.Brush("RillSurfaceBrush", root);
+        void ApplyBackground() => root.Background = InboundTheme.Brush("InboundSurfaceBrush", root);
         root.ActualThemeChanged += (_, _) => ApplyBackground();
         root.Loaded += (_, _) => ApplyBackground();
 
@@ -201,7 +201,7 @@ public sealed class DownloadGroupsWindow : Window
         var summary = DownloadGroupSummary.Create(children);
         var summaryLine = new TextBlock { Text = SummaryText(summary), Opacity = 0.82 };
         summaryLine.TextWrapping = TextWrapping.Wrap;
-        var progressBar = RillTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 1, Width = 180, Height = 6, Margin = new Thickness(0, 2, 0, 2) });
+        var progressBar = InboundTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 1, Width = 180, Height = 6, Margin = new Thickness(0, 2, 0, 2) });
         var summaryControls = new GroupSummaryControls(summaryLine, progressBar);
         UpdateSummary(summaryControls, summary);
         var body = new StackPanel { Spacing = 6, Margin = new Thickness(12, 4, 0, 8) };

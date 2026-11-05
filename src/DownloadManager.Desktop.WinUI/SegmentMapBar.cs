@@ -46,9 +46,9 @@ internal sealed class SegmentMapBar : Grid
         var width = ActualWidth;
         var height = ActualHeight;
         if (width <= 0 || height <= 0) return;
-        Background = RillTheme.Brush("RillProgressTrackBrush", this);
-        var fill = RillTheme.Brush("RillProgressFillBrush", this);
-        var divider = RillTheme.Brush("RillSurfaceBrush", this);
+        Background = InboundTheme.Brush("InboundProgressTrackBrush", this);
+        var fill = InboundTheme.Brush("InboundProgressFillBrush", this);
+        var divider = InboundTheme.Brush("InboundSurfaceBrush", this);
 
         if (_segments.Count == 0 || _total <= 0)
         {

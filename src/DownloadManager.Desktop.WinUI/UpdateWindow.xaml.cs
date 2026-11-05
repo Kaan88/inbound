@@ -23,7 +23,7 @@ public sealed partial class UpdateWindow : Window
         AppWindow.Resize(new SizeInt32(420, 230));
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        Title = "Rill Download Manager update";
+        Title = "Inbound Download Manager update";
 
         _connection.UpdateProgressChanged += progress => DispatcherQueue.TryEnqueue(() =>
         {

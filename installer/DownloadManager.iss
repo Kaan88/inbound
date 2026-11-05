@@ -25,7 +25,7 @@
 AppId={{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Rill Download Manager {#AppVersion}
+AppVerName=Inbound Download Manager {#AppVersion}
 AppPublisher=Kaan
 DefaultDirName={localappdata}\DownloadManager
 DisableDirPage=yes

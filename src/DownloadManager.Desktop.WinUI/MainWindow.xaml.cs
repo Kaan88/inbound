@@ -1532,8 +1532,8 @@ public sealed partial class MainWindow : Window
 
     private async void MenuAbout_Click(object sender, RoutedEventArgs e)
     {
-        await ShowMessageAsync("Rill Download Manager",
-            $"Rill Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
+        await ShowMessageAsync("Inbound Download Manager",
+            $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
             "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
             "and a Chrome Manifest V3 bridge.\n\n" +
             "Reference behavior studied from another download manager 6.43.12.3. This project is not affiliated " +
@@ -1622,7 +1622,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
         };
         browseDestination.Click += async (_, _) =>
         {
@@ -1994,7 +1994,7 @@ public sealed partial class MainWindow : Window
         {
             Text = "Ranges: [1-10], [001-010], [a-z], or lists [1,3,5]. Multiple ranges expand together.",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
+            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
             FontSize = 12,
         };
         var destinationBox = new TextBox
@@ -2208,7 +2208,7 @@ public sealed partial class MainWindow : Window
                        $"max {queue.MaxConcurrentDownloads} concurrent" +
                        (queue.QuotaEnabled ? $"; quota {queue.QuotaBytes:N0} bytes" : string.Empty),
                 FontSize = 11,
-                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
+                Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
             });
             Grid.SetColumn(info, 0);
             row.Children.Add(info);
@@ -2286,7 +2286,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new Border
             {
                 Height = 1,
-                Background = RillTheme.Brush("RillHighlightBrush", RootGrid),
+                Background = InboundTheme.Brush("InboundHighlightBrush", RootGrid),
             });
         }
 
@@ -2417,7 +2417,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 320 };
         panel.Children.Add(name);
@@ -2557,7 +2557,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new TextBlock
             {
                 Text = "No schedules yet.",
-                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
+                Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
             });
         }
 
@@ -2601,7 +2601,7 @@ public sealed partial class MainWindow : Window
                        (schedule.StopTime is { } stop ? $"–{stop}" : string.Empty) +
                        $" [{schedule.Days}] → {target}",
                 FontSize = 11,
-                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
+                Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
                 TextWrapping = TextWrapping.Wrap,
             });
             Grid.SetColumn(info, 0);
@@ -2648,7 +2648,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new Border
             {
                 Height = 1,
-                Background = RillTheme.Brush("RillHighlightBrush", RootGrid),
+                Background = InboundTheme.Brush("InboundHighlightBrush", RootGrid),
             });
         }
 
@@ -2799,7 +2799,7 @@ public sealed partial class MainWindow : Window
                 : "Global system actions are disabled. Exit and computer actions saved below will be skipped until this opt-in is enabled.",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
-            Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
+            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
         };
         allowSystemActions.Checked += (_, _) => systemActionsNote.Text =
             "Global system actions are enabled. Queue exit and computer actions will be allowed when configured.";
@@ -2819,7 +2819,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid),
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 340 };
         panel.Children.Add(nameBox);

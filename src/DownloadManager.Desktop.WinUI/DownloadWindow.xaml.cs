@@ -43,7 +43,7 @@ public sealed partial class DownloadWindow : Window
         WindowLayout.ResizeForDpi(this, 720, 700);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        Title = "Download status — Rill Download Manager";
+        Title = "Download status — Inbound Download Manager";
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
@@ -290,7 +290,7 @@ public sealed partial class DownloadWindow : Window
     private void RenderSegmentTable(IReadOnlyList<SegmentDto> segments, IReadOnlyList<ConnectionTelemetryDto> connections)
     {
         Segments.Children.Clear();
-        var secondary = RillTheme.Brush("RillSecondaryTextBrush", Root);
+        var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", Root);
         Grid NewRow()
         {
             var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -326,7 +326,7 @@ public sealed partial class DownloadWindow : Window
         Cell(head, 2, Text("Downloaded", header: true)); Cell(head, 3, Text("Speed", header: true));
         Cell(head, 4, Text("Info", header: true));
         Segments.Children.Add(head);
-        Segments.Children.Add(new Border { Height = 1, Background = RillTheme.Brush("RillDividerBrush", Root) });
+        Segments.Children.Add(new Border { Height = 1, Background = InboundTheme.Brush("InboundDividerBrush", Root) });
 
         for (var index = 0; index < segments.Count; index++)
         {
@@ -339,7 +339,7 @@ public sealed partial class DownloadWindow : Window
             _segmentRate[segment.Start] = rate;
             var row = NewRow();
             Cell(row, 0, Text((index + 1).ToString(CultureInfo.CurrentCulture), muted: true));
-            Cell(row, 1, RillTheme.Styled(new ProgressBar { Maximum = 100, Value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100) }));
+            Cell(row, 1, InboundTheme.Styled(new ProgressBar { Maximum = 100, Value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100) }));
             Cell(row, 2, Text($"{Bytes(segment.Completed)} / {Bytes(length)}"));
             Cell(row, 3, Text(rate > 0 ? $"{Bytes((long)rate)}/s" : "—", muted: rate <= 0));
             Cell(row, 4, Text(segment.IsComplete ? "Complete" : live.Count > 0 ? "Receiving data…" : "Waiting", muted: live.Count == 0));

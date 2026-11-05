@@ -234,12 +234,12 @@ async function installMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
     id: "dm.download-link",
-    title: "Download with Rill Download Manager",
+    title: "Download with Inbound Download Manager",
     contexts: ["link"],
   });
   chrome.contextMenus.create({
     id: "dm.download-media",
-    title: "Download with Rill Download Manager",
+    title: "Download with Inbound Download Manager",
     contexts: ["video", "audio", "image"],
   });
 }

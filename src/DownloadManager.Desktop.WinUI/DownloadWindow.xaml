@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:DownloadManager.Desktop.WinUI">
     <Grid x:Name="Root" Padding="18" RowSpacing="10"
-          Background="{ThemeResource RillSurfaceBrush}">
+          Background="{ThemeResource InboundSurfaceBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -121,7 +121,7 @@
         <TextBlock x:Name="Notice" Grid.Row="2" TextWrapping="Wrap"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         <local:SegmentMapBar x:Name="SegmentMap" Grid.Row="3" Visibility="Collapsed" ToolTipService.ToolTip="Start positions and download progress by connection" />
-        <ProgressBar x:Name="OverallFooter" Grid.Row="3" Maximum="100" IsIndeterminate="True" Style="{StaticResource RillProgressBarStyle}" Height="14" MinHeight="14" CornerRadius="2" />
+        <ProgressBar x:Name="OverallFooter" Grid.Row="3" Maximum="100" IsIndeterminate="True" Style="{StaticResource InboundProgressBarStyle}" Height="14" MinHeight="14" CornerRadius="2" />
 
         <ScrollViewer Grid.Row="4" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <StackPanel x:Name="ActionRow" Orientation="Horizontal" Spacing="8"
