@@ -1,4 +1,6 @@
-# Download Manager
+# Rill Download Manager
+
+Rill is the app's display name. Existing DownloadManager install/data paths, native-host identity and update identity remain compatible with earlier builds.
 
 A private-use Windows download manager built around a durable background engine,
 a replaceable WinUI 3 frontend, and a Manifest V3 Chrome bridge. It implements
@@ -8,7 +10,9 @@ licensing.
 Reference: **another download manager 6.43.12.3** (see
 `notes/reference-version.md`).
 
-> Status: Phase 0/1 in development. Parity claims are tracked honestly in
+> Status: Windows installer package is built and ready for user installation
+> testing; actual install lifecycle and sign-in behavior remain unverified.
+> Parity claims are tracked honestly in
 > `reference notes`; unimplemented features are labelled.
 
 ## Repository layout
@@ -43,9 +47,19 @@ docs/                              architecture and operation docs
 ## Build
 
 ```powershell
-dotnet build DownloadManager.sln -c Debug
+dotnet build DownloadManager.slnx -c Debug
 cd extensions\chrome; npm install; npm run build
 ```
+
+## Install
+
+The current packaged installer is
+`artifacts\installer\DownloadManagerSetup-0.1.0.exe` (71.9 MB; SHA-256
+`A3D5ABCADE836177371CA8D3F5FD1981DE83CA47C8956D138C1C8920260D8363`). Publish
+checks verified all staged extension files and hashes, including icons, with no
+nested `dist`. The package is ready for user installation testing; actual
+install/upgrade/uninstall lifecycle and sign-in behavior have not yet been
+verified.
 
 ## Install (development)
 

@@ -1,5 +1,71 @@
 # Goal — Build a private reference app-compatible download manager
 
+Rill branding/unified Scheduler checkpoint (2026-11-05): original generated icon saved to assets/rill-icon.png, multi-resolution assets/app.ico and extension icons built by scripts/build-icons.ps1; prompt/mode documented in assets/rill-icon-prompt.md. Display name Rill Download Manager, compatibility identities/paths unchanged. Combined Scheduler window now wired from toolbar/menu; source review fixed automatic Apply capture, selection preservation, read-only empty form, closable tabs and theme background. Latest integration95/95 includes per-job fake program/open/power behavior, no restart replay and injected completion-marker write failure preventing all side effects. Latest expanded automated totals: Core88, engine57, integration95, extension34. Scheduler visual polish after the last build still needs rebuild/live verification; installer release remains pending.
+
+Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
+
+Batched 0.1.5 scheduler/queue source (2026-11-05): startup triggers, timed/overnight windows, periodic HTTP file synchronization, queue retry limits and actual queue detachment added. Periodic sync compares validators and stages changed/unverifiable downloads while keeping the old final file until atomic replacement. Previous completed versions are retained in statistics without double-counting the current version. Retry processing is explicit for queue-managed downloads, runs at30-second intervals, respects stop/cancel and blocks premature completion actions. Startup-only failures retain pending eligibility. Explicit queue detachment keeps jobs/files and excludes them from queue pause/concurrency/quota/sync policy. Source only; consolidated validation pending. Network troubleshooting made no system changes; external test downloads remain deferred while the owner's throughput problem is unresolved.
+
+Batched 0.1.5 source (2026-11-05): per-download completion options and real HTTP response-stream telemetry added; no build/test run. Properties stages program inheritance/override/disable, open-file and gated system actions; execution marker is persisted before side effects. HTTP telemetry measures actual response reads across direct/range/media/probe requests and exposes only host/port, protocol/status/range/bytes/rate. Statistics added to scope: archived minimal job records are written before removal and deduplicated against current jobs for persistent byte/count totals, with a View → Statistics window integrated in source. Consolidated validation remains pending.
+
+Batched 0.1.5 source (2026-11-05): persistent independent download groups now have Host-owned definitions/membership, atomic settings commits and group controls. Tasks and selected-download context actions expose group creation/assignment; expandable management window is integrated in source, with aggregate progress/controls visible while collapsed and independent child controls. Bottom download-only speed graph added from owner reference 33528189-2dc8223e-d865-11e7-9d2a-2b5102afb5af.png: selectable 1/5/30/60-minute session history, scale/grid, current/average/peak, disconnected/stale gaps, persisted visibility/collapse. Source-only; consolidated build/tests and live DPI/theme/workflow acceptance pending. FTP remains out of scope.
+
+Batched 0.1.5 source (2026-11-05): explicit unused-category deletion in Options and populated queue deletion with download/schedule reassignment added; source-only, consolidated verification pending. Queue moves save before old queue removal, and failed persistence restores in-memory membership for retry. Settings/category/job admission and queue membership edits share a mutation gate. No build/test run for this batch.
+
+Owner scope update (2026-11-05): FTP work is out of scope; existing backend support is retained, but no additional FTP UI or acceptance work is required.
+
+Owner workflow: batch remaining implementation, then consolidated verification; no new feature-by-feature test runs. Source0.1.5 now includes Add URL Host-owned metadata preview and suggested filenames. Final cancellation-review fixes and live acceptance await consolidated validation (PROGRESS.md).
+
+0.1.5 source: persistent custom categories, Add URL selection/creation, extension rules, category folders/remember, sidebar and Options editing implemented. Focused7/7 and Core79/79 pass; full integration82/82 passes (artifacts/integration-categories.log); live GUI acceptance pending. Metadata preview/server-suggested names and category deletion remain open (PROGRESS.md).
+
+Owner file-icon requirement (2026-11-05): verified actual Windows Shell icon calls in pinned reference app binary; replace generic file glyphs with Windows file-type and completed-file/application icons. Investigation: `notes/file-icons-2026-11-05.md`. Source implementation now covers main/queue rows and progress/completion headers; native checks2/2 and clean WinUI build pass. Live visual/DPI acceptance remains pending; see PROGRESS.md.
+
+Post-0.1.4: manual HTTP Basic authentication and DPAPI-protected job headers implemented in source; integration 76/76 and redirect-boundary tests pass. Owner's testfile.org right-click 403 was investigated: automatic capture has a browser-resolved CDN URL, right-click does not. Frame/profile/partition cookie handling corrected; extension 34/34 plus typecheck/build pass. Live reference check: reference app itself returns403 for right-click on the same testfile link. Direct handoff remains the normal path; browser-assisted preparation is an optional improvement, not a confirmed parity defect. Broader live acceptance remains open (PROGRESS.md).
+
+Post-0.1.4 source increment: persisted queue file ordering and Queues → Files editor added. Focused actual-dispatch/restart/stale-list coverage passes, Core 79/79, clean Runtime/WinUI builds. Full integration 74/74 passes (artifacts/integration-queue-file-order.log); live editor acceptance remains open. This is separate from grouped independent child downloads, which remain planned.
+
+0.1.4 published (2026-11-05): signed public feed/assets verified; inherited-working-directory and persistent-file-lock rollback fixtures pass. Installed repair/restart acceptance remains open. Post-release source now exposes Site Logins editing; clean UI build and secure-login integration workflow pass, live editor acceptance pending. See PROGRESS.md for evidence and artifact hashes.
+
+Owner requirement (2026-11-05): add first-class expandable groups for multiple independent child downloads, with aggregate progress/state and parent controls. Persist and restore membership. Keep distinct from byte-range segments. This is a prerequisite for TorBox multi-file transfers. Host persistence, group controls and expandable WinUI management are now implemented in source; consolidated verification remains pending (PROGRESS.md).
+
+Updater repair checkpoint (2026-11-05): owner upgrade exposed stale 0.1.2 binaries with a 0.1.3 version record after replacement/rollback failed. Source 0.1.4 repairs working-directory/native-bridge locks, metadata ordering/recovery, version reconciliation, progress events/window, and frontend reopening. Focused updater tests and isolated rollback fixtures pass; installed repair and live restart/progress acceptance remain pending. See PROGRESS.md.
+
+Owner added GitHub build publication and installer-only automatic updates.
+Public builds-only repository: `Kaan88/download-manager-builds`; source remains
+private. 0.1.3 installer/update assets are published, and an older-version test installer is available;
+owner upgrade acceptance and remaining parity work are still open.
+
+**Scope decision (owner, 2026-11-04): Dial Up/VPN is out of scope.**
+
+Nov5 increment: WinUI queue creation/editing for names, concurrency and quotas
+compiles cleanly; focused restart/preservation test passes. Live GUI acceptance,
+queue deletion/file ordering and scheduler editing remain pending.
+
+Current increment: per-job live HTTP speed caps, progress controls and compact
+completion actions (PARITY E97). Core 78/78, engine 47/47, integration 69/69;
+the Host access blocker is cleared and representative live window checks passed
+(PARITY E98). Owner approval and broader visual variants remain open. Queue/scheduler and the other
+screenshot-review gaps remain on the roadmap.
+
+**Owner acceptance blocker (2026-11-04):** the current WinUI is considered basic
+and disorganized. When the owner has time, perform a complete live review of
+reference app's appearance and interaction flows, then reorganize the WinUI to match the
+reference's structure, density, hierarchy and behavior using our own assets.
+The owner resumed work and authorized the live review on 2026-11-04.
+The review includes missing functionality and behavior needing adjustment,
+not only appearance. The owner supplied 36 screenshots, cataloged in
+`reference-screens/INDEX.md`; the source comparison and functional gaps are in
+`notes/screenshot-review-2026-11-04.md`.
+Existing functional evidence does not establish visual acceptance. See
+ROADMAP UI.R1/UI.R2 and PROGRESS.md for the deferred review and Edge flyout note.
+
+Latest increment (2026-11-04): browser-resolved final URLs are used with
+original-origin credential boundaries and target validation (E95). Separate
+automatic per-job progress/completion windows replace the main-window modal
+flow (E96, partial acceptance). Core 78/78, engine 41/41, integration 66/66;
+extension 7/7 plus typecheck/build. Light/tray visual acceptance and a fresh reference app
+completion reference capture remain pending; full parity is not complete.
+
 > **Tracking fallback note (2026-11-04).** This OpenCode 2.2.5 environment has no
 > Goal or Todo tool (verified through the tool catalog, the OpenCode V2 docs, and
 > the local API OpenAPI document). Per the task instructions, `GOAL.md`,
@@ -69,15 +135,15 @@ SDK, or presentation types.
 | --- | --- | --- | --- |
 | 0 | Baseline, reference inventory, repo, browser strategy | done | Buildable solution, initial parity inventory, concrete handoff strategy |
 | 1 | Correct single-stream engine + CLI | done | Controlled downloads hash correctly; failures never look successful |
-| 2 | Persistence, resume, crash recovery | in progress | Kill/restart preserves safe resume and final hashes (process-kill matrix still pending) |
+| 2 | Persistence, resume, crash recovery | in progress | Kill/restart matrix passed for single and segmented downloads at 20/50/80% (E94); independent review remains |
 | 3 | Tray + minimal WinUI frontend | done | Downloads continue with window closed; reopen restores state |
 | 4 | Chrome integration, first daily version | in progress | One Chrome request → one job while host is in tray; authenticated cookie/referrer/UA handoff, destination/start-mode dialog, live popup progress, enable/disable, file-type/site rules, temporary bypass, outage recovery, media and Download All verified (independent restart/handoff verification remains) |
-| 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; dynamic redistribution, per-host/global limits, stable estimates and the A9 benchmark verified (E81-E84); independent interruption verification pending |
+| 5 | Parallel segmented transfers + limits | in progress | Correct through pause/crash/retry; dynamic redistribution, per-host/global limits, stable estimates and the A9 benchmark verified (E81-E84); kill/restart matrix passed (E94), independent review remains |
 | 6 | Everyday download management | done | Clipboard monitoring, completion dialog/notification/sound, batch URLs, editable descriptions, duplicate policies, category destinations, last-folder and recent-URL memory, list export/import, category/state views, numeric sort, multiselect bulk actions, delete-file choice, shell open/reveal, and progress details verified (E33–E54/E56) |
 | 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundary, and expired-URL refresh with partial resume verified; SOCKS4/4a and proxy-password hardening remain |
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
 | 9 | Media detection/downloading | done | Detection, in-page/quality panel, HLS/DASH assembly (SegmentTemplate, Timeline, SegmentList, SegmentBase byte ranges), A/V muxing (DASH and HLS alternate audio), fragment recovery, token refresh, live exclusion, DRM detection, and HLS AES-128 key rotation verified (E24-E32/E55/E57-E59); dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain excluded |
-| 10 | Download All + site grabber | done | Download All collection/filter/handoff (E31), scoped crawl and offline mirror (G2/G3, E40), and persistent/resumable/scheduled grabber projects verified (G4, E41) |
+| 10 | Download All; site grabber removed | done / scoped | Download All collection/filter/handoff is done (G1/E31); site grabber G2–G4 was removed by owner decision and is out of scope (see reference notes) |
 | 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI parity remains; Edge/Firefox out of scope (C3) |
 | 12 | Final visual/behavioral parity audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (side-by-side checklist/live UIA dump), U3, U4, U5, U6 and U7 (accessibility/contrast/DPI simulation/localization audit); clean-Windows acceptance remains (E52–E54/E85–E88) |
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Download Manager Bridge settings</title>
+  <title>Rill Download Manager Bridge settings</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="options">
@@ -11,8 +11,8 @@
     <header class="brand large">
       <img src="icons/icon48.png" alt="" width="36" height="36" />
       <div>
-        <h1>Download Manager Bridge</h1>
-        <p class="muted">Chrome → Download Manager handoff. The desktop host remains the source of truth.</p>
+        <h1>Rill Download Manager Bridge</h1>
+        <p class="muted">Chrome → Rill Download Manager handoff. The desktop host remains the source of truth.</p>
       </div>
     </header>
 
@@ -27,6 +27,10 @@
         <span>Automatically take over eligible downloads</span>
       </label>
       <label class="check">
+        <input id="mediaDetectionEnabled" type="checkbox" />
+        <span>Detect media on pages and show the in-page download panel</span>
+      </label>
+      <label class="check">
         <input id="notifications" type="checkbox" />
         <span>Show notifications for handoff results</span>
       </label>
@@ -39,10 +43,7 @@
         </select>
       </label>
 
-      <label class="field">
-        <span>Default destination (optional override)</span>
-        <input id="defaultDestination" type="text" spellcheck="false" placeholder="Leave empty to use the app's folder" />
-      </label>
+      <p class="muted small">New downloads use the app's default folder. Choose a one-off folder on the handoff screen.</p>
     </section>
 
     <section class="card form-card">
@@ -70,7 +71,7 @@
       </p>
       <div class="row">
         <button id="test" type="button">Test native host</button>
-        <button id="openApp" type="button">Open Download Manager</button>
+        <button id="openApp" type="button">Open Rill Download Manager</button>
       </div>
       <p id="testResult" class="muted small"></p>
     </section>

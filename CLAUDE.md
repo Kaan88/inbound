@@ -23,21 +23,17 @@ containing secrets.
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
 Chrome automatic + context-menu handoff, including authenticated cookie,
-referrer and user-agent transfer. Phase 8 is partly implemented: named
-queues, per-queue concurrency, start/stop, queue assignment/reassignment,
-persistence, and daily/one-time schedule execution are tested; completion
-actions, quotas, sleep prevention, and DST/wall-clock tests remain. Payload bytes are
-written directly into a destination-local part file and renamed in place, with
+referrer and user-agent transfer. Phase 8 (queues/scheduler) is complete,
+including completion actions, quotas, sleep prevention, and DST behavior.
+Payload bytes are written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
-complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining large
-areas: everyday management gaps, additional DASH/HLS modes and AES-128, the
-remaining grabber polish, installer/updater work, and clean-environment
-install/upgrade verification. Phase 8 (queues/scheduler) is complete; clipboard
+complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining
+verification includes clean-environment install/upgrade and independent
+interruption/restart checks. Clipboard
 URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
 duplicate Rename/Overwrite/Fail policies, category destination rules,
 last-folder memory, JSON list export/import, completion dialog/notification/
-sound, Download All link collection/filter/selection, batch handoff, a scoped
-site grabber with offline link rewriting, persistent/scheduled grabber projects,
+sound, Download All link collection/filter/selection, batch handoff,
 FTP auth/resume, post-download hooks, external CLI control, connection profiles,
 settings transfer, installer/native-host repair, upgrade/uninstall, installer-
 only updater (check/download/install/rollback/notifications/gating), the WinUI
@@ -50,11 +46,17 @@ HLS master/media assembly including AES-128 (single and rotating keys) and
 alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
 byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
 expiring segment-token refresh,
-explicit live-stream
-exclusion, and DRM detection are implemented. Account-provider/TorBox integration, unrar, and Docker/Linux web UI
-are queued as a post-parity side quest (ROADMAP A1–A5/D1–D4). Authenticated HTTP/HTTPS proxy, SOCKS5, DPAPI site logins, redirect
-credential boundaries, and expired-URL refresh are verified; SOCKS4/4a and
-DPAPI protection for proxy passwords remain.
+explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
+VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
+SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
+credential boundaries, and expired-URL refresh are verified (PARITY S2–S7).
+TorBox/account-provider work, unrar, and Linux/Docker/web UI are explicitly
+deferred (ROADMAP A1–A5/D1–D4). The installer package is built, but install
+smoke testing, sign-in behavior, and clean-environment install/upgrade acceptance
+remain unverified. Installer safety changes are under validation: Setup uses
+Windows Restart Manager rather than force-killing by process name; sign-in
+configures through synchronous config-only Host mode independently of optional
+launch; and uninstall retains state. Do not treat these changes as verified.
 
 Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
 extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
@@ -155,14 +157,17 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 
 ## Review delegation (user requirement, 2026-11-04)
 
-Delegate simple reviews to a Haiku subagent instead of doing them in the main
-session: spawn a `general` (or `explore` for read-only) subagent with model
-`claude-agent/haiku`. "Simple" means small diff/commit reviews, doc/encoding
-sanity checks, parity-row or evidence wording checks, and test-coverage
-spot checks. Keep complex reviews (concurrency, durability, security, IPC
-protocol changes, architecture) in the main model. Give the subagent full
-context (commit hash, files, what to check) since it starts fresh, and treat
-its findings as input to verify, not as acceptance evidence.
+For Claude-led sessions, delegate simple work and reviews to
+`claude-agent/haiku`; for OpenAI/GPT-led sessions, use `openai/gpt-6-luna`.
+Generally, every main agent should delegate routine/simple work to a cheaper
+capable available model. Simple work includes small changes, diff/commit
+reviews, documentation/encoding checks, parity/evidence wording, and coverage
+spot checks. Discover exact model IDs; do not guess. Verify delegated outputs.
+If the preferred model is unavailable, disclose that and use an available
+cheaper capable equivalent, or ask if none is available. Keep complex work
+(concurrency, durability, security, IPC protocol changes, architecture) in the
+main model. Give reviewers full context and treat findings as input to verify,
+not as acceptance evidence.
 
 ## Known traps
 

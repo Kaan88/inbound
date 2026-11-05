@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "DownloadManager"),
-    [string]$Version = "0.1.0",
+    [string]$Version = "0.1.5",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -10,7 +10,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$installRoot = $InstallRoot
+$installRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+if ($installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\')) {
+    throw "InstallRoot must be an application directory, not a drive root."
+}
 $appDir = Join-Path $installRoot "app"
 
 if (-not $Source) {
@@ -35,9 +38,17 @@ if (-not (Test-Path (Join-Path $extensionSource "manifest.json"))) {
     throw "Chrome extension build not found at $extensionSource."
 }
 
-Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
+$appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
+$installedProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+    $_.ExecutablePath -and $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+    $_.Name -in @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe')
+})
+if ($installedProcesses | Where-Object Name -eq 'DownloadManager.Host.exe') {
+    throw "Exit the installed Download Manager Host before replacing its files. Downloads were not interrupted."
+}
+foreach ($frontendProcess in $installedProcesses) {
+    Stop-Process -Id $frontendProcess.ProcessId -Force -ErrorAction Stop
+}
 
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 $installMetadata = [ordered]@{
@@ -46,10 +57,6 @@ $installMetadata = [ordered]@{
     installRoot = $installRoot
     installedAt = (Get-Date).ToString("O")
 }
-[System.IO.File]::WriteAllText(
-    (Join-Path $installRoot "install.json"),
-    ($installMetadata | ConvertTo-Json -Depth 3),
-    (New-Object System.Text.UTF8Encoding($false)))
 if (Test-Path $appDir) {
     Remove-Item $appDir -Recurse -Force
 }
@@ -63,6 +70,11 @@ if (Test-Path $extensionTarget) {
 Copy-Item $extensionSource $extensionTarget -Recurse -Force
 
 & (Join-Path $PSScriptRoot "register-native-host.ps1") -AppDir $appDir -Force
+# Publish the version only after replacing and registering all application files.
+[System.IO.File]::WriteAllText(
+    (Join-Path $installRoot "install.json"),
+    ($installMetadata | ConvertTo-Json -Depth 3),
+    (New-Object System.Text.UTF8Encoding($false)))
 
 if (-not $NoShortcut) {
     try {

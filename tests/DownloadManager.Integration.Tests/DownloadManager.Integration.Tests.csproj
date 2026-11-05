@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
   </ItemGroup>
 
   <ItemGroup>

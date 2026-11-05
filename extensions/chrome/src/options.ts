@@ -1,8 +1,8 @@
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
+  mediaDetectionEnabled: boolean;
   startMode: "now" | "later";
-  defaultDestination: string;
   interceptedExtensions: string[];
   excludedExtensions: string[];
   excludedHosts: string[];
@@ -12,8 +12,8 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   autoIntercept: true,
+  mediaDetectionEnabled: false,
   startMode: "now",
-  defaultDestination: "",
   interceptedExtensions: [],
   excludedExtensions: [],
   excludedHosts: [],
@@ -34,9 +34,9 @@ function splitList(value: string): string[] {
 function fill(settings: Settings): void {
   byId<HTMLInputElement>("enabled").checked = settings.enabled;
   byId<HTMLInputElement>("autoIntercept").checked = settings.autoIntercept;
+  byId<HTMLInputElement>("mediaDetectionEnabled").checked = settings.mediaDetectionEnabled;
   byId<HTMLInputElement>("notifications").checked = settings.notifications;
   byId<HTMLSelectElement>("startMode").value = settings.startMode;
-  byId<HTMLInputElement>("defaultDestination").value = settings.defaultDestination;
   byId<HTMLTextAreaElement>("interceptedExtensions").value = settings.interceptedExtensions.join(", ");
   byId<HTMLTextAreaElement>("excludedExtensions").value = settings.excludedExtensions.join(", ");
   byId<HTMLTextAreaElement>("excludedHosts").value = settings.excludedHosts.join(", ");
@@ -46,9 +46,9 @@ function collect(): Settings {
   return {
     enabled: byId<HTMLInputElement>("enabled").checked,
     autoIntercept: byId<HTMLInputElement>("autoIntercept").checked,
+    mediaDetectionEnabled: byId<HTMLInputElement>("mediaDetectionEnabled").checked,
     notifications: byId<HTMLInputElement>("notifications").checked,
     startMode: byId<HTMLSelectElement>("startMode").value === "later" ? "later" : "now",
-    defaultDestination: byId<HTMLInputElement>("defaultDestination").value.trim(),
     interceptedExtensions: splitList(byId<HTMLTextAreaElement>("interceptedExtensions").value),
     excludedExtensions: splitList(byId<HTMLTextAreaElement>("excludedExtensions").value),
     excludedHosts: splitList(byId<HTMLTextAreaElement>("excludedHosts").value),

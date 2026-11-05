@@ -146,7 +146,8 @@ internal static class Program
             {
                 FileName = hostExe,
                 Arguments = "--background",
-                UseShellExecute = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
             log($"Started host '{hostExe}'.");

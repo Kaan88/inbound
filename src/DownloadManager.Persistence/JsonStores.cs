@@ -240,8 +240,19 @@ public sealed class JsonJobStore : IJobStore
         }
 
         job.SchemaVersion = DownloadJob.CurrentSchemaVersion;
+        job.CompletionOptions ??= new();
         job.Touch();
-        var json = JsonSerializer.Serialize(job, PersistenceJson.Options);
+        // Protect a detached snapshot; the engine continues using plaintext in
+        // memory, and a failed write cannot mutate its live request headers.
+        var stored = job.Clone();
+        stored.RequestHeadersProtected.Clear();
+        foreach (var (name, value) in stored.RequestHeaders.ToList())
+        {
+            if (!IsSensitiveHeader(name)) continue;
+            stored.RequestHeadersProtected[name] = SecretProtector.ProtectHeader(value);
+            stored.RequestHeaders.Remove(name);
+        }
+        var json = JsonSerializer.Serialize(stored, PersistenceJson.Options);
         var path = JobPath(job.Id);
         await AtomicFile.WriteAsync(path, json, cancellationToken).ConfigureAwait(false);
     }
@@ -363,11 +374,25 @@ public sealed class JsonJobStore : IJobStore
         // Version 1 is the first persisted schema. Future migrations go here.
         job.SchemaVersion = DownloadJob.CurrentSchemaVersion;
         job.RequestHeaders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        job.RequestHeaders = new Dictionary<string, string>(job.RequestHeaders, StringComparer.OrdinalIgnoreCase);
+        job.RequestHeadersProtected ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, protectedValue) in job.RequestHeadersProtected)
+        {
+            if (!IsSensitiveHeader(name)) continue;
+            job.RequestHeaders.Remove(name);
+            var value = SecretProtector.UnprotectHeader(protectedValue);
+            if (value is not null) job.RequestHeaders[name] = value;
+        }
         job.CreatedAt = job.CreatedAt == default ? DateTimeOffset.UtcNow : job.CreatedAt;
         job.UpdatedAt = job.UpdatedAt == default ? DateTimeOffset.UtcNow : job.UpdatedAt;
     }
 
     private string JobPath(Guid id) => Path.Combine(_paths.JobsDirectory, $"{id:N}.json");
+
+    private static bool IsSensitiveHeader(string name)
+        => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("Cookie", StringComparison.OrdinalIgnoreCase);
 
     private string ClaimPath(string extensionId, string clientRequestId)
     {
@@ -665,6 +690,12 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.PostDownloadCommand = string.IsNullOrWhiteSpace(settings.PostDownloadCommand)
             ? null
             : settings.PostDownloadCommand.Trim();
+        if (string.IsNullOrWhiteSpace(settings.UpdateManifestUrl) &&
+            string.IsNullOrWhiteSpace(settings.UpdatePublicKey))
+        {
+            settings.UpdateManifestUrl = ReleaseUpdates.ManifestUrl;
+            settings.UpdatePublicKey = ReleaseUpdates.PublicKey;
+        }
         settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(settings.UpdateManifestUrl)
             ? null
             : settings.UpdateManifestUrl.Trim();
@@ -675,6 +706,20 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.SkippedUpdateVersion = string.IsNullOrWhiteSpace(settings.SkippedUpdateVersion)
             ? null
             : settings.SkippedUpdateVersion.Trim();
+
+        settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
+        settings.CustomCategories ??= new();
+        settings.ArchivedDownloads ??= new();
+        settings.ArchivedDownloads = settings.ArchivedDownloads.Where(record => record is not null && record.Id != Guid.Empty).DistinctBy(record => record.Id).ToList();
+        settings.DownloadGroups ??= new();
+        settings.DownloadGroups = settings.DownloadGroups.Where(group => group is not null && group.Id != Guid.Empty)
+            .DistinctBy(group => group.Id).ToList();
+        var groupedJobs = new HashSet<Guid>();
+        foreach (var group in settings.DownloadGroups)
+        {
+            group.Name = string.IsNullOrWhiteSpace(group.Name) ? "Downloads" : group.Name;
+            group.JobIds = (group.JobIds ?? new()).Where(id => id != Guid.Empty && groupedJobs.Add(id)).ToList();
+        }
 
         settings.CategoryFolders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

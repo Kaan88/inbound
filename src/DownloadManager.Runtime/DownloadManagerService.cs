@@ -20,7 +20,7 @@ public sealed record ScheduleAction(
     bool Ok,
     string? Error);
 
-public sealed class DownloadManagerService
+public sealed partial class DownloadManagerService
 {
     private readonly StoragePaths _paths;
     private readonly IJobStore _jobStore;
@@ -36,7 +36,12 @@ public sealed class DownloadManagerService
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IDownloadEngine? _ftpEngine;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly SemaphoreSlim _updateInstallGate = new(1, 1);
+    private bool _updateInstallScheduled;
+    private bool _updateQuiescing;
     public event EventHandler? UpdateShutdownRequested;
+    public event EventHandler<UpdateProgressDto>? UpdateProgressChanged;
+    private UpdateProgressDto? _updateProgress;
     public event EventHandler<string>? UpdateDeferred;
     private readonly object _sync = new();
     private readonly List<string> _orphanPartFiles = new();
@@ -44,6 +49,8 @@ public sealed class DownloadManagerService
     private readonly Dictionary<Guid, JobRuntime> _jobs = new();
     private readonly HashSet<int> _completionFiredQueues = new();
     private readonly SemaphoreSlim _persistGate = new(1, 1);
+    private readonly SemaphoreSlim _settingsUpdateGate = new(1, 1);
+    private readonly SemaphoreSlim _metadataGate = new(2, 2);
     private AppSettings _settings = new();
     private CancellationTokenSource? _schedulerCts;
     private Task? _schedulerTask;
@@ -119,6 +126,14 @@ public sealed class DownloadManagerService
         foreach (var runtime in _jobs.Values)
         {
             var changed = await ReconcileAsync(runtime, cancellationToken).ConfigureAwait(false);
+            // Queue policy is authoritative; a crash between settings and job
+            // writes must not leave the denormalized display name stale.
+            var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId);
+            if (queue is not null && runtime.Job.QueueName != queue.Name)
+            {
+                runtime.Job.QueueName = runtime.Job.IsQueued ? queue.Name : "None";
+                changed = true;
+            }
             if (changed)
             {
                 await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
@@ -137,6 +152,7 @@ public sealed class DownloadManagerService
         {
             return new SnapshotDto
             {
+                UpdateProgress = _updateProgress,
                 Jobs = _jobs.Values
                     .Select(r => Map(r.Job))
                     .OrderByDescending(j => j.CreatedAt)
@@ -185,6 +201,19 @@ public sealed class DownloadManagerService
             .ToList();
     }
 
+    public IReadOnlyList<ConnectionTelemetryDto> GetConnections(Guid id)
+    {
+        lock (_sync) if (!_jobs.ContainsKey(id)) return Array.Empty<ConnectionTelemetryDto>();
+        if (_engine is not IConnectionTelemetrySource source) return Array.Empty<ConnectionTelemetryDto>();
+        return source.GetConnections(id).Take(128).Select(connection => new ConnectionTelemetryDto
+        {
+            Id = connection.Id, Host = connection.Host, State = connection.State,
+            RangeStart = connection.RangeStart, RangeEnd = connection.RangeEnd,
+            ReceivedBytes = connection.ReceivedBytes, BytesPerSecond = connection.BytesPerSecond,
+            StatusCode = connection.StatusCode, HttpVersion = connection.HttpVersion, StartedAt = connection.StartedAt,
+        }).ToList();
+    }
+
     public JobDto? GetJob(Guid id)
     {
         lock (_sync)
@@ -193,7 +222,38 @@ public sealed class DownloadManagerService
         }
     }
 
+    public async Task<FileMetadataResult> ReadFileMetadataAsync(FileMetadataRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!TryValidateUrl(request.Url, out var uri, out var error) || uri.Scheme is not ("http" or "https"))
+            return new FileMetadataResult { Error = string.IsNullOrWhiteSpace(error) ? "File information is available for HTTP/HTTPS URLs." : error };
+        if (!TryCopyHeaders(request.Headers, out var headers, out error)) return new FileMetadataResult { Error = error };
+        if (_engine is not IFileMetadataReader reader) return new FileMetadataResult { Error = "This engine cannot preview file information." };
+        if (!await _metadataGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            return new FileMetadataResult { Error = "Other file information requests are still running. Try again shortly." };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        try
+        {
+            var metadata = await reader.ReadMetadataAsync(new DownloadJob { Url = uri.AbsoluteUri, RequestHeaders = headers,
+                UserAgent = request.UserAgent, Referrer = request.Referrer }, timeout.Token).ConfigureAwait(false);
+            return new FileMetadataResult { Ok = true, FileName = metadata.FileName, TotalBytes = metadata.TotalBytes,
+                ContentType = metadata.ContentType, FinalUrl = metadata.FinalUrl };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { return new FileMetadataResult { Error = "File information request timed out. You can still start the download." }; }
+        catch (Exception ex) when (ex is HttpRequestException or ArgumentException or IOException or InvalidOperationException)
+        { return new FileMetadataResult { Error = ex.Message }; }
+        finally { _metadataGate.Release(); }
+    }
+
     public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
+    {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await AddJobCoreAsync(request, cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<AddJobResponse> AddJobCoreAsync(AddJobRequest request, CancellationToken cancellationToken)
     {
         if (!TryValidateUrl(request.Url, out var uri, out var urlError))
         {
@@ -244,7 +304,21 @@ public sealed class DownloadManagerService
         var fileName = string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameResolver.Resolve(null, uri)
             : FileNameResolver.Sanitize(request.FileName);
-        var destination = ResolveDestination(request.DestinationDirectory, fileName);
+        var browserDownload = source is DownloadSource.ChromeAuto or DownloadSource.ChromeContextMenu;
+        var categoryId = request.CategoryId;
+        if (Guid.TryParseExact(categoryId, "N", out var requestedCategoryGuid)) categoryId = requestedCategoryGuid.ToString("N");
+        lock (_sync)
+        {
+            if (!string.IsNullOrWhiteSpace(categoryId) && !FileCategories.IsBuiltIn(categoryId) &&
+                !_settings.CustomCategories.Any(category => category.Id == categoryId))
+                return new AddJobResponse { Accepted = false, Error = "Category not found.", ErrorCode = "invalid_category" };
+            categoryId = string.IsNullOrWhiteSpace(categoryId)
+                ? _settings.CustomCategories.FirstOrDefault(category => category.Extensions.Contains(
+                    Path.GetExtension(fileName).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id ?? FileCategories.For(fileName)
+                : FileCategories.IsBuiltIn(categoryId) ? categoryId.ToLowerInvariant() : categoryId;
+        }
+        var destination = ResolveDestination(request.DestinationDirectory, fileName,
+            useLastFolder: !browserDownload, useCategoryFolder: !browserDownload, categoryId: categoryId);
         string finalPath;
         try
         {
@@ -281,10 +355,13 @@ public sealed class DownloadManagerService
             QueueId = queueId,
             QueueName = queue.Name,
             FileName = Path.GetFileName(finalPath),
+            CategoryId = categoryId,
+            CategoryIsAutomatic = string.IsNullOrWhiteSpace(request.CategoryId),
             DestinationDirectory = destination,
             FinalFilePath = finalPath,
             PartFilePath = string.Empty,
             StartMode = startMode,
+            QueueProcessing = startMode == StartMode.Queue,
             Source = source,
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
@@ -363,11 +440,19 @@ public sealed class DownloadManagerService
         Schedule();
 
         var settingsChanged = false;
-        if (request.RememberDestination != false &&
-            !string.IsNullOrWhiteSpace(request.DestinationDirectory) &&
-            !string.Equals(_settings.LastDestinationDirectory, destination, StringComparison.OrdinalIgnoreCase))
+        if (!browserDownload && request.RememberDestination != false &&
+            !string.IsNullOrWhiteSpace(request.DestinationDirectory))
         {
-            _settings.LastDestinationDirectory = destination;
+            lock (_sync)
+            {
+                if (!string.IsNullOrWhiteSpace(request.CategoryId))
+                {
+                    var custom = _settings.CustomCategories.FirstOrDefault(category => category.Id == categoryId);
+                    if (custom is not null) custom.DestinationDirectory = destination;
+                    else _settings.CategoryFolders[categoryId!] = destination;
+                }
+                else _settings.LastDestinationDirectory = destination;
+            }
             settingsChanged = true;
         }
 
@@ -420,6 +505,7 @@ public sealed class DownloadManagerService
             }
 
             runtime.PauseRequested = true;
+            runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Paused;
             runtime.Job.BytesPerSecond = null;
             runtime.Job.EstimatedRemaining = null;
@@ -434,6 +520,13 @@ public sealed class DownloadManagerService
     }
 
     public async Task<JobActionResponse> ResumeAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await ResumeCoreAsync(id, cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> ResumeCoreAsync(Guid id, CancellationToken cancellationToken)
     {
         JobRuntime? runtime;
         Task? stopping = null;
@@ -480,6 +573,7 @@ public sealed class DownloadManagerService
             runtime.PauseRequested = false;
             runtime.CancelRequested = false;
             runtime.CancelledForRemoval = false;
+            runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Queued;
             runtime.Job.StartMode = StartMode.StartNow;
             runtime.Job.Failure = null;
@@ -497,7 +591,8 @@ public sealed class DownloadManagerService
     public async Task<JobActionResponse> CancelAsync(
         Guid id,
         bool deleteFile = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool onlyIfUnfinished = false)
     {
         JobRuntime? runtime;
         lock (_sync)
@@ -507,9 +602,13 @@ public sealed class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = "Job not found." };
             }
 
+            if (onlyIfUnfinished && runtime.Job.IsTerminal)
+                return new JobActionResponse { Ok = false, Error = "This download has already finished. Its saved file has been kept." };
+
             runtime.CancelRequested = true;
             runtime.DeleteOnCancel = deleteFile;
             runtime.Job.DeleteFileOnCancel = deleteFile;
+            runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Cancelled;
             runtime.Job.BytesPerSecond = null;
             runtime.Job.EstimatedRemaining = null;
@@ -535,6 +634,35 @@ public sealed class DownloadManagerService
         bool deleteFile,
         CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            AppSettings? staged = null;
+            lock (_sync)
+            {
+                if (!_jobs.ContainsKey(id)) return new JobActionResponse { Error = "Job not found." };
+                if (_settings.DownloadGroups.Any(group => group.JobIds.Contains(id)))
+                {
+                    var groups = CloneGroups(_settings.DownloadGroups);
+                    foreach (var group in groups) group.JobIds.Remove(id);
+                    staged = _settings.WithDownloadGroups(groups);
+                }
+            }
+            if (staged is not null)
+            {
+                try { await _settingsStore.SaveAsync(staged, cancellationToken).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { return new JobActionResponse { Error = "The download was retained because download history could not be saved. " + ex.Message }; }
+                lock (_sync) _settings.DownloadGroups = staged.DownloadGroups;
+                SettingsChanged?.Invoke(this, _settings);
+            }
+            return await RemoveCoreAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> RemoveCoreAsync(Guid id, bool deleteFile, CancellationToken cancellationToken)
+    {
         JobRuntime? runtime;
         Task? runner;
         lock (_sync)
@@ -554,13 +682,28 @@ public sealed class DownloadManagerService
         {
             try
             {
-                await Task.WhenAny(runner, Task.Delay(TimeSpan.FromSeconds(15), cancellationToken)).ConfigureAwait(false);
+                var settled = await Task.WhenAny(runner, Task.Delay(TimeSpan.FromSeconds(15), cancellationToken)).ConfigureAwait(false);
+                if (settled != runner)
+                    return new JobActionResponse { Error = "The download is still stopping. Retry removal after it stops.", Job = Map(runtime.Job) };
             }
             catch (OperationCanceledException)
             {
                 // continue with removal
             }
         }
+
+        AppSettings archived;
+        lock (_sync)
+        {
+            archived = _settings.WithDownloadGroups(CloneGroups(_settings.DownloadGroups));
+            archived.ArchivedDownloads = _settings.ArchivedDownloads.Where(record => record.Id != id).ToList();
+            archived.ArchivedDownloads.Add(new ArchivedDownloadRecord { Id = id, ReceivedBytes = runtime.Job.ReceivedBytes,
+                State = runtime.Job.State, CreatedAt = runtime.Job.CreatedAt, CompletedAt = runtime.Job.CompletedAt });
+        }
+        try { await _settingsStore.SaveAsync(archived, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { return new JobActionResponse { Error = "The stopped download was retained because its statistics could not be saved. " + ex.Message, Job = Map(runtime.Job) }; }
+        lock (_sync) _settings.ArchivedDownloads = archived.ArchivedDownloads;
 
         if (deleteFile)
         {
@@ -569,12 +712,14 @@ public sealed class DownloadManagerService
             await _checkpointStore.DeleteAsync(id, CancellationToken.None).ConfigureAwait(false);
         }
 
-        lock (_sync)
+        await _persistGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            _jobs.Remove(id);
+            lock (_sync) runtime.CancelledForRemoval = true;
+            await _jobStore.DeleteAsync(id, CancellationToken.None).ConfigureAwait(false);
+            lock (_sync) _jobs.Remove(id);
         }
-
-        await _jobStore.DeleteAsync(id, CancellationToken.None).ConfigureAwait(false);
+        finally { _persistGate.Release(); }
         JobChanged?.Invoke(this, new JobChangeEventArgs(Map(runtime.Job), "removed"));
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
@@ -589,6 +734,7 @@ public sealed class DownloadManagerService
             foreach (var runtime in paused)
             {
                 runtime.PauseRequested = true;
+                runtime.Job.QueueRetryAt = null;
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
                 runtime.Job.EstimatedRemaining = null;
@@ -607,6 +753,13 @@ public sealed class DownloadManagerService
 
     public async Task ResumeAllAsync(CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await ResumeAllCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task ResumeAllCoreAsync(CancellationToken cancellationToken)
+    {
         List<JobRuntime> resumed;
         lock (_sync)
         {
@@ -618,6 +771,7 @@ public sealed class DownloadManagerService
             {
                 runtime.PauseRequested = false;
                 runtime.CancelRequested = false;
+                runtime.Job.QueueRetryAt = null;
                 runtime.Job.State = DownloadState.Queued;
                 runtime.Job.StartMode = StartMode.StartNow;
                 runtime.Job.Failure = null;
@@ -639,6 +793,59 @@ public sealed class DownloadManagerService
         SettingsDto settings,
         CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await UpdateSettingsCoreAsync(settings, cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<SettingsResult> UpdateSettingsCoreAsync(SettingsDto settings, CancellationToken cancellationToken)
+    {
+        settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in settings.EventSoundFiles)
+        {
+            if (key is not ("completed" or "failed" or "queueFinished") || value is null ||
+                (value.Length > 0 && value != "@system" &&
+                 (!Path.IsPathFullyQualified(value) || !string.Equals(Path.GetExtension(value), ".wav", StringComparison.OrdinalIgnoreCase))))
+                return new SettingsResult { Ok = false, Error = "Event sounds must be disabled, system sounds, or absolute WAV file paths.", Settings = MapSettings(_settings) };
+        }
+        if ((settings.Queues ?? new()).Any(queue => queue.RetryLimit is < 0 or > 100) ||
+            (settings.Schedules ?? new()).Any(schedule => schedule.RepeatEveryMinutes is < 1 or > 1440 ||
+                schedule.RepeatEveryMinutes is not null && !schedule.TimedStartEnabled ||
+                !schedule.StartOnHostStartup && !schedule.TimedStartEnabled))
+            return new SettingsResult { Error = "Select a startup or timed trigger, synchronization interval 1–1440 minutes, and retry limit 0–100 or unlimited.", Settings = MapSettings(_settings) };
+        var categories = settings.CustomCategories ?? new();
+        var categoryIds = new HashSet<string>(StringComparer.Ordinal);
+        var categoryNames = new HashSet<string>(FileCategories.Names.Append("other"), StringComparer.OrdinalIgnoreCase);
+        var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (categories.Count > 100) return new SettingsResult { Ok = false, Error = "At most 100 custom categories are supported.", Settings = MapSettings(_settings) };
+        foreach (var category in categories)
+        {
+            if (category is null) return new SettingsResult { Ok = false, Error = "Invalid category.", Settings = MapSettings(_settings) };
+            category.Name = category.Name?.Trim() ?? string.Empty;
+            if (Guid.TryParseExact(category.Id, "N", out var categoryGuid)) category.Id = categoryGuid.ToString("N");
+            category.Extensions = (category.Extensions ?? new()).Select(extension => (extension ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant()).Distinct().ToList();
+            if (!Guid.TryParseExact(category.Id, "N", out _) || !categoryIds.Add(category.Id) ||
+                category.Name.Length is < 1 or > 64 || category.Name.Any(char.IsControl) || !categoryNames.Add(category.Name) ||
+                category.Extensions.Count > 64 || category.Extensions.Any(extension => extension.Length is < 1 or > 32 ||
+                    extension.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')) || !extensions.Add(extension)))
+                return new SettingsResult { Ok = false, Error = "Categories need unique IDs/names and unambiguous file extensions.", Settings = MapSettings(_settings) };
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(category.DestinationDirectory)) category.DestinationDirectory = Path.GetFullPath(category.DestinationDirectory);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+            { return new SettingsResult { Ok = false, Error = "Invalid category folder.", Settings = MapSettings(_settings) }; }
+        }
+        lock (_sync)
+        {
+            var deleting = (settings.DeleteCategoryIds ?? new()).ToHashSet(StringComparer.Ordinal);
+            if (deleting.Any(id => !_settings.CustomCategories.Any(category => category.Id == id) || categoryIds.Contains(id)))
+                return new SettingsResult { Ok = false, Error = "The category list changed. Refresh Options before deleting categories.", Settings = MapSettings(_settings) };
+            if (_settings.CustomCategories.Any(category => !categoryIds.Contains(category.Id) && !deleting.Contains(category.Id)))
+                return new SettingsResult { Ok = false, Error = "Existing custom categories must be retained. Refresh settings before saving.", Settings = MapSettings(_settings) };
+            if (_jobs.Values.Any(runtime => runtime.Job.CategoryId is { } id && deleting.Contains(id)))
+                return new SettingsResult { Ok = false, Error = "Change the category of this category's downloads before deleting it. No settings or files were changed.", Settings = MapSettings(_settings) };
+        }
         if (string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory))
         {
             return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapSettings(_settings) };
@@ -666,6 +873,10 @@ public sealed class DownloadManagerService
 
         var next = new AppSettings
         {
+            DownloadGroups = CloneGroups(_settings.DownloadGroups),
+            ArchivedDownloads = new(_settings.ArchivedDownloads),
+            CustomCategories = categories.Select(category => new DownloadCategory { Id = category.Id, Name = category.Name,
+                DestinationDirectory = category.DestinationDirectory, Extensions = new(category.Extensions) }).ToList(),
             DefaultDownloadDirectory = directory,
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
@@ -686,6 +897,7 @@ public sealed class DownloadManagerService
             BrowserAutoIntercept = settings.BrowserAutoIntercept,
             NotifyOnCompletion = settings.NotifyOnCompletion,
             PlayCompletionSound = settings.PlayCompletionSound,
+            EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
@@ -730,6 +942,18 @@ public sealed class DownloadManagerService
             next.DefaultQueueId = next.Queues[0].Id;
         }
 
+        lock (_sync)
+        {
+            var retainedQueueIds = next.Queues.Select(queue => queue.Id).ToHashSet();
+            if (_jobs.Values.Any(runtime => !retainedQueueIds.Contains(runtime.Job.QueueId)) ||
+                next.Schedules.Any(schedule => !retainedQueueIds.Contains(schedule.QueueId)))
+                return new SettingsResult
+                {
+                    Ok = false,
+                    Error = "Move downloads and schedules before removing their queue. No settings were changed.",
+                    Settings = MapSettings(_settings),
+                };
+        }
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         lock (_sync)
@@ -740,7 +964,7 @@ public sealed class DownloadManagerService
             {
                 if (queueNames.TryGetValue(runtime.Job.QueueId, out var queueName))
                 {
-                    runtime.Job.QueueName = queueName;
+                    runtime.Job.QueueName = runtime.Job.IsQueued ? queueName : "None";
                 }
             }
         }
@@ -761,13 +985,73 @@ public sealed class DownloadManagerService
         QueueActionRequest request,
         CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (request.Action.Equals("delete", StringComparison.OrdinalIgnoreCase) && request.MoveContentsToQueueId is { } destination)
+            {
+                List<Guid> members;
+                lock (_sync)
+                {
+                    if (request.QueueId == _settings.DefaultQueueId || destination == request.QueueId ||
+                        !_settings.Queues.Any(queue => queue.Id == request.QueueId) ||
+                        !_settings.Queues.Any(queue => queue.Id == destination))
+                        return new SettingsResult { Error = "Choose another existing queue. The default queue cannot be deleted.", Settings = MapSettings(_settings) };
+                    members = _jobs.Values.Where(runtime => runtime.Job.QueueId == request.QueueId).Select(runtime => runtime.Job.Id).ToList();
+                }
+                // Persist each move before deleting its old queue. Interruption leaves a valid,
+                // partially moved queue that can be retried, never orphaned downloads.
+                try
+                {
+                    foreach (var id in members)
+                    {
+                        var moved = await MoveToQueueCoreAsync(id, destination, cancellationToken).ConfigureAwait(false);
+                        if (!moved.Ok) return new SettingsResult { Error = "Queue retained; some downloads may already have moved. " + moved.Error, Settings = MapSettings(_settings) };
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return new SettingsResult { Error = "Queue retained because reassignment could not be saved. Some downloads may already have moved. " + ex.Message, Settings = MapSettings(_settings) };
+                }
+                lock (_sync)
+                    foreach (var schedule in _settings.Schedules.Where(schedule => schedule.QueueId == request.QueueId))
+                        schedule.QueueId = destination;
+            }
+            return await QueueActionCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<SettingsResult> QueueActionCoreAsync(QueueActionRequest request, CancellationToken cancellationToken)
+    {
         List<JobRuntime> paused = new();
         List<JobRuntime> resumed = new();
+        List<JobRuntime> renamed = new();
         string? error = null;
 
         lock (_sync)
         {
             var queue = _settings.Queues.FirstOrDefault(q => q.Id == request.QueueId);
+            if (request.Action.Equals("create", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ValidQueuePolicy(request))
+                    return new SettingsResult { Ok = false, Error = "Invalid queue name, concurrency or quota policy.", Settings = MapSettings(_settings) };
+                var usedIds = _settings.Queues.Select(q => q.Id).ToHashSet();
+                var nextId = 0;
+                while (usedIds.Contains(nextId) && nextId < int.MaxValue) nextId++;
+                if (usedIds.Contains(nextId))
+                    return new SettingsResult { Ok = false, Error = "No queue identifiers are available.", Settings = MapSettings(_settings) };
+                queue = new DownloadQueue
+                {
+                    Id = nextId, Name = request.Name!.Trim(), IsRunning = false,
+                    Order = _settings.Queues.Count,
+                    MaxConcurrentDownloads = request.MaxConcurrentDownloads,
+                    QuotaEnabled = request.QuotaEnabled ?? false,
+                    QuotaBytes = request.QuotaBytes ?? 200L * 1024 * 1024,
+                    QuotaWindowHours = request.QuotaWindowHours ?? 5,
+                };
+                _settings.Queues.Add(queue);
+            }
             if (queue is null)
             {
                 return new SettingsResult { Ok = false, Error = "Queue not found.", Settings = MapSettings(_settings) };
@@ -775,10 +1059,58 @@ public sealed class DownloadManagerService
 
             switch (request.Action.ToLowerInvariant())
             {
+                case "create":
+                    break;
+                case "delete":
+                    if (queue.Id == _settings.DefaultQueueId)
+                        error = "The default queue cannot be deleted.";
+                    else if (_jobs.Values.Any(r => r.Job.QueueId == queue.Id) ||
+                             _settings.Schedules.Any(s => s.QueueId == queue.Id))
+                        error = "Move this queue's downloads and schedules before deleting it. No downloads were removed.";
+                    else
+                        _settings.Queues.Remove(queue);
+                    break;
+                case "moveup":
+                case "movedown":
+                    var ordered = _settings.Queues.OrderBy(q => q.Order).ThenBy(q => q.Id).ToList();
+                    var position = ordered.FindIndex(q => q.Id == queue.Id);
+                    var target = position + (request.Action.Equals("moveup", StringComparison.OrdinalIgnoreCase) ? -1 : 1);
+                    if (target >= 0 && target < ordered.Count)
+                        (ordered[position], ordered[target]) = (ordered[target], ordered[position]);
+                    for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
+                    _settings.Queues = ordered;
+                    break;
+                case "policy":
+                    if (!ValidQueuePolicy(request))
+                    {
+                        error = "Enter a queue name, concurrency 1–16, and valid quota limits (up to 10 TiB / 8760 hours).";
+                        break;
+                    }
+                    queue.Name = request.Name!.Trim();
+                    queue.MaxConcurrentDownloads = request.MaxConcurrentDownloads;
+                    if (request.QuotaEnabled is { } enabled) queue.QuotaEnabled = enabled;
+                    if (request.QuotaBytes is { } bytes) queue.QuotaBytes = bytes;
+                    if (request.QuotaWindowHours is { } hours) queue.QuotaWindowHours = hours;
+                    // Usage and the current window belong to the Host, never the editor.
+                    break;
+                case "reorderfiles":
+                    var members = _jobs.Values.Where(r => r.Job.IsQueued && r.Job.QueueId == queue.Id)
+                        .Select(r => r.Job.Id).ToHashSet();
+                    if (request.JobOrder is null || request.JobOrder.Count != members.Count ||
+                        request.JobOrder.Distinct().Count() != members.Count ||
+                        request.JobOrder.Any(id => !members.Contains(id)))
+                    {
+                        error = "The queue's file list changed. Reopen Files and try again.";
+                        break;
+                    }
+                    queue.JobOrder = request.JobOrder.ToList();
+                    break;
                 case "start":
+                    _completionFiredQueues.Remove(queue.Id);
                     queue.IsRunning = true;
                     foreach (var runtime in _jobs.Values.Where(r =>
-                                 r.Job.QueueId == queue.Id && r.Job.State == DownloadState.Paused))
+                                 r.Job.IsQueued && r.Job.QueueId == queue.Id && (r.Job.State is DownloadState.Paused or DownloadState.Queued ||
+                                     r.Job.State == DownloadState.Failed && !r.Job.IsTerminal)))
                     {
                         if (runtime.Starting || runtime.Runner is { IsCompleted: false })
                         {
@@ -790,6 +1122,9 @@ public sealed class DownloadManagerService
                         runtime.PauseRequested = false;
                         runtime.CancelRequested = false;
                         runtime.CancelledForRemoval = false;
+                        runtime.Job.QueueProcessing = true;
+                        runtime.Job.QueueRetryCount = 0;
+                        runtime.Job.QueueRetryAt = null;
                         runtime.Job.State = DownloadState.Queued;
                         runtime.Job.StartMode = StartMode.StartNow;
                         runtime.Job.Failure = null;
@@ -800,8 +1135,14 @@ public sealed class DownloadManagerService
                     break;
                 case "stop":
                     queue.IsRunning = false;
+                    foreach (var waiting in _jobs.Values.Where(runtime => runtime.Job.IsQueued && runtime.Job.QueueId == queue.Id && runtime.Job.QueueRetryAt is not null))
+                    {
+                        waiting.Job.QueueRetryAt = null;
+                        waiting.Job.Touch();
+                        renamed.Add(waiting);
+                    }
                     paused = _jobs.Values
-                        .Where(r => r.Job.QueueId == queue.Id &&
+                        .Where(r => r.Job.IsQueued && r.Job.QueueId == queue.Id &&
                                     (r.Starting || r.Runner is { IsCompleted: false }))
                         .ToList();
                     foreach (var runtime in paused)
@@ -824,9 +1165,13 @@ public sealed class DownloadManagerService
                     break;
             }
 
-            foreach (var runtime in _jobs.Values.Where(r => r.Job.QueueId == queue.Id))
+            foreach (var runtime in _jobs.Values.Where(r => r.Job.IsQueued && r.Job.QueueId == queue.Id))
             {
-                runtime.Job.QueueName = queue.Name;
+                if (runtime.Job.QueueName != queue.Name)
+                {
+                    runtime.Job.QueueName = queue.Name;
+                    renamed.Add(runtime);
+                }
             }
         }
 
@@ -848,10 +1193,22 @@ public sealed class DownloadManagerService
         }
 
         await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+        foreach (var runtime in renamed)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "updated");
+        }
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
     }
+
+    private static bool ValidQueuePolicy(QueueActionRequest request)
+        => !string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 80 &&
+           request.MaxConcurrentDownloads is >= 1 and <= 16 &&
+           request.QuotaBytes is not (< 1 or > 10995116277760L) &&
+           request.QuotaWindowHours is not (< 1 or > 8760) &&
+           (request.QuotaEnabled != true || (request.QuotaBytes is not null && request.QuotaWindowHours is not null));
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
@@ -999,6 +1356,39 @@ public sealed class DownloadManagerService
         CancellationToken cancellationToken = default)
     {
         var check = await CheckForUpdatesAsync(cancellationToken).ConfigureAwait(false);
+        return await DownloadVerifiedUpdateAsync(check, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void ReportUpdateProgress(string stage, string? version, long received = 0,
+        long? total = null, string? error = null)
+    {
+        var progress = new UpdateProgressDto
+        {
+            Stage = stage, Version = version, ReceivedBytes = received, TotalBytes = total, Error = error,
+        };
+        lock (_sync) _updateProgress = progress;
+        UpdateProgressChanged?.Invoke(this, progress);
+    }
+
+    private async Task<UpdateDownloadResult> DownloadVerifiedUpdateAsync(
+        UpdateCheckResult check, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await DownloadUpdateCoreAsync(check, cancellationToken).ConfigureAwait(false);
+            if (!result.Ok) ReportUpdateProgress("failed", check.AvailableVersion, error: result.Error);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            ReportUpdateProgress("failed", check.AvailableVersion, error: "Update download cancelled.");
+            throw;
+        }
+    }
+
+    private async Task<UpdateDownloadResult> DownloadUpdateCoreAsync(
+        UpdateCheckResult check, CancellationToken cancellationToken)
+    {
         if (!check.Ok || check.Status != "updateAvailable" ||
             string.IsNullOrWhiteSpace(check.InstallerUrl) ||
             string.IsNullOrWhiteSpace(check.Sha256) || check.Size is not > 0)
@@ -1028,6 +1418,7 @@ public sealed class DownloadManagerService
         var directory = Path.Combine(_paths.Root, "updates");
         Directory.CreateDirectory(directory);
         var target = Path.Combine(directory, $"installer-{check.AvailableVersion}.zip");
+        ReportUpdateProgress("downloading", check.AvailableVersion, total: check.Size);
         try
         {
             using var response = await UpdateClient.GetAsync(
@@ -1060,6 +1451,7 @@ public sealed class DownloadManagerService
             {
                 var buffer = new byte[81_920];
                 long written = 0;
+                long nextProgress = 0;
                 while (true)
                 {
                     var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -1082,10 +1474,16 @@ public sealed class DownloadManagerService
 
                     await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                         .ConfigureAwait(false);
+                    if (Environment.TickCount64 >= nextProgress)
+                    {
+                        ReportUpdateProgress("downloading", check.AvailableVersion, written, check.Size);
+                        nextProgress = Environment.TickCount64 + 200;
+                    }
                 }
             }
 
             var length = new FileInfo(target).Length;
+            ReportUpdateProgress("verifying", check.AvailableVersion, length, check.Size);
             var hash = await Hashing.Sha256FileAsync(target, cancellationToken).ConfigureAwait(false);
             if (length != check.Size ||
                 !hash.Equals(check.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -1121,6 +1519,33 @@ public sealed class DownloadManagerService
     public async Task<UpdateInstallResult> InstallUpdateAsync(
         UpdateInstallRequest? request = null,
         CancellationToken cancellationToken = default)
+    {
+        if (!await _updateInstallGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            return new UpdateInstallResult { Ok = false, Status = "busy", Error = "An update installation is already in progress." };
+        try
+        {
+            if (_updateInstallScheduled)
+                return new UpdateInstallResult { Ok = false, Status = "busy", Error = "An update is already staged for restart." };
+            var result = await InstallUpdateCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            if (result.Ok) _updateInstallScheduled = true;
+            else ReportUpdateProgress(result.Status == "busy" ? "postponed" : "failed",
+                result.Version, error: result.Error);
+            return result;
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                if (!_updateInstallScheduled) _updateQuiescing = false;
+            }
+            _updateInstallGate.Release();
+            if (!_updateInstallScheduled) Schedule();
+        }
+    }
+
+    private async Task<UpdateInstallResult> InstallUpdateCoreAsync(
+        UpdateInstallRequest? request,
+        CancellationToken cancellationToken)
     {
         var install = InstalledBuild.TryLoad();
         if (install is null)
@@ -1167,7 +1592,9 @@ public sealed class DownloadManagerService
             };
         }
 
-        var download = await DownloadUpdateAsync(cancellationToken).ConfigureAwait(false);
+        // Use the exact verified manifest selected for this installation. A
+        // second feed request can return another release during CDN propagation.
+        var download = await DownloadVerifiedUpdateAsync(check, cancellationToken).ConfigureAwait(false);
         if (!download.Ok || string.IsNullOrWhiteSpace(download.Path))
         {
             return new UpdateInstallResult
@@ -1178,7 +1605,18 @@ public sealed class DownloadManagerService
             };
         }
 
+        lock (_sync)
+        {
+            // Downloads may have started while the update package was fetched.
+            // Recheck and stop admitting new runners atomically with Schedule.
+            if (request?.Force != true && _jobs.Values.Any(runtime =>
+                    runtime.Starting || runtime.Job.State is DownloadState.Connecting or
+                        DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting))
+                return new UpdateInstallResult { Ok = false, Status = "busy", Error = "Downloads became active while the update was downloading." };
+            _updateQuiescing = true;
+        }
         var staging = Path.Combine(_paths.Root, "updates", $"stage-{check.AvailableVersion}");
+        ReportUpdateProgress("staging", check.AvailableVersion, download.Size ?? 0, download.Size);
         try
         {
             if (Directory.Exists(staging))
@@ -1205,6 +1643,7 @@ public sealed class DownloadManagerService
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                WorkingDirectory = staging,
             };
             foreach (var argument in new[]
                      {
@@ -1234,6 +1673,7 @@ public sealed class DownloadManagerService
 
             _log?.Invoke(
                 $"Update {check.AvailableVersion} staged; the Host will shut down for the installer.");
+            ReportUpdateProgress("installing", check.AvailableVersion, download.Size ?? 0, download.Size);
             return new UpdateInstallResult
             {
                 Ok = true,
@@ -1257,6 +1697,13 @@ public sealed class DownloadManagerService
     public async Task<SettingsResult> DeferUpdateAsync(
         string version,
         CancellationToken cancellationToken = default)
+    {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await DeferUpdateCoreAsync(version, cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<SettingsResult> DeferUpdateCoreAsync(string version, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(version))
         {
@@ -1284,7 +1731,20 @@ public sealed class DownloadManagerService
         JobUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try { return await UpdateJobCoreAsync(request, cancellationToken).ConfigureAwait(false); }
+            finally { _persistGate.Release(); }
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> UpdateJobCoreAsync(JobUpdateRequest request, CancellationToken cancellationToken)
+    {
         JobRuntime? runtime;
+        DownloadJob? beforeEdit = null;
         string? moveFrom = null;
         string? moveTo = null;
         lock (_sync)
@@ -1293,6 +1753,46 @@ public sealed class DownloadManagerService
             {
                 return new JobActionResponse { Ok = false, Error = "Job not found." };
             }
+
+            beforeEdit = runtime.Job.Clone();
+            string? categoryId = request.CategoryId;
+            if (categoryId is not null)
+            {
+                if (Guid.TryParseExact(categoryId, "N", out var categoryGuid)) categoryId = categoryGuid.ToString("N");
+                if (categoryId.Length > 0 && !FileCategories.IsBuiltIn(categoryId) &&
+                    !_settings.CustomCategories.Any(category => category.Id == categoryId))
+                    return new JobActionResponse { Ok = false, Error = "Category not found." };
+                if (request.NewFilePath is not null)
+                    return new JobActionResponse { Ok = false, Error = "Change category and Move/Rename in separate requests." };
+            }
+
+            if (request.CompletionOptions is { } completion)
+            {
+                if (runtime.Job.State == DownloadState.Completed || runtime.Job.CompletionActionsStarted)
+                    return new JobActionResponse { Error = "Completion actions can be edited before the download completes." };
+                if (request.NewFilePath is not null)
+                    return new JobActionResponse { Error = "Change completion actions and Move/Rename in separate requests." };
+                if (completion.SystemAction is not ("none" or "exit" or "shutdown" or "restart" or "logoff"))
+                    return new JobActionResponse { Error = "Unknown completion system action." };
+                if (completion.SystemAction != "none" && !_settings.AllowSystemCompletionActions)
+                    return new JobActionResponse { Error = "Enable system completion actions in Scheduler before choosing this action." };
+                if (completion.ProgramPath is { Length: > 0 } program &&
+                    (!Path.IsPathFullyQualified(program) || !string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase)))
+                    return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
+            }
+
+            if (request.SpeedLimitBytesPerSecond is < 0)
+                return new JobActionResponse { Ok = false, Error = "The speed limit must be zero (unlimited) or a positive number of bytes per second." };
+            if (request.NewFilePath is not null &&
+                (request.SpeedLimitBytesPerSecond is not null || request.ShowCompletionDialog is not null))
+                return new JobActionResponse { Ok = false, Error = "Update transfer settings and Move/Rename in separate requests." };
+            if (request.SpeedLimitBytesPerSecond is not null &&
+                (runtime.Job.IsTerminal || !SupportsLiveSpeedLimit(runtime.Job)))
+                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS file downloads." };
+            if (request.SpeedLimitBytesPerSecond is not null)
+                runtime.Job.SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond;
+            if (request.ShowCompletionDialog is not null)
+                runtime.Job.ShowCompletionDialog = request.ShowCompletionDialog;
 
             if (request.Description is not null)
             {
@@ -1345,6 +1845,21 @@ public sealed class DownloadManagerService
                 }
             }
 
+            if (categoryId is not null)
+            {
+                runtime.Job.CategoryIsAutomatic = categoryId.Length == 0;
+                runtime.Job.CategoryId = categoryId.Length == 0
+                    ? _settings.CustomCategories.FirstOrDefault(category => category.Extensions.Contains(
+                        Path.GetExtension(runtime.Job.FileName).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id
+                        ?? FileCategories.For(runtime.Job.FileName)
+                    : FileCategories.IsBuiltIn(categoryId) ? categoryId.ToLowerInvariant() : categoryId;
+                // Classification never relocates payloads or changes an active transfer's destination.
+            }
+
+            if (request.CompletionOptions is { } options)
+                runtime.Job.CompletionOptions = new JobCompletionOptions { ProgramPath = options.ProgramPath,
+                    OpenFile = options.OpenFile, SystemAction = options.SystemAction, ForceSystemAction = options.ForceSystemAction };
+
             runtime.Job.Touch();
         }
 
@@ -1372,7 +1887,31 @@ public sealed class DownloadManagerService
             }
         }
 
-        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PersistAsync(runtime, cancellationToken,
+                requireSuccess: request.CategoryId is not null || request.CompletionOptions is not null, gateHeld: true).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_sync)
+            {
+                if (request.CategoryId is not null)
+                {
+                    runtime.Job.CategoryIsAutomatic = beforeEdit!.CategoryIsAutomatic;
+                    runtime.Job.CategoryId = beforeEdit.CategoryIsAutomatic
+                        ? _settings.CustomCategories.FirstOrDefault(category => category.Extensions.Contains(
+                            Path.GetExtension(runtime.Job.FileName).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id ?? FileCategories.For(runtime.Job.FileName)
+                        : beforeEdit.CategoryId;
+                }
+                if (request.CompletionOptions is not null) runtime.Job.CompletionOptions = beforeEdit!.CompletionOptions;
+                if (request.Description is not null) runtime.Job.Description = beforeEdit!.Description;
+                if (request.SpeedLimitBytesPerSecond is not null) runtime.Job.SpeedLimitBytesPerSecond = beforeEdit!.SpeedLimitBytesPerSecond;
+                if (request.ShowCompletionDialog is not null) runtime.Job.ShowCompletionDialog = beforeEdit!.ShowCompletionDialog;
+                runtime.Job.Touch();
+            }
+            throw;
+        }
         Raise(runtime, "updated");
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
@@ -1382,9 +1921,28 @@ public sealed class DownloadManagerService
         int queueId,
         CancellationToken cancellationToken = default)
     {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false); }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> MoveToQueueCoreAsync(Guid id, int queueId, CancellationToken cancellationToken)
+    {
+        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await MoveToQueueUnderPersistGateAsync(id, queueId, cancellationToken).ConfigureAwait(false); }
+        finally { _persistGate.Release(); }
+    }
+
+    private async Task<JobActionResponse> MoveToQueueUnderPersistGateAsync(Guid id, int queueId, CancellationToken cancellationToken)
+    {
         JobRuntime? runtime;
         DownloadQueue? queue;
         var paused = false;
+        bool oldIsQueued;
+        bool oldQueueProcessing;
+        DateTimeOffset? oldQueueRetryAt;
+        int oldQueueId;
+        string? oldQueueName;
         lock (_sync)
         {
             if (!_jobs.TryGetValue(id, out runtime))
@@ -1398,6 +1956,15 @@ public sealed class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = "Queue not found." };
             }
 
+            runtime.AdmissionSuspended = true;
+            oldQueueProcessing = runtime.Job.QueueProcessing;
+            oldQueueRetryAt = runtime.Job.QueueRetryAt;
+            oldIsQueued = runtime.Job.IsQueued;
+            runtime.Job.IsQueued = true;
+            oldQueueId = runtime.Job.QueueId;
+            oldQueueName = runtime.Job.QueueName;
+            runtime.Job.QueueProcessing = true;
+            runtime.Job.QueueRetryAt = null;
             runtime.Job.QueueId = queue.Id;
             runtime.Job.QueueName = queue.Name;
             runtime.Job.Touch();
@@ -1415,7 +1982,22 @@ public sealed class DownloadManagerService
             }
         }
 
-        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+        try { await PersistAsync(runtime, cancellationToken, requireSuccess: true, gateHeld: true).ConfigureAwait(false); }
+        catch
+        {
+            lock (_sync)
+            {
+                runtime.Job.QueueProcessing = oldQueueProcessing;
+                runtime.Job.QueueRetryAt = oldQueueRetryAt;
+                runtime.Job.IsQueued = oldIsQueued;
+                runtime.Job.QueueId = oldQueueId;
+                runtime.Job.QueueName = oldQueueName;
+                runtime.Job.Touch();
+            }
+            throw;
+        }
+        finally { lock (_sync) runtime.AdmissionSuspended = false; }
+        lock (_sync) if (runtime.Job.State != DownloadState.Completed) _completionFiredQueues.Remove(queue.Id);
         Raise(runtime, paused ? "paused" : "updated");
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
@@ -1478,132 +2060,6 @@ public sealed class DownloadManagerService
     /// timestamp. Public so tests can drive time deterministically; the host calls
     /// it from its 30-second scheduler loop with <see cref="TimeProvider.GetLocalNow"/>.
     /// </summary>
-    public async Task<IReadOnlyList<ScheduleAction>> EvaluateSchedulesAsync(
-        DateTimeOffset localNow,
-        CancellationToken cancellationToken = default)
-    {
-        var today = DateOnly.FromDateTime(localNow.DateTime);
-        var nowTime = TimeOnly.FromDateTime(localNow.DateTime);
-        var due = new List<(Guid Id, int QueueId, string Action)>();
-
-        lock (_sync)
-        {
-            if (!_initialized || _shuttingDown)
-            {
-                return Array.Empty<ScheduleAction>();
-            }
-
-            foreach (var schedule in _settings.Schedules)
-            {
-                if (!schedule.Enabled)
-                {
-                    continue;
-                }
-
-                if (!_settings.Queues.Any(q => q.Id == schedule.QueueId))
-                {
-                    continue;
-                }
-
-                if (!TryParseScheduleTime(schedule.StartTime, out var start))
-                {
-                    continue;
-                }
-
-                var hasStop = TryParseScheduleTime(schedule.StopTime, out var stop);
-                var isOneTime = string.Equals(schedule.Kind, "oneTime", StringComparison.OrdinalIgnoreCase);
-                var dayMatches = !isOneTime && MatchesDay(schedule.Days, localNow.DayOfWeek);
-                var dateMatches = isOneTime ? schedule.StartDate == today : dayMatches;
-                var overnight = hasStop && stop <= start;
-
-                var startDue = dateMatches &&
-                               nowTime >= start &&
-                               schedule.LastStartDate != today;
-
-                // A same-day window that already closed is missed, not started late.
-                if (startDue && hasStop && !overnight && nowTime >= stop)
-                {
-                    startDue = false;
-                }
-
-                // If an overnight window opened yesterday, it is already running;
-                // don't start it again after midnight.
-                if (startDue && overnight && schedule.LastStartDate == today.AddDays(-1) && nowTime < stop)
-                {
-                    startDue = false;
-                }
-
-                if (startDue)
-                {
-                    due.Add((schedule.Id, schedule.QueueId, "start"));
-                    continue;
-                }
-
-                if (!hasStop || nowTime < stop || schedule.LastStopDate == today)
-                {
-                    continue;
-                }
-
-                var startedInWindow = overnight
-                    ? schedule.LastStartDate == today || schedule.LastStartDate == today.AddDays(-1)
-                    : schedule.LastStartDate == today;
-                if (startedInWindow)
-                {
-                    due.Add((schedule.Id, schedule.QueueId, "stop"));
-                }
-            }
-        }
-
-        var results = new List<ScheduleAction>(due.Count);
-        foreach (var action in due)
-        {
-            lock (_sync)
-            {
-                if (_shuttingDown)
-                {
-                    break;
-                }
-            }
-
-            var reply = await QueueActionAsync(
-                new QueueActionRequest { QueueId = action.QueueId, Action = action.Action },
-                cancellationToken).ConfigureAwait(false);
-
-            if (reply.Ok)
-            {
-                lock (_sync)
-                {
-                    var schedule = _settings.Schedules.FirstOrDefault(s => s.Id == action.Id);
-                    if (schedule is not null)
-                    {
-                        if (action.Action == "start")
-                        {
-                            schedule.LastStartDate = today;
-                        }
-                        else
-                        {
-                            schedule.LastStopDate = today;
-                        }
-                    }
-                }
-
-                await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
-                SettingsChanged?.Invoke(this, _settings);
-                _log?.Invoke($"Scheduler {action.Action} queue {action.QueueId} for {today:yyyy-MM-dd}.");
-            }
-
-            results.Add(new ScheduleAction(
-                action.Id,
-                action.QueueId,
-                action.Action,
-                today,
-                reply.Ok,
-                reply.Error));
-        }
-
-        return results;
-    }
-
     private static bool MatchesDay(string days, DayOfWeek day)
     {
         if (string.IsNullOrWhiteSpace(days))
@@ -1939,6 +2395,25 @@ public sealed class DownloadManagerService
             changed = true;
         }
 
+        // Completed payloads have already been atomically renamed. Their absent
+        // part file is expected and must not erase recorded download bytes.
+        if (job.State == DownloadState.Completed)
+        {
+            if (!File.Exists(job.FinalFilePath))
+            {
+                job.State = DownloadState.Failed;
+                job.Failure = new JobFailure(FailureKind.DestinationUnavailable,
+                    "The completed file is missing from its destination.", false, false, DateTimeOffset.UtcNow);
+                return true;
+            }
+            if (job.ReceivedBytes == 0)
+            {
+                job.ReceivedBytes = new FileInfo(job.FinalFilePath).Length;
+                changed = job.ReceivedBytes != 0 || changed;
+            }
+            return changed;
+        }
+
         var checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
         if (checkpoint is not null)
         {
@@ -1963,6 +2438,10 @@ public sealed class DownloadManagerService
             ? new FileInfo(job.PartFilePath).Length
             : (long?)null;
         if (checkpoint is not null &&
+            // Segmented files are preallocated and contain completed ranges at
+            // noncontiguous offsets. Their aggregate byte count is not a safe
+            // truncation offset; the engine validates their layout on resume.
+            checkpoint.Segments.Count <= 1 &&
             partLength is { } longPartLength &&
             longPartLength > checkpoint.CompletedBytes)
         {
@@ -2054,7 +2533,7 @@ public sealed class DownloadManagerService
 
     private bool AddQuotaUsageLocked(JobRuntime runtime, long received)
     {
-        var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId);
+        var queue = runtime.Job.IsQueued ? _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) : null;
         if (queue is null || !queue.QuotaEnabled)
         {
             return false;
@@ -2076,7 +2555,7 @@ public sealed class DownloadManagerService
 
         queue.IsRunning = false;
         foreach (var active in _jobs.Values.Where(r =>
-                     r.Job.QueueId == queue.Id &&
+                     r.Job.IsQueued && r.Job.QueueId == queue.Id &&
                      (r.Starting || r.Runner is { IsCompleted: false })))
         {
             active.PauseRequested = true;
@@ -2093,6 +2572,7 @@ public sealed class DownloadManagerService
 
     private async Task SaveSettingsQuietlyAsync()
     {
+        await _settingsUpdateGate.WaitAsync().ConfigureAwait(false);
         try
         {
             await _settingsStore.SaveAsync(_settings, CancellationToken.None).ConfigureAwait(false);
@@ -2102,6 +2582,7 @@ public sealed class DownloadManagerService
         {
             _log?.Invoke($"Could not persist quota state: {ex.Message}");
         }
+        finally { _settingsUpdateGate.Release(); }
     }
 
     private void Schedule()
@@ -2109,7 +2590,7 @@ public sealed class DownloadManagerService
         List<JobRuntime> toStart;
         lock (_sync)
         {
-            if (!_initialized || _shuttingDown)
+            if (!_initialized || _shuttingDown || _updateQuiescing)
             {
                 return;
             }
@@ -2128,15 +2609,21 @@ public sealed class DownloadManagerService
             var queueDefaults = _settings.Queues.FirstOrDefault(q => q.Id == _settings.DefaultQueueId)
                                 ?? _settings.Queues[0];
             var perQueueActive = running
-                .GroupBy(r => r.Job.QueueId)
+                .GroupBy(r => r.Job.IsQueued ? r.Job.QueueId : -1)
                 .ToDictionary(g => g.Key, g => g.Count());
 
             toStart = new List<JobRuntime>();
+            var fileOrder = _settings.Queues
+                .SelectMany(queue => (queue.JobOrder ?? new()).Select((id, index) =>
+                    (QueueId: queue.Id, JobId: id, Index: index)))
+                .GroupBy(item => (item.QueueId, item.JobId))
+                .ToDictionary(group => group.Key, group => group.First().Index);
             foreach (var runtime in _jobs.Values
-                         .Where(r => !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
+                         .Where(r => !r.AdmissionSuspended && !r.Starting && (r.Runner is null || r.Runner.IsCompleted) &&
                                      r.Job.State == DownloadState.Queued &&
                                      r.Job.StartMode != StartMode.Later)
                          .OrderByDescending(r => r.Job.Priority)
+                         .ThenBy(r => fileOrder.GetValueOrDefault((r.Job.QueueId, r.Job.Id), int.MaxValue))
                          .ThenBy(r => r.Job.CreatedAt))
             {
                 if (slots <= 0)
@@ -2144,7 +2631,8 @@ public sealed class DownloadManagerService
                     break;
                 }
 
-                var queue = _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults;
+                var queue = runtime.Job.IsQueued ? _settings.Queues.FirstOrDefault(q => q.Id == runtime.Job.QueueId) ?? queueDefaults
+                    : new DownloadQueue { Id = -1, IsRunning = true, MaxConcurrentDownloads = _settings.MaxConcurrentDownloads };
                 if (!queue.IsRunning)
                 {
                     continue;
@@ -2387,6 +2875,13 @@ public sealed class DownloadManagerService
                 job.State = DownloadState.Failed;
                 job.Failure = result.Failure ?? new JobFailure(FailureKind.Unknown,
                     "The download failed for an unknown reason.", false, true, DateTimeOffset.UtcNow);
+                var queue = _settings.Queues.FirstOrDefault(item => item.Id == job.QueueId);
+                if (job.IsQueued && job.QueueProcessing && queue is { IsRunning: true } && !job.IsTerminal &&
+                    (queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit))
+                {
+                    job.QueueRetryCount++;
+                    job.QueueRetryAt = _timeProvider.GetUtcNow().AddSeconds(30);
+                }
                 changeType = "failed";
             }
 
@@ -2435,8 +2930,20 @@ public sealed class DownloadManagerService
             Raise(runtime, "queued");
         }
 
-        await MaybeRunPostDownloadHookAsync(job, changeType).ConfigureAwait(false);
-        await MaybeRunCompletionActionsAsync(job, changeType, CancellationToken.None).ConfigureAwait(false);
+        if (await BeginCompletionActionsAsync(runtime, changeType).ConfigureAwait(false))
+        {
+            await MaybeRunPostDownloadHookAsync(job, changeType).ConfigureAwait(false);
+            if (job.CompletionOptions.SystemAction != "none")
+            {
+                await MaybeRunCompletionActionsAsync(job, changeType, CancellationToken.None, skipSystemAction: true).ConfigureAwait(false);
+                await RunJobCompletionActionsAsync(job).ConfigureAwait(false);
+            }
+            else
+            {
+                await RunJobCompletionActionsAsync(job).ConfigureAwait(false);
+                await MaybeRunCompletionActionsAsync(job, changeType, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
         Schedule();
     }
 
@@ -2447,7 +2954,7 @@ public sealed class DownloadManagerService
             return;
         }
 
-        var command = _settings.PostDownloadCommand;
+        var command = job.CompletionOptions.ProgramPath ?? _settings.PostDownloadCommand;
         if (string.IsNullOrWhiteSpace(command))
         {
             return;
@@ -2474,9 +2981,9 @@ public sealed class DownloadManagerService
     private async Task MaybeRunCompletionActionsAsync(
         DownloadJob job,
         string changeType,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool skipSystemAction = false)
     {
-        if (changeType != "completed")
+        if (changeType != "completed" || !job.IsQueued)
         {
             return;
         }
@@ -2502,8 +3009,8 @@ public sealed class DownloadManagerService
 
             var queueUnfinished = _jobs.Values.Any(r =>
                 r.Job.Id != job.Id &&
-                r.Job.QueueId == job.QueueId &&
-                r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled));
+                r.Job.IsQueued && r.Job.QueueId == job.QueueId &&
+                (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled)));
             if (queueUnfinished)
             {
                 return;
@@ -2513,10 +3020,10 @@ public sealed class DownloadManagerService
             allowSystemActions = _settings.AllowSystemCompletionActions;
             blockedByOtherDownloads = _jobs.Values.Any(r =>
                 r.Job.Id != job.Id &&
-                r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled));
+                (r.Job.QueueRetryAt is not null || r.Job.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled)));
         }
 
-        if (schedule.OpenFileWhenDone)
+        if (schedule.OpenFileWhenDone && !job.CompletionOptions.OpenFile)
         {
             if (File.Exists(job.FinalFilePath))
             {
@@ -2536,6 +3043,8 @@ public sealed class DownloadManagerService
                 _log?.Invoke($"Completion action skipped open: '{job.FinalFilePath}' does not exist.");
             }
         }
+
+        if (skipSystemAction) return;
 
         if (!schedule.ExitWhenDone && !schedule.ShutdownWhenDone)
         {
@@ -2574,31 +3083,48 @@ public sealed class DownloadManagerService
         }
     }
 
-    private async Task PersistAsync(JobRuntime runtime, CancellationToken cancellationToken)
+    private async Task PersistAsync(JobRuntime runtime, CancellationToken cancellationToken, bool requireSuccess = false, bool gateHeld = false)
     {
         DownloadJob clone;
         lock (_sync)
         {
             if (runtime.CancelledForRemoval)
             {
+                if (requireSuccess) throw new InvalidOperationException("The download is being removed.");
                 return;
             }
 
+            if (runtime.Job.CategoryIsAutomatic && runtime.CategoryFileName != runtime.Job.FileName)
+            {
+                runtime.Job.CategoryId = _settings.CustomCategories.FirstOrDefault(category => category.Extensions.Contains(
+                    Path.GetExtension(runtime.Job.FileName).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id ?? FileCategories.For(runtime.Job.FileName);
+                runtime.CategoryFileName = runtime.Job.FileName;
+            }
             clone = runtime.Job.Clone();
         }
 
-        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!gateHeld) await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            lock (_sync)
+            {
+                if (runtime.CancelledForRemoval || !_jobs.ContainsKey(clone.Id))
+                {
+                    if (requireSuccess) throw new InvalidOperationException("The download is being removed.");
+                    return;
+                }
+                clone = runtime.Job.Clone();
+            }
             await _jobStore.SaveAsync(clone, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
         {
             _log?.Invoke($"Could not persist job {clone.Id}: {ex.Message}");
+            if (requireSuccess) throw;
         }
         finally
         {
-            _persistGate.Release();
+            if (!gateHeld) _persistGate.Release();
         }
     }
 
@@ -2673,21 +3199,23 @@ public sealed class DownloadManagerService
             value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
-    private string ResolveDestination(string? requested, string fileName)
+    private string ResolveDestination(string? requested, string fileName, bool useLastFolder = true, bool useCategoryFolder = true, string? categoryId = null)
     {
         if (!string.IsNullOrWhiteSpace(requested))
         {
             return Path.GetFullPath(requested.Trim());
         }
 
-        var category = FileCategories.For(fileName);
-        if (_settings.CategoryFolders.TryGetValue(category, out var categoryFolder) &&
+        var category = categoryId ?? FileCategories.For(fileName);
+        var customFolder = _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
+        if (useCategoryFolder && !string.IsNullOrWhiteSpace(customFolder)) return Path.GetFullPath(customFolder);
+        if (useCategoryFolder && _settings.CategoryFolders.TryGetValue(category, out var categoryFolder) &&
             !string.IsNullOrWhiteSpace(categoryFolder))
         {
             return Path.GetFullPath(categoryFolder.Trim());
         }
 
-        var directory = _settings.LastDestinationDirectory ?? _settings.DefaultDownloadDirectory;
+        var directory = (useLastFolder ? _settings.LastDestinationDirectory : null) ?? _settings.DefaultDownloadDirectory;
         return Path.GetFullPath(directory);
     }
 
@@ -2828,6 +3356,20 @@ public sealed class DownloadManagerService
         };
     }
 
+    private static bool SupportsLiveSpeedLimit(DownloadJob job)
+        => Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
+           uri.Scheme is "http" or "https" &&
+           !uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
+           !uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase) &&
+           !job.FileName.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
+           !job.FileName.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase) &&
+           !(job.ContentType?.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) ?? false) &&
+           !(job.ContentType?.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ?? false) &&
+           !(job.Description?.Contains("mpegurl", StringComparison.OrdinalIgnoreCase) ?? false) &&
+           !(job.Description?.Contains("m3u8", StringComparison.OrdinalIgnoreCase) ?? false) &&
+           !(job.Description?.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ?? false) &&
+           !(job.Description?.Contains(".mpd", StringComparison.OrdinalIgnoreCase) ?? false);
+
     public static JobDto Map(DownloadJob job)
         => new()
         {
@@ -2836,6 +3378,10 @@ public sealed class DownloadManagerService
             FinalUrl = job.FinalUrl,
             PageUrl = job.PageUrl,
             FileName = job.FileName,
+            IsQueued = job.IsQueued,
+            QueueProcessing = job.QueueProcessing, QueueRetryCount = job.QueueRetryCount, QueueRetryAt = job.QueueRetryAt,
+            CategoryId = job.CategoryId ?? FileCategories.For(job.FileName),
+            CategoryIsAutomatic = job.CategoryIsAutomatic,
             DestinationDirectory = job.DestinationDirectory,
             FinalFilePath = job.FinalFilePath,
             PartFilePath = job.PartFilePath,
@@ -2854,6 +3400,13 @@ public sealed class DownloadManagerService
             ActiveConnections = job.ActiveConnections,
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
+            CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),
+            CanCancel = !job.IsTerminal,
+            ResumeSupported = job.ResumeSupported,
+            ShowCompletionDialog = job.ShowCompletionDialog,
+            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = job.CompletionOptions.ProgramPath,
+                OpenFile = job.CompletionOptions.OpenFile, SystemAction = job.CompletionOptions.SystemAction,
+                ForceSystemAction = job.CompletionOptions.ForceSystemAction },
             EstimatedRemaining = job.EstimatedRemaining,
             Source = JsonNamingPolicy.CamelCase.ConvertName(job.Source.ToString()),
             ClientRequestId = job.ClientRequestId,
@@ -2909,6 +3462,7 @@ public sealed class DownloadManagerService
             BrowserAutoIntercept = settings.BrowserAutoIntercept,
             NotifyOnCompletion = settings.NotifyOnCompletion,
             PlayCompletionSound = settings.PlayCompletionSound,
+            EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),
             ShowCompletionDialog = settings.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = settings.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = settings.AllowLocalNetwork,
@@ -2926,6 +3480,9 @@ public sealed class DownloadManagerService
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
             RecentUrls = new List<string>(settings.RecentUrls ?? new List<string>()),
+            DownloadGroups = MapGroups(settings.DownloadGroups),
+            CustomCategories = settings.CustomCategories.Select(category => new CategoryDefinitionDto { Id = category.Id, Name = category.Name,
+                DestinationDirectory = category.DestinationDirectory, Extensions = new(category.Extensions) }).ToList(),
             CategoryFolders = new Dictionary<string, string>(
                 settings.CategoryFolders ?? new Dictionary<string, string>(),
                 StringComparer.OrdinalIgnoreCase),
@@ -2940,6 +3497,8 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = q.MaxConcurrentDownloads,
                 IsRunning = q.IsRunning,
                 Order = q.Order,
+                JobOrder = q.JobOrder?.ToList() ?? new(),
+                RetryLimit = q.RetryLimit,
                 QuotaEnabled = q.QuotaEnabled,
                 QuotaBytes = q.QuotaBytes,
                 QuotaWindowHours = q.QuotaWindowHours,
@@ -2962,6 +3521,9 @@ public sealed class DownloadManagerService
                 ShutdownWhenDone = s.ShutdownWhenDone,
                 ShutdownMode = s.ShutdownMode,
                 ForceShutdown = s.ForceShutdown,
+                StartOnHostStartup = s.StartOnHostStartup, TimedStartEnabled = s.TimedStartEnabled,
+                RepeatEveryMinutes = s.RepeatEveryMinutes,
+                LastRunAt = s.LastRunAt, LastRunError = s.LastRunError,
                 LastStartDate = s.LastStartDate,
                 LastStopDate = s.LastStopDate,
             }).ToList(),
@@ -3062,11 +3624,13 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = Math.Clamp(q.MaxConcurrentDownloads, 1, 16),
                 IsRunning = q.IsRunning,
                 Order = index,
+                RetryLimit = q.RetryLimit,
                 QuotaEnabled = q.QuotaEnabled,
                 QuotaBytes = Math.Clamp(q.QuotaBytes, 1, 10L * 1024 * 1024 * 1024 * 1024),
                 QuotaWindowHours = Math.Clamp(q.QuotaWindowHours, 1, 24 * 365),
                 QuotaWindowStart = q.QuotaWindowStart,
                 QuotaBytesUsed = Math.Max(0, q.QuotaBytesUsed),
+                JobOrder = existing.FirstOrDefault(current => current.Id == q.Id)?.JobOrder?.ToList() ?? new(),
             }).ToList()
             : existing.Select((q, index) => new DownloadQueue
             {
@@ -3075,11 +3639,13 @@ public sealed class DownloadManagerService
                 MaxConcurrentDownloads = q.MaxConcurrentDownloads,
                 IsRunning = q.IsRunning,
                 Order = index,
+                RetryLimit = q.RetryLimit,
                 QuotaEnabled = q.QuotaEnabled,
                 QuotaBytes = q.QuotaBytes,
                 QuotaWindowHours = q.QuotaWindowHours,
                 QuotaWindowStart = q.QuotaWindowStart,
                 QuotaBytesUsed = q.QuotaBytesUsed,
+                JobOrder = q.JobOrder?.ToList() ?? new(),
             }).ToList();
 
         if (source.Count == 0)
@@ -3124,6 +3690,11 @@ public sealed class DownloadManagerService
         {
             var id = s.Id == Guid.Empty ? Guid.NewGuid() : s.Id;
             existingById.TryGetValue(id, out var previous);
+            var triggerChanged = previous is not null && (previous.QueueId != s.QueueId || previous.Kind != s.Kind ||
+                previous.StartDate != s.StartDate || previous.Days != s.Days || previous.StartTime != s.StartTime ||
+                previous.StopTime != s.StopTime || previous.StartOnHostStartup != s.StartOnHostStartup ||
+                previous.TimedStartEnabled != s.TimedStartEnabled || previous.RepeatEveryMinutes != s.RepeatEveryMinutes ||
+                !previous.Enabled && s.Enabled);
             return new ScheduleRule
             {
                 Id = id,
@@ -3142,9 +3713,12 @@ public sealed class DownloadManagerService
                 ShutdownWhenDone = s.ShutdownWhenDone,
                 ShutdownMode = s.ShutdownMode,
                 ForceShutdown = s.ForceShutdown,
+                StartOnHostStartup = s.StartOnHostStartup, TimedStartEnabled = s.TimedStartEnabled,
+                RepeatEveryMinutes = s.RepeatEveryMinutes,
                 // Run state is owned by the host scheduler, never by a UI payload.
-                LastStartDate = previous?.LastStartDate,
-                LastStopDate = previous?.LastStopDate,
+                LastRunAt = triggerChanged ? null : previous?.LastRunAt, LastRunError = triggerChanged ? null : previous?.LastRunError,
+                LastStartDate = triggerChanged ? null : previous?.LastStartDate,
+                LastStopDate = triggerChanged ? null : previous?.LastStopDate,
             };
         }).ToList();
     }
@@ -3154,14 +3728,17 @@ public sealed class DownloadManagerService
         public JobRuntime(DownloadJob job)
         {
             Job = job;
+            CategoryFileName = job.FileName;
             QuotaReportedBytes = job.ReceivedBytes;
         }
 
         public DownloadJob Job { get; }
+        public string CategoryFileName { get; set; }
         public long QuotaReportedBytes { get; set; }
         public CancellationTokenSource? Cts { get; set; }
         public Task? Runner { get; set; }
         public bool Starting { get; set; }
+        public bool AdmissionSuspended { get; set; }
         public bool PauseRequested { get; set; }
         public bool ResumeWhenStopped { get; set; }
         public bool CancelRequested { get; set; }

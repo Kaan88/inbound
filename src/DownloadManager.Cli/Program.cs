@@ -65,7 +65,7 @@ internal static class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--start now|later] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]");
                     return 2;
                 }
 
@@ -81,6 +81,7 @@ internal static class Program
                     Url = optionArgs[0],
                     DestinationDirectory = GetOption(args, "--dest"),
                     FileName = GetOption(args, "--name"),
+                    CategoryId = GetOption(args, "--category"),
                     StartMode = GetOption(args, "--start") ?? "now",
                     ConflictPolicy = conflict ?? "rename",
                     Description = GetOption(args, "--description"),
@@ -255,6 +256,7 @@ internal static class Program
                         {
                             Url = entry.Url,
                             FileName = entry.FileName,
+                            CategoryId = entry.CategoryId,
                             DestinationDirectory = entry.DestinationDirectory,
                             Description = entry.Description,
                             QueueId = entry.QueueId,
@@ -1608,7 +1610,7 @@ internal static class Program
             Download Manager CLI
 
             Usage:
-              dm add <url> [--dest DIR] [--name NAME] [--start now|later] [--wait]
+              dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
                           [--conflict rename|overwrite|fail]
               dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
@@ -1663,6 +1665,14 @@ internal sealed class CliClient : IAsyncDisposable
                 return new CliClient(connected);
             }
         }
+        catch (UnauthorizedAccessException)
+        {
+            throw RunningHostPermissionDenied();
+        }
+        catch (HostUnavailableException)
+        {
+            throw;
+        }
         catch (Exception)
         {
             // fall through to starting the host
@@ -1681,7 +1691,8 @@ internal sealed class CliClient : IAsyncDisposable
             {
                 FileName = host,
                 Arguments = "--background",
-                UseShellExecute = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
         }
@@ -1702,6 +1713,14 @@ internal sealed class CliClient : IAsyncDisposable
                     return new CliClient(connected);
                 }
             }
+            catch (UnauthorizedAccessException)
+            {
+                throw RunningHostPermissionDenied();
+            }
+            catch (HostUnavailableException)
+            {
+                throw;
+            }
             catch (Exception)
             {
                 // retry
@@ -1710,6 +1729,9 @@ internal sealed class CliClient : IAsyncDisposable
 
         throw new HostUnavailableException("The background host did not become ready within 15 seconds.");
     }
+
+    private static HostUnavailableException RunningHostPermissionDenied()
+        => new("Windows denied access to the running Host. If it was started as administrator, exit Download Manager and start it normally.");
 
     private static async Task<IpcClient?> TryConnectAsync()
     {

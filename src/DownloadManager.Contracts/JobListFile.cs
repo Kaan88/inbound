@@ -6,6 +6,7 @@ public sealed class JobListEntry
 {
     public string Url { get; set; } = string.Empty;
     public string? FileName { get; set; }
+    public string? CategoryId { get; set; }
     public string? DestinationDirectory { get; set; }
     public string? Description { get; set; }
     public int QueueId { get; set; }
@@ -30,6 +31,7 @@ public static class JobListFile
             {
                 Url = job.Url,
                 FileName = job.FileName,
+                CategoryId = job.CategoryId,
                 DestinationDirectory = job.DestinationDirectory,
                 Description = job.Description,
                 QueueId = job.QueueId,

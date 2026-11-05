@@ -1,10 +1,15 @@
 /// <reference types="chrome" />
 
+import { chooseDownloadFileName } from "./download-filename";
+import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
+import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
+
 type StartMode = "now" | "later";
 
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
+  mediaDetectionEnabled: boolean;
   startMode: StartMode;
   defaultDestination: string;
   interceptedExtensions: string[];
@@ -24,6 +29,7 @@ interface PendingHandoff {
   totalBytes?: number;
   isAutoIntercept: boolean;
   createdAt: number;
+  cookieContext?: BrowserCookieContext;
 }
 
 interface JobSummary {
@@ -68,6 +74,7 @@ interface NativeEnvelope {
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   autoIntercept: true,
+  mediaDetectionEnabled: false,
   startMode: "now",
   defaultDestination: "",
   interceptedExtensions: [
@@ -83,9 +90,11 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const NATIVE_HOST = "com.kaank.downloadmanager";
-const EXTENSION_VERSION = "0.1.0";
+const EXTENSION_VERSION = "0.1.3";
 
 let settings: Settings = DEFAULT_SETTINGS;
+let settingsLoaded = false;
+let settingsLoadPromise: Promise<void> | null = null;
 let bypassUntil = 0;
 let nativePort: chrome.runtime.Port | null = null;
 let lastNativeError = "";
@@ -102,11 +111,35 @@ const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
 const mediaByTab = new Map<number, TabMedia>();
 const variantCache = new Map<string, { expires: number; variants: MediaVariant[] }>();
+let mediaSyncQueue: Promise<void> = Promise.resolve();
+async function hasDeleteGesture(url: string): Promise<boolean> {
+  // DownloadItem has no tab id. Ask page scripts for the exact initiating link
+  // before pausing Chrome, rather than racing a fire-and-forget click message
+  // against downloads.onCreated. No page URLs or key history are retained here.
+  try {
+    const tabs = await chrome.tabs.query({});
+    const replies = new Promise<boolean>(resolve => {
+      void Promise.all(tabs.filter(tab => tab.id !== undefined).map(async tab => {
+        try {
+          const response = await chrome.tabs.sendMessage(tab.id!, { type: "dm.consumeCaptureBypass", url }, { frameId: 0 });
+          if (response?.bypass === true) resolve(true);
+        } catch { /* Restricted pages have no content script. */ }
+      })).then(() => resolve(false));
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        replies,
+        new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 300); }),
+      ]);
+    } finally { clearTimeout(timer); }
+  } catch { return false; }
+}
 
 void initialize();
 
 async function initialize(): Promise<void> {
-  await loadSettings();
+  await ensureSettingsLoaded();
   await installMenus();
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     void onContextMenu(info, tab);
@@ -127,8 +160,18 @@ async function initialize(): Promise<void> {
     void installMenus();
   });
   chrome.runtime.onStartup.addListener(() => {
-    void loadSettings();
+    void loadSettings().then(syncMediaDetectionWithTabs);
   });
+}
+
+async function ensureSettingsLoaded(): Promise<void> {
+  if (settingsLoaded) return;
+  settingsLoadPromise ??= loadSettings();
+  try {
+    await settingsLoadPromise;
+  } finally {
+    settingsLoadPromise = null;
+  }
 }
 
 async function loadSettings(): Promise<void> {
@@ -137,20 +180,66 @@ async function loadSettings(): Promise<void> {
     ...DEFAULT_SETTINGS,
     ...(stored.settings ?? {}),
   };
+  // Earlier releases saved one-off handoff destinations as a global override.
+  // Browser downloads now defer to the application's configured default.
+  let changed = false;
+  if (settings.defaultDestination) {
+    settings.defaultDestination = "";
+    changed = true;
+  }
+  if (typeof stored.settings?.mediaDetectionEnabled !== "boolean") {
+    changed = true;
+  }
+  if (changed) {
+    await chrome.storage.local.set({ settings });
+  }
   const normalized = await chrome.storage.local.get("bypassUntil");
   bypassUntil = typeof normalized.bypassUntil === "number" ? normalized.bypassUntil : 0;
+  settingsLoaded = true;
+}
+
+function syncMediaDetectionWithTabs(): Promise<void> {
+  const sync = mediaSyncQueue.then(async () => {
+    const enabled = settings.mediaDetectionEnabled === true;
+    try {
+      const tabs = await chrome.tabs.query({});
+      // A newer Options save may have happened during the query. Its queued sync
+      // will publish the latest value; this stale pass must not clear/broadcast.
+      if (enabled !== (settings.mediaDetectionEnabled === true)) return;
+      if (!enabled) {
+        mediaByTab.clear();
+        await Promise.all(tabs
+          .filter(tab => typeof tab.id === "number")
+          .map(tab => updateBadge(tab.id!, 0)));
+      }
+      for (const tab of tabs) {
+        if (enabled !== (settings.mediaDetectionEnabled === true)) return;
+        if (typeof tab.id !== "number") continue;
+        try {
+          await chrome.tabs.sendMessage(
+            tab.id, { type: "dm.mediaDetectionChanged", enabled }, { frameId: 0 });
+        } catch {
+          // The tab may be restricted or may not have loaded the content script yet.
+        }
+      }
+    } catch {
+      // Tab synchronization is best effort; each content script also requests the setting on load.
+    }
+  });
+  mediaSyncQueue = sync.catch(() => undefined);
+  return mediaSyncQueue;
 }
 
 async function installMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
     id: "dm.download-link",
-    title: "Download with Download Manager",
+    title: "Download with Rill Download Manager",
     contexts: ["link"],
   });
   chrome.contextMenus.create({
     id: "dm.download-media",
-    title: "Download with Download Manager",
+    title: "Download with Rill Download Manager",
     contexts: ["video", "audio", "image"],
   });
 }
@@ -171,11 +260,12 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     id,
     url,
     pageUrl: info.pageUrl ?? tab?.url,
-    referrer: info.pageUrl ?? tab?.url,
+    referrer: info.frameUrl ?? info.pageUrl ?? tab?.url,
     userAgent: navigator.userAgent,
     suggestedFileName: inferFileName(url, info.linkUrl ? "link" : "media"),
     isAutoIntercept: false,
     createdAt: Date.now(),
+    cookieContext: await cookieContextForFrame(tab?.id, info.frameId ?? 0),
   };
   pendingHandoffs.set(id, pending);
   await chrome.storage.session.set({ [`handoff.${id}`]: pending });
@@ -183,7 +273,7 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
     type: "popup",
     width: 560,
-    height: 500,
+    height: 680,
   });
 }
 
@@ -196,12 +286,16 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
     return;
   }
 
+  if (await hasDeleteGesture(item.url)) {
+    return;
+  }
+
   const url = item.finalUrl || item.url;
   if (!isHttpUrl(url)) {
     return;
   }
 
-  const fileName = baseName(item.filename || url);
+  const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
   const extension = extensionOf(fileName || url);
   const host = hostOf(url);
   if (!host) {
@@ -238,6 +332,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
     downloadRequestIds.set(item.id, requestId);
   }
 
+  let hostAccepted = false;
   try {
     const ack = await requestHandoff({
       requestId,
@@ -257,12 +352,14 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
     });
 
     if (ack.accepted) {
-      await chrome.downloads.cancel(item.id).catch(() => undefined);
-      await chrome.downloads.erase({ id: item.id }).catch(() => undefined);
+      hostAccepted = true;
+      const browserEntryRemoved = await removeAcceptedBrowserDownload(chrome.downloads, item.id);
       downloadRequestIds.delete(item.id);
       notify(
-        ack.duplicate ? "Already in Download Manager" : "Sent to Download Manager",
-        fileName,
+        browserEntryRemoved
+          ? ack.duplicate ? "Already in Download Manager" : "Sent to Download Manager"
+          : "Sent to Download Manager; browser cleanup incomplete",
+        browserEntryRemoved ? fileName : "The browser entry could not be cleared. Check the browser's Downloads menu.",
       );
     } else {
       await chrome.downloads.resume(item.id).catch(() => undefined);
@@ -270,6 +367,12 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
       lastNativeError = ack.error ?? "handoff rejected";
     }
   } catch (error) {
+    if (hostAccepted) {
+      // Cleanup/notification failures cannot revoke durable native acceptance.
+      // Resuming here would start a second browser transfer of the same file.
+      downloadRequestIds.delete(item.id);
+      return;
+    }
     await chrome.downloads.resume(item.id).catch(() => undefined);
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
@@ -370,6 +473,34 @@ function ensurePort(): chrome.runtime.Port {
   return port;
 }
 
+function pickNativeFolder(initialPath?: string): Promise<any> {
+  // A modal picker can stay open for minutes. Use its own native connection so
+  // it cannot block automatic handoffs on the normal sequential IPC connection.
+  const port = chrome.runtime.connectNative(NATIVE_HOST);
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const finish = (result: any, error?: Error): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try { port.disconnect(); } catch { /* already closed */ }
+      if (error) reject(error); else resolve(result);
+    };
+    const timer = setTimeout(() => finish(null, new Error("Folder selection timed out.")), 120000);
+    port.onMessage.addListener((message: NativeEnvelope) => {
+      if (message.replyTo !== id) return;
+      if (message.type !== "host.folderPicked") {
+        finish(null, new Error("This Host does not support folder selection. Update the desktop application."));
+      } else finish(message.payload);
+    });
+    port.onDisconnect.addListener(() => finish(null,
+      new Error(chrome.runtime.lastError?.message ?? "The folder selection connection closed.")));
+    try { port.postMessage({ v: 1, type: "host.pickFolder", id, payload: { initialPath } }); }
+    catch (error) { finish(null, error instanceof Error ? error : new Error(String(error))); }
+  });
+}
+
 function disconnectPort(): void {
   if (!nativePort) {
     return;
@@ -433,18 +564,7 @@ function extractError(payload: unknown): string {
 }
 
 async function cookieHeaders(url: string): Promise<Record<string, string>> {
-  try {
-    const cookies = await chrome.cookies.getAll({ url });
-    if (cookies.length === 0) {
-      return {};
-    }
-
-    return {
-      Cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; "),
-    };
-  } catch {
-    return {};
-  }
+  return browserCookieHeaders(url);
 }
 
 function isHttpUrl(url: string): boolean {
@@ -625,11 +745,20 @@ chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
 });
 
 async function handleRuntimeMessage(message: any, sender?: chrome.runtime.MessageSender): Promise<any> {
+  await ensureSettingsLoaded();
   switch (message?.type) {
+    case "dm.getMediaDetectionEnabled":
+      return { ok: true, enabled: settings.mediaDetectionEnabled === true };
+
     case "dm.mediaDetected": {
       const tabId = sender?.tab?.id;
       if (typeof tabId !== "number") {
         return { ok: false, error: "No sender tab." };
+      }
+      if (settings.mediaDetectionEnabled !== true) {
+        mediaByTab.delete(tabId);
+        await updateBadge(tabId, 0);
+        return { ok: true, count: 0, disabled: true };
       }
 
       const items = (Array.isArray(message.items) ? message.items : [])
@@ -650,6 +779,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.rescan": {
+      if (settings.mediaDetectionEnabled !== true) return { ok: true, disabled: true };
       const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       const tabId = tabs[0]?.id;
       if (typeof tabId === "number") {
@@ -669,6 +799,10 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         tabId = tabs[0]?.id;
       }
 
+      if (settings.mediaDetectionEnabled !== true) {
+        return { ok: true, tabId, pageUrl: "", items: [] };
+      }
+
       const media = typeof tabId === "number" ? mediaByTab.get(tabId) : undefined;
       const items = await Promise.all((media?.items ?? []).map(enrichMediaItem));
       return {
@@ -680,6 +814,9 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.queueMedia": {
+      if (settings.mediaDetectionEnabled !== true) {
+        return { ok: false, error: "Media detection is disabled in extension settings." };
+      }
       const url = String(message.url ?? "");
       if (!isHttpUrl(url)) {
         return { ok: false, error: "This media URL cannot be downloaded." };
@@ -704,7 +841,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
         type: "popup",
         width: 560,
-        height: 500,
+        height: 680,
       });
       return { ok: true, id };
     }
@@ -840,6 +977,15 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true };
     }
 
+    case "dm.pickFolder": {
+      const sourcePage = (sender?.url ?? "").split(/[?#]/)[0];
+      if (sender?.id !== chrome.runtime.id ||
+          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html")].includes(sourcePage ?? "")) {
+        return { ok: false, error: "Folder selection is available from the download destination screen." };
+      }
+      return await pickNativeFolder(typeof message.initialPath === "string" ? message.initialPath : undefined);
+    }
+
     case "dm.ping": {
       const result = await sendNative("host.ping", {}, 5000);
       return { ok: true, result };
@@ -888,20 +1034,19 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         totalBytes: pending.totalBytes,
         startMode,
         isAutoIntercept: pending.isAutoIntercept,
-        headers: await cookieHeaders(pending.url),
+        headers: await browserCookieHeaders(pending.url, pending.cookieContext),
         destinationDirectory: destination || undefined,
       });
 
       pendingHandoffs.delete(id);
       await chrome.storage.session.remove(`handoff.${id}`);
 
-      // Remember the confirmed choices as the defaults for future handoffs
-      // and automatic interception, mirroring reference app's last-folder behavior.
+      // A folder selected here belongs only to this request. The configured
+      // default destination is changed exclusively in extension Options.
       if (ack?.accepted) {
         settings = {
           ...settings,
           startMode,
-          defaultDestination: destination,
         };
         await chrome.storage.local.set({ settings });
       }
@@ -913,8 +1058,13 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       settings = {
         ...DEFAULT_SETTINGS,
         ...message.settings,
+        // An Options page left open across an extension reload may still send
+        // the removed persistent-folder field. It must not restore the override.
+        defaultDestination: "",
       };
       await chrome.storage.local.set({ settings });
+      settingsLoaded = true;
+      await syncMediaDetectionWithTabs();
       return { ok: true, settings };
     }
 

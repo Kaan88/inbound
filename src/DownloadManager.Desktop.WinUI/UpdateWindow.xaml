@@ -1,0 +1,46 @@
+<Window
+    x:Class="DownloadManager.Desktop.WinUI.UpdateWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid x:Name="Root" Padding="18" RowSpacing="10"
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Spacing="3">
+            <TextBlock Text="Software update" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock x:Name="VersionText" Text="Checking for a newer version…"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <TextBlock x:Name="StatusText" Grid.Row="1" Text="Connecting to Download Manager…"
+                   FontSize="14" TextWrapping="Wrap" />
+
+        <ProgressBar x:Name="UpdateProgress" Grid.Row="2" Height="8" Maximum="100"
+                     IsIndeterminate="True" />
+
+        <Grid Grid.Row="3" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="BytesText" Text="Preparing update…"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="PercentText" Grid.Column="1" Text="" HorizontalAlignment="Right"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Grid>
+
+        <TextBlock x:Name="DetailText" Grid.Row="4" TextWrapping="Wrap"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+        <Button x:Name="CloseButton" Grid.Row="5" Content="Close"
+                HorizontalAlignment="Right" Click="Close_Click" />
+    </Grid>
+</Window>

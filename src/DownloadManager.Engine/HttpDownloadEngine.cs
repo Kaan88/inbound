@@ -10,7 +10,7 @@ using System.Xml.Linq;
 
 namespace DownloadManager.Core;
 
-public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
+public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataReader, IDisposable
 {
     private static readonly HashSet<string> RestrictedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -199,7 +199,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         }
 
         if (job.RequestedConnections > 1 &&
-            job.SpeedLimitBytesPerSecond is not > 0 &&
             (checkpoint is null || checkpoint.Segments.Count > 1))
         {
             var segmented = await TryExecuteSegmentedAsync(job, checkpoint, progress, cancellationToken)
@@ -222,7 +221,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         var reporter = new TransferReporter(progress, state);
         reporter.Reset();
-        var stopwatch = Stopwatch.StartNew();
         var attempt = 0;
         var bestBytes = state.Bytes;
 
@@ -235,7 +233,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
             try
             {
-                var result = await TransferOnceAsync(job, state, reporter, stopwatch, cancellationToken)
+                var result = await TransferOnceAsync(job, state, reporter, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (result.RestartFromZero)
@@ -303,7 +301,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         DownloadJob job,
         TransferState state,
         TransferReporter reporter,
-        Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
         reporter.Report(force: true, state.Bytes > 0 ? "Resuming" : "Connecting");
@@ -357,6 +354,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
 
         if (status == 200 && state.Bytes > 0)
         {
+            job.ResumeSupported = false;
             // The server ignored our Range request. Never append response bytes to
             // an existing partial file: restart from zero.
             if (state.Restarts++ < 2)
@@ -452,6 +450,8 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         state.ETag = responseEtag ?? state.ETag;
         state.LastModified = responseLastModified ?? state.LastModified;
         state.ContentType = response.Content.Headers.ContentType?.ToString();
+        if (status == 206 || response.Headers.AcceptRanges.Contains("bytes")) job.ResumeSupported = true;
+        else if (response.Headers.AcceptRanges.Contains("none")) job.ResumeSupported = false;
         await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
 
         var contentLength = response.Content.Headers.ContentLength;
@@ -506,13 +506,12 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     break;
                 }
 
+                await state.RateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
                 await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 state.Bytes += read;
                 bytesThisResponse += read;
 
                 reporter.Report(force: false, "Downloading");
-                await ThrottleAsync(state.Bytes, stopwatch.Elapsed, job.SpeedLimitBytesPerSecond, cancellationToken)
-                    .ConfigureAwait(false);
 
                 var now = DateTimeOffset.UtcNow;
                 if (now - lastCheckpointAt >= TimeSpan.FromSeconds(1) || Math.Abs(state.Bytes - checkpointBytes) >= 8 * 1024 * 1024)
@@ -719,8 +718,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             using var request = BuildRequest(job, uri, 0, SameAuthority(job.Url, uri));
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_options.ConnectTimeout);
-            using var response = await CurrentClient()
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+            using var response = await SendTrackedAsync(job, request, timeout.Token)
                 .ConfigureAwait(false);
             var status = (int)response.StatusCode;
             if (status is 301 or 302 or 303 or 307 or 308)
@@ -1329,8 +1327,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                     includeValidators: false);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_options.ReadTimeout);
-                using var response = await CurrentClient()
-                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                using var response = await SendTrackedAsync(job, request, timeout.Token)
                     .ConfigureAwait(false);
                 var status = (int)response.StatusCode;
                 if (status is 401 or 403 or 404 or 407 or 410)
@@ -1480,8 +1477,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 using var request = BuildRequest(job, keyUri, 0, SameAuthority(job.Url, keyUri));
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_options.ReadTimeout);
-                using var response = await CurrentClient()
-                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                using var response = await SendTrackedAsync(job, request, timeout.Token)
                     .ConfigureAwait(false);
                 var status = (int)response.StatusCode;
                 if (status is 401 or 403 or 404 or 407 or 410)
@@ -2055,8 +2051,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             includeValidators: false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.ReadTimeout);
-        using var response = await CurrentClient()
-            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+        using var response = await SendTrackedAsync(job, request, timeout.Token)
             .ConfigureAwait(false);
         var status = (int)response.StatusCode;
         if (status is 401 or 403 or 404 or 407 or 410)
@@ -2623,27 +2618,73 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             ? parsed
             : fallback;
 
+    public async Task<FileMetadata> ReadMetadataAsync(DownloadJob request, CancellationToken cancellationToken)
+    {
+        try { return await ReadMetadataCoreAsync(request, cancellationToken).ConfigureAwait(false); }
+        catch (DownloadEngineException ex) { throw new HttpRequestException(ex.Message, ex); }
+    }
+
+    private async Task<FileMetadata> ReadMetadataCoreAsync(DownloadJob request, CancellationToken cancellationToken)
+    {
+        if (!TryCreateUri(request.Url, out var uri, out var error)) throw new ArgumentException(error);
+        using var lease = await _hostLimiter.AcquireAsync(uri.Host, cancellationToken).ConfigureAwait(false);
+        var response = await SendWithRedirectsAsync(request, 0, cancellationToken, method: HttpMethod.Head).ConfigureAwait(false);
+        try
+        {
+            if (response.StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+            {
+                response.Dispose();
+                response = await SendWithRedirectsAsync(request, 0, cancellationToken, rangeEnd: 0).ConfigureAwait(false);
+            }
+            response.EnsureSuccessStatusCode();
+            var finalUri = response.RequestMessage?.RequestUri ?? uri;
+            var disposition = response.Content.Headers.TryGetValues("Content-Disposition", out var values)
+                ? values.FirstOrDefault() : null;
+            var size = response.StatusCode == HttpStatusCode.PartialContent
+                ? response.Content.Headers.ContentRange?.Length : response.Content.Headers.ContentLength;
+            return new FileMetadata(FileNameResolver.Resolve(disposition, finalUri), size,
+                response.Content.Headers.ContentType?.MediaType, finalUri.AbsoluteUri,
+                response.Headers.ETag?.ToString(), response.Content.Headers.LastModified?.ToString("R"));
+        }
+        finally { response.Dispose(); }
+    }
+
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
         CancellationToken cancellationToken,
-        long? rangeEnd = null)
+        long? rangeEnd = null,
+        HttpMethod? method = null)
     {
-        var currentUri = new Uri(job.Url, UriKind.Absolute);
-        var originalOrigin = currentUri.GetLeftPart(UriPartial.Authority);
+        // Browser handoff can already have resolved a landing page to a CDN URL.
+        // Keep credentials bound to the original origin even when skipping that page.
+        var originalOrigin = new Uri(job.Url, UriKind.Absolute).GetLeftPart(UriPartial.Authority);
+        var target = string.IsNullOrWhiteSpace(job.FinalUrl) ? job.Url : job.FinalUrl;
+        if (!TryCreateUri(target, out var currentUri, out var targetError))
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.InvalidContent, targetError, false, false, DateTimeOffset.UtcNow),
+                isRetryable: false);
+        }
         for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
         {
+            if (!_options.AllowLocalNetwork && IsLocalTarget(currentUri))
+            {
+                throw new DownloadEngineException(
+                    new JobFailure(FailureKind.Forbidden, "Local network destinations are disabled.", false, false, DateTimeOffset.UtcNow),
+                    isRetryable: false);
+            }
             using var request = BuildRequest(job, currentUri, offset,
                 sameOrigin: currentUri.GetLeftPart(UriPartial.Authority) == originalOrigin,
                 rangeEnd: rangeEnd);
+            if (method is not null) request.Method = method;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_options.ConnectTimeout);
 
             HttpResponseMessage response;
             try
             {
-                response = await CurrentClient()
-                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                response = await SendTrackedAsync(job, request, timeout.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -2657,6 +2698,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                 throw ToEngineException(ex);
             }
 
+            response.RequestMessage ??= request;
             if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect
                 or HttpStatusCode.RedirectMethod or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
             {
@@ -2965,6 +3007,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             .ConfigureAwait(false);
         if ((int)response.StatusCode != 206)
         {
+            if ((int)response.StatusCode == 200) job.ResumeSupported = false;
             return null;
         }
 
@@ -2974,6 +3017,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             return null;
         }
 
+        job.ResumeSupported = true;
         return new SegmentedPlan(
             range.Length.Value,
             response.Headers.ETag?.Tag,
@@ -3229,6 +3273,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
                             truncated = true;
                         }
 
+                        await run.RateLimiter.WaitAsync(allowed, cancellationToken).ConfigureAwait(false);
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
                                 buffer.AsMemory(0, allowed),
@@ -3494,6 +3539,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
             Plan = plan;
             File = file;
             Segments = segments;
+            RateLimiter = new TransferRateLimiter(() => job.SpeedLimitBytesPerSecond);
             Host = Uri.TryCreate(job.Url, UriKind.Absolute, out var uri)
                 ? uri.Host
                 : string.Empty;
@@ -3503,6 +3549,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         public SegmentedPlan Plan { get; }
         public FileStream File { get; }
         public List<SegmentCheckpoint> Segments { get; }
+        public TransferRateLimiter RateLimiter { get; }
         public HashSet<SegmentCheckpoint> Claimed { get; } = new();
         public string Host { get; }
         public object Sync { get; } = new();
@@ -3713,26 +3760,6 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         {
             // The payload itself is still written; a missing/stale checkpoint only
             // costs resume precision and is reconciled at startup.
-        }
-    }
-
-    private static async Task ThrottleAsync(long totalBytes, TimeSpan elapsed, long? limit, CancellationToken cancellationToken)
-    {
-        if (limit is not > 0 || elapsed <= TimeSpan.Zero)
-        {
-            return;
-        }
-
-        var allowedSeconds = totalBytes / (double)limit.Value;
-        var delay = TimeSpan.FromSeconds(allowedSeconds) - elapsed;
-        if (delay > TimeSpan.FromMilliseconds(15))
-        {
-            if (delay > TimeSpan.FromSeconds(2))
-            {
-                delay = TimeSpan.FromSeconds(2);
-            }
-
-            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -3993,6 +4020,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
     {
         public TransferState(DownloadJob job, DownloadCheckpoint? checkpoint)
         {
+            RateLimiter = new TransferRateLimiter(() => job.SpeedLimitBytesPerSecond);
             Total = checkpoint?.TotalBytes ?? job.TotalBytes;
             ETag = checkpoint?.ETag ?? job.ETag;
             LastModified = checkpoint?.LastModified ?? job.LastModified;
@@ -4001,6 +4029,7 @@ public sealed class HttpDownloadEngine : IDownloadEngine, IDisposable
         }
 
         public long Bytes { get; set; }
+        public TransferRateLimiter RateLimiter { get; }
         public long? Total { get; set; }
         public string? ETag { get; set; }
         public string? LastModified { get; set; }

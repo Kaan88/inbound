@@ -11,11 +11,18 @@ public sealed class FailureDto
 
 public sealed class JobDto
 {
+    public bool IsQueued { get; set; } = true;
+    public bool QueueProcessing { get; set; }
+    public int QueueRetryCount { get; set; }
+    public DateTimeOffset? QueueRetryAt { get; set; }
+
     public Guid Id { get; set; }
     public string Url { get; set; } = string.Empty;
     public string? FinalUrl { get; set; }
     public string? PageUrl { get; set; }
     public string FileName { get; set; } = string.Empty;
+    public string? CategoryId { get; set; }
+    public bool CategoryIsAutomatic { get; set; } = true;
     public string DestinationDirectory { get; set; } = string.Empty;
     public string FinalFilePath { get; set; } = string.Empty;
     public string PartFilePath { get; set; } = string.Empty;
@@ -34,6 +41,11 @@ public sealed class JobDto
     public int ActiveConnections { get; set; }
     public double? BytesPerSecond { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
+    public bool? ResumeSupported { get; set; }
+    public bool? ShowCompletionDialog { get; set; }
+    public JobCompletionOptionsDto CompletionOptions { get; set; } = new();
+    public bool CanChangeSpeedLimit { get; set; }
+    public bool CanCancel { get; set; }
     public TimeSpan? EstimatedRemaining { get; set; }
     public string Source { get; set; } = "cli";
     public string? ClientRequestId { get; set; }
@@ -51,8 +63,18 @@ public sealed class JobDto
     public FailureDto? Failure { get; set; }
 }
 
+public sealed class CategoryDefinitionDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? DestinationDirectory { get; set; }
+    public List<string> Extensions { get; set; } = new();
+}
+
 public sealed class QueueDto
 {
+    public int? RetryLimit { get; set; }
+    public List<Guid> JobOrder { get; set; } = new();
     public int Id { get; set; }
     public string Name { get; set; } = "Main";
     public int MaxConcurrentDownloads { get; set; } = 3;
@@ -73,6 +95,12 @@ public sealed class ConnectionProfileDto
 
 public sealed class ScheduleDto
 {
+    public string? LastRunError { get; set; }
+    public bool StartOnHostStartup { get; set; }
+    public bool TimedStartEnabled { get; set; } = true;
+    public int? RepeatEveryMinutes { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+
     public Guid Id { get; set; }
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
@@ -133,6 +161,7 @@ public sealed class SettingsDto
     public bool BrowserAutoIntercept { get; set; } = true;
     public bool NotifyOnCompletion { get; set; } = true;
     public bool PlayCompletionSound { get; set; } = true;
+    public Dictionary<string, string> EventSoundFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
@@ -151,6 +180,11 @@ public sealed class SettingsDto
     public string? LastDestinationDirectory { get; set; }
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<CategoryDefinitionDto> CustomCategories { get; set; } = new();
+    /// <summary>Host-owned; use group.action to mutate.</summary>
+    public List<DownloadGroupDto> DownloadGroups { get; set; } = new();
+    /// <summary>Explicit deletion intent for unused custom categories; snapshots always leave this empty.</summary>
+    public List<string> DeleteCategoryIds { get; set; } = new();
     public List<string> ExcludedFileExtensions { get; set; } = new();
     public List<string> ExcludedHosts { get; set; } = new();
     public List<string> InterceptedFileExtensions { get; set; } = new();
@@ -189,9 +223,41 @@ public sealed class IncompatibleDto
 
 public sealed class SnapshotDto
 {
+    public UpdateProgressDto? UpdateProgress { get; set; }
     public List<JobDto> Jobs { get; set; } = new();
     public SettingsDto Settings { get; set; } = new();
     public HostStatusDto Status { get; set; } = new();
+}
+
+public sealed class FolderPickRequest
+{
+    public string? InitialPath { get; set; }
+}
+
+public sealed class FolderPickResult
+{
+    public bool Ok { get; set; }
+    public bool Cancelled { get; set; }
+    public string? Path { get; set; }
+    public string? Error { get; set; }
+}
+
+public sealed class FileMetadataRequest
+{
+    public string Url { get; set; } = string.Empty;
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? UserAgent { get; set; }
+    public string? Referrer { get; set; }
+}
+
+public sealed class FileMetadataResult
+{
+    public bool Ok { get; set; }
+    public string? FileName { get; set; }
+    public long? TotalBytes { get; set; }
+    public string? ContentType { get; set; }
+    public string? FinalUrl { get; set; }
+    public string? Error { get; set; }
 }
 
 public sealed class AddJobRequest
@@ -200,6 +266,7 @@ public sealed class AddJobRequest
     public string? FinalUrl { get; set; }
     public string? DestinationDirectory { get; set; }
     public string? FileName { get; set; }
+    public string? CategoryId { get; set; }
     public string StartMode { get; set; } = "startNow";
     public string Source { get; set; } = "cli";
     public string? ClientRequestId { get; set; }
@@ -231,6 +298,7 @@ public sealed class JobActionRequest
 {
     public Guid JobId { get; set; }
     public bool DeleteFile { get; set; }
+    public bool OnlyIfUnfinished { get; set; }
 }
 
 public sealed class JobActionResponse
@@ -256,13 +324,20 @@ public sealed class CleanOrphansResponse
 
 public sealed class QueueActionRequest
 {
+    public int? MoveContentsToQueueId { get; set; }
+    public List<Guid>? JobOrder { get; set; }
     public int QueueId { get; set; }
     public string Action { get; set; } = "start";
     public int MaxConcurrentDownloads { get; set; }
+    public string? Name { get; set; }
+    public bool? QuotaEnabled { get; set; }
+    public long? QuotaBytes { get; set; }
+    public int? QuotaWindowHours { get; set; }
 }
 
 public sealed class JobQueueRequest
 {
+    public bool Detach { get; set; }
     public Guid JobId { get; set; }
     public int QueueId { get; set; }
 }
@@ -275,8 +350,15 @@ public sealed class JobRefreshUrlRequest
 
 public sealed class JobUpdateRequest
 {
+    public JobCompletionOptionsDto? CompletionOptions { get; set; }
+    /// <summary>Null leaves unchanged; empty selects automatic classification.</summary>
+    public string? CategoryId { get; set; }
+
     public Guid JobId { get; set; }
     public string? Description { get; set; }
+    /// <summary>Null leaves unchanged; zero disables the cap; positive values set it.</summary>
+    public long? SpeedLimitBytesPerSecond { get; set; }
+    public bool? ShowCompletionDialog { get; set; }
 
     /// <summary>New absolute path for a completed download (Move/Rename).</summary>
     public string? NewFilePath { get; set; }
@@ -346,4 +428,69 @@ public sealed class HandoffAck
     public JobDto? Job { get; set; }
     public string? Error { get; set; }
     public string? ErrorCode { get; set; }
+}
+
+public sealed class DownloadGroupDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public List<Guid> JobIds { get; set; } = new();
+}
+
+public sealed class GroupActionRequest
+{
+    public Guid GroupId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string? Name { get; set; }
+    public List<Guid>? JobIds { get; set; }
+}
+
+public sealed class GroupActionResult
+{
+    public bool Ok { get; set; }
+    public Guid GroupId { get; set; }
+    public string? Error { get; set; }
+    public Dictionary<Guid, string> FailedJobs { get; set; } = new();
+    public List<DownloadGroupDto> Groups { get; set; } = new();
+}
+
+public sealed class JobCompletionOptionsDto
+{
+    public string? ProgramPath { get; set; }
+    public bool OpenFile { get; set; }
+    public string SystemAction { get; set; } = "none";
+    public bool ForceSystemAction { get; set; }
+}
+
+public sealed class ConnectionTelemetryDto
+{
+    public Guid Id { get; set; }
+    public string Host { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+    public long? RangeStart { get; set; }
+    public long? RangeEnd { get; set; }
+    public long ReceivedBytes { get; set; }
+    public double BytesPerSecond { get; set; }
+    public int? StatusCode { get; set; }
+    public string? HttpVersion { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+}
+
+public sealed class DownloadStatisticsDto
+{
+    public DateTimeOffset CapturedAt { get; set; }
+    public DateTimeOffset? FirstRecordedAt { get; set; }
+    public long RecordedBytes { get; set; }
+    public long CompletedBytes { get; set; }
+    public long CompletedTodayBytes { get; set; }
+    public int CompletedCount { get; set; }
+    public int CompletedTodayCount { get; set; }
+    public int FailedCount { get; set; }
+    public int CancelledCount { get; set; }
+    public int RetainedCount { get; set; }
+    public int ArchivedCount { get; set; }
+    public int ActiveCount { get; set; }
+    public int QueuedCount { get; set; }
+    public int PausedCount { get; set; }
+    public double BytesPerSecond { get; set; }
 }

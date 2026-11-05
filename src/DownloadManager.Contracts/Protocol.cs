@@ -11,7 +11,8 @@ public static class Protocol
 {
     public const int Version = 1;
     public const int MaxFrameBytes = 8 * 1024 * 1024;
-    public const string HostVersion = "0.1.0";
+    public static string HostVersion { get; } =
+        typeof(Protocol).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 }
 
 public static class MessageTypes
@@ -22,6 +23,8 @@ public static class MessageTypes
     public const string JobEvent = "job.event";
     public const string JobAdd = "job.add";
     public const string JobAddResult = "job.addResult";
+    public const string FileMetadata = "file.metadata";
+    public const string FileMetadataResult = "file.metadataResult";
     public const string JobPause = "job.pause";
     public const string JobResume = "job.resume";
     public const string JobCancel = "job.cancel";
@@ -30,6 +33,8 @@ public static class MessageTypes
     public const string JobMoveToQueue = "job.moveToQueue";
     public const string JobRefreshUrl = "job.refreshUrl";
     public const string JobUpdate = "job.update";
+    public const string JobConnections = "job.connections";
+    public const string JobConnectionsResult = "job.connectionsResult";
     public const string JobActionResult = "job.actionResult";
     public const string HostStatusResult = "host.statusResult";
     public const string JobsPauseAll = "jobs.pauseAll";
@@ -38,16 +43,23 @@ public static class MessageTypes
     public const string SettingsUpdate = "settings.update";
     public const string SettingsResult = "settings.result";
     public const string QueueAction = "queue.action";
+    public const string GroupAction = "group.action";
+    public const string GroupActionResult = "group.actionResult";
     public const string HostStatus = "host.status";
     public const string HostShutdown = "host.shutdown";
     public const string HostPing = "host.ping";
     public const string HostOpenUi = "host.openUi";
+    public const string HostPickFolder = "host.pickFolder";
+    public const string HostFolderPicked = "host.folderPicked";
+    public const string UpdateProgress = "update.progress";
     public const string HostCleanOrphans = "host.cleanOrphans";
     public const string HostCleanOrphansResult = "host.cleanOrphansResult";
     public const string HostActionResult = "host.actionResult";
     public const string HandoffRequest = "handoff.request";
     public const string HandoffAck = "handoff.ack";
     public const string HandoffError = "handoff.error";
+    public const string StatisticsGet = "statistics.get";
+    public const string StatisticsResult = "statistics.result";
     public const string JobsQuery = "jobs.query";
     public const string JobSegments = "job.segments";
     public const string JobSegmentsResult = "job.segmentsResult";
@@ -173,6 +185,9 @@ public static class PipeNames
     public static string CurrentUserKey()
     {
         var identity = $"{Environment.UserDomainName}\\{Environment.UserName}";
+        var instance = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTANCE");
+        if (!string.IsNullOrWhiteSpace(instance) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA")))
+            identity += "\nInstance:" + instance.Trim();
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
         return Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant();
     }

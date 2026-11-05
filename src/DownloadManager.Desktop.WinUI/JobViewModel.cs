@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -24,6 +25,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private string _destination = string.Empty;
     private string _finalFilePath = string.Empty;
     private string _fileGlyph = "\uE7C3";
+    private ImageSource? _fileIcon;
+    private string? _iconKey;
+    public ImageSource? FileIcon { get => _fileIcon; private set => Set(ref _fileIcon, value); }
+    public Visibility FileIconVisibility => FileIcon is null ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility FileGlyphVisibility => FileIcon is null ? Visibility.Visible : Visibility.Collapsed;
     private string _queueText = string.Empty;
     private string _lastTryText = string.Empty;
     private string _description = string.Empty;
@@ -33,6 +39,10 @@ public sealed class JobViewModel : INotifyPropertyChanged
 
     public Guid Id { get; private set; }
     public int QueueId { get; private set; }
+    public int Priority { get; private set; }
+    public string CategoryId { get; private set; } = "other";
+    public bool CategoryIsAutomatic { get; private set; } = true;
+    public JobCompletionOptionsDto CompletionOptions { get; private set; } = new();
     public string QueueName { get; private set; } = "Main";
 
     public string FileName { get => _fileName; private set => Set(ref _fileName, value); }
@@ -69,7 +79,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileName = job.FileName;
         Url = job.Url;
         State = job.State;
-        StateText = ToDisplayState(job.State);
+        StateText = job.QueueRetryAt is not null ? "Queue retry scheduled" : ToDisplayState(job.State);
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
         BytesPerSecond = job.BytesPerSecond ?? 0;
         LastUpdated = job.UpdatedAt;
@@ -91,9 +101,22 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Destination = job.DestinationDirectory;
         FinalFilePath = job.FinalFilePath;
         FileGlyph = GlyphFor(FileName);
+        var completedPath = job.State == "completed" ? job.FinalFilePath : null;
+        var iconKey = completedPath is null ? "type:" + Path.GetExtension(job.FileName)
+            : $"file:{job.Id}:{completedPath}:{job.CompletedAt:O}";
+        if (_iconKey != iconKey)
+        {
+            _iconKey = iconKey;
+            SetFileIcon(null);
+            _ = LoadFileIconAsync(job.FileName, completedPath, iconKey);
+        }
         QueueId = job.QueueId;
+        Priority = job.Priority;
+        CategoryId = job.CategoryId ?? FileCategories.For(job.FileName);
+        CategoryIsAutomatic = job.CategoryIsAutomatic;
+        CompletionOptions = job.CompletionOptions;
         QueueName = job.QueueName ?? (job.QueueId == 0 ? "Main" : $"Queue {job.QueueId}");
-        QueueText = (job.QueueId + 1).ToString(CultureInfo.InvariantCulture);
+        QueueText = job.IsQueued ? (job.QueueId + 1).ToString(CultureInfo.InvariantCulture) : string.Empty;
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
         RawDescription = job.Description ?? string.Empty;
@@ -103,6 +126,27 @@ public sealed class JobViewModel : INotifyPropertyChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
         CreatedAt = job.CreatedAt;
+    }
+
+    private async Task LoadFileIconAsync(string fileName, string? completedPath, string key)
+    {
+        try
+        {
+            var image = await FileIconProvider.LoadAsync(fileName, completedPath, key);
+            if (_iconKey == key) SetFileIcon(image);
+        }
+        catch (Exception ex)
+        {
+            // Icon lookup must never interrupt job updates or surface an unobserved task error.
+            UiTrace.Write($"File icon unavailable: {ex.GetType().Name}");
+        }
+    }
+
+    private void SetFileIcon(ImageSource? image)
+    {
+        FileIcon = image;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FileIconVisibility)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FileGlyphVisibility)));
     }
 
     private static string GlyphFor(string fileName)
@@ -121,7 +165,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         };
     }
 
-    private static string ToDisplayState(string state)
+    internal static string ToDisplayState(string state)
         => state switch
         {
             "queued" => "Queued",

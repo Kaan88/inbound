@@ -1,3 +1,5 @@
+import { pickDestinationFolder } from "./pick-destination";
+
 interface PageLink {
   url: string;
   text: string;
@@ -31,6 +33,7 @@ const linksList = document.getElementById("links") as HTMLUListElement;
 const countLabel = document.getElementById("count") as HTMLSpanElement;
 const selectionLabel = document.getElementById("selection") as HTMLSpanElement;
 const destinationInput = document.getElementById("destination") as HTMLInputElement;
+const browseDestinationButton = document.getElementById("browseDestination") as HTMLButtonElement;
 const startSelect = document.getElementById("startMode") as HTMLSelectElement;
 const confirmButton = document.getElementById("confirm") as HTMLButtonElement;
 const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
@@ -235,4 +238,11 @@ confirmButton.addEventListener("click", async () => {
 
 cancelButton.addEventListener("click", () => window.close());
 
+browseDestinationButton.addEventListener("click", () => {
+  void pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+});
+
 void loadLinks();
+import { fitWindowToContent } from "./fit-window";
+
+void fitWindowToContent().catch(() => undefined);

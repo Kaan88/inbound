@@ -125,6 +125,13 @@ public sealed class HostConnectionLimiter : IHostConnectionLimiter
     }
 }
 
+public sealed record FileMetadata(string FileName, long? TotalBytes, string? ContentType, string FinalUrl, string? ETag = null, string? LastModified = null);
+
+public interface IFileMetadataReader
+{
+    Task<FileMetadata> ReadMetadataAsync(DownloadJob request, CancellationToken cancellationToken);
+}
+
 public interface IDownloadEngine
 {
     Task<DownloadResult> ExecuteAsync(

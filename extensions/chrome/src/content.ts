@@ -1,4 +1,5 @@
 /// <reference types="chrome" />
+import { CaptureBypass, consumeCaptureBypass, normalizeDownloadUrl } from "./capture-bypass";
 
 interface MediaCandidate {
   url: string;
@@ -15,8 +16,33 @@ interface PageLink {
 }
 
 const seen = new Map<string, MediaCandidate>();
+let deleteHeld = false;
+let mediaDetectionEnabled = false;
+let mediaDetectionGeneration = 0;
+let observer: MutationObserver | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
-
+const captureGestures: CaptureBypass[] = [];
+document.addEventListener("keydown", event => {
+  if (event.isTrusted && event.key === "Delete") deleteHeld = true;
+}, true);
+document.addEventListener("keyup", event => {
+  if (event.isTrusted && event.key === "Delete") deleteHeld = false;
+}, true);
+window.addEventListener("blur", () => { deleteHeld = false; });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) deleteHeld = false;
+});
+// Capture before the page's click handler initiates navigation or a download.
+function rememberCaptureGesture(event: MouseEvent): void {
+  if (!event.isTrusted) return;
+  captureGestures.length = 0;
+  if (!deleteHeld) return;
+  const anchor = event.composedPath().find(node => node instanceof HTMLAnchorElement) as HTMLAnchorElement | undefined;
+  const url = normalizeDownloadUrl(anchor?.href ?? "");
+  if (url) captureGestures.push({ url, expires: Date.now() + 15000 });
+}
+document.addEventListener("click", rememberCaptureGesture, true);
+document.addEventListener("auxclick", rememberCaptureGesture, true);
 function kindFor(url: string, tag: string): string {
   const lower = url.toLowerCase();
   if (lower.includes(".m3u8")) {
@@ -55,6 +81,8 @@ function add(url: string | null | undefined, tag: string, label: string): void {
 }
 
 function scan(): void {
+  if (!mediaDetectionEnabled) return;
+
   for (const video of Array.from(document.querySelectorAll("video"))) {
     add(video.currentSrc, "video", video.getAttribute("title") || "video");
     add(video.getAttribute("src"), "video", video.getAttribute("title") || "video");
@@ -194,8 +222,16 @@ function updatePanel(): void {
   }
 }
 
+function removeMediaPanel(): void {
+  seen.clear();
+  panelHost?.remove();
+  document.getElementById("dm-media-panel-host")?.remove();
+  panelHost = null;
+  panelRoot = null;
+}
+
 function send(): void {
-  if (seen.size === 0) {
+  if (!mediaDetectionEnabled || seen.size === 0) {
     return;
   }
 
@@ -298,21 +334,65 @@ function collectLinks(): PageLink[] {
 }
 
 function scheduleScan(): void {
+  if (!mediaDetectionEnabled) return;
   if (timer) {
     clearTimeout(timer);
   }
 
   timer = setTimeout(() => {
     timer = null;
-    scan();
+    if (mediaDetectionEnabled) scan();
   }, 500);
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "dm.scan") {
+function setMediaDetectionEnabled(enabled: boolean): void {
+  mediaDetectionGeneration++;
+  if (enabled === mediaDetectionEnabled) {
+    if (!enabled) removeMediaPanel();
+    return;
+  }
+  mediaDetectionEnabled = enabled;
+  if (enabled) {
+    observer ??= new MutationObserver(scheduleScan);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+    for (const event of ["loadedmetadata", "durationchange", "play"]) {
+      document.addEventListener(event, scheduleScan, true);
+    }
     scan();
-    sendResponse({ ok: true });
+    return;
+  }
+
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  observer?.disconnect();
+  for (const event of ["loadedmetadata", "durationchange", "play"]) {
+    document.removeEventListener(event, scheduleScan, true);
+  }
+  removeMediaPanel();
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "dm.consumeCaptureBypass") {
+    sendResponse({ bypass: consumeCaptureBypass(captureGestures, String(message.url ?? ""), Date.now()) });
+    return false;
+  }
+  if (message?.type === "dm.scan") {
+    if (mediaDetectionEnabled) scan();
+    sendResponse({ ok: true, disabled: !mediaDetectionEnabled });
     return true;
+  }
+
+  if (message?.type === "dm.mediaDetectionChanged") {
+    setMediaDetectionEnabled(message.enabled === true);
+    sendResponse({ ok: true, enabled: mediaDetectionEnabled });
+    return false;
   }
 
   if (message?.type === "dm.collectLinks") {
@@ -323,14 +403,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-scan();
-const observer = new MutationObserver(scheduleScan);
-observer.observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ["src"],
-});
-for (const event of ["loadedmetadata", "durationchange", "play"]) {
-  document.addEventListener(event, scheduleScan, true);
-}
+const initialMediaDetectionGeneration = mediaDetectionGeneration;
+void chrome.runtime.sendMessage({ type: "dm.getMediaDetectionEnabled" })
+  .then(response => {
+    // Ignore an initial read that races a newer live Options change.
+    if (mediaDetectionGeneration === initialMediaDetectionGeneration)
+      setMediaDetectionEnabled(response?.enabled === true);
+  })
+  .catch(() => undefined);

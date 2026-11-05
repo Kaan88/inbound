@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Send to Download Manager</title>
+  <title>Send to Rill Download Manager</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="handoff">
@@ -11,8 +11,8 @@
     <header class="brand">
       <img src="icons/icon48.png" alt="" width="36" height="36" />
       <div>
-        <h1>Send to Download Manager</h1>
-        <p class="muted small">Review the request before it becomes a durable download job.</p>
+        <h1>Send to Rill Download Manager</h1>
+        <p class="muted small">Choose where to save this download.</p>
       </div>
     </header>
 
@@ -27,7 +27,10 @@
       </label>
       <label class="field">
         <span>Destination folder (optional)</span>
-        <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
+        <div class="destination-picker">
+          <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
+          <button id="browseDestination" type="button">Browse…</button>
+        </div>
       </label>
       <label class="field">
         <span>Start</span>
@@ -37,7 +40,7 @@
         </select>
       </label>
       <p id="hint" class="muted small">
-        The destination and start choice are remembered for the next handoff.
+        The folder applies to this download only. New downloads use your configured default folder.
         Authenticated requests carry the browser's cookies for this site. They are sent only to the
         local application and are not logged.
       </p>

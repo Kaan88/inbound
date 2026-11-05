@@ -29,4 +29,14 @@ public static class FileCategories
     public static string Normalize(string? category)
         => Names.FirstOrDefault(name => string.Equals(name, category, StringComparison.OrdinalIgnoreCase))
            ?? "other";
+
+    public static bool IsBuiltIn(string category)
+        => string.Equals(category, "other", StringComparison.OrdinalIgnoreCase) || Names.Contains(category, StringComparer.OrdinalIgnoreCase);
+
+    public static string For(string? fileName, IEnumerable<CategoryDefinitionDto> categories)
+    {
+        var extension = Path.GetExtension(fileName ?? string.Empty).TrimStart('.');
+        return categories.FirstOrDefault(category => category.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase))?.Id
+            ?? For(fileName);
+    }
 }

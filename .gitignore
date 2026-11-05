@@ -48,6 +48,7 @@ secrets/
 notes/artifacts/
 notes/binaries/
 notes/captures/
+reference-screens/*.png
 notes/disassembler/
 *.exe
 *.dll

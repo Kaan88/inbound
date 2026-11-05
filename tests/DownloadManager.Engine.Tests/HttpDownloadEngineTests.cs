@@ -82,6 +82,61 @@ public sealed class HttpDownloadEngineTests
         Assert.Equal(65536, new FileInfo(result.FinalFilePath!).Length);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(8)]
+    public async Task BrowserResolvedFinalUrlSkipsForbiddenLandingPage(int connections)
+    {
+        const int size = 2 * 1024 * 1024;
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/error/403", "resolved.bin");
+        job.FinalUrl = $"{_server.BaseAddress}/file/resolved.bin?size={size}&seed=734";
+        job.RequestedConnections = connections;
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        Assert.True(result.Success, result.Failure?.Message);
+        var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(734, size))).ToLowerInvariant();
+        Assert.Equal(expected, await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BrowserResolvedFinalUrlKeepsOriginalCredentialBoundary(bool crossOrigin)
+    {
+        await using var target = await TestServerHost.StartAsync();
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/error/403", "resolved.json");
+        job.FinalUrl = $"{(crossOrigin ? target.BaseAddress : _server.BaseAddress)}/sensitive/echo";
+        job.Referrer = $"{_server.BaseAddress}/page";
+        job.RequestHeaders["Cookie"] = "session=secret";
+        job.RequestHeaders["Authorization"] = "Bearer secret";
+        job.RequestHeaders["Proxy-Authorization"] = "Basic secret";
+        using var engine = CreateEngine();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        Assert.True(result.Success, result.Failure?.Message);
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.FinalFilePath!));
+        foreach (var name in new[] { "cookie", "authorization", "referer" })
+            Assert.Equal(!crossOrigin, json.RootElement.GetProperty(name).GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("file:///C:/test.bin", FailureKind.InvalidContent)]
+    [InlineData("not a URL", FailureKind.InvalidContent)]
+    [InlineData("http://127.0.0.1/private.bin", FailureKind.Forbidden)]
+    [InlineData("http://192.168.1.1/private.bin", FailureKind.Forbidden)]
+    public async Task BrowserResolvedFinalUrlRejectsInvalidOrDisabledTargets(string finalUrl, FailureKind kind)
+    {
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob("https://example.com/file.bin", "blocked.bin");
+        job.FinalUrl = finalUrl;
+        using var engine = new HttpDownloadEngine(new EngineOptions { AllowLocalNetwork = false, MaxAttempts = 1 });
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal(kind, result.Failure?.Kind);
+        Assert.False(File.Exists(job.FinalFilePath));
+    }
+
     [Fact]
     public async Task SendsCookieRefererAndUserAgentToAuthenticatedEndpoint()
     {
@@ -623,6 +678,79 @@ public sealed class HttpDownloadEngineTests
             await Hashing.Sha256FileAsync(result.FinalFilePath!));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task SpeedLimitCanBeEnabledAndRemovedDuringTransfer(int connections)
+    {
+        using var ctx = new EngineContext();
+        const int size = 4 * 1024 * 1024;
+        var job = ctx.CreateJob(
+            $"{_server.BaseAddress}/slow/live-limit.bin?size={size}&seed=417&bps=524288", "live-limit.bin");
+        job.RequestedConnections = connections;
+        var capped = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        long latest = 0;
+        var enabled = 0;
+        var progress = new InlineProgress<TransferProgress>(p =>
+        {
+            Interlocked.Exchange(ref latest, p.ReceivedBytes);
+            if (p.Phase == "Downloading" && p.ReceivedBytes >= 131072 && Interlocked.Exchange(ref enabled, 1) == 0)
+            {
+                job.SpeedLimitBytesPerSecond = 65536;
+                capped.TrySetResult(p.ReceivedBytes);
+            }
+        });
+        using var engine = CreateEngine();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        var transfer = engine.ExecuteAsync(job, null, progress, cancellation.Token);
+        var atCap = await capped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(1400);
+        // All workers share the cap. Allow one buffer of burst plus report lag.
+        Assert.InRange(Interlocked.Read(ref latest) - atCap, 0, 262144);
+        Assert.False(transfer.IsCompleted);
+        job.SpeedLimitBytesPerSecond = null;
+        var result = await transfer.WaitAsync(TimeSpan.FromSeconds(12));
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(job.ResumeSupported);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(417, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task InitialSpeedLimitIsSharedAcrossConnections(int connections)
+    {
+        using var ctx = new EngineContext();
+        const int size = 1048576;
+        var job = ctx.CreateJob($"{_server.BaseAddress}/file/shared-limit.bin?size={size}&seed=418", "shared-limit.bin");
+        job.RequestedConnections = connections;
+        job.SpeedLimitBytesPerSecond = 262144;
+        using var engine = CreateEngine();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 9);
+        Assert.Equal(size, new FileInfo(result.FinalFilePath!).Length);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public async Task CancellingWhileWaitingForSpeedBudgetReturnsPromptly(int connections)
+    {
+        using var ctx = new EngineContext();
+        var job = ctx.CreateJob($"{_server.BaseAddress}/file/capped-cancel.bin?size=1048576&seed=421", "capped-cancel.bin");
+        job.RequestedConnections = connections;
+        job.SpeedLimitBytesPerSecond = 1;
+        using var engine = CreateEngine();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var result = await engine.ExecuteAsync(job, null, null, cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(DownloadState.Cancelled, result.FinalState);
+        Assert.False(File.Exists(job.FinalFilePath));
+    }
+
     [Fact]
     public async Task DiskFullPreflightFailsBeforeWriting()
     {
@@ -720,7 +848,7 @@ public sealed class HttpDownloadEngineTests
         var last = reports[^1];
         Assert.Equal(size, last.ReceivedBytes);
         Assert.True(last.TotalBytes is null or size);
-        Assert.True(reports.Any(report => report.BytesPerSecond > 0));
+        Assert.Contains(reports, report => report.BytesPerSecond > 0);
         Assert.All(reports, report =>
         {
             Assert.True(report.EstimatedRemaining is null ||

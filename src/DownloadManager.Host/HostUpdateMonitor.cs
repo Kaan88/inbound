@@ -8,21 +8,25 @@ internal sealed class HostUpdateMonitor : IDisposable
 {
     private readonly DownloadManagerService _service;
     private readonly Action<string> _log;
-    private readonly System.Windows.Forms.Timer _timer;
+    private readonly System.Threading.Timer _timer;
+    private readonly System.Threading.Timer _retryTimer;
     private readonly object _sync = new();
     private Action<string, string>? _notify;
     private UpdateCheckResult? _available;
     private string? _notifiedVersion;
     private bool _checking;
-    private bool _autoCheck;
+    private volatile bool _autoCheck;
     private int _intervalHours = 24;
+    private bool _disposed;
 
     public HostUpdateMonitor(DownloadManagerService service, Action<string> log)
     {
         _service = service;
         _log = log;
-        _timer = new System.Windows.Forms.Timer();
-        _timer.Tick += (_, _) => _ = CheckAsync(manual: false);
+        _timer = new System.Threading.Timer(
+            _ => _ = CheckAsync(manual: false), null, Timeout.Infinite, Timeout.Infinite);
+        _retryTimer = new System.Threading.Timer(
+            _ => _ = CheckAsync(manual: false), null, Timeout.Infinite, Timeout.Infinite);
         _service.UpdateDeferred += (_, _) =>
         {
             lock (_sync)
@@ -47,20 +51,19 @@ internal sealed class HostUpdateMonitor : IDisposable
 
     public void ApplySettings(SettingsDto settings)
     {
-        var wasEnabled = _autoCheck;
-        _autoCheck = settings.AutoCheckUpdates;
-        _intervalHours = Math.Clamp(settings.UpdateCheckIntervalHours, 1, 168);
-        _timer.Interval = _intervalHours * 60 * 60 * 1000;
-        if (_autoCheck && !_timer.Enabled)
+        bool startCheck;
+        lock (_sync)
         {
-            _timer.Start();
+            if (_disposed) return;
+            var wasEnabled = _autoCheck;
+            _autoCheck = settings.AutoCheckUpdates && InstalledBuild.TryLoad() is not null;
+            _intervalHours = Math.Clamp(settings.UpdateCheckIntervalHours, 1, 168);
+            var interval = _autoCheck ? TimeSpan.FromHours(_intervalHours) : Timeout.InfiniteTimeSpan;
+            _timer.Change(interval, interval);
+            if (!_autoCheck) _retryTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            startCheck = _autoCheck && !wasEnabled;
         }
-        else if (!_autoCheck && _timer.Enabled)
-        {
-            _timer.Stop();
-        }
-
-        if (_autoCheck && !wasEnabled)
+        if (startCheck)
         {
             _ = CheckAsync(manual: false);
         }
@@ -93,6 +96,11 @@ internal sealed class HostUpdateMonitor : IDisposable
         var result = await _service.InstallUpdateAsync(new UpdateInstallRequest()).ConfigureAwait(false);
         if (result.Status == "busy")
         {
+            lock (_sync)
+            {
+                if (!_disposed && _autoCheck)
+                    _retryTimer.Change(TimeSpan.FromMinutes(1), Timeout.InfiniteTimeSpan);
+            }
             _notify?.Invoke("Update postponed", "Downloads are active; the update will not restart the Host yet.");
             _log("Automatic update install blocked by active downloads.");
             return;
@@ -110,10 +118,12 @@ internal sealed class HostUpdateMonitor : IDisposable
         }
 
         _notify?.Invoke("Installing update", $"Version {result.Version} will be installed; the Host is restarting.");
+        _service.RequestUpdateShutdown();
     }
 
     public async Task CheckAsync(bool manual)
     {
+        if (!manual && !_autoCheck) return;
         lock (_sync)
         {
             if (_checking)
@@ -149,6 +159,14 @@ internal sealed class HostUpdateMonitor : IDisposable
                 return;
             }
 
+            if (!manual)
+            {
+                if (!_autoCheck) return;
+                lock (_sync) _available = check;
+                await InstallAsync().ConfigureAwait(false);
+                return;
+            }
+
             lock (_sync)
             {
                 _available = check;
@@ -181,7 +199,13 @@ internal sealed class HostUpdateMonitor : IDisposable
 
     public void Dispose()
     {
-        _timer.Stop();
-        _timer.Dispose();
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _autoCheck = false;
+            _retryTimer.Dispose();
+            _timer.Dispose();
+        }
     }
 }

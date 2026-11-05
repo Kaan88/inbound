@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -16,19 +16,25 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
     private MenuFlyoutSubItem? _addToQueueMenu;
+    private DownloadGroupsWindow? _groupsWindow;
+    private StatisticsWindow? _statisticsWindow;
+    private SchedulerWindow? _schedulerWindow;
     private SettingsDto? _settings;
     private HostStatusDto? _status;
     private bool _settingsDialogOpen;
     private bool _pendingSettingsOpen;
-    private bool _completionDialogOpen;
-    private readonly Queue<JobDto> _completionDialogs = new();
     private string _category = "all";
     private string _search = string.Empty;
     private string _sortKey = "added";
     private bool _sortAscending;
     private bool _toolbarLarge = true;
     private bool _hideCategories;
+    private bool _refreshingCategories;
     private UiState _uiState = new();
+    private bool _graphConnected;
+    private bool _graphSnapshotReady;
+    private readonly DispatcherTimer _speedHistoryTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+
 
     public MainWindow()
     {
@@ -36,7 +42,27 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
-        RootGrid.RequestedTheme = ElementTheme.Dark;
+        RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
+            ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
+            : ElementTheme.Default;
+        SpeedGraphPanel.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
+        ShowSpeedGraphMenuItem.IsChecked = _uiState.ShowSpeedGraph;
+        SpeedGraphPanel.IsExpanded = _uiState.SpeedGraphExpanded;
+        _speedHistoryTimer.Tick += (_, _) =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            var active = _jobsById.Values.Where(job => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting").ToArray();
+            double? rate = !_graphConnected || !_graphSnapshotReady || active.Any(job => now - job.LastUpdated > TimeSpan.FromSeconds(10))
+                ? null : active.Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
+            SpeedGraph.AddSample(now, rate);
+        };
+        _speedHistoryTimer.Start();
+        RootGrid.ActualThemeChanged += (_, _) =>
+        {
+            DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
+            ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
+        };
+        DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
         UiTrace.Write("MainWindow collections initialized");
@@ -52,7 +78,7 @@ public sealed partial class MainWindow : Window
                 AppWindow.SetIcon(icon);
             }
 
-            ApplyTitleBarTheme(dark: true);
+            ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
         }
         catch (Exception)
         {
@@ -117,6 +143,10 @@ public sealed partial class MainWindow : Window
             {
                 CategoryList.SelectedItem = saved;
             }
+            else if (_uiState.Category.StartsWith("category:", StringComparison.Ordinal))
+            {
+                _category = _uiState.Category; // Restored once Host category definitions arrive.
+            }
         }
 
         UpdateButtons();
@@ -140,14 +170,18 @@ public sealed partial class MainWindow : Window
     public void ShowFromTray()
     {
         AppWindow.Show();
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
+            presenter.Restore();
         Activate();
     }
 
     public void RequestSettingsPage()
     {
+        ShowFromTray();
         _pendingSettingsOpen = true;
         if (_settings is not null)
         {
+            _pendingSettingsOpen = false;
             _ = ShowSettingsDialogAsync();
         }
     }
@@ -175,6 +209,9 @@ public sealed partial class MainWindow : Window
                 SortAscending = _sortAscending,
                 ToolbarLarge = _toolbarLarge,
                 HideCategories = _hideCategories,
+                ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked,
+                SpeedGraphExpanded = SpeedGraphPanel.IsExpanded,
+                DarkMode = _uiState.DarkMode,
             });
         }
         catch (Exception ex)
@@ -185,7 +222,9 @@ public sealed partial class MainWindow : Window
 
     private void ApplySnapshot(SnapshotDto snapshot)
     {
+        _graphSnapshotReady = true;
         _settings = snapshot.Settings;
+        RefreshCustomCategories();
         _status = snapshot.Status;
         RefreshQueueMenus();
 
@@ -244,80 +283,15 @@ public sealed partial class MainWindow : Window
         UpdateStatusText();
         UpdateButtons();
 
-        if (changeType == "completed" && _settings?.ShowCompletionDialog == true)
-        {
-            _completionDialogs.Enqueue(job);
-            _ = ShowNextCompletionDialogAsync();
-        }
-    }
-
-    private async Task ShowNextCompletionDialogAsync()
-    {
-        if (_completionDialogOpen)
-        {
-            return;
-        }
-
-        _completionDialogOpen = true;
-        try
-        {
-            while (_completionDialogs.Count > 0)
-            {
-                var job = _completionDialogs.Dequeue();
-                var dialog = new ContentDialog
-                {
-                    XamlRoot = Content.XamlRoot,
-                    Title = "Download complete",
-                    Content = new TextBlock
-                    {
-                        Text = $"{job.FileName}\n{job.FinalFilePath}",
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                    PrimaryButtonText = "Open file",
-                    SecondaryButtonText = "Open folder",
-                    CloseButtonText = "Close",
-                    DefaultButton = ContentDialogButton.Primary,
-                };
-
-                var result = await dialog.ShowAsync();
-                if (result == ContentDialogResult.Primary && File.Exists(job.FinalFilePath))
-                {
-                    try
-                    {
-                        Process.Start(new ProcessStartInfo(job.FinalFilePath) { UseShellExecute = true });
-                    }
-                    catch (Exception ex)
-                    {
-                        await ShowMessageAsync("Could not open file", ex.Message);
-                    }
-                }
-                else if (result == ContentDialogResult.Secondary)
-                {
-                    try
-                    {
-                        var argument = File.Exists(job.FinalFilePath)
-                            ? $"/select,\"{job.FinalFilePath}\""
-                            : $"\"{Path.GetDirectoryName(job.FinalFilePath)}\"";
-                        Process.Start(new ProcessStartInfo("explorer.exe", argument)
-                        {
-                            UseShellExecute = true,
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        await ShowMessageAsync("Could not open folder", ex.Message);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            _completionDialogOpen = false;
-        }
+        // Preserve notifications for headless jobs when the main UI is already open.
+        if (changeType == "completed" && job.Source == "cli" && (job.ShowCompletionDialog ?? _settings?.ShowCompletionDialog) == true)
+            OpenDownloadWindow(job.Id);
     }
 
     private void ApplyConnection(bool connected, string? error)
     {
+        _graphConnected = connected;
+        _graphSnapshotReady = false;
         ConnectionText.Text = connected
             ? "Host connected"
             : $"Host unavailable{(error is null ? string.Empty : $": {error}")}";
@@ -353,8 +327,8 @@ public sealed partial class MainWindow : Window
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "retryWaiting" or "verifying");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads Â· {active} active Â· {queued} queued" +
-                          (host is null ? string.Empty : $" Â· host {host}")
+        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
+                          (host is null ? string.Empty : $" · host {host}")
                           + (_status?.BrowserIntegration is { Length: > 0 } integration
                               ? $" | browser {integration}"
                               : string.Empty);
@@ -392,11 +366,8 @@ public sealed partial class MainWindow : Window
             "active" => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting",
             "queued" => job.State is "queued" or "paused",
             "failed" => job.State == "failed",
-            "compressed" => FileCategories.For(job.FileName) == "compressed",
-            "documents" => FileCategories.For(job.FileName) == "documents",
-            "music" => FileCategories.For(job.FileName) == "music",
-            "programs" => FileCategories.For(job.FileName) == "programs",
-            "video" => FileCategories.For(job.FileName) == "video",
+            "compressed" or "documents" or "music" or "programs" or "video" or "other" => job.CategoryId == _category,
+            _ when _category.StartsWith("category:", StringComparison.Ordinal) => job.CategoryId == _category[9..],
             _ => true,
         };
     }
@@ -453,6 +424,7 @@ public sealed partial class MainWindow : Window
 
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_refreshingCategories) return;
         if (CategoryList.SelectedItem is ListBoxItem { Tag: string tag })
         {
             if (tag == "queues")
@@ -464,6 +436,30 @@ public sealed partial class MainWindow : Window
             _category = tag;
             RebuildVisible();
         }
+    }
+
+    private void RefreshCustomCategories()
+    {
+        if (_settings is null) return;
+        _refreshingCategories = true;
+        try
+        {
+            for (var index = CategoryList.Items.Count - 1; index >= 0; index--)
+                if (CategoryList.Items[index] is ListBoxItem { Tag: string tag } && tag.StartsWith("category:", StringComparison.Ordinal))
+                    CategoryList.Items.RemoveAt(index);
+            var insertion = 6;
+            foreach (var category in _settings.CustomCategories)
+                CategoryList.Items.Insert(insertion++, new ListBoxItem { Tag = "category:" + category.Id,
+                    Content = category.Name, Padding = new Thickness(38, 2, 8, 2) });
+            var selected = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == _category);
+            if (selected is not null) CategoryList.SelectedItem = selected;
+            else if (_category.StartsWith("category:", StringComparison.Ordinal))
+            {
+                _category = "all";
+                CategoryList.SelectedIndex = 0;
+            }
+        }
+        finally { _refreshingCategories = false; }
     }
 
     private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -514,6 +510,8 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Progress details...", MenuProgressDetails_Click));
+        flyout.Items.Add(CreateContextItem("Group selected downloads...", MenuGroupSelected_Click));
+        flyout.Items.Add(CreateContextItem("Change category...", MenuChangeCategory_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
         JobsList.ContextFlyout = flyout;
     }
@@ -574,7 +572,7 @@ public sealed partial class MainWindow : Window
     {
         if (SelectedJob is { } job && _settings is { } settings)
         {
-            await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, settings.DefaultQueueId));
+            await RunActionAsync(() => _connection.DetachFromQueueAsync(job.Id));
         }
     }
 
@@ -668,6 +666,7 @@ public sealed partial class MainWindow : Window
                 Url = job.Url,
                 DestinationDirectory = job.Destination,
                 FileName = job.FileName,
+                CategoryId = job.CategoryId,
                 ConflictPolicy = "rename",
                 Source = "api",
             });
@@ -790,106 +789,116 @@ public sealed partial class MainWindow : Window
         await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, input.Text.Trim()));
     }
 
-    private async void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
+    private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } selected)
+        if (SelectedJob is not { } job) return;
+        OpenDownloadWindow(job.Id);
+    }
+
+    private void OpenDownloadWindow(Guid jobId)
+    {
+        try
         {
-            return;
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--job {jobId:D} --manual")
+            {
+                UseShellExecute = false,
+            });
         }
+        catch (Exception ex) { _ = ShowMessageAsync("Could not open progress", ex.Message); }
+    }
 
-        var summary = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var overall = new ProgressBar { Maximum = 100, Height = 8 };
-        var segmentsPanel = new StackPanel { Spacing = 4 };
-        var status = new TextBlock
+    private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
+    {
+        SpeedGraphPanel.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+        SaveUiState();
+    }
+
+    private void MenuStatistics_Click(object sender, RoutedEventArgs e)
+    {
+        if (_statisticsWindow is null)
         {
-            FontSize = 11,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
-        };
-        var refresh = new Button { Content = "Refresh" };
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(summary);
-        panel.Children.Add(overall);
-        panel.Children.Add(refresh);
-        panel.Children.Add(segmentsPanel);
-        panel.Children.Add(status);
+            _statisticsWindow = new StatisticsWindow();
+            _statisticsWindow.Closed += (_, _) => _statisticsWindow = null;
+        }
+        _statisticsWindow.ShowWindow();
+    }
 
-        async Task LoadAsync()
+    private void MenuGroups_Click(object sender, RoutedEventArgs e)
+    {
+        if (_groupsWindow is null)
+        {
+            _groupsWindow = new DownloadGroupsWindow();
+            _groupsWindow.Closed += (_, _) => _groupsWindow = null;
+        }
+        _groupsWindow.ShowWindow();
+    }
+
+    private async void MenuGroupSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selection = SelectedJobs;
+        if (selection.Count == 0) return;
+        try
+        {
+            var snapshot = await _connection.RefreshAsync();
+            var destination = new ComboBox { Header = "Group", HorizontalAlignment = HorizontalAlignment.Stretch };
+            destination.Items.Add(new ComboBoxItem { Content = "Create new group", Tag = Guid.Empty });
+            foreach (var group in snapshot.Settings.DownloadGroups)
+                destination.Items.Add(new ComboBoxItem { Content = group.Name, Tag = group.Id });
+            destination.SelectedIndex = 0;
+            var name = new TextBox { Header = "New group name", MaxLength = 100, Text = "Downloads" };
+            destination.SelectionChanged += (_, _) => name.IsEnabled = destination.SelectedIndex == 0;
+            var panel = new StackPanel { Spacing = 12 };
+            panel.Children.Add(new TextBlock { Text = $"Group {selection.Count} independent download(s). Files and queue assignments stay unchanged. Downloads already grouped will move to this group.", TextWrapping = TextWrapping.Wrap });
+            panel.Children.Add(destination);
+            panel.Children.Add(name);
+            var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
+                Title = "Group downloads", Content = panel, PrimaryButtonText = "Group", CloseButtonText = "Cancel" };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || destination.SelectedItem is not ComboBoxItem { Tag: Guid groupId }) return;
+            var reply = await _connection.GroupActionAsync(new GroupActionRequest { GroupId = groupId,
+                Action = groupId == Guid.Empty ? "create" : "add", Name = name.Text,
+                JobIds = selection.Select(job => job.Id).ToList() });
+            var result = reply.GetPayload<GroupActionResult>();
+            if (!result.Ok) await ShowMessageAsync("Group downloads", result.Error ?? "The group could not be saved.");
+            else MenuGroups_Click(sender, e);
+        }
+        catch (Exception ex) { await ShowMessageAsync("Group downloads", ex.Message); }
+    }
+
+    private async void MenuChangeCategory_Click(object sender, RoutedEventArgs e)
+    {
+        var selection = SelectedJobs;
+        if (selection.Count == 0 || _settings is null) return;
+        var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
+        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (file extension)", Tag = "" });
+        foreach (var id in new[] { "compressed", "documents", "music", "programs", "video", "other" })
+            categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(id[0]) + id[1..], Tag = id });
+        foreach (var category in _settings.CustomCategories)
+            categoryBox.Items.Add(new ComboBoxItem { Content = category.Name, Tag = category.Id });
+        categoryBox.SelectedIndex = 0;
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(new TextBlock { Text = $"Change category for {selection.Count} download(s). Existing files stay in their current folders.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(categoryBox);
+        var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
+            Title = "Change category", Content = panel, PrimaryButtonText = "Apply", CloseButtonText = "Cancel" };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || categoryBox.SelectedItem is not ComboBoxItem { Tag: string categoryId }) return;
+        var errors = new List<string>();
+        foreach (var job in selection)
         {
             try
             {
-                var snapshot = await _connection.RefreshAsync();
-                var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == selected.Id);
-                if (job is null)
-                {
-                    summary.Text = "This download is no longer in the list.";
-                    segmentsPanel.Children.Clear();
-                    return;
-                }
-
-                var received = job.ReceivedBytes;
-                var total = job.TotalBytes;
-                var percent = total is > 0 ? received * 100.0 / total.Value : 0;
-                overall.Value = Math.Clamp(percent, 0, 100);
-                summary.Text =
-                    $"File: {job.FileName}\nState: {job.State}\n" +
-                    $"Bytes: {received:N0}" + (total is > 0 ? $" / {total.Value:N0} ({percent:0.0}%)" : string.Empty) +
-                    $"\nConnections: {job.ActiveConnections}/{job.RequestedConnections}\n" +
-                    $"Speed: {job.BytesPerSecond:0} B/s\nETA: {job.EstimatedRemaining}\n" +
-                    $"Part: {job.PartFilePath}";
-
-                var reply = await _connection.GetSegmentsAsync(job.Id);
-                var segments = reply.GetPayload<List<SegmentDto>>();
-                segmentsPanel.Children.Clear();
-                if (segments.Count == 0)
-                {
-                    status.Text = job.State == "completed"
-                        ? "Completed; the checkpoint was removed after the final rename."
-                        : "No segment checkpoint yet (the transfer may still be connecting).";
-                    return;
-                }
-
-                status.Text = $"{segments.Count} segment{(segments.Count == 1 ? "" : "s")} from the engine checkpoint.";
-                foreach (var segment in segments)
-                {
-                    var length = Math.Max(1, segment.End - segment.Start + 1);
-                    var row = new StackPanel { Spacing = 1 };
-                    row.Children.Add(new TextBlock
-                    {
-                        Text = $"Bytes {segment.Start:N0}â€“{segment.End:N0}  " +
-                               $"{segment.Completed:N0}/{length:N0}",
-                        FontSize = 11,
-                    });
-                    row.Children.Add(new ProgressBar
-                    {
-                        Maximum = 100,
-                        Height = 5,
-                        Value = Math.Clamp(segment.Fraction * 100, 0, 100),
-                    });
-                    segmentsPanel.Children.Add(row);
-                }
+                var reply = await _connection.SetCategoryAsync(job.Id, categoryId);
+                var result = reply.GetPayload<JobActionResponse>();
+                if (!result.Ok) errors.Add($"{job.FileName}: {result.Error ?? "Update rejected."}");
             }
-            catch (Exception ex)
-            {
-                status.Text = ex.Message;
-            }
+            catch (Exception ex) { errors.Add($"{job.FileName}: {ex.Message}"); }
         }
-
-        refresh.Click += async (_, _) => await LoadAsync();
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "Download progress",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 520 },
-            CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        await LoadAsync();
-        await dialog.ShowAsync();
+        await RefreshAsync();
+        if (errors.Count > 0) await ShowMessageAsync("Some categories were not changed", string.Join("\n", errors));
     }
 
     private async void MenuProperties_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job)
+        if (SelectedJob is not { } job || _settings is null)
         {
             return;
         }
@@ -910,17 +919,47 @@ public sealed partial class MainWindow : Window
             AcceptsReturn = true,
             Height = 80,
         };
+        var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
+        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (file extension)", Tag = "" });
+        foreach (var id in new[] { "compressed", "documents", "music", "programs", "video", "other" })
+            categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(id[0]) + id[1..], Tag = id });
+        foreach (var category in _settings.CustomCategories)
+            categoryBox.Items.Add(new ComboBoxItem { Content = category.Name, Tag = category.Id });
+        categoryBox.SelectedItem = categoryBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
+            item.Tag as string == (job.CategoryIsAutomatic ? "" : job.CategoryId)) ?? categoryBox.Items[0];
+        var originalCategorySelection = categoryBox.SelectedItem;
+        var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions);
+        var canEditCompletion = job.State != "completed";
+        if (completionEditor.Content is Control completionControl) completionControl.IsEnabled = canEditCompletion;
+        var completionExpander = new Expander { Header = "After completion", Content = completionEditor.Content,
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        JobCompletionOptionsDto? completionOptions = null;
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(info);
         panel.Children.Add(descriptionBox);
+        panel.Children.Add(categoryBox);
+        panel.Children.Add(completionExpander);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
             Title = "Download properties",
-            Content = panel,
+            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
+        };
+
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (canEditCompletion)
+            {
+                if (!completionEditor.TryGetOptions(out var options, out var completionValidationError))
+                {
+                    args.Cancel = true;
+                    completionExpander.IsExpanded = true;
+                }
+                else completionOptions = options;
+            }
         };
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -930,7 +969,9 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var reply = await _connection.UpdateJobAsync(job.Id, descriptionBox.Text);
+            var reply = await _connection.UpdateJobAsync(job.Id, descriptionBox.Text,
+                ReferenceEquals(originalCategorySelection, categoryBox.SelectedItem) ? null :
+                    (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string, completionOptions);
             var result = reply.GetPayload<JobActionResponse>();
             if (!result.Ok)
             {
@@ -1061,6 +1102,7 @@ public sealed partial class MainWindow : Window
                 {
                     Url = entry.Url,
                     FileName = entry.FileName,
+                    CategoryId = entry.CategoryId,
                     DestinationDirectory = entry.DestinationDirectory,
                     Description = entry.Description,
                     QueueId = entry.QueueId,
@@ -1338,7 +1380,9 @@ public sealed partial class MainWindow : Window
     {
         var dark = DarkModeMenuItem.IsChecked;
         RootGrid.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        _uiState.DarkMode = dark;
         ApplyTitleBarTheme(dark);
+        SaveUiState();
     }
 
     private void ApplyTitleBarTheme(bool dark)
@@ -1488,8 +1532,8 @@ public sealed partial class MainWindow : Window
 
     private async void MenuAbout_Click(object sender, RoutedEventArgs e)
     {
-        await ShowMessageAsync("Download Manager",
-            "Download Manager 0.1.0\n\n" +
+        await ShowMessageAsync("Rill Download Manager",
+            $"Rill Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
             "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
             "and a Chrome Manifest V3 bridge.\n\n" +
             "Reference behavior studied from another download manager 6.43.12.3. This project is not affiliated " +
@@ -1532,6 +1576,33 @@ public sealed partial class MainWindow : Window
         {
             urlBox.Items.Add(recent);
         }
+        var addressError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var addressPanel = new StackPanel { Spacing = 8, MinWidth = 360 };
+        addressPanel.Children.Add(urlBox);
+        addressPanel.Children.Add(addressError);
+        var addressDialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Enter new address to download",
+            Content = addressPanel,
+            PrimaryButtonText = "Next",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        addressDialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
+                candidate.Scheme is not ("http" or "https"))
+            {
+                addressError.Text = "Enter an absolute http or https URL.";
+                addressError.Visibility = Visibility.Visible;
+                args.Cancel = true;
+            }
+        };
+        if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
+        var url = urlBox.Text.Trim();
+
+        var urlDisplay = new TextBox { Header = "URL", Text = url, IsReadOnly = true };
         var nameBox = new TextBox
         {
             Header = "File name (optional)",
@@ -1539,13 +1610,143 @@ public sealed partial class MainWindow : Window
         };
         var destinationBox = new TextBox
         {
-            Header = "Destination folder",
             Text = _settings.DefaultDownloadDirectory,
         };
-        var startMode = new ComboBox { Header = "Start" };
-        startMode.Items.Add("Start now");
-        startMode.Items.Add("Download later");
-        startMode.SelectedIndex = 0;
+        var browseDestination = new Button
+        {
+            Content = "Browse…",
+            VerticalAlignment = VerticalAlignment.Bottom,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(destinationBox, "Destination folder");
+        var destinationPickerError = new TextBlock
+        {
+            Visibility = Visibility.Collapsed,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+        };
+        browseDestination.Click += async (_, _) =>
+        {
+            browseDestination.IsEnabled = false;
+            destinationPickerError.Text = string.Empty;
+            destinationPickerError.Visibility = Visibility.Collapsed;
+            try
+            {
+                var picker = new Windows.Storage.Pickers.FolderPicker
+                {
+                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
+                };
+                picker.FileTypeFilter.Add("*");
+                var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder is not null)
+                    destinationBox.Text = folder.Path;
+            }
+            catch (Exception ex)
+            {
+                destinationPickerError.Text = $"Could not open the folder picker: {ex.Message}";
+                destinationPickerError.Visibility = Visibility.Visible;
+            }
+            finally
+            {
+                browseDestination.IsEnabled = true;
+            }
+        };
+        var destinationRow = new Grid { ColumnSpacing = 8 };
+        destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(browseDestination, 1);
+        destinationRow.Children.Add(destinationBox);
+        destinationRow.Children.Add(browseDestination);
+        var descriptionBox = new TextBox { Header = "Description (optional)" };
+        var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
+        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (from file type)" });
+        foreach (var category in FileCategories.Names.Append("other"))
+            categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(category[0]) + category[1..], Tag = category });
+        foreach (var category in _settings.CustomCategories)
+            categoryBox.Items.Add(new ComboBoxItem { Content = category.Name, Tag = category.Id });
+        categoryBox.SelectedIndex = 0;
+        var changingDestination = false;
+        var customDestination = false;
+        void UseCategoryFolder(bool force = false)
+        {
+            if (customDestination && !force) return;
+            var fileName = string.IsNullOrWhiteSpace(nameBox.Text) ? Uri.UnescapeDataString(new Uri(url).AbsolutePath) : nameBox.Text;
+            var category = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string
+                ?? FileCategories.For(fileName, _settings.CustomCategories);
+            var folder = _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
+            if (string.IsNullOrWhiteSpace(folder)) _settings.CategoryFolders.TryGetValue(category, out folder);
+            changingDestination = true;
+            destinationBox.Text = string.IsNullOrWhiteSpace(folder) ? _settings.DefaultDownloadDirectory : folder;
+            changingDestination = false;
+            customDestination = false;
+        }
+        destinationBox.TextChanged += (_, _) => { if (!changingDestination) customDestination = true; };
+        nameBox.TextChanged += (_, _) => UseCategoryFolder();
+        categoryBox.SelectionChanged += (_, _) => UseCategoryFolder(force: true);
+        UseCategoryFolder();
+        var categoryName = new TextBox { Header = "New category name" };
+        var categoryExtensions = new TextBox { Header = "File extensions (optional)", PlaceholderText = "zip 7z rar" };
+        var categoryError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        ContentDialog? fileInfoDialog = null;
+        var createCategory = new Button { Content = "Create category" };
+        createCategory.Click += async (_, _) =>
+        {
+            createCategory.IsEnabled = false;
+            if (fileInfoDialog is not null) fileInfoDialog.IsPrimaryButtonEnabled = fileInfoDialog.IsSecondaryButtonEnabled = false;
+            categoryError.Visibility = Visibility.Collapsed;
+            try
+            {
+                var current = await _connection.RefreshAsync();
+                var updated = CloneSettings(current.Settings);
+                var category = new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = categoryName.Text.Trim(),
+                    DestinationDirectory = destinationBox.Text.Trim(),
+                    Extensions = categoryExtensions.Text.Split([' ', ',', ';', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList() };
+                updated.CustomCategories.Add(category);
+                var reply = await _connection.UpdateSettingsAsync(updated);
+                var result = reply.GetPayload<SettingsResult>();
+                if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Could not create category.");
+                _settings = result.Settings;
+                RefreshCustomCategories();
+                var option = new ComboBoxItem { Content = category.Name, Tag = category.Id };
+                categoryBox.Items.Add(option);
+                categoryBox.SelectedItem = option;
+                categoryName.Text = categoryExtensions.Text = string.Empty;
+            }
+            catch (Exception ex)
+            {
+                categoryError.Text = ex.Message;
+                categoryError.Visibility = Visibility.Visible;
+            }
+            finally
+            {
+                createCategory.IsEnabled = true;
+                if (fileInfoDialog is not null) fileInfoDialog.IsPrimaryButtonEnabled = fileInfoDialog.IsSecondaryButtonEnabled = true;
+            }
+        };
+        var categoryPanel = new StackPanel { Spacing = 8 };
+        categoryPanel.Children.Add(categoryName);
+        categoryPanel.Children.Add(categoryExtensions);
+        categoryPanel.Children.Add(new TextBlock { Text = "Create a saved category using the destination folder above. Matching extensions apply to future downloads; leave blank for manual selection. Creating it saves immediately, even if this download is cancelled.", TextWrapping = TextWrapping.Wrap });
+        categoryPanel.Children.Add(createCategory);
+        categoryPanel.Children.Add(categoryError);
+        var useAuthentication = new CheckBox { Content = "Use a user name and password for this download" };
+        var authenticationUser = new TextBox { Header = "User name", IsEnabled = false };
+        var authenticationPassword = new PasswordBox { Header = "Password", IsEnabled = false };
+        useAuthentication.Checked += (_, _) => authenticationUser.IsEnabled = authenticationPassword.IsEnabled = true;
+        useAuthentication.Unchecked += (_, _) => authenticationUser.IsEnabled = authenticationPassword.IsEnabled = false;
+        var authenticationPanel = new StackPanel { Spacing = 8 };
+        authenticationPanel.Children.Add(useAuthentication);
+        authenticationPanel.Children.Add(authenticationUser);
+        authenticationPanel.Children.Add(authenticationPassword);
+        authenticationPanel.Children.Add(new TextBlock { Text = "HTTP Basic authentication. Credentials apply only to this download and are protected by Windows when saved.", TextWrapping = TextWrapping.Wrap });
+        var authenticationError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+        authenticationPanel.Children.Add(authenticationError);
+        var rememberFolder = new CheckBox { Content = "Remember this folder for manual downloads", IsChecked = true };
+        categoryBox.SelectionChanged += (_, _) => rememberFolder.Content =
+            (categoryBox.SelectedItem as ComboBoxItem)?.Tag is string
+                ? "Remember this folder for the selected category" : "Remember this folder for manual downloads";
 
         var queueBox = new ComboBox { Header = "Queue" };
         foreach (var queue in _settings.Queues.OrderBy(q => q.Order))
@@ -1565,33 +1766,140 @@ public sealed partial class MainWindow : Window
         conflictBox.Items.Add("Fail the new download");
         conflictBox.SelectedIndex = 0;
 
+        var metadataText = new TextBlock { Text = "File information has not been checked.", TextWrapping = TextWrapping.Wrap };
+        var metadataBusy = new ProgressRing { IsActive = false, Visibility = Visibility.Collapsed, Width = 18, Height = 18 };
+        var checkMetadata = new Button { Content = "Check file info" };
+        var metadataActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        metadataActions.Children.Add(checkMetadata);
+        metadataActions.Children.Add(metadataBusy);
+        var metadataGeneration = 0;
+        var metadataClosed = false;
+        var nameEdited = false;
+        var assigningServerName = false;
+        CancellationTokenSource? metadataCancellation = null;
+        nameBox.TextChanged += (_, _) => { if (!assigningServerName) nameEdited = true; };
+        async Task PreviewMetadataAsync()
+        {
+            metadataCancellation?.Cancel();
+            var generation = ++metadataGeneration;
+            using var cancellation = new CancellationTokenSource();
+            metadataCancellation = cancellation;
+            metadataBusy.IsActive = true;
+            metadataBusy.Visibility = Visibility.Visible;
+            checkMetadata.IsEnabled = false;
+            metadataText.Text = "Checking the server… You can start without waiting.";
+            try
+            {
+                var request = new FileMetadataRequest { Url = url };
+                if (useAuthentication.IsChecked == true)
+                {
+                    if (string.IsNullOrWhiteSpace(authenticationUser.Text) || authenticationUser.Text.IndexOfAny([':', '\r', '\n']) >= 0)
+                        throw new ArgumentException("Enter a user name without colons or line breaks, then check file info again.");
+                    request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+                        $"{authenticationUser.Text}:{authenticationPassword.Password}"));
+                }
+                var metadata = await _connection.ReadFileMetadataAsync(request, cancellation.Token);
+                if (metadataClosed || generation != metadataGeneration) return;
+                if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
+                var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
+                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}\nServer name: {metadata.FileName}";
+                if (!nameEdited && !string.IsNullOrWhiteSpace(metadata.FileName))
+                {
+                    assigningServerName = true;
+                    nameBox.Text = metadata.FileName;
+                    assigningServerName = false;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!metadataClosed && generation == metadataGeneration)
+                    metadataText.Text = "File information request timed out. You can still start the download.";
+            }
+            catch (Exception ex)
+            {
+                if (!metadataClosed && generation == metadataGeneration)
+                    metadataText.Text = $"File information unavailable: {ex.Message} You can still start the download.";
+            }
+            finally
+            {
+                if (ReferenceEquals(metadataCancellation, cancellation)) metadataCancellation = null;
+                if (!metadataClosed && generation == metadataGeneration)
+                {
+                    metadataBusy.IsActive = false;
+                    metadataBusy.Visibility = Visibility.Collapsed;
+                    checkMetadata.IsEnabled = true;
+                }
+            }
+        }
+        void MetadataCredentialsChanged()
+        {
+            metadataGeneration++;
+            metadataCancellation?.Cancel();
+            metadataBusy.IsActive = false;
+            metadataBusy.Visibility = Visibility.Collapsed;
+            checkMetadata.IsEnabled = true;
+            metadataText.Text = "Credentials changed. Check file info again to refresh the preview.";
+        }
+        checkMetadata.Click += async (_, _) => await PreviewMetadataAsync();
+        authenticationUser.TextChanged += (_, _) => MetadataCredentialsChanged();
+        authenticationPassword.PasswordChanged += (_, _) => MetadataCredentialsChanged();
+        useAuthentication.Checked += (_, _) => MetadataCredentialsChanged();
+        useAuthentication.Unchecked += (_, _) => MetadataCredentialsChanged();
+
         var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(urlBox);
+        panel.Children.Add(urlDisplay);
+        panel.Children.Add(metadataText);
+        panel.Children.Add(metadataActions);
         panel.Children.Add(nameBox);
-        panel.Children.Add(destinationBox);
-        panel.Children.Add(startMode);
-        panel.Children.Add(queueBox);
-        panel.Children.Add(conflictBox);
+        panel.Children.Add(categoryBox);
+        panel.Children.Add(new TextBlock { Text = "Destination folder" });
+        panel.Children.Add(destinationRow);
+        panel.Children.Add(destinationPickerError);
+        panel.Children.Add(rememberFolder);
+        panel.Children.Add(new Expander { Header = "Create a category", Content = categoryPanel, HorizontalAlignment = HorizontalAlignment.Stretch });
+        panel.Children.Add(descriptionBox);
+        panel.Children.Add(new Expander { Header = "Authentication (optional)", Content = authenticationPanel,
+            HorizontalAlignment = HorizontalAlignment.Stretch });
+        var advanced = new StackPanel { Spacing = 10 };
+        advanced.Children.Add(queueBox);
+        advanced.Children.Add(conflictBox);
+        panel.Children.Add(new Expander { Header = "Queue and file conflicts", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
 
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
-            Title = "Add download",
-            Content = panel,
-            PrimaryButtonText = "Download",
+            Title = "Download file info",
+            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
+            PrimaryButtonText = "Start download",
+            SecondaryButtonText = "Download later",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        fileInfoDialog = dialog;
+        dialog.Opened += async (_, _) => await PreviewMetadataAsync();
+        dialog.Closing += (_, _) =>
         {
-            return;
-        }
+            metadataClosed = true;
+            metadataGeneration++;
+            metadataCancellation?.Cancel();
+        };
 
-        var url = urlBox.Text.Trim();
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        void ValidateAuthentication(ContentDialogButtonClickEventArgs args)
         {
-            await ShowMessageAsync("Invalid URL", "Enter an absolute http or https URL.");
+            if (useAuthentication.IsChecked == true &&
+                (string.IsNullOrWhiteSpace(authenticationUser.Text) || authenticationUser.Text.IndexOfAny([':', '\r', '\n']) >= 0))
+            {
+                authenticationError.Text = "Enter a user name without colons or line breaks.";
+                authenticationError.Visibility = Visibility.Visible;
+                args.Cancel = true;
+            }
+        }
+        dialog.PrimaryButtonClick += (_, args) => ValidateAuthentication(args);
+        dialog.SecondaryButtonClick += (_, args) => ValidateAuthentication(args);
+        var downloadChoice = await dialog.ShowAsync();
+        if (downloadChoice == ContentDialogResult.None)
+        {
             return;
         }
 
@@ -1629,8 +1937,11 @@ public sealed partial class MainWindow : Window
         {
             Url = url,
             FileName = string.IsNullOrWhiteSpace(nameBox.Text) ? null : nameBox.Text.Trim(),
+            CategoryId = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string,
             DestinationDirectory = string.IsNullOrWhiteSpace(destinationBox.Text) ? null : destinationBox.Text.Trim(),
-            StartMode = startMode.SelectedIndex == 1 ? "later" : "now",
+            StartMode = downloadChoice == ContentDialogResult.Secondary ? "later" : "now",
+            Description = string.IsNullOrWhiteSpace(descriptionBox.Text) ? null : descriptionBox.Text.Trim(),
+            RememberDestination = rememberFolder.IsChecked == true,
             ConflictPolicy = conflictBox.SelectedIndex switch
             {
                 1 => "overwrite",
@@ -1644,6 +1955,12 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            if (useAuthentication.IsChecked == true)
+            {
+                request.Headers["Authorization"] = "Basic " + Convert.ToBase64String(
+                    System.Text.Encoding.UTF8.GetBytes($"{authenticationUser.Text}:{authenticationPassword.Password}"));
+            }
+            authenticationPassword.Password = string.Empty;
             var reply = await _connection.AddAsync(request);
             var add = reply.GetPayload<AddJobResponse>();
             if (!add.Accepted)
@@ -1859,9 +2176,17 @@ public sealed partial class MainWindow : Window
         {
             XamlRoot = Content.XamlRoot,
             Title = "Queues",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 480 },
+            RequestedTheme = RootGrid.ActualTheme,
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+            PrimaryButtonText = "New queue",
             CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
+            DefaultButton = ContentDialogButton.Primary,
         };
 
         foreach (var queue in _settings.Queues.OrderBy(queue => queue.Order))
@@ -1870,12 +2195,11 @@ public sealed partial class MainWindow : Window
             var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 4, 0, 4) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{queue.Name} â€” {(queue.IsRunning ? "running" : "stopped")}",
+                Text = $"{queue.Name} — {(queue.IsRunning ? "running" : "stopped")}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
@@ -1889,6 +2213,26 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(info, 0);
             row.Children.Add(info);
 
+            var actions = new StackPanel { Spacing = 4 };
+            var primaryActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            var orderActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            var edit = new Button { Content = "Edit" };
+            edit.Click += (_, _) =>
+            {
+                action = "edit";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            primaryActions.Children.Add(edit);
+            var files = new Button { Content = "Files" };
+            files.Click += (_, _) =>
+            {
+                action = "files";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            primaryActions.Children.Add(files);
+
             var start = new Button { Content = "Start", IsEnabled = !queue.IsRunning };
             start.Click += (_, _) =>
             {
@@ -1896,8 +2240,7 @@ public sealed partial class MainWindow : Window
                 actionQueue = queue.Id;
                 dialog.Hide();
             };
-            Grid.SetColumn(start, 1);
-            row.Children.Add(start);
+            primaryActions.Children.Add(start);
 
             var stop = new Button { Content = "Stop", IsEnabled = queue.IsRunning };
             stop.Click += (_, _) =>
@@ -1906,8 +2249,38 @@ public sealed partial class MainWindow : Window
                 actionQueue = queue.Id;
                 dialog.Hide();
             };
-            Grid.SetColumn(stop, 2);
-            row.Children.Add(stop);
+            primaryActions.Children.Add(stop);
+
+            var orderedQueues = _settings.Queues.OrderBy(item => item.Order).ToList();
+            var queueIndex = orderedQueues.FindIndex(item => item.Id == queue.Id);
+            var moveUp = new Button { Content = "Move up", IsEnabled = queueIndex > 0 };
+            moveUp.Click += (_, _) =>
+            {
+                action = "moveup";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            orderActions.Children.Add(moveUp);
+            var moveDown = new Button { Content = "Move down", IsEnabled = queueIndex >= 0 && queueIndex < orderedQueues.Count - 1 };
+            moveDown.Click += (_, _) =>
+            {
+                action = "movedown";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            orderActions.Children.Add(moveDown);
+            var delete = new Button { Content = "Delete" };
+            delete.Click += (_, _) =>
+            {
+                action = "delete";
+                actionQueue = queue.Id;
+                dialog.Hide();
+            };
+            orderActions.Children.Add(delete);
+            actions.Children.Add(primaryActions);
+            actions.Children.Add(orderActions);
+            Grid.SetColumn(actions, 1);
+            row.Children.Add(actions);
 
             panel.Children.Add(row);
             panel.Children.Add(new Border
@@ -1917,16 +2290,67 @@ public sealed partial class MainWindow : Window
             });
         }
 
-        await dialog.ShowAsync();
+        var dialogResult = await dialog.ShowAsync();
+        if (action == "files")
+        {
+            await ShowQueueFilesAsync(actionQueue);
+            await ShowQueuesAsync();
+            return;
+        }
+        if (action == "edit")
+        {
+            if (await ShowQueueEditorAsync(actionQueue))
+                await ShowQueuesAsync();
+            return;
+        }
+
+        if (dialogResult == ContentDialogResult.Primary)
+        {
+            if (await ShowQueueEditorAsync())
+                await ShowQueuesAsync();
+            return;
+        }
+
         if (action.Length == 0)
         {
             return;
+        }
+
+        int? moveContentsToQueueId = null;
+        if (action == "delete")
+        {
+            var destination = new ComboBox { Header = "Move downloads and schedules to", HorizontalAlignment = HorizontalAlignment.Stretch };
+            foreach (var queue in _settings.Queues.Where(queue => queue.Id != actionQueue).OrderBy(queue => queue.Order))
+                destination.Items.Add(new ComboBoxItem { Content = queue.Name, Tag = queue.Id });
+            destination.SelectedItem = destination.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
+                item.Tag is int id && id == _settings.DefaultQueueId);
+            var deletePanel = new StackPanel { Spacing = 12 };
+            deletePanel.Children.Add(new TextBlock { Text = "Downloads and schedules will move to the selected queue. A stopped destination pauses active transfers. Downloaded files stay in their current folders. The default queue cannot be deleted.", TextWrapping = TextWrapping.Wrap });
+            deletePanel.Children.Add(destination);
+            var confirm = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                RequestedTheme = RootGrid.ActualTheme,
+                Title = "Delete queue?",
+                Content = deletePanel,
+                PrimaryButtonText = "Delete queue",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            {
+                await ShowQueuesAsync();
+                return;
+            }
+            if (destination.SelectedItem is not ComboBoxItem { Tag: int targetQueueId }) return;
+            moveContentsToQueueId = targetQueueId;
         }
 
         var reply = await _connection.QueueActionAsync(new QueueActionRequest
         {
             QueueId = actionQueue,
             Action = action,
+            MoveContentsToQueueId = moveContentsToQueueId,
         });
         var result = reply.GetPayload<SettingsResult>();
         if (!result.Ok)
@@ -1940,8 +2364,184 @@ public sealed partial class MainWindow : Window
         await ShowQueuesAsync();
     }
 
-    private async void MenuScheduler_Click(object sender, RoutedEventArgs e)
-        => await ShowSchedulerAsync();
+    private async Task<bool> ShowQueueEditorAsync(int? queueId = null)
+    {
+        var snapshot = await _connection.RefreshAsync();
+        var settings = CloneSettings(snapshot.Settings);
+        var existing = queueId is { } id
+            ? settings.Queues.FirstOrDefault(queue => queue.Id == id)
+            : null;
+        if (queueId is not null && existing is null)
+        {
+            await ShowMessageAsync("Queue", "This queue no longer exists.");
+            return false;
+        }
+
+        var name = new TextBox
+        {
+            Header = "Queue name",
+            Text = existing?.Name ?? $"Queue {settings.Queues.Count + 1}",
+            MaxLength = 80,
+        };
+        var concurrent = new TextBox
+        {
+            Header = "Download files at the same time (1–16)",
+            Text = (existing?.MaxConcurrentDownloads ?? 1).ToString(System.Globalization.CultureInfo.CurrentCulture),
+        };
+        var quotaEnabled = new CheckBox
+        {
+            Content = "Enable download limit",
+            IsChecked = existing?.QuotaEnabled ?? false,
+        };
+        var quotaMb = new TextBox
+        {
+            Header = "Download no more than (MB; max 10,485,760)",
+            Text = ((existing?.QuotaBytes ?? 200L * 1024 * 1024) / (1024m * 1024m))
+                .ToString("0.##", System.Globalization.CultureInfo.CurrentCulture),
+        };
+        var quotaHours = new TextBox
+        {
+            Header = "Every (hours; 1–8,760)",
+            Text = (existing?.QuotaWindowHours ?? 5).ToString(System.Globalization.CultureInfo.CurrentCulture),
+        };
+        void UpdateQuotaControls()
+        {
+            quotaMb.IsEnabled = quotaEnabled.IsChecked == true;
+            quotaHours.IsEnabled = quotaEnabled.IsChecked == true;
+        }
+        quotaEnabled.Checked += (_, _) => UpdateQuotaControls();
+        quotaEnabled.Unchecked += (_, _) => UpdateQuotaControls();
+        UpdateQuotaControls();
+
+        var error = new TextBlock
+        {
+            Visibility = Visibility.Collapsed,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+        };
+        var panel = new StackPanel { Spacing = 10, MinWidth = 320 };
+        panel.Children.Add(name);
+        panel.Children.Add(concurrent);
+        panel.Children.Add(quotaEnabled);
+        panel.Children.Add(quotaMb);
+        panel.Children.Add(quotaHours);
+        panel.Children.Add(error);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = existing is null ? "New queue" : "Edit queue",
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+            PrimaryButtonText = existing is null ? "Create" : "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        int parsedConcurrent = 0;
+        int parsedHours = 0;
+        long parsedQuotaBytes = 0;
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var message = string.Empty;
+            var trimmedName = name.Text.Trim();
+            var useQuota = quotaEnabled.IsChecked == true;
+            var quotaValid = !useQuota ||
+                (decimal.TryParse(quotaMb.Text, System.Globalization.NumberStyles.Number,
+                     System.Globalization.CultureInfo.CurrentCulture, out var mb) &&
+                 mb > 0 && mb <= 10_485_760m);
+            var parsedMb = useQuota && quotaValid
+                ? decimal.Parse(quotaMb.Text, System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.CurrentCulture)
+                : 0m;
+            var quotaBytes = useQuota
+                ? (long)Math.Round(parsedMb * 1024m * 1024m, MidpointRounding.AwayFromZero)
+                : 0;
+            if (trimmedName.Length == 0)
+                message = "Enter a queue name.";
+            else if (!int.TryParse(concurrent.Text, System.Globalization.NumberStyles.Integer,
+                         System.Globalization.CultureInfo.CurrentCulture, out parsedConcurrent) ||
+                     parsedConcurrent is < 1 or > 16)
+                message = "Simultaneous downloads must be between 1 and 16.";
+            else if (!quotaValid)
+                message = "The quota must be a positive number of MB, up to 10,485,760.";
+            else if (useQuota && quotaBytes < 1)
+                message = "The quota must be large enough to represent at least one byte.";
+            else if (useQuota &&
+                     (!int.TryParse(quotaHours.Text, System.Globalization.NumberStyles.Integer,
+                          System.Globalization.CultureInfo.CurrentCulture, out parsedHours) ||
+                      parsedHours is < 1 or > 8_760))
+                message = "The quota window must be between 1 and 8,760 hours.";
+            else if (useQuota)
+                parsedQuotaBytes = quotaBytes;
+
+            if (message.Length > 0)
+            {
+                error.Text = message;
+                error.Visibility = Visibility.Visible;
+                args.Cancel = true;
+            }
+            else
+            {
+                error.Text = string.Empty;
+                error.Visibility = Visibility.Collapsed;
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return false;
+
+        // Rebase onto current settings after the modal editor closes so quota
+        // usage accumulated while it was open is preserved.
+        var saveSnapshot = await _connection.RefreshAsync();
+        settings = CloneSettings(saveSnapshot.Settings);
+        var saveExisting = queueId is { } existingId
+            ? settings.Queues.FirstOrDefault(queue => queue.Id == existingId)
+            : null;
+        if (queueId is not null && saveExisting is null)
+        {
+            await ShowMessageAsync("Queue", "This queue was removed before the changes could be saved.");
+            return false;
+        }
+
+        var useQuota = quotaEnabled.IsChecked == true;
+        var reply = await _connection.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = saveExisting?.Id ?? 0,
+            Action = saveExisting is null ? "create" : "policy",
+            Name = name.Text.Trim(),
+            MaxConcurrentDownloads = parsedConcurrent,
+            QuotaEnabled = useQuota,
+            QuotaBytes = useQuota ? parsedQuotaBytes : null,
+            QuotaWindowHours = useQuota ? parsedHours : null,
+        });
+        var result = reply.GetPayload<SettingsResult>();
+        if (!result.Ok)
+        {
+            await ShowMessageAsync("Could not save queue", result.Error ?? "The host rejected the change.");
+            return false;
+        }
+
+        _settings = result.Settings;
+        await RefreshAsync();
+        return true;
+    }
+
+    private void MenuScheduler_Click(object sender, RoutedEventArgs e)
+    {
+        if (_schedulerWindow is null)
+        {
+            _schedulerWindow = new SchedulerWindow();
+            _schedulerWindow.Closed += (_, _) => _schedulerWindow = null;
+        }
+        _schedulerWindow.ShowWindow();
+    }
 
     private sealed record ScheduleTarget(int QueueId, string Label);
 
@@ -1951,11 +2551,6 @@ public sealed partial class MainWindow : Window
         _settings = snapshot.Settings;
 
         var settings = CloneSettings(_settings);
-        var targets = new List<ScheduleTarget>();
-        targets.AddRange(settings.Queues
-            .OrderBy(queue => queue.Order)
-            .Select(queue => new ScheduleTarget(queue.Id, $"Queue: {queue.Name}")));
-
         var panel = new StackPanel { Spacing = 8 };
         if (settings.Schedules.Count == 0)
         {
@@ -1971,11 +2566,18 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Scheduler",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = Math.Max(240, Math.Min(540, RootGrid.ActualHeight - 220)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
             PrimaryButtonText = "Add schedule",
             CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
+            DefaultButton = ContentDialogButton.Primary,
         };
 
         foreach (var schedule in settings.Schedules.OrderBy(schedule => schedule.StartTime))
@@ -1984,25 +2586,43 @@ public sealed partial class MainWindow : Window
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var target = settings.Queues.FirstOrDefault(queue => queue.Id == schedule.QueueId)?.Name ?? "missing queue";
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{schedule.Name} â€” {(schedule.Enabled ? "enabled" : "disabled")}",
+                Text = $"{schedule.Name} — {(schedule.Enabled ? "enabled" : "disabled")}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
             {
-                Text = $"{schedule.Kind} {schedule.StartTime}" +
-                       (schedule.StopTime is { } stop ? $"â€“{stop}" : string.Empty) +
-                       $" [{schedule.Days}] â†’ {target}",
+                Text = (schedule.TimedStartEnabled ? $"{schedule.Kind} {schedule.StartTime}" : "Startup trigger") +
+                       (schedule.StopTime is { } stop ? $"–{stop}" : string.Empty) +
+                       $" [{schedule.Days}] → {target}",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
                 TextWrapping = TextWrapping.Wrap,
             });
             Grid.SetColumn(info, 0);
             row.Children.Add(info);
+
+            info.Children.Add(new TextBlock { Text =
+                (schedule.StartOnHostStartup ? "On Host startup · " : string.Empty) +
+                (schedule.RepeatEveryMinutes is { } minutes ? $"Synchronize every {minutes} min · " : string.Empty) +
+                (schedule.LastRunAt is { } run ? $"Last run {run.ToLocalTime():g}" : "Not run yet"),
+                TextWrapping = TextWrapping.Wrap, FontSize = 11 });
+            if (!string.IsNullOrWhiteSpace(schedule.LastRunError))
+                info.Children.Add(new TextBlock { Text = schedule.LastRunError, TextWrapping = TextWrapping.Wrap, FontSize = 11 });
+            var edit = new Button { Content = "Edit" };
+            edit.Click += (_, _) =>
+            {
+                action = "edit";
+                actionId = schedule.Id;
+                dialog.Hide();
+            };
+            Grid.SetColumn(edit, 1);
+            row.Children.Add(edit);
 
             var toggle = new Button { Content = schedule.Enabled ? "Disable" : "Enable" };
             toggle.Click += (_, _) =>
@@ -2011,7 +2631,7 @@ public sealed partial class MainWindow : Window
                 actionId = schedule.Id;
                 dialog.Hide();
             };
-            Grid.SetColumn(toggle, 1);
+            Grid.SetColumn(toggle, 2);
             row.Children.Add(toggle);
 
             var remove = new Button { Content = "Remove" };
@@ -2021,7 +2641,7 @@ public sealed partial class MainWindow : Window
                 actionId = schedule.Id;
                 dialog.Hide();
             };
-            Grid.SetColumn(remove, 2);
+            Grid.SetColumn(remove, 3);
             row.Children.Add(remove);
 
             panel.Children.Add(row);
@@ -2032,38 +2652,18 @@ public sealed partial class MainWindow : Window
             });
         }
 
-        var nameBox = new TextBox { Header = "Name", PlaceholderText = "Nightly queue" };
-        var targetBox = new ComboBox { Header = "Target" };
-        foreach (var target in targets)
+        var dialogResult = await dialog.ShowAsync();
+        if (action == "edit" && actionId is Guid editId)
         {
-            targetBox.Items.Add(target.Label);
+            if (await ShowScheduleEditorAsync(editId))
+                await ShowSchedulerAsync();
+            return;
         }
 
-        targetBox.SelectedIndex = targets.Count > 0 ? 0 : -1;
-        var startBox = new TextBox { Header = "Start (HH:mm)", Text = "09:00" };
-        var stopBox = new TextBox { Header = "Stop (HH:mm, optional)" };
-        var daysBox = new TextBox
-        {
-            Header = "Days",
-            Text = "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
-        };
-        var onceBox = new TextBox
-        {
-            Header = "One-time date (yyyy-MM-dd, optional)",
-        };
-
-        panel.Children.Add(new TextBlock { Text = "Add schedule", Margin = new Thickness(0, 8, 0, 0) });
-        panel.Children.Add(nameBox);
-        panel.Children.Add(targetBox);
-        panel.Children.Add(startBox);
-        panel.Children.Add(stopBox);
-        panel.Children.Add(daysBox);
-        panel.Children.Add(onceBox);
-
-        var dialogResult = await dialog.ShowAsync();
         if (actionId is Guid scheduleId && (action == "toggle" || action == "remove"))
         {
-            var updated = CloneSettings(settings);
+            var latest = await _connection.RefreshAsync();
+            var updated = CloneSettings(latest.Settings);
             var existing = updated.Schedules.FirstOrDefault(schedule => schedule.Id == scheduleId);
             if (existing is not null)
             {
@@ -2090,76 +2690,293 @@ public sealed partial class MainWindow : Window
         }
 
         if (dialogResult != ContentDialogResult.Primary)
-        {
             return;
-        }
+        if (await ShowScheduleEditorAsync())
+            await ShowSchedulerAsync();
+    }
 
-        if (!TimeOnly.TryParse(startBox.Text.Trim(), out var start))
-        {
-            await ShowMessageAsync("Scheduler", "Start time must be HH:mm.");
-            return;
-        }
-
-        TimeOnly? stopTime = null;
-        if (!string.IsNullOrWhiteSpace(stopBox.Text))
-        {
-            if (!TimeOnly.TryParse(stopBox.Text.Trim(), out var parsedStop))
-            {
-                await ShowMessageAsync("Scheduler", "Stop time must be HH:mm.");
-                return;
-            }
-
-            stopTime = parsedStop;
-        }
-
-        DateOnly? once = null;
-        var kind = "daily";
-        if (!string.IsNullOrWhiteSpace(onceBox.Text))
-        {
-            if (!DateOnly.TryParse(onceBox.Text.Trim(), out var parsedDate))
-            {
-                await ShowMessageAsync("Scheduler", "One-time date must be yyyy-MM-dd.");
-                return;
-            }
-
-            once = parsedDate;
-            kind = "oneTime";
-        }
-
-        var selectedTarget = targetBox.SelectedIndex >= 0 && targetBox.SelectedIndex < targets.Count
-            ? targets[targetBox.SelectedIndex]
+    private async Task<bool> ShowScheduleEditorAsync(Guid? scheduleId = null)
+    {
+        var snapshot = await _connection.RefreshAsync();
+        var settings = CloneSettings(snapshot.Settings);
+        var existing = scheduleId is { } id
+            ? settings.Schedules.FirstOrDefault(schedule => schedule.Id == id)
             : null;
-        if (selectedTarget is null)
+        if (scheduleId is not null && existing is null)
         {
-            await ShowMessageAsync("Scheduler", "Choose a queue.");
-            return;
+            await ShowMessageAsync("Scheduler", "This schedule no longer exists.");
+            return false;
         }
 
-        var added = CloneSettings(settings);
-        added.Schedules.Add(new ScheduleDto
+        var targets = settings.Queues
+            .OrderBy(queue => queue.Order)
+            .Select(queue => new ScheduleTarget(queue.Id, $"Queue: {queue.Name}"))
+            .ToList();
+        if (targets.Count == 0)
         {
-            Id = Guid.NewGuid(),
-            Name = string.IsNullOrWhiteSpace(nameBox.Text) ? $"Schedule {added.Schedules.Count + 1}" : nameBox.Text.Trim(),
-            QueueId = selectedTarget.QueueId,
-            Enabled = true,
-            Kind = kind,
-            StartDate = once,
-            Days = string.IsNullOrWhiteSpace(daysBox.Text)
-                ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
-                : daysBox.Text.Trim(),
-            StartTime = start.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
-            StopTime = stopTime?.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
-        });
-
-        var addReply = await _connection.UpdateSettingsAsync(added);
-        var addResult = addReply.GetPayload<SettingsResult>();
-        if (!addResult.Ok)
-        {
-            await ShowMessageAsync("Scheduler", addResult.Error ?? "The host rejected the schedule.");
-            return;
+            await ShowMessageAsync("Scheduler", "Create a queue before adding a schedule.");
+            return false;
         }
 
-        await ShowSchedulerAsync();
+        var nameBox = new TextBox
+        {
+            Header = "Name",
+            PlaceholderText = "Nightly queue",
+            Text = existing?.Name ?? string.Empty,
+            MaxLength = 80,
+        };
+        var targetBox = new ComboBox { Header = "Target" };
+        foreach (var target in targets)
+            targetBox.Items.Add(target.Label);
+        var targetIndex = existing is null
+            ? 0
+            : targets.FindIndex(target => target.QueueId == existing.QueueId);
+        targetBox.SelectedIndex = targetIndex >= 0 ? targetIndex : 0;
+
+        var runOptions = new SchedulerRunOptionsEditor(existing,
+            settings.Queues.FirstOrDefault(queue => queue.Id == (existing?.QueueId ?? targets[0].QueueId))?.RetryLimit);
+        targetBox.SelectionChanged += (_, _) =>
+        {
+            if (targetBox.SelectedIndex >= 0 && targetBox.SelectedIndex < targets.Count)
+                runOptions.SetRetryLimit(settings.Queues.FirstOrDefault(queue => queue.Id == targets[targetBox.SelectedIndex].QueueId)?.RetryLimit);
+        };
+        var startBox = new TextBox { Header = "Start (HH:mm)", Text = existing?.StartTime ?? "09:00" };
+        var stopBox = new TextBox { Header = "Stop (HH:mm, optional)", Text = existing?.StopTime ?? string.Empty };
+        var daysBox = new TextBox
+        {
+            Header = "Days (daily schedules; comma-separated)",
+            Text = existing?.Days ?? "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+        };
+        var onceBox = new TextBox
+        {
+            Header = "One-time date (yyyy-MM-dd, optional)",
+            Text = existing?.Kind == "oneTime" && existing.StartDate is { } date
+                ? date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                : string.Empty,
+        };
+
+        var openWhenDone = new CheckBox
+        {
+            Content = "Open a file when the queue finishes",
+            IsChecked = existing?.OpenFileWhenDone ?? false,
+        };
+        var exitWhenDone = new CheckBox
+        {
+            Content = "Exit Download Manager when the queue finishes",
+            IsChecked = existing?.ExitWhenDone ?? false,
+        };
+        var shutdownWhenDone = new CheckBox
+        {
+            Content = "Turn off the computer when the queue finishes",
+            IsChecked = existing?.ShutdownWhenDone ?? false,
+        };
+        var shutdownMode = new ComboBox
+        {
+            Header = "Computer action",
+            ItemsSource = new[] { "Shut down", "Restart", "Log off" },
+            SelectedIndex = (existing?.ShutdownMode ?? "shutdown") switch
+            {
+                "restart" => 1,
+                "logoff" => 2,
+                _ => 0,
+            },
+        };
+        var forceShutdown = new CheckBox
+        {
+            Content = "Force the selected computer action",
+            IsChecked = existing?.ForceShutdown ?? false,
+        };
+        var allowSystemActions = new CheckBox
+        {
+            Content = "Allow system completion actions (global opt-in)",
+            IsChecked = settings.AllowSystemCompletionActions,
+        };
+        var initialAllowSystemActions = settings.AllowSystemCompletionActions;
+        var systemActionsNote = new TextBlock
+        {
+            Text = settings.AllowSystemCompletionActions
+                ? "Global system actions are enabled. Queue exit and computer actions will be allowed when configured."
+                : "Global system actions are disabled. Exit and computer actions saved below will be skipped until this opt-in is enabled.",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+        };
+        allowSystemActions.Checked += (_, _) => systemActionsNote.Text =
+            "Global system actions are enabled. Queue exit and computer actions will be allowed when configured.";
+        allowSystemActions.Unchecked += (_, _) => systemActionsNote.Text =
+            "Global system actions are disabled. Exit and computer actions saved below will be skipped until this opt-in is enabled.";
+
+        void UpdateShutdownControls()
+        {
+            shutdownMode.IsEnabled = shutdownWhenDone.IsChecked == true;
+            forceShutdown.IsEnabled = shutdownWhenDone.IsChecked == true;
+        }
+        shutdownWhenDone.Checked += (_, _) => UpdateShutdownControls();
+        shutdownWhenDone.Unchecked += (_, _) => UpdateShutdownControls();
+        UpdateShutdownControls();
+
+        var error = new TextBlock
+        {
+            Visibility = Visibility.Collapsed,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+        };
+        var panel = new StackPanel { Spacing = 10, MinWidth = 340 };
+        panel.Children.Add(nameBox);
+        panel.Children.Add(targetBox);
+        panel.Children.Add(runOptions.Content);
+        panel.Children.Add(startBox);
+        panel.Children.Add(stopBox);
+        panel.Children.Add(daysBox);
+        panel.Children.Add(onceBox);
+        panel.Children.Add(new TextBlock { Text = "When the queue finishes", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        panel.Children.Add(openWhenDone);
+        panel.Children.Add(exitWhenDone);
+        panel.Children.Add(shutdownWhenDone);
+        panel.Children.Add(shutdownMode);
+        panel.Children.Add(forceShutdown);
+        panel.Children.Add(allowSystemActions);
+        panel.Children.Add(systemActionsNote);
+        panel.Children.Add(error);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = existing is null ? "Add schedule" : "Edit schedule",
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = Math.Max(240, Math.Min(600, RootGrid.ActualHeight - 200)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+            PrimaryButtonText = existing is null ? "Add schedule" : "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        TimeOnly parsedStart = default;
+        TimeOnly? parsedStop = null;
+        DateOnly? parsedDate = null;
+        bool startOnStartup = false, timedStart = true;
+        int? repeatMinutes = null, retryLimit = null;
+        var valid = false;
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var message = string.Empty;
+            parsedStop = null;
+            parsedDate = null;
+            if (string.IsNullOrWhiteSpace(nameBox.Text))
+                message = "Enter a schedule name.";
+            else if (targetBox.SelectedIndex < 0 || targetBox.SelectedIndex >= targets.Count)
+                message = "Choose a queue.";
+            else if (!TimeOnly.TryParseExact(startBox.Text.Trim(), "HH:mm",
+                         System.Globalization.CultureInfo.InvariantCulture,
+                         System.Globalization.DateTimeStyles.None, out parsedStart))
+                message = "Start time must use HH:mm.";
+            else if (!string.IsNullOrWhiteSpace(stopBox.Text))
+            {
+                if (!TimeOnly.TryParseExact(stopBox.Text.Trim(), "HH:mm",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var stop))
+                    message = "Stop time must use HH:mm.";
+                else
+                    parsedStop = stop;
+            }
+
+            if (message.Length == 0 && !string.IsNullOrWhiteSpace(onceBox.Text))
+            {
+                if (!DateOnly.TryParseExact(onceBox.Text.Trim(), "yyyy-MM-dd",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var date))
+                    message = "One-time date must use yyyy-MM-dd.";
+                else
+                    parsedDate = date;
+            }
+
+            if (message.Length == 0 && !runOptions.TryGet(out startOnStartup, out timedStart, out repeatMinutes, out retryLimit, out var runError))
+                message = runError ?? "Invalid scheduler options.";
+            valid = message.Length == 0;
+            error.Text = message;
+            error.Visibility = valid ? Visibility.Collapsed : Visibility.Visible;
+            args.Cancel = !valid;
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || !valid)
+            return false;
+
+        var latest = await _connection.RefreshAsync();
+        var updated = CloneSettings(latest.Settings);
+        if (targetBox.SelectedIndex < 0 || targetBox.SelectedIndex >= targets.Count)
+        {
+            await ShowMessageAsync("Scheduler", "Select a target queue.");
+            return false;
+        }
+        var selectedQueueId = targets[targetBox.SelectedIndex].QueueId;
+        if (!updated.Queues.Any(queue => queue.Id == selectedQueueId))
+        {
+            await ShowMessageAsync("Scheduler", "The selected queue was removed before the schedule could be saved.");
+            return false;
+        }
+        ScheduleDto edited;
+        if (scheduleId is { } editingId)
+        {
+            var currentSchedule = updated.Schedules.FirstOrDefault(schedule => schedule.Id == editingId);
+            if (currentSchedule is null)
+            {
+                await ShowMessageAsync("Scheduler", "This schedule was removed before the changes could be saved.");
+                return false;
+            }
+            edited = currentSchedule;
+        }
+        else
+        {
+            edited = new ScheduleDto
+            {
+                Id = Guid.NewGuid(),
+                Enabled = true,
+            };
+            updated.Schedules.Add(edited);
+        }
+
+        edited.StartOnHostStartup = startOnStartup;
+        edited.TimedStartEnabled = timedStart;
+        edited.RepeatEveryMinutes = repeatMinutes;
+        updated.Queues.First(queue => queue.Id == selectedQueueId).RetryLimit = retryLimit;
+        edited.Name = nameBox.Text.Trim();
+        edited.QueueId = selectedQueueId;
+        edited.Kind = parsedDate is null ? "daily" : "oneTime";
+        edited.StartDate = parsedDate;
+        edited.Days = string.IsNullOrWhiteSpace(daysBox.Text)
+            ? "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
+            : daysBox.Text.Trim();
+        edited.StartTime = parsedStart.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        edited.StopTime = parsedStop?.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        edited.OpenFileWhenDone = openWhenDone.IsChecked == true;
+        edited.ExitWhenDone = exitWhenDone.IsChecked == true;
+        edited.ShutdownWhenDone = shutdownWhenDone.IsChecked == true;
+        edited.ShutdownMode = shutdownMode.SelectedIndex switch
+        {
+            1 => "restart",
+            2 => "logoff",
+            _ => "shutdown",
+        };
+        edited.ForceShutdown = forceShutdown.IsChecked == true;
+        if ((allowSystemActions.IsChecked == true) != initialAllowSystemActions)
+            updated.AllowSystemCompletionActions = allowSystemActions.IsChecked == true;
+
+        var reply = await _connection.UpdateSettingsAsync(updated);
+        var result = reply.GetPayload<SettingsResult>();
+        if (!result.Ok)
+        {
+            await ShowMessageAsync("Scheduler", result.Error ?? "The host rejected the schedule.");
+            return false;
+        }
+
+        _settings = result.Settings;
+        await RefreshAsync();
+        return true;
     }
 
     private JobViewModel? FindExistingJob(string url)
@@ -2180,7 +2997,7 @@ public sealed partial class MainWindow : Window
             var settings = CloneSettings(_settings);
             var directory = new TextBox { Header = "Default download folder", Text = settings.DefaultDownloadDirectory };
             var maxConcurrent = new TextBox { Header = "Maximum simultaneous downloads", Text = settings.MaxConcurrentDownloads.ToString() };
-            var connections = new TextBox { Header = "Connections per download (1â€“32)", Text = settings.DefaultConnections.ToString() };
+            var connections = new TextBox { Header = "Connections per download (1–32)", Text = settings.DefaultConnections.ToString() };
             var speedLimit = new TextBox
             {
                 Header = "Global speed limit (KB/s, empty for unlimited)",
@@ -2200,10 +3017,11 @@ public sealed partial class MainWindow : Window
             };
             var launch = new CheckBox { Content = "Launch Download Manager at sign-in", IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Monitor the clipboard for URLs", IsChecked = settings.ClipboardMonitoring };
-            var integration = new CheckBox { Content = "Enable Chrome â†’ Download Manager handoff", IsChecked = settings.BrowserIntegrationEnabled };
+            var integration = new CheckBox { Content = "Enable Chrome download capture", IsChecked = settings.BrowserIntegrationEnabled };
             var autoIntercept = new CheckBox { Content = "Automatically take over eligible Chrome downloads", IsChecked = settings.BrowserAutoIntercept };
             var notify = new CheckBox { Content = "Notify when a download completes", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound when a download completes", IsChecked = settings.PlayCompletionSound };
+            var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads after restart", IsChecked = settings.AutoResumeUnfinishedOnStartup };
             var postDownload = new TextBox
             {
@@ -2230,7 +3048,7 @@ public sealed partial class MainWindow : Window
             };
             var autoUpdate = new CheckBox
             {
-                Content = "Automatically check for updates",
+                Content = "Automatically check and install updates when downloads are idle (installed copies only)",
                 IsChecked = settings.AutoCheckUpdates,
             };
             var updateInterval = new TextBox
@@ -2285,8 +3103,42 @@ public sealed partial class MainWindow : Window
             forgetProxyPassword.Checked += (_, _) => proxyPassword.IsEnabled = false;
             forgetProxyPassword.Unchecked += (_, _) => proxyPassword.IsEnabled = true;
 
+            var loginRows = new List<(SiteLoginDto Original, TextBox Site, TextBox User, PasswordBox Password)>();
+            var loginPanel = new StackPanel { Spacing = 12 };
+            void AddLoginRow(SiteLoginDto original)
+            {
+                var site = new TextBox { Header = "Site or URL prefix", Text = original.Site,
+                    PlaceholderText = "https://example.com/private/ or example.com" };
+                var user = new TextBox { Header = "User name", Text = original.Username };
+                var password = new PasswordBox { Header = original.HasPassword
+                    ? "Password (saved; leave empty to keep)" : "Password" };
+                var remove = new Button { Content = "Remove login", HorizontalAlignment = HorizontalAlignment.Right };
+                var row = new StackPanel { Spacing = 8 };
+                row.Children.Add(site);
+                row.Children.Add(user);
+                row.Children.Add(password);
+                row.Children.Add(remove);
+                var border = new Border { Child = row, Padding = new Thickness(12), BorderThickness = new Thickness(1),
+                    BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"],
+                    CornerRadius = new CornerRadius(6) };
+                var entry = (original, site, user, password);
+                loginRows.Add(entry);
+                loginPanel.Children.Add(border);
+                remove.Click += (_, _) =>
+                {
+                    password.Password = string.Empty;
+                    loginRows.Remove(entry);
+                    loginPanel.Children.Remove(border);
+                };
+            }
+            foreach (var login in settings.SiteLogins) AddLoginRow(login);
+            var addLogin = new Button { Content = "Add site login" };
+            addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
+            var loginHelp = new TextBlock { Text = "Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.",
+                TextWrapping = TextWrapping.Wrap };
+
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
-            foreach (var category in FileCategories.Names)
+            foreach (var category in FileCategories.Names.Append("other"))
             {
                 categoryBoxes[category] = new TextBox
                 {
@@ -2295,51 +3147,112 @@ public sealed partial class MainWindow : Window
                 };
             }
 
-            var panel = new StackPanel { Spacing = 9 };
-            panel.Children.Add(new TextBlock { Text = "Transfer" });
-            panel.Children.Add(directory);
-            panel.Children.Add(maxConcurrent);
-            panel.Children.Add(connections);
-            panel.Children.Add(speedLimit);
-            panel.Children.Add(profilesBox);
-            panel.Children.Add(new TextBlock { Text = "Behaviour", Margin = new Thickness(0, 8, 0, 0) });
-            panel.Children.Add(launch);
-            panel.Children.Add(clipboard);
-            panel.Children.Add(autoResume);
-            panel.Children.Add(postDownload);
-            panel.Children.Add(notify);
-            panel.Children.Add(sound);
-            panel.Children.Add(new TextBlock { Text = "Browser integration", Margin = new Thickness(0, 8, 0, 0) });
-            panel.Children.Add(integration);
-            panel.Children.Add(autoIntercept);
-            panel.Children.Add(new TextBlock { Text = "Proxy", Margin = new Thickness(0, 8, 0, 0) });
-            panel.Children.Add(proxyMode);
-            panel.Children.Add(proxyProtocol);
-            panel.Children.Add(proxyAddress);
-            panel.Children.Add(proxyUser);
-            panel.Children.Add(proxyPassword);
-            panel.Children.Add(forgetProxyPassword);
-            panel.Children.Add(new TextBlock { Text = "Category folders", Margin = new Thickness(0, 8, 0, 0) });
-            foreach (var box in categoryBoxes.Values)
+            var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
+            var customCategoryControls = new List<UIElement>();
+            var stagedCategoryRemovals = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var category in settings.CustomCategories)
             {
-                panel.Children.Add(box);
+                var name = new TextBox { Header = "Name", Text = category.Name };
+                var extensions = new TextBox { Header = "File extensions (space separated)", Text = string.Join(" ", category.Extensions) };
+                var folder = new TextBox { Header = "Destination folder (optional)", Text = category.DestinationDirectory ?? string.Empty };
+                customCategoryEditors.Add((category, name, extensions, folder));
+                var remove = new Button { Content = "Remove category", HorizontalAlignment = HorizontalAlignment.Right };
+                var fields = new StackPanel { Spacing = 8 };
+                fields.Children.Add(name);
+                fields.Children.Add(extensions);
+                fields.Children.Add(folder);
+                fields.Children.Add(remove);
+                var expander = new Expander { Header = category.Name, Content = fields, HorizontalAlignment = HorizontalAlignment.Stretch };
+                remove.Click += (_, _) =>
+                {
+                    if (!stagedCategoryRemovals.Add(category.Id))
+                    {
+                        stagedCategoryRemovals.Remove(category.Id);
+                        remove.Content = "Remove category";
+                        expander.Opacity = 1;
+                    }
+                    else
+                    {
+                        remove.Content = "Undo removal";
+                        expander.Opacity = 0.55;
+                    }
+                };
+                customCategoryControls.Add(expander);
             }
-
-            panel.Children.Add(new TextBlock { Text = "Updates", Margin = new Thickness(0, 8, 0, 0) });
-            panel.Children.Add(updateUrl);
-            panel.Children.Add(updateKey);
-            panel.Children.Add(updateChannel);
-            panel.Children.Add(autoUpdate);
-            panel.Children.Add(updateInterval);
+            var tabs = new TabView
+            {
+                IsAddTabButtonVisible = false,
+                CanReorderTabs = false,
+                TabWidthMode = TabViewWidthMode.SizeToContent,
+                Width = Math.Max(280, Math.Min(740, RootGrid.ActualWidth - 100)),
+                Height = Math.Max(220, Math.Min(470, RootGrid.ActualHeight - 240)),
+            };
+            void AddOptionsTab(string title, params UIElement[] controls)
+            {
+                var panel = new StackPanel { Spacing = 12, Padding = new Thickness(4, 16, 16, 8) };
+                foreach (var control in controls) panel.Children.Add(control);
+                tabs.TabItems.Add(new TabViewItem
+                {
+                    Header = title,
+                    IsClosable = false,
+                    Content = new ScrollViewer
+                    {
+                        Content = panel,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    },
+                });
+            }
+            AddOptionsTab("General", launch, clipboard, integration, autoIntercept);
+            AddOptionsTab("Save to", new UIElement[] { directory }.Concat(categoryBoxes.Values).Concat(customCategoryControls).ToArray());
+            AddOptionsTab("Downloads", autoResume, completionDialog, notify, sound, postDownload);
+            AddOptionsTab("Connection", maxConcurrent, connections, speedLimit, profilesBox);
+            AddOptionsTab("Proxy", proxyMode, proxyProtocol, proxyAddress, proxyUser, proxyPassword, forgetProxyPassword);
+            AddOptionsTab("Site logins", loginHelp, loginPanel, addLogin);
+            AddOptionsTab("Updates", autoUpdate, updateInterval, updateChannel, updateUrl, updateKey);
+            var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, this);
+            var soundErrorText = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+            AddOptionsTab("Sounds", soundEditor.Content, soundErrorText);
 
             var dialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
                 Title = "Options",
-                Content = new ScrollViewer { Content = panel, MaxHeight = 540 },
+                Content = tabs,
                 PrimaryButtonText = "Save",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
+            };
+            dialog.Resources["ContentDialogMaxWidth"] = 840d;
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var validationError))
+                {
+                    soundErrorText.Text = validationError;
+                    soundErrorText.Visibility = Visibility.Visible;
+                    tabs.SelectedIndex = 7;
+                    args.Cancel = true;
+                    return;
+                }
+                foreach (var row in loginRows)
+                {
+                    if (string.IsNullOrWhiteSpace(row.Site.Text) || string.IsNullOrWhiteSpace(row.User.Text))
+                    {
+                        loginHelp.Text = "Every site login needs a site and user name. Remove unused rows before saving.";
+                        tabs.SelectedIndex = 5;
+                        args.Cancel = true;
+                        return;
+                    }
+                    if (row.Original.HasPassword && string.IsNullOrEmpty(row.Password.Password) &&
+                        (!string.Equals(row.Original.Site, row.Site.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                         !string.Equals(row.Original.Username, row.User.Text.Trim(), StringComparison.Ordinal)))
+                    {
+                        loginHelp.Text = "Re-enter the password for a login whose site or user name changed.";
+                        tabs.SelectedIndex = 5;
+                        args.Cancel = true;
+                        return;
+                    }
+                }
             };
 
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -2397,6 +3310,14 @@ public sealed partial class MainWindow : Window
                 HasPassword = settings.Proxy.HasPassword && forgetProxyPassword.IsChecked != true,
             };
             settings.DefaultDownloadDirectory = directory.Text.Trim();
+            settings.SiteLogins = loginRows.Select(row => new SiteLoginDto
+            {
+                Id = row.Original.Id,
+                Site = row.Site.Text.Trim(),
+                Username = row.User.Text.Trim(),
+                Password = string.IsNullOrEmpty(row.Password.Password) ? null : row.Password.Password,
+                HasPassword = row.Original.HasPassword,
+            }).ToList();
             settings.MaxConcurrentDownloads = max;
             settings.DefaultConnections = connectionsValue;
             settings.GlobalSpeedLimitBytesPerSecond = limit;
@@ -2433,6 +3354,7 @@ public sealed partial class MainWindow : Window
             settings.BrowserAutoIntercept = autoIntercept.IsChecked == true;
             settings.NotifyOnCompletion = notify.IsChecked == true;
             settings.PlayCompletionSound = sound.IsChecked == true;
+            settings.ShowCompletionDialog = completionDialog.IsChecked == true;
             settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
             settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text)
                 ? null
@@ -2458,6 +3380,22 @@ public sealed partial class MainWindow : Window
             settings.CategoryFolders = categoryBoxes
                 .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                 .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
+            foreach (var editor in customCategoryEditors)
+            {
+                editor.Category.Name = editor.Name.Text.Trim();
+                editor.Category.Extensions = editor.Extensions.Text.Split([' ', ',', ';', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList();
+                editor.Category.DestinationDirectory = string.IsNullOrWhiteSpace(editor.Folder.Text) ? null : editor.Folder.Text.Trim();
+            }
+            settings.CustomCategories = settings.CustomCategories
+                .Where(category => !stagedCategoryRemovals.Contains(category.Id))
+                .ToList();
+            settings.DeleteCategoryIds = stagedCategoryRemovals.ToList();
+
+            if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
+            {
+                await ShowMessageAsync("Sounds", soundError ?? "Invalid sound choice.");
+                return;
+            }
 
             var reply = await _connection.UpdateSettingsAsync(settings);
             var update = reply.GetPayload<SettingsResult>();
@@ -2478,6 +3416,136 @@ public sealed partial class MainWindow : Window
         {
             _settingsDialogOpen = false;
         }
+    }
+
+    private async Task ShowQueueFilesAsync(int queueId)
+    {
+        var snapshot = await _connection.RefreshAsync();
+        var queue = snapshot.Settings.Queues.FirstOrDefault(item => item.Id == queueId);
+        if (queue is null) return;
+        var jobs = new ObservableCollection<JobViewModel>(snapshot.Jobs.Where(job => job.IsQueued && job.QueueId == queueId)
+            .OrderByDescending(job => job.Priority)
+            .ThenBy(job => { var index = queue.JobOrder.IndexOf(job.Id); return index < 0 ? int.MaxValue : index; })
+            .ThenBy(job => job.CreatedAt).Select(job => { var row = new JobViewModel(); row.Update(job); return row; }));
+        var queues = snapshot.Settings.Queues.Where(item => item.Id != queueId).OrderBy(item => item.Order).ToList();
+        var stagedMembership = new Dictionary<Guid, int?>();
+        var list = new ListBox { ItemsSource = jobs, ItemTemplate = (DataTemplate)RootGrid.Resources["QueueFileTemplate"],
+            SelectionMode = SelectionMode.Single, MinHeight = 120,
+            MaxHeight = Math.Max(160, Math.Min(320, RootGrid.ActualHeight - 350)),
+            HorizontalAlignment = HorizontalAlignment.Stretch };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(list, "Files in download order");
+        var up = new Button { Content = "Move up", IsEnabled = false };
+        var down = new Button { Content = "Move down", IsEnabled = false };
+        var remove = new Button { Content = "Remove from queue", IsEnabled = false };
+        var target = new ComboBox { PlaceholderText = "Move to queue", MinWidth = 150, IsEnabled = false };
+        foreach (var item in queues) target.Items.Add(item.Name);
+        var moveToQueue = new Button { Content = "Move to queue", IsEnabled = false };
+        void UpdateButtons()
+        {
+            var index = list.SelectedIndex;
+            up.IsEnabled = index > 0 && jobs[index].Priority == jobs[index - 1].Priority;
+            down.IsEnabled = index >= 0 && index < jobs.Count - 1 && jobs[index].Priority == jobs[index + 1].Priority;
+            remove.IsEnabled = list.SelectedItem is JobViewModel;
+            target.IsEnabled = list.SelectedItem is JobViewModel && queues.Count > 0;
+            moveToQueue.IsEnabled = list.SelectedItem is JobViewModel && queues.Count > 0 && target.SelectedIndex >= 0;
+        }
+        void Move(int direction)
+        {
+            var index = list.SelectedIndex;
+            var destinationIndex = index + direction;
+            if (index < 0 || destinationIndex < 0 || destinationIndex >= jobs.Count || jobs[index].Priority != jobs[destinationIndex].Priority) return;
+            jobs.Move(index, destinationIndex);
+            list.SelectedIndex = destinationIndex;
+            UpdateButtons();
+        }
+        void StageMembershipChange(int? destinationQueueId)
+        {
+            if (list.SelectedItem is not JobViewModel selected) return;
+            var index = list.SelectedIndex;
+            stagedMembership[selected.Id] = destinationQueueId;
+            jobs.RemoveAt(index);
+            list.SelectedIndex = Math.Min(index, jobs.Count - 1);
+            UpdateButtons();
+        }
+        list.SelectionChanged += (_, _) => UpdateButtons();
+        target.SelectionChanged += (_, _) => UpdateButtons();
+        up.Click += (_, _) => Move(-1);
+        down.Click += (_, _) => Move(1);
+        remove.Click += (_, _) => StageMembershipChange(null);
+        moveToQueue.Click += (_, _) =>
+        {
+            if (target.SelectedIndex >= 0 && target.SelectedIndex < queues.Count)
+                StageMembershipChange(queues[target.SelectedIndex].Id);
+        };
+        var orderButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        orderButtons.Children.Add(up);
+        orderButtons.Children.Add(down);
+        var membershipButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        membershipButtons.Children.Add(remove);
+        membershipButtons.Children.Add(target);
+        membershipButtons.Children.Add(moveToQueue);
+        var panel = new StackPanel { Spacing = 12, MinWidth = 460 };
+        panel.Children.Add(new TextBlock { Text = "Choose the order of waiting downloads within the same priority. Transfers already running continue. Status is shown as of opening this window.", TextWrapping = TextWrapping.Wrap });
+        var headings = new Grid { ColumnSpacing = 12, Margin = new Thickness(12, 0, 12, 0) };
+        foreach (var width in new[] { new GridLength(1, GridUnitType.Star), new GridLength(80), new GridLength(90), new GridLength(75) })
+            headings.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        var labels = new[] { "File name", "Size", "Status", "Time left" };
+        for (var column = 0; column < labels.Length; column++)
+        {
+            var heading = new TextBlock { Text = labels[column], FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+            Grid.SetColumn(heading, column);
+            headings.Children.Add(heading);
+        }
+        panel.Children.Add(headings);
+        panel.Children.Add(list);
+        panel.Children.Add(orderButtons);
+        panel.Children.Add(membershipButtons);
+        var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, Title = $"Files in {queue.Name}",
+            RequestedTheme = RootGrid.ActualTheme,
+            Content = panel, PrimaryButtonText = "Save", CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var failures = new List<string>();
+        foreach (var change in stagedMembership)
+        {
+            IpcMessage response;
+            try
+            {
+                response = change.Value is { } targetQueueId
+                    ? await _connection.MoveToQueueAsync(change.Key, targetQueueId)
+                    : await _connection.DetachFromQueueAsync(change.Key);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{change.Key}: {ex.Message}");
+                continue;
+            }
+            var action = response.GetPayload<JobActionResponse>();
+            if (response.Type != MessageTypes.JobActionResult || !action.Ok)
+                failures.Add($"{change.Key}: {action.Error ?? "The host rejected the change."}");
+        }
+        if (failures.Count > 0)
+        {
+            await ShowMessageAsync("Queue files", "Some queue changes could not be applied:\n" + string.Join("\n", failures));
+            await RefreshAsync();
+            return;
+        }
+
+        var refreshed = await _connection.RefreshAsync();
+        if (!refreshed.Settings.Queues.Any(item => item.Id == queueId))
+        {
+            await ShowMessageAsync("Queue file order", "This queue was removed before its file order could be saved.");
+            await RefreshAsync();
+            return;
+        }
+        var reply = await _connection.QueueActionAsync(new QueueActionRequest
+        {
+            QueueId = queueId, Action = "reorderfiles", JobOrder = jobs.Select(job => job.Id).ToList(),
+        });
+        var result = reply.GetPayload<SettingsResult>();
+        if (reply.Type != MessageTypes.SettingsResult || !result.Ok)
+            await ShowMessageAsync("Queue file order", result.Error ?? "Could not save the file order.");
     }
 
     private static SettingsDto CloneSettings(SettingsDto source)
@@ -2512,6 +3580,8 @@ public sealed partial class MainWindow : Window
                 MaxConcurrentDownloads = queue.MaxConcurrentDownloads,
                 IsRunning = queue.IsRunning,
                 Order = queue.Order,
+                JobOrder = queue.JobOrder.ToList(),
+                RetryLimit = queue.RetryLimit,
                 QuotaEnabled = queue.QuotaEnabled,
                 QuotaBytes = queue.QuotaBytes,
                 QuotaWindowHours = queue.QuotaWindowHours,
@@ -2525,6 +3595,8 @@ public sealed partial class MainWindow : Window
                 QueueId = schedule.QueueId,
                 Enabled = schedule.Enabled,
                 Kind = schedule.Kind,
+                StartOnHostStartup = schedule.StartOnHostStartup, TimedStartEnabled = schedule.TimedStartEnabled,
+                RepeatEveryMinutes = schedule.RepeatEveryMinutes, LastRunAt = schedule.LastRunAt, LastRunError = schedule.LastRunError,
                 StartDate = schedule.StartDate,
                 Days = schedule.Days,
                 StartTime = schedule.StartTime,
@@ -2543,6 +3615,7 @@ public sealed partial class MainWindow : Window
             BrowserAutoIntercept = source.BrowserAutoIntercept,
             NotifyOnCompletion = source.NotifyOnCompletion,
             PlayCompletionSound = source.PlayCompletionSound,
+            EventSoundFiles = new Dictionary<string, string>(source.EventSoundFiles, StringComparer.OrdinalIgnoreCase),
             ShowCompletionDialog = source.ShowCompletionDialog,
             AutoResumeUnfinishedOnStartup = source.AutoResumeUnfinishedOnStartup,
             AllowLocalNetwork = source.AllowLocalNetwork,
@@ -2563,6 +3636,8 @@ public sealed partial class MainWindow : Window
                 Pattern = profile.Pattern,
                 MaxConnections = profile.MaxConnections,
             }).ToList(),
+            CustomCategories = source.CustomCategories.Select(category => new CategoryDefinitionDto { Id = category.Id, Name = category.Name,
+                DestinationDirectory = category.DestinationDirectory, Extensions = new(category.Extensions) }).ToList(),
             CategoryFolders = new Dictionary<string, string>(source.CategoryFolders, StringComparer.OrdinalIgnoreCase),
             ExcludedFileExtensions = new List<string>(source.ExcludedFileExtensions),
             ExcludedHosts = new List<string>(source.ExcludedHosts),

@@ -13,6 +13,7 @@ public sealed class HostConnection : IAsyncDisposable
     private Task? _loop;
 
     public event Action<SnapshotDto>? SnapshotReceived;
+    public event Action<UpdateProgressDto>? UpdateProgressChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<bool, string?>? ConnectionChanged;
 
@@ -30,8 +31,35 @@ public sealed class HostConnection : IAsyncDisposable
         return reply.GetPayload<SnapshotDto>();
     }
 
+    public Task<IpcMessage> GroupActionAsync(GroupActionRequest request, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.GroupAction, request, TimeSpan.FromMinutes(2), cancellationToken);
+
+    public Task<IpcMessage> GetConnectionsAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobConnections, new JobActionRequest { JobId = jobId }, TimeSpan.FromSeconds(8), cancellationToken);
+
+    public Task<IpcMessage> GetStatisticsAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.StatisticsGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
+
+    public async Task<FileMetadataResult> ReadFileMetadataAsync(FileMetadataRequest payload, CancellationToken cancellationToken)
+    {
+        // Isolate a slow server preview from this UI's normal command/event connection.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(18));
+        await using var client = await IpcClient.ConnectAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+        var request = IpcMessage.Create(MessageTypes.FileMetadata, payload);
+        await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
+        while (await client.ReadAsync(timeout.Token).ConfigureAwait(false) is { } reply)
+        {
+            if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
+            if (reply.ReplyTo != request.Id) continue;
+            if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This Host does not support file information previews." };
+            return reply.GetPayload<FileMetadataResult>();
+        }
+        throw new IOException("The Host disconnected while reading file information.");
+    }
 
     public Task<IpcMessage> GetSegmentsAsync(Guid id, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobSegments, new JobActionRequest { JobId = id },
@@ -44,7 +72,7 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobResume, new JobActionRequest { JobId = id }, TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task<IpcMessage> CancelAsync(Guid id, CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.JobCancel, new JobActionRequest { JobId = id, DeleteFile = true },
+        => RequestAsync(MessageTypes.JobCancel, new JobActionRequest { JobId = id, DeleteFile = true, OnlyIfUnfinished = true },
             TimeSpan.FromSeconds(8), cancellationToken);
 
     public Task<IpcMessage> RemoveAsync(Guid id, bool deleteFile, CancellationToken cancellationToken = default)
@@ -56,7 +84,10 @@ public sealed class HostConnection : IAsyncDisposable
             TimeSpan.FromSeconds(10), cancellationToken);
 
     public Task<IpcMessage> QueueActionAsync(QueueActionRequest request, CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.QueueAction, request, TimeSpan.FromSeconds(10), cancellationToken);
+        => RequestAsync(MessageTypes.QueueAction, request, request.MoveContentsToQueueId.HasValue ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> DetachFromQueueAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobMoveToQueue, new JobQueueRequest { JobId = jobId, Detach = true }, TimeSpan.FromSeconds(10), cancellationToken);
 
     public Task<IpcMessage> MoveToQueueAsync(Guid jobId, int queueId, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobMoveToQueue, new JobQueueRequest { JobId = jobId, QueueId = queueId },
@@ -84,9 +115,22 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.UpdateDefer, new UpdateDeferRequest { Version = version },
             TimeSpan.FromSeconds(10), cancellationToken);
 
-    public Task<IpcMessage> UpdateJobAsync(Guid jobId, string description, CancellationToken cancellationToken = default)
-        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Description = description },
+    public Task<IpcMessage> UpdateJobAsync(Guid jobId, string description, string? categoryId = null, JobCompletionOptionsDto? completionOptions = null, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Description = description, CategoryId = categoryId, CompletionOptions = completionOptions },
             TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> SetCategoryAsync(Guid jobId, string categoryId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, CategoryId = categoryId },
+            TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> UpdateTransferOptionsAsync(Guid id, long? speedLimitBytesPerSecond = null,
+        bool? showCompletionDialog = null, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest
+        {
+            JobId = id,
+            SpeedLimitBytesPerSecond = speedLimitBytesPerSecond,
+            ShowCompletionDialog = showCompletionDialog,
+        }, TimeSpan.FromSeconds(10), cancellationToken);
 
     public Task<IpcMessage> MoveJobAsync(Guid jobId, string newFilePath, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, NewFilePath = newFilePath },
@@ -136,12 +180,14 @@ public sealed class HostConnection : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        // App.OnLaunched owns Host startup. Reconnection only waits for it;
+        // a hidden frontend must never undo an intentional tray Exit, even if
+        // Exit happens before this frontend's first successful handshake.
         while (!cancellationToken.IsCancellationRequested)
         {
             IpcClient? client = null;
             try
             {
-                HostLauncher.EnsureStarted();
                 client = await IpcClient.ConnectAsync(TimeSpan.FromSeconds(2), cancellationToken)
                     .ConfigureAwait(false);
 
@@ -190,6 +236,7 @@ public sealed class HostConnection : IAsyncDisposable
                 if (_client == client)
                 {
                     _client = null;
+                    ConnectionChanged?.Invoke(false, "The background Host has stopped. Open Download Manager again to start it.");
                 }
 
                 FailPending(new IOException("The connection to the background host was lost."));
@@ -212,6 +259,11 @@ public sealed class HostConnection : IAsyncDisposable
 
     private void Dispatch(IpcMessage message, bool snapshot)
     {
+        if (message.Type == MessageTypes.UpdateProgress)
+        {
+            UpdateProgressChanged?.Invoke(message.GetPayload<UpdateProgressDto>());
+            return;
+        }
         if (message.ReplyTo is not null && _pending.TryGetValue(message.ReplyTo, out var completion))
         {
             _pending.TryRemove(message.ReplyTo, out _);
@@ -282,8 +334,21 @@ public static class HostLauncher
 
     public static void EnsureStarted()
     {
-        if (Process.GetProcessesByName("DownloadManager.Host").Length > 0)
+        // Use the same per-user/profile identity as IPC and the Host. A process
+        // name can belong to another profile, while a duplicate scoped Host
+        // can activate a frontend from an older build directory.
+        try
         {
+            if (Mutex.TryOpenExisting(PipeNames.MutexName(), out var existingHost))
+            {
+                existingHost.Dispose();
+                return;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // An existing Host owns this identity but is inaccessible. Starting
+            // another cannot resolve that; let the connection report the error.
             return;
         }
 
@@ -305,7 +370,8 @@ public static class HostLauncher
             {
                 FileName = executable,
                 Arguments = "--background",
-                UseShellExecute = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
         }

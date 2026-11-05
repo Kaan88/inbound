@@ -52,11 +52,11 @@ public sealed class TrayIconController : IDisposable
     {
         _actions = actions;
         _menu = new ContextMenuStrip();
-        _statusItem = new ToolStripMenuItem("Download Manager") { Enabled = false };
+        _statusItem = new ToolStripMenuItem("Rill Download Manager") { Enabled = false };
         _menu.Items.Add(_statusItem);
         _menu.Items.Add(new ToolStripSeparator());
 
-        var open = new ToolStripMenuItem("Open Download Manager", null, (_, _) => _actions.Open());
+        var open = new ToolStripMenuItem("Open Rill Download Manager", null, (_, _) => _actions.Open());
         open.Font = new Font(open.Font, FontStyle.Bold);
         _menu.Items.Add(open);
 
@@ -80,11 +80,15 @@ public sealed class TrayIconController : IDisposable
         _icon = new NotifyIcon
         {
             Icon = icon ?? SystemIcons.Application,
-            Text = "Download Manager",
+            Text = "Rill Download Manager",
             Visible = true,
             ContextMenuStrip = _menu,
         };
-        _icon.DoubleClick += (_, _) => _actions.Open();
+        _icon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left) _actions.Open();
+        };
+        _icon.BalloonTipClicked += (_, _) => _actions.Open();
 
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
         _timer.Tick += (_, _) => RefreshState();
@@ -108,7 +112,7 @@ public sealed class TrayIconController : IDisposable
         {
             var active = _actions.ActiveCount();
             _statusItem.Text = active == 0 ? "Idle" : $"{active} active download{(active == 1 ? "" : "s")}";
-            _icon.Text = active == 0 ? "Download Manager" : $"Download Manager — {active} active";
+            _icon.Text = active == 0 ? "Rill Download Manager" : $"Rill — {active} active";
             _integrationItem.Text = $"Browser integration: {_actions.IntegrationStatus()}";
             var updateText = _actions.UpdateText();
             _updateItem.Visible = !string.IsNullOrWhiteSpace(updateText);

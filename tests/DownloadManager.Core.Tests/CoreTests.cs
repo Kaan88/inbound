@@ -100,6 +100,7 @@ public sealed class JobListFileTests
             {
                 Url = "https://example.com/a.zip",
                 FileName = "a.zip",
+                CategoryId = "compressed",
                 DestinationDirectory = "C:\\Downloads",
                 Description = "keep me",
                 QueueId = 3,
@@ -115,6 +116,7 @@ public sealed class JobListFileTests
         var entry = Assert.Single(entries);
         Assert.Equal("https://example.com/a.zip", entry.Url);
         Assert.Equal("a.zip", entry.FileName);
+        Assert.Equal("compressed", entry.CategoryId);
         Assert.Equal("C:\\Downloads", entry.DestinationDirectory);
         Assert.Equal("keep me", entry.Description);
         Assert.Equal(3, entry.QueueId);

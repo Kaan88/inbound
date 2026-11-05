@@ -80,6 +80,11 @@ public sealed record JobFailure(
 
 public sealed class DownloadJob
 {
+    public bool IsQueued { get; set; } = true;
+    public bool QueueProcessing { get; set; }
+    public int QueueRetryCount { get; set; }
+    public DateTimeOffset? QueueRetryAt { get; set; }
+
     public const int CurrentSchemaVersion = 1;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -90,8 +95,9 @@ public sealed class DownloadJob
     public string? Referrer { get; set; }
     public string? UserAgent { get; set; }
 
-
     public string FileName { get; set; } = string.Empty;
+    public string? CategoryId { get; set; }
+    public bool CategoryIsAutomatic { get; set; } = true;
     public string DestinationDirectory { get; set; } = string.Empty;
     public string FinalFilePath { get; set; } = string.Empty;
     public string PartFilePath { get; set; } = string.Empty;
@@ -111,7 +117,16 @@ public sealed class DownloadJob
     public int RequestedConnections { get; set; } = 1;
     public int ActiveConnections { get; set; }
     public double? BytesPerSecond { get; set; }
-    public long? SpeedLimitBytesPerSecond { get; set; }
+    private long _speedLimitBytesPerSecond;
+    public long? SpeedLimitBytesPerSecond
+    {
+        get { var value = Volatile.Read(ref _speedLimitBytesPerSecond); return value > 0 ? value : null; }
+        set => Volatile.Write(ref _speedLimitBytesPerSecond, value.GetValueOrDefault());
+    }
+    public bool? ResumeSupported { get; set; }
+    public bool? ShowCompletionDialog { get; set; }
+    public JobCompletionOptions CompletionOptions { get; set; } = new();
+    public bool CompletionActionsStarted { get; set; }
     public TimeSpan? EstimatedRemaining { get; set; }
 
     public DownloadSource Source { get; set; } = DownloadSource.Cli;
@@ -130,6 +145,7 @@ public sealed class DownloadJob
 
     public JobFailure? Failure { get; set; }
     public Dictionary<string, string> RequestHeaders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> RequestHeadersProtected { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     [JsonIgnore]
     public bool IsTerminal => State is DownloadState.Completed or DownloadState.Cancelled ||
@@ -143,7 +159,7 @@ public sealed class DownloadJob
     public bool IsActive => State is DownloadState.Connecting or DownloadState.Downloading or DownloadState.Verifying or DownloadState.RetryWaiting;
 
     [JsonIgnore]
-    public bool CanPause => State is DownloadState.Queued or DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting;
+    public bool CanPause => QueueRetryAt is not null || State is DownloadState.Queued or DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting;
 
     [JsonIgnore]
     public bool CanResume => State is DownloadState.Paused or DownloadState.Cancelled ||
@@ -157,9 +173,21 @@ public sealed class DownloadJob
     public DownloadJob Clone()
     {
         var clone = (DownloadJob)MemberwiseClone();
+        clone.CompletionOptions = CompletionOptions.Clone();
         clone.RequestHeaders = new Dictionary<string, string>(RequestHeaders, StringComparer.OrdinalIgnoreCase);
+        clone.RequestHeadersProtected = new Dictionary<string, string>(RequestHeadersProtected, StringComparer.OrdinalIgnoreCase);
         return clone;
     }
+}
+
+public sealed class JobCompletionOptions
+{
+    /// <summary>Null inherits the global program; empty disables it for this job.</summary>
+    public string? ProgramPath { get; set; }
+    public bool OpenFile { get; set; }
+    public string SystemAction { get; set; } = "none";
+    public bool ForceSystemAction { get; set; }
+    public JobCompletionOptions Clone() => (JobCompletionOptions)MemberwiseClone();
 }
 
 public sealed record TransferProgress(
@@ -308,6 +336,8 @@ public sealed class SegmentCheckpoint
 
 public sealed class DownloadQueue
 {
+    public int? RetryLimit { get; set; }
+    public List<Guid> JobOrder { get; set; } = new();
     public int Id { get; set; }
     public string Name { get; set; } = "Main";
     public int MaxConcurrentDownloads { get; set; } = 3;
@@ -323,6 +353,12 @@ public sealed class DownloadQueue
 
 public sealed class ScheduleRule
 {
+    public string? LastRunError { get; set; }
+    public bool StartOnHostStartup { get; set; }
+    public bool TimedStartEnabled { get; set; } = true;
+    public int? RepeatEveryMinutes { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
@@ -359,6 +395,31 @@ public sealed class ConnectionProfile
     public int MaxConnections { get; set; } = 8;
 }
 
+public sealed class DownloadCategory
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? DestinationDirectory { get; set; }
+    public List<string> Extensions { get; set; } = new();
+}
+
+public sealed class ArchivedDownloadRecord
+{
+    public Guid? SourceJobId { get; set; }
+    public Guid Id { get; set; }
+    public long ReceivedBytes { get; set; }
+    public DownloadState State { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}
+
+public sealed class DownloadGroup
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public List<Guid> JobIds { get; set; } = new();
+}
+
 public sealed class AppSettings
 {
     public const int CurrentSchemaVersion = 1;
@@ -384,6 +445,7 @@ public sealed class AppSettings
     public bool BrowserAutoIntercept { get; set; } = true;
     public bool NotifyOnCompletion { get; set; } = true;
     public bool PlayCompletionSound { get; set; } = true;
+    public Dictionary<string, string> EventSoundFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ShowCompletionDialog { get; set; } = true;
     public bool AutoResumeUnfinishedOnStartup { get; set; } = true;
     public bool AllowLocalNetwork { get; set; } = true;
@@ -394,10 +456,10 @@ public sealed class AppSettings
 
     /// <summary>Program run once after each successful download; file path is one argument.</summary>
     public string? PostDownloadCommand { get; set; }
-    public string? UpdateManifestUrl { get; set; }
-    public string? UpdatePublicKey { get; set; }
+    public string? UpdateManifestUrl { get; set; } = ReleaseUpdates.ManifestUrl;
+    public string? UpdatePublicKey { get; set; } = ReleaseUpdates.PublicKey;
     public string UpdateChannel { get; set; } = "stable";
-    public bool AutoCheckUpdates { get; set; }
+    public bool AutoCheckUpdates { get; set; } = true;
     public int UpdateCheckIntervalHours { get; set; } = 24;
     public string? SkippedUpdateVersion { get; set; }
     public DateTimeOffset? LastUpdateCheck { get; set; }
@@ -409,6 +471,17 @@ public sealed class AppSettings
     public string? LastDestinationDirectory { get; set; }
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<DownloadCategory> CustomCategories { get; set; } = new();
+    public List<DownloadGroup> DownloadGroups { get; set; } = new();
+    public List<ArchivedDownloadRecord> ArchivedDownloads { get; set; } = new();
+
+    public AppSettings WithDownloadGroups(List<DownloadGroup> groups)
+    {
+        var copy = (AppSettings)MemberwiseClone();
+        copy.DownloadGroups = groups;
+        return copy;
+    }
+
     public List<string> ExcludedFileExtensions { get; set; } = new();
     public List<string> ExcludedHosts { get; set; } = new();
     public List<string> InterceptedFileExtensions { get; set; } = new()

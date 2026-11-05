@@ -53,12 +53,21 @@ public static class InstalledBuild
                 return null;
             }
 
+            var effectiveVersion = versionValue.Trim();
+            var hostAssembly = Path.Combine(root, "app", "DownloadManager.Host.dll");
+            if (File.Exists(hostAssembly) && Version.TryParse(effectiveVersion, out var recorded))
+            {
+                var actual = System.Reflection.AssemblyName.GetAssemblyName(hostAssembly).Version;
+                if (actual is not null && recorded > actual)
+                    effectiveVersion = actual.ToString(3);
+            }
+
             return new InstallMetadata(
-                versionValue.Trim(),
+                effectiveVersion,
                 string.IsNullOrWhiteSpace(channel.GetString()) ? "stable" : channel.GetString()!.Trim(),
                 root);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or BadImageFormatException)
         {
             return null;
         }

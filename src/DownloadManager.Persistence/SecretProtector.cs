@@ -19,6 +19,11 @@ public static class SecretProtector
 
     private static readonly byte[] ProxyEntropy =
         Encoding.UTF8.GetBytes("DownloadManager.Proxy.v1");
+    private static readonly byte[] HeaderEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.RequestHeader.v1");
+
+    public static string ProtectHeader(string plaintext) => Protect(plaintext, HeaderEntropy);
+    public static string? UnprotectHeader(string? protectedValue) => Unprotect(protectedValue, HeaderEntropy);
 
     public static string Protect(string plaintext) => Protect(plaintext, Entropy);
 

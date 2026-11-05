@@ -11,6 +11,9 @@ internal sealed class UiState
     public bool SortAscending { get; set; }
     public bool ToolbarLarge { get; set; } = true;
     public bool HideCategories { get; set; }
+    public bool ShowSpeedGraph { get; set; } = true;
+    public bool SpeedGraphExpanded { get; set; } = true;
+    public bool? DarkMode { get; set; }
 }
 
 internal static class UiStateStore
@@ -20,14 +23,19 @@ internal static class UiStateStore
         WriteIndented = true,
     };
 
-    private static string[] Paths =>
-    [
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DownloadManager",
-            "ui-state.json"),
-        Path.Combine(AppContext.BaseDirectory, "ui-state.json"),
-    ];
+    private static string[] Paths
+    {
+        get
+        {
+            var isolated = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
+            if (!string.IsNullOrWhiteSpace(isolated)) return [Path.Combine(isolated, "ui-state.json")];
+            return
+            [
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DownloadManager", "ui-state.json"),
+                Path.Combine(AppContext.BaseDirectory, "ui-state.json"),
+            ];
+        }
+    }
 
     public static UiState Load()
     {

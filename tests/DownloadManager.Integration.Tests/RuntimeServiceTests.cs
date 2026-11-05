@@ -19,7 +19,7 @@ public sealed class RuntimeServerFixture : IAsyncLifetime
 }
 
 [Collection("runtime-http")]
-public sealed class RuntimeServiceTests
+public sealed partial class RuntimeServiceTests
 {
     private readonly TestServerHost _server;
 
@@ -70,7 +70,7 @@ public sealed class RuntimeServiceTests
         Assert.True(second.Accepted, second.Error);
         Assert.True(second.Duplicate);
         Assert.Equal(first.Job!.Id, second.Job!.Id);
-        Assert.Single(ctx.Service.GetSnapshot().Jobs.Where(j => j.ClientRequestId == "request-1"));
+        Assert.Single(ctx.Service.GetSnapshot().Jobs, j => j.ClientRequestId == "request-1");
     }
 
     [Fact]
@@ -225,6 +225,58 @@ public sealed class RuntimeServiceTests
         {
             await ctx.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task CrashReconciliationPreservesSegmentedPartFileAndResumes()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        const int size = 4 * 1024 * 1024;
+        const int keptPerSegment = 65536;
+        var expected = TestContent.Generate(721, size);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/segmented-crash.bin?size={size}&seed=721",
+            DestinationDirectory = ctx.Destination,
+            FileName = "segmented-crash.bin",
+            Connections = 2,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var jobId = response.Job!.Id;
+        var partPath = response.Job.PartFilePath;
+        await using (var part = new FileStream(partPath, FileMode.Create, FileAccess.Write))
+        {
+            part.SetLength(size);
+            await part.WriteAsync(expected.AsMemory(0, keptPerSegment));
+            part.Position = size / 2;
+            await part.WriteAsync(expected.AsMemory(size / 2, keptPerSegment));
+        }
+        await new JsonCheckpointStore(ctx.Paths).SaveAsync(new DownloadCheckpoint
+        {
+            JobId = jobId,
+            Url = response.Job.Url,
+            TotalBytes = size,
+            Segments =
+            {
+                new SegmentCheckpoint { Start = 0, End = size / 2 - 1, Completed = keptPerSegment },
+                new SegmentCheckpoint { Start = size / 2, End = size - 1, Completed = keptPerSegment },
+            },
+        });
+
+        await using var restarted = await ServiceContext.CreateAsync(
+            _server, ctx.Paths, ctx.Destination, autoResume: false);
+        Assert.Equal(2 * keptPerSegment, restarted.Service.GetJob(jobId)!.ReceivedBytes);
+        Assert.Equal(size, new FileInfo(partPath).Length);
+        var savedBytes = await File.ReadAllBytesAsync(partPath);
+        Assert.Equal(expected.AsSpan(size / 2, keptPerSegment).ToArray(),
+            savedBytes.AsSpan(size / 2, keptPerSegment).ToArray());
+        var resume = await restarted.Service.ResumeAsync(jobId);
+        Assert.True(resume.Ok, resume.Error);
+        var completed = await restarted.WaitFor(jobId, job => job.State == "completed");
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(expected)).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
     [Fact]
@@ -411,6 +463,44 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ConcurrentUpdateInstallIsRejectedAndCancellationReleasesGate()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var installRoot = Path.Combine(ctx.Paths.Root, "fake-install");
+        Directory.CreateDirectory(installRoot);
+        await File.WriteAllTextAsync(Path.Combine(installRoot, "install.json"),
+            "{\"version\":\"1.0.0\",\"channel\":\"stable\"}");
+        var settings = ctx.Service.GetSnapshot().Settings;
+        // Exceed the fixture's 64 KiB first write. A complete first chunk could
+        // otherwise return the HTTP connection to the pool while the fixture
+        // still delays completion, blocking a later request on that connection.
+        settings.UpdateManifestUrl = $"{_server.BaseAddress}/slow/update-manifest.bin?size=131072&seed=410&bps=1";
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", installRoot);
+            var first = ctx.Service.InstallUpdateAsync(cancellationToken: cancellation.Token);
+            var second = await ctx.Service.InstallUpdateAsync();
+            Assert.False(second.Ok);
+            Assert.Equal("busy", second.Status);
+            Assert.Contains("already in progress", second.Error);
+            cancellation.Cancel();
+            try { await first; }
+            catch (OperationCanceledException) { }
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", null);
+            var afterCancellation = await ctx.Service.InstallUpdateAsync();
+            Assert.Equal("notInstalled", afterCancellation.Status);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+        }
+    }
+
+    [Fact]
     public async Task UpdateCheckExcludesPortableAndVerifiesSignedDownload()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -480,6 +570,19 @@ public sealed class RuntimeServiceTests
                 Assert.False(blocked.Ok);
                 Assert.Equal("busy", blocked.Status);
                 await ctx.Service.CancelAsync(active.Job.Id, deleteFile: true);
+
+                // The signed fixture is deliberately not a ZIP: a staging
+                // failure must release admission so normal downloads continue.
+                var invalidPackage = await ctx.Service.InstallUpdateAsync(new UpdateInstallRequest { Force = true });
+                Assert.False(invalidPackage.Ok);
+                Assert.Equal("failed", invalidPackage.Status);
+                var following = await ctx.Service.AddJobAsync(new AddJobRequest
+                {
+                    Url = $"{_server.BaseAddress}/file/after-update-failure.bin?size=4096&seed=411",
+                    Source = "cli",
+                });
+                Assert.True(following.Accepted, following.Error);
+                await ctx.WaitFor(following.Job!.Id, job => job.State == "completed");
 
                 var deferred = await ctx.Service.DeferUpdateAsync("1.0.1");
                 Assert.True(deferred.Ok, deferred.Error);
@@ -971,6 +1074,194 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ProgressCancelAfterCompletionKeepsSavedFile()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/cancel-complete.bin?size=65536&seed=422",
+        });
+        var completed = await ctx.WaitFor(added.Job!.Id, j => j.State == "completed");
+        var hash = await Hashing.Sha256FileAsync(completed.FinalFilePath);
+        var cancelled = await ctx.Service.CancelAsync(completed.Id, deleteFile: true, onlyIfUnfinished: true);
+        Assert.False(cancelled.Ok);
+        Assert.Equal("completed", ctx.Service.GetJob(completed.Id)!.State);
+        Assert.Equal(hash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task TransferOptionsPersistIndependentlyAndRejectInvalidUpdates()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var first = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/options.bin?size=65536&seed=419", StartMode = "later",
+        });
+        var second = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/other-options.bin?size=65536&seed=420", StartMode = "later",
+        });
+        var id = first.Job!.Id;
+        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = id, SpeedLimitBytesPerSecond = 32768, ShowCompletionDialog = false,
+        });
+        Assert.True(update.Ok, update.Error);
+        Assert.Equal(32768, update.Job!.SpeedLimitBytesPerSecond);
+        Assert.False(update.Job.ShowCompletionDialog);
+        Assert.True(update.Job.CanChangeSpeedLimit);
+        Assert.Null(ctx.Service.GetJob(second.Job!.Id)!.SpeedLimitBytesPerSecond);
+        Assert.Null(ctx.Service.GetJob(second.Job.Id)!.ShowCompletionDialog);
+        Assert.True(ctx.Service.GetSnapshot().Settings.ShowCompletionDialog);
+        var invalid = await ctx.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = id, SpeedLimitBytesPerSecond = -1, ShowCompletionDialog = true,
+        });
+        Assert.False(invalid.Ok);
+        Assert.False(ctx.Service.GetJob(id)!.ShowCompletionDialog);
+        Assert.Equal(32768, ctx.Service.GetJob(id)!.SpeedLimitBytesPerSecond);
+        await ctx.Service.ShutdownAsync();
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+        Assert.Equal(32768, restarted.Service.GetJob(id)!.SpeedLimitBytesPerSecond);
+        Assert.False(restarted.Service.GetJob(id)!.ShowCompletionDialog);
+        var cleared = await restarted.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = id, SpeedLimitBytesPerSecond = 0,
+        });
+        Assert.True(cleared.Ok);
+        Assert.Null(cleared.Job!.SpeedLimitBytesPerSecond);
+        Assert.False(cleared.Job.ShowCompletionDialog);
+        var media = await restarted.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/sample.m3u8", StartMode = "later",
+        });
+        Assert.False(media.Job!.CanChangeSpeedLimit);
+        Assert.False((await restarted.Service.UpdateJobAsync(new JobUpdateRequest
+        {
+            JobId = media.Job.Id, SpeedLimitBytesPerSecond = 1000,
+        })).Ok);
+    }
+
+    [Fact]
+    public async Task CustomCategoriesClassifyPersistAndRespectExplicitChoicesAndBrowserDefaults()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var categoryId = Guid.NewGuid().ToString("N");
+        var folder = Path.Combine(ctx.Destination, "design");
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.CustomCategories.Add(new CategoryDefinitionDto { Id = categoryId, Name = "Design files",
+            DestinationDirectory = folder, Extensions = new() { ".DMART" } });
+        settings.CategoryFolders["documents"] = Path.Combine(ctx.Destination, "documents");
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/design.dmart?size=65536&seed=901", Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+        var completed = await ctx.WaitFor(added.Job!.Id, job => job.State == "completed");
+        Assert.Equal(categoryId, completed.CategoryId);
+        Assert.Equal(folder, completed.DestinationDirectory);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(901, 65536))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        var chosen = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/chosen.dmart?size=65536&seed=902", CategoryId = "documents", StartMode = "later",
+        });
+        Assert.True(chosen.Accepted, chosen.Error);
+        Assert.Equal("documents", chosen.Job!.CategoryId);
+        Assert.Equal(settings.CategoryFolders["documents"], chosen.Job.DestinationDirectory);
+        var browser = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/browser.dmart?size=65536&seed=903", Source = "chromeAuto", StartMode = "later",
+        });
+        Assert.True(browser.Accepted, browser.Error);
+        Assert.Equal(categoryId, browser.Job!.CategoryId);
+        Assert.Equal(ctx.Destination, browser.Job.DestinationDirectory);
+        var explicitFolder = Path.Combine(ctx.Destination, "one-off");
+        var remembered = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/remember.dmart?size=65536&seed=904", CategoryId = categoryId.ToUpperInvariant(),
+            DestinationDirectory = explicitFolder, RememberDestination = true, StartMode = "later",
+        });
+        Assert.True(remembered.Accepted, remembered.Error);
+        var renamed = ctx.Service.GetSnapshot().Settings;
+        renamed.CustomCategories.Single().Name = "Renamed designs";
+        Assert.True((await ctx.Service.UpdateSettingsAsync(renamed)).Ok);
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+        var snapshot = restarted.Service.GetSnapshot();
+        var definition = Assert.Single(snapshot.Settings.CustomCategories);
+        Assert.Equal("Renamed designs", definition.Name);
+        Assert.Equal(explicitFolder, definition.DestinationDirectory);
+        Assert.Equal(new[] { "dmart" }, definition.Extensions);
+        Assert.Equal(categoryId, snapshot.Jobs.Single(job => job.Id == completed.Id).CategoryId);
+        Assert.Equal("documents", snapshot.Jobs.Single(job => job.Id == chosen.Job.Id).CategoryId);
+        Assert.True(File.Exists(completed.FinalFilePath));
+        var invalid = await restarted.Service.AddJobAsync(new AddJobRequest { Url = $"{_server.BaseAddress}/file/invalid", CategoryId = Guid.NewGuid().ToString("N") });
+        Assert.False(invalid.Accepted);
+        Assert.Equal("invalid_category", invalid.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CategoryValidationRejectsAmbiguousRulesAndStaleRemovalWithoutChangingDefinitions()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var stale = ctx.Service.GetSnapshot().Settings;
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.CustomCategories.Add(new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = "Assets", Extensions = new() { "asset" } });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.False((await ctx.Service.UpdateSettingsAsync(stale)).Ok);
+        var duplicate = ctx.Service.GetSnapshot().Settings;
+        duplicate.CustomCategories.Add(new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = "Other assets", Extensions = new() { ".ASSET" } });
+        Assert.False((await ctx.Service.UpdateSettingsAsync(duplicate)).Ok);
+        Assert.Single(ctx.Service.GetSnapshot().Settings.CustomCategories);
+        var duplicateId = ctx.Service.GetSnapshot().Settings;
+        duplicateId.CustomCategories.Add(new CategoryDefinitionDto { Id = duplicateId.CustomCategories[0].Id.ToUpperInvariant(), Name = "Duplicate identifier" });
+        Assert.False((await ctx.Service.UpdateSettingsAsync(duplicateId)).Ok);
+        var invalid = ctx.Service.GetSnapshot().Settings;
+        invalid.CustomCategories[0].Extensions = new() { "../bad" };
+        Assert.False((await ctx.Service.UpdateSettingsAsync(invalid)).Ok);
+        Assert.Equal(new[] { "asset" }, Assert.Single(ctx.Service.GetSnapshot().Settings.CustomCategories).Extensions);
+    }
+
+    [Fact]
+    public async Task RenamingUpdatesAutomaticCategoryAndKeepsExplicitSelection()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var id = Guid.NewGuid().ToString("N");
+        settings.CustomCategories.Add(new CategoryDefinitionDto { Id = id, Name = "Artwork", Extensions = new() { "dmart" } });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var automatic = await ctx.Service.AddJobAsync(new AddJobRequest { Url = $"{_server.BaseAddress}/file/opaque?size=1024&seed=905" });
+        Assert.True(automatic.Accepted, automatic.Error);
+        var done = await ctx.WaitFor(automatic.Job!.Id, job => job.State == "completed");
+        var renamed = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = done.Id, NewFilePath = Path.Combine(ctx.Destination, "artwork.dmart") });
+        Assert.True(renamed.Ok, renamed.Error);
+        Assert.Equal(id, renamed.Job!.CategoryId);
+        var explicitChoice = await ctx.Service.AddJobAsync(new AddJobRequest { Url = $"{_server.BaseAddress}/file/opaque2?size=1024&seed=906", CategoryId = "documents" });
+        Assert.True(explicitChoice.Accepted, explicitChoice.Error);
+        var selected = await ctx.WaitFor(explicitChoice.Job!.Id, job => job.State == "completed");
+        var selectedRenamed = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = selected.Id, NewFilePath = Path.Combine(ctx.Destination, "chosen.dmart") });
+        Assert.True(selectedRenamed.Ok, selectedRenamed.Error);
+        Assert.Equal("documents", selectedRenamed.Job!.CategoryId);
+    }
+
+    [Fact]
+    public async Task ConcurrentCategoryCreationCannotSilentlyDiscardAnotherSavedDefinition()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var first = ctx.Service.GetSnapshot().Settings;
+        var second = ctx.Service.GetSnapshot().Settings;
+        first.CustomCategories.Add(new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = "First" });
+        second.CustomCategories.Add(new CategoryDefinitionDto { Id = Guid.NewGuid().ToString("N"), Name = "Second" });
+        var results = await Task.WhenAll(ctx.Service.UpdateSettingsAsync(first), ctx.Service.UpdateSettingsAsync(second));
+        Assert.Single(results, result => result.Ok);
+        Assert.Single(results, result => !result.Ok);
+        var kept = Assert.Single(ctx.Service.GetSnapshot().Settings.CustomCategories);
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+        Assert.Equal(kept.Id, Assert.Single(restarted.Service.GetSnapshot().Settings.CustomCategories).Id);
+    }
+
+    [Fact]
     public async Task CategoryDestinationRulesAndLastFolderPersist()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1018,6 +1309,48 @@ public sealed class RuntimeServiceTests
         {
             await second.DisposeAsync();
         }
+    }
+
+    [Theory]
+    [InlineData("chromeAuto")]
+    [InlineData("chromeContextMenu")]
+    public async Task BrowserDownloadsUseDefaultInsteadOfLastFolderAcrossRestart(string source)
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var previous = Path.Combine(ctx.Destination, "previous");
+        var oneOff = Path.Combine(ctx.Destination, "one-off");
+        settings.LastDestinationDirectory = previous;
+        settings.CategoryFolders["music"] = Path.Combine(ctx.Destination, "category-music");
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var explicitChoice = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/one.mp3?size=4096&seed=281",
+            DestinationDirectory = oneOff,
+            Source = source,
+            StartMode = "queue",
+        });
+        Assert.Equal(oneOff, explicitChoice.Job!.DestinationDirectory);
+        Assert.Equal(previous, ctx.Service.GetSnapshot().Settings.LastDestinationDirectory);
+        var next = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/two.mp3?size=4096&seed=282",
+            Source = source,
+            StartMode = "queue",
+        });
+        Assert.Equal(ctx.Destination, next.Job!.DestinationDirectory);
+
+        await ctx.Service.ShutdownAsync();
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination);
+        var afterRestart = await restarted.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/three.mp3?size=4096&seed=283",
+            Source = source,
+            StartMode = "queue",
+        });
+        Assert.Equal(ctx.Destination, afterRestart.Job!.DestinationDirectory);
+        Assert.Equal(previous, restarted.Service.GetSnapshot().Settings.LastDestinationDirectory);
     }
 
     [Fact]
@@ -1252,6 +1585,52 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task QueueFileOrderControlsSchedulingSurvivesRestartAndRejectsStaleLists()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues[0].IsRunning = false;
+        settings.Queues[0].MaxConcurrentDownloads = 1;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var ids = new List<Guid>();
+        for (var index = 0; index < 3; index++)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/slow/order-{index}.bin?size=262144&seed={120 + index}&bps=262144",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"order-{index}.bin", QueueId = 0,
+            });
+            Assert.True(response.Accepted, response.Error);
+            ids.Add(response.Job!.Id);
+        }
+        ids.Reverse();
+        var reorder = await ctx.Service.QueueActionAsync(new QueueActionRequest
+            { QueueId = 0, Action = "reorderfiles", JobOrder = ids });
+        Assert.True(reorder.Ok, reorder.Error);
+        foreach (var invalid in new[] { ids.Take(2).ToList(), new List<Guid> { ids[0], ids[0], ids[2] },
+                     new List<Guid> { ids[0], ids[1], Guid.NewGuid() } })
+        {
+            var rejected = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                { QueueId = 0, Action = "reorderfiles", JobOrder = invalid });
+            Assert.False(rejected.Ok);
+            Assert.Equal(ids, ctx.Service.GetSnapshot().Settings.Queues[0].JobOrder);
+        }
+        // A stale general Options snapshot must not overwrite Host-owned order.
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination, autoResume: false);
+        Assert.Equal(ids, restarted.Service.GetSnapshot().Settings.Queues[0].JobOrder);
+        Assert.True((await restarted.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" })).Ok);
+        await restarted.WaitFor(ids[0], job => job.ReceivedBytes > 0);
+        Assert.Null(restarted.Service.GetJob(ids[1])!.StartedAt);
+        Assert.Null(restarted.Service.GetJob(ids[2])!.StartedAt);
+        foreach (var id in ids) await restarted.WaitFor(id, job => job.State == "completed");
+        var finished = ids.Select(id => restarted.Service.GetJob(id)!).ToList();
+        Assert.True(finished[0].CompletedAt <= finished[1].StartedAt);
+        Assert.True(finished[1].CompletedAt <= finished[2].StartedAt);
+    }
+
+    [Fact]
     public async Task QueueStateAndMembershipSurviveRestart()
     {
         var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
@@ -1304,6 +1683,271 @@ public sealed class RuntimeServiceTests
         finally
         {
             await ctx.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task QueueSettingsCreateEditAndPersistWithoutChangingOtherQueues()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        var windowStart = DateTimeOffset.UtcNow;
+        try
+        {
+            await using (var ctx = await ServiceContext.CreateAsync(
+                             _server, paths, destination, autoResume: false))
+            {
+                var settings = ctx.Service.GetSnapshot().Settings;
+                settings.Queues.Add(new QueueDto
+                {
+                    Id = 1,
+                    Name = "Night",
+                    MaxConcurrentDownloads = 2,
+                    IsRunning = false,
+                    Order = 1,
+                    QuotaEnabled = true,
+                    QuotaBytes = 2_000_000,
+                    QuotaWindowHours = 8,
+                    QuotaWindowStart = windowStart,
+                    QuotaBytesUsed = 123_456,
+                });
+                settings.Queues.Add(new QueueDto
+                {
+                    Id = 2,
+                    Name = "Sync",
+                    MaxConcurrentDownloads = 4,
+                    IsRunning = true,
+                    Order = 2,
+                    QuotaEnabled = true,
+                    QuotaBytes = 5_000_000,
+                    QuotaWindowHours = 24,
+                    QuotaWindowStart = windowStart.AddHours(-1),
+                    QuotaBytesUsed = 789_012,
+                });
+
+                var created = await ctx.Service.UpdateSettingsAsync(settings);
+                Assert.True(created.Ok, created.Error);
+
+                var beforeQueueCreation = ctx.Service.GetSnapshot().Settings.Queues;
+                var invalidCreate = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create",
+                    Name = "  ",
+                    MaxConcurrentDownloads = 2,
+                });
+                Assert.False(invalidCreate.Ok);
+                Assert.Equal(beforeQueueCreation.Select(queue => queue.Id),
+                    ctx.Service.GetSnapshot().Settings.Queues.Select(queue => queue.Id));
+
+                var createdBrowser = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create",
+                    Name = "Browser",
+                    MaxConcurrentDownloads = 1,
+                });
+                Assert.True(createdBrowser.Ok, createdBrowser.Error);
+                var browserQueue = Assert.Single(createdBrowser.Settings!.Queues, queue => queue.Name == "Browser");
+                Assert.Equal(3, browserQueue.Id);
+                Assert.False(browserQueue.IsRunning);
+                Assert.False(browserQueue.QuotaEnabled);
+
+                var createdNight = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create",
+                    Name = "Night backup",
+                    MaxConcurrentDownloads = 2,
+                    QuotaEnabled = true,
+                    QuotaBytes = 1_500_000,
+                    QuotaWindowHours = 6,
+                });
+                Assert.True(createdNight.Ok, createdNight.Error);
+                var nightBackup = Assert.Single(createdNight.Settings!.Queues, queue => queue.Name == "Night backup");
+                Assert.Equal(4, nightBackup.Id);
+                Assert.False(nightBackup.IsRunning);
+                Assert.True(nightBackup.QuotaEnabled);
+                Assert.Equal(1_500_000, nightBackup.QuotaBytes);
+                Assert.Equal(6, nightBackup.QuotaWindowHours);
+
+                var queuesAfterCreate = ctx.Service.GetSnapshot().Settings.Queues;
+                Assert.Equal("Night", Assert.Single(queuesAfterCreate, queue => queue.Id == 1).Name);
+                Assert.Equal(123_456, Assert.Single(queuesAfterCreate, queue => queue.Id == 1).QuotaBytesUsed);
+                Assert.Equal(windowStart, Assert.Single(queuesAfterCreate, queue => queue.Id == 1).QuotaWindowStart);
+                Assert.Equal("Sync", Assert.Single(queuesAfterCreate, queue => queue.Id == 2).Name);
+                Assert.Equal(789_012, Assert.Single(queuesAfterCreate, queue => queue.Id == 2).QuotaBytesUsed);
+
+                var editedSettings = ctx.Service.GetSnapshot().Settings;
+                var night = Assert.Single(editedSettings.Queues, queue => queue.Id == 1);
+                night.Name = "Night edited";
+                night.MaxConcurrentDownloads = 5;
+                night.QuotaBytes = 3_000_000;
+                night.QuotaWindowHours = 12;
+                // Leave usage, window start, and stopped state untouched while editing.
+                var rejected = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 1, Action = "policy", Name = "Invalid", MaxConcurrentDownloads = 0,
+                });
+                Assert.False(rejected.Ok);
+                Assert.Equal("Night", ctx.Service.GetSnapshot().Settings.Queues.Single(q => q.Id == 1).Name);
+                var edited = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 1, Action = "policy", Name = night.Name,
+                    MaxConcurrentDownloads = night.MaxConcurrentDownloads,
+                    QuotaEnabled = true, QuotaBytes = night.QuotaBytes, QuotaWindowHours = night.QuotaWindowHours,
+                });
+                Assert.True(edited.Ok, edited.Error);
+            }
+
+            await using var restarted = await ServiceContext.CreateAsync(
+                _server, paths, destination, autoResume: false);
+            var queues = restarted.Service.GetSnapshot().Settings.Queues;
+            var persistedNight = Assert.Single(queues, queue => queue.Id == 1);
+            Assert.Equal("Night edited", persistedNight.Name);
+            Assert.Equal(5, persistedNight.MaxConcurrentDownloads);
+            Assert.False(persistedNight.IsRunning);
+            Assert.True(persistedNight.QuotaEnabled);
+            Assert.Equal(3_000_000, persistedNight.QuotaBytes);
+            Assert.Equal(12, persistedNight.QuotaWindowHours);
+            Assert.Equal(123_456, persistedNight.QuotaBytesUsed);
+            Assert.Equal(windowStart, persistedNight.QuotaWindowStart);
+
+            var unchangedSync = Assert.Single(queues, queue => queue.Id == 2);
+            Assert.Equal("Sync", unchangedSync.Name);
+            Assert.Equal(4, unchangedSync.MaxConcurrentDownloads);
+            Assert.True(unchangedSync.IsRunning);
+            Assert.True(unchangedSync.QuotaEnabled);
+            Assert.Equal(5_000_000, unchangedSync.QuotaBytes);
+            Assert.Equal(24, unchangedSync.QuotaWindowHours);
+            Assert.Equal(789_012, unchangedSync.QuotaBytesUsed);
+            Assert.Equal(windowStart.AddHours(-1), unchangedSync.QuotaWindowStart);
+
+            var persistedBrowser = Assert.Single(queues, queue => queue.Id == 3);
+            Assert.Equal("Browser", persistedBrowser.Name);
+            Assert.Equal(1, persistedBrowser.MaxConcurrentDownloads);
+            Assert.False(persistedBrowser.IsRunning);
+            Assert.False(persistedBrowser.QuotaEnabled);
+
+            var persistedNightBackup = Assert.Single(queues, queue => queue.Id == 4);
+            Assert.Equal("Night backup", persistedNightBackup.Name);
+            Assert.Equal(2, persistedNightBackup.MaxConcurrentDownloads);
+            Assert.False(persistedNightBackup.IsRunning);
+            Assert.True(persistedNightBackup.QuotaEnabled);
+            Assert.Equal(1_500_000, persistedNightBackup.QuotaBytes);
+            Assert.Equal(6, persistedNightBackup.QuotaWindowHours);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task QueueActionsPersistOrderAndProtectDefaultOrAttachedQueues()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        try
+        {
+            await using (var ctx = await ServiceContext.CreateAsync(
+                             _server, paths, destination, autoResume: false))
+            {
+                var jobsQueue = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create", Name = "Jobs", MaxConcurrentDownloads = 1,
+                });
+                var emptyQueue = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create", Name = "Empty", MaxConcurrentDownloads = 2,
+                });
+                var orderedQueue = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    Action = "create", Name = "Ordered", MaxConcurrentDownloads = 3,
+                });
+                Assert.True(jobsQueue.Ok, jobsQueue.Error);
+                Assert.True(emptyQueue.Ok, emptyQueue.Error);
+                Assert.True(orderedQueue.Ok, orderedQueue.Error);
+                Assert.Equal(new[] { 0, 1, 2, 3 },
+                    ctx.Service.GetSnapshot().Settings.Queues.Select(queue => queue.Id));
+
+                var added = await ctx.Service.AddJobAsync(new AddJobRequest
+                {
+                    Url = $"{_server.BaseAddress}/file/queue-delete-guard.bin?size=4096&seed=433",
+                    DestinationDirectory = destination,
+                    FileName = "queue-delete-guard.bin",
+                    Source = "cli",
+                    QueueId = 1,
+                    StartMode = "later",
+                });
+                Assert.True(added.Accepted, added.Error);
+
+                var rename = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 1, Action = "policy", Name = "Renamed jobs", MaxConcurrentDownloads = 1,
+                });
+                Assert.True(rename.Ok, rename.Error);
+                Assert.Equal("Renamed jobs", ctx.Service.GetJob(added.Job!.Id)!.QueueName);
+
+                var deleteDefault = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 0, Action = "delete",
+                });
+                Assert.False(deleteDefault.Ok);
+                Assert.Contains(ctx.Service.GetSnapshot().Settings.Queues, queue => queue.Id == 0);
+
+                var deleteAttached = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 1, Action = "delete",
+                });
+                Assert.False(deleteAttached.Ok);
+                Assert.Contains(ctx.Service.GetSnapshot().Settings.Queues, queue => queue.Id == 1);
+                Assert.Equal(1, ctx.Service.GetJob(added.Job!.Id)!.QueueId);
+
+                Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 3, Action = "moveup",
+                })).Ok);
+                Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 1, Action = "movedown",
+                })).Ok);
+                var ordered = ctx.Service.GetSnapshot().Settings.Queues;
+                Assert.Equal(new[] { 0, 3, 1, 2 }, ordered.Select(queue => queue.Id));
+                Assert.Equal(new[] { 0, 1, 2, 3 }, ordered.Select(queue => queue.Order));
+
+                var deleteEmpty = await ctx.Service.QueueActionAsync(new QueueActionRequest
+                {
+                    QueueId = 2, Action = "delete",
+                });
+                Assert.True(deleteEmpty.Ok, deleteEmpty.Error);
+                Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.Queues, queue => queue.Id == 2);
+                Assert.Equal(1, ctx.Service.GetJob(added.Job.Id)!.QueueId);
+            }
+
+            await using var restarted = await ServiceContext.CreateAsync(
+                _server, paths, destination, autoResume: false);
+            var afterRestart = restarted.Service.GetSnapshot();
+            Assert.Equal(new[] { 0, 3, 1 }, afterRestart.Settings.Queues.Select(queue => queue.Id));
+            Assert.Equal(new[] { 0, 1, 2 }, afterRestart.Settings.Queues.Select(queue => queue.Order));
+            Assert.DoesNotContain(afterRestart.Settings.Queues, queue => queue.Id == 2);
+            var retainedJob = Assert.Single(afterRestart.Jobs, job => job.FileName == "queue-delete-guard.bin");
+            Assert.Equal(1, retainedJob.QueueId);
+            Assert.Equal("Renamed jobs", retainedJob.QueueName);
+            Assert.Equal("queued", retainedJob.State);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 
@@ -1378,16 +2022,27 @@ public sealed class RuntimeServiceTests
         legacy.Schedules.Add(new ScheduleRule { Id = queueScheduleId, Name = "Main", QueueId = 0, StartTime = "09:00" });
         await new JsonSettingsStore(paths).SaveAsync(legacy);
 
-        await using (var ctx = await ServiceContext.CreateAsync(_server, paths, destination))
+        try
         {
-            var schedule = Assert.Single(ctx.Service.GetSnapshot().Settings.Schedules);
+            // Only InitializeAsync runs (no settings update), so the reload below proves the
+            // startup cleanup itself persisted the removal.
+            using var engine = new HttpDownloadEngine(new EngineOptions { AllowLocalNetwork = true });
+            var checkpoints = new JsonCheckpointStore(paths);
+            var service = new DownloadManagerService(
+                paths, new JsonJobStore(paths), checkpoints, new JsonSettingsStore(paths), engine,
+                enableSchedulerTimer: false);
+            await service.InitializeAsync();
+            var schedule = Assert.Single(service.GetSnapshot().Settings.Schedules);
             Assert.Equal(queueScheduleId, schedule.Id);
-        }
 
-        // The removal was persisted, not just filtered in memory.
-        var reloaded = await new JsonSettingsStore(paths).LoadAsync();
-        Assert.Equal(queueScheduleId, Assert.Single(reloaded.Schedules).Id);
-        Directory.Delete(root, recursive: true);
+            var reloaded = await new JsonSettingsStore(paths).LoadAsync();
+            Assert.Equal(queueScheduleId, Assert.Single(reloaded.Schedules).Id);
+            await service.ShutdownAsync();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -1837,6 +2492,120 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task FileMetadataPreviewDoesNotCreateJobsPayloadOrHistoryAndSuggestedNameCanBeDownloaded()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var disposition = Uri.EscapeDataString("attachment; filename=server-report.zip");
+        var url = $"{_server.BaseAddress}/filename/opaque?disposition={disposition}";
+        var before = ctx.Service.GetSnapshot().Settings.RecentUrls.ToArray();
+        var metadata = await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = url });
+        Assert.True(metadata.Ok, metadata.Error);
+        Assert.Equal("server-report.zip", metadata.FileName);
+        Assert.Equal(1024, metadata.TotalBytes);
+        Assert.Equal("application/octet-stream", metadata.ContentType);
+        Assert.Empty(ctx.Service.GetSnapshot().Jobs);
+        Assert.Equal(before, ctx.Service.GetSnapshot().Settings.RecentUrls);
+        Assert.Empty(Directory.GetFiles(ctx.Destination, "*", SearchOption.AllDirectories));
+        Assert.Empty(Directory.GetFiles(ctx.Paths.JobsDirectory, "*.json"));
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest { Url = url, FileName = metadata.FileName });
+        Assert.True(added.Accepted, added.Error);
+        var completed = await ctx.WaitFor(added.Job!.Id, job => job.State == "completed");
+        Assert.Equal("server-report.zip", completed.FileName);
+        Assert.Equal("compressed", completed.CategoryId);
+        Assert.True(File.Exists(completed.FinalFilePath));
+        Assert.Equal(1024, new FileInfo(completed.FinalFilePath).Length);
+    }
+
+    [Fact]
+    public async Task FileMetadataPreviewUsesPerRequestOrSavedAuthenticationAndRejectsMalformedHeaders()
+    {
+        _server.SetSiteCredentials("preview-user", "preview-pass");
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var url = $"{_server.BaseAddress}/site/secure/preview.bin?size=65536&seed=910";
+        var denied = await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = url });
+        Assert.False(denied.Ok);
+        var request = new FileMetadataRequest { Url = url, Headers = new() { ["Authorization"] = "Basic " +
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("preview-user:preview-pass")) } };
+        var authorized = await ctx.Service.ReadFileMetadataAsync(request);
+        Assert.True(authorized.Ok, authorized.Error);
+        Assert.Equal(65536, authorized.TotalBytes);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        Assert.Empty(settings.SiteLogins);
+        settings.SiteLogins.Add(new SiteLoginDto { Id = Guid.NewGuid(), Site = _server.BaseAddress, Username = "preview-user", Password = "preview-pass" });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var saved = await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = url });
+        Assert.True(saved.Ok, saved.Error);
+        var invalid = await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = url, Headers = new() { ["X-Test"] = "invalid\r\nheader" } });
+        Assert.False(invalid.Ok);
+        Assert.Empty(ctx.Service.GetSnapshot().Jobs);
+        Assert.Empty(Directory.GetFiles(ctx.Paths.JobsDirectory, "*.json"));
+        Assert.False((await ctx.Service.ReadFileMetadataAsync(new FileMetadataRequest { Url = "file:///private.txt" })).Ok);
+    }
+
+    [Fact]
+    public async Task PerDownloadAuthenticationIsProtectedAndWorksAfterRestart()
+    {
+        _server.SetSiteCredentials("manualuser", "manualpass");
+        var token = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("manualuser:manualpass"));
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/site/secure/manual-auth.bin?size=131072&seed=143",
+            DestinationDirectory = ctx.Destination, FileName = "manual-auth.bin", StartMode = "later",
+            Headers = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Authorization"] = token, ["Cookie"] = "test-session=private-cookie-value",
+                ["X-Test"] = "ordinary-header",
+            },
+        });
+        Assert.True(response.Accepted, response.Error);
+        var jobPath = Path.Combine(ctx.Paths.JobsDirectory, $"{response.Job!.Id:N}.json");
+        var json = await File.ReadAllTextAsync(jobPath);
+        Assert.DoesNotContain(token, json);
+        Assert.DoesNotContain("private-cookie-value", json);
+        Assert.Contains("dpapi:v1:", json);
+        var store = new JsonJobStore(ctx.Paths);
+        var reloaded = await store.LoadAsync(response.Job.Id);
+        Assert.Equal(token, reloaded!.RequestHeaders["authorization"]);
+        Assert.Equal("test-session=private-cookie-value", reloaded.RequestHeaders["cookie"]);
+        Assert.Equal("ordinary-header", reloaded.RequestHeaders["X-Test"]);
+        var snapshotJson = System.Text.Json.JsonSerializer.Serialize(ctx.Service.GetSnapshot());
+        Assert.DoesNotContain(token, snapshotJson);
+        Assert.DoesNotContain("private-cookie-value", snapshotJson);
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination, autoResume: false);
+        Assert.Empty(restarted.Service.GetSnapshot().Settings.SiteLogins);
+        Assert.True((await restarted.Service.ResumeAsync(response.Job.Id)).Ok);
+        var completed = await restarted.WaitFor(response.Job.Id, job => job.State == "completed");
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(143, 131072))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task HeaderPersistenceMigratesLegacySecretsAndDropsUndecryptableValues()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var store = new JsonJobStore(ctx.Paths);
+        var job = new DownloadJob { Url = $"{_server.BaseAddress}/file/legacy-header.bin", FileName = "legacy-header.bin",
+            RequestHeaders = new(StringComparer.OrdinalIgnoreCase) { ["cOoKiE"] = "legacy-cookie-secret", ["Authorization"] = "Basic legacy-secret" } };
+        var path = Path.Combine(ctx.Paths.JobsDirectory, $"{job.Id:N}.json");
+        await File.WriteAllTextAsync(path, System.Text.Json.JsonSerializer.Serialize(job));
+        var loaded = await store.LoadAsync(job.Id);
+        Assert.Equal("legacy-cookie-secret", loaded!.RequestHeaders["Cookie"]);
+        await store.SaveAsync(loaded);
+        Assert.Equal("legacy-cookie-secret", loaded.RequestHeaders["Cookie"]); // saving never mutates the live request
+        var protectedJson = await File.ReadAllTextAsync(path);
+        Assert.DoesNotContain("legacy-cookie-secret", protectedJson);
+        Assert.DoesNotContain("legacy-secret", protectedJson);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(protectedJson)!;
+        node["requestHeadersProtected"]!["Authorization"] = "dpapi:v1:AAAA";
+        await File.WriteAllTextAsync(path, node.ToJsonString());
+        var all = await store.LoadAllAsync();
+        var damaged = Assert.Single(all, item => item.Id == job.Id);
+        Assert.False(damaged.RequestHeaders.ContainsKey("Authorization"));
+        Assert.Equal("legacy-cookie-secret", damaged.RequestHeaders["Cookie"]);
+    }
+
+    [Fact]
     public async Task StoredSiteLoginAuthenticatesAndSurvivesRestart()
     {
         _server.SetSiteCredentials("siteuser", "sitepass");
@@ -1972,7 +2741,7 @@ public sealed class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task DownloadLaterWaitsForExplicitStart()
+    public async Task DownloadLaterWaitsForExplicitQueueStart()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
         var response = await ctx.Service.AddJobAsync(new AddJobRequest
@@ -1998,10 +2767,6 @@ public sealed class RuntimeServiceTests
             QueueId = 0,
             Action = "start",
         })).Ok);
-        await Task.Delay(300);
-        Assert.Equal("queued", ctx.Service.GetJob(response.Job.Id)!.State);
-
-        Assert.True((await ctx.Service.ResumeAsync(response.Job.Id)).Ok);
         var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
             TimeSpan.FromSeconds(30));
         var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(

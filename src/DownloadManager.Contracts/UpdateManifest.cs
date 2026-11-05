@@ -26,6 +26,15 @@ public sealed class UpdateCheckResult
     public string? Sha256 { get; set; }
 }
 
+public sealed class UpdateProgressDto
+{
+    public string Stage { get; set; } = "checking";
+    public string? Version { get; set; }
+    public long ReceivedBytes { get; set; }
+    public long? TotalBytes { get; set; }
+    public string? Error { get; set; }
+}
+
 public sealed class UpdateDownloadResult
 {
     public bool Ok { get; set; }

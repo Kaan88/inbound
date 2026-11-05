@@ -1,6 +1,302 @@
 # Progress — session handoff
 
+Rill branding/unified Scheduler checkpoint (2026-11-05): original generated icon saved to assets/rill-icon.png, multi-resolution assets/app.ico and extension icons built by scripts/build-icons.ps1; prompt/mode documented in assets/rill-icon-prompt.md. Display name Rill Download Manager, compatibility identities/paths unchanged. Combined Scheduler window now wired from toolbar/menu; source review fixed automatic Apply capture, selection preservation, read-only empty form, closable tabs and theme background. Latest integration95/95 includes per-job fake program/open/power behavior, no restart replay and injected completion-marker write failure preventing all side effects. Latest expanded automated totals: Core88, engine57, integration95, extension34. Scheduler visual polish after the last build still needs rebuild/live verification; installer release remains pending.
+
+### Consolidated validation started (2026-11-05)
+
+- Full Release solution build succeeds with zero warnings/errors after correcting accumulated Host/UI compile errors. Separate validation output: artifacts/validation-bin; build log: artifacts/consolidated-build.log. This permits the earlier QA app to remain open without file-lock rebuild failures.
+- Core88/88 passes (artifacts/consolidated-core-pass2.log), including new group aggregate semantic cases. Engine57/57 passes (artifacts/consolidated-engine-pass2.log), including gated live telemetry, request-context/payload hash, cancellation and response/handler cleanup cases. Integration91/91 passes (artifacts/consolidated-integration-pass2.log), including group/statistics restart, startup/overnight/periodic-unchanged/retry and queue detach cases. Extension34/34 plus typecheck/build passes (artifacts/consolidated-extension.log).
+- First integration pass was85/86: an old test expected a Later job to ignore an explicit queue start. Updated the test to the implemented explicit-queue-start behavior, retaining pre-start non-admission and payload hash checks. The official scheduler workflow supports this change; this was not a skipped assertion or an unexplained flaky rerun.
+- Isolated QA profile artifacts/qa-015/state, instance qa-015, starts via direct process creation without shell unsigned-app prompts. Current open QA processes were started as Host2268 and WinUI7616; refresh actual process/window state before using those IDs. The app is displaying local fixtures only; updates/autoresume are disabled. Installed app state was not changed. Main light view and bottom graph rendered; Windows file-type icons visible. Statistics rendered, and live inspection exposed a pre-existing reconciliation defect: missing part files erased received bytes even for completed files. Completed reconciliation now preserves/recovers final-file bytes; a retained-job restart assertion passes in the updated integration suite.
+- The open QA UI is the earlier build (before that reconciliation fix); corrected validation binaries are separate. User activity was detected in the QA window, so further UI input was stopped while regression work continued. Full dark/light/DPI and window/workflow acceptance is still incomplete. A unified Scheduler window and additional per-download completion/fault-path regressions are being prepared; do not package or claim full parity yet.
+
+Batched 0.1.5 scheduler/queue source (2026-11-05): startup triggers, timed/overnight windows, periodic HTTP file synchronization, queue retry limits and actual queue detachment added. Periodic sync compares validators and stages changed/unverifiable downloads while keeping the old final file until atomic replacement. Previous completed versions are retained in statistics without double-counting the current version. Retry processing is explicit for queue-managed downloads, runs at30-second intervals, respects stop/cancel and blocks premature completion actions. Startup-only failures retain pending eligibility. Explicit queue detachment keeps jobs/files and excludes them from queue pause/concurrency/quota/sync policy. Source only; consolidated validation pending. Network troubleshooting made no system changes; external test downloads remain deferred while the owner's throughput problem is unresolved.
+
+### Completion actions, HTTP telemetry and statistics — batched source (2026-11-05)
+
+- Per-download completion options are editable in Properties before completion. Program defaults may be inherited, disabled or replaced with an executable; the saved file is passed as one argument without shell parsing. Open-file and explicit exit/shutdown/restart/logoff choices are persisted. System actions require global opt-in and no other unfinished downloads. The execution marker is saved before side effects; restart does not replay them. Per-download system choices override queue system actions while retaining independent queue open-file behavior and avoiding duplicate opens. Luna reviewed source; main corrected that precedence.
+- Actual HTTP response streams are instrumented at all five engine send sites (direct/range redirects and media/key/manifest requests). The wrapper preserves response headers and streaming/cancellation, measures returned read bytes and a short rolling rate, and removes entries on failure/disposal. Progress details distinguish active HTTP streams from checkpointed byte ranges and explicitly distinguish HTTP/2 streams from physical sockets. Only host/port/protocol/status/ranges/counters are exposed; no URL paths, query tokens or credentials. Luna source review found no concrete wrapping/disposal defect. Consolidated engine and live checks remain required.
+- Statistics now combine current jobs with minimal archived records (ID/state/bytes/dates only). Removal saves its archive before deleting the job; archive records whose IDs are still live are excluded, preventing double counts across interruption. Host-owned archive state survives stale Options saves. View → Statistics shows recorded/completed/today bytes, completion/failure/cancellation counts, current activity and speed. UI states that these are saved-progress records, not network-interface usage; previously deleted history cannot be reconstructed. The archive intentionally retains historical records rather than relying on the visible list.
+- Source inspection found that background PersistAsync logs and swallows write failures. Added an explicit required-save path for queue membership, category/completion edits and completion execution markers; failed edits restore in-memory choices and actions do not execute without a saved marker. Job deletion now waits for the runner to settle, is ordered against queued persistence, and retains the in-memory job on durable-delete failure. Scheduler/quota/update-defer settings writes now also coordinate with the shared mutation gate to avoid overwriting Host-owned groups/history.
+- Follow-up source fixes: property and queue membership edits hold persistence admission through mutation/save/rollback, and queued background saves take a fresh snapshot after admission, preventing obsolete writes from undoing committed edits/markers. Resume admission coordinates with removal, and completion side effects skip jobs cancelled or being removed. Statistics archive and current-activity semantics were independently reviewed by Luna; no concrete calculation/persistence defect was found. These changes still require the consolidated fault/concurrency tests.
+- No builds/tests were run for these source increments, following the owner's batched implementation instruction. Consolidated validation must cover body streaming/resume/hash/cancellation, marker write failures and one-time side effects via fake executors, queue/category write failures, stats removal/restart/interruption/stale settings and all new UI layouts/theme/DPI. Scheduler timing/retries and full live WinUI review remain open;0.1.5 is not packaged or published.
+
+Batched 0.1.5 source (2026-11-05): per-download completion options and real HTTP response-stream telemetry added; no build/test run. Properties stages program inheritance/override/disable, open-file and gated system actions; execution marker is persisted before side effects. HTTP telemetry measures actual response reads across direct/range/media/probe requests and exposes only host/port, protocol/status/range/bytes/rate. Statistics added to scope: archived minimal job records are written before removal and deduplicated against current jobs for persistent byte/count totals, with a View → Statistics window integrated in source. Consolidated validation remains pending.
+
+### Groups and bottom speed graph — batched source, not yet validated (2026-11-05)
+
+- Group membership and definitions share one atomic settings write. General Options preserves Host-owned groups; create/add/detach/rename/ungroup are explicit IPC actions. Each download belongs to at most one group; moving membership does not change its queue or file location. Parent pause/resume/cancel acts on a membership snapshot and reports per-child failures; cancel retains files and skips terminal children. Group controls release the settings mutation gate before waiting for transfers to settle.
+- Removing a download first saves its detached group membership under the same mutation gate, then removes the independent job. Failed group persistence retains the job. An interruption between these operations leaves an ordinary ungrouped download. Luna reviewed persistence; main fixed removal coordination and terminal-cancel handling from that review.
+- Download-only speed graph follows the supplied qBittorrent screenshot's history/grid/period structure using original WinUI drawing code. Keeps at most one hour of session samples; unknown/stale/offline data creates gaps. Downsampling retains peaks/troughs; visibility and expansion are saved. Luna source review found a reconnect/snapshot freshness edge, fixed by withholding samples until a fresh snapshot. No qBittorrent code/assets copied.
+- Main reviewed Luna's groups window, fixed stale child-action capture, polling error lifetime, responsive parent/child rows, collapsed creation editor and DPI-aware initial sizing bounded to the work area. All are source changes awaiting the single consolidated validation pass.
+- Consolidated acceptance must cover restart and stale Options saves, moving/detaching children, partial child-control failure, atomic-write failure and interruption, unknown-total aggregation, independent child details, graph gaps/periods/theme/DPI and responsive window layout. No builds or tests were run for this batch. Published release remains0.1.4.
+
+Batched 0.1.5 source (2026-11-05): persistent independent download groups now have Host-owned definitions/membership, atomic settings commits and group controls. Tasks and selected-download context actions expose group creation/assignment; expandable management window is integrated in source, with aggregate progress/controls visible while collapsed and independent child controls. Bottom download-only speed graph added from owner reference 33528189-2dc8223e-d865-11e7-9d2a-2b5102afb5af.png: selectable 1/5/30/60-minute session history, scale/grid, current/average/peak, disconnected/stale gaps, persisted visibility/collapse. Source-only; consolidated build/tests and live DPI/theme/workflow acceptance pending. FTP remains out of scope.
+
+Batched 0.1.5 source (2026-11-05): explicit unused-category deletion in Options and populated queue deletion with download/schedule reassignment added; source-only, consolidated verification pending. Queue moves save before old queue removal, and failed persistence restores in-memory membership for retry. Settings/category/job admission and queue membership edits share a mutation gate. No build/test run for this batch.
+
+Owner scope update (2026-11-05): FTP work is out of scope; existing backend support is retained, but no additional FTP UI or acceptance work is required.
+
+Batched 0.1.5 implementation: Download Properties now supports assigning existing downloads to built-in/custom categories or automatic extension classification. Host validates category identity, persists the choice, and does not relocate payloads. DTO/view model preserve automatic versus explicit classification. Added multi-selection Change category context action with per-file failure reporting. Luna read-only review found no issue in the Properties/Host reassignment path; main inspected the changes. Consolidated verification pending; no build/test run for this increment.
+
+### Event sounds added to implementation batch (verification deferred)
+
+- Added persisted EventSoundFiles settings and mappings, Options Sounds editor with local WAV picker and disabled/system/file modes, plus Host event playback for completed/failed/queue-finished. Legacy completion toggle remains authoritative; previously silent failure/queue events remain silent until explicitly configured. Inline validation keeps Options open on invalid WAV selections. Queue-finished playback is deduplicated per queue cycle.
+- Luna implemented isolated SoundOptionsEditor and CompletionSoundPlayer helpers; parent integrated model/DTO/persistence/runtime settings/WinUI/Host event plumbing. Sound playback is asynchronous with file size/playback bounds, no process execution, and owned SoundPlayer disposal. Reviewed helper ownership: disposal cancels playback and defers CTS/semaphore disposal until active calls exit. Parent added inline picker-failure handling and a narrow-window layout.
+- No build or test was started for this increment, following the owner's request. Consolidated verification must include settings roundtrip, legacy defaults, WAV picker cancellation/errors, event selection, simultaneous events, shutdown disposal and live sound playback. This is source work, not accepted parity.
+
+### Batched implementation workflow and metadata preview (0.1.5 source)
+
+- Owner requested implementing the remaining features as a batch, then consolidated verification, to conserve tokens. Do not start new feature-by-feature test/build cycles. Tests already running before this instruction may finish; new final-review fixes are pending consolidated verification.
+- Added Host-owned HTTP metadata preview and Add URL filename/size/type display, asynchronous automatic check and refresh button. HEAD falls back to a one-byte Range GET only for405/501, reads headers without consuming response bodies, and creates no jobs/payload/history. Uses the existing engine proxy, saved login, redirect credential boundaries, target validation and host limiter. Runtime allows two previews with12s deadlines; UI uses a separate IPC connection, so slow preview does not hold the normal command stream. It preserves user filename edits, recalculates automatic category folders from suggested names, invalidates responses after credential changes/closure, and allows Start/Later without waiting.
+- Closing the dedicated preview pipe now cancels Host work through a one-message lookahead. Pipelined messages are retained for next dispatch. Review found exceptional lookahead faults and operation-first faults needing observation; source corrected to cancel/observe both paths. These last corrections are not yet revalidated per the new batching instruction.
+- Before the workflow change: new metadata engine cases6/6 and real-HTTP metadata integration2/2 passed; Core83/83 and Host/WinUI builds passed. Already-started full engine suite53/53 passed. The already-started full integration run also completed84/84 (artifacts/integration-metadata.log,1m46s), before final cancellation-review and sound changes. Do not extrapolate these results to final untested fixes or live GUI acceptance.
+- Protocol.HostVersion now derives from Contracts assembly version (0.1.5) instead of stale0.1.3; protocol stays1. Luna compiled/reflected that narrow change before the new testing instruction. Public installer remains0.1.4; no new release published.
+
+### Persistent categories and Add URL selection (0.1.5 source, 2026-11-05)
+
+- Added stable custom category definitions (ID/name/extensions/optional destination), persisted job membership and explicit-versus-automatic classification. Legacy jobs without membership keep built-in filename classification. New automatic jobs use custom rules before built-ins; explicit choices survive filename changes. Automatic membership updates after Move/Rename. Renaming definitions preserves IDs and files.
+- Add URL selects Automatic/built-in/custom categories, initializes category folders, supports one-off path override, and creates saved categories using the chosen destination and extension rules. Creation is explicitly immediate even if the download is cancelled. Start/Later wait for an in-flight create. Remember-folder applies to the explicitly selected category; browser captures still use the configured default.
+- Sidebar shows custom categories and Other. Options Save to edits names/extensions/folders. CLI --category, export/import and redownload preserve membership. General settings saves cannot remove existing custom definitions; deletion/reassignment UI remains open. Settings updates are serialized so concurrent category creation rejects stale settings instead of losing definitions.
+- Focused category/browser checks7/7 and Core79/79 pass: real payload hash, classification, explicit override, remember, rename, restart, invalid/ambiguous rules and stale/concurrent saves. Runtime/CLI/WinUI builds passed. Luna review found GUID casing and missing Other navigation; corrected both. Removal-race concern was checked against current source: all existing definitions are retained, and serialized settings saves reject stale lists. Custom sidebar selection restores after definitions arrive. Full integration82/82 passes in1m46s (artifacts/integration-categories.log). Live GUI/layout acceptance remains open; not published.
+- Test exploration confirmed manual downloads retain their URL filename rather than adopting Content-Disposition at start. Metadata preview/server-name handling remains open; category coverage does not verify it.
+
+### Windows Shell file icons (0.1.5 source, 2026-11-05)
+
+- Implemented original Windows Shell icon provider for main download rows, queue file rows and individual progress/completion headers. Pending files use registered file-type icons without opening a partial payload; completed files request the actual local file icon, including embedded application icons. Missing files fall back to their registered type; existing font glyph remains on errors/loading.
+- Native calls run off the UI thread under a two-worker gate with COM initialized. Owned HICON/DC/DIB handles are released in finally blocks; dual-background rendering reconstructs premultiplied BGRA for alpha and legacy mask icons. No file is executed to inspect its icon. Cache holds at most256 tasks, expires completed entries after one minute, and distinguishes completed-job revisions. Overflow requests still load under the worker gate. Job view models reject stale async completions after path/state/name changes.
+- Native integration checks pass2/2: associated/unknown/extensionless types; actual cmd.exe differs from generic executable type; missing actual path falls back; output transparency/premultiplied bounds;100 repeated lookups do not grow GDI/USER handle counts beyond tolerance. WinUI Release x64 builds with zero warnings/errors; scoped whitespace check passes. These checks do not establish visual/DPI acceptance, cache-burst runtime acceptance or every third-party shell handler's behavior. Not yet packaged/published. Published latest remains0.1.4. Current app/installer/install/package/extension version fields advanced consistently to0.1.5; extension rebuilt at0.1.5 with34/34 tests and typecheck passing.
+- Luna reviewed ownership/concurrency/UI key guards. Fixed the identified full-in-flight-cache permanent fallback and clarified the COM apartment behavior. Investigated reference app calls and limitations are recorded in notes/file-icons-2026-11-05.md. Broader WinUI and lifecycle acceptance remains open.
+
+### Queue file details and priority-aware ordering (2026-11-05)
+
+- Post-0.1.4 source: Queues → Files now shows file name, size, status and time remaining using existing job display formatting, with filename tooltip and inherited application theme. The dialog explicitly labels the values as an opening-time snapshot. Move controls cannot cross priority boundaries, matching the scheduler rather than offering a reorder it would ignore.
+- WinUI Release x64 build passes with zero warnings/errors; scoped diff whitespace check passes. Live layout/DPI acceptance remains open. Luna read-only review confirmed populated queue deletion still needs coordinated Host reassignment; composing individual moves in the UI is not sufficient. No deletion behavior was changed.
+- Owner requested Windows file/application icons and independent verification of reference app behavior. Pinned executable hash verified; static strings include SHGetFileInfoW/A, SHGetImageList and AssocQueryStringW, but strings alone do not establish the calling behavior. disassembler identity and callers now verified: background COM-initialized file-type lookup/cache and separate actual-file shell preview/icon fallback. See notes/file-icons-2026-11-05.md. Main-list executable-specific icon behavior still requires targeted live comparison; no icon implementation claimed.
+
+### Live reference app right-click reference result (2026-11-05)
+
+- Owner installed reference app integration and authorized retry. In Edge on testfile.org, selected DOWNLOAD 5GB (https://testfile.org/files-5GB) → right-click → Download with reference app (the actual reference extension, distinct from our Download Manager entry).
+- reference app 6.43 opened Download File Info with the original protected URL and unresolved files-5GB filename. Start Download produced its own error dialog: HTTP/1.1 403 Forbidden. The error was observed directly through screenshot and accessibility text, then dismissed. No successful payload transfer was observed.
+- This confirms that right-click failure on this exact link is also present in the installed reference. Keep direct right-click handoff as normal behavior. Browser-assisted preparation may be an optional improvement for protected/intermediate links, but is not required to imitate reference app here. Earlier automatic-job evidence already established the resolved CDN URL differs; it does not prove reference app internally performs browser preparation on right-click.
+- Source cookie store/frame/partition corrections remain valid independently and tested; do not describe them as a proven testfile.org fix. Broader project work and outstanding live acceptance remain open.
+
+### Manual authentication and protected-site right-click investigation (2026-11-05)
+
+- Post-0.1.4 source: Add URL now exposes optional per-download HTTP Basic user/password controls with masked input and inline validation on Start and Later. It does not add a saved site login. JsonJobStore protects Authorization, Proxy-Authorization and Cookie values in detached snapshots with a separate per-user DPAPI entropy; live engine headers remain unchanged. Both load paths restore usable values and omit undecryptable protected values. Legacy plaintext headers still load and become protected on next save. Read DTOs/export snapshots contain neither plaintext nor protected headers.
+- New integration coverage proves a per-download authenticated transfer survives restart with matching SHA256, no saved SiteLogins entry, no plaintext headers in job JSON/snapshot, legacy rewrite and damaged-ciphertext handling. Integration suite 76/76 passes (artifacts/integration-manual-auth.log, 1m46s); redirect credential-boundary engine checks 2/2 pass. Runtime/WinUI builds cleanly. Live Add URL acceptance remains open; not in public 0.1.4.
+- Owner reported right-click 403 at public https://testfile.org/files-5GB while automatic capture works. Read-only redacted installed job evidence establishes automatic jobs already carried final CDN URL https://cdn.hotelnearmedanta.com/testfile.org/testfile.org-5GB.dat; right-click jobs had no resolved final URL. Both sources carried cookies and an Edge user agent. This supports browser redirect/preparation as the key difference; do not claim exact Cloudflare cause or full fix yet. Direct web fetch of the protected URL returns403; existing browser renders the public home page and exposes that download link. No payload was started and no real cookie values were printed/copied.
+- Additional concrete right-click defects fixed in source: use clicked frame URL as referrer; retain source tab's cookie store and exact frame partition metadata; read fresh unpartitioned plus matching partition cookies at confirmation. Never fall back to a different profile when a known tab's store is unavailable. Preserve same-name cookies at distinct paths in browser path order. No cross-site partition enumeration. Official Chrome cookies API (getAllCookieStores/getPartitionKey/partitionKey) and Cloudflare cookie docs consulted. These corrections do not establish that the protected redirect is now resolved.
+- Extension tests 34/34 plus typecheck/build pass, including complete right-click-to-native source-frame/partition flow, partition exclusion, private-store isolation, fresh-at-confirmation cookies and older-browser behavior. Next: verify reference app reference behavior on the same protected link before selecting a fallback. Official reference app docs distinguish direct-link context-menu downloads from automatic capture, and explicitly say some sharing links only work with automatic capture. Do not make browser-initiated resolution the unconditional right-click path. Keep direct handoff as the normal path; investigate optional browser-assisted preparation for protected/intermediate links, with explicit correlation and duplicate prevention if needed.
+
+### Queue file-order implementation (post-0.1.4 source, 2026-11-05)
+
+- Added Host-owned JobOrder to persisted queues and queue snapshots. Queue action reorderfiles accepts an exact, duplicate-free list of the current queue's job IDs; stale/missing/foreign IDs are rejected without changing order. General Options updates preserve the existing order instead of trusting a stale client snapshot.
+- Scheduler uses the saved order among equal-priority waiting jobs, with creation time as fallback for new/unordered jobs; it does not cancel or restart active transfers. Order lookup is precomputed for dispatch instead of repeatedly scanning file lists.
+- Queues → Files exposes a selectable filename list, Move up/Move down, Save order and Cancel. Source and WinUI Release x64 compile cleanly. Published 0.1.4 does not contain this source increment. Live UI acceptance remains open.
+- QueueFileOrderControlsSchedulingSurvivesRestartAndRejectsStaleLists passes: reverse order persists across service restart, real serial transfers start in that order, malformed/stale/foreign lists are rejected, and a stale general settings save does not reset the order. Core suite passes 79/79. Full integration suite passes 74/74 in 1m45s (artifacts/integration-queue-file-order.log); Host also builds cleanly. The reference Files in queue capture was visually inspected; its combined scheduler layout and remove-from-queue affordance still require live UI review, so this does not establish full scheduler parity.
+
+### 0.1.4 published; Site Logins editor source increment (2026-11-05)
+
+- Public release: https://github.com/Kaan88/download-manager-builds/releases/tag/v0.1.4. Five uploaded assets verified via GitHub; anonymous versioned and cache-busted latest manifests both report 0.1.4. Signature verifies against the unchanged client trust anchor. Installer 75,511,846 bytes SHA256 a4b60cbf9bc8cbdffb82ef27c259b9ef54a194ebe439e815f9df6b88220da4ea; ZIP 112,277,537 bytes SHA256 e2208a6901ed18e38bbbc73a056f8acf66ed6b641980d2d11c3a5d8d6994fd0a. Host and UI assemblies in ZIP both 0.1.4.0. Source repository and private signing key were not published.
+- Strengthened helper fixture starts the child with native working directory inside app, and success actually removes/recreates app. Helper explicitly changes both PowerShell location and native Environment.CurrentDirectory. Additional persistent file-lock fixture verifies old metadata is restored even when file rollback fails. All four helper cases pass: artifacts/update-helper-tests-793c27f3ed88464c8aafe127fbf9e602. Partial restart cleanup stops only processes created by that helper before rollback. Installed upgrade/restart/progress acceptance remains open; no user installation changed.
+- Post-release source work (NOT included in published 0.1.4): Options now has Site logins tab with add/edit/remove rows, masked password input, saved-password preservation, and inline validation retaining the dialog on incomplete rows. Changing saved identity requires password re-entry to avoid silently losing the credential. Changes remain local until Save; Cancel does not persist them. Host remains DPAPI owner and read DTOs never return passwords. WinUI Release x64 builds cleanly; existing authenticated-transfer/DPAPI/restart integration workflow passes. Live editor acceptance remains pending.
+
+### Updater failure repair in progress (2026-11-05)
+
+- Owner's reported About mismatch confirmed as a failed replacement, not just a label bug: installed Host/UI assemblies remained 0.1.2 while install.json said 0.1.3. Result recorded installer exit 1 and rollback failure because app directory was in use. Installed files/processes were inspected read-only; no user installation changed.
+- Helper now leaves the application working directory (runtime also starts it in staging), releases only this installation's native bridges after Host exit, and restores metadata independently before file rollback. Installer writes version metadata after file replacement/native registration. Reopening uses direct process creation and restores the desktop UI when a frontend was present.
+- InstalledBuild clamps an ahead-of-binary version record to the actual Host assembly version; focused regression passes. About now derives its version from its running assembly. Source versions advanced consistently to 0.1.4; this version is not yet packaged/published.
+- Update installation downloads the same verified manifest selected by its check. Throttled byte progress is available in snapshot/events and a separate compact WinUI progress window; failed/busy results stop its progress state. Host and WinUI compile with zero warnings/errors. Live progress/restart and installed repair acceptance remain unverified.
+- Signed updater/concurrency integration tests 6/6 pass. Isolated helper success/missing-installer/partial-failure rollback fixtures pass; fixture artifacts: artifacts/update-helper-tests-48c02caa9f544da698daa31c8d03b967.
+- Luna agents hit usage limits. Main verified their folder-picker work, fixed the test mock to dispatch the dedicated native-port reply, and ran extension tests 29/29 plus typecheck/build successfully. No live browser acceptance claimed.
 ## Current state (2026-11-04)
+
+### Queue editor increment (2026-11-05)
+
+- Fresh latest-download redirect now resolves to0.1.3 (cache-busted anonymous fetch); initial stale0.1.2 response above was propagation/cache lag. Direct0.1.3 release assets verified.
+
+-0.1.3 published: https://github.com/Kaan88/download-manager-builds/releases/tag/v0.1.3. Five asset sizes verified; versioned anonymous manifest signature verifies with unchanged release trust anchor. Setup75,489,064bytes; signedZIP112,268,895bytes SHA256`eb6dfae7b3b4eba3fb98abf26ecbe9e9a8e2ad5218715dc1670c303a39c2ebd3`. Initial unqualified latest redirect still returned cached0.1.2 immediately after upload; versioned0.1.3 is verified, latest propagation being checked. Reload unpacked extension after installation to replace running background worker. Browser live acceptance and installed automatic update remain unproven.
+- Main reviewed extension Browse helper and both handoff/batch bindings: cancellation unchanged, only confirmed path applied, errors inline, Browse disabled while awaiting. Main ran25extension tests/typecheck/build successfully (including picker sender rejection/nativepathforwarding; furtherUIhelpercancel tests still being added). Host/WinUI/self-contained installer builds pass. Helper closes only target-install resident frontends before waiting for Host, preventing older reconnect loops from racing upgrade; strengthened isolated harness passes outsideCIM-restricted sandbox, with explicit error-stage assertions. No installed app was changed by agent tests.
+
+- Preparing0.1.3 for owner tray-exit/popup/destination-picker feedback; version fields bumped consistently by Luna, historical releases unchanged. Folderpicker frontend task re-dispatched with followup_task after discovering queued send_message to completed agent had not started a new turn; actual native/background implementation was already landed. Do not claim extension Browse controls complete until source/tests are inspected.
+- Legacy folder migration hardened on dm.saveSettings as well as load: a stale Options tab cannot reintroduce defaultDestination after extension reload. Chrome typecheck passes; regression assertion queued with folderpicker tests.
+
+- Full integration now73/73 passes (1m43s; `artifacts/integration-update-admission-fixed.log`). Deterministic timeout was introduced by the cancellation regression fixture: /slow writes its first64KiB before throttling, so an8KiB response could complete client-side while its server handler still delayed, poisoning reuse of that HTTP/1 connection. Enlarging to128KiB ensures an incomplete response on cancellation; focused/new checks and fullsuite now pass. No production timeout increase or skipped test.
+- Tray-exit fix refined: HostConnection never launches the Host; only explicit App.OnLaunched does, including secondary activation. This covers exit before first handshake as well as resident connected UIs. UI reconnects to a Host started by user/native handoff/updatehelper. WinUI compile will be rerun before packaging.
+- Native extension folder picker uses a dedicated native messaging port, so its long modal interaction cannot block unrelated handoffs on the normal sequential IPC connection. Only extension handoff/batch pages may request it. UI wiring/tests in progress; Host compile and Chrome typecheck pass.
+
+- Owner reported tray Exit relaunching Host: confirmed resident WinUI reconnect loop called EnsureStarted every iteration. Unreleased fix bootstraps until first valid connection, then reconnects without spawning Host; explicit application launch still calls EnsureStarted even for an already resident frontend. EOF disconnect now updates offline status. Host/WinUI Release builds pass; live exit/reopen acceptance pending. Updater IPC success now requests shutdown in finally even if the reply fails, preventing staged/quiesced Host deadlock.
+- Owner reported toolbar extension popup sizing and missing destination picker. Luna changed popup intrinsic width to390px with bounded height/scroll; 24 extension tests/typecheck/build passed, visual acceptance pending. Main added native host.pickFolder/host.folderPicked contracts, serialized Windows STA FolderBrowserDialog, default app folder starting location, and extension sender validation permitting only handoff/batch pages. Host builds; Luna implementing both destination Browse controls/tests. These changes are unreleased.
+- Diagnostic full integration rerun also failed the same update fixture manifest GET timeout:72/73 (log artifacts/integration-update-admission.log). Paired tests pass; Luna investigating order/shared HTTP-client state. Treat full suite as failing, not transient/accepted.
+
+- Unreleased manual Add URL Browse control implemented by Luna, reviewed by main and Release x64 built with 0 warnings/errors; cancellation preserves editable path, errors inline, field has explicit accessible name. Live picker acceptance remains open; screenshot gap matrix updated to distinguish source/build evidence from remaining gaps.
+- Runtime update staging rechecks active transfers after package fetch and atomically pauses new runner admission through staging/restart; failure releases admission and reschedules. Expanded signed-update regression verifies malformed signed ZIP fails safely and following download completes. Six focused update tests pass. Full integration run:72/73, one local fixture manifest request timed out after30s. Paired concurrent-cancellation/signed-update rerun passes2/2; full diagnostic rerun running session12371, log `artifacts/integration-update-admission.log`. Do not claim full suite green yet.
+- Update periodic/retry timers now use System.Threading.Timer because settings callbacks arrive on IPC worker threads; disposal and retry changes synchronized, disabled preference rechecked after fetch. Host Release build passes. Runtime periodic/retry acceptance still pending; no new release published during owner's0.1.2 test.
+
+- Browser cleanup verification complete at unit/mock level: 24/24 extension tests (six new cancel/erase/search cases), typecheck and build pass; main reviewed tests and reran tests/typecheck. Live Edge flyout reproduction still outstanding. This work is unreleased.
+- Busy installed automatic updates now schedule a one-minute retry rather than waiting the normal daily interval; disabling automatic updates cancels pending retry and automatic checks revalidate the preference after manifest fetch. Host Release build passed before the final preference guard; runtime retry/disable acceptance remains open. Naming/original-icon follow-up recorded in ROADMAP per owner request. Luna now implementing the missing manual destination Browse control; no installed UI actions authorized by that subtask.
+
+- Unreleased post-0.1.2 fixes: Runtime serializes all update installations (automatic/tray/IPC) with a shared nonwaiting gate and refuses another helper after successful staging. Six update integration tests pass, including a slow-manifest concurrent request rejected as busy and cancellation releasing the gate. Runtime Release build clean. Further active-download admission races and busy-update retry cadence remain open.
+- Update helper now backs up/restores the browser extension alongside app and metadata, with normalized scoped target checks and rejection of linked target directories. `tools/test-update-helper.ps1` invokes the real helper with isolated fake installers and NoStart: missing installer preserves baseline, partial app/extension/metadata replacement failure rolls back all three, success writes expected metadata without executing fake Host. Main reran all three successfully; fixtures at `artifacts/update-helper-tests-493d52796f414063bd13341b46136b30`. These fixes are not in published0.1.2.
+- Browser cleanup investigation found cancel/erase failures were ignored after native ACK. New helper retries boundedly, checks terminal state before erase and verifies absence through downloads.search. Background records durable acceptance before cleanup; post-ACK failures cannot resume a duplicate browser transfer. Typecheck passes; additional regression tests in progress. No live Edge flyout fix/acceptance claimed. Only listed Edge windows; no input or installed-app changes during owner update test.
+
+- 0.1.2 publication completed: https://github.com/Kaan88/download-manager-builds/releases/tag/v0.1.2. Anonymous HTTP fetched `releases/latest/download/manifest.json`; RSA signature verified and version is0.1.2. Owner can now install the local older-version test installer and enable Options→Updates automatic checks if previously disabled. No actual user installation/upgrade result has been observed yet.
+
+- Owner approved public builds-only hosting. Created `Kaan88/download-manager-builds`, initialized generic README; verified it public and source repo private. 0.1.1 preview uploaded with four explicit assets. New 0.1.2 sources configure signed feed/public trust anchor, default checks on for new settings, preserve existing false preference, gate periodic monitor on installed metadata, invoke idle-gated installation on automatic check, and request Host shutdown after tray/automatic staging. Five update integration tests pass. Automatic live acceptance/concurrent install races remain open.
+- Built self-contained 0.1.2 installer and ZIP; prepare-release script validated real ZIP and emitted five explicit public assets with signed manifest/checksums. 0.1.2 upload started (exec session27893; verify terminal result). Test installer `artifacts/update-test/DownloadManagerUpdateTest-0.1.1.exe` deliberately records installed0.1.1 using current0.1.2 binaries to exercise upgrade to0.1.2; SHA256 `993595A0D67E28D90726FFD6E3D5AD36A31A3D266A47022EB96865194F9816CD`.
+- Update helper no longer removes app on preflight failure before replacement; regression with missing install.ps1 preserves original marker and reports failure. It refuses proceeding after Host exit timeout; install.ps1 scopes process checks to target app path, refuses active Host rather than killing all Hosts by name. Backup retained through restart; success recorded after launch. Final helper revision is in signed update ZIP; setup EXE embeds the preceding helper revision (same successful path, earlier success backup cleanup), so future update execution uses the signed ZIP helper. Further lifecycle acceptance remains required.
+
+- Extension media opt-out and legacy-folder cleanup implemented by Luna and verified by main: 18/18 extension tests, typecheck and 0.1.1 build pass. Media scanning defaults off for missing settings; Options toggle stops observers/listeners and clears panel, resources and badges on existing pages. Serialized broadcasts and content generation guard prevent stale enable after disable. Download All link collection remains independent. Extension Options no longer offers a persistent destination override; explicit one-off handoff destination remains covered. Live browser/UI acceptance still open.
+- Release signer now requires an existing private key; explicit `--generate-key` uses exclusive creation, and signing output never contains private key material. Release build passes; two fixture manifests verify against one stable public key. Hosting decision pending: origin repository is private, so unauthenticated default update URLs cannot fetch its release assets. Asked owner whether to use a public builds-only repository or authenticated private updates; no repository visibility changes or release publication performed.
+
+- Full integration suite after browser destination routing and queue-name persistence: 72/72 passed (1m43s). GitHub release/update work explicitly added by owner: remote `Kaan88/download-manager`; `gh auth status` succeeds outside restricted network context. Existing installed-build metadata gating and signed-manifest updater need release wiring/acceptance; no new release uploaded yet. Existing UpdateSigner creates a new key per invocation, so release signing must support a stable private key before publishing an update feed.
+
+- Fixed queue rename propagation: changed job names are persisted and emit `updated`; initialization reconciles denormalized names from authoritative queue settings, including a crash between settings/job writes. Runtime Release build has 0 warnings/errors and the expanded rename/order/delete/restart test passes. Luna read-only review found no regression; shared mutable settings saves and failure rollback remain a broader concurrency/durability gap, not closed by this fix. Scheduler run dates intentionally remain preserved by ID, retaining once-per-day suppression after edits.
+
+- Resumed verification: Release Runtime build passes with 0 warnings/errors. Filtered browser-directory/queue integration run passes 11/11, including both browser sources across restart with a conflicting music category destination and a one-off folder choice. Browser requests use the application default; desktop category routing remains separate. Existing xUnit2031 warning remains. Media opt-out/Options migration is still being implemented by Luna; no live Edge ghost-entry fix is claimed. Chrome API documents cancel completion before the returned promise resolves, so a terminal-state race is not established by source inspection alone.
+
+- Compaction handoff: active goal remains finishing all remaining in-scope functionality/acceptance before TorBox/Docker/WebUI, without dropping quality/features. Version 0.1.1 bumped consistently. Queue create/policy/delete/move actions and scheduler edit UI are in the worktree; live acceptance pending. Latest queued regressions passed 8/8; ongoing agents own further tests and UI/media work.
+- New browser requirements: persistent old extension destination must migrate back to application default; disable page media scanning/bubble via explicit setting; investigate Edge ghost download/flyout after native handoff. Main added clearing legacy `settings.defaultDestination` in extension loadSettings and browser Runtime destination routing now skips both last-folder and category-folder fallbacks (explicit one-off destination still wins). These latest changes are not yet tested. `/root/review_filename` owns media opt-out + extension Options cleanup/tests; `/root/extension_review` owns queue/scheduler WinUI work (latest build passed). Main must verify their results, run directory regression with a conflicting category folder, and investigate Edge ghost entry without weakening acknowledged-before-cancel handoff safety. No new 0.1.1 package installed.
+
+- Queue editor now calls Host-owned create/policy actions rather than replacing all settings. Scheduler editing and existing completion-action controls compile cleanly; no live GUI acceptance yet. Settings replacement now rejects queue sets that orphan existing downloads or schedule queue references. Main is verifying queue regressions and scheduler persistence; move/delete UI wiring continues.
+
+- Host queue actions now include `moveup`/`movedown` (persistent queue order) and safe empty-queue deletion. Default queues and queues referenced by jobs or schedules are rejected without deleting downloads; populated-queue reassignment/deletion workflow remains unfinished. Runtime builds cleanly; focused tests and UI wiring are in progress.
+
+- Current product/extension/build metadata consistently bumped to 0.1.1; CLI build and extension typecheck passed. Historical artifact filenames/hashes and test fixture versions are unchanged.
+- Host-owned queue creation now allocates identifiers under the runtime lock and creates stopped queues without replacing full settings; shares policy validation with queue edits. Runtime compiled; editor migration, focused creation tests and scheduler editing continue. No 0.1.1 installer or live GUI acceptance is claimed yet.
+
+- Added Host-owned `queue.action` policy updates for name, concurrency and quota limits, preserving live usage/window timestamps instead of accepting those counters from the editor. Backend compilation passed; integration coverage and editor migration are in progress. Owner requested incremented versioning; the next review build is being bumped from 0.1.0 to 0.1.1 consistently, without rewriting historical evidence.
+
+- Added New queue and per-queue Edit controls in WinUI. Editor supports name, simultaneous downloads (1–16), optional quota (up to 10 TiB) and quota window (1–8760 hours), with validation that retains input. New queues start stopped. Existing IDs, order, running state, quota consumption and window start are preserved. Settings are refreshed again after closing the editor before applying edits.
+- Release WinUI build passed with zero warnings/errors. `QueueSettingsCreateEditAndPersistWithoutChangingOtherQueues` passed after restart, including unchanged second queue and quota usage. The initial test used a Nov4 quota window that legitimately expired on Nov5; changed the fixture to a current window and reran successfully. No live GUI acceptance or new installer is claimed for this increment.
+- Queue deletion/file ordering and scheduler editing remain pending. Full-settings saves still have a narrow concurrent-update race after refresh; atomic queue-specific policy updates are a follow-up before broad concurrent acceptance.
+
+### Host access investigation and live visual check (2026-11-04, blocker cleared)
+
+- Owner exited the elevated installed app. Directly launched normal-privilege workspace Host with `DOWNLOADMANAGER_DATA=artifacts/progress-smoke/data`; IPC immediately connected and confirmed an empty isolated list. The earlier Host-access blocker is cleared. Installed jobs were not changed.
+- Live fixture `14e70bde-6a42-4489-94d1-83ce5e861db9`: automatically opened the per-job UI, paused at 6,422,528 bytes, changed its cap from 128 to 64 KB/s via the UI, resumed, and completed. A 4.108 s interval transferred 262,144 bytes (~63,802 B/s); reported rate ~65,536 B/s. Global Don't show again saved false for ShowCompletionDialog while leaving the completion window open; restored true afterward.
+- Visual checking found the status expander header and completion saved-path textbox clipped at the former 500/400 heights. Defaults are now 640×560 for progress and 640×450 for completion. Rebuilt and checked fixture `1850c7d3-c868-4da1-9726-2903933e97ac`: status controls and completion path fit, all four checkpoint rows are accessible by scrolling with footer actions still visible. Per-job completion toggled false/true without changing global true. Cancel confirmation and its Keep downloading branch were observed; actual destructive Cancel is covered by integration tests, not a GUI deletion claim.
+- Removed the cap using the UI, resumed, and observed ~980,164 B/s over 2.607 s before completion. Both 8,388,608-byte files matched TestServer's `/large/expected` SHA-256 `ECC3DEC859B2355CBD2C9DA1E6513A6AAB7ADFBAAA7FF31FF3F0DA0F2898B59F`. Evidence: `artifacts/ui-smoke/progress-verified.png`, `segments-verified.png`, `completion-verified.png` (isolated fixture content only).
+- Completion Open folder/Open with were invoked, but a corresponding external Explorer/chooser window was not observed; do not mark those shell handoffs newly accepted from this smoke. Cancellation dialog now explicitly inherits the window theme; that final theme assignment is compile-verified, not separately recaptured. CLI now distinguishes access denied from Host absence and preserves protocol mismatch diagnostics; Release CLI build passed with no warnings/errors.
+- Closed the fixture window and cleanly shut down only the verified isolated Host after both jobs completed. Owner-wide visual approval, dark/DPI variants, shell handoff acceptance, and the other screenshot-review functional gaps remain open.
+- Restored the installed WinUI afterward. It now exposes its full accessibility tree to the helper (no higher-integrity warning), shows Host connected and the original eight failed / zero active entries. The restricted execution CLI still receives access denied from that installed Host's pipe; do not confuse that context limitation with the successful isolated IPC/UI checks or claim every caller privilege combination was verified.
+- Final updated installer (built, not installed): `artifacts/visual-final/installer/DownloadManagerSetup-0.1.0.exe`, 75,482,690 bytes, SHA-256 `9F19C315C5B10151262F88992F5108E9794750F42353DBEFCA745434535CDE9B`. Staging is `artifacts/visual-final/installer-app`; logs are `artifacts/ui-smoke/visual-final-publish.log` and `visual-final-installer.log`. A prior staging-root removal hit a directory handle left by a shell-action check; publishing to this fresh root succeeded without killing unrelated shell processes.
+
+- Queried the instance mutex owner directly: current owner is PID 63996 at `%LOCALAPPDATA%/DownloadManager/app/DownloadManager.Host.exe`, not the previous workspace smoke executable. Installed Host, Runtime and WinUI DLL hashes match the review package. Installed state has eight failed jobs and no active jobs; existing jobs were not modified.
+- The computer-use helper initially reported higher Windows integrity for the installed WinUI window, explaining its restricted control access. The installed Host's pipe is separately denied to the restricted execution CLI even after the accessible UI restart; elevation versus restricted-token ACL behavior was not independently distinguished for that pipe. The CLI's generic “Host not running” diagnostic concealed access denied. The executable manifest uses `asInvoker`, and no RUNASADMIN compatibility flag or `__COMPAT_LAYER` override was found for Host/UI. No Windows security settings or pipe ACLs were changed.
+- Opened the installed main window and requested the owner use Tasks → Exit, since Windows prevents this lower-privilege session from controlling that elevated instance. The owner completed that handoff; the successful isolated smoke above supersedes the blocker. Do not treat the earlier PID 139600 diagnosis as the current owner identity.
+
+### Progress/completion control increment (2026-11-04)
+
+- Added an aggregate per-transfer HTTP rate budget shared by single/range workers. Caps now apply to segmented downloads and can be enabled/changed/removed while running. Waits poll live settings at most every 100 ms and honor cancellation; changing a cap resets accumulated credit. Resume no longer charges the existing partial file against a fresh transfer timer. Limit state uses atomic reads/writes and persists in job metadata.
+- Optional `job.update` fields set the per-job cap (0 disables, null leaves unchanged) and completion-window preference. Invalid negative caps, terminal/FTP/HLS/DASH live caps, and combined Move/Rename + transfer-options requests are rejected before mutation. Other jobs and the global completion preference remain unchanged. Host and CLI-completion UI launch honor the per-job preference over the global default.
+- DownloadWindow now has Download status/Speed limiter/Options on completion tabs, URL/size/rate/ETA, an honest Yes/No/Unknown HTTP resume capability, Cancel with confirmation, saved-segment counters, and per-job completion selection. Completion has a separate compact summary with address, saved path, exact bytes, Open/Open with/Open folder/Close and global Don't show again. Completion resolves the latest global setting; saving Don't show again keeps the current completion window open. Segment data is explicitly checkpointed, not claimed to be instantaneous connection telemetry. Per-job shutdown/program actions remain outside this increment.
+- Owner requested avoiding Windows unsigned-app Run/Cancel prompts. Internal Host launches in frontend/CLI/native bridge now use `UseShellExecute=false` and `CreateNoWindow=true`; test launches use direct process execution. No Windows security setting was changed. Opening a downloaded file still uses its normal shell action.
+- Validation: Core 78/78, engine 47/47, integration 69/69. Six new engine cases cover single/segmented initial caps, enabling/removing a cap live with final hashes, and prompt cancellation while waiting on a 1-byte/s cap. Integration covers isolated per-job preferences, invalid requests and restart persistence. Existing tests initially hit the running TestServer.exe apphost lock; reran test builds with already-built dependencies. Pre-existing xUnit analyzer warnings remain; WinUI builds have a NU1900 vulnerability-feed availability warning.
+- Live UI transfer acceptance remains open: old smoke Host PID 139600 still owns the instance mutex, its pipe is unreachable, and this session cannot stop it (Access denied). New direct test Host launches exit against that existing mutex; the fixture add did not succeed. Do not claim a live new-window transfer/screenshot from this attempt. The new build is staged separately from the older running artifacts.
+- Final cancellation review added an opt-in unfinished-only guard to the cancel request, advertised by `JobDto.CanCancel`. Progress-window cancellation cannot delete a file that completes while its confirmation dialog is open; older Hosts do not advertise this control. New `ProgressCancelAfterCompletionKeepsSavedFile` verifies state and file hash preservation. Focused cancellation/pause/transfer-option checks: 4/4 after this guard; the earlier full integration run was 69/69. Removed-job windows now hide stale completion data and transfer actions. Rebuilt the isolated review package after these fixes.
+- Review installer (built, not installed): `artifacts/progress-release/installer/DownloadManagerSetup-0.1.0.exe`, 75,479,855 bytes, SHA-256 `0D5E73865D20FFB922AEB664F54BB6328FF5A64A05C51BABFCA79607276ED620`. Exact self-contained app staging is `artifacts/progress-release/installer-app`; publish/build logs are `artifacts/ui-smoke/progress-release-publish.log` and `progress-release-installer.log`. This is a progress/completion increment, not closure of all screenshot-review gaps or installer lifecycle acceptance.
+
+- Owner confirmed Dial Up/VPN is out of scope (2026-11-04); it is not an open functional gap.
+
+### Resumed owner review and browser fixes (2026-11-04, in progress)
+
+- Owner supplied 36 PNGs in `reference-screens` and explicitly requested Luna organize them for **functionality as well as UI**. Luna produced `reference-screens/INDEX.md` and `notes/screenshot-review-2026-11-04.md`; main inspected six key reference captures and checked source mappings. Originals remain unchanged and PNGs are excluded from git. Catalog is static evidence, not proof that every control works. Key gaps: manual auth/category/browse/metadata; progress Cancel/resume capability/live per-job limiter/completion settings; completion Open with/hide-again; site-login and sound editing; queue administration; scheduler editing/retries/startup/completion UI. Distinguish backend functionality missing a frontend from missing backend capability.
+- At owner's request, registered the existing disassembler MCP globally with `codex mcp add disassembler --url http://127.0.0.1:8081/mcp`, verified enabled configuration, and started the installed hidden headless launcher. It opened the saved `reference_project` project and began analysis of `/reference app.exe`; a read-only `get_program_info` request is pending analysis readiness. No decompilation findings or binary-identity verification are claimed yet. Do not launch another session against the same project.
+
+- Owner explicitly resumed implementation and requested a proper live reference app investigation, allowing Luna for lower-cost inspection. Luna owns reference UI inspection; main handles implementation and integration. New evidence will be recorded in `notes/live-review-2026-11-04.md`. This supersedes the deferral below.
+- Live reference app General → Keys confirms the installed reference has Del selected to prevent capture while clicking links. Actual bypass transfer acceptance remains pending.
+- Chrome handoff confirmation no longer overwrites the configured default folder. Runtime browser sources (`chromeAuto`, `chromeContextMenu`) ignore the desktop last-folder fallback and do not overwrite that memory; explicit one-download and category destinations still apply. Integration suite: 68/68, including both browser sources with consecutive requests and service restart. One initial focused run had a transient AccessDenied on atomic settings replacement; focused rerun and full suite passed.
+- Extension windows fit content within the current display's available bounds, scroll on short screens, and keep handoff/batch actions sticky. Delete+link capture uses page-side one-shot original-URL gestures, queried before pausing Chrome; this replaced a fire-and-forget registration race found by Luna's mocked review. Browser-chrome pages, unloaded source documents, and iframe initiators are not established shortcut coverage. Extension mock/unit suite 16/16 plus typecheck/build; live Chrome acceptance remains pending.
+- WinUI Options reorganized into General/Save to/Downloads/Connection/Proxy/Updates tabs with bounded scroll areas and a working completion-window setting. Add URL uses Address → Download file info with Start download/Download later and advanced queue/conflict choices; list header/body share horizontal scrolling to preserve alignment on narrow windows. Build and live visual review in progress; none of this establishes owner visual approval.
+- The supplied ThinkBroadband page explicitly disallows scripted/automated file downloads; inspected the page but repeatable transfer checks use the controlled local TestServer instead. No automated ThinkBroadband payload transfer claimed.
+
+### Owner feedback and deferred review (2026-11-04)
+
+- Additional owner requirements (recorded for follow-up, not implemented or
+  verified): **UI.R3**, every new Chrome-extension download should start in the
+  configured default folder, not remember the previous download's chosen
+  folder; **UI.R4**, resize/reflow extension windows so all items and actions fit
+  the available screen without clipping (scroll when necessary); **UI.R5**,
+  holding Delete while initiating a download should bypass capture and leave
+  the transfer in the browser, matching the owner's reported reference app behavior.
+  Interpret "pressing down delete" as holding the Delete key, not deleting a
+  download/list item. Confirm exact reference timing during the reference app review;
+  do not claim existing temporary bypass already meets this gesture.
+- **Visual acceptance blocker:** owner describes the current WinUI as basic
+  and disorganized. When the owner has time, carry out a complete live review
+  of reference app's appearance and workflows and use it to reorganize the WinUI. Cover
+  all main screens/dialogs, control grouping, hierarchy, spacing/density,
+  theme consistency and window behavior, with safe reference captures and a
+  screen-by-screen comparison. Existing inventory and functional checks do
+  not satisfy this acceptance gate. Tracked as ROADMAP UI.R1; wait to coordinate
+  the review with the owner instead of starting desktop work now.
+- **Minor Edge issue, take note:** starting a download from Edge tends to open
+  its Downloads flyout. Owner's screenshot shows that flyout and a canceled
+  testfile.org download. Cause is unverified; investigate browser behavior and
+  handoff before proposing a remedy (UI.R2). Do not change browser settings or
+  infer a new Edge-integration commitment from this report. Do not copy the
+  screenshot's unrelated download history into project records.
+
+### Latest user-test follow-up (supersedes the older fixes-in-progress handoff)
+
+- Engine now starts direct HTTP requests at the browser-supplied `FinalUrl`
+  when present, while binding cookies/Authorization/referrer to the original
+  URL origin. Invalid targets fail closed; the existing local-network policy
+  is also checked at the final URL and each redirect. Eight new cases cover
+  single/8-connection output hashes, same/cross-origin credentials, malformed
+  and unsupported targets, and disabled local destinations. Engine **41/41**.
+  This does not bypass Cloudflare or establish that testfile.org works.
+- Reviewed Luna's filename helper; added encoded-separator sanitization and a
+  regression. Extension **7/7**, typecheck and build pass. Real GitHub browser
+  acceptance against the new installer remains pending.
+- Added `DownloadWindow`: a separate per-job frontend (`--job <guid>`), with
+  live stats/overall progress, checkpoint connection details, pause/resume,
+  hide/close, completion Open file/Open folder actions and reconnect handling.
+  The Host launches it for interactive jobs; CLI stays headless unless the
+  main UI is already open and completion dialogs are enabled. A per-job named
+  event prevents duplicate windows. Queue members open when transferring,
+  rather than opening a burst of windows for every queued event. Main-window
+  Progress details launches this frontend; the old modal dialogs are removed.
+- Smoke test used only workspace fixture state under `artifacts/ui-smoke`.
+  The first shell-based launch waited and reported cancellation; internal
+  frontend launch now uses direct executable startup. Observed automatic live
+  progress, a pause at 73.4% with Resume enabled, checkpoint range progress,
+  and a completed 4.00 MB window with Open file/Open folder/Close. Saved paused
+  evidence: `artifacts/ui-smoke/progress-paused.jpg`. Final packaged compact completion layout was then visually checked and saved
+  as `artifacts/ui-smoke/completion-final.jpg` (connection details hidden).
+  Final isolated job `03a6c321-95f2-4c31-9d86-570646b5cedc` completed
+  4,194,304 bytes; SHA-256
+  `7a48f6942cc7d8917782ab387b6cd6574b117d5890c4f119f30deb85c72e6aa3`. Several fixture jobs were used; one was left
+  paused in the earlier smoke data and the test Host was shut down cleanly.
+- Earlier tray left-click/balloon click, dedicated settings activation and
+  light-theme resource changes are built. **Live tray/settings/light-mode
+  acceptance remains pending.** Corrected the pre-existing extra U+00C2 before middle-dot status-bar
+  separators. Luna reviewed the routine diff/encoding changes; review is not
+  acceptance evidence.
+- Computer-use `@oai/sky` works for observation and the new app controls.
+  reference app's initial owned address dialog repeatedly timed out on `set_value` and
+  did not accept typed input reliably. User entered the first URL; its
+  progress window was observed at Connecting, then it timed out on isolated
+  port 18741. A desktop-network TestServer was started on 18742; retrying the
+  address entry remained unreliable. **No successful fresh reference app completion
+  reference capture exists.** Do not rerun the old PowerShell UI helper in the
+  same turn as the computer-use skill.
+- Validation: Release solution build succeeds; core **78/78**, engine **41/41**,
+  integration **66/66** (185 .NET tests). The restricted test/solution commands
+  exited without useful diagnostics; normal approved execution passed. NuGet
+  vulnerability lookup was unavailable during one build; no compiler errors.
+- Final self-contained installer build log:
+  `artifacts/ui-smoke/final-installer-build.log`. Package:
+  `artifacts/installer/DownloadManagerSetup-0.1.0.exe` (72.0 MB), SHA-256
+  `4AF50CB652B8B09C124FF4B4DA3295A8CF40B9F1E9C878CD601B3D86458176FA`.
+  This package has not been installed/upgraded as acceptance evidence.
+  A final smoke Host/UI is running from `artifacts/installer-app`, with
+  `DOWNLOADMANAGER_DATA=artifacts/ui-smoke/final-data` and one completed fixture
+  job. This is test state, not the installed user job list. The desktop test
+  server on port 18742 is still available for the pending reference app capture.
+
 
 **Goal:** Build a private reference app-compatible download manager. The full 1:1 parity
 goal is **not complete**; Phase 0–5 are substantially implemented, later phases
@@ -1460,27 +1756,66 @@ random-access part file **in the destination directory**:
 
 ## Next actions (dependency order)
 
-Status refreshed after the Phase 7 closure (E89). Phases 6-11 are implemented
-and evidenced in `reference notes` (E1-E89); the only `blocked` rows are L4 (needs a
-normal shell) and C3 (explicit Chrome-only scope).
+### User test fixes in progress (handoff to next chat, 2026-11-04)
+
+- User reports GitHub release filenames becoming UUIDs, testfile.org failures, tray balloon clicks and tray Settings doing nothing, broken light mode, and requests reference app-style separate automatic download progress/completion windows. UI priority is high.
+- Installed logs are `%LOCALAPPDATA%\DownloadManager\logs\host-20261104.log`; inspect job records selectively without exposing cookies/headers. testfile.org jobs failed HTTP 403 at zero bytes. Curl confirmed `Cf-Mitigated: challenge` for site links; in-app browser also shows Cloudflare verification (`https://testfile.org/files-5GB`). Do not claim this is fixed or try to bypass challenges.
+- Important engine finding still UNFIXED: `HttpDownloadEngine.SendWithRedirectsAsync` always starts at `job.Url` and ignores browser-supplied `FinalUrl`, potentially replaying the challenged landing URL instead of the already-resolved CDN URL. Any fix must preserve original-origin credential stripping, validate target scheme/local-network policy, and add regression tests.
+- Luna implemented extension filename helper/tests: prefer informative Chrome filename; when empty/UUID, prefer decoded original URL before opaque final URL. Six Node tests and typecheck passed. Review changes before packaging.
+- Luna changed `App.xaml` and `MainWindow.xaml` to theme resources rather than hardcoded dark surfaces. WinUI build passed before subsequent main-session edits.
+- Main-session edits NOT YET BUILT/TESTED: tray left click and BalloonTipClicked open UI; App uses separate named settings activation event so secondary-instance `--page settings` is not discarded; MainWindow restores minimized windows, persists nullable DarkMode in UiState, follows system theme when unset, and clears pending settings request correctly. No new installer yet.
+- Separate automatic progress/completion windows are NOT implemented yet. Current progress is a manual ContentDialog and completion is a modal dialog tied to the main window. Need standalone per-job windows with live progress and completion actions, including when main UI is hidden/not initially running.
+- Reference screenshot inventory only found `notes/artifacts/reference app-main.png`, no progress/completion captures. Original inventory says other captures were outside repo. User explicitly requests a real reference app download and fresh captures if missing. reference app is running (PID 29904 observed, recheck). A controlled TestServer was started on port 18741 in background shell `sh_1a6e297a6001P2frc1bWejbkZ0`; no reference app test download was started. `artifacts/reference app-window-inspect.ps1` was drafted but NOT RUN; it enumerates reference app windows and can capture a title-specific window/optionally click a specified control ID. Don't claim captures exist.
+- Computer-use skill was loaded. Tool discovery returned no dedicated computer namespace, but user says it worked with DeepSeek and is starting a new chat to recheck. Do not repeat a blanket claim that desktop control is unavailable; inspect skill/tool availability freshly. Earlier reference work used PowerShell/Win32/UIA through shell. Browser tab for testfile.org exists; no verification challenge was interacted with.
+
+
+Current checkpoint (2026-11-04): the real Host process-kill matrix rerun passed
+all six cases (1 and 8 connections, kills at 20/50/80%) at
+`artifacts/kill-restart/20261104-152636/results.json` (E94). Single-stream
+retained 4,980,736 / 12,386,304 / 20,054,016 bytes; 8-connection retained
+4,479,153 / 11,429,751 / 20,658,980 bytes; the segmented sparse part file
+remained 25,165,824 bytes. Both modes resumed to the reference hashes: single
+`6d905264d6d4fc0445a3e694b6a1ad9bc16632be3310df3809d3b69e75476423`, segmented
+`a240b74fda649eab4f67152507e49e9aaa6eb4925636b60f3d48f1269f6410e6`. This was
+run in the main session with the Host process-kill script; it is not independent
+subagent verification. The first matrix at
+`artifacts/kill-restart/20261104-152127` exposed segmented progress loss at 20%
+while all single-stream cases and both final hashes passed. `ReconcileAsync` was
+truncating a segmented preallocated part file to aggregate `CompletedBytes`; the
+fix restricts truncation to `Segments.Count <= 1`. Regression test
+`CrashReconciliationPreservesSegmentedPartFileAndResumes` covers noncontiguous
+two-range checkpoint bytes and resumed hash; all three CrashReconciliation tests
+passed. Release solution build succeeded with 0 errors and one pre-existing
+xUnit2031 warning at line 73. The unchanged core/engine suites passed 78/78 and
+33/33; full integration passed **66/66** (177 total tests across the three
+suites).
+
+Final installer rebuild is successful: `artifacts\installer\DownloadManagerSetup-0.1.0.exe`,
+71.9 MB, SHA-256
+`A3D5ABCADE836177371CA8D3F5FD1981DE83CA47C8956D138C1C8920260D8363`. Publish
+checks passed for every extension relative file and hash, including icons, with
+no nested `dist`; this fresh package includes the recovery fix. It is ready for
+user installation testing, but actual install/upgrade/uninstall lifecycle and
+sign-in behavior remain unverified. Startup/install safety changes are under
+validation, not verified:
+Setup now uses Windows Restart Manager rather than force-killing by process
+name; sign-in configures through synchronous config-only Host mode independently
+of optional launch; uninstall retains state. Do not treat the build or these
+changes as install acceptance evidence.
 
 1. Done: Options -> Proxy controls, the Forget-password checkbox and the orphan cleanup dialog were live-verified (E93).
-2. (Removed) Site grabber was removed on 2026-11-04 by owner decision; no grabber work remains. Previously listed: result preview, JS-rendered pages,
-   result preview (robots.txt E91, crawler proxy/auth E92, JS rendering E93 done; sandboxed rendering needs a normal-shell run).
-3. Phase 5: orphan `.part` quarantine/delete is done via CLI/IPC (E90); a WinUI affordance is still missing.
-4. Phase 11/12: clean-Windows install/upgrade/uninstall acceptance (still
-   unverified outside this harness), L4 launch-at-sign-in from a normal shell,
-   independent visual review, independent kill/restart verification (P2.7,
-   P5.6, X.5), and final parity evidence. ROADMAP Phase 0-3 task rows still
-   say `pending` although the work is done; reconcile them.
-5. Proxy polish: no UI affordance to clear a saved proxy password without
-   changing the address/user; system-proxy mode passthrough is untested.
-6. SOCKS5 UDP ASSOCIATE is not supported (not needed for HTTP downloads).
-7. Installer-only update check and auto-update (ROADMAP P11.1–P11.7, PARITY C9);
-   portable and development builds must be excluded.
-8. Side quest (after parity): TorBox/account-provider integration with the
-   account manager, unrar extraction, a Linux/Docker headless host, and a web UI.
-   See ROADMAP.md A1–A5/D1–D4. Provider tokens must be supplied via environment
+2. Site grabber was removed on 2026-11-04 by owner decision; no grabber work remains. Download All is retained.
+3. Phase 11/12: finish validating startup/install safety, then perform clean-Windows
+   installer smoke and install/upgrade/uninstall acceptance (still
+    unverified outside this harness), L4 launch-at-sign-in from a normal shell,
+    independent visual review and independent verification/review of the
+    main-session kill/restart evidence (P2.7, P5.6, X.5), and final parity
+    evidence.
+4. System-proxy mode passthrough remains untested.
+5. SOCKS5 UDP ASSOCIATE is not supported (not needed for HTTP downloads).
+6. Deferred side quest: TorBox/account-provider integration, unrar, and a
+   Linux/Docker headless host and web UI (ROADMAP.md A1–A5/D1–D4). These are
+   deferred, not completed. Provider tokens must be supplied via environment
    variables and never committed.
 
 ## Commands
@@ -1521,3 +1856,15 @@ the first engine/host/IPC implementation.
 - Owner decision: the site grabber is out of scope. Deleted `SiteGrabber`, `HeadlessRenderer`, `RobotsRules`, grabber projects (model, `JsonGrabberProjectStore`, `grabber-projects.json` is no longer read), `grabber.*` IPC, CLI `grab`/`grabber`/`schedule add --grabber`, WinUI Tasks menu items, Grabber Projects category and scheduler targets, engine robots.txt redirect checks and the auxiliary crawler handler, TestServer `/grab`, `/robo`, `/robots.txt`, `/js` fixtures, and `scripts\test.ps1 -IncludeBrowser`.
 - Kept: G1 Download All (page link collection in the extension). `DownloadSource.Grabber` and `ScheduleRule.GrabberProjectId` stay only so old state files load; legacy grabber schedules are removed and persisted on startup.
 - Tests: core 78/78 (26 robots cases removed), engine 33/33, integration 65/65 (11 grabber tests removed, `LegacyGrabberSchedulesAreDroppedOnLoad` added).
+
+Scheduler reference consulted: https://support.internetdownloadmanager.com/support/reference app-scheduler/idm_scheduler.html (official). Confirms server-change synchronization, periodic windows, queued-file retries and queue task removal. Implemented behavior is not yet accepted against the live reference. Luna source review identified startup-only failure consumption, fixed with pending startup IDs; periodic metadata failures intentionally wait for the next configured period and are exposed via LastRunError. Full scheduler, sync hash/atomic replacement, retry counts, stale configuration and queue-detach failure/restart tests are required in the consolidated pass.
+
+## 0.1.5 final launch/packaging checkpoint (2026-11-05)
+Scoped Host launch now checks the same named mutex as IPC rather than global process names. WinUI Release build passed with zero warnings/errors (artifacts/validation-launch.log). Fresh isolated QA launched outside the sandbox and rendered the dark main window and unified Scheduler; source fix clears a stale initial connection-error status after successful refresh while retaining editor errors. This last status fix awaits the final rebuild. Packaging review identified output deletion containment and version override guards; fixes in progress. The existing local installer predates these final changes and must be rebuilt before release. No public 0.1.5 publication or install acceptance claimed.
+
+## 2026-11-05 — 0.1.5 release candidate
+
+- Release build clean (0 warnings). Tests: Core 88, Engine 57, Integration 95, extension all passing.
+- Rebuilt `DownloadManagerSetup-0.1.5.exe` (72.4 MB) and signed update ZIP (SHA-256 b19cba5a...1ee3); assets in `artifacts\release\v0.1.5`.
+- Not yet published. Live acceptance (tray Exit, installer upgrade, updater restart) still unverified.
+

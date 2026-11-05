@@ -13,6 +13,8 @@ public interface IHostController
 {
     void OpenUi(string? page = null);
     void RequestShutdown();
+    Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken)
+        => Task.FromResult(new FolderPickResult { Error = "Folder selection is unavailable in this Host." });
 }
 
 public sealed class HostPipeServer
@@ -23,6 +25,7 @@ public sealed class HostPipeServer
     private readonly ConcurrentDictionary<Guid, ClientConnection> _clients = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _acceptLoop;
+    private int _updateWindowOpened;
 
     public HostPipeServer(DownloadManagerService service, IHostController controller, FileLogger log)
     {
@@ -34,6 +37,7 @@ public sealed class HostPipeServer
     public void Start()
     {
         _service.JobChanged += OnJobChanged;
+        _service.UpdateProgressChanged += OnUpdateProgressChanged;
         _acceptLoop = AcceptLoopAsync(_cts.Token);
         _log.Info($"IPC server listening on pipe '{PipeNames.HostPipe()}'.");
     }
@@ -41,6 +45,7 @@ public sealed class HostPipeServer
     public async Task StopAsync()
     {
         _service.JobChanged -= OnJobChanged;
+        _service.UpdateProgressChanged -= OnUpdateProgressChanged;
         _cts.Cancel();
         foreach (var client in _clients.Values)
         {
@@ -126,9 +131,11 @@ public sealed class HostPipeServer
                 IpcMessage.Create(MessageTypes.JobsSnapshot, _service.GetSnapshot()),
                 serverToken).ConfigureAwait(false);
 
+            Task<IpcMessage?>? pendingRead = null;
             while (!serverToken.IsCancellationRequested)
             {
-                var message = await IpcFraming.ReadAsync(client.Stream, serverToken).ConfigureAwait(false);
+                var message = await (pendingRead ?? IpcFraming.ReadAsync(client.Stream, serverToken)).ConfigureAwait(false);
+                pendingRead = null;
                 if (message is null)
                 {
                     break;
@@ -145,7 +152,12 @@ public sealed class HostPipeServer
                     break;
                 }
 
-                await DispatchAsync(client, message, serverToken).ConfigureAwait(false);
+                if (message.Type == MessageTypes.FileMetadata)
+                {
+                    pendingRead = IpcFraming.ReadAsync(client.Stream, serverToken);
+                    await IpcOperationLifetime.RunAsync(token => DispatchAsync(client, message, token), pendingRead, serverToken).ConfigureAwait(false);
+                }
+                else await DispatchAsync(client, message, serverToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -201,6 +213,10 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.StatisticsGet:
+                    await Reply(client, message, MessageTypes.StatisticsResult, _service.GetStatistics()).ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
                     await Reply(client, message, MessageTypes.JobsSnapshot, _service.GetSnapshot())
@@ -211,6 +227,11 @@ public sealed class HostPipeServer
                     var add = message.GetPayload<AddJobRequest>();
                     var addResult = await _service.AddJobAsync(add, cancellationToken).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.JobAddResult, addResult).ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.FileMetadata:
+                    var metadata = await _service.ReadFileMetadataAsync(message.GetPayload<FileMetadataRequest>(), cancellationToken).ConfigureAwait(false);
+                    await Reply(client, message, MessageTypes.FileMetadataResult, metadata).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.HandoffRequest:
@@ -235,7 +256,8 @@ public sealed class HostPipeServer
                 case MessageTypes.JobCancel:
                     var cancel = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.CancelAsync(cancel.JobId, cancel.DeleteFile, cancellationToken).ConfigureAwait(false))
+                        await _service.CancelAsync(cancel.JobId, cancel.DeleteFile, cancellationToken,
+                            onlyIfUnfinished: cancel.OnlyIfUnfinished).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
@@ -249,7 +271,8 @@ public sealed class HostPipeServer
                 case MessageTypes.JobMoveToQueue:
                     var moveToQueue = message.GetPayload<JobQueueRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken)
+                        await (moveToQueue.Detach ? _service.DetachFromQueueAsync(moveToQueue.JobId, cancellationToken) :
+                            _service.MoveToQueueAsync(moveToQueue.JobId, moveToQueue.QueueId, cancellationToken))
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -260,6 +283,12 @@ public sealed class HostPipeServer
                         await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, cancellationToken)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.JobConnections:
+                    var connectionsRequest = message.GetPayload<JobActionRequest>();
+                    await Reply(client, message, MessageTypes.JobConnectionsResult,
+                        _service.GetConnections(connectionsRequest.JobId)).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobUpdate:
@@ -295,11 +324,16 @@ public sealed class HostPipeServer
                                          new UpdateInstallRequest();
                     var installResult = await _service.InstallUpdateAsync(
                         installRequest, cancellationToken).ConfigureAwait(false);
-                    await Reply(client, message, MessageTypes.UpdateInstallResult, installResult)
-                        .ConfigureAwait(false);
-                    if (installResult.Ok)
+                    try
                     {
-                        _service.RequestUpdateShutdown();
+                        await Reply(client, message, MessageTypes.UpdateInstallResult, installResult)
+                            .ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // The helper already waits for this Host. A client that
+                        // disconnects before its reply must not strand staging.
+                        if (installResult.Ok) _service.RequestUpdateShutdown();
                     }
 
                     break;
@@ -340,6 +374,13 @@ public sealed class HostPipeServer
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.GroupAction:
+                    var groupAction = message.GetPayload<GroupActionRequest>();
+                    await Reply(client, message, MessageTypes.GroupActionResult,
+                        await _service.GroupActionAsync(groupAction, cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.QueueAction:
                     var queueAction = message.GetPayload<QueueActionRequest>();
                     await Reply(client, message, MessageTypes.SettingsResult,
@@ -352,6 +393,13 @@ public sealed class HostPipeServer
                     _controller.OpenUi(string.IsNullOrWhiteSpace(open.Action) ? null : open.Action);
                     await Reply(client, message, MessageTypes.HostActionResult,
                         new HostActionResult { Ok = true, Message = "Opening the desktop UI." }).ConfigureAwait(false);
+                    break;
+
+                case MessageTypes.HostPickFolder:
+                    var pickFolder = message.GetPayload<FolderPickRequest>();
+                    var pickedFolder = await _controller.PickFolderAsync(pickFolder.InitialPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await Reply(client, message, MessageTypes.HostFolderPicked, pickedFolder).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.HostShutdown:
@@ -443,6 +491,16 @@ public sealed class HostPipeServer
 
     private static Task Reply<T>(ClientConnection client, IpcMessage request, string type, T payload)
         => client.SendAsync(IpcMessage.Create(type, payload, request.Id));
+
+    private void OnUpdateProgressChanged(object? sender, UpdateProgressDto progress)
+    {
+        if (progress.Stage == "downloading" && Interlocked.Exchange(ref _updateWindowOpened, 1) == 0)
+            _controller.OpenUi("update-progress");
+        if (progress.Stage is "failed" or "postponed" or "upToDate")
+            Interlocked.Exchange(ref _updateWindowOpened, 0);
+        var message = IpcMessage.Create(MessageTypes.UpdateProgress, progress);
+        foreach (var client in _clients.Values) client.Writer.TryWrite(message);
+    }
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)
     {

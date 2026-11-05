@@ -14,9 +14,13 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        var configureStartup = args.FirstOrDefault(arg =>
+            arg.StartsWith("--configure-sign-in-launch=", StringComparison.OrdinalIgnoreCase));
         using var mutex = new Mutex(initiallyOwned: true, PipeNames.MutexName(), out var createdNew);
         if (!createdNew)
         {
+            // Never rewrite settings behind a running service's single-writer authority.
+            if (configureStartup is not null) return 1;
             NotifyExistingInstance();
             return 0;
         }
@@ -36,6 +40,23 @@ internal static class Program
 
         try
         {
+            // Setup must apply this even when the optional postinstall launch is skipped.
+            // Do not initialize the runtime: configuration must not start queued downloads.
+            if (configureStartup is not null)
+            {
+                var installRoot = Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
+                if (!string.Equals(Path.GetFullPath(paths.Root), installRoot, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Setup could not access the installed application's data directory.");
+                var value = configureStartup.Split('=', 2)[1];
+                if (value is not ("enabled" or "disabled")) return 2;
+                var store = new JsonSettingsStore(paths);
+                var settings = store.LoadAsync().GetAwaiter().GetResult();
+                settings.LaunchAtStartup = value == "enabled";
+                store.SaveAsync(settings).GetAwaiter().GetResult();
+                StartupRegistration.Apply(settings.LaunchAtStartup, StartupRegistration.HostExecutablePath());
+                return 0;
+            }
+
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
@@ -72,6 +93,19 @@ internal static class Program
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
             var pipe = new HostPipeServer(service, controller, log);
             pipe.Start();
+
+            // Passed by the installer when "Start when I sign in" is selected; afterwards the
+            // Options setting owns the Run key (applied just below and on every settings change).
+            if (args.Contains("--enable-sign-in-launch", StringComparer.OrdinalIgnoreCase))
+            {
+                var startupSettings = service.GetSnapshot().Settings;
+                if (!startupSettings.LaunchAtStartup)
+                {
+                    startupSettings.LaunchAtStartup = true;
+                    service.UpdateSettingsAsync(startupSettings).GetAwaiter().GetResult();
+                    log.Info("Launch at sign-in enabled by the installer.");
+                }
+            }
 
             var currentSettings = service.GetSnapshot().Settings;
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
@@ -114,9 +148,35 @@ internal static class Program
                 log.Info);
             clipboardMonitor.Start();
 
+            var shownDownloads = new System.Collections.Concurrent.ConcurrentDictionary<Guid, byte>();
+            var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
+            using var eventSounds = new CompletionSoundPlayer(log.Warn);
+            void PlayEventSound(string key, SettingsDto settings)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try { await eventSounds.PlayAsync(key, settings.EventSoundFiles).ConfigureAwait(false); }
+                    catch (Exception ex) { log.Warn($"Event sound failed: {ex.GetType().Name}"); }
+                });
+            }
             service.JobChanged += (_, e) =>
             {
                 var current = currentSettings;
+                // CLI callers remain headless. Interactive downloads get a separate
+                // per-job frontend; launching again activates the same job window.
+                var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
+                    (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
+                if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
+                if (e.Job.Source != "cli" &&
+                    ((starting && shownDownloads.TryAdd(e.Job.Id, 0)) ||
+                     (e.ChangeType == "completed" && (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog))))
+                {
+                    // Process launch has no WinForms affinity. Keep it off the engine's
+                    // event path and independent of the tray synchronization context.
+                    _ = Task.Run(() => controller.OpenDownload(e.Job.Id));
+                }
+                if (e.ChangeType is "paused" or "cancelled" or "failed" or "completed" or "removed")
+                    shownDownloads.TryRemove(e.Job.Id, out var ignored);
                 if (e.ChangeType == "completed")
                 {
                     if (current.NotifyOnCompletion)
@@ -126,23 +186,29 @@ internal static class Program
 
                     if (current.PlayCompletionSound)
                     {
-                        try
-                        {
-                            System.Media.SystemSounds.Asterisk.Play();
-                        }
-                        catch (Exception ex)
-                        {
-                            log.Warn($"Completion sound failed: {ex.Message}");
-                        }
+                        PlayEventSound("completed", current);
                     }
                 }
                 else if (e.ChangeType == "failed")
                 {
                     tray.Notify("Download failed", $"{e.Job.FileName}: {e.Job.Failure?.Message}");
+                    if (current.EventSoundFiles.ContainsKey("failed")) PlayEventSound("failed", current);
                 }
+                if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
+                    service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
+                        .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&
+                    finishedQueueSounds.TryAdd(e.Job.QueueId, 0))
+                    PlayEventSound("queueFinished", current);
             };
 
             log.Info("Host ready.");
+            // Start Menu / desktop shortcuts pass --open so a fresh start shows the window;
+            // a second launch already opens it through NotifyExistingInstance.
+            if (args.Contains("--open", StringComparer.OrdinalIgnoreCase))
+            {
+                controller.OpenUi();
+            }
+
             Application.Run(tray);
 
             log.Info("UI loop exited; shutting down.");
@@ -250,6 +316,12 @@ internal static class Program
 
     private static void TryApplyStartup(bool enabled, FileLogger log)
     {
+        // Isolated test/portable state must not replace or delete the installed user's Run entry.
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA")))
+        {
+            return;
+        }
+
         try
         {
             StartupRegistration.Apply(enabled, StartupRegistration.HostExecutablePath());

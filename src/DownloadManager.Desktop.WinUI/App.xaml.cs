@@ -6,8 +6,13 @@ namespace DownloadManager.Desktop.WinUI;
 public partial class App : Application
 {
     private readonly EventWaitHandle _showEvent;
+    private readonly EventWaitHandle _settingsEvent;
     private readonly bool _secondaryInstance;
     private MainWindow? _window;
+    private DownloadWindow? _downloadWindow;
+    private UpdateWindow? _updateWindow;
+    private readonly bool _updateMode;
+    private readonly Guid? _jobId;
 
     public App()
     {
@@ -30,8 +35,15 @@ public partial class App : Application
         }
 
         UiTrace.Write("App InitializeComponent complete");
-        var name = $"Local\\DownloadManager.UI.Show.{PipeNames.CurrentUserKey()}";
+        var commandLine = Environment.GetCommandLineArgs();
+        _updateMode = commandLine.Contains("update-progress");
+        var jobIndex = Array.FindIndex(commandLine, arg => arg == "--job");
+        if (jobIndex >= 0 && jobIndex + 1 < commandLine.Length &&
+            Guid.TryParse(commandLine[jobIndex + 1], out var jobId)) _jobId = jobId;
+        var name = $"Local\\DownloadManager.UI.Show.{PipeNames.CurrentUserKey()}" +
+            (_updateMode ? ".Update" : _jobId is { } id ? $".Job.{id:D}" : string.Empty);
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name, out var createdNew);
+        _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
         _secondaryInstance = !createdNew;
         UiTrace.Write($"App ctor end secondary={_secondaryInstance}");
     }
@@ -51,10 +63,49 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var commandLine = Environment.GetCommandLineArgs();
+        var pageIndex = Array.FindIndex(commandLine, arg => string.Equals(arg, "--page", StringComparison.OrdinalIgnoreCase));
+        var openSettings = pageIndex >= 0 && pageIndex + 1 < commandLine.Length &&
+            string.Equals(commandLine[pageIndex + 1], "settings", StringComparison.OrdinalIgnoreCase);
+        // Explicit launches can restart an exited Host even when the hidden
+        // frontend already owns the single-instance activation event.
+        HostLauncher.EnsureStarted();
         if (_secondaryInstance)
         {
-            _showEvent.Set();
+            (openSettings ? _settingsEvent : _showEvent).Set();
             Exit();
+            return;
+        }
+
+        if (_updateMode)
+        {
+            _updateWindow = new UpdateWindow();
+            _updateWindow.Closed += (_, _) => Exit();
+            _updateWindow.Activate();
+            _ = Task.Run(() =>
+            {
+                while (true)
+                {
+                    _showEvent.WaitOne();
+                    _updateWindow.DispatcherQueue.TryEnqueue(() => _updateWindow.ShowWindow());
+                }
+            });
+            return;
+        }
+
+        if (_jobId is { } id)
+        {
+            _downloadWindow = new DownloadWindow(id, commandLine.Contains("--manual"));
+            _downloadWindow.Closed += (_, _) => Exit();
+            _downloadWindow.Activate();
+            _ = Task.Run(() =>
+            {
+                while (true)
+                {
+                    _showEvent.WaitOne();
+                    _downloadWindow.DispatcherQueue.TryEnqueue(() => _downloadWindow.ShowWindow());
+                }
+            });
             return;
         }
 
@@ -72,9 +123,7 @@ public partial class App : Application
             throw;
         }
 
-        var commandLine = Environment.GetCommandLineArgs();
-        if (commandLine.Contains("--page", StringComparer.OrdinalIgnoreCase) ||
-            commandLine.Contains("settings", StringComparer.OrdinalIgnoreCase))
+        if (openSettings)
         {
             _window.RequestSettingsPage();
         }
@@ -83,12 +132,12 @@ public partial class App : Application
         {
             while (true)
             {
-                if (!_showEvent.WaitOne(TimeSpan.FromSeconds(1)))
+                var activation = WaitHandle.WaitAny([_showEvent, _settingsEvent]);
+                _window.DispatcherQueue.TryEnqueue(() =>
                 {
-                    continue;
-                }
-
-                _window.DispatcherQueue.TryEnqueue(() => _window.ShowFromTray());
+                    _window.ShowFromTray();
+                    if (activation == 1) _window.RequestSettingsPage();
+                });
             }
         });
     }

@@ -1,3 +1,5 @@
+import { pickDestinationFolder } from "./pick-destination";
+
 interface PendingHandoff {
   id: string;
   url: string;
@@ -11,6 +13,7 @@ const handoffId = params.get("id") ?? "";
 const urlInput = document.getElementById("url") as HTMLInputElement;
 const nameInput = document.getElementById("fileName") as HTMLInputElement;
 const destinationInput = document.getElementById("destination") as HTMLInputElement;
+const browseDestinationButton = document.getElementById("browseDestination") as HTMLButtonElement;
 const startSelect = document.getElementById("startMode") as HTMLSelectElement;
 const confirmButton = document.getElementById("confirm") as HTMLButtonElement;
 const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
@@ -100,3 +103,10 @@ confirmButton.addEventListener("click", async () => {
 });
 
 cancelButton.addEventListener("click", () => window.close());
+
+browseDestinationButton.addEventListener("click", () => {
+  void pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+});
+import { fitWindowToContent } from "./fit-window";
+
+void fitWindowToContent().catch(() => undefined);
