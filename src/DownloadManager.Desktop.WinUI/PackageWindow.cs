@@ -44,6 +44,7 @@ internal sealed class PackageWindow : Window
         _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
         Title = "Package status — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 720, 520);
+        WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 

@@ -41,6 +41,7 @@ public sealed partial class DownloadWindow : Window
         var theme = UiStateStore.Load().DarkMode;
         Root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
         WindowLayout.ResizeForDpi(this, 720, 700);
+        WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         Title = "Download status — Inbound Download Manager";

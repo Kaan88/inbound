@@ -103,6 +103,7 @@ public sealed class SchedulerWindow : Window
     {
         Title = "Scheduler — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 1000, 720);
+        WindowPlacement.Track(this, "scheduler");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 

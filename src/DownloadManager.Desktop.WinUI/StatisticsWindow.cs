@@ -21,6 +21,7 @@ public sealed class StatisticsWindow : Window
     {
         Title = "Statistics — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 650, 650);
+        WindowPlacement.Track(this, "statistics");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 

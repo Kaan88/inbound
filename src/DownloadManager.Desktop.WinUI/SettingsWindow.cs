@@ -33,6 +33,7 @@ internal sealed class SettingsWindow : Window
     {
         Title = "Options — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 860, 620);
+        WindowPlacement.Track(this, "options");
         _root.RequestedTheme = theme;
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

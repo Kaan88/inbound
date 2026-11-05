@@ -53,8 +53,12 @@ public sealed partial class MainWindow : Window
         {
             var now = DateTimeOffset.UtcNow;
             var active = _jobsById.Values.Where(job => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting").ToArray();
-            double? rate = !_graphConnected || !_graphSnapshotReady || active.Any(job => now - job.LastUpdated > TimeSpan.FromSeconds(10))
-                ? null : active.Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
+            // A gap means "no data" (Host disconnected). A download that has gone quiet (stalled,
+            // connecting, waiting to retry) is transferring nothing, so it counts as 0, not unknown.
+            double? rate = !_graphConnected || !_graphSnapshotReady
+                ? null
+                : active.Where(job => now - job.LastUpdated <= TimeSpan.FromSeconds(10))
+                    .Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
             SpeedGraph.AddSample(now, rate);
         };
         _speedHistoryTimer.Start();
@@ -73,6 +77,7 @@ public sealed partial class MainWindow : Window
             var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
             var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
             AppWindow.Resize(new SizeInt32(width, height));
+            WindowPlacement.Track(this, "main");
             var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
             if (File.Exists(icon))
             {
