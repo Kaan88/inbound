@@ -44,9 +44,12 @@ internal static class Program
             // Do not initialize the runtime: configuration must not start queued downloads.
             if (configureStartup is not null)
             {
-                var installRoot = Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
-                if (!string.Equals(Path.GetFullPath(paths.Root), installRoot, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Setup could not access the installed application's data directory.");
+                // A fallback data folder (roaming or next to the exe) would configure the wrong settings.
+                var overridden = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
+                var expectedRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(overridden) ? AppFolders.DataRoot() : overridden)
+                    .TrimEnd(Path.DirectorySeparatorChar);
+                if (!string.Equals(Path.GetFullPath(paths.Root).TrimEnd(Path.DirectorySeparatorChar), expectedRoot, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Setup could not use the data folder {expectedRoot}; the host resolved {paths.Root}.");
                 var value = configureStartup.Split('=', 2)[1];
                 if (value is not ("enabled" or "disabled")) return 2;
                 var store = new JsonSettingsStore(paths);
