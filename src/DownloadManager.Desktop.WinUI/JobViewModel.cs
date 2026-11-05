@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using DownloadManager.Contracts;
@@ -69,6 +69,15 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public double BytesPerSecond { get; private set; }
     public DateTimeOffset LastUpdated { get; private set; }
     public Visibility ProgressVisibility { get => _progressVisibility; private set => Set(ref _progressVisibility, value); }
+    public Microsoft.UI.Xaml.Media.Brush StatusBrush { get => _statusBrush; private set => Set(ref _statusBrush, value); }
+    private Microsoft.UI.Xaml.Media.Brush _statusBrush = NeutralStatus;
+
+    // Mid-tone status colors chosen to keep contrast on both the dark (#181818) and light (#FFFFFF) list surfaces.
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush ActiveStatus = new(Windows.UI.Color.FromArgb(255, 61, 143, 224));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush DoneStatus = new(Windows.UI.Color.FromArgb(255, 56, 158, 76));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush FailedStatus = new(Windows.UI.Color.FromArgb(255, 222, 78, 78));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WaitingStatus = new(Windows.UI.Color.FromArgb(255, 201, 140, 32));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NeutralStatus = new(Windows.UI.Color.FromArgb(255, 138, 138, 138));
     public DateTimeOffset CreatedAt { get => _createdAt; private set => Set(ref _createdAt, value); }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -83,7 +92,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
         BytesPerSecond = job.BytesPerSecond ?? 0;
         LastUpdated = job.UpdatedAt;
-        SizeText = FormatBytes(TotalSize);
+        SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
         EtaText = FormatDuration(job.EstimatedRemaining);
         DetailText = job.Failure?.Message is { Length: > 0 } failure
@@ -126,6 +135,14 @@ public sealed class JobViewModel : INotifyPropertyChanged
             ? Visibility.Visible
             : Visibility.Collapsed;
         CreatedAt = job.CreatedAt;
+        StatusBrush = job.State switch
+        {
+            "downloading" or "connecting" or "verifying" or "assembling" => ActiveStatus,
+            "completed" => DoneStatus,
+            "failed" => FailedStatus,
+            "paused" or "queued" or "retryWaiting" or "waiting" => WaitingStatus,
+            _ => NeutralStatus,
+        };
     }
 
     private async Task LoadFileIconAsync(string fileName, string? completedPath, string key)

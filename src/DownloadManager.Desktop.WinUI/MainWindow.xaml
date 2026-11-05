@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="DownloadManager.Desktop.WinUI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -6,7 +6,7 @@
     xmlns:local="using:DownloadManager.Desktop.WinUI"
     Title="Rill Download Manager">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid x:Name="RootGrid" Background="{ThemeResource RillSurfaceBrush}">
         <Grid.Resources>
             <DataTemplate x:Key="QueueFileTemplate">
                 <Grid ColumnSpacing="12" Padding="0,3" ToolTipService.ToolTip="{Binding FileName}">
@@ -39,7 +39,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <MenuBar Grid.Row="0" Background="{ThemeResource SystemControlBackgroundAltHighBrush}" BorderThickness="0" Padding="4,1">
+        <MenuBar Grid.Row="0" Background="{ThemeResource RillChromeBrush}" BorderThickness="0" Padding="4,1">
             <MenuBarItem Title="Tasks">
                 <MenuFlyoutItem Text="Add new download..." Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
@@ -124,7 +124,14 @@
             </MenuBarItem>
         </MenuBar>
 
-        <Border Grid.Row="1" Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,1">
+        <Border Grid.Row="1" Background="{ThemeResource RillChromeBrush}" BorderBrush="{ThemeResource RillDividerBrush}" BorderThickness="0,1,0,1">
+            <Border.Resources>
+                <!-- Toolbar buttons are flat: disabled ones only dim, they do not get a gray box. -->
+                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+            </Border.Resources>
             <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="ToolbarPanel" Orientation="Horizontal" Padding="8,4" Spacing="0">
@@ -212,7 +219,7 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Background="{ThemeResource RillChromeBrush}" BorderBrush="{ThemeResource RillDividerBrush}" BorderThickness="0,0,1,0">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -310,21 +317,21 @@
             <ScrollViewer x:Name="DownloadListViewport" Grid.Column="1"
                           HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-            <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" RowSpacing="0"
+            <Grid Background="{ThemeResource RillSurfaceBrush}" RowSpacing="0"
                   MinWidth="1040" Width="{Binding ViewportWidth, ElementName=DownloadListViewport}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="27" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
+                <Border Grid.Row="0" Background="{ThemeResource RillChromeBrush}" BorderBrush="{ThemeResource RillDividerBrush}" BorderThickness="0,0,0,1">
                     <Grid Padding="4,0" ColumnSpacing="0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="78" />
-                            <ColumnDefinition Width="92" />
+                            <ColumnDefinition Width="140" />
                             <ColumnDefinition Width="78" />
                             <ColumnDefinition Width="86" />
                             <ColumnDefinition Width="116" />
@@ -345,7 +352,7 @@
                 <Grid Grid.Row="1">
                     <ListView x:Name="JobsList"
                               AutomationProperties.Name="Downloads"
-                              Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                              Background="{ThemeResource RillSurfaceBrush}"
                               BorderThickness="0"
                               SelectionMode="Extended"
                               ItemContainerStyle="{StaticResource InboundListRowStyle}"
@@ -364,7 +371,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="78" />
-                                        <ColumnDefinition Width="92" />
+                                        <ColumnDefinition Width="140" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="86" />
                                         <ColumnDefinition Width="116" />
@@ -378,23 +385,23 @@
                                     <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
-                                                VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                                                VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}"
                                                ToolTipService.ToolTip="{Binding QueueName}" />
                                     <TextBlock Grid.Column="3" Text="{Binding SizeText}" FontSize="11"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="1">
-                                        <TextBlock Text="{Binding StateText}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                        <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Height="3"
+                                        <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
+                                        <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource RillProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
                                     </StackPanel>
                                     <TextBlock Grid.Column="5" Text="{Binding EtaText}" FontSize="11"
-                                                VerticalAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+                                                VerticalAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}" />
                                     <TextBlock Grid.Column="6" Text="{Binding SpeedText}" FontSize="11"
-                                                VerticalAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" TextTrimming="CharacterEllipsis" />
+                                                VerticalAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="7" Text="{Binding LastTryText}" FontSize="11"
-                                                VerticalAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" TextTrimming="CharacterEllipsis" />
+                                                VerticalAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="8" Text="{Binding Description}" FontSize="11"
-                                                VerticalAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" TextTrimming="CharacterEllipsis" />
+                                                VerticalAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -402,28 +409,28 @@
                     <TextBlock x:Name="EmptyText"
                                Text="No downloads in this view.&#x0a;Use Add URL or the Chrome bridge to start one."
                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                TextAlignment="Center" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" FontSize="12" />
+                                TextAlignment="Center" Foreground="{ThemeResource RillSecondaryTextBrush}" FontSize="12" />
                 </Grid>
             </Grid>
             </ScrollViewer>
         </Grid>
 
-        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" Header="Download speed · session history" IsExpanded="True"
+        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Up" Header="Download speed · session history" IsExpanded="True"
                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <local:DownloadSpeedGraph x:Name="SpeedGraph" />
         </Expander>
 
-        <Border Grid.Row="4" Background="{ThemeResource SystemControlBackgroundAltHighBrush}" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="4" Background="{ThemeResource RillChromeBrush}" BorderBrush="{ThemeResource RillDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
             <Grid Padding="8,0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" AutomationProperties.Name="Status" Text="Starting…" FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                <TextBlock x:Name="StatusText" AutomationProperties.Name="Status" Text="Starting…" FontSize="11" Foreground="{ThemeResource RillSecondaryTextBrush}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="ConnectionText" AutomationProperties.Name="Host connection" Grid.Column="1" Text="Connecting…" FontSize="11"
-                            Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" VerticalAlignment="Center" />
+                            Foreground="{ThemeResource RillSecondaryTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Border>
     </Grid>

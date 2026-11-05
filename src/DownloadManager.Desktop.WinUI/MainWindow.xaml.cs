@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -1393,7 +1393,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var background = dark ? Windows.UI.Color.FromArgb(255, 27, 27, 27) : Windows.UI.Color.FromArgb(255, 243, 243, 243);
+        var background = dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 243, 243, 243);
         var foreground = dark ? Windows.UI.Color.FromArgb(255, 235, 235, 235) : Windows.UI.Color.FromArgb(255, 30, 30, 30);
         var hover = dark ? Windows.UI.Color.FromArgb(255, 45, 45, 48) : Windows.UI.Color.FromArgb(255, 225, 225, 225);
         var pressed = dark ? Windows.UI.Color.FromArgb(255, 60, 60, 63) : Windows.UI.Color.FromArgb(255, 210, 210, 210);
@@ -1622,7 +1622,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
         };
         browseDestination.Click += async (_, _) =>
         {
@@ -1994,7 +1994,7 @@ public sealed partial class MainWindow : Window
         {
             Text = "Ranges: [1-10], [001-010], [a-z], or lists [1,3,5]. Multiple ranges expand together.",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
             FontSize = 12,
         };
         var destinationBox = new TextBox
@@ -2208,7 +2208,7 @@ public sealed partial class MainWindow : Window
                        $"max {queue.MaxConcurrentDownloads} concurrent" +
                        (queue.QuotaEnabled ? $"; quota {queue.QuotaBytes:N0} bytes" : string.Empty),
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
             });
             Grid.SetColumn(info, 0);
             row.Children.Add(info);
@@ -2286,7 +2286,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new Border
             {
                 Height = 1,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 59, 76)),
+                Background = RillTheme.Brush("RillHighlightBrush", RootGrid),
             });
         }
 
@@ -2417,7 +2417,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 320 };
         panel.Children.Add(name);
@@ -2557,7 +2557,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new TextBlock
             {
                 Text = "No schedules yet.",
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
             });
         }
 
@@ -2601,7 +2601,7 @@ public sealed partial class MainWindow : Window
                        (schedule.StopTime is { } stop ? $"–{stop}" : string.Empty) +
                        $" [{schedule.Days}] → {target}",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+                Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
                 TextWrapping = TextWrapping.Wrap,
             });
             Grid.SetColumn(info, 0);
@@ -2648,7 +2648,7 @@ public sealed partial class MainWindow : Window
             panel.Children.Add(new Border
             {
                 Height = 1,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 48, 59, 76)),
+                Background = RillTheme.Brush("RillHighlightBrush", RootGrid),
             });
         }
 
@@ -2799,7 +2799,7 @@ public sealed partial class MainWindow : Window
                 : "Global system actions are disabled. Exit and computer actions saved below will be skipped until this opt-in is enabled.",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 150, 150, 150)),
+            Foreground = RillTheme.Brush("RillSecondaryTextBrush", RootGrid),
         };
         allowSystemActions.Checked += (_, _) => systemActionsNote.Text =
             "Global system actions are enabled. Queue exit and computer actions will be allowed when configured.";
@@ -2819,7 +2819,7 @@ public sealed partial class MainWindow : Window
         {
             Visibility = Visibility.Collapsed,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 80, 80)),
+            Foreground = RillTheme.Brush("RillErrorTextBrush", RootGrid),
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 340 };
         panel.Children.Add(nameBox);

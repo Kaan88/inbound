@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
@@ -10,7 +10,7 @@ namespace DownloadManager.Desktop.WinUI;
 public sealed class DownloadSpeedGraph : Grid
 {
     private readonly Queue<(DateTimeOffset Time, double? Rate)> _samples = new();
-    private readonly Canvas _plot = new() { MinHeight = 100, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Canvas _plot = new() { MinHeight = 70, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _rate = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox _period = new() { MinWidth = 115 };
     private readonly int[] _periods = [60, 300, 1800, 3600];
@@ -20,7 +20,7 @@ public sealed class DownloadSpeedGraph : Grid
     {
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        Height = 190;
+        Height = 130;
         Padding = new Thickness(12, 4, 12, 4);
         var header = new Grid { ColumnSpacing = 12 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -60,7 +60,7 @@ public sealed class DownloadSpeedGraph : Grid
 
     private static string RateText(double rate)
     {
-        string[] units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"];
+        string[] units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"];
         var unit = 0;
         while (rate >= 1024 && unit < units.Length - 1) { rate /= 1024; unit++; }
         return $"{rate:0.#} {units[unit]}";
@@ -80,16 +80,15 @@ public sealed class DownloadSpeedGraph : Grid
         var peak = known.Length == 0 ? 0 : known.Max();
         var average = known.Length == 0 ? 0 : known.Average();
         var latest = visible.LastOrDefault().Rate;
-        _rate.Text = $"Download: {(latest is { } current ? RateText(current) : "unavailable")}   ·   Average {RateText(average)}   ·   Peak {RateText(peak)}";
+        _rate.Text = $"Download: {(latest is { } current ? RateText(current) : "—")}   ·   Average {RateText(average)}   ·   Peak {RateText(peak)}";
         var top = peak <= 0 ? 1024 : Math.Pow(10, Math.Floor(Math.Log10(peak)));
         top *= Math.Ceiling(Math.Max(peak, top) / top);
         if (!double.IsFinite(top) || top <= 0) top = Math.Max(peak, 1024);
         const double left = 77, upper = 8, lower = 22;
         var chartWidth = width - left - 8;
         var chartHeight = height - upper - lower;
-        var dark = ActualTheme == ElementTheme.Dark;
-        var foreground = new SolidColorBrush(dark ? Windows.UI.Color.FromArgb(255, 192, 192, 192) : Windows.UI.Color.FromArgb(255, 85, 85, 85));
-        var gridBrush = new SolidColorBrush(dark ? Windows.UI.Color.FromArgb(255, 70, 70, 70) : Windows.UI.Color.FromArgb(255, 205, 205, 205));
+        var foreground = RillTheme.Brush("RillSecondaryTextBrush", this);
+        var gridBrush = RillTheme.Brush("RillDividerBrush", this);
         void Label(string text, double x, double y)
         {
             var label = new TextBlock { Text = text, FontSize = 10, Foreground = foreground };
@@ -110,8 +109,7 @@ public sealed class DownloadSpeedGraph : Grid
             var minutes = _seconds * (4 - column) / 240d;
             Label(column == 4 ? "Now" : $"−{minutes:0.#} min", Math.Clamp(x - 18, left, width - 40), upper + chartHeight + 3);
         }
-        var color = ActualTheme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 143, 211, 72) : Windows.UI.Color.FromArgb(255, 62, 133, 18);
-        var stroke = new SolidColorBrush(color);
+        var stroke = RillTheme.Brush("RillProgressFillBrush", this);
         Polyline? line = null;
         // Keep peaks/troughs when a period contains more samples than horizontal pixels.
         var bucketWidth = Math.Max(1, (int)chartWidth);

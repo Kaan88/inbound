@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -188,8 +188,7 @@ public sealed class SchedulerWindow : Window
         Content = windowFrame;
         void ApplyBackground()
         {
-            var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(root.ActualTheme == ElementTheme.Dark
-                ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 250, 250, 250));
+            var brush = RillTheme.Brush("RillSurfaceBrush", root);
             root.Background = brush;
             windowFrame.Background = brush;
         }

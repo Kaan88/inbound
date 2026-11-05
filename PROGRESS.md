@@ -1868,3 +1868,11 @@ Scoped Host launch now checks the same named mutex as IPC rather than global pro
 - Rebuilt `DownloadManagerSetup-0.1.5.exe` (72.4 MB) and signed update ZIP (SHA-256 b19cba5a...1ee3); assets in `artifacts\release\v0.1.5`.
 - Not yet published. Live acceptance (tray Exit, installer upgrade, updater restart) still unverified.
 
+
+## 2026-11-05 — UI consistency pass (post-0.1.5 source)
+
+- Single theme palette in App.xaml (dark/light ThemeDictionaries) + `RillTheme` helper; hardcoded window colors removed from main, progress, groups, scheduler, statistics and speed-graph code. Guidelines: `docs/design-guidelines.md`.
+- List: colored status text, 6px rounded progress bar in a 140px Status column, blank unknown sizes, flat toolbar without disabled boxes, unified KB/MB units, smaller graph that expands upward.
+- Progress window: reference app-style segmented map replaces the overall bar; segment table (N./progress/downloaded/speed/info) uses live stream positions with a monotonic high-water mark (verified live: values only increase); DPI-scaled default size; fixed invisible text cells.
+- Evidence: isolated `uiqa` profile with throttled TestServer downloads, dark and light captures. Core 88/88, clean Release build. Not yet packaged; scheduler/options/groups windows not re-reviewed visually.
+

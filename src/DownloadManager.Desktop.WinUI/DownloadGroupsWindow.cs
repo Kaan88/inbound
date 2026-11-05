@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -52,8 +52,7 @@ public sealed class DownloadGroupsWindow : Window
             null => ElementTheme.Default
         };
 
-        void ApplyBackground() => root.Background = new SolidColorBrush(root.ActualTheme == ElementTheme.Dark
-            ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 250, 250, 250));
+        void ApplyBackground() => root.Background = RillTheme.Brush("RillSurfaceBrush", root);
         root.ActualThemeChanged += (_, _) => ApplyBackground();
         root.Loaded += (_, _) => ApplyBackground();
 
@@ -202,7 +201,7 @@ public sealed class DownloadGroupsWindow : Window
         var summary = DownloadGroupSummary.Create(children);
         var summaryLine = new TextBlock { Text = SummaryText(summary), Opacity = 0.82 };
         summaryLine.TextWrapping = TextWrapping.Wrap;
-        var progressBar = new ProgressBar { Minimum = 0, Maximum = 1, Width = 180, Height = 6, Margin = new Thickness(0, 2, 0, 2) };
+        var progressBar = RillTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 1, Width = 180, Height = 6, Margin = new Thickness(0, 2, 0, 2) });
         var summaryControls = new GroupSummaryControls(summaryLine, progressBar);
         UpdateSummary(summaryControls, summary);
         var body = new StackPanel { Spacing = 6, Margin = new Thickness(12, 4, 0, 8) };

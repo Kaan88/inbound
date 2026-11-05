@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -72,8 +72,7 @@ public sealed class StatisticsWindow : Window
             HorizontalScrollMode = ScrollMode.Disabled,
         };
 
-        void ApplyBackground() => scroller.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(scroller.ActualTheme == ElementTheme.Dark
-            ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 250, 250, 250));
+        void ApplyBackground() => scroller.Background = RillTheme.Brush("RillSurfaceBrush", scroller);
         scroller.ActualThemeChanged += (_, _) => ApplyBackground();
         scroller.Loaded += (_, _) => ApplyBackground();
         Content = scroller;
