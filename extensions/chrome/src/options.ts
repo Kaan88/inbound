@@ -115,7 +115,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ok?: boolean;
         error?: string;
       };
-      result.textContent = response?.ok ? "Opening Download Manager…" : (response?.error || "Could not open the app.");
+      result.textContent = response?.ok ? "Opening Inbound Download Manager…" : (response?.error || "Could not open the app.");
     } catch (error) {
       result.textContent = error instanceof Error ? error.message : String(error);
     }

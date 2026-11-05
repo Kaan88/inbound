@@ -247,8 +247,8 @@ internal static class Program
             log.Error($"Host failed to start: {ex}");
             if (!args.Contains("--background", StringComparer.OrdinalIgnoreCase))
             {
-                MessageBox.Show($"Download Manager host failed to start:\r\n{ex.Message}",
-                    "Download Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Inbound Download Manager host failed to start:\r\n{ex.Message}",
+                    "Inbound Download Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
             return 1;

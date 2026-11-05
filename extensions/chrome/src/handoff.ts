@@ -85,7 +85,7 @@ confirmButton.addEventListener("click", async () => {
     }
 
     if (!response.ack?.accepted) {
-      showError(response.ack?.error || "The Download Manager host rejected this request.");
+      showError(response.ack?.error || "Inbound Download Manager rejected this request.");
       confirmButton.disabled = false;
       return;
     }

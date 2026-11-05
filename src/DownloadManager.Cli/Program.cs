@@ -22,7 +22,7 @@ internal static class Program
 
         if (args[0] is "-v" or "--version" or "version")
         {
-            Console.WriteLine($"Download Manager CLI {Protocol.HostVersion} (protocol {Protocol.Version})");
+            Console.WriteLine($"Inbound Download Manager CLI {Protocol.HostVersion} (protocol {Protocol.Version})");
             return 0;
         }
 
@@ -1481,7 +1481,7 @@ internal static class Program
             await using var client = await CliClient.ConnectAsync(startHost: !noStart).ConfigureAwait(false);
             var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
             var status = await client.StatusAsync().ConfigureAwait(false);
-            Console.WriteLine("Download Manager diagnostics");
+            Console.WriteLine("Inbound Download Manager diagnostics");
             Console.WriteLine($"  host:        {status.HostVersion} (protocol {status.ProtocolVersion})");
             Console.WriteLine($"  state dir:   {status.StateDirectory}");
             Console.WriteLine($"  tray:        {(status.TrayAvailable ? "yes" : "no")}");

@@ -61,7 +61,7 @@ internal sealed class WindowsSleepPrevention : ISleepPrevention
             return;
         }
 
-        _reasonString = Marshal.StringToHGlobalUni("Download Manager is downloading files");
+        _reasonString = Marshal.StringToHGlobalUni("Inbound Download Manager is downloading files");
         var context = new ReasonContext
         {
             Version = 0,

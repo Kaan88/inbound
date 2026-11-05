@@ -2,6 +2,7 @@
 
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
+import { DownloadUiController } from "./download-ui";
 import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
 
 type StartMode = "now" | "later";
@@ -90,7 +91,12 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const NATIVE_HOST = "com.kaank.downloadmanager";
-const EXTENSION_VERSION = "0.1.3";
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+const downloadUi = new DownloadUiController(chrome.downloads as any);
+
+function syncDownloadUi(): Promise<void> {
+  return downloadUi.setIntercepting(settings.enabled && settings.autoIntercept);
+}
 
 let settings: Settings = DEFAULT_SETTINGS;
 let settingsLoaded = false;
@@ -140,13 +146,21 @@ void initialize();
 
 async function initialize(): Promise<void> {
   await ensureSettingsLoaded();
+  await syncDownloadUi();
   await installMenus();
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     void onContextMenu(info, tab);
   });
   chrome.downloads.onCreated.addListener((item) => {
-    void onDownloadCreated(item);
+    void onDownloadCreated(item).then((intercepted) => {
+      if (!intercepted && item.state === "in_progress") void downloadUi.keepInBrowser(item.id);
+    });
   });
+  chrome.downloads.onChanged.addListener((delta) => {
+    const state = delta.state?.current;
+    if (state && state !== "in_progress") void downloadUi.settled(delta.id);
+  });
+  chrome.downloads.onErased.addListener((id) => { void downloadUi.settled(id); });
   chrome.tabs.onRemoved.addListener((tabId) => {
     mediaByTab.delete(tabId);
   });
@@ -251,7 +265,7 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
   }
 
   if (!isHttpUrl(url)) {
-    notify("Download Manager", "This link type cannot be handed to the download manager.");
+    notify("Inbound Download Manager", "This link type cannot be handed to the download manager.");
     return;
   }
 
@@ -277,53 +291,54 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
   });
 }
 
-async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<void> {
+async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<boolean> {
+  await ensureSettingsLoaded();
   if (!settings.enabled || !settings.autoIntercept) {
-    return;
+    return false;
   }
 
   if (Date.now() < bypassUntil) {
-    return;
+    return false;
   }
 
   if (await hasDeleteGesture(item.url)) {
-    return;
+    return false;
   }
 
   const url = item.finalUrl || item.url;
   if (!isHttpUrl(url)) {
-    return;
+    return false;
   }
 
   const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
   const extension = extensionOf(fileName || url);
   const host = hostOf(url);
   if (!host) {
-    return;
+    return false;
   }
 
   if (settings.excludedHosts.some((h) => hostMatches(host, h))) {
-    return;
+    return false;
   }
 
   if (extension && settings.excludedExtensions.includes(extension)) {
-    return;
+    return false;
   }
 
   if (extension && settings.interceptedExtensions.length > 0 &&
       !settings.interceptedExtensions.includes(extension)) {
-    return;
+    return false;
   }
 
   if (!extension && /^text\/html/i.test(item.mime ?? "")) {
-    return;
+    return false;
   }
 
   try {
     await chrome.downloads.pause(item.id);
   } catch {
     // The download may have completed before we could pause it.
-    return;
+    return false;
   }
 
   let requestId = downloadRequestIds.get(item.id);
@@ -357,13 +372,14 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
       downloadRequestIds.delete(item.id);
       notify(
         browserEntryRemoved
-          ? ack.duplicate ? "Already in Download Manager" : "Sent to Download Manager"
-          : "Sent to Download Manager; browser cleanup incomplete",
+          ? ack.duplicate ? "Already in Inbound" : "Sent to Inbound"
+          : "Sent to Inbound; browser cleanup incomplete",
         browserEntryRemoved ? fileName : "The browser entry could not be cleared. Check the browser's Downloads menu.",
       );
+      return true;
     } else {
       await chrome.downloads.resume(item.id).catch(() => undefined);
-      notify("Download Manager did not accept the download", ack.error ?? "The host rejected the request.");
+      notify("Inbound did not accept the download", ack.error ?? "The host rejected the request.");
       lastNativeError = ack.error ?? "handoff rejected";
     }
   } catch (error) {
@@ -371,14 +387,15 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<v
       // Cleanup/notification failures cannot revoke durable native acceptance.
       // Resuming here would start a second browser transfer of the same file.
       downloadRequestIds.delete(item.id);
-      return;
+      return true;
     }
     await chrome.downloads.resume(item.id).catch(() => undefined);
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
     lastNativeError = message;
-    notify("Download Manager unavailable", `${message}. Chrome will keep downloading.`);
+    notify("Inbound unavailable", `${message}. The browser will keep downloading.`);
   }
+  return false;
 }
 
 async function requestHandoff(payload: Record<string, unknown>): Promise<any> {
@@ -388,7 +405,7 @@ async function requestHandoff(payload: Record<string, unknown>): Promise<any> {
     const message = error instanceof Error ? error.message : String(error);
     if (/native|not found|disconnected|host/i.test(message)) {
       // One reconnect is already attempted inside sendNative; surface a usable error.
-      throw new Error(`Could not reach the Download Manager host: ${message}`);
+      throw new Error(`Could not reach Inbound Download Manager: ${message}`);
     }
     throw error;
   }
@@ -1064,6 +1081,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       };
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;
+      await syncDownloadUi();
       await syncMediaDetectionWithTabs();
       return { ok: true, settings };
     }

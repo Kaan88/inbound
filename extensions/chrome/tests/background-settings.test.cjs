@@ -31,6 +31,7 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
     onMessage: runtimeOnMessage,
     onInstalled: event(),
     onStartup: event(),
+    getManifest: () => ({ version: '0.0.0-test' }),
     getURL: value => `chrome-extension://test/${value}`,
     connectNative: () => {
       const port = {
@@ -64,6 +65,8 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
     },
     downloads: {
       onCreated: downloadsCreated,
+      onChanged: event(),
+      onErased: event(),
       async pause(id) { pausedDownloads.push(id); throw new Error('mock pause'); },
     },
     tabs: {

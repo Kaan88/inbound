@@ -1,4 +1,4 @@
-; Inno Setup script for Download Manager (per-user install, no admin rights).
+﻿; Inno Setup script for Download Manager (per-user install, no admin rights).
 ; Build with scripts\build-installer.ps1, which publishes a self-contained app into
 ; artifacts\installer-app and the Chrome extension into artifacts\installer-extension.
 ;
@@ -15,7 +15,7 @@
   #define SourceRoot "..\artifacts"
 #endif
 
-#define AppName "Download Manager"
+#define AppName "Inbound Download Manager"
 #define HostExe "DownloadManager.Host.exe"
 #define UiExe "DownloadManager.Desktop.WinUI.exe"
 #define NativeHostName "com.kaank.downloadmanager"
@@ -62,6 +62,9 @@ Source: "..\scripts\register-native-host.ps1"; DestDir: "{app}"; Flags: ignoreve
 ; Upgrades replace the program folder completely, like install.ps1 does.
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\extension"
+; Shortcuts from versions named plain "Download Manager".
+Type: files; Name: "{userprograms}\Download Manager.lnk"
+Type: files; Name: "{userdesktop}\Download Manager.lnk"
 
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}\app"; IconFilename: "{app}\app\{#HostExe}"

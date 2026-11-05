@@ -77,7 +77,7 @@ public sealed class HostController : IHostController
             MessageBox.Show(
                 "The desktop frontend was not found next to the host.\r\n\r\n" +
                 "Build/publish DownloadManager.Desktop.WinUI and place it in the host directory.",
-                "Download Manager",
+                "Inbound Download Manager",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
@@ -100,7 +100,7 @@ public sealed class HostController : IHostController
         {
             _log.Error($"Could not open the desktop UI: {ex.Message}");
             MessageBox.Show($"Could not open the desktop UI:\r\n{ex.Message}",
-                "Download Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                "Inbound Download Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

@@ -36,6 +36,7 @@
   ],
   "permissions": [
     "downloads",
+    "downloads.ui",
     "contextMenus",
     "storage",
     "cookies",

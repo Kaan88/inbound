@@ -182,7 +182,7 @@ internal sealed class HostUpdateMonitor : IDisposable
             _log($"Update {check.AvailableVersion} available.");
             _notify?.Invoke(
                 "Update available",
-                $"Download Manager {check.AvailableVersion} is ready. Use the tray or Help menu to install it.");
+                $"Inbound Download Manager {check.AvailableVersion} is ready. Use the tray or Help menu to install it.");
         }
         catch (Exception ex)
         {
