@@ -28,18 +28,40 @@ test('hides browser download UI while intercepting', async () => {
   assert.deepEqual(f.calls, [false, true]);
 });
 
-test('shows UI while a browser-owned download is in progress', async () => {
+test('keeps UI for a grace period after a kept download settles', async () => {
   const f = fake();
-  const ui = new DownloadUiController(f.api);
+  const ui = new DownloadUiController(f.api, 20);
   await ui.setIntercepting(true);
   await ui.keepInBrowser(1);
-  await ui.keepInBrowser(2);
   await ui.settled(1);
   assert.equal(ui.uiEnabled, true);
-  await ui.settled(2);
+  await new Promise(r => setTimeout(r, 40));
+  await ui.release(99);
   assert.deepEqual(f.calls, [false, true, false]);
-  await ui.settled(99);
+});
+
+test('erase releases at once; resume during grace cancels release', async () => {
+  const f = fake();
+  const ui = new DownloadUiController(f.api, 20);
+  await ui.setIntercepting(true);
+  await ui.keepInBrowser(1);
+  await ui.settled(1);
+  await ui.keepInBrowser(1);
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(ui.uiEnabled, true);
+  await ui.release(1);
   assert.deepEqual(f.calls, [false, true, false]);
+});
+
+test('serializes overlapping changes to the final state', async () => {
+  const calls = [];
+  const api = { setUiOptions: (o) => new Promise(r => setTimeout(() => { calls.push(o.enabled); r(); }, 5)) };
+  const ui = new DownloadUiController(api, 1000);
+  void ui.setIntercepting(true);
+  void ui.keepInBrowser(1);
+  await ui.release(1);
+  assert.equal(ui.uiEnabled, false);
+  assert.equal(calls.at(-1), false);
 });
 
 test('tolerates browsers without setUiOptions or permission', async () => {

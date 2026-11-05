@@ -61,11 +61,12 @@ if (-not $NoShortcut) {
         $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
         New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Download Manager.lnk"))
+        Remove-Item (Join-Path $startMenu "Download Manager.lnk") -Force -ErrorAction SilentlyContinue
+        $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Inbound Download Manager.lnk"))
         $shortcut.TargetPath = Join-Path $AppDir "DownloadManager.Host.exe"
         $shortcut.Arguments = "--background"
         $shortcut.WorkingDirectory = $AppDir
-        $shortcut.Description = "Download Manager background host"
+        $shortcut.Description = "Inbound Download Manager background host"
         $shortcut.Save()
         Write-Host "Restored the Start Menu shortcut."
     }
@@ -78,7 +79,7 @@ New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
 $installFile = Join-Path $InstallRoot "INSTALL.txt"
 if (-not (Test-Path $installFile)) {
     Set-Content -Path $installFile -Encoding UTF8 -Value @"
-Download Manager repaired at $(Get-Date -Format O)
+Inbound Download Manager repaired at $(Get-Date -Format O)
 
 Application: $AppDir
 Chrome extension: $extensionTarget

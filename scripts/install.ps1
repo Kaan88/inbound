@@ -44,7 +44,7 @@ $installedProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-
     $_.Name -in @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe')
 })
 if ($installedProcesses | Where-Object Name -eq 'DownloadManager.Host.exe') {
-    throw "Exit the installed Download Manager Host before replacing its files. Downloads were not interrupted."
+    throw "Exit the installed Inbound Download Manager Host before replacing its files. Downloads were not interrupted."
 }
 foreach ($frontendProcess in $installedProcesses) {
     Stop-Process -Id $frontendProcess.ProcessId -Force -ErrorAction Stop
@@ -81,11 +81,12 @@ if (-not $NoShortcut) {
         $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
         New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Download Manager.lnk"))
+        Remove-Item (Join-Path $startMenu "Download Manager.lnk") -Force -ErrorAction SilentlyContinue
+        $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Inbound Download Manager.lnk"))
         $shortcut.TargetPath = Join-Path $appDir "DownloadManager.Host.exe"
         $shortcut.Arguments = "--background"
         $shortcut.WorkingDirectory = $appDir
-        $shortcut.Description = "Download Manager background host"
+        $shortcut.Description = "Inbound Download Manager background host"
         $shortcut.Save()
         Write-Host "Created Start Menu shortcut."
     }
@@ -109,7 +110,7 @@ if (-not $NoLaunch) {
 
 $extensionId = "pknddmneejadnnngffojnoecojhdfalc"
 $instructions = @"
-Download Manager installed at:
+Inbound Download Manager installed at:
   $appDir
 
 Chrome extension:

@@ -276,7 +276,12 @@
                                 <TextBlock Text="Video" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="other" Content="Other" Padding="38,2,8,2" />
+                        <ListBoxItem Tag="other" Padding="38,2,8,2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="#A8A8A8" />
+                                <TextBlock Text="Other" />
+                            </StackPanel>
+                        </ListBoxItem>
                         <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" />
                         <ListBoxItem Tag="unfinished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -411,7 +416,7 @@
                         </ListView.ItemTemplate>
                     </ListView>
                     <TextBlock x:Name="EmptyText"
-                               Text="No downloads in this view.&#x0a;Use Add URL or the Chrome bridge to start one."
+                               Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                 TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
                 </Grid>
@@ -419,7 +424,7 @@
             </ScrollViewer>
         </Grid>
 
-        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Up" Header="Download speed · session history" IsExpanded="True"
+        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Down" Header="Download speed · session history" IsExpanded="True"
                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <local:DownloadSpeedGraph x:Name="SpeedGraph" />
         </Expander>

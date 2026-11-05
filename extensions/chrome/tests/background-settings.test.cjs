@@ -67,6 +67,7 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
       onCreated: downloadsCreated,
       onChanged: event(),
       onErased: event(),
+      async search() { return []; },
       async pause(id) { pausedDownloads.push(id); throw new Error('mock pause'); },
     },
     tabs: {

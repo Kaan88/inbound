@@ -94,8 +94,13 @@ const NATIVE_HOST = "com.kaank.downloadmanager";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 const downloadUi = new DownloadUiController(chrome.downloads as any);
 
+let bypassTimer: ReturnType<typeof setTimeout> | undefined;
+
 function syncDownloadUi(): Promise<void> {
-  return downloadUi.setIntercepting(settings.enabled && settings.autoIntercept);
+  const remaining = bypassUntil - Date.now();
+  clearTimeout(bypassTimer);
+  if (remaining > 0) bypassTimer = setTimeout(() => { void syncDownloadUi(); }, remaining + 50);
+  return downloadUi.setIntercepting(settings.enabled && settings.autoIntercept && remaining <= 0);
 }
 
 let settings: Settings = DEFAULT_SETTINGS;
@@ -115,6 +120,8 @@ const pendingRequests = new Map<
 >();
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
+/** Downloads left to the browser in this worker lifetime (re-shown if resumed). */
+const browserKeptIds = new Set<number>();
 const mediaByTab = new Map<number, TabMedia>();
 const variantCache = new Map<string, { expires: number; variants: MediaVariant[] }>();
 let mediaSyncQueue: Promise<void> = Promise.resolve();
@@ -142,40 +149,65 @@ async function hasDeleteGesture(url: string): Promise<boolean> {
   } catch { return false; }
 }
 
+// MV3: listeners must be registered synchronously at top level, or the event
+// that wakes a suspended worker is dropped. Handlers await settings themselves.
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  void onContextMenu(info, tab);
+});
+chrome.downloads.onCreated.addListener((item) => {
+  void onDownloadCreated(item).then(async (intercepted) => {
+    if (intercepted) return;
+    // The creation snapshot is stale after the async checks; use live state.
+    const [live] = await chrome.downloads.search({ id: item.id }).catch(() => []);
+    if (!live) return;
+    browserKeptIds.add(item.id);
+    await downloadUi.keepInBrowser(item.id);
+    if (live.state !== "in_progress") await downloadUi.settled(item.id);
+  });
+});
+chrome.downloads.onChanged.addListener((delta) => {
+  const state = delta.state?.current;
+  if (!state) return;
+  if (state !== "in_progress") void downloadUi.settled(delta.id);
+  // A kept download that was interrupted and later resumed is shown again.
+  else if (browserKeptIds.has(delta.id)) void downloadUi.keepInBrowser(delta.id);
+});
+chrome.downloads.onErased.addListener((id) => {
+  browserKeptIds.delete(id);
+  void downloadUi.release(id);
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  mediaByTab.delete(tabId);
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    mediaByTab.delete(tabId);
+    void updateBadge(tabId, 0);
+  }
+});
+chrome.runtime.onInstalled.addListener(() => {
+  void installMenus();
+});
+chrome.runtime.onStartup.addListener(() => {
+  void loadSettings().then(syncMediaDetectionWithTabs);
+});
+
 void initialize();
 
 async function initialize(): Promise<void> {
   await ensureSettingsLoaded();
+  // The worker may have restarted while browser-kept downloads were running.
+  // Running (not paused) downloads are not handoffs in flight; keep them visible.
+  try {
+    const running = await chrome.downloads.search({ state: "in_progress" });
+    for (const item of running) {
+      if (item.paused || downloadRequestIds.has(item.id)) continue;
+      browserKeptIds.add(item.id);
+      await downloadUi.keepInBrowser(item.id);
+    }
+  } catch { /* best effort */ }
   await syncDownloadUi();
   await installMenus();
-  chrome.contextMenus.onClicked.addListener((info, tab) => {
-    void onContextMenu(info, tab);
-  });
-  chrome.downloads.onCreated.addListener((item) => {
-    void onDownloadCreated(item).then((intercepted) => {
-      if (!intercepted && item.state === "in_progress") void downloadUi.keepInBrowser(item.id);
-    });
-  });
-  chrome.downloads.onChanged.addListener((delta) => {
-    const state = delta.state?.current;
-    if (state && state !== "in_progress") void downloadUi.settled(delta.id);
-  });
-  chrome.downloads.onErased.addListener((id) => { void downloadUi.settled(id); });
-  chrome.tabs.onRemoved.addListener((tabId) => {
-    mediaByTab.delete(tabId);
-  });
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === "loading") {
-      mediaByTab.delete(tabId);
-      void updateBadge(tabId, 0);
-    }
-  });
-  chrome.runtime.onInstalled.addListener(() => {
-    void installMenus();
-  });
-  chrome.runtime.onStartup.addListener(() => {
-    void loadSettings().then(syncMediaDetectionWithTabs);
-  });
 }
 
 async function ensureSettingsLoaded(): Promise<void> {
@@ -293,6 +325,7 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
 
 async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<boolean> {
   await ensureSettingsLoaded();
+  void syncDownloadUi();
   if (!settings.enabled || !settings.autoIntercept) {
     return false;
   }
@@ -1089,6 +1122,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.bypass": {
       bypassUntil = Date.now() + 5 * 60 * 1000;
       await chrome.storage.local.set({ bypassUntil });
+      await syncDownloadUi();
       return { ok: true, bypassUntil };
     }
 

@@ -300,6 +300,7 @@ public sealed partial class MainWindow : Window
         ConnectionText.Text = connected
             ? "Host connected"
             : $"Host unavailable{(error is null ? string.Empty : $": {error}")}";
+        if (connected) UpdateStatusText();
         if (!connected)
         {
             EmptyText.Visibility = Visibility.Visible;
@@ -332,11 +333,12 @@ public sealed partial class MainWindow : Window
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "retryWaiting" or "verifying");
         var queued = _jobsById.Values.Count(j => j.State == "queued");
         var host = _status?.HostVersion;
-        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued" +
-                          (host is null ? string.Empty : $" · host {host}")
-                          + (_status?.BrowserIntegration is { Length: > 0 } integration
-                              ? $" | browser {integration}"
-                              : string.Empty);
+        StatusText.Text = $"{_jobsById.Count} downloads · {active} active · {queued} queued";
+        if (_graphConnected)
+        {
+            ConnectionText.Text = "Host connected" + (host is null ? string.Empty : $" · {host}")
+                + (_status?.BrowserIntegration is { Length: > 0 } integration ? $" · browser {integration}" : string.Empty);
+        }
         var selected = SelectedJobs.Count;
         if (selected > 1)
         {

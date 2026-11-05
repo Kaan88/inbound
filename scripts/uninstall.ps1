@@ -23,9 +23,12 @@ if (Test-Path $runKey) {
     Remove-ItemProperty -Path $runKey -Name "DownloadManagerHost" -ErrorAction SilentlyContinue
 }
 
-$shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Download Manager.lnk"
-if (Test-Path $shortcut) {
-    Remove-Item $shortcut -Force
+# Current name plus the shortcut created by versions named plain "Download Manager".
+foreach ($name in @("Inbound Download Manager.lnk", "Download Manager.lnk")) {
+    $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$name"
+    if (Test-Path $shortcut) {
+        Remove-Item $shortcut -Force
+    }
 }
 
 if (Test-Path $appDir) {
