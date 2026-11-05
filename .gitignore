@@ -62,3 +62,6 @@ Thumbs.db
 desktop.ini
 .DS_Store
 *.swp
+
+# local secrets, never commit
+credentials.txt
