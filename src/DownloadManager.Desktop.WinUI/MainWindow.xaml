@@ -423,7 +423,7 @@
             </ScrollViewer>
         </Grid>
 
-        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Down" Header="Download speed · session history" IsExpanded="True"
+        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Up" Header="Download speed · session history" IsExpanded="True"
                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
             <local:DownloadSpeedGraph x:Name="SpeedGraph" />
         </Expander>
