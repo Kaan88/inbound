@@ -65,11 +65,7 @@ public sealed partial class RuntimeServiceTests
             Action = "detach", GroupId = secondGroupId, JobIds = [second.Id],
         });
         Assert.True(detached.Ok, detached.Error);
-        var deleted = await ctx.Service.GroupActionAsync(new GroupActionRequest
-        {
-            Action = "delete", GroupId = secondGroupId,
-        });
-        Assert.True(deleted.Ok, deleted.Error);
+        // Detaching left one member, so the package dissolved; its jobs remain.
         Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups,
             group => group.Id == secondGroupId);
         Assert.NotNull(ctx.Service.GetJob(first.Id));
@@ -150,5 +146,55 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(1, afterRestart.CompletedCount);
         Assert.Equal(0, afterRestart.RetainedCount);
         Assert.Equal(1, afterRestart.ArchivedCount);
+    }
+}
+
+public sealed partial class RuntimeServiceTests
+{
+    [Fact]
+    public async Task SplitArchivePartsAndBatchesBecomePackagesAndSurviveRestart()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var single = await Add("movie.part1.rar");
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(single.Id));
+        var second = await Add("movie.part2.rar");
+        var unrelated = await Add("other.part1.rar");
+        var third = await Add("Movie.part3.rar");
+
+        var package = Assert.Single(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(single.Id));
+        Assert.Equal("movie", package.Name);
+        Assert.Equal(new[] { single.Id, second.Id, third.Id }, package.JobIds);
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(unrelated.Id));
+
+        var a = await Add("readme.txt", packageKey: "paste-1", packageName: "Pasted links");
+        var b = await Add("notes.pdf", packageKey: "paste-1", packageName: "ignored after first");
+        var batch = Assert.Single(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(a.Id));
+        Assert.Equal("Pasted links", batch.Name);
+        Assert.Equal(new[] { a.Id, b.Id }, batch.JobIds);
+
+        var removed = await ctx.Service.RemoveAsync(b.Id, deleteFile: false);
+        Assert.True(removed.Ok, removed.Error);
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.Id == batch.Id);
+
+        await ctx.Service.ShutdownAsync();
+        await using var restarted = await ServiceContext.CreateAsync(_server, ctx.Paths, ctx.Destination, autoResume: false);
+        var reloaded = Assert.Single(restarted.Service.GetSnapshot().Settings.DownloadGroups, g => g.Id == package.Id);
+        Assert.Equal(package.JobIds, reloaded.JobIds);
+
+        async Task<JobDto> Add(string fileName, string? packageKey = null, string? packageName = null)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{fileName}?size=2048&seed=7",
+                DestinationDirectory = ctx.Destination,
+                FileName = fileName,
+                Source = "cli",
+                StartMode = "later",
+                PackageKey = packageKey,
+                PackageName = packageName,
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!;
+        }
     }
 }

@@ -14,6 +14,7 @@ internal sealed class UiState
     public bool ShowSpeedGraph { get; set; } = true;
     public bool SpeedGraphExpanded { get; set; } = true;
     public bool? DarkMode { get; set; }
+    public List<Guid> ExpandedPackages { get; set; } = new();
 }
 
 internal static class UiStateStore

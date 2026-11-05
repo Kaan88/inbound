@@ -283,6 +283,9 @@ public sealed class AddJobRequest
     public bool? AutoResumeAfterRestart { get; set; }
     public bool? RememberDestination { get; set; }
     public int QueueId { get; set; }
+    /// <summary>Jobs added with the same key are shown as one package (for example one pasted batch).</summary>
+    public string? PackageKey { get; set; }
+    public string? PackageName { get; set; }
 }
 
 public sealed class AddJobResponse
@@ -418,6 +421,8 @@ public sealed class HandoffRequest
     public bool IsAutoIntercept { get; set; }
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? DestinationDirectory { get; set; }
+    public string? PackageKey { get; set; }
+    public string? PackageName { get; set; }
 }
 
 public sealed class HandoffAck
@@ -434,6 +439,7 @@ public sealed class DownloadGroupDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Key { get; set; }
     public List<Guid> JobIds { get; set; } = new();
 }
 

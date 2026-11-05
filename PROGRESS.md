@@ -1905,3 +1905,14 @@ Reviewed every window and dialog in both themes (isolated `uiqa` profile, captur
 - Updater restart (owner-approved, real install): version bumped to 0.1.6; package and installer built from ba2742a; manifest signed with a loopback URL into `artifacts/updtest` (not the release folder, nothing published) and served on 127.0.0.1. Installed 0.1.5: `update check` saw 0.1.6, `download` verified SHA-256, `install` succeeded in ~2 s; Host and WinUI restarted with new PIDs from the install dir, both report 0.1.6+ba2742a, 17 jobs intact. Manifest URL restored to GitHub afterwards.
 - Installer: owner ran the relabelled 0.1.6 setup without admin on a clean per-user install (after uninstall) - succeeded. Upgrade-over-existing still to be seen on the next release.
 - Installer "Access denied unless admin" root cause (owner-reported since the start): the repo root carries an explicit Low mandatory label, inherited by built setups, so Windows starts them at Low integrity (verified via token: setup 0x1000 vs Explorer 0x2000) and Inno cannot create `%TEMP%\is-*.tmp`. `build-installer.ps1` now sets an explicit Medium label; relabelled setup starts at 0x2000. Release downloads from GitHub never had the label.
+
+## 2026-11-05 — Packages in the main list, Add Links dialog
+
+- Replaced the Download Groups window with JDownloader-style **packages** in the download list: split
+  archives (`.partN.rar`, `.rNN`, `.7z.NNN`, `.zip.NNN`/`.zNN`, `.NNN`) group automatically per folder;
+  each Add Links / Download All batch becomes one package; manual Group into / Remove from / Rename Package.
+  Packages under two files dissolve. Host pushes `groups.changed`. Evidence: `MultipartArchiveNameTests`,
+  `SplitArchivePartsAndBatchesBecomePackagesAndSurviveRestart` (Core 107, Engine 57, Integration 96 pass).
+- "Add Batch Download" pattern dialog replaced by **Add Links…** (paste any text → review checklist →
+  optional "Keep as one package"). CLI `batch` keeps the pattern expander.
+- Status: **unverified in the live UI** (row tree, expand/collapse, both themes) — needs a QA pass.

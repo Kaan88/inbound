@@ -417,6 +417,8 @@ public sealed class DownloadGroup
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
+    /// <summary>Automatic package identity (multipart archive or browser batch); null for manual packages.</summary>
+    public string? Key { get; set; }
     public List<Guid> JobIds { get; set; } = new();
 }
 

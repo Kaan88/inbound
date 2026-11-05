@@ -6,10 +6,74 @@ namespace DownloadManager.Runtime;
 public sealed partial class DownloadManagerService
 {
     private static List<DownloadGroup> CloneGroups(IEnumerable<DownloadGroup> groups) => groups.Select(group =>
-        new DownloadGroup { Id = group.Id, Name = group.Name, JobIds = new(group.JobIds) }).ToList();
+        new DownloadGroup { Id = group.Id, Name = group.Name, Key = group.Key, JobIds = new(group.JobIds) }).ToList();
 
     private static List<DownloadGroupDto> MapGroups(IEnumerable<DownloadGroup> groups) => groups.Select(group =>
-        new DownloadGroupDto { Id = group.Id, Name = group.Name, JobIds = new(group.JobIds) }).ToList();
+        new DownloadGroupDto { Id = group.Id, Name = group.Name, Key = group.Key, JobIds = new(group.JobIds) }).ToList();
+
+    /// <summary>
+    /// Puts a newly admitted job into a package: the batch named by the request, or the package of
+    /// a split archive whose other parts are in the same folder. Runs under the settings gate; a
+    /// failed save leaves the job ungrouped rather than failing the add.
+    /// </summary>
+    private async Task AssignPackageAfterAddAsync(Guid jobId, AddJobRequest request, CancellationToken cancellationToken)
+    {
+        List<DownloadGroup> next;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(jobId, out var record)) return;
+            var job = record.Job;
+            next = CloneGroups(_settings.DownloadGroups);
+            if (next.Any(group => group.JobIds.Contains(jobId))) return;
+
+            var batchKey = string.IsNullOrWhiteSpace(request.PackageKey) ? null : "batch:" + request.PackageKey.Trim();
+            if (batchKey is not null)
+            {
+                var batch = next.FirstOrDefault(group => group.Key == batchKey);
+                if (batch is null)
+                {
+                    var name = request.PackageName?.Trim();
+                    if (string.IsNullOrWhiteSpace(name) || name.Length > 100 || name.Any(char.IsControl))
+                        name = MultipartArchiveName.TryGetBaseName(job.FileName, out var archive) ? archive : "Downloads";
+                    // A batch package is created with its first job; it shows as a package from the second.
+                    next.Add(new DownloadGroup { Name = name, Key = batchKey, JobIds = [jobId] });
+                }
+                else batch.JobIds.Add(jobId);
+            }
+            else
+            {
+                var key = MultipartArchiveName.KeyFor(job.FileName, job.DestinationDirectory)
+                          ?? MultipartArchiveName.FirstPartKeyFor(job.FileName, job.DestinationDirectory);
+                if (key is null) return;
+                var existing = next.FirstOrDefault(group => group.Key == key);
+                if (existing is not null) existing.JobIds.Add(jobId);
+                else
+                {
+                    var grouped = next.SelectMany(group => group.JobIds).ToHashSet();
+                    var siblings = _jobs.Values.Select(candidate => candidate.Job)
+                        .Where(candidate => candidate.Id != jobId && !grouped.Contains(candidate.Id) &&
+                            (MultipartArchiveName.KeyFor(candidate.FileName, candidate.DestinationDirectory) ??
+                             MultipartArchiveName.FirstPartKeyFor(candidate.FileName, candidate.DestinationDirectory)) == key)
+                        .OrderBy(candidate => candidate.CreatedAt).Select(candidate => candidate.Id).ToList();
+                    // An unnumbered name.rar/name.zip only forms a package together with a numbered part.
+                    var hasNumbered = MultipartArchiveName.KeyFor(job.FileName, job.DestinationDirectory) is not null ||
+                        siblings.Any(id => MultipartArchiveName.KeyFor(_jobs[id].Job.FileName, _jobs[id].Job.DestinationDirectory) is not null);
+                    if (siblings.Count == 0 || !hasNumbered) return;
+                    MultipartArchiveName.TryGetBaseName(job.FileName, out var baseName);
+                    if (string.IsNullOrEmpty(baseName)) baseName = Path.GetFileNameWithoutExtension(job.FileName);
+                    next.Add(new DownloadGroup { Name = baseName, Key = key, JobIds = [.. siblings, jobId] });
+                }
+            }
+            if (next.Count > 1000) return;
+        }
+
+        AppSettings staged;
+        lock (_sync) staged = _settings.WithDownloadGroups(next);
+        try { await _settingsStore.SaveAsync(staged, cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+        lock (_sync) _settings.DownloadGroups = next;
+        SettingsChanged?.Invoke(this, _settings);
+    }
 
     public async Task<GroupActionResult> GroupActionAsync(GroupActionRequest request, CancellationToken cancellationToken = default)
     {
@@ -90,6 +154,7 @@ public sealed partial class DownloadManagerService
                     var detached = request.JobIds!.ToHashSet();
                     if (detached.Any(id => !group!.JobIds.Contains(id))) return Failure("Group membership changed. Refresh and try again.");
                     group!.JobIds.RemoveAll(detached.Contains);
+                    if (group.JobIds.Count < 2) next.Remove(group); // a package of one is just a download
                     break;
                 case "delete":
                     next.Remove(group!); // Ungroup only: independent jobs and files are retained.

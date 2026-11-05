@@ -4,6 +4,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Threading.Channels;
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 using DownloadManager.Runtime;
 using DownloadManager.Tray;
 
@@ -38,6 +39,7 @@ public sealed class HostPipeServer
     {
         _service.JobChanged += OnJobChanged;
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
+        _service.SettingsChanged += OnSettingsChanged;
         _acceptLoop = AcceptLoopAsync(_cts.Token);
         _log.Info($"IPC server listening on pipe '{PipeNames.HostPipe()}'.");
     }
@@ -46,6 +48,7 @@ public sealed class HostPipeServer
     {
         _service.JobChanged -= OnJobChanged;
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
+        _service.SettingsChanged -= OnSettingsChanged;
         _cts.Cancel();
         foreach (var client in _clients.Values)
         {
@@ -476,6 +479,8 @@ public sealed class HostPipeServer
             UserAgent = handoff.UserAgent,
             PageUrl = handoff.PageUrl,
             Description = handoff.MimeType,
+            PackageKey = handoff.PackageKey,
+            PackageName = handoff.PackageName,
         };
 
         var result = await _service.AddJobAsync(request, cancellationToken).ConfigureAwait(false);
@@ -516,6 +521,26 @@ public sealed class HostPipeServer
             try { await client.SendDirectAsync(message, cts.Token).ConfigureAwait(false); }
             catch (Exception) { /* client already gone */ }
         })).ConfigureAwait(false);
+    }
+
+    private List<DownloadGroupDto>? _lastGroups;
+
+    private void OnSettingsChanged(object? sender, AppSettings settings)
+    {
+        // Packages are shown in the download list, so clients need membership changes live
+        // (a browser batch or a split archive can form one without any UI involvement).
+        var groups = _service.GetSnapshot().Settings.DownloadGroups;
+        var signature = System.Text.Json.JsonSerializer.Serialize(groups);
+        lock (_clients)
+        {
+            if (_lastGroups is not null && System.Text.Json.JsonSerializer.Serialize(_lastGroups) == signature) return;
+            _lastGroups = groups;
+        }
+        var message = IpcMessage.Create(MessageTypes.GroupsChanged, groups);
+        foreach (var client in _clients.Values)
+        {
+            client.Writer.TryWrite(message);
+        }
     }
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)

@@ -15,6 +15,7 @@ public sealed class HostConnection : IAsyncDisposable
     public event Action<SnapshotDto>? SnapshotReceived;
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     public event Action<JobDto, string>? JobChanged;
+    public event Action<List<DownloadGroupDto>>? GroupsChanged;
     public event Action<bool, string?>? ConnectionChanged;
     /// <summary>The Host announced a user-requested application exit.</summary>
     public event Action? HostExiting;
@@ -275,6 +276,13 @@ public sealed class HostConnection : IAsyncDisposable
         {
             _pending.TryRemove(message.ReplyTo, out _);
             completion.TrySetResult(message);
+            return;
+        }
+
+        if (message.Type == MessageTypes.GroupsChanged)
+        {
+            try { GroupsChanged?.Invoke(message.GetPayload<List<DownloadGroupDto>>() ?? new()); }
+            catch { /* ignore malformed events */ }
             return;
         }
 

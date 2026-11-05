@@ -249,7 +249,13 @@ public sealed partial class DownloadManagerService
     public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await AddJobCoreAsync(request, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var result = await AddJobCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            if (result.Accepted && !result.Duplicate && result.Job is { } job)
+                await AssignPackageAfterAddAsync(job.Id, request, cancellationToken).ConfigureAwait(false);
+            return result;
+        }
         finally { _settingsUpdateGate.Release(); }
     }
 
@@ -645,6 +651,7 @@ public sealed partial class DownloadManagerService
                 {
                     var groups = CloneGroups(_settings.DownloadGroups);
                     foreach (var group in groups) group.JobIds.Remove(id);
+                    groups.RemoveAll(group => group.JobIds.Count < 2); // a package of one is just a download
                     staged = _settings.WithDownloadGroups(groups);
                 }
             }

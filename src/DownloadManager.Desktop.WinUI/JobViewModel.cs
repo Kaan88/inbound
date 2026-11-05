@@ -84,6 +84,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
 
     public void Update(JobDto job)
     {
+        Dto = job;
+        IsPackage = false;
         Id = job.Id;
         FileName = job.FileName;
         Url = job.Url;
@@ -141,6 +143,80 @@ public sealed class JobViewModel : INotifyPropertyChanged
             "completed" => DoneStatus,
             "failed" => FailedStatus,
             "paused" or "queued" or "retryWaiting" or "waiting" => WaitingStatus,
+            _ => NeutralStatus,
+        };
+    }
+
+    // ---- Packages (JDownloader-style grouping of several files in the list) ----
+
+    private Guid? _packageId;
+    private bool _isPackage;
+    private bool _isExpanded;
+
+    /// <summary>The last DTO applied to this row; null for package rows.</summary>
+    public JobDto? Dto { get; private set; }
+
+    /// <summary>True for the expandable package header row.</summary>
+    public bool IsPackage { get => _isPackage; private set { if (Set(ref _isPackage, value)) NotifyPackageLayout(); } }
+
+    /// <summary>For a file row: the package it is listed under while that package is shown.</summary>
+    public Guid? PackageId { get => _packageId; set { if (Set(ref _packageId, value)) NotifyPackageLayout(); } }
+
+    public bool IsExpanded { get => _isExpanded; private set { if (Set(ref _isExpanded, value)) NotifyPackageLayout(); } }
+
+    /// <summary>The file rows of a package row, in display order.</summary>
+    public IReadOnlyList<JobViewModel> Children { get; private set; } = [];
+
+    public Thickness RowPadding => !IsPackage && PackageId is not null ? new Thickness(28, 0, 4, 0) : new Thickness(4, 0, 4, 0);
+    public string ChevronGlyph => IsExpanded ? "" : "";
+    public Visibility ChevronVisibility => IsPackage ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FileIconAreaVisibility => IsPackage ? Visibility.Collapsed : Visibility.Visible;
+    public Windows.UI.Text.FontWeight NameWeight => IsPackage ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+    private void NotifyPackageLayout()
+    {
+        foreach (var name in new[] { nameof(RowPadding), nameof(ChevronGlyph), nameof(ChevronVisibility), nameof(FileIconAreaVisibility), nameof(NameWeight) })
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
+    /// <summary>Shows this row as a package header summarising <paramref name="children"/>.</summary>
+    public void UpdatePackage(DownloadGroupDto group, IReadOnlyList<JobViewModel> children, bool expanded)
+    {
+        Id = group.Id;
+        IsPackage = true;
+        IsExpanded = expanded;
+        Children = children;
+        var summary = DownloadGroupSummary.Create(children.Where(child => child.Dto is not null).Select(child => child.Dto!));
+        FileName = group.Name;
+        Url = string.Empty;
+        State = summary.State == "active" ? "downloading" : summary.State;
+        StateText = $"{ToDisplayState(State)} · {summary.CompletedCount}/{summary.MemberCount}";
+        TotalSize = summary.TotalBytes ?? summary.ReceivedBytes;
+        BytesPerSecond = summary.BytesPerSecond;
+        SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
+        SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
+        EtaText = FormatDuration(summary.EstimatedRemaining);
+        ProgressPercent = summary.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
+        ProgressVisibility = summary.State is "active" or "paused" && ProgressPercent > 0 ? Visibility.Visible : Visibility.Collapsed;
+        CanPause = children.Any(child => child.CanPause);
+        CanResume = children.Any(child => child.CanResume);
+        IsTerminal = children.All(child => child.IsTerminal);
+        DetailText = $"{summary.MemberCount} files";
+        Description = $"{summary.MemberCount} files";
+        RawDescription = string.Empty;
+        QueueText = string.Empty;
+        LastUpdated = children.Count == 0 ? DateTimeOffset.MinValue : children.Max(child => child.LastUpdated);
+        CreatedAt = children.Count == 0 ? DateTimeOffset.MinValue : children.Min(child => child.CreatedAt);
+        LastTryText = children.Count == 0 ? string.Empty
+            : LastUpdated.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        CategoryId = children.FirstOrDefault()?.CategoryId ?? "other";
+        Destination = children.FirstOrDefault()?.Destination ?? string.Empty;
+        StatusBrush = State switch
+        {
+            "downloading" => ActiveStatus,
+            "completed" => DoneStatus,
+            "failed" => FailedStatus,
+            "paused" or "queued" => WaitingStatus,
             _ => NeutralStatus,
         };
     }
@@ -234,14 +310,15 @@ public sealed class JobViewModel : INotifyPropertyChanged
             : $"{Math.Max(1, duration.Value.Minutes)}m {duration.Value.Seconds}s";
     }
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
         {
-            return;
+            return false;
         }
 
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 }

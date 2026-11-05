@@ -46,8 +46,7 @@
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Add Batch Download…" Click="MenuAddBatch_Click" />
-                <MenuFlyoutItem Text="Download Groups…" Click="MenuGroups_Click" />
+                <MenuFlyoutItem Text="Add Links…" Click="MenuAddBatch_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Export Download List…" Click="MenuExport_Click" />
                 <MenuFlyoutItem Text="Import Download List…" Click="MenuImport_Click" />
@@ -373,7 +372,7 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent">
+                                <Grid Height="27" Padding="{Binding RowPadding}" ColumnSpacing="0" Background="Transparent">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
@@ -385,12 +384,18 @@
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
-                                    <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconInfoBrush}"
-                                              Visibility="{Binding FileGlyphVisibility}"
-                                              VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                    <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
-                                           Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12"
+                                    <Grid Visibility="{Binding FileIconAreaVisibility}">
+                                        <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconInfoBrush}"
+                                                  Visibility="{Binding FileGlyphVisibility}"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                        <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
+                                               Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                    </Grid>
+                                    <FontIcon Glyph="{Binding ChevronGlyph}" FontSize="11" Visibility="{Binding ChevronVisibility}"
+                                              Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                                              VerticalAlignment="Center" HorizontalAlignment="Center"
+                                              AutomationProperties.Name="Expand or collapse package" />
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"

@@ -45,6 +45,8 @@ public static class MessageTypes
     public const string QueueAction = "queue.action";
     public const string GroupAction = "group.action";
     public const string GroupActionResult = "group.actionResult";
+    /// <summary>Host push: the current package (download group) definitions after any change.</summary>
+    public const string GroupsChanged = "groups.changed";
     public const string HostStatus = "host.status";
     public const string HostShutdown = "host.shutdown";
     /// <summary>Host event: the user asked the whole app to exit (tray, menu, CLI, queue "exit when done"). Not sent for update restarts.</summary>

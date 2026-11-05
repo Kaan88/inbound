@@ -938,6 +938,17 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         ? message.destination.trim()
         : settings.defaultDestination || undefined;
       const results: Array<Record<string, unknown>> = [];
+      // One Download All batch becomes one package in the list.
+      const packageKey = urls.length >= 2 ? crypto.randomUUID() : undefined;
+      let packageName: string | undefined;
+      if (packageKey) {
+        try {
+          const tab = typeof message.tabId === "number" ? await chrome.tabs.get(message.tabId) : undefined;
+          packageName = (tab?.title || (pageUrl ? new URL(pageUrl).host : "") || "Links").slice(0, 100);
+        } catch {
+          packageName = pageUrl ? new URL(pageUrl).host : "Links";
+        }
+      }
       for (const item of urls) {
         try {
           const ack = await requestHandoff({
@@ -954,6 +965,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             isAutoIntercept: false,
             headers: await cookieHeaders(item.url),
             destinationDirectory: destination,
+            packageKey,
+            packageName,
           });
           results.push({
             url: item.url,

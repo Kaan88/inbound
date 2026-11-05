@@ -16,7 +16,8 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
     private MenuFlyoutSubItem? _addToQueueMenu;
-    private DownloadGroupsWindow? _groupsWindow;
+    private List<DownloadGroupDto> _groups = new();
+    private readonly Dictionary<Guid, JobViewModel> _packageRows = new();
     private StatisticsWindow? _statisticsWindow;
     private SchedulerWindow? _schedulerWindow;
     private SettingsDto? _settings;
@@ -91,6 +92,7 @@ public sealed partial class MainWindow : Window
         _connection = new HostConnection();
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() => ApplySnapshot(snapshot));
         _connection.JobChanged += (job, type) => DispatcherQueue.TryEnqueue(() => ApplyJobEvent(job, type));
+        _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() => { _groups = groups; RebuildVisible(); });
         _connection.ConnectionChanged += (connected, error) =>
             DispatcherQueue.TryEnqueue(() => ApplyConnection(connected, error));
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
@@ -229,6 +231,7 @@ public sealed partial class MainWindow : Window
     {
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
+        _groups = snapshot.Settings.DownloadGroups;
         RefreshCustomCategories();
         _status = snapshot.Status;
         RefreshQueueMenus();
@@ -259,7 +262,24 @@ public sealed partial class MainWindow : Window
             if (_jobsById.Remove(job.Id, out var removed))
             {
                 _visibleJobs.Remove(removed);
+                if (removed.PackageId is not null) RebuildVisible();
             }
+        }
+        else if (PackageOf(job.Id) is { } package)
+        {
+            if (!_jobsById.TryGetValue(job.Id, out var member))
+            {
+                member = new JobViewModel();
+                _jobsById[job.Id] = member;
+            }
+
+            member.Update(job);
+            var row = _packageRows.GetValueOrDefault(package.Id);
+            var shouldShow = row is not null && row.IsExpanded && Matches(member);
+            if (row is null || member.PackageId != package.Id || shouldShow != _visibleJobs.Contains(member))
+                RebuildVisible();
+            else
+                row.UpdatePackage(package, PackageMembers(package), row.IsExpanded);
         }
         else
         {
@@ -270,6 +290,15 @@ public sealed partial class MainWindow : Window
             }
 
             vm.Update(job);
+            if (vm.PackageId is not null)
+            {
+                // It just left its package.
+                vm.PackageId = null;
+                RebuildVisible();
+                UpdateStatusText();
+                UpdateButtons();
+                return;
+            }
             var isVisible = _visibleJobs.Contains(vm);
             if (Matches(vm))
             {
@@ -309,10 +338,23 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
     }
 
-    private JobViewModel? SelectedJob => JobsList.SelectedItem as JobViewModel;
+    private JobViewModel? SelectedJob => JobsList.SelectedItem as JobViewModel is { IsPackage: false } job ? job : null;
 
+    /// <summary>Selected files; a selected package row contributes all of its files.</summary>
     private List<JobViewModel> SelectedJobs =>
-        JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+        JobsList.SelectedItems.OfType<JobViewModel>()
+            .SelectMany(row => row.IsPackage ? row.Children : [row])
+            .Distinct().ToList();
+
+    private JobViewModel? SelectedPackage => JobsList.SelectedItem as JobViewModel is { IsPackage: true } row ? row : null;
+
+    /// <summary>The package a job is shown in; only packages with at least two listed files count.</summary>
+    private DownloadGroupDto? PackageOf(Guid jobId) =>
+        _groups.FirstOrDefault(group => group.JobIds.Contains(jobId) && group.JobIds.Count(_jobsById.ContainsKey) >= 2);
+
+    private List<JobViewModel> PackageMembers(DownloadGroupDto group) => group.JobIds
+        .Where(_jobsById.ContainsKey).Select(id => _jobsById[id])
+        .OrderBy(job => job.FileName, NaturalStringComparer.Instance).ToList();
 
     private void UpdateButtons()
     {
@@ -381,32 +423,63 @@ public sealed partial class MainWindow : Window
 
     private void RebuildVisible(Guid? selectedId = null)
     {
-        selectedId ??= SelectedJob?.Id;
+        selectedId ??= (JobsList.SelectedItem as JobViewModel)?.Id;
         _visibleJobs.Clear();
 
-        var filtered = _jobsById.Values.Where(Matches);
-        var ordered = _sortKey switch
+        var packaged = new HashSet<Guid>();
+        var top = new List<JobViewModel>();
+        var liveRows = new HashSet<Guid>();
+        foreach (var group in _groups)
         {
-            "name" => _sortAscending ? filtered.OrderBy(j => j.FileName) : filtered.OrderByDescending(j => j.FileName),
-            "size" => _sortAscending ? filtered.OrderBy(j => j.TotalSize) : filtered.OrderByDescending(j => j.TotalSize),
-            "status" => _sortAscending ? filtered.OrderBy(j => j.State) : filtered.OrderByDescending(j => j.State),
-            "rate" => _sortAscending ? filtered.OrderBy(j => j.BytesPerSecond) : filtered.OrderByDescending(j => j.BytesPerSecond),
-            "lastTry" => _sortAscending ? filtered.OrderBy(j => j.LastUpdated) : filtered.OrderByDescending(j => j.LastUpdated),
-            _ => _sortAscending ? filtered.OrderBy(j => j.CreatedAt) : filtered.OrderByDescending(j => j.CreatedAt),
-        };
-
-        foreach (var job in ordered)
+            var members = PackageMembers(group);
+            if (members.Count < 2) continue;
+            foreach (var member in members) { packaged.Add(member.Id); member.PackageId = group.Id; }
+            if (!members.Any(Matches)) continue;
+            if (!_packageRows.TryGetValue(group.Id, out var row)) _packageRows[group.Id] = row = new JobViewModel();
+            row.UpdatePackage(group, members, _uiState.ExpandedPackages.Contains(group.Id));
+            liveRows.Add(group.Id);
+            top.Add(row);
+        }
+        foreach (var stale in _packageRows.Keys.Where(id => !liveRows.Contains(id)).ToList()) _packageRows.Remove(stale);
+        foreach (var job in _jobsById.Values)
         {
-            _visibleJobs.Add(job);
+            if (packaged.Contains(job.Id)) continue;
+            job.PackageId = null;
+            if (Matches(job)) top.Add(job);
         }
 
-        if (selectedId is not null && _jobsById.TryGetValue(selectedId.Value, out var selected))
+        var ordered = _sortKey switch
+        {
+            "name" => _sortAscending ? top.OrderBy(j => j.FileName, NaturalStringComparer.Instance) : top.OrderByDescending(j => j.FileName, NaturalStringComparer.Instance),
+            "size" => _sortAscending ? top.OrderBy(j => j.TotalSize) : top.OrderByDescending(j => j.TotalSize),
+            "status" => _sortAscending ? top.OrderBy(j => j.State) : top.OrderByDescending(j => j.State),
+            "rate" => _sortAscending ? top.OrderBy(j => j.BytesPerSecond) : top.OrderByDescending(j => j.BytesPerSecond),
+            "lastTry" => _sortAscending ? top.OrderBy(j => j.LastUpdated) : top.OrderByDescending(j => j.LastUpdated),
+            _ => _sortAscending ? top.OrderBy(j => j.CreatedAt) : top.OrderByDescending(j => j.CreatedAt),
+        };
+
+        foreach (var row in ordered)
+        {
+            _visibleJobs.Add(row);
+            if (row.IsPackage && row.IsExpanded)
+                foreach (var child in row.Children.Where(Matches)) _visibleJobs.Add(child);
+        }
+
+        if (selectedId is { } id && _visibleJobs.FirstOrDefault(row => row.Id == id) is { } selected)
         {
             JobsList.SelectedItem = selected;
         }
 
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
+    }
+
+    private void TogglePackage(JobViewModel row)
+    {
+        if (!row.IsPackage) return;
+        if (!_uiState.ExpandedPackages.Remove(row.Id)) _uiState.ExpandedPackages.Add(row.Id);
+        UiStateStore.Save(_uiState);
+        RebuildVisible(row.Id);
     }
 
     private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -471,6 +544,11 @@ public sealed partial class MainWindow : Window
 
     private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        if (SelectedPackage is { } package)
+        {
+            TogglePackage(package);
+            return;
+        }
         if (SelectedJob is { } job)
         {
             await OpenJobAsync(job);
@@ -519,7 +597,9 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Progress Details…", MenuProgressDetails_Click));
-        flyout.Items.Add(CreateContextItem("Group Selected Downloads…", MenuGroupSelected_Click));
+        flyout.Items.Add(CreateContextItem("Group into Package…", MenuGroupSelected_Click));
+        flyout.Items.Add(CreateContextItem("Remove from Package", MenuUngroup_Click));
+        flyout.Items.Add(CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
         JobsList.ContextFlyout = flyout;
@@ -832,45 +912,65 @@ public sealed partial class MainWindow : Window
         _statisticsWindow.ShowWindow();
     }
 
-    private void MenuGroups_Click(object sender, RoutedEventArgs e)
+    private async Task<string?> AskPackageNameAsync(string title, string initial)
     {
-        if (_groupsWindow is null)
+        var name = new TextBox { Header = "Package name", MaxLength = 100, Text = initial };
+        name.Loaded += (_, _) => { name.Focus(FocusState.Programmatic); name.SelectAll(); };
+        var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
+            Title = title, Content = name, PrimaryButtonText = "OK", CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(name.Text)
+            ? name.Text.Trim() : null;
+    }
+
+    private async Task RunGroupActionAsync(string title, GroupActionRequest request)
+    {
+        try
         {
-            _groupsWindow = new DownloadGroupsWindow();
-            _groupsWindow.Closed += (_, _) => _groupsWindow = null;
+            var result = (await _connection.GroupActionAsync(request)).GetPayload<GroupActionResult>();
+            if (!result.Ok) await ShowMessageAsync(title, result.Error ?? "The package could not be changed.");
+            else { _groups = result.Groups; RebuildVisible(); }
         }
-        _groupsWindow.ShowWindow();
+        catch (Exception ex) { await ShowMessageAsync(title, ex.Message); }
     }
 
     private async void MenuGroupSelected_Click(object sender, RoutedEventArgs e)
     {
         var selection = SelectedJobs;
-        if (selection.Count == 0) return;
-        try
+        if (selection.Count < 2)
         {
-            var snapshot = await _connection.RefreshAsync();
-            var destination = new ComboBox { Header = "Group", HorizontalAlignment = HorizontalAlignment.Stretch };
-            destination.Items.Add(new ComboBoxItem { Content = "Create new group", Tag = Guid.Empty });
-            foreach (var group in snapshot.Settings.DownloadGroups)
-                destination.Items.Add(new ComboBoxItem { Content = group.Name, Tag = group.Id });
-            destination.SelectedIndex = 0;
-            var name = new TextBox { Header = "New group name", MaxLength = 100, Text = "Downloads" };
-            destination.SelectionChanged += (_, _) => name.IsEnabled = destination.SelectedIndex == 0;
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(new TextBlock { Text = $"Group {selection.Count} independent download(s). Files and queue assignments stay unchanged. Downloads already grouped will move to this group.", TextWrapping = TextWrapping.Wrap });
-            panel.Children.Add(destination);
-            panel.Children.Add(name);
-            var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
-                Title = "Group downloads", Content = panel, PrimaryButtonText = "Group", CloseButtonText = "Cancel" };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || destination.SelectedItem is not ComboBoxItem { Tag: Guid groupId }) return;
-            var reply = await _connection.GroupActionAsync(new GroupActionRequest { GroupId = groupId,
-                Action = groupId == Guid.Empty ? "create" : "add", Name = name.Text,
-                JobIds = selection.Select(job => job.Id).ToList() });
-            var result = reply.GetPayload<GroupActionResult>();
-            if (!result.Ok) await ShowMessageAsync("Group downloads", result.Error ?? "The group could not be saved.");
-            else MenuGroups_Click(sender, e);
+            await ShowMessageAsync("Group into package", "Select at least two downloads to put in a package.");
+            return;
         }
-        catch (Exception ex) { await ShowMessageAsync("Group downloads", ex.Message); }
+        var suggested = System.Text.RegularExpressions.Regex.Replace(selection[0].FileName,
+            @"(\.part\d+\.rar|\.r\d{2,3}|\.z\d{2}|\.\d{3})$|\.[^.]+$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (await AskPackageNameAsync("Group into package", suggested) is not { } name) return;
+        await RunGroupActionAsync("Group into package", new GroupActionRequest
+            { Action = "create", Name = name, JobIds = selection.Select(job => job.Id).ToList() });
+    }
+
+    private async void MenuUngroup_Click(object sender, RoutedEventArgs e)
+    {
+        var byPackage = SelectedJobs.Where(job => job.PackageId is not null).GroupBy(job => job.PackageId!.Value).ToList();
+        if (byPackage.Count == 0) return;
+        foreach (var package in byPackage)
+        {
+            var group = _groups.FirstOrDefault(candidate => candidate.Id == package.Key);
+            if (group is null) continue;
+            // Removing every file of a package dissolves it; the downloads stay.
+            var request = package.Count() >= group.JobIds.Count
+                ? new GroupActionRequest { Action = "delete", GroupId = package.Key }
+                : new GroupActionRequest { Action = "detach", GroupId = package.Key, JobIds = package.Select(job => job.Id).ToList() };
+            await RunGroupActionAsync("Remove from package", request);
+        }
+    }
+
+    private async void MenuRenamePackage_Click(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedPackage ?? (SelectedJob?.PackageId is { } id ? _packageRows.GetValueOrDefault(id) : null);
+        if (row is null) return;
+        if (await AskPackageNameAsync("Rename package", row.FileName) is not { } name) return;
+        await RunGroupActionAsync("Rename package", new GroupActionRequest { Action = "rename", GroupId = row.Id, Name = name });
     }
 
     private async void MenuChangeCategory_Click(object sender, RoutedEventArgs e)
@@ -1989,19 +2089,29 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var patternBox = new TextBox
+        var pasteBox = new TextBox
         {
-            Header = "URL pattern",
-            PlaceholderText = "https://example.com/file[001-010].zip",
+            Header = "Paste links or any text containing links",
+            PlaceholderText = "https://example.com/file.part1.rar\nhttps://example.com/file.part2.rar",
+            AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
+            Height = 160,
         };
-        var hint = new TextBlock
+        ScrollViewer.SetVerticalScrollBarVisibility(pasteBox, ScrollBarVisibility.Auto);
+        try
         {
-            Text = "Ranges: [1-10], [001-010], [a-z], or lists [1,3,5]. Multiple ranges expand together.",
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
-            FontSize = 12,
-        };
+            var clip = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+            {
+                var text = await clip.GetTextAsync();
+                if (ExtractLinks(text).Count > 0) pasteBox.Text = text;
+            }
+        }
+        catch (Exception)
+        {
+            // The clipboard can be locked by another app; the box just starts empty.
+        }
+        var keepPackage = new CheckBox { Content = "Keep as one package", IsChecked = true };
         var destinationBox = new TextBox
         {
             Header = "Destination folder",
@@ -2035,20 +2145,20 @@ public sealed partial class MainWindow : Window
         };
 
         var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(patternBox);
-        panel.Children.Add(hint);
+        panel.Children.Add(pasteBox);
         panel.Children.Add(destinationBox);
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
         panel.Children.Add(conflictBox);
         panel.Children.Add(skipDuplicates);
+        panel.Children.Add(keepPackage);
 
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
-            Title = "Add batch download",
-            Content = panel,
-            PrimaryButtonText = "Add batch",
+            Title = "Add links",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 560 },
+            PrimaryButtonText = "Review",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
@@ -2058,43 +2168,74 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        IReadOnlyList<string> urls;
-        try
+        var found = ExtractLinks(pasteBox.Text);
+        if (found.Count == 0)
         {
-            urls = BatchUrlExpander.Expand(patternBox.Text);
-        }
-        catch (FormatException ex)
-        {
-            await ShowMessageAsync("Invalid batch pattern", ex.Message);
+            await ShowMessageAsync("Add links", "No http or https links were found in the pasted text.");
             return;
         }
 
-        urls = urls.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var checks = new List<(CheckBox Box, string Url)>();
+        var list = new StackPanel { Spacing = 2 };
+        foreach (var link in found)
+        {
+            var uri = new Uri(link);
+            var name = Uri.UnescapeDataString(uri.Segments.LastOrDefault()?.Trim('/') ?? string.Empty);
+            var listed = FindExistingJob(link) is not null;
+            var box = new CheckBox
+            {
+                IsChecked = !(listed && skipDuplicates.IsChecked == true),
+                Content = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock { Text = name.Length > 0 ? name : uri.Host, TextTrimming = TextTrimming.CharacterEllipsis },
+                        new TextBlock
+                        {
+                            Text = uri.Host + (listed ? " · already in the list" : string.Empty),
+                            FontSize = 12,
+                            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
+                        },
+                    },
+                },
+            };
+            ToolTipService.SetToolTip(box, link);
+            checks.Add((box, link));
+            list.Children.Add(box);
+        }
+        var toggleAll = new CheckBox { Content = "Select all", IsChecked = checks.All(c => c.Box.IsChecked == true) };
+        toggleAll.Click += (_, _) => { foreach (var c in checks) c.Box.IsChecked = toggleAll.IsChecked == true; };
+        var review = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = $"Review {found.Count} link{(found.Count == 1 ? string.Empty : "s")}",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children = { toggleAll, new ScrollViewer { Content = list, MaxHeight = 420 } },
+            },
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await review.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> urls = checks.Where(c => c.Box.IsChecked == true).Select(c => c.Url).ToList();
         if (urls.Count == 0)
         {
-            await ShowMessageAsync("Batch download", "The pattern produced no URLs.");
             return;
         }
 
-        if (urls.Count > 25)
+        string? packageKey = null;
+        string? packageName = null;
+        if (keepPackage.IsChecked == true && urls.Count >= 2)
         {
-            var confirm = new ContentDialog
-            {
-                XamlRoot = Content.XamlRoot,
-                Title = "Add many downloads?",
-                Content = new TextBlock
-                {
-                    Text = $"This pattern expands to {urls.Count} downloads. Add them all?",
-                    TextWrapping = TextWrapping.Wrap,
-                },
-                PrimaryButtonText = "Add all",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close,
-            };
-            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
+            packageKey = Guid.NewGuid().ToString("N");
+            packageName = $"Links {DateTime.Now:MMM dd HH:mm}";
         }
 
         var queueId = _settings.Queues.OrderBy(q => q.Order)
@@ -2118,12 +2259,6 @@ public sealed partial class MainWindow : Window
                 continue;
             }
 
-            if (skipDuplicates.IsChecked == true && FindExistingJob(url) is not null)
-            {
-                skipped++;
-                continue;
-            }
-
             try
             {
                 var reply = await _connection.AddAsync(new AddJobRequest
@@ -2139,6 +2274,8 @@ public sealed partial class MainWindow : Window
                     },
                     Source = "batch",
                     QueueId = queueId,
+                    PackageKey = packageKey,
+                    PackageName = packageName,
                 });
                 var add = reply.GetPayload<AddJobResponse>();
                 if (add.Accepted)
@@ -2167,7 +2304,19 @@ public sealed partial class MainWindow : Window
                       (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
                       (skipped > 0 ? $"; {skipped} skipped as already listed" : string.Empty) +
                       (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
-        await ShowMessageAsync("Batch download", summary);
+        await ShowMessageAsync("Add links", summary);
+    }
+
+    /// <summary>Finds distinct http/https links in free text (one per line, in HTML, in prose).</summary>
+    private static List<string> ExtractLinks(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        return System.Text.RegularExpressions.Regex.Matches(text, @"https?://[^\s""'<>`]+",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            .Select(match => match.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!', '?'))
+            .Where(link => Uri.TryCreate(link, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task ShowQueuesAsync()
