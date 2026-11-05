@@ -11,14 +11,14 @@ public sealed class JobCompletionEditor
 {
     private readonly Window _owner;
     private readonly bool _systemActionsEnabled;
-    private readonly ComboBox _programMode = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _programMode = new() { Header = "When this download completes", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _programPath = new() { MinWidth = 0, PlaceholderText = "Select an executable" };
     private readonly Button _browse = new() { Content = "Browse…" };
     private readonly CheckBox _openFile = new() { Content = "Open the downloaded file when complete" };
-    private readonly ComboBox _systemAction = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _systemAction = new() { Header = "System action", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly CheckBox _force = new() { Content = "Force the system action" };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-    private readonly TextBlock _systemActionNote = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _systemActionNote = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.72 };
 
     public UIElement Content { get; }
 
@@ -61,17 +61,16 @@ public sealed class JobCompletionEditor
         programLine.Children.Add(_programPath);
         programLine.Children.Add(_browse);
 
-        var panel = new StackPanel { Spacing = 10, MaxWidth = 620 };
-        panel.Children.Add(new TextBlock { Text = "After this download completes", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        // Plain fields with the same header style as the rest of the properties dialog.
+        var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(_programMode);
         panel.Children.Add(programLine);
         panel.Children.Add(_openFile);
-        panel.Children.Add(new TextBlock { Text = "System action", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         panel.Children.Add(_systemAction);
         panel.Children.Add(_systemActionNote);
         panel.Children.Add(_force);
         panel.Children.Add(_error);
-        Content = new ScrollViewer { Content = panel, VerticalScrollMode = ScrollMode.Auto };
+        Content = new ContentControl { Content = panel, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         UpdateProgramMode();
     }
 

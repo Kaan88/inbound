@@ -430,7 +430,8 @@ public sealed partial class MainWindow : Window
         var keepSelected = selectedId is { } only
             ? new HashSet<Guid> { only }
             : JobsList.SelectedItems.OfType<JobViewModel>().Select(row => row.Id).ToHashSet();
-        _visibleJobs.Clear();
+        var before = _visibleJobs.ToHashSet();
+        var target = new List<JobViewModel>();
 
         var packaged = new HashSet<Guid>();
         var top = new List<JobViewModel>();
@@ -466,19 +467,154 @@ public sealed partial class MainWindow : Window
 
         foreach (var row in ordered)
         {
-            _visibleJobs.Add(row);
+            target.Add(row);
             if (row.IsPackage && row.IsExpanded)
-                foreach (var child in row.Children.Where(Matches)) _visibleJobs.Add(child);
+                foreach (var child in row.Children.Where(Matches)) target.Add(child);
         }
 
-        JobsList.SelectedItems.Clear();
-        foreach (var row in _visibleJobs.Where(row => keepSelected.Contains(row.Id)).ToList())
+        // Sync in place instead of Clear + Add: rows that stay keep their containers, so
+        // progress bars do not replay from another row's value and nothing jumps.
+        for (var i = 0; i < target.Count; i++)
         {
-            JobsList.SelectedItems.Add(row);
+            if (i < _visibleJobs.Count && ReferenceEquals(_visibleJobs[i], target[i])) continue;
+            var existing = -1;
+            for (var j = i + 1; j < _visibleJobs.Count; j++)
+            {
+                if (ReferenceEquals(_visibleJobs[j], target[i])) { existing = j; break; }
+            }
+            if (existing >= 0) _visibleJobs.Move(existing, i);
+            else _visibleJobs.Insert(i, target[i]);
         }
+        while (_visibleJobs.Count > target.Count) _visibleJobs.RemoveAt(_visibleJobs.Count - 1);
+
+        var selectedNow = JobsList.SelectedItems.OfType<JobViewModel>().ToHashSet();
+        if (!selectedNow.SetEquals(_visibleJobs.Where(row => keepSelected.Contains(row.Id))))
+        {
+            JobsList.SelectedItems.Clear();
+            foreach (var row in _visibleJobs.Where(row => keepSelected.Contains(row.Id)).ToList())
+                JobsList.SelectedItems.Add(row);
+        }
+
+        // Rows that appeared because a package opened fade in quickly.
+        var added = target.Where(row => row.PackageId is not null && !before.Contains(row)).ToList();
+        if (added.Count > 0 && before.Count > 0) FadeIn(added);
 
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
+    }
+
+    private ScrollViewer? _jobsScroller;
+
+    private void JobsList_Loaded(object sender, RoutedEventArgs e)
+    {
+        // The template's ScrollViewer may not exist yet; retry on layout until it does.
+        if (!HookJobsScroller()) JobsList.LayoutUpdated += JobsList_LayoutUpdated;
+    }
+
+    private void JobsList_LayoutUpdated(object? sender, object e)
+    {
+        if (HookJobsScroller()) JobsList.LayoutUpdated -= JobsList_LayoutUpdated;
+    }
+
+    private bool HookJobsScroller()
+    {
+        if (_jobsScroller is not null) return true;
+        _jobsScroller = FindChild<ScrollViewer>(JobsList);
+        if (_jobsScroller is null) return false;
+        _jobsScroller.ViewChanged += (_, _) => SyncScrollBar();
+        _jobsScroller.RegisterPropertyChangedCallback(ScrollViewer.ScrollableHeightProperty, (_, _) => SyncScrollBar());
+        _jobsScroller.RegisterPropertyChangedCallback(ScrollViewer.ViewportHeightProperty, (_, _) => SyncScrollBar());
+        SyncScrollBar();
+        return true;
+    }
+
+    private double _thumbDragStartY = double.NaN;
+    private double _thumbDragStartOffset;
+
+    /// <summary>Sizes and places the custom scrollbar thumb from the list's ScrollViewer.</summary>
+    private void SyncScrollBar()
+    {
+        if (_jobsScroller is null) return;
+        var scrollable = _jobsScroller.ScrollableHeight;
+        JobsScrollTrack.Visibility = scrollable > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var track = JobsScrollTrack.ActualHeight;
+        if (scrollable <= 0 || track <= 0) return;
+        var thumb = Math.Max(24, track * _jobsScroller.ViewportHeight / _jobsScroller.ExtentHeight);
+        JobsScrollThumb.Height = thumb;
+        var top = (track - thumb) * Math.Clamp(_jobsScroller.VerticalOffset / scrollable, 0, 1);
+        JobsScrollThumb.Margin = new Thickness(3, top, 3, 0);
+    }
+
+    private void JobsScrollTrack_SizeChanged(object sender, SizeChangedEventArgs e) => SyncScrollBar();
+
+    private void JobsScrollTrack_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_jobsScroller is null) return;
+        var y = e.GetCurrentPoint(JobsScrollTrack).Position.Y;
+        var top = JobsScrollThumb.Margin.Top;
+        if (y >= top && y <= top + JobsScrollThumb.ActualHeight)
+        {
+            _thumbDragStartY = y;
+            _thumbDragStartOffset = _jobsScroller.VerticalOffset;
+            JobsScrollTrack.CapturePointer(e.Pointer);
+        }
+        else
+        {
+            // Click on the track pages toward the pointer, like a normal scrollbar.
+            var page = Math.Max(27, _jobsScroller.ViewportHeight - 27);
+            _jobsScroller.ChangeView(null, _jobsScroller.VerticalOffset + (y < top ? -page : page), null, true);
+        }
+        e.Handled = true;
+    }
+
+    private void JobsScrollTrack_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_jobsScroller is null || double.IsNaN(_thumbDragStartY)) return;
+        var free = JobsScrollTrack.ActualHeight - JobsScrollThumb.ActualHeight;
+        if (free <= 0) return;
+        var dy = e.GetCurrentPoint(JobsScrollTrack).Position.Y - _thumbDragStartY;
+        _jobsScroller.ChangeView(null, _thumbDragStartOffset + dy * _jobsScroller.ScrollableHeight / free, null, true);
+    }
+
+    private void JobsScrollTrack_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _thumbDragStartY = double.NaN;
+        JobsScrollTrack.ReleasePointerCaptures();
+    }
+
+    private void JobsScrollTrack_PointerEntered(object sender, PointerRoutedEventArgs e) => JobsScrollThumb.Opacity = 0.75;
+
+    private void JobsScrollTrack_PointerExited(object sender, PointerRoutedEventArgs e) => JobsScrollThumb.Opacity = 0.45;
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            if (FindChild<T>(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
+    private void FadeIn(IReadOnlyList<JobViewModel> rows)
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            var storyboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+            foreach (var row in rows)
+            {
+                if (JobsList.ContainerFromItem(row) is not UIElement container) continue;
+                var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+                {
+                    From = 0, To = 1, Duration = TimeSpan.FromMilliseconds(140),
+                };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, container);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
+                storyboard.Children.Add(fade);
+            }
+            if (storyboard.Children.Count > 0) storyboard.Begin();
+        });
     }
 
     private void PackageChevron_Tapped(object sender, TappedRoutedEventArgs e)
@@ -585,7 +721,9 @@ public sealed partial class MainWindow : Window
         }
         if (SelectedJob is { } job)
         {
-            await OpenJobAsync(job);
+            // Finished files open; anything still in progress shows its progress window.
+            if (job.State == "completed") await OpenJobAsync(job);
+            else OpenDownloadWindow(job.Id);
         }
     }
 
@@ -1154,14 +1292,12 @@ public sealed partial class MainWindow : Window
         var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions);
         var canEditCompletion = job.State != "completed";
         if (completionEditor.Content is Control completionControl) completionControl.IsEnabled = canEditCompletion;
-        var completionExpander = new Expander { Header = "After completion", Content = completionEditor.Content,
-            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         JobCompletionOptionsDto? completionOptions = null;
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(info);
         panel.Children.Add(descriptionBox);
         panel.Children.Add(categoryBox);
-        panel.Children.Add(completionExpander);
+        panel.Children.Add(completionEditor.Content);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -1180,7 +1316,6 @@ public sealed partial class MainWindow : Window
                 if (!completionEditor.TryGetOptions(out var options, out var completionValidationError))
                 {
                     args.Cancel = true;
-                    completionExpander.IsExpanded = true;
                 }
                 else completionOptions = options;
             }
@@ -3509,8 +3644,9 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Section("Per-site limits"), profilesBox);
             window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
             window.AddPage("Site logins", "\uE8D7", loginHelp, loginPanel, addLogin);
-            window.AddPage("Updates", "\uE895", autoUpdate, updateInterval,
-                SettingsWindow.Section("Update source"), updateChannel, updateUrl, updateKey);
+            // The update source (channel, manifest URL, signing key) is set by the installer and is
+            // not user-editable; the hidden boxes only carry the saved values through Save.
+            window.AddPage("Updates", "\uE895", autoUpdate, updateInterval);
             var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, window);
             window.AddPage("Sounds", "\uE767", soundEditor.Content);
 

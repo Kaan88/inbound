@@ -76,6 +76,7 @@ public sealed partial class DownloadWindow : Window
         _timer.Tick += async (_, _) => await LoadSegmentsAsync();
         SegmentDetails.Expanding += (_, _) => FitSegmentsSoon();
         SegmentDetails.Collapsed += (_, _) => FitSegmentsSoon();
+        Root.Loaded += (_, _) => FitSegmentsSoon();
         Closed += async (_, _) =>
         {
             _closed = true;
@@ -411,6 +412,15 @@ public sealed partial class DownloadWindow : Window
             {
                 AppWindow.Resize(new Windows.Graphics.SizeInt32(size.Width, previous));
                 _heightBeforeSegments = null;
+                return;
+            }
+            // Collapsed: drop blank space below the content so the window ends at the expander.
+            StatusScroll.UpdateLayout();
+            var slack = StatusScroll.ViewportHeight - StatusScroll.ExtentHeight;
+            if (slack > 1)
+            {
+                var shrunk = Math.Max(240, size.Height - (int)Math.Floor(slack * Root.XamlRoot.RasterizationScale));
+                if (shrunk < size.Height) AppWindow.Resize(new Windows.Graphics.SizeInt32(size.Width, shrunk));
             }
             return;
         }

@@ -357,6 +357,7 @@
                 </Border>
 
                 <Grid Grid.Row="1">
+
                     <ListView x:Name="JobsList"
                               AutomationProperties.Name="Downloads"
                               Background="{ThemeResource InboundSurfaceBrush}"
@@ -368,7 +369,8 @@
                               DoubleTapped="JobsList_DoubleTapped"
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                              ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                              Loaded="JobsList_Loaded">
                         <!-- No entrance/add animations: the list is rebuilt on expand, collapse and
                              view changes, and the default transition slid every row up from below. -->
                         <ListView.ItemContainerTransitions>
@@ -439,6 +441,21 @@
                 </Grid>
             </Grid>
             </ScrollViewer>
+            <!-- Always-visible scrollbar, outside the horizontal scroller so it stays at the right edge; kept in sync with the list's own ScrollViewer
+                 (WinUI's built-in one collapses to a thin auto-hiding line). -->
+            <Grid x:Name="JobsScrollTrack" Grid.Column="1" Width="12" HorizontalAlignment="Right" Margin="0,27,0,0" Visibility="Collapsed"
+                  Background="{ThemeResource InboundChromeBrush}"
+                  PointerPressed="JobsScrollTrack_PointerPressed"
+                  PointerMoved="JobsScrollTrack_PointerMoved"
+                  PointerReleased="JobsScrollTrack_PointerReleased"
+                  PointerCaptureLost="JobsScrollTrack_PointerReleased"
+                  PointerEntered="JobsScrollTrack_PointerEntered"
+                  PointerExited="JobsScrollTrack_PointerExited"
+                  SizeChanged="JobsScrollTrack_SizeChanged">
+                <Border x:Name="JobsScrollThumb" VerticalAlignment="Top" Margin="3,0,3,0"
+                        CornerRadius="3" Opacity="0.45"
+                        Background="{ThemeResource InboundSecondaryTextBrush}" />
+            </Grid>
         </Grid>
 
         <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Up" Header="Download speed · session history" IsExpanded="True"

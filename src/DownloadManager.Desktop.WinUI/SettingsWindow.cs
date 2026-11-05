@@ -12,7 +12,12 @@ namespace DownloadManager.Desktop.WinUI;
 internal sealed class SettingsWindow : Window
 {
     private readonly Grid _root = new();
-    private readonly ListView _nav = new() { SelectionMode = ListViewSelectionMode.Single, Padding = new Thickness(0, 6, 0, 6) };
+    // Empty transitions: the default entrance animation slid the page list up on open.
+    private readonly ListView _nav = new()
+    {
+        SelectionMode = ListViewSelectionMode.Single, Padding = new Thickness(0, 6, 0, 6),
+        ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
+    };
     private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, MaxLines = 3 };
     private readonly Button _ok = new() { Content = "OK", MinWidth = 92, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
