@@ -423,7 +423,11 @@ public sealed partial class MainWindow : Window
 
     private void RebuildVisible(Guid? selectedId = null)
     {
-        selectedId ??= (JobsList.SelectedItem as JobViewModel)?.Id;
+        // Keep the whole (multi-)selection by id. Clearing the collection can leave the
+        // ListView selecting row 0, so the selection is always rebuilt explicitly below.
+        var keepSelected = selectedId is { } only
+            ? new HashSet<Guid> { only }
+            : JobsList.SelectedItems.OfType<JobViewModel>().Select(row => row.Id).ToHashSet();
         _visibleJobs.Clear();
 
         var packaged = new HashSet<Guid>();
@@ -465,9 +469,10 @@ public sealed partial class MainWindow : Window
                 foreach (var child in row.Children.Where(Matches)) _visibleJobs.Add(child);
         }
 
-        if (selectedId is { } id && _visibleJobs.FirstOrDefault(row => row.Id == id) is { } selected)
+        JobsList.SelectedItems.Clear();
+        foreach (var row in _visibleJobs.Where(row => keepSelected.Contains(row.Id)).ToList())
         {
-            JobsList.SelectedItem = selected;
+            JobsList.SelectedItems.Add(row);
         }
 
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -578,12 +583,22 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Open With…", MenuOpenWith_Click));
         flyout.Items.Add(CreateContextItem("Open Folder", MenuOpenFolder_Click));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
-        moveRename.KeyboardAccelerators.Add(new KeyboardAccelerator
+        // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
+        // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
+        moveRename.KeyboardAcceleratorTextOverride = "Ctrl+M";
+        var moveShortcut = new KeyboardAccelerator
         {
             Key = Windows.System.VirtualKey.M,
             Modifiers = Windows.System.VirtualKeyModifiers.Control,
-        });
+        };
+        moveShortcut.Invoked += (_, args) =>
+        {
+            args.Handled = true;
+            if (SelectedJob?.State == "completed") MenuMoveRename_Click(moveRename, new RoutedEventArgs());
+        };
+        JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);
+        _menuMoveRename = moveRename;
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
@@ -597,9 +612,9 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Progress Details…", MenuProgressDetails_Click));
-        flyout.Items.Add(CreateContextItem("Group into Package…", MenuGroupSelected_Click));
-        flyout.Items.Add(CreateContextItem("Remove from Package", MenuUngroup_Click));
-        flyout.Items.Add(CreateContextItem("Rename Package…", MenuRenamePackage_Click));
+        flyout.Items.Add(_menuGroup = CreateContextItem("Group into Package…", MenuGroupSelected_Click));
+        flyout.Items.Add(_menuUngroup = CreateContextItem("Remove from Package", MenuUngroup_Click));
+        flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
         JobsList.ContextFlyout = flyout;
@@ -612,8 +627,21 @@ public sealed partial class MainWindow : Window
         return item;
     }
 
+    private MenuFlyoutItem? _menuMoveRename;
+    private MenuFlyoutItem? _menuGroup;
+    private MenuFlyoutItem? _menuUngroup;
+    private MenuFlyoutItem? _menuRenamePackage;
+
     private void JobsContextMenu_Opening(object? sender, object e)
     {
+        // Offer only what applies to the current selection.
+        var selection = SelectedJobs;
+        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed";
+        static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
+        if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
+        if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
+        if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
+
         if (_addToQueueMenu is null)
         {
             return;
@@ -697,29 +725,70 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var pathBox = new TextBox
+        var nameBox = new TextBox { Header = "File name", Text = Path.GetFileName(job.FinalFilePath) };
+        var folderBox = new TextBox { Text = Path.GetDirectoryName(job.FinalFilePath) ?? string.Empty };
+        var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
+        browse.Click += async (_, _) =>
         {
-            Header = "New full path",
-            Text = job.FinalFilePath,
+            try
+            {
+                var picker = new Windows.Storage.Pickers.FolderPicker
+                {
+                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
+                };
+                picker.FileTypeFilter.Add("*");
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+                if (await picker.PickSingleFolderAsync() is { } folder) folderBox.Text = folder.Path;
+            }
+            catch (Exception)
+            {
+                // The folder box stays editable when the picker cannot open.
+            }
         };
+        var folderRow = new Grid { ColumnSpacing = 8 };
+        folderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        folderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        folderRow.Children.Add(folderBox);
+        Grid.SetColumn(browse, 1);
+        folderRow.Children.Add(browse);
+        var panel = new StackPanel { Spacing = 10, MinWidth = 440 };
+        panel.Children.Add(nameBox);
+        panel.Children.Add(new TextBlock { Text = "Folder" });
+        panel.Children.Add(folderRow);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
-            Title = "Move/Rename",
-            Content = pathBox,
-            PrimaryButtonText = "Move",
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = "Move or rename",
+            Content = panel,
+            PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
+        dialog.Opened += (_, _) =>
+        {
+            // Select the name without its extension, like Explorer's rename.
+            nameBox.Focus(FocusState.Programmatic);
+            var stem = Path.GetFileNameWithoutExtension(nameBox.Text);
+            nameBox.Select(0, stem.Length > 0 ? stem.Length : nameBox.Text.Length);
+        };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
-            string.IsNullOrWhiteSpace(pathBox.Text))
+            string.IsNullOrWhiteSpace(nameBox.Text) || string.IsNullOrWhiteSpace(folderBox.Text))
+        {
+            return;
+        }
+
+        var target = Path.Combine(folderBox.Text.Trim(), nameBox.Text.Trim());
+        if (string.Equals(target, job.FinalFilePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Path.GetFileName(target), Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
         {
             return;
         }
 
         try
         {
-            var reply = await _connection.MoveJobAsync(job.Id, pathBox.Text.Trim());
+            var reply = await _connection.MoveJobAsync(job.Id, target);
             var result = reply.GetPayload<JobActionResponse>();
             if (!result.Ok)
             {
@@ -862,6 +931,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Refresh download address",
             Content = input,
             PrimaryButtonText = "Refresh",
@@ -985,10 +1055,10 @@ public sealed partial class MainWindow : Window
             categoryBox.Items.Add(new ComboBoxItem { Content = category.Name, Tag = category.Id });
         categoryBox.SelectedIndex = 0;
         var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(new TextBlock { Text = $"Change category for {selection.Count} download(s). Existing files stay in their current folders.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = (selection.Count == 1 ? $"Change the category of '{selection[0].FileName}'." : $"Change the category of {selection.Count} downloads.") + " Existing files stay in their current folders.", TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(categoryBox);
         var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
-            Title = "Change category", Content = panel, PrimaryButtonText = "Apply", CloseButtonText = "Cancel" };
+            Title = "Change category", Content = panel, PrimaryButtonText = "Apply", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || categoryBox.SelectedItem is not ComboBoxItem { Tag: string categoryId }) return;
         var errors = new List<string>();
         foreach (var job in selection)
@@ -1012,14 +1082,29 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var info = new TextBlock
+        // Label/value grid; values are selectable so the URL or path can be copied.
+        var info = new Grid { ColumnSpacing = 12, RowSpacing = 4 };
+        info.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        info.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid);
+        foreach (var (label, value) in new[]
         {
-            Text = $"File: {job.FileName}\nQueue: {job.QueueName}\nState: {job.StateText}\n" +
-                   $"Size: {job.SizeText}\nSource: {job.SourceText}\nURL: {job.Url}\n" +
-                   $"Destination: {job.Destination}\nFinal path: {job.FinalFilePath}\n" +
-                   $"Last try: {job.LastTryText}",
-            TextWrapping = TextWrapping.Wrap,
-        };
+            ("File", job.FileName), ("Status", job.StateText), ("Size", job.SizeText),
+            ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName), ("Source", job.SourceText),
+            ("Address", job.Url), ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
+        })
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            var row = info.RowDefinitions.Count;
+            info.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var name = new TextBlock { Text = label, Foreground = secondary };
+            var text = new TextBlock { Text = value, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+            Grid.SetRow(name, row);
+            Grid.SetRow(text, row);
+            Grid.SetColumn(text, 1);
+            info.Children.Add(name);
+            info.Children.Add(text);
+        }
         var descriptionBox = new TextBox
         {
             Header = "Description",
@@ -1051,6 +1136,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Download properties",
             Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
             PrimaryButtonText = "Save",
@@ -1108,6 +1194,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Export download list",
             Content = pathBox,
             PrimaryButtonText = "Export",
@@ -1145,6 +1232,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Import download list",
             Content = pathBox,
             PrimaryButtonText = "Import",
@@ -1177,6 +1265,7 @@ public sealed partial class MainWindow : Window
         var confirm = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Import downloads?",
             Content = new TextBlock
             {
@@ -1312,6 +1401,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Delete completed downloads?",
             Content = new TextBlock
             {
@@ -1353,6 +1443,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Clean up leftover partial files",
             Content = new ScrollViewer
             {
@@ -1411,6 +1502,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Find",
             Content = box,
             PrimaryButtonText = "Find",
@@ -1534,6 +1626,7 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
+                RequestedTheme = RootGrid.ActualTheme,
                 Title = "Update available",
                 Content = new TextBlock
                 {
@@ -1563,6 +1656,7 @@ public sealed partial class MainWindow : Window
             var installDialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
+                RequestedTheme = RootGrid.ActualTheme,
                 Title = "Install update now?",
                 Content = new TextBlock
                 {
@@ -1587,6 +1681,7 @@ public sealed partial class MainWindow : Window
                 var forceDialog = new ContentDialog
                 {
                     XamlRoot = Content.XamlRoot,
+                    RequestedTheme = RootGrid.ActualTheme,
                     Title = "Downloads are active",
                     Content = new TextBlock
                     {
@@ -1688,6 +1783,7 @@ public sealed partial class MainWindow : Window
         var addressDialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Enter new address to download",
             Content = addressPanel,
             PrimaryButtonText = "Next",
@@ -1973,6 +2069,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Download file info",
             Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
@@ -2014,6 +2111,7 @@ public sealed partial class MainWindow : Window
             var duplicateDialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
+                RequestedTheme = RootGrid.ActualTheme,
                 Title = "Download already exists",
                 Content = new TextBlock
                 {
@@ -2156,6 +2254,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = "Add links",
             Content = new ScrollViewer { Content = panel, MaxHeight = 560 },
             PrimaryButtonText = "Review",
@@ -2235,7 +2334,14 @@ public sealed partial class MainWindow : Window
         if (keepPackage.IsChecked == true && urls.Count >= 2)
         {
             packageKey = Guid.NewGuid().ToString("N");
-            packageName = $"Links {DateTime.Now:MMM dd HH:mm}";
+            // Name a package of split-archive parts after the archive.
+            var bases = urls.Select(link => System.Text.RegularExpressions.Regex.Match(
+                    Uri.UnescapeDataString(new Uri(link).Segments.LastOrDefault() ?? string.Empty),
+                    @"^(?<b>.+?)(\.part\d+\.rar|\.r\d{2,3}|\.z\d{2}|\.rar|\.zip|\.\d{3})$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                .Select(match => match.Success ? match.Groups["b"].Value : null)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            packageName = bases is [{ } archive] ? archive : $"Links {DateTime.Now:MMM dd HH:mm}";
         }
 
         var queueId = _settings.Queues.OrderBy(q => q.Order)
@@ -2329,8 +2435,8 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
-            Title = "Queues",
             RequestedTheme = RootGrid.ActualTheme,
+            Title = "Queues",
             Content = new ScrollViewer
             {
                 Content = panel,
@@ -3805,11 +3911,15 @@ public sealed partial class MainWindow : Window
                 : $"Remove {selection.Count} downloads from the list? Partial data is always removed.",
             TextWrapping = TextWrapping.Wrap,
         });
-        panel.Children.Add(deleteFiles);
+        // Unfinished downloads only have partial data, which is removed anyway.
+        var anyCompleted = selection.Any(job => job.State == "completed");
+        if (anyCompleted) panel.Children.Add(deleteFiles);
+        else deleteFiles.IsChecked = true;
 
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = selection.Count == 1 ? "Delete download?" : $"Delete {selection.Count} downloads?",
             Content = panel,
             PrimaryButtonText = "Delete",
@@ -3940,6 +4050,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
             Title = title,
             Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
             CloseButtonText = "OK",
