@@ -1,4 +1,4 @@
-# UI design guidelines
+﻿# UI design guidelines
 
 How the WinUI frontend should look and behave. The goal is a dense, reference app-style
 utility (reference captures in `reference-screens/`) that looks the same in dark
@@ -15,7 +15,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 | `RillSurfaceBrush` | window/page background, download list, dialog bodies | `#181818` | `#FFFFFF` |
 | `RillDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
 | `RillSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
-| `RillProgressFillBrush` | progress fill and the speed-graph line | `#4CB860` | `#2E9E44` |
+| `RillProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
 | `RillProgressTrackBrush` | progress track | `#383838` | `#E2E2E2` |
 | `RillErrorTextBrush` | inline error messages | `#F07A7A` | `#C42B1C` |
 | `RillHighlightBrush` | informational banners and highlighted panels | `#2B3A4F` | `#DCE9F7` |
@@ -47,7 +47,7 @@ Color only the status text. Don't tint whole rows.
 ## 3. Progress bars
 
 - Every `ProgressBar` uses `RillProgressBarStyle`: 6px tall, rounded,
-  green fill on a neutral track. For bars created in code, wrap them with
+  blue fill on a neutral track. For bars created in code, wrap them with
   `RillTheme.Styled(new ProgressBar { ... })`.
 - In the list, the bar sits under the status text inside the 140px Status
   column. Show it only while a job is active or paused with progress above 0.
@@ -59,7 +59,7 @@ Color only the status text. Don't tint whole rows.
   Speed | Info. Its values come from the live stream position
   (`RangeStart - Start + ReceivedBytes`), merged with the saved checkpoint and
   kept at a high-water mark, so numbers never move backwards between
-  refreshes.
+  refreshes. Per-segment speeds are smoothed (EMA 0.25) because raw per-stream rates sawtooth.
 - Normal text cells keep the inherited foreground. Never assign a `null`
   Foreground in code; it renders the text invisible.
 - The bottom Expander (speed graph) uses `ExpandDirection="Up"`, so its header

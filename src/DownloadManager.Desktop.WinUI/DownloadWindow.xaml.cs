@@ -24,6 +24,8 @@ public sealed partial class DownloadWindow : Window
     private bool _haveSegmentMap;
     // Highest completed byte count shown per segment start; display never moves backwards between refreshes.
     private readonly Dictionary<long, long> _segmentHighWater = [];
+    // Exponentially smoothed per-segment speed; raw per-stream rates sawtooth between reads.
+    private readonly Dictionary<long, double> _segmentRate = [];
     private bool _updatingControls;
     private readonly bool _manual;
     private bool _completedLayout;
@@ -332,7 +334,9 @@ public sealed partial class DownloadWindow : Window
             var length = Math.Max(1, segment.End - segment.Start + 1);
             var live = connections.Where(c => c.RangeStart is { } from ? from >= segment.Start && from <= segment.End
                 : segments.Count == 1).ToList();
-            var rate = live.Sum(c => Math.Max(0, c.BytesPerSecond));
+            var raw = live.Sum(c => Math.Max(0, c.BytesPerSecond));
+            var rate = _segmentRate.TryGetValue(segment.Start, out var previous) && raw > 0 ? previous * 0.75 + raw * 0.25 : raw;
+            _segmentRate[segment.Start] = rate;
             var row = NewRow();
             Cell(row, 0, Text((index + 1).ToString(CultureInfo.CurrentCulture), muted: true));
             Cell(row, 1, RillTheme.Styled(new ProgressBar { Maximum = 100, Value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100) }));

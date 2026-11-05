@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Application
     x:Class="DownloadManager.Desktop.WinUI.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -16,7 +16,7 @@
                     <SolidColorBrush x:Key="RillSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="RillDividerBrush" Color="#343434" />
                     <SolidColorBrush x:Key="RillSecondaryTextBrush" Color="#A3A3A3" />
-                    <SolidColorBrush x:Key="RillProgressFillBrush" Color="#4CB860" />
+                    <SolidColorBrush x:Key="RillProgressFillBrush" Color="#4AA3F0" />
                     <SolidColorBrush x:Key="RillProgressTrackBrush" Color="#383838" />
                     <SolidColorBrush x:Key="RillErrorTextBrush" Color="#F07A7A" />
                     <SolidColorBrush x:Key="RillHighlightBrush" Color="#2B3A4F" />
@@ -26,7 +26,7 @@
                     <SolidColorBrush x:Key="RillSurfaceBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="RillDividerBrush" Color="#DADADA" />
                     <SolidColorBrush x:Key="RillSecondaryTextBrush" Color="#666666" />
-                    <SolidColorBrush x:Key="RillProgressFillBrush" Color="#2E9E44" />
+                    <SolidColorBrush x:Key="RillProgressFillBrush" Color="#1F6FC5" />
                     <SolidColorBrush x:Key="RillProgressTrackBrush" Color="#E2E2E2" />
                     <SolidColorBrush x:Key="RillErrorTextBrush" Color="#C42B1C" />
                     <SolidColorBrush x:Key="RillHighlightBrush" Color="#DCE9F7" />
