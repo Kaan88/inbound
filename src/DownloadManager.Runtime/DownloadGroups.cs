@@ -11,6 +11,27 @@ public sealed partial class DownloadManagerService
     private static List<DownloadGroupDto> MapGroups(IEnumerable<DownloadGroup> groups) => groups.Select(group =>
         new DownloadGroupDto { Id = group.Id, Name = group.Name, Key = group.Key, JobIds = new(group.JobIds) }).ToList();
 
+    /// <summary>The package a job belongs to when it shows as a package (two or more members).</summary>
+    public Guid? FindPackageOf(Guid jobId)
+    {
+        lock (_sync)
+        {
+            var group = _settings.DownloadGroups.FirstOrDefault(candidate => candidate.JobIds.Contains(jobId));
+            return group is { JobIds.Count: > 1 } ? group.Id : null;
+        }
+    }
+
+    /// <summary>True when every member of the package has finished downloading.</summary>
+    public bool IsPackageComplete(Guid packageId)
+    {
+        lock (_sync)
+        {
+            var group = _settings.DownloadGroups.FirstOrDefault(candidate => candidate.Id == packageId);
+            return group is not null && group.JobIds.All(id =>
+                !_jobs.TryGetValue(id, out var record) || record.Job.State == DownloadState.Completed);
+        }
+    }
+
     /// <summary>
     /// Puts a newly admitted job into a package: the batch named by the request, or the package of
     /// a split archive whose other parts are in the same folder. Runs under the settings gate; a

@@ -13,6 +13,8 @@ public partial class App : Application
     private UpdateWindow? _updateWindow;
     private readonly bool _updateMode;
     private readonly Guid? _jobId;
+    private readonly Guid? _packageId;
+    private PackageWindow? _packageWindow;
 
     public App()
     {
@@ -40,8 +42,11 @@ public partial class App : Application
         var jobIndex = Array.FindIndex(commandLine, arg => arg == "--job");
         if (jobIndex >= 0 && jobIndex + 1 < commandLine.Length &&
             Guid.TryParse(commandLine[jobIndex + 1], out var jobId)) _jobId = jobId;
+        var packageIndex = Array.FindIndex(commandLine, arg => arg == "--package");
+        if (packageIndex >= 0 && packageIndex + 1 < commandLine.Length &&
+            Guid.TryParse(commandLine[packageIndex + 1], out var packageId)) _packageId = packageId;
         var name = $"Local\\DownloadManager.UI.Show.{PipeNames.CurrentUserKey()}" +
-            (_updateMode ? ".Update" : _jobId is { } id ? $".Job.{id:D}" : string.Empty);
+            (_updateMode ? ".Update" : _jobId is { } id ? $".Job.{id:D}" : _packageId is { } pid ? $".Package.{pid:D}" : string.Empty);
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name, out var createdNew);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
         _secondaryInstance = !createdNew;
@@ -88,6 +93,22 @@ public partial class App : Application
                 {
                     _showEvent.WaitOne();
                     _updateWindow.DispatcherQueue.TryEnqueue(() => _updateWindow.ShowWindow());
+                }
+            });
+            return;
+        }
+
+        if (_packageId is { } package)
+        {
+            _packageWindow = new PackageWindow(package);
+            _packageWindow.Closed += (_, _) => Exit();
+            _packageWindow.Activate();
+            _ = Task.Run(() =>
+            {
+                while (true)
+                {
+                    _showEvent.WaitOne();
+                    _packageWindow.DispatcherQueue.TryEnqueue(() => _packageWindow.ShowWindow());
                 }
             });
             return;

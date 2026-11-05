@@ -163,7 +163,18 @@ internal static class Program
                 var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
                     (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
                 if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
-                if (e.Job.Source != "cli" &&
+                // Package members share one package window instead of one window per file.
+                var package = e.Job.Source != "cli" && (starting || e.ChangeType == "completed")
+                    ? service.FindPackageOf(e.Job.Id) : null;
+                if (package is { } packageId)
+                {
+                    var showCompletion = e.ChangeType == "completed" &&
+                        (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog) && service.IsPackageComplete(packageId);
+                    if ((starting && shownDownloads.TryAdd(packageId, 0)) || showCompletion)
+                        _ = Task.Run(() => controller.OpenPackage(packageId));
+                    if (showCompletion) shownDownloads.TryRemove(packageId, out byte _);
+                }
+                else if (e.Job.Source != "cli" &&
                     ((starting && shownDownloads.TryAdd(e.Job.Id, 0)) ||
                      (e.ChangeType == "completed" && (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog))))
                 {

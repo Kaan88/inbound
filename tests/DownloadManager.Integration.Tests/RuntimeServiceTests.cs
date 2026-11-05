@@ -2434,6 +2434,20 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AddWithoutFileNameUsesServerContentDispositionName()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var disposition = Uri.EscapeDataString("attachment; filename=\"Game.part01.rar\"; filename*=UTF-8''Game.part01.rar");
+        var url = $"{_server.BaseAddress}/filename/696b84a7-c512-4aab-8825-a28864a1bd57?disposition={disposition}";
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest { Url = url, Source = "batch" });
+        Assert.True(added.Accepted, added.Error);
+        Assert.Equal("Game.part01.rar", added.Job!.FileName);
+        Assert.Equal("compressed", added.Job.CategoryId);
+        var completed = await ctx.WaitFor(added.Job.Id, job => job.State == "completed");
+        Assert.Equal("Game.part01.rar", Path.GetFileName(completed.FinalFilePath));
+    }
+
+    [Fact]
     public async Task FileMetadataPreviewDoesNotCreateJobsPayloadOrHistoryAndSuggestedNameCanBeDownloaded()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

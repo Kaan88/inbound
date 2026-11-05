@@ -1117,8 +1117,18 @@ public sealed partial class MainWindow : Window
 
     private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
     {
+        if (SelectedPackage is { } package) { OpenPackageWindow(package.Id); return; }
         if (SelectedJob is not { } job) return;
         OpenDownloadWindow(job.Id);
+    }
+
+    private void OpenPackageWindow(Guid packageId)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--package {packageId:D}") { UseShellExecute = false });
+        }
+        catch (Exception ex) { _ = ShowMessageAsync("Could not open progress", ex.Message); }
     }
 
     private void OpenDownloadWindow(Guid jobId)

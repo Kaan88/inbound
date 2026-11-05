@@ -24,6 +24,8 @@ public sealed class HostController : IHostController
 
     public void OpenDownload(Guid jobId) => LaunchUi(null, jobId);
 
+    public void OpenPackage(Guid packageId) => LaunchUi(null, null, packageId);
+
     public Task<FolderPickResult> PickFolderAsync(string? initialPath, CancellationToken cancellationToken)
     {
         var context = UiContext;
@@ -69,7 +71,7 @@ public sealed class HostController : IHostController
         return completion.Task.WaitAsync(cancellationToken);
     }
 
-    private void LaunchUi(string? page, Guid? jobId)
+    private void LaunchUi(string? page, Guid? jobId, Guid? packageId = null)
     {
         var executable = FindUiExecutable();
         if (executable is null)
@@ -85,7 +87,8 @@ public sealed class HostController : IHostController
 
         try
         {
-            var arguments = jobId is { } id ? $"--job {id:D}" :
+            var arguments = packageId is { } package ? $"--package {package:D}" :
+                jobId is { } id ? $"--job {id:D}" :
                 string.IsNullOrWhiteSpace(page) ? string.Empty : $"--page {page}";
             Process.Start(new ProcessStartInfo
             {

@@ -51,6 +51,7 @@ public sealed partial class DownloadManagerService
     private readonly SemaphoreSlim _persistGate = new(1, 1);
     private readonly SemaphoreSlim _settingsUpdateGate = new(1, 1);
     private readonly SemaphoreSlim _metadataGate = new(2, 2);
+    private readonly SemaphoreSlim _addProbeGate = new(4, 4);
     private AppSettings _settings = new();
     private CancellationTokenSource? _schedulerCts;
     private Task? _schedulerTask;
@@ -240,6 +241,8 @@ public sealed partial class DownloadManagerService
 
     public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
     {
+        // Outside the settings gate: the probe is network-bound and must not block other adds.
+        await ResolveServerFileNameAsync(request, cancellationToken).ConfigureAwait(false);
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -249,6 +252,39 @@ public sealed partial class DownloadManagerService
             return result;
         }
         finally { _settingsUpdateGate.Release(); }
+    }
+
+    /// <summary>
+    /// When a download is added without a file name, asks the server for it (Content-Disposition,
+    /// then the final URL after redirects), as browsers do. The name decides the category and
+    /// therefore the folder, so it has to be known before the job is created. Failures and
+    /// timeouts keep the name taken from the URL; the download itself is unaffected.
+    /// </summary>
+    private async Task ResolveServerFileNameAsync(AddJobRequest request, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.FileName) || _engine is not IFileMetadataReader reader) return;
+        if (!TryValidateUrl(request.Url, out var uri, out _) || uri.Scheme is not ("http" or "https")) return;
+        if (!TryCopyHeaders(request.Headers, out var headers, out _)) return;
+        await _addProbeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        try
+        {
+            var metadata = await reader.ReadMetadataAsync(new DownloadJob
+            {
+                Url = uri.AbsoluteUri,
+                FinalUrl = request.FinalUrl,
+                RequestHeaders = headers,
+                UserAgent = request.UserAgent,
+                Referrer = request.Referrer,
+            }, timeout.Token).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(metadata.FileName) &&
+                !string.Equals(metadata.FileName, "download", StringComparison.OrdinalIgnoreCase))
+                request.FileName = metadata.FileName;
+        }
+        // Any probe failure (timeout, HTTP error, refused range) falls back to the URL name.
+        catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
+        finally { _addProbeGate.Release(); }
     }
 
     private async Task<AddJobResponse> AddJobCoreAsync(AddJobRequest request, CancellationToken cancellationToken)
