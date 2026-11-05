@@ -2,7 +2,6 @@
 
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
-import { DownloadUiController } from "./download-ui";
 import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
 
 type StartMode = "now" | "later";
@@ -92,17 +91,6 @@ const DEFAULT_SETTINGS: Settings = {
 
 const NATIVE_HOST = "com.kaank.downloadmanager";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
-const downloadUi = new DownloadUiController(chrome.downloads as any);
-
-let bypassTimer: ReturnType<typeof setTimeout> | undefined;
-
-function syncDownloadUi(): Promise<void> {
-  const remaining = bypassUntil - Date.now();
-  clearTimeout(bypassTimer);
-  if (remaining > 0) bypassTimer = setTimeout(() => { void syncDownloadUi(); }, remaining + 50);
-  return downloadUi.setIntercepting(settings.enabled && settings.autoIntercept && remaining <= 0);
-}
-
 let settings: Settings = DEFAULT_SETTINGS;
 let settingsLoaded = false;
 let settingsLoadPromise: Promise<void> | null = null;
@@ -120,8 +108,6 @@ const pendingRequests = new Map<
 >();
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
-/** Downloads left to the browser in this worker lifetime (re-shown if resumed). */
-const browserKeptIds = new Set<number>();
 const mediaByTab = new Map<number, TabMedia>();
 const variantCache = new Map<string, { expires: number; variants: MediaVariant[] }>();
 let mediaSyncQueue: Promise<void> = Promise.resolve();
@@ -154,27 +140,22 @@ async function hasDeleteGesture(url: string): Promise<boolean> {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   void onContextMenu(info, tab);
 });
-chrome.downloads.onCreated.addListener((item) => {
-  void onDownloadCreated(item).then(async (intercepted) => {
-    if (intercepted) return;
-    // The creation snapshot is stale after the async checks; use live state.
-    const [live] = await chrome.downloads.search({ id: item.id }).catch(() => []);
-    if (!live) return;
-    browserKeptIds.add(item.id);
-    await downloadUi.keepInBrowser(item.id);
-    if (live.state !== "in_progress") await downloadUi.settled(item.id);
-  });
-});
-chrome.downloads.onChanged.addListener((delta) => {
-  const state = delta.state?.current;
-  if (!state) return;
-  if (state !== "in_progress") void downloadUi.settled(delta.id);
-  // A kept download that was interrupted and later resumed is shown again.
-  else if (browserKeptIds.has(delta.id)) void downloadUi.keepInBrowser(delta.id);
-});
-chrome.downloads.onErased.addListener((id) => {
-  browserKeptIds.delete(id);
-  void downloadUi.release(id);
+// Interception happens while the browser waits for the target file name.
+// Chromium adds a download to its UI only after the name is decided, so
+// holding the suggestion (returning true) while the Host is asked keeps the
+// download bubble from opening. An accepted download is cancelled without ever
+// answering; anything kept by the browser gets the default name and resumes.
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  let answered = false;
+  const answer = (): void => {
+    if (answered) return;
+    answered = true;
+    try { suggest(); } catch { /* the download is already gone */ }
+  };
+  void onDownloadCreated(item)
+    .then((intercepted) => { if (!intercepted) answer(); })
+    .catch(() => answer());
+  return true;
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   mediaByTab.delete(tabId);
@@ -196,17 +177,6 @@ void initialize();
 
 async function initialize(): Promise<void> {
   await ensureSettingsLoaded();
-  // The worker may have restarted while browser-kept downloads were running.
-  // Running (not paused) downloads are not handoffs in flight; keep them visible.
-  try {
-    const running = await chrome.downloads.search({ state: "in_progress" });
-    for (const item of running) {
-      if (item.paused || downloadRequestIds.has(item.id)) continue;
-      browserKeptIds.add(item.id);
-      await downloadUi.keepInBrowser(item.id);
-    }
-  } catch { /* best effort */ }
-  await syncDownloadUi();
   await installMenus();
 }
 
@@ -325,7 +295,6 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
 
 async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<boolean> {
   await ensureSettingsLoaded();
-  void syncDownloadUi();
   if (!settings.enabled || !settings.autoIntercept) {
     return false;
   }
@@ -370,8 +339,10 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
   try {
     await chrome.downloads.pause(item.id);
   } catch {
-    // The download may have completed before we could pause it.
-    return false;
+    // While the file name is held the download cannot complete, so a failed
+    // pause only matters if the download already finished or was removed.
+    const [live] = await chrome.downloads.search({ id: item.id }).catch(() => []);
+    if (!live || live.state !== "in_progress") return false;
   }
 
   let requestId = downloadRequestIds.get(item.id);
@@ -1122,7 +1093,6 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       };
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;
-      await syncDownloadUi();
       await syncMediaDetectionWithTabs();
       return { ok: true, settings };
     }
@@ -1130,7 +1100,6 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.bypass": {
       bypassUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
       await chrome.storage.local.set({ bypassUntil });
-      await syncDownloadUi();
       return { ok: true, bypassUntil };
     }
 

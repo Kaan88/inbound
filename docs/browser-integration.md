@@ -12,11 +12,14 @@ Chrome version during Phase 4.
    and construct an equivalent authenticated request for a different client in
    the general case. POST bodies, multipart uploads and short-lived signed URLs
    may be unavailable. Such downloads stay in Chrome.
-2. **Interception point is the Downloads API.** `chrome.downloads.onCreated`
-   fires when Chrome starts a download. `chrome.downloads.cancel(id)` and
-   `resume(id)` are available. `onDeterminingFilename` can suggest a filename
-   but cannot itself cancel. We therefore pause/cancel only *after* a durable
-   ACK from our host.
+2. **Interception point is `downloads.onDeterminingFilename`.** Chromium adds a
+   download to its UI (the Chrome/Edge download bubble) only after the target
+   name is decided. The listener returns `true` to hold the decision, pauses,
+   and asks the Host. After a durable ACK the download is cancelled and erased
+   without ever answering, so no bubble opens. When the browser keeps the
+   download (filtered, bypassed, rejected, Host unreachable), the listener calls
+   `suggest()` once and resumes. reference app's own MV3 extension uses the same hook;
+   `downloads.setUiOptions` is not needed and is not used.
 3. **`webRequest` is observational in MV3.** Blocking requires a
    policy-installed extension; we do not rely on it. `onBeforeSendHeaders` /
    `onHeadersReceived` are used to enrich metadata, not to redirect.

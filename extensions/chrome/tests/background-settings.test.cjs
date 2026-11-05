@@ -64,7 +64,8 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
       create() {},
     },
     downloads: {
-      onCreated: downloadsCreated,
+      onCreated: event(),
+      onDeterminingFilename: downloadsCreated,
       onChanged: event(),
       onErased: event(),
       async search() { return []; },
@@ -498,6 +499,29 @@ test('restricted or unloaded pages fall back to normal bridge capture', async ()
     while (harness.pageMessageCount < 1) await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(harness.pausedDownloads, [41]);
+  } finally {
+    global.chrome = oldChrome;
+  }
+});
+
+test('file-name hook holds the download and answers when the browser keeps it', async () => {
+  const settings = {
+    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    interceptedExtensions: ['zip'], excludedExtensions: [], excludedHosts: [], notifications: false,
+  };
+  const harness = makeChrome(settings, { id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0 }, new Map());
+  const oldChrome = global.chrome;
+  global.chrome = harness.chrome;
+  try {
+    await startBackground(path.join(__dirname, '..', 'src', 'background.ts'));
+    let answered = 0;
+    const held = harness.downloadsCreated.listeners[0](
+      { id: 51, url: 'https://example.test/page.html', finalUrl: 'https://example.test/page.html', filename: 'page.html', mime: 'text/html', totalBytes: 1 },
+      () => { answered++; });
+    assert.equal(held, true, 'listener must return true so the browser waits for the name');
+    for (let i = 0; i < 50 && answered === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(answered, 1, 'a download left to the browser gets exactly one suggestion');
+    assert.deepEqual(harness.pausedDownloads, []);
   } finally {
     global.chrome = oldChrome;
   }

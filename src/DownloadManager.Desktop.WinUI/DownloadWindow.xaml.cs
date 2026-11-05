@@ -74,6 +74,8 @@ public sealed partial class DownloadWindow : Window
             UpdateButtons();
         });
         _timer.Tick += async (_, _) => await LoadSegmentsAsync();
+        SegmentDetails.Expanding += (_, _) => FitSegmentsSoon();
+        SegmentDetails.Collapsed += (_, _) => FitSegmentsSoon();
         Closed += async (_, _) =>
         {
             _closed = true;
@@ -228,7 +230,7 @@ public sealed partial class DownloadWindow : Window
         finally { _updatingControls = false; }
 
         CloseButton.Content = job.IsTerminal ? "Close" : "Hide";
-        if (job.IsTerminal) Segments.Children.Clear();
+        if (job.IsTerminal && Segments.Children.Count > 0) { Segments.Children.Clear(); _segmentRows.Clear(); FitSegmentsSoon(); }
         UpdateButtons();
     }
 
@@ -289,46 +291,38 @@ public sealed partial class DownloadWindow : Window
         finally { _loadingSegments = false; }
     }
 
+    private sealed record SegmentRow(TextBlock Number, ProgressBar Bar, TextBlock Downloaded, TextBlock Speed, TextBlock Info);
+    private readonly List<SegmentRow> _segmentRows = [];
+    private int? _heightBeforeSegments;
+
     private void RenderSegmentTable(IReadOnlyList<SegmentDto> segments, IReadOnlyList<ConnectionTelemetryDto> connections)
     {
-        Segments.Children.Clear();
         var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", Root);
-        Grid NewRow()
+        void Tone(TextBlock block, bool muted)
         {
-            var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var width in new[] { 28d, -1d, 170d, 90d, 120d })
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = width < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(width) });
-            return row;
-        }
-        void Cell(Grid row, int column, UIElement element)
-        {
-            Grid.SetColumn((FrameworkElement)element, column);
-            ((FrameworkElement)element).VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(element);
-        }
-        TextBlock Text(string value, bool muted = false, bool header = false)
-        {
-            var block = new TextBlock
-            {
-                Text = value, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
-                FontWeight = header ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-            };
-            // Leave the inherited theme foreground alone for normal cells; a null brush renders invisible text.
-            if (muted || header) block.Foreground = secondary;
-            return block;
+            // Normal cells keep the inherited theme foreground; a null brush renders invisible text.
+            if (muted) block.Foreground = secondary; else block.ClearValue(TextBlock.ForegroundProperty);
         }
 
         if (segments.Count == 0)
         {
-            Segments.Children.Add(Text("No segment information yet.", muted: true));
+            if (_segmentRows.Count > 0 || Segments.Children.Count != 1)
+            {
+                _segmentRows.Clear();
+                Segments.Children.Clear();
+                Segments.Children.Add(SegmentText("No segment information yet.", secondary, muted: true));
+                FitSegmentsSoon();
+            }
             return;
         }
-        var head = NewRow();
-        Cell(head, 0, Text("N.", header: true)); Cell(head, 1, Text("Progress", header: true));
-        Cell(head, 2, Text("Downloaded", header: true)); Cell(head, 3, Text("Speed", header: true));
-        Cell(head, 4, Text("Info", header: true));
-        Segments.Children.Add(head);
-        Segments.Children.Add(new Border { Height = 1, Background = InboundTheme.Brush("InboundDividerBrush", Root) });
+
+        // Rows are updated in place. Recreating the ProgressBars on every refresh made each bar
+        // first draw against a default width and then snap to the real one, so the bars jumped.
+        if (_segmentRows.Count != segments.Count || Segments.Children.Count != segments.Count + 2)
+        {
+            BuildSegmentRows(segments.Count, secondary);
+            FitSegmentsSoon();
+        }
 
         for (var index = 0; index < segments.Count; index++)
         {
@@ -339,14 +333,98 @@ public sealed partial class DownloadWindow : Window
             var raw = live.Sum(c => Math.Max(0, c.BytesPerSecond));
             var rate = _segmentRate.TryGetValue(segment.Start, out var previous) && raw > 0 ? previous * 0.75 + raw * 0.25 : raw;
             _segmentRate[segment.Start] = rate;
+            var row = _segmentRows[index];
+            var value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100);
+            if (Math.Abs(row.Bar.Value - value) > 0.001) row.Bar.Value = value;
+            row.Downloaded.Text = $"{Bytes(segment.Completed)} / {Bytes(length)}";
+            row.Speed.Text = rate > 0 ? $"{Bytes((long)rate)}/s" : "—";
+            Tone(row.Speed, rate <= 0);
+            row.Info.Text = segment.IsComplete ? "Complete" : live.Count > 0 ? "Receiving data…" : "Waiting";
+            Tone(row.Info, live.Count == 0);
+        }
+    }
+
+    private static TextBlock SegmentText(string value, Microsoft.UI.Xaml.Media.Brush secondary, bool muted = false, bool header = false)
+    {
+        var block = new TextBlock
+        {
+            Text = value, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
+            FontWeight = header ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+        };
+        if (muted || header) block.Foreground = secondary;
+        return block;
+    }
+
+    private void BuildSegmentRows(int count, Microsoft.UI.Xaml.Media.Brush secondary)
+    {
+        _segmentRows.Clear();
+        Segments.Children.Clear();
+        static Grid NewRow()
+        {
+            var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
+            foreach (var width in new[] { 28d, -1d, 170d, 90d, 120d })
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = width < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(width) });
+            return row;
+        }
+        static T Cell<T>(Grid row, int column, T element) where T : FrameworkElement
+        {
+            Grid.SetColumn(element, column);
+            element.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(element);
+            return element;
+        }
+
+        var head = NewRow();
+        Cell(head, 0, SegmentText("N.", secondary, header: true));
+        Cell(head, 1, SegmentText("Progress", secondary, header: true));
+        Cell(head, 2, SegmentText("Downloaded", secondary, header: true));
+        Cell(head, 3, SegmentText("Speed", secondary, header: true));
+        Cell(head, 4, SegmentText("Info", secondary, header: true));
+        Segments.Children.Add(head);
+        Segments.Children.Add(new Border { Height = 1, Background = InboundTheme.Brush("InboundDividerBrush", Root) });
+        for (var index = 0; index < count; index++)
+        {
             var row = NewRow();
-            Cell(row, 0, Text((index + 1).ToString(CultureInfo.CurrentCulture), muted: true));
-            Cell(row, 1, InboundTheme.Styled(new ProgressBar { Maximum = 100, Value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100) }));
-            Cell(row, 2, Text($"{Bytes(segment.Completed)} / {Bytes(length)}"));
-            Cell(row, 3, Text(rate > 0 ? $"{Bytes((long)rate)}/s" : "—", muted: rate <= 0));
-            Cell(row, 4, Text(segment.IsComplete ? "Complete" : live.Count > 0 ? "Receiving data…" : "Waiting", muted: live.Count == 0));
+            _segmentRows.Add(new SegmentRow(
+                Cell(row, 0, SegmentText((index + 1).ToString(CultureInfo.CurrentCulture), secondary, muted: true)),
+                Cell(row, 1, InboundTheme.Styled(new ProgressBar { Maximum = 100 })),
+                Cell(row, 2, SegmentText(string.Empty, secondary)),
+                Cell(row, 3, SegmentText("—", secondary, muted: true)),
+                Cell(row, 4, SegmentText(string.Empty, secondary, muted: true))));
             Segments.Children.Add(row);
         }
+    }
+
+    /// <summary>Grows the window so every segment row is visible; restores the height when collapsed.</summary>
+    private void FitSegmentsSoon() =>
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, FitSegments);
+
+    private void FitSegments()
+    {
+        if (_closed || Root.XamlRoot is null) return;
+        var size = AppWindow.Size;
+        if (!SegmentDetails.IsExpanded || _segmentRows.Count == 0)
+        {
+            if (_heightBeforeSegments is { } previous)
+            {
+                AppWindow.Resize(new Windows.Graphics.SizeInt32(size.Width, previous));
+                _heightBeforeSegments = null;
+            }
+            return;
+        }
+
+        StatusScroll.UpdateLayout();
+        var overflow = StatusScroll.ExtentHeight - StatusScroll.ViewportHeight;
+        if (overflow <= 1) return;
+        var scale = Root.XamlRoot.RasterizationScale;
+        var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Nearest).WorkArea;
+        var target = Math.Min(area.Height, size.Height + (int)Math.Ceiling(overflow * scale));
+        if (target <= size.Height) return;
+        _heightBeforeSegments ??= size.Height;
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(size.Width, target));
+        var position = AppWindow.Position;
+        if (position.Y + target > area.Y + area.Height)
+            AppWindow.Move(new Windows.Graphics.PointInt32(position.X, Math.Max(area.Y, area.Y + area.Height - target)));
     }
 
     private static string Bytes(long bytes) => bytes >= 1024L * 1024

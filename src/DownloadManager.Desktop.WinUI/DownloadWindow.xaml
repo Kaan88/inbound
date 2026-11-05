@@ -32,7 +32,7 @@
         <TabView x:Name="DetailsTabs" Grid.Row="1" IsAddTabButtonVisible="False"
                  CanReorderTabs="False" TabWidthMode="Equal">
             <TabViewItem Header="Download status" IsClosable="False">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer x:Name="StatusScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8" Padding="4,8,10,10">
                         <TextBlock Text="URL" FontWeight="SemiBold" />
                         <TextBlock x:Name="UrlText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
