@@ -2,6 +2,14 @@
 
 Rill branding/unified Scheduler checkpoint (2026-11-05): original generated icon saved to assets/rill-icon.png, multi-resolution assets/app.ico and extension icons built by scripts/build-icons.ps1; prompt/mode documented in assets/rill-icon-prompt.md. Display name Rill Download Manager, compatibility identities/paths unchanged. Combined Scheduler window now wired from toolbar/menu; source review fixed automatic Apply capture, selection preservation, read-only empty form, closable tabs and theme background. Latest integration95/95 includes per-job fake program/open/power behavior, no restart replay and injected completion-marker write failure preventing all side effects. Latest expanded automated totals: Core88, engine57, integration95, extension34. Scheduler visual polish after the last build still needs rebuild/live verification; installer release remains pending.
 
+### Main window, extension review and Edge flyout (2026-11-05)
+
+- Rename to Inbound Download Manager across installer, assembly product, dialogs, CLI, tray and scripts; old "Download Manager" shortcuts removed on upgrade/repair/uninstall (a81c699, 6d5a128).
+- Main window: menus regrouped and normalized, context menu grouped, duplicate Stop All / identical Pause All removed, light-theme icon tokens, status bar split (57d6228). Speed-graph expander direction restored to Up per design guidelines after an accidental flip (83e0b93).
+- Extension: popup host probe, readable states, pause-catching toggle, handoff retry after rejection, media-scan starvation fix (57d6228).
+- Edge flyout flash: interception moved to `downloads.onDeterminingFilename` (pattern observed in reference app's MV3 extension), replacing `setUiOptions` (b56ae50). Extension tests 35/35. Owner Edge check pending; not accepted.
+- Progress window: segment rows updated in place (fixes jumping bars seen in the owner's recording), window grows to fit all segments and restores on collapse (b56ae50). Live check pending.
+
 ### Consolidated validation started (2026-11-05)
 
 - Full Release solution build succeeds with zero warnings/errors after correcting accumulated Host/UI compile errors. Separate validation output: artifacts/validation-bin; build log: artifacts/consolidated-build.log. This permits the earlier QA app to remain open without file-lock rebuild failures.
