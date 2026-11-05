@@ -1,7 +1,7 @@
 {
   "name": "download-manager-bridge",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Private Download Manager Chrome bridge",
   "scripts": {
     "build": "node scripts/build.mjs",

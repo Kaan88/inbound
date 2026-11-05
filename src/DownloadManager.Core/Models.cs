@@ -473,6 +473,14 @@ public sealed class AppSettings
     public string? LastDestinationDirectory { get; set; }
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Default download folder the built-in category folders were last derived from (Compressed,
+    /// Documents, Music, Programs, Video subfolders). Null until first seeded. When the default folder
+    /// changes, category folders still at their derived value follow it; customized or cleared ones
+    /// are left alone.
+    /// </summary>
+    public string? CategoryFoldersRoot { get; set; }
     public List<DownloadCategory> CustomCategories { get; set; } = new();
     public List<DownloadGroup> DownloadGroups { get; set; } = new();
     public List<ArchivedDownloadRecord> ArchivedDownloads { get; set; } = new();

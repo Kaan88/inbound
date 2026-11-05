@@ -645,6 +645,12 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
     }
 
+    private static readonly (string Id, string Name)[] BuiltInCategoryFolders =
+    [
+        ("compressed", "Compressed"), ("documents", "Documents"), ("music", "Music"),
+        ("programs", "Programs"), ("video", "Video"),
+    ];
+
     private static void Normalize(AppSettings settings)
     {
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
@@ -734,6 +740,25 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
 
         settings.CategoryFolders = categories;
+        var root = settings.DefaultDownloadDirectory;
+        if (!string.Equals(settings.CategoryFoldersRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            var previous = settings.CategoryFoldersRoot;
+            foreach (var (id, name) in BuiltInCategoryFolders)
+            {
+                if (previous is null)
+                {
+                    if (!categories.ContainsKey(id)) categories[id] = Path.Combine(root, name);
+                }
+                else if (categories.TryGetValue(id, out var current) &&
+                         string.Equals(current, Path.Combine(previous, name), StringComparison.OrdinalIgnoreCase))
+                {
+                    categories[id] = Path.Combine(root, name);
+                }
+            }
+
+            settings.CategoryFoldersRoot = root;
+        }
 
         settings.RecentUrls ??= new List<string>();
         settings.RecentUrls = settings.RecentUrls

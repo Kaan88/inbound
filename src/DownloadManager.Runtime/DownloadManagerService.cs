@@ -880,6 +880,7 @@ public sealed partial class DownloadManagerService
 
         var next = new AppSettings
         {
+            CategoryFoldersRoot = _settings.CategoryFoldersRoot,
             DownloadGroups = CloneGroups(_settings.DownloadGroups),
             ArchivedDownloads = new(_settings.ArchivedDownloads),
             CustomCategories = categories.Select(category => new DownloadCategory { Id = category.Id, Name = category.Name,

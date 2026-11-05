@@ -1224,6 +1224,37 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task BuiltInCategoryFoldersSeedFollowDefaultFolderAndRespectClearedOrCustom()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        try
+        {
+            var store = new JsonSettingsStore(paths);
+            var first = Path.Combine(root, "dl1");
+            await store.SaveAsync(new AppSettings { DefaultDownloadDirectory = first });
+            var seeded = await store.LoadAsync();
+            Assert.Equal(Path.Combine(first, "Compressed"), seeded.CategoryFolders["compressed"]);
+            Assert.Equal(Path.Combine(first, "Video"), seeded.CategoryFolders["video"]);
+            Assert.False(seeded.CategoryFolders.ContainsKey("other"));
+
+            seeded.CategoryFolders.Remove("music");
+            seeded.CategoryFolders["video"] = Path.Combine(root, "movies");
+            var second = Path.Combine(root, "dl2");
+            seeded.DefaultDownloadDirectory = second;
+            await store.SaveAsync(seeded);
+            var moved = await store.LoadAsync();
+            Assert.Equal(Path.Combine(second, "Compressed"), moved.CategoryFolders["compressed"]);
+            Assert.Equal(Path.Combine(root, "movies"), moved.CategoryFolders["video"]);
+            Assert.False(moved.CategoryFolders.ContainsKey("music"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task RenamingUpdatesAutomaticCategoryAndKeepsExplicitSelection()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
