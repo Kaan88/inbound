@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
@@ -47,6 +47,8 @@ public static class MessageTypes
     public const string GroupActionResult = "group.actionResult";
     public const string HostStatus = "host.status";
     public const string HostShutdown = "host.shutdown";
+    /// <summary>Host event: the user asked the whole app to exit (tray, menu, CLI, queue "exit when done"). Not sent for update restarts.</summary>
+    public const string HostExiting = "host.exiting";
     public const string HostPing = "host.ping";
     public const string HostOpenUi = "host.openUi";
     public const string HostPickFolder = "host.pickFolder";

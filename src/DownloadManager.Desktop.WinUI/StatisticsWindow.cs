@@ -76,6 +76,7 @@ public sealed class StatisticsWindow : Window
         scroller.ActualThemeChanged += (_, _) => ApplyBackground();
         scroller.Loaded += (_, _) => ApplyBackground();
         Content = scroller;
+        WindowLayout.ApplyChrome(this, root);
 
         Closed += async (_, _) =>
         {
@@ -85,6 +86,7 @@ public sealed class StatisticsWindow : Window
             await _connection.DisposeAsync();
         };
         _connection.ConnectionChanged += OnConnectionChanged;
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _timer.Tick += async (_, _) => await RefreshAsync();
         _connection.Start();
         _timer.Start();
@@ -207,7 +209,7 @@ public sealed class StatisticsWindow : Window
     private static string FormatBytes(double value)
     {
         value = Math.Max(0, double.IsFinite(value) ? value : 0);
-        string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+        string[] units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
         var unit = 0;
         while (value >= 1024 && unit < units.Length - 1)
         {

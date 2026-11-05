@@ -44,6 +44,8 @@ public sealed partial class DownloadWindow : Window
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         Title = "Download status — Inbound Download Manager";
+        WindowLayout.ApplyChrome(this, Root);
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;

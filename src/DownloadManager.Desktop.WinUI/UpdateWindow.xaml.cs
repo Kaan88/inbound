@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -24,6 +24,7 @@ public sealed partial class UpdateWindow : Window
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         Title = "Inbound Download Manager update";
+        WindowLayout.ApplyChrome(this, Root);
 
         _connection.UpdateProgressChanged += progress => DispatcherQueue.TryEnqueue(() =>
         {

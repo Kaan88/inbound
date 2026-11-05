@@ -19,6 +19,11 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 | `InboundProgressTrackBrush` | progress track | `#383838` | `#E2E2E2` |
 | `InboundErrorTextBrush` | inline error messages | `#F07A7A` | `#C42B1C` |
 | `InboundHighlightBrush` | informational banners and highlighted panels | `#2B3A4F` | `#DCE9F7` |
+| `InboundIconStartBrush` / `Pause` / `Danger` / `Info` / `Neutral` | toolbar glyph accents | lighter tints | darker tints |
+
+- `App.xaml` overrides `SystemAccentColor*` with Inbound blue, so checkboxes,
+  radio buttons, accent buttons, toggles and list selection follow the palette
+  instead of the user's Windows accent. Don't reintroduce a second accent.
 
 - In XAML, use `{ThemeResource InboundXxxBrush}`.
 - In code-behind, use `InboundTheme.Brush("InboundXxxBrush", element)`. Pass the
@@ -26,8 +31,9 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
   application-level lookup can return the wrong variant.
 - New windows read `UiStateStore.Load().DarkMode`, set `RequestedTheme` on the
   root, and use `InboundSurfaceBrush` for the background.
-- The title bar colors in `MainWindow.ApplyTitleBarTheme` match
-  `InboundChromeBrush`. Keep them in sync if the chrome color changes.
+- Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
+  `Content`. It sets the app icon and a title bar matching `InboundChromeBrush`,
+  so a dark window never sits under a white caption.
 
 ## 2. Status colors
 
@@ -82,20 +88,38 @@ Color only the status text. Don't tint whole rows.
 
 ## 5. Toolbar
 
-- Buttons are flat (`InboundToolButtonStyle`): 86×58, icon above label, with a
-  transparent background in every state, including disabled. Disabled buttons
-  only dim; they don't get a gray box.
-- Icons are outline glyphs with one functional accent each (green start,
-  amber stop, red delete or stop, blue settings). Don't use filled or
-  multicolored icons.
+- Buttons are flat (`InboundToolButtonStyle`): 58px tall, at least 72px wide and
+  sized to a single-line label, icon above label, with a transparent background
+  in every state, including disabled. Disabled buttons only dim; they don't get
+  a gray box.
+- Groups, separated by `InboundToolSeparatorStyle`: Add URL | Resume, Stop,
+  Stop All | Delete, Delete Completed | Options, Scheduler | Start Queue,
+  Stop Queue.
+- Icons are outline glyphs colored with the `InboundIcon*Brush` tokens: start
+  green, pause/stop amber, delete red, add/scheduler blue, settings neutral.
+  Stop (keeps partial data) uses the pause glyph; Stop All and Stop Queue use
+  the square. Don't use hard-coded hex colors or filled icons.
 
 ## 6. Dialogs and secondary windows
 
 - Use the same surface, divider and text tokens as the main window.
 - Buttons go at the bottom right, with the primary action first and Cancel or
   Close last.
-- Use `TabView` or `Pivot` tabs for multi-page settings, like reference app's Options.
-  Each page scrolls on its own inside fixed outer bounds.
+- Don't use `TabView` (browser tabs) for settings. Multi-page settings use
+  `SettingsWindow`: a resizable window with a page list on the left, a titled
+  scrolling page with `Section`/`Hint` headings on the right, and
+  OK / Cancel / Apply in a footer. Validation errors appear inline in the footer
+  and select the offending page; the window never closes on invalid input.
+- Smaller multi-page windows (Scheduler) use a `SelectorBar` above the page.
+- Use the right control for the value: `NumberBox` for numbers,
+  `FolderField` (text box with Browse…) for folders, `TimeField`/`DaysField`/
+  `DateField` (`FormFields.cs`) for schedule times, weekdays and dates,
+  `RadioButtons` for exclusive modes. Don't ask users to type formats like
+  `HH:mm` or comma lists.
+- Dependent options are indented 28px under their parent and disabled when
+  the parent is off.
+- Windows that can be empty show an empty-state explanation, and every
+  secondary window has a Close or OK/Cancel button at the bottom right.
 - Secondary text uses `TextFillColorSecondaryBrush` in XAML or
   `InboundSecondaryTextBrush` in code. Error text uses `InboundErrorTextBrush`.
 

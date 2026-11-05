@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -405,6 +405,7 @@ public sealed class HostPipeServer
                 case MessageTypes.HostShutdown:
                     await Reply(client, message, MessageTypes.HostActionResult,
                         new HostActionResult { Ok = true, Message = "Shutting down." }).ConfigureAwait(false);
+                    await NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
                     _controller.RequestShutdown();
                     break;
 
@@ -500,6 +501,21 @@ public sealed class HostPipeServer
             Interlocked.Exchange(ref _updateWindowOpened, 0);
         var message = IpcMessage.Create(MessageTypes.UpdateProgress, progress);
         foreach (var client in _clients.Values) client.Writer.TryWrite(message);
+    }
+
+    /// <summary>
+    /// Tells connected frontends that the user asked the whole application to exit, so they close
+    /// instead of waiting offline for a Host that will not come back. Best effort, bounded by <paramref name="timeout"/>.
+    /// </summary>
+    public async Task NotifyExitingAsync(TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        var message = IpcMessage.Create(MessageTypes.HostExiting, new { });
+        await Task.WhenAll(_clients.Values.Select(async client =>
+        {
+            try { await client.SendDirectAsync(message, cts.Token).ConfigureAwait(false); }
+            catch (Exception) { /* client already gone */ }
+        })).ConfigureAwait(false);
     }
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)

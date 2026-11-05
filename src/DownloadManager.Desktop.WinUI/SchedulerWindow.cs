@@ -26,10 +26,10 @@ public sealed class SchedulerWindow : Window
     private readonly ComboBox _schedulePicker = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _scheduleTarget = new() { Header = "Queue", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _scheduleName = new() { Header = "Schedule name", MaxLength = 80 };
-    private readonly TextBox _startTime = new() { Header = "Start time (HH:mm)" };
-    private readonly TextBox _stopTime = new() { Header = "Stop time (HH:mm, optional)" };
-    private readonly TextBox _days = new() { Header = "Days (comma-separated)" };
-    private readonly TextBox _oneTimeDate = new() { Header = "One-time date (yyyy-MM-dd, optional)" };
+    private readonly TimeField _startTime = new("Start time", optional: false);
+    private readonly TimeField _stopTime = new("Stop time (optional)", optional: true);
+    private readonly DaysField _days = new("Days");
+    private readonly DateField _oneTimeDate = new("One-time date (optional)", "Repeat on the days above");
     private readonly CheckBox _scheduleEnabled = new() { Content = "Enable schedule" };
     private readonly CheckBox _openWhenDone = new() { Content = "Open a file when the queue finishes" };
     private readonly CheckBox _exitWhenDone = new() { Content = "Exit Download Manager when the queue finishes" };
@@ -50,10 +50,10 @@ public sealed class SchedulerWindow : Window
     private readonly Button _moveFile = new() { Content = "Move", IsEnabled = false };
     private readonly TextBlock _fileHint = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
 
-    private readonly TextBox _maxConcurrent = new() { Header = "Files at the same time (1–16)" };
+    private readonly NumberBox _maxConcurrent = new() { Header = "Files at the same time", Minimum = 1, Maximum = 16, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 160 };
     private readonly CheckBox _quotaEnabled = new() { Content = "Enable download limit" };
-    private readonly TextBox _quotaMb = new() { Header = "Download limit (MB; max 10,485,760)" };
-    private readonly TextBox _quotaHours = new() { Header = "Limit window (hours; 1–8,760)" };
+    private readonly NumberBox _quotaMb = new() { Header = "Download limit (MB)", Minimum = 1, Maximum = 10_485_760, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 200 };
+    private readonly NumberBox _quotaHours = new() { Header = "Per (hours)", Minimum = 1, Maximum = 8_760, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 160 };
 
     private readonly Dictionary<int, QueuePolicyDraft> _queueDrafts = new();
     private readonly Dictionary<int, QueueDto> _queuePolicyBaselines = new();
@@ -131,10 +131,13 @@ public sealed class SchedulerWindow : Window
         _queues.SelectionChanged += (_, _) => OnQueueSelectionChanged();
         Grid.SetRow(_queues, 1);
         queuePanel.Children.Add(_queues);
-        var queueCrud = new StackPanel { Spacing = 6 };
-        var createQueue = new Button { Content = "New queue", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var renameQueue = new Button { Content = "Rename queue", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var deleteQueue = new Button { Content = "Delete queue", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var queueCrud = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var createQueue = new Button { Content = "New…" };
+        var renameQueue = new Button { Content = "Rename…" };
+        var deleteQueue = new Button { Content = "Delete" };
+        ToolTipService.SetToolTip(createQueue, "New queue");
+        ToolTipService.SetToolTip(renameQueue, "Rename the selected queue");
+        ToolTipService.SetToolTip(deleteQueue, "Delete the selected queue");
         createQueue.Click += async (_, _) => await CreateQueueAsync();
         renameQueue.Click += async (_, _) => await RenameQueueAsync();
         deleteQueue.Click += async (_, _) => await DeleteQueueAsync();
@@ -153,15 +156,20 @@ public sealed class SchedulerWindow : Window
         Grid.SetColumn(queuePanel, 0);
         root.Children.Add(queuePanel);
 
-        var tabs = new TabView
-        {
-            IsAddTabButtonVisible = false,
-            CanDragTabs = false,
-            CanReorderTabs = false,
-        };
-        tabs.TabItems.Add(new TabViewItem { Header = "Schedule", IsClosable = false, Content = BuildScheduleTab() });
-        tabs.TabItems.Add(new TabViewItem { Header = "Files", IsClosable = false, Content = BuildFilesTab() });
-        tabs.TabItems.Add(new TabViewItem { Header = "Limits", IsClosable = false, Content = BuildLimitsTab() });
+        // Flat selector bar instead of browser-style tabs (see docs/design-guidelines.md, dialogs).
+        var tabs = new Grid { RowSpacing = 6 };
+        tabs.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        tabs.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var tabBar = new SelectorBar();
+        var tabPage = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        Grid.SetRow(tabPage, 1);
+        var tabPages = new List<UIElement> { BuildScheduleTab(), BuildFilesTab(), BuildLimitsTab() };
+        foreach (var header in new[] { "Schedule", "Files", "Limits" }) tabBar.Items.Add(new SelectorBarItem { Text = header });
+        tabBar.SelectionChanged += (_, _) => tabPage.Content = tabPages[Math.Max(0, tabBar.Items.IndexOf(tabBar.SelectedItem))];
+        tabBar.SelectedItem = tabBar.Items[0];
+        tabPage.Content = tabPages[0];
+        tabs.Children.Add(tabBar);
+        tabs.Children.Add(tabPage);
         Grid.SetColumn(tabs, 1);
         root.Children.Add(tabs);
 
@@ -186,6 +194,7 @@ public sealed class SchedulerWindow : Window
         _editorSurface.RequestedTheme = root.RequestedTheme;
         var windowFrame = new Border { Child = _editorSurface, RequestedTheme = root.RequestedTheme };
         Content = windowFrame;
+        WindowLayout.ApplyChrome(this, root);
         void ApplyBackground()
         {
             var brush = InboundTheme.Brush("InboundSurfaceBrush", root);
@@ -202,6 +211,7 @@ public sealed class SchedulerWindow : Window
             await _connection.DisposeAsync();
         };
         _connection.ConnectionChanged += OnConnectionChanged;
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _timer.Tick += async (_, _) => await RefreshAsync();
         _connection.Start();
         _timer.Start();
@@ -238,8 +248,9 @@ public sealed class SchedulerWindow : Window
         timing.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         timing.Children.Add(_startTime);
         timing.Children.Add(_stopTime); Grid.SetColumn(_stopTime, 1);
-        timing.Children.Add(_days); Grid.SetRow(_days, 1);
-        timing.Children.Add(_oneTimeDate); Grid.SetRow(_oneTimeDate, 1); Grid.SetColumn(_oneTimeDate, 1);
+        timing.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        timing.Children.Add(_days); Grid.SetRow(_days, 1); Grid.SetColumnSpan(_days, 2);
+        timing.Children.Add(_oneTimeDate); Grid.SetRow(_oneTimeDate, 2);
         panel.Children.Add(timing);
         var completion = new StackPanel { Spacing = 8 };
         completion.Children.Add(_openWhenDone); completion.Children.Add(_exitWhenDone);

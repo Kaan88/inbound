@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using DownloadManager.Contracts;
 
@@ -16,6 +16,8 @@ public sealed class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<bool, string?>? ConnectionChanged;
+    /// <summary>The Host announced a user-requested application exit.</summary>
+    public event Action? HostExiting;
 
     public bool IsConnected => _client is not null;
 
@@ -259,6 +261,11 @@ public sealed class HostConnection : IAsyncDisposable
 
     private void Dispatch(IpcMessage message, bool snapshot)
     {
+        if (message.Type == MessageTypes.HostExiting)
+        {
+            HostExiting?.Invoke();
+            return;
+        }
         if (message.Type == MessageTypes.UpdateProgress)
         {
             UpdateProgressChanged?.Invoke(message.GetPayload<UpdateProgressDto>());

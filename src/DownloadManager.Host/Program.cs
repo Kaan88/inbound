@@ -89,9 +89,15 @@ internal static class Program
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
-            completionExecutor.ExitHost = controller.RequestShutdown;
+            // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
             var pipe = new HostPipeServer(service, controller, log);
+            void ExitApplication() => _ = Task.Run(async () =>
+            {
+                try { await pipe.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+                finally { controller.RequestShutdown(); }
+            });
+            completionExecutor.ExitHost = ExitApplication;
             pipe.Start();
 
             // Passed by the installer when "Start when I sign in" is selected; afterwards the
@@ -123,7 +129,7 @@ internal static class Program
                 OpenSettings: () => controller.OpenUi("settings"),
                 PauseAll: () => FireAndForget(service.PauseAllAsync(), log),
                 ResumeAll: () => FireAndForget(service.ResumeAllAsync(), log),
-                Exit: controller.RequestShutdown,
+                Exit: ExitApplication,
                 IntegrationStatus: () => BrowserIntegrationText(service),
                 ActiveCount: () => service.GetSnapshot().Status.ActiveDownloads,
                 UpdateText: () => updateMonitor.UpdateText,

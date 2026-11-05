@@ -21,7 +21,7 @@ public sealed partial class MainWindow : Window
     private SchedulerWindow? _schedulerWindow;
     private SettingsDto? _settings;
     private HostStatusDto? _status;
-    private bool _settingsDialogOpen;
+    private SettingsWindow? _settingsWindow;
     private bool _pendingSettingsOpen;
     private string _category = "all";
     private string _search = string.Empty;
@@ -93,6 +93,11 @@ public sealed partial class MainWindow : Window
         _connection.JobChanged += (job, type) => DispatcherQueue.TryEnqueue(() => ApplyJobEvent(job, type));
         _connection.ConnectionChanged += (connected, error) =>
             DispatcherQueue.TryEnqueue(() => ApplyConnection(connected, error));
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            UiTrace.Write("Host announced application exit");
+            Application.Current.Exit();
+        });
         _connection.Start();
         UiTrace.Write("MainWindow connection started");
 
@@ -1357,7 +1362,9 @@ public sealed partial class MainWindow : Window
         _toolbarLarge = large;
         foreach (var button in ToolbarPanel.Children.OfType<Button>())
         {
-            button.Width = large ? 86 : 34;
+            button.Width = large ? double.NaN : 34;
+            button.MinWidth = large ? 72 : 34;
+            button.Padding = large ? new Thickness(10, 2, 10, 2) : new Thickness(2);
             button.Height = large ? 58 : 32;
             if (button.Content is not StackPanel content)
             {
@@ -1385,31 +1392,7 @@ public sealed partial class MainWindow : Window
         SaveUiState();
     }
 
-    private void ApplyTitleBarTheme(bool dark)
-    {
-        var titleBar = AppWindow.TitleBar;
-        if (!AppWindowTitleBar.IsCustomizationSupported())
-        {
-            return;
-        }
-
-        var background = dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 243, 243, 243);
-        var foreground = dark ? Windows.UI.Color.FromArgb(255, 235, 235, 235) : Windows.UI.Color.FromArgb(255, 30, 30, 30);
-        var hover = dark ? Windows.UI.Color.FromArgb(255, 45, 45, 48) : Windows.UI.Color.FromArgb(255, 225, 225, 225);
-        var pressed = dark ? Windows.UI.Color.FromArgb(255, 60, 60, 63) : Windows.UI.Color.FromArgb(255, 210, 210, 210);
-        titleBar.BackgroundColor = background;
-        titleBar.ForegroundColor = foreground;
-        titleBar.InactiveBackgroundColor = background;
-        titleBar.InactiveForegroundColor = foreground;
-        titleBar.ButtonBackgroundColor = background;
-        titleBar.ButtonForegroundColor = foreground;
-        titleBar.ButtonHoverBackgroundColor = hover;
-        titleBar.ButtonHoverForegroundColor = foreground;
-        titleBar.ButtonPressedBackgroundColor = pressed;
-        titleBar.ButtonPressedForegroundColor = foreground;
-        titleBar.ButtonInactiveBackgroundColor = background;
-        titleBar.ButtonInactiveForegroundColor = foreground;
-    }
+    private void ApplyTitleBarTheme(bool dark) => WindowLayout.ApplyTitleBar(this, dark);
 
     private async void MenuUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -1571,13 +1554,31 @@ public sealed partial class MainWindow : Window
             Header = "URL",
             PlaceholderText = "https://example.com/file.zip",
             IsEditable = true,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         foreach (var recent in _settings.RecentUrls.Take(20))
         {
             urlBox.Items.Add(recent);
         }
-        var addressError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        var addressPanel = new StackPanel { Spacing = 8, MinWidth = 360 };
+        // Like other download managers, start from a link already on the clipboard.
+        try
+        {
+            var clip = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+            {
+                var text = (await clip.GetTextAsync()).Trim();
+                if (text.Length < 4096 && Uri.TryCreate(text, UriKind.Absolute, out var clipUri) &&
+                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp))
+                    urlBox.Text = text;
+            }
+        }
+        catch (Exception)
+        {
+            // Clipboard access is best-effort.
+        }
+        var addressError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
+            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid) };
+        var addressPanel = new StackPanel { Spacing = 8, MinWidth = 460 };
         addressPanel.Children.Add(urlBox);
         addressPanel.Children.Add(addressError);
         var addressDialog = new ContentDialog
@@ -2986,112 +2987,106 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowSettingsDialogAsync()
     {
-        if (_settingsDialogOpen || _settings is null)
+        if (_settingsWindow is not null)
         {
+            _settingsWindow.Activate();
             return;
         }
+        if (_settings is null) return;
 
-        _settingsDialogOpen = true;
+        var settings = CloneSettings(_settings);
+        var window = new SettingsWindow(RootGrid.ActualTheme);
+        _settingsWindow = window;
+        window.Closed += (_, _) => _settingsWindow = null;
         try
         {
-            var settings = CloneSettings(_settings);
-            var directory = new TextBox { Header = "Default download folder", Text = settings.DefaultDownloadDirectory };
-            var maxConcurrent = new TextBox { Header = "Maximum simultaneous downloads", Text = settings.MaxConcurrentDownloads.ToString() };
-            var connections = new TextBox { Header = "Connections per download (1–32)", Text = settings.DefaultConnections.ToString() };
-            var speedLimit = new TextBox
-            {
-                Header = "Global speed limit (KB/s, empty for unlimited)",
-                Text = settings.GlobalSpeedLimitBytesPerSecond is > 0
-                    ? (settings.GlobalSpeedLimitBytesPerSecond.Value / 1024).ToString()
-                    : string.Empty,
-            };
+            var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
+            var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
+            var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
+            var speedLimit = SettingsWindow.Number("Global speed limit (KB/s)",
+                settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
+                1, 10_000_000, "Unlimited");
+            speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;
             var profilesBox = new TextBox
             {
-                Header = "Connection profiles (host-pattern=max-connections per line)",
+                Header = "One host pattern=maximum connections per line",
                 Text = string.Join(
                     Environment.NewLine,
                     settings.ConnectionProfiles.Select(profile => $"{profile.Pattern}={profile.MaxConnections}")),
                 AcceptsReturn = true,
-                Height = 80,
+                Height = 96,
                 PlaceholderText = "*.example.com=2",
             };
-            var launch = new CheckBox { Content = "Launch Download Manager at sign-in", IsChecked = settings.LaunchAtStartup };
-            var clipboard = new CheckBox { Content = "Monitor the clipboard for URLs", IsChecked = settings.ClipboardMonitoring };
-            var integration = new CheckBox { Content = "Enable Chrome download capture", IsChecked = settings.BrowserIntegrationEnabled };
-            var autoIntercept = new CheckBox { Content = "Automatically take over eligible Chrome downloads", IsChecked = settings.BrowserAutoIntercept };
-            var notify = new CheckBox { Content = "Notify when a download completes", IsChecked = settings.NotifyOnCompletion };
-            var sound = new CheckBox { Content = "Play a sound when a download completes", IsChecked = settings.PlayCompletionSound };
+            var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = settings.LaunchAtStartup };
+            var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
+            var integration = new CheckBox { Content = "Capture downloads from Chrome", IsChecked = settings.BrowserIntegrationEnabled };
+            var autoIntercept = new CheckBox { Content = "Take over eligible Chrome downloads automatically", IsChecked = settings.BrowserAutoIntercept,
+                Margin = new Thickness(28, 0, 0, 0) };
+            autoIntercept.IsEnabled = integration.IsChecked == true;
+            integration.Checked += (_, _) => autoIntercept.IsEnabled = true;
+            integration.Unchecked += (_, _) => autoIntercept.IsEnabled = false;
+            var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
+            var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
-            var autoResume = new CheckBox { Content = "Resume unfinished downloads after restart", IsChecked = settings.AutoResumeUnfinishedOnStartup };
+            var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
             var postDownload = new TextBox
             {
                 Header = "Run this program after each download (optional)",
                 Text = settings.PostDownloadCommand ?? string.Empty,
                 PlaceholderText = @"C:\Program Files\Scanner\scan.exe",
             };
-            var updateUrl = new TextBox
-            {
-                Header = "Update manifest URL (HTTPS)",
-                Text = settings.UpdateManifestUrl ?? string.Empty,
-            };
+            var updateUrl = new TextBox { Header = "Update manifest URL (HTTPS)", Text = settings.UpdateManifestUrl ?? string.Empty };
             var updateKey = new TextBox
             {
                 Header = "Update public key (PEM)",
                 Text = settings.UpdatePublicKey ?? string.Empty,
                 AcceptsReturn = true,
-                Height = 70,
+                Height = 96,
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"),
+                FontSize = 12,
             };
-            var updateChannel = new TextBox
-            {
-                Header = "Update channel",
-                Text = settings.UpdateChannel,
-            };
+            var updateChannel = new TextBox { Header = "Update channel", Text = settings.UpdateChannel, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 200 };
             var autoUpdate = new CheckBox
             {
-                Content = "Automatically check and install updates when downloads are idle (installed copies only)",
+                Content = "Check for and install updates automatically while no downloads are running",
                 IsChecked = settings.AutoCheckUpdates,
             };
-            var updateInterval = new TextBox
-            {
-                Header = "Update check interval (hours)",
-                Text = settings.UpdateCheckIntervalHours.ToString(),
-            };
+            var updateInterval = SettingsWindow.Number("Check every (hours)", settings.UpdateCheckIntervalHours, 1, 168);
 
             var (proxyProtocolIndex, proxyHostText) = ProxyAddress.Split(settings.Proxy.Address);
-            var proxyMode = new ComboBox
+            var proxyMode = new RadioButtons
             {
-                Header = "Proxy",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                ItemsSource = new[] { "No proxy", "Use system proxy", "Manual proxy" },
+                Header = "Connection",
+                ItemsSource = new[] { "No proxy", "Use the Windows proxy settings", "Use this proxy server:" },
                 SelectedIndex = settings.Proxy.Mode switch { "system" => 1, "manual" => 2, _ => 0 },
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyMode, "Proxy mode");
             var proxyProtocol = new ComboBox
             {
-                Header = "Proxy type",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Header = "Type",
+                MinWidth = 140,
                 ItemsSource = ProxyAddress.ProtocolNames,
                 SelectedIndex = proxyProtocolIndex,
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyProtocol, "Proxy type");
             var proxyAddress = new TextBox
             {
-                Header = "Proxy address (host:port)",
+                Header = "Address (host:port)",
                 Text = proxyHostText,
                 PlaceholderText = "proxy.example.com:8080",
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyAddress, "Proxy address");
             var proxyUser = new TextBox
             {
-                Header = "Proxy user name (SOCKS4/4a send it as the user ID)",
+                Header = "User name (optional; SOCKS4/4a send it as the user ID)",
                 Text = settings.Proxy.Username ?? string.Empty,
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyUser, "Proxy user name");
             var proxyPassword = new PasswordBox
             {
                 Header = settings.Proxy.HasPassword
-                    ? "Proxy password (saved - leave empty to keep it)"
-                    : "Proxy password",
+                    ? "Password (saved - leave empty to keep it)"
+                    : "Password (optional)",
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyPassword, "Proxy password");
             var forgetProxyPassword = new CheckBox
@@ -3100,11 +3095,31 @@ public sealed partial class MainWindow : Window
                 Visibility = settings.Proxy.HasPassword ? Visibility.Visible : Visibility.Collapsed,
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(forgetProxyPassword, "Forget the saved proxy password");
-            forgetProxyPassword.Checked += (_, _) => proxyPassword.IsEnabled = false;
-            forgetProxyPassword.Unchecked += (_, _) => proxyPassword.IsEnabled = true;
+            var proxyServer = new Grid { ColumnSpacing = 8 };
+            proxyServer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            proxyServer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            proxyServer.Children.Add(proxyProtocol);
+            Grid.SetColumn(proxyAddress, 1);
+            proxyServer.Children.Add(proxyAddress);
+            var manualProxy = new StackPanel { Spacing = 12, Margin = new Thickness(28, 0, 0, 0) };
+            manualProxy.Children.Add(proxyServer);
+            manualProxy.Children.Add(proxyUser);
+            manualProxy.Children.Add(proxyPassword);
+            manualProxy.Children.Add(forgetProxyPassword);
+            void UpdateProxyFields()
+            {
+                var manual = proxyMode.SelectedIndex == 2;
+                proxyProtocol.IsEnabled = proxyAddress.IsEnabled = proxyUser.IsEnabled = manual;
+                proxyPassword.IsEnabled = manual && forgetProxyPassword.IsChecked != true;
+                forgetProxyPassword.IsEnabled = manual;
+            }
+            proxyMode.SelectionChanged += (_, _) => UpdateProxyFields();
+            forgetProxyPassword.Checked += (_, _) => UpdateProxyFields();
+            forgetProxyPassword.Unchecked += (_, _) => UpdateProxyFields();
+            UpdateProxyFields();
 
             var loginRows = new List<(SiteLoginDto Original, TextBox Site, TextBox User, PasswordBox Password)>();
-            var loginPanel = new StackPanel { Spacing = 12 };
+            var loginPanel = new StackPanel { Spacing = 10 };
             void AddLoginRow(SiteLoginDto original)
             {
                 var site = new TextBox { Header = "Site or URL prefix", Text = original.Site,
@@ -3112,15 +3127,20 @@ public sealed partial class MainWindow : Window
                 var user = new TextBox { Header = "User name", Text = original.Username };
                 var password = new PasswordBox { Header = original.HasPassword
                     ? "Password (saved; leave empty to keep)" : "Password" };
-                var remove = new Button { Content = "Remove login", HorizontalAlignment = HorizontalAlignment.Right };
+                var remove = new Button { Content = "Remove", HorizontalAlignment = HorizontalAlignment.Right };
+                var credentials = new Grid { ColumnSpacing = 8 };
+                credentials.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                credentials.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                credentials.Children.Add(user);
+                Grid.SetColumn(password, 1);
+                credentials.Children.Add(password);
                 var row = new StackPanel { Spacing = 8 };
                 row.Children.Add(site);
-                row.Children.Add(user);
-                row.Children.Add(password);
+                row.Children.Add(credentials);
                 row.Children.Add(remove);
                 var border = new Border { Child = row, Padding = new Thickness(12), BorderThickness = new Thickness(1),
-                    BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"],
-                    CornerRadius = new CornerRadius(6) };
+                    BorderBrush = InboundTheme.Brush("InboundDividerBrush", RootGrid),
+                    CornerRadius = new CornerRadius(4) };
                 var entry = (original, site, user, password);
                 loginRows.Add(entry);
                 loginPanel.Children.Add(border);
@@ -3134,17 +3154,16 @@ public sealed partial class MainWindow : Window
             foreach (var login in settings.SiteLogins) AddLoginRow(login);
             var addLogin = new Button { Content = "Add site login" };
             addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
-            var loginHelp = new TextBlock { Text = "Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.",
-                TextWrapping = TextWrapping.Wrap };
+            var loginHelp = SettingsWindow.Hint("Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
+            var categoryRows = new List<UIElement>();
             foreach (var category in FileCategories.Names.Append("other"))
             {
-                categoryBoxes[category] = new TextBox
-                {
-                    Header = $"{char.ToUpperInvariant(category[0])}{category[1..]} folder (optional)",
-                    Text = settings.CategoryFolders.TryGetValue(category, out var folder) ? folder : string.Empty,
-                };
+                var (row, box) = window.FolderField($"{char.ToUpperInvariant(category[0])}{category[1..]}",
+                    settings.CategoryFolders.TryGetValue(category, out var folder) ? folder : null, "Use the default folder", inlineLabel: true);
+                categoryBoxes[category] = box;
+                categoryRows.Add(row);
             }
 
             var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
@@ -3154,15 +3173,16 @@ public sealed partial class MainWindow : Window
             {
                 var name = new TextBox { Header = "Name", Text = category.Name };
                 var extensions = new TextBox { Header = "File extensions (space separated)", Text = string.Join(" ", category.Extensions) };
-                var folder = new TextBox { Header = "Destination folder (optional)", Text = category.DestinationDirectory ?? string.Empty };
+                var (folderRow, folder) = window.FolderField("Destination folder (optional)", category.DestinationDirectory);
                 customCategoryEditors.Add((category, name, extensions, folder));
                 var remove = new Button { Content = "Remove category", HorizontalAlignment = HorizontalAlignment.Right };
                 var fields = new StackPanel { Spacing = 8 };
                 fields.Children.Add(name);
                 fields.Children.Add(extensions);
-                fields.Children.Add(folder);
+                fields.Children.Add(folderRow);
                 fields.Children.Add(remove);
-                var expander = new Expander { Header = category.Name, Content = fields, HorizontalAlignment = HorizontalAlignment.Stretch };
+                var expander = new Expander { Header = category.Name, Content = fields, HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 remove.Click += (_, _) =>
                 {
                     if (!stagedCategoryRemovals.Add(category.Id))
@@ -3179,242 +3199,150 @@ public sealed partial class MainWindow : Window
                 };
                 customCategoryControls.Add(expander);
             }
-            var tabs = new TabView
-            {
-                IsAddTabButtonVisible = false,
-                CanReorderTabs = false,
-                TabWidthMode = TabViewWidthMode.SizeToContent,
-                Width = Math.Max(280, Math.Min(740, RootGrid.ActualWidth - 100)),
-                Height = Math.Max(220, Math.Min(470, RootGrid.ActualHeight - 240)),
-            };
-            void AddOptionsTab(string title, params UIElement[] controls)
-            {
-                var panel = new StackPanel { Spacing = 12, Padding = new Thickness(4, 16, 16, 8) };
-                foreach (var control in controls) panel.Children.Add(control);
-                tabs.TabItems.Add(new TabViewItem
-                {
-                    Header = title,
-                    IsClosable = false,
-                    Content = new ScrollViewer
-                    {
-                        Content = panel,
-                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                    },
-                });
-            }
-            AddOptionsTab("General", launch, clipboard, integration, autoIntercept);
-            AddOptionsTab("Save to", new UIElement[] { directory }.Concat(categoryBoxes.Values).Concat(customCategoryControls).ToArray());
-            AddOptionsTab("Downloads", autoResume, completionDialog, notify, sound, postDownload);
-            AddOptionsTab("Connection", maxConcurrent, connections, speedLimit, profilesBox);
-            AddOptionsTab("Proxy", proxyMode, proxyProtocol, proxyAddress, proxyUser, proxyPassword, forgetProxyPassword);
-            AddOptionsTab("Site logins", loginHelp, loginPanel, addLogin);
-            AddOptionsTab("Updates", autoUpdate, updateInterval, updateChannel, updateUrl, updateKey);
-            var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, this);
-            var soundErrorText = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-            AddOptionsTab("Sounds", soundEditor.Content, soundErrorText);
 
-            var dialog = new ContentDialog
+            const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
+            window.AddPage("General", "\uE80F",
+                SettingsWindow.Section("Startup"), launch, autoResume,
+                SettingsWindow.Section("Capturing downloads"), integration, autoIntercept, clipboard);
+            var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"),
+                SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder.") };
+            saveTo.AddRange(categoryRows);
+            if (customCategoryControls.Count > 0)
             {
-                XamlRoot = Content.XamlRoot,
-                Title = "Options",
-                Content = tabs,
-                PrimaryButtonText = "Save",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            dialog.Resources["ContentDialogMaxWidth"] = 840d;
-            dialog.PrimaryButtonClick += (_, args) =>
+                saveTo.Add(SettingsWindow.Section("Custom categories"));
+                saveTo.AddRange(customCategoryControls);
+            }
+            window.AddPage("Save to", "\uE8B7", saveTo.ToArray());
+            window.AddPage("Downloads", "\uE896",
+                SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload);
+            window.AddPage("Connection", "\uE774",
+                maxConcurrent, connections, speedLimit,
+                SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
+                SettingsWindow.Section("Per-site limits"), profilesBox);
+            window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
+            window.AddPage("Site logins", "\uE8D7", loginHelp, loginPanel, addLogin);
+            window.AddPage("Updates", "\uE895", autoUpdate, updateInterval,
+                SettingsWindow.Section("Update source"), updateChannel, updateUrl, updateKey);
+            var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, window);
+            window.AddPage("Sounds", "\uE767", soundEditor.Content);
+
+            static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
+
+            window.Save = async () =>
             {
-                if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var validationError))
-                {
-                    soundErrorText.Text = validationError;
-                    soundErrorText.Visibility = Visibility.Visible;
-                    tabs.SelectedIndex = 7;
-                    args.Cancel = true;
-                    return;
-                }
+                if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
+                    return (soundError ?? "Invalid sound choice.", SoundsPage);
                 foreach (var row in loginRows)
                 {
                     if (string.IsNullOrWhiteSpace(row.Site.Text) || string.IsNullOrWhiteSpace(row.User.Text))
-                    {
-                        loginHelp.Text = "Every site login needs a site and user name. Remove unused rows before saving.";
-                        tabs.SelectedIndex = 5;
-                        args.Cancel = true;
-                        return;
-                    }
+                        return ("Every site login needs a site and user name. Remove unused rows before saving.", SiteLoginsPage);
                     if (row.Original.HasPassword && string.IsNullOrEmpty(row.Password.Password) &&
                         (!string.Equals(row.Original.Site, row.Site.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
                          !string.Equals(row.Original.Username, row.User.Text.Trim(), StringComparison.Ordinal)))
-                    {
-                        loginHelp.Text = "Re-enter the password for a login whose site or user name changed.";
-                        tabs.SelectedIndex = 5;
-                        args.Cancel = true;
-                        return;
-                    }
+                        return ("Re-enter the password for a login whose site or user name changed.", SiteLoginsPage);
                 }
+                if (WholeNumber(maxConcurrent) is not { } max || max is < 1 or > 16)
+                    return ("Maximum simultaneous downloads must be between 1 and 16.", ConnectionPage);
+                if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32)
+                    return ("Connections per download must be between 1 and 32.", ConnectionPage);
+                long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
+                if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ConnectionPage);
+                if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168)
+                    return ("Update interval must be 1-168 hours.", UpdatesPage);
+
+                var proxyModeValue = proxyMode.SelectedIndex switch { 1 => "system", 2 => "manual", _ => "none" };
+                string? composedProxyAddress = null;
+                if (proxyModeValue == "manual")
+                {
+                    composedProxyAddress = ProxyAddress.Compose(proxyProtocol.SelectedIndex, proxyAddress.Text);
+                    if (composedProxyAddress is null)
+                        return ("Enter the proxy address as host:port (port 1-65535).", ProxyPage);
+                }
+
+                var profiles = new List<ConnectionProfileDto>();
+                foreach (var line in profilesBox.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.Length == 0) continue;
+                    var separator = trimmed.LastIndexOf('=');
+                    if (separator <= 0 ||
+                        !int.TryParse(trimmed[(separator + 1)..].Trim(), out var profileLimit) ||
+                        profileLimit < 1 || profileLimit > 32)
+                        return ($"Per-site limit '{trimmed}' must use pattern=max (1-32).", ConnectionPage);
+                    profiles.Add(new ConnectionProfileDto { Pattern = trimmed[..separator].Trim(), MaxConnections = profileLimit });
+                }
+
+                settings.Proxy = new ProxyDto
+                {
+                    Mode = proxyModeValue,
+                    Address = composedProxyAddress,
+                    Username = string.IsNullOrWhiteSpace(proxyUser.Text) ? null : proxyUser.Text.Trim(),
+                    // Empty keeps the stored password (the host re-applies it for an unchanged address/user)
+                    // unless "Forget" is checked.
+                    Password = forgetProxyPassword.IsChecked == true || string.IsNullOrEmpty(proxyPassword.Password)
+                        ? null
+                        : proxyPassword.Password,
+                    ClearPassword = forgetProxyPassword.IsChecked == true,
+                    HasPassword = settings.Proxy.HasPassword && forgetProxyPassword.IsChecked != true,
+                };
+                settings.DefaultDownloadDirectory = directory.Text.Trim();
+                settings.SiteLogins = loginRows.Select(row => new SiteLoginDto
+                {
+                    Id = row.Original.Id,
+                    Site = row.Site.Text.Trim(),
+                    Username = row.User.Text.Trim(),
+                    Password = string.IsNullOrEmpty(row.Password.Password) ? null : row.Password.Password,
+                    HasPassword = row.Original.HasPassword,
+                }).ToList();
+                settings.MaxConcurrentDownloads = max;
+                settings.DefaultConnections = connectionsValue;
+                settings.GlobalSpeedLimitBytesPerSecond = limit;
+                settings.ConnectionProfiles = profiles;
+                settings.LaunchAtStartup = launch.IsChecked == true;
+                settings.ClipboardMonitoring = clipboard.IsChecked == true;
+                settings.BrowserIntegrationEnabled = integration.IsChecked == true;
+                settings.BrowserAutoIntercept = autoIntercept.IsChecked == true;
+                settings.NotifyOnCompletion = notify.IsChecked == true;
+                settings.PlayCompletionSound = sound.IsChecked == true;
+                settings.ShowCompletionDialog = completionDialog.IsChecked == true;
+                settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
+                settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text) ? null : postDownload.Text.Trim();
+                settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(updateUrl.Text) ? null : updateUrl.Text.Trim();
+                settings.UpdatePublicKey = string.IsNullOrWhiteSpace(updateKey.Text) ? null : updateKey.Text.Trim();
+                settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text) ? "stable" : updateChannel.Text.Trim();
+                settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
+                settings.UpdateCheckIntervalHours = checkInterval;
+                settings.CategoryFolders = categoryBoxes
+                    .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
+                foreach (var editor in customCategoryEditors)
+                {
+                    editor.Category.Name = editor.Name.Text.Trim();
+                    editor.Category.Extensions = editor.Extensions.Text.Split([' ', ',', ';', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList();
+                    editor.Category.DestinationDirectory = string.IsNullOrWhiteSpace(editor.Folder.Text) ? null : editor.Folder.Text.Trim();
+                }
+                settings.CustomCategories = settings.CustomCategories
+                    .Where(category => !stagedCategoryRemovals.Contains(category.Id))
+                    .ToList();
+                settings.DeleteCategoryIds = stagedCategoryRemovals.ToList();
+
+                var reply = await _connection.UpdateSettingsAsync(settings);
+                var update = reply.GetPayload<SettingsResult>();
+                if (!update.Ok)
+                    return (update.Error ?? "The host rejected the settings.", -1);
+
+                _settings = update.Settings;
+                await RefreshAsync();
+                return (null, 0);
             };
 
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-
-            if (!int.TryParse(maxConcurrent.Text, out var max) || max < 1 || max > 16)
-            {
-                await ShowMessageAsync("Invalid setting", "Maximum simultaneous downloads must be between 1 and 16.");
-                return;
-            }
-
-            if (!int.TryParse(connections.Text, out var connectionsValue) || connectionsValue < 1 || connectionsValue > 32)
-            {
-                await ShowMessageAsync("Invalid setting", "Connections per download must be between 1 and 32.");
-                return;
-            }
-
-            long? limit = null;
-            if (!string.IsNullOrWhiteSpace(speedLimit.Text))
-            {
-                if (!long.TryParse(speedLimit.Text, out var kb) || kb <= 0)
-                {
-                    await ShowMessageAsync("Invalid setting", "Speed limit must be a positive number of KB/s.");
-                    return;
-                }
-
-                limit = kb * 1024;
-            }
-
-            var proxyModeValue = proxyMode.SelectedIndex switch { 1 => "system", 2 => "manual", _ => "none" };
-            string? composedProxyAddress = null;
-            if (proxyModeValue == "manual")
-            {
-                composedProxyAddress = ProxyAddress.Compose(proxyProtocol.SelectedIndex, proxyAddress.Text);
-                if (composedProxyAddress is null)
-                {
-                    await ShowMessageAsync("Invalid setting", "Enter the proxy address as host:port (port 1-65535).");
-                    return;
-                }
-            }
-
-            settings.Proxy = new ProxyDto
-            {
-                Mode = proxyModeValue,
-                Address = composedProxyAddress,
-                Username = string.IsNullOrWhiteSpace(proxyUser.Text) ? null : proxyUser.Text.Trim(),
-                // Empty keeps the stored password (the host re-applies it for an unchanged address/user)
-                // unless "Forget" is checked.
-                Password = forgetProxyPassword.IsChecked == true || string.IsNullOrEmpty(proxyPassword.Password)
-                    ? null
-                    : proxyPassword.Password,
-                ClearPassword = forgetProxyPassword.IsChecked == true,
-                HasPassword = settings.Proxy.HasPassword && forgetProxyPassword.IsChecked != true,
-            };
-            settings.DefaultDownloadDirectory = directory.Text.Trim();
-            settings.SiteLogins = loginRows.Select(row => new SiteLoginDto
-            {
-                Id = row.Original.Id,
-                Site = row.Site.Text.Trim(),
-                Username = row.User.Text.Trim(),
-                Password = string.IsNullOrEmpty(row.Password.Password) ? null : row.Password.Password,
-                HasPassword = row.Original.HasPassword,
-            }).ToList();
-            settings.MaxConcurrentDownloads = max;
-            settings.DefaultConnections = connectionsValue;
-            settings.GlobalSpeedLimitBytesPerSecond = limit;
-            var profiles = new List<ConnectionProfileDto>();
-            foreach (var line in profilesBox.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var trimmed = line.Trim();
-                if (trimmed.Length == 0)
-                {
-                    continue;
-                }
-
-                var separator = trimmed.LastIndexOf('=');
-                if (separator <= 0 ||
-                    !int.TryParse(trimmed[(separator + 1)..].Trim(), out var profileLimit) ||
-                    profileLimit < 1 || profileLimit > 32)
-                {
-                    await ShowMessageAsync("Invalid setting",
-                        $"Connection profile '{trimmed}' must use pattern=max (1-32).");
-                    return;
-                }
-
-                profiles.Add(new ConnectionProfileDto
-                {
-                    Pattern = trimmed[..separator].Trim(),
-                    MaxConnections = profileLimit,
-                });
-            }
-
-            settings.ConnectionProfiles = profiles;
-            settings.LaunchAtStartup = launch.IsChecked == true;
-            settings.ClipboardMonitoring = clipboard.IsChecked == true;
-            settings.BrowserIntegrationEnabled = integration.IsChecked == true;
-            settings.BrowserAutoIntercept = autoIntercept.IsChecked == true;
-            settings.NotifyOnCompletion = notify.IsChecked == true;
-            settings.PlayCompletionSound = sound.IsChecked == true;
-            settings.ShowCompletionDialog = completionDialog.IsChecked == true;
-            settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
-            settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text)
-                ? null
-                : postDownload.Text.Trim();
-            settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(updateUrl.Text)
-                ? null
-                : updateUrl.Text.Trim();
-            settings.UpdatePublicKey = string.IsNullOrWhiteSpace(updateKey.Text)
-                ? null
-                : updateKey.Text.Trim();
-            settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text)
-                ? "stable"
-                : updateChannel.Text.Trim();
-            settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
-            if (!int.TryParse(updateInterval.Text, out var checkInterval) ||
-                checkInterval < 1 || checkInterval > 168)
-            {
-                await ShowMessageAsync("Invalid setting", "Update interval must be 1-168 hours.");
-                return;
-            }
-
-            settings.UpdateCheckIntervalHours = checkInterval;
-            settings.CategoryFolders = categoryBoxes
-                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
-                .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
-            foreach (var editor in customCategoryEditors)
-            {
-                editor.Category.Name = editor.Name.Text.Trim();
-                editor.Category.Extensions = editor.Extensions.Text.Split([' ', ',', ';', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList();
-                editor.Category.DestinationDirectory = string.IsNullOrWhiteSpace(editor.Folder.Text) ? null : editor.Folder.Text.Trim();
-            }
-            settings.CustomCategories = settings.CustomCategories
-                .Where(category => !stagedCategoryRemovals.Contains(category.Id))
-                .ToList();
-            settings.DeleteCategoryIds = stagedCategoryRemovals.ToList();
-
-            if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
-            {
-                await ShowMessageAsync("Sounds", soundError ?? "Invalid sound choice.");
-                return;
-            }
-
-            var reply = await _connection.UpdateSettingsAsync(settings);
-            var update = reply.GetPayload<SettingsResult>();
-            if (!update.Ok)
-            {
-                await ShowMessageAsync("Could not save settings", update.Error ?? "The host rejected the settings.");
-                return;
-            }
-
-            _settings = update.Settings;
-            await RefreshAsync();
+            window.Activate();
+            await window.WaitClosedAsync();
         }
         catch (Exception ex)
         {
+            window.Close();
             await ShowMessageAsync("Options", ex.Message);
-        }
-        finally
-        {
-            _settingsDialogOpen = false;
         }
     }
 

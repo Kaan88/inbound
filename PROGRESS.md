@@ -1880,6 +1880,19 @@ Scoped Host launch now checks the same named mutex as IPC rather than global pro
 ## 2026-11-05 — Rebrand to Inbound
 
 - Display name changed from Rill to Inbound Download Manager (UI, tray, installer AppVerName, Chrome extension, README). Install/data paths, native-host name, extension key and update identity unchanged for upgrade compatibility.
-- New original icon (plane landing on a runway) drawn by `scripts/draw-inbound-icon.ps1`; ICO/PNG/extension icons rebuilt. Internal theme tokens renamed to `Inbound*`.
+- Icon: owner-supplied artwork (plane descending into a tray), `assets/inbound-icon-source.png`, made transparent/cropped by `scripts/prepare-inbound-icon.ps1`; ICO/PNG/extension icons rebuilt by `scripts/build-icons.ps1`. Internal theme tokens renamed to `Inbound*`.
 - Verified: clean Release build, extension 34/34, renamed window captured in isolated profile. Not yet packaged as a release.
 
+
+## 2026-11-05 — Secondary-window review and redesign
+
+Reviewed every window and dialog in both themes (isolated `uiqa` profile, captures from the published build).
+
+- Accent: `SystemAccentColor*` overridden with Inbound blue; Windows' own accent (teal here) no longer leaks into checkboxes, primary buttons and selections.
+- Title bars: shared `WindowLayout.ApplyChrome`; Scheduler, Groups, Statistics, progress and update windows previously had a white caption over dark content.
+- Options: was a modal ContentDialog with browser-style tabs, equal-width Save/Cancel, typed numbers and folders, and validation that closed the dialog (losing edits). Now `SettingsWindow`: page list, titled sections, NumberBox, Browse… for every folder, proxy RadioButtons that enable the manual fields, side-by-side login credentials, OK/Cancel/Apply, inline errors that jump to the page. Verified live: toggle + OK persisted to settings.json and closed the window.
+- Scheduler: SelectorBar instead of stretched tabs; TimePicker (24h) start/stop with clear, weekday toggles + "Every day", CalendarDatePicker one-time date; compact queue buttons. Verified live: New schedule with Sat/Sun off saved `days: Mon,Tue,Wed,Thu,Fri`, `startTime: 09:00`.
+- Groups: empty-state text, inline create/add rows, Close button. Statistics: KB/MB units (was MiB). Add URL: full-width field, prefilled from a clipboard link.
+- Toolbar: grouped with separators, theme icon tokens (light mode had pale pastel icons), Stop = pause glyph, Delete Completed = clear glyph (was a checkmark), single-line auto-width labels. Help menu says "About Inbound Download Manager".
+- Exit: Host now sends `host.exiting` on a user exit (tray Exit, Tasks > Exit, `dm host shutdown`, queue "exit when done"); every frontend process closes. Update restarts don't send it. Live: UI+Host both gone within 3 s after `host shutdown`, nothing respawned after 18 s; relaunch starts both again. The tray menu click itself could not be driven (Windows shell overflow is not automatable here); it calls the same exit path.
+- Still unverified: installer upgrade over the installed 0.1.4 and updater restart (both modify the installed app; awaiting owner go-ahead).

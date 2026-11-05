@@ -22,6 +22,13 @@ public sealed class DownloadGroupsWindow : Window
     private readonly Button _add = new() { Content = "Add to selected group" };
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap };
     private readonly ScrollViewer _groupsScroll;
+    private readonly Expander _selectionExpander;
+    private readonly TextBlock _empty = new()
+    {
+        Text = "No download groups yet.\nOpen “Create a group or add downloads”, select downloads, enter a name and choose Create group.",
+        TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Opacity = 0.7,
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 420,
+    };
     private readonly Dictionary<Guid, JobViewModel> _viewModels = new();
     private readonly Dictionary<Guid, ChildControls> _childControls = new();
     private readonly Dictionary<Guid, GroupSummaryControls> _summaries = new();
@@ -39,7 +46,7 @@ public sealed class DownloadGroupsWindow : Window
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
-        var root = new Grid { Margin = new Thickness(16), RowSpacing = 12 };
+        var root = new Grid { Padding = new Thickness(16), RowSpacing = 12 };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -65,37 +72,46 @@ public sealed class DownloadGroupsWindow : Window
         _ungrouped.SelectionChanged += (_, _) => UpdateButtons();
         _targetGroup.SelectionChanged += (_, _) => UpdateButtons();
         selectionPanel.Children.Add(_ungrouped);
-        var createRow = new StackPanel { Spacing = 6 };
-        createRow.Children.Add(_newGroupName);
-        createRow.Children.Add(_create);
+        var createRow = InlineRow(_newGroupName, _create);
         selectionPanel.Children.Add(createRow);
-        var addRow = new StackPanel { Spacing = 6 };
-        addRow.Children.Add(_targetGroup);
-        addRow.Children.Add(_add);
+        var addRow = InlineRow(_targetGroup, _add);
         selectionPanel.Children.Add(addRow);
         _create.Click += async (_, _) => await CreateGroupAsync();
         _add.Click += async (_, _) => await AddToGroupAsync();
-        var selectionExpander = new Expander { Header = "Create a group or add downloads", HorizontalAlignment = HorizontalAlignment.Stretch,
+        _selectionExpander = new Expander { Header = "Create a group or add downloads", HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = new ScrollViewer { Content = selectionPanel, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        var selectionExpander = _selectionExpander;
         Grid.SetRow(selectionExpander, 1);
         root.Children.Add(selectionExpander);
 
         _groupsScroll = new ScrollViewer { Content = _groupsPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Grid.SetRow(_groupsScroll, 2);
         root.Children.Add(_groupsScroll);
+        Grid.SetRow(_empty, 2);
+        root.Children.Add(_empty);
         _notice.Opacity = 0.9;
         Grid.SetRow(_notice, 3);
         root.Children.Add(_notice);
-        root.Children.Add(new TextBlock
+        var footer = new Grid();
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.Children.Add(new TextBlock
         {
             Text = "Groups keep downloads independent. Ungrouping never removes files.",
             Opacity = 0.7,
-            Margin = new Thickness(0, 2, 0, 0)
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
         });
-        Grid.SetRow((FrameworkElement)root.Children[^1], 4);
+        var close = new Button { Content = "Close", MinWidth = 92 };
+        close.Click += (_, _) => Close();
+        Grid.SetColumn(close, 1);
+        footer.Children.Add(close);
+        Grid.SetRow(footer, 4);
+        root.Children.Add(footer);
 
         Content = root;
+        WindowLayout.ApplyChrome(this, root);
         Closed += async (_, _) =>
         {
             _closed = true;
@@ -103,6 +119,7 @@ public sealed class DownloadGroupsWindow : Window
             _connection.SnapshotReceived -= OnSnapshotReceived;
             await _connection.DisposeAsync();
         };
+        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += OnSnapshotReceived;
         _timer.Tick += async (_, _) => await RefreshAsync();
         _connection.Start();
@@ -191,7 +208,23 @@ public sealed class DownloadGroupsWindow : Window
                         UpdateChild(controls, _viewModels[id], job);
             }
         }
+        _empty.Visibility = groups.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (groups.Count == 0 && !_emptyShown) { _emptyShown = true; _selectionExpander.IsExpanded = true; }
         UpdateButtons();
+    }
+
+    private bool _emptyShown;
+
+    private static Grid InlineRow(FrameworkElement field, Button action)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        field.HorizontalAlignment = HorizontalAlignment.Stretch;
+        row.Children.Add(field);
+        Grid.SetColumn(action, 1);
+        row.Children.Add(action);
+        return row;
     }
 
     private GroupVisual BuildGroup(DownloadGroupDto group, IReadOnlyDictionary<Guid, JobDto> jobs, bool expanded)
