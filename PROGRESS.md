@@ -1916,3 +1916,14 @@ Reviewed every window and dialog in both themes (isolated `uiqa` profile, captur
 - "Add Batch Download" pattern dialog replaced by **Add Links…** (paste any text → review checklist →
   optional "Keep as one package"). CLI `batch` keeps the pattern expander.
 - Status: **unverified in the live UI** (row tree, expand/collapse, both themes) — needs a QA pass.
+
+## 2026-11-05 — Dialog pass and live Edge check
+
+- Walked Add Links, Move/Rename, Properties, Delete and Change category in the QA profile (light theme).
+  Fixed: list selection fell back to row 0 after a rebuild (toolbar acted on the wrong file); Ctrl+M on
+  the context-flyout item crashed WinUI natively (moved to the list); dialogs ignored the light theme;
+  Move/Rename now has name + folder + Browse and is enabled only for completed files; Properties is a
+  selectable grid; Delete hides the file checkbox for partial downloads.
+- Edge 156 (separate profile, `--load-extension`): popup (light/dark), options, Download All link
+  scan, and the media panel (light/dark) render and work. Edge falls back to Chrome's native-host key.
+  Not exercised: an actual Edge handoff into the QA host (it would reach the installed app).

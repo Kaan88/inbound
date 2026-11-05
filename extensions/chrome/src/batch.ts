@@ -203,6 +203,7 @@ confirmButton.addEventListener("click", async () => {
     const response = (await chrome.runtime.sendMessage({
       type: "dm.confirmBatch",
       pageUrl,
+      tabId: Number.isFinite(requestedTabId) ? requestedTabId : undefined,
       destination: destinationInput.value.trim(),
       startMode: startSelect.value,
       urls: [...selected].map((url) => ({ url })),
