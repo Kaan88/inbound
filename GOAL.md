@@ -1,6 +1,8 @@
-# Goal — Build a private reference app-compatible download manager
+# Goal — Build a private Windows download manager (reference app as reference)
 
-Rill branding/unified Scheduler checkpoint (2026-11-05): original generated icon saved to assets/rill-icon.png, multi-resolution assets/app.ico and extension icons built by scripts/build-icons.ps1; prompt/mode documented in assets/rill-icon-prompt.md. Display name Rill Download Manager, compatibility identities/paths unchanged. Combined Scheduler window now wired from toolbar/menu; source review fixed automatic Apply capture, selection preservation, read-only empty form, closable tabs and theme background. Latest integration95/95 includes per-job fake program/open/power behavior, no restart replay and injected completion-marker write failure preventing all side effects. Latest expanded automated totals: Core88, engine57, integration95, extension34. Scheduler visual polish after the last build still needs rebuild/live verification; installer release remains pending.
+Owner direction (2026-11-05): reference app 6.43.12.3 is now a reference for suggestions, not a parity requirement. The owner prefers the current Inbound design over reference app's; keep our own design and behavior, and use reference app only as a source of ideas to propose. Rows below are reference notes. A row's status describes our feature, and `implemented` still needs linked acceptance evidence.
+
+
 
 Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
 

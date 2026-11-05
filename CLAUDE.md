@@ -7,8 +7,11 @@ increment.
 
 ## What this project is
 
-A private-use Windows download manager with verified functional parity against
-the installed **another download manager 6.43.12.3** (`v6.43b12 Full`). It is a
+A private-use Windows download manager, **Inbound Download Manager**. The
+installed **another download manager 6.43.12.3** (`v6.43b12 Full`) is a
+*reference for suggestions*, not a parity target (owner decision, 2026-11-05):
+the owner prefers the current design. Propose reference app-inspired ideas; do not
+reshape existing behavior or UI to match reference app unless asked. It is a
 new C#/.NET application with a WinUI 3 frontend, a separate background host and
 download engine, and our own Manifest V3 Chrome extension + Native Messaging
 host. It is **not** a patch, crack, or license bypass of reference app, and it does not
@@ -26,8 +29,8 @@ Chrome automatic + context-menu handoff, including authenticated cookie,
 referrer and user-agent transfer. Phase 8 (queues/scheduler) is complete,
 including completion actions, quotas, sleep prevention, and DST behavior.
 Payload bytes are written directly into a destination-local part file and renamed in place, with
-no fixed temp directory or cross-volume stitching. Full 1:1 parity is **not**
-complete; `reference notes` and `PROGRESS.md` are authoritative. Remaining
+no fixed temp directory or cross-volume stitching. `PROGRESS.md` is authoritative for status;
+`reference notes` holds reference app reference notes. Remaining
 verification includes clean-environment install/upgrade and independent
 interruption/restart checks. Clipboard
 URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
@@ -97,15 +100,18 @@ the host durably records and ACKs before Chrome’s download is cancelled. On an
 failure Chrome’s download is resumed. POST bodies and unsupported request types
 stay in Chrome. See `docs/browser-integration.md`.
 
-## UI structure (rebuilt from the observed reference app window)
+## UI structure (current Inbound shell)
 
-Dark WinUI shell with menu bar (`Tasks`, `File`, `Downloads`, `View`, `Help`),
-large icon+label toolbar (Add URL, Resume, Stop, Stop All, Delete, Delete
-Completed, Options; Scheduler/queues disabled until implemented), category
-sidebar (All Downloads, Compressed, Documents, Music, Programs, Video,
-Unfinished, Finished), and an eight-column compact list (File Name, Q, Size,
-Status, Time left, Transfer rate, Last Try Date, Description). Closing hides the
-window; a second launch activates the existing UI via a named event.
+Dark/light WinUI shell (theme tokens in `App.xaml`, rules in
+`docs/design-guidelines.md`) with menu bar (`Tasks`, `File`, `Downloads`,
+`View`, `Help`), grouped icon+label toolbar (Add URL | Resume, Stop, Stop All |
+Delete, Delete Completed | Options, Scheduler | Start/Stop Queue), category
+sidebar (categories, Unfinished/Active/Queued/Failed, Finished, Queues), the
+download list (File Name, Q, Size, Status, Time left, Transfer rate, Last Try
+Date, Description) with expandable packages, a collapsible bottom speed graph
+(Expander opens Up by design) and a status bar. Secondary windows (Options,
+Scheduler, progress, statistics) use `WindowLayout.ApplyChrome`. Closing hides
+the window; a second launch activates the existing UI via a named event.
 
 ## Commands
 
@@ -149,7 +155,7 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
   (`<final>.<jobId>.part`), with ranges written at final offsets, so completion
   is a same-volume rename. Do not reintroduce a fixed temp directory or an
   assembly copy. Only metadata/checkpoints stay in app data.
-- Never mark a parity row `implemented` without linked acceptance evidence.
+- Never mark a feature `implemented` without linked acceptance evidence.
   Use `partial`, `blocked`, or `unverified` otherwise.
 - Do not add unlabelled stubs or settings that do nothing.
 - Own branding/assets only; do not copy reference app icons, strings, or binaries.

@@ -1,6 +1,6 @@
 # Inbound Download Manager
 
-Inbound is the app's display name (formerly Rill). Existing DownloadManager install/data paths, native-host identity and update identity remain compatible with earlier builds.
+Inbound is the app's display name. Existing DownloadManager install/data paths, native-host identity and update identity remain compatible with earlier builds.
 
 A private-use Windows download manager built around a durable background engine,
 a replaceable WinUI 3 frontend, and a Manifest V3 Chrome bridge. It implements
