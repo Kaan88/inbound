@@ -705,6 +705,8 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(settings.UpdateManifestUrl)
             ? null
             : settings.UpdateManifestUrl.Trim();
+        if (string.Equals(settings.UpdateManifestUrl, ReleaseUpdates.RetiredManifestUrl, StringComparison.OrdinalIgnoreCase))
+            settings.UpdateManifestUrl = ReleaseUpdates.ManifestUrl;
         settings.UpdateChannel = string.IsNullOrWhiteSpace(settings.UpdateChannel)
             ? "stable"
             : settings.UpdateChannel.Trim().ToLowerInvariant();

@@ -5,7 +5,7 @@ param(
     [string]$InstallerPath,
     [string]$UpdatePackagePath,
     [string]$SignerExe,
-    [string]$BuildsRepository = "Kaan88/download-manager-builds"
+    [string]$BuildsRepository = "Kaan88/inbound"
 )
 
 $ErrorActionPreference = "Stop"

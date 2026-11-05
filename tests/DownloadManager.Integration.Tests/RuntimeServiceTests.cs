@@ -1224,6 +1224,25 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task SavedRetiredUpdateFeedMovesToCurrentFeed()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        try
+        {
+            var store = new JsonSettingsStore(paths);
+            await store.SaveAsync(new AppSettings { UpdateManifestUrl = ReleaseUpdates.RetiredManifestUrl });
+            Assert.Equal(ReleaseUpdates.ManifestUrl, (await store.LoadAsync()).UpdateManifestUrl);
+            await store.SaveAsync(new AppSettings { UpdateManifestUrl = "https://example.test/feed.json" });
+            Assert.Equal("https://example.test/feed.json", (await store.LoadAsync()).UpdateManifestUrl);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task BuiltInCategoryFoldersSeedFollowDefaultFolderAndRespectClearedOrCustom()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));

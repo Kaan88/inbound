@@ -33,8 +33,8 @@ Owner requirement (2026-11-05): add first-class expandable groups for multiple i
 Updater repair checkpoint (2026-11-05): owner upgrade exposed stale 0.1.2 binaries with a 0.1.3 version record after replacement/rollback failed. Source 0.1.4 repairs working-directory/native-bridge locks, metadata ordering/recovery, version reconciliation, progress events/window, and frontend reopening. Focused updater tests and isolated rollback fixtures pass; installed repair and live restart/progress acceptance remain pending. See PROGRESS.md.
 
 Owner added GitHub build publication and installer-only automatic updates.
-Public builds-only repository: `Kaan88/download-manager-builds`; source remains
-private. 0.1.3 installer/update assets are published, and an older-version test installer is available;
+Releases and source: public `Kaan88/inbound` (owner, 2026-11-06; the builds-only
+repository `Kaan88/download-manager-builds` is retired). 0.1.3 installer/update assets are published, and an older-version test installer is available;
 owner upgrade acceptance and remaining parity work are still open.
 
 **Scope decision (owner, 2026-11-04): Dial Up/VPN is out of scope.**
