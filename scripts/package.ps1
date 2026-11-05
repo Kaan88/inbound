@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.6"
+    [string]$Version = "0.2.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Copy-Item (Join-Path $root "artifacts\app") (Join-Path $packageRoot "app") -Recurse -Force
 Copy-Item (Join-Path $root "artifacts\extension") (Join-Path $packageRoot "extension") -Recurse -Force
 $installText = Get-Content (Join-Path $PSScriptRoot "install.ps1") -Raw
-$installText = $installText.Replace('[string]$Version = "0.1.6"', "[string]`$Version = `"$Version`"")
+$installText = $installText.Replace('[string]$Version = "0.2.0"', "[string]`$Version = `"$Version`"")
 Set-Content -Path (Join-Path $packageRoot "install.ps1") -Value $installText -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot "repair.ps1") $packageRoot
 Copy-Item (Join-Path $PSScriptRoot "apply-update.ps1") $packageRoot

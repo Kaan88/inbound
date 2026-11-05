@@ -9,7 +9,7 @@
 ;   %LOCALAPPDATA%\DownloadManager\ (other)      user data: jobs, settings - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.1.6"
+  #define AppVersion "0.2.0"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
