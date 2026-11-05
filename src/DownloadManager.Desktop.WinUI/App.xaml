@@ -25,6 +25,7 @@
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#E08A8A" />
                     <SolidColorBrush x:Key="InboundIconInfoBrush" Color="#6FA8DC" />
                     <SolidColorBrush x:Key="InboundIconNeutralBrush" Color="#A8A8A8" />
+                    <SolidColorBrush x:Key="InboundIconMediaBrush" Color="#B49AD6" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="InboundChromeBrush" Color="#F3F3F3" />
@@ -40,6 +41,7 @@
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#C42B1C" />
                     <SolidColorBrush x:Key="InboundIconInfoBrush" Color="#1F6FC5" />
                     <SolidColorBrush x:Key="InboundIconNeutralBrush" Color="#6A6A6A" />
+                    <SolidColorBrush x:Key="InboundIconMediaBrush" Color="#7B4FB8" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 

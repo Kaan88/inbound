@@ -121,7 +121,4 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  byId<HTMLButtonElement>("test").addEventListener("contextmenu", () => {
-    // no-op: keep the standard browser menu available
-  });
 });

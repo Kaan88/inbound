@@ -497,9 +497,9 @@ public sealed partial class MainWindow : Window
         var flyout = new MenuFlyout();
         flyout.Opening += JobsContextMenu_Opening;
         flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
-        flyout.Items.Add(CreateContextItem("Open with...", MenuOpenWith_Click));
-        flyout.Items.Add(CreateContextItem("Open folder", MenuOpenFolder_Click));
-        var moveRename = CreateContextItem("Move/Rename...", MenuMoveRename_Click);
+        flyout.Items.Add(CreateContextItem("Open With…", MenuOpenWith_Click));
+        flyout.Items.Add(CreateContextItem("Open Folder", MenuOpenFolder_Click));
+        var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         moveRename.KeyboardAccelerators.Add(new KeyboardAccelerator
         {
             Key = Windows.System.VirtualKey.M,
@@ -507,18 +507,20 @@ public sealed partial class MainWindow : Window
         });
         flyout.Items.Add(moveRename);
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
         flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
-        flyout.Items.Add(CreateContextItem("Refresh download address...", MenuRefreshUrl_Click));
-        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
-        _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to queue" };
-        flyout.Items.Add(_addToQueueMenu);
-        flyout.Items.Add(CreateContextItem("Delete from queue", MenuDeleteFromQueue_Click));
+        flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
+        flyout.Items.Add(CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Progress details...", MenuProgressDetails_Click));
-        flyout.Items.Add(CreateContextItem("Group selected downloads...", MenuGroupSelected_Click));
-        flyout.Items.Add(CreateContextItem("Change category...", MenuChangeCategory_Click));
+        _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to Queue" };
+        flyout.Items.Add(_addToQueueMenu);
+        flyout.Items.Add(CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(CreateContextItem("Progress Details…", MenuProgressDetails_Click));
+        flyout.Items.Add(CreateContextItem("Group Selected Downloads…", MenuGroupSelected_Click));
+        flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
         JobsList.ContextFlyout = flyout;
     }

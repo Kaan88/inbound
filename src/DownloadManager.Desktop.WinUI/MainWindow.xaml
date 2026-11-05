@@ -41,64 +41,63 @@
 
         <MenuBar Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
             <MenuBarItem Title="Tasks">
-                <MenuFlyoutItem Text="Add new download..." Click="MenuAdd_Click">
+                <MenuFlyoutItem Text="Add New Download…" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Add batch download..." Click="MenuAddBatch_Click" />
-                <MenuFlyoutItem Text="Download groups..." Click="MenuGroups_Click" />
+                <MenuFlyoutItem Text="Add Batch Download…" Click="MenuAddBatch_Click" />
+                <MenuFlyoutItem Text="Download Groups…" Click="MenuGroups_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Export Download List…" Click="MenuExport_Click" />
+                <MenuFlyoutItem Text="Import Download List…" Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
             </MenuBarItem>
 
             <MenuBarItem Title="File">
                 <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
-                <MenuFlyoutItem Text="Open folder" Click="MenuOpenFolder_Click" />
-                <MenuFlyoutItem Text="Move/Rename..." AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
+                <MenuFlyoutItem Text="Open Folder" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutItem Text="Move/Rename…" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Export download list..." Click="MenuExport_Click" />
-                <MenuFlyoutItem Text="Import download list..." Click="MenuImport_Click" />
-                <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Progress details..." Click="MenuProgressDetails_Click" />
-                <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
-                <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
-                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
+                <MenuFlyoutItem Text="Progress Details…" Click="MenuProgressDetails_Click" />
                 <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />
+                <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
                 <MenuFlyoutItem Text="Redownload" Click="MenuRedownload_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
             </MenuBarItem>
 
             <MenuBarItem Title="Downloads">
-                <MenuFlyoutItem Text="Pause All" Click="MenuPauseAll_Click" />
                 <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
-                <MenuFlyoutItem Text="Clean up leftover partial files..." Click="MenuCleanOrphans_Click" />
+                <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" Click="MenuCleanOrphans_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Find..." Click="MenuFind_Click">
+                <MenuFlyoutItem Text="Find…" Click="MenuFind_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Find next" Click="MenuFindNext_Click">
+                <MenuFlyoutItem Text="Find Next" Click="MenuFindNext_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F3" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start queue" />
-                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop queue" />
+                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" />
+                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Scheduler..." Click="MenuScheduler_Click" />
-                <MenuFlyoutItem Text="Options..." Click="MenuOptions_Click" />
+                <MenuFlyoutItem Text="Scheduler…" Click="MenuScheduler_Click" />
+                <MenuFlyoutItem Text="Options…" Click="MenuOptions_Click" />
             </MenuBarItem>
 
             <MenuBarItem Title="View">
-                <MenuFlyoutItem Text="Statistics..." Click="MenuStatistics_Click" />
-                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download speed graph" IsChecked="True" Click="MenuSpeedGraph_Click" />
-                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide categories" Click="MenuHideCategories_Click" />
-                <MenuFlyoutSubItem Text="Arrange files">
-                    <MenuFlyoutItem Text="By Order Of Addition" Tag="added" Click="MenuSort_Click" />
+                <MenuFlyoutItem Text="Statistics…" Click="MenuStatistics_Click" />
+                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" IsChecked="True" Click="MenuSpeedGraph_Click" />
+                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" Click="MenuHideCategories_Click" />
+                <MenuFlyoutSubItem Text="Arrange Files">
+                    <MenuFlyoutItem Text="By Order of Addition" Tag="added" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By File Name" Tag="name" Click="MenuSort_Click" />
                     <MenuFlyoutItem Text="By Size" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
                         <MenuFlyoutItem.KeyboardAccelerators>
@@ -117,10 +116,10 @@
             </MenuBarItem>
 
             <MenuBarItem Title="Help">
-                <MenuFlyoutItem Text="Check for updates..." Click="MenuUpdate_Click" />
+                <MenuFlyoutItem Text="Check for Updates…" Click="MenuUpdate_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="About Inbound Download Manager" Click="MenuAbout_Click" />
-                <MenuFlyoutItem Text="Open diagnostics folder" Click="MenuDiagnostics_Click" />
+                <MenuFlyoutItem Text="Open Diagnostics Folder" Click="MenuDiagnostics_Click" />
             </MenuBarItem>
         </MenuBar>
 
@@ -242,80 +241,80 @@
                         </ListBox.Resources>
                         <ListBoxItem Tag="all" Padding="24,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="#C9C9C9" />
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="All Downloads" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="compressed" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="#C9A46A" />
+                                <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Compressed" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="documents" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8A5;" FontSize="14" Foreground="#8FB8DE" />
+                                <FontIcon Glyph="&#xE8A5;" FontSize="14" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Documents" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="music" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="#B49AD6" />
+                                <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource InboundIconMediaBrush}" />
                                 <TextBlock Text="Music" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="programs" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="#8CCF8C" />
+                                <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Programs" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="video" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE714;" FontSize="14" Foreground="#D98C8C" />
+                                <FontIcon Glyph="&#xE714;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Video" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="other" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="#A8A8A8" />
+                                <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Other" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" />
                         <ListBoxItem Tag="unfinished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="#C9C9C9" />
+                                <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Unfinished" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="active" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE895;" FontSize="13" Foreground="#6FA8DC" />
+                                <FontIcon Glyph="&#xE895;" FontSize="13" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Active" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="queued" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE823;" FontSize="13" Foreground="#E8B36A" />
+                                <FontIcon Glyph="&#xE823;" FontSize="13" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Queued" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="failed" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE783;" FontSize="13" Foreground="#D98C8C" />
+                                <FontIcon Glyph="&#xE783;" FontSize="13" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Failed" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="finished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="#8CCF8C" />
+                                <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Finished" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Tag="queues" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="#C9C9C9" />
+                                <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Queues" />
                             </StackPanel>
                         </ListBoxItem>
@@ -386,7 +385,7 @@
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
-                                    <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="#7FA8CF"
+                                    <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconInfoBrush}"
                                               Visibility="{Binding FileGlyphVisibility}"
                                               VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"

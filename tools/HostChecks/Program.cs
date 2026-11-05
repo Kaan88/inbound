@@ -105,7 +105,7 @@ internal static class Program
 
         foreach (var item in menu.Items.OfType<ToolStripItem>())
         {
-            if (item.Text is "Open Download Manager" or "Pause All" or "Resume All" or "Exit" ||
+            if (item.Text is "Open Inbound Download Manager" or "Pause All" or "Resume All" or "Exit" ||
                 item.Text.StartsWith("Settings"))
             {
                 item.PerformClick();

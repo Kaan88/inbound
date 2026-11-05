@@ -144,6 +144,18 @@ function formatEta(seconds: number): string {
     `${String(Math.floor((total % 3_600) / 60)).padStart(2, "0")}m`;
 }
 
+const STATE_LABELS: Record<string, string> = {
+  queued: "Queued", connecting: "Connecting", downloading: "Downloading", retrying: "Retrying",
+  retryWaiting: "Waiting to retry", verifying: "Verifying", muxing: "Merging", paused: "Paused",
+  completed: "Completed", failed: "Failed", cancelled: "Cancelled", scheduled: "Scheduled",
+};
+
+function stateLabel(state: string): string {
+  return STATE_LABELS[state] ?? state.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
+}
+
+let bypassActive = false;
+
 function renderJobs(jobs: JobSummary[]): void {
   jobsList.replaceChildren();
   if (!jobs.length) {
@@ -163,7 +175,8 @@ function renderJobs(jobs: JobSummary[]): void {
 
     const state = document.createElement("span");
     state.className = "state";
-    state.textContent = job.state;
+    state.textContent = stateLabel(job.state);
+    state.dataset.state = job.state;
 
     const meta = document.createElement("span");
     meta.className = "meta";
@@ -292,26 +305,29 @@ async function refresh(): Promise<void> {
     statusDot.className = "dot";
     if (!enabled) {
       statusDot.classList.add("warn");
-      statusLabel.textContent = "Bridge disabled";
-      statusDetail.textContent = "Enable it in Settings.";
+      statusLabel.textContent = "Download catching is off";
+      statusDetail.textContent = "Turn it on in Settings.";
       statusText.textContent = "Disabled";
     } else if (connected) {
       statusDot.classList.add("ok");
-      statusLabel.textContent = "Native bridge connected";
-      statusDetail.textContent = status.settings?.autoIntercept ? "Automatic handoff on" : "Automatic handoff off";
+      statusLabel.textContent = "Connected to the desktop app";
+      statusDetail.textContent = status.settings?.autoIntercept ? "Browser downloads are caught automatically" : "Automatic catching is off; use the context menu";
       statusText.textContent = "Connected";
     } else {
       statusDot.classList.add("bad");
-      statusLabel.textContent = "Native bridge unavailable";
-      statusDetail.textContent = status.lastError || "Check native-host registration.";
+      statusLabel.textContent = "Desktop app not reachable";
+      statusDetail.textContent = status.lastError || "Start Inbound Download Manager, or run Repair from its installer.";
       statusText.textContent = "Disconnected";
     }
 
-    const bypass = status.bypassUntil && status.bypassUntil > Date.now();
-    if (bypass) {
-      const bypassButton = document.getElementById("bypass") as HTMLButtonElement;
-      bypassButton.textContent = `Bypassed (${Math.ceil((status.bypassUntil! - Date.now()) / 60000)} min)`;
-    }
+    bypassActive = !!status.bypassUntil && status.bypassUntil > Date.now();
+    const bypassButton = document.getElementById("bypass") as HTMLButtonElement;
+    bypassButton.textContent = bypassActive
+      ? `Resume catching (${Math.ceil((status.bypassUntil! - Date.now()) / 60000)} min left)`
+      : "Pause catching for 5 min";
+    bypassButton.title = bypassActive
+      ? "Downloads currently stay in the browser. Click to resume catching now."
+      : "Let the browser handle downloads for the next 5 minutes.";
 
     renderJobs(status.jobs ?? []);
     await refreshMedia();
@@ -392,9 +408,9 @@ document.addEventListener("DOMContentLoaded", () => {
   (document.getElementById("bypass") as HTMLButtonElement).addEventListener("click", async () => {
     clearError();
     try {
-      const result = (await chrome.runtime.sendMessage({ type: "dm.bypass" })) as { ok?: boolean; error?: string };
+      const result = (await chrome.runtime.sendMessage({ type: "dm.bypass", cancel: bypassActive })) as { ok?: boolean; error?: string };
       if (!result?.ok) {
-        showError(result?.error || "Could not enable bypass.");
+        showError(result?.error || "Could not change download catching.");
       }
       await refresh();
     } catch (error) {
@@ -402,9 +418,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  chrome.runtime.onMessage.addListener((message: { type?: string }) => {
-    if (message?.type === "dm.jobEvent") {
-      void refresh();
-    }
-  });
+  // Job events are reflected by the 1 s jobs poll above; a full refresh per
+  // event would refetch media playlists on every progress tick.
 });

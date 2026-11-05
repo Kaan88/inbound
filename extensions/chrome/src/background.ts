@@ -1010,6 +1010,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.status":
+      // The native port opens lazily; probe once so the popup does not report
+      // a working host as disconnected just because nothing used it yet.
+      if (nativePort === null) {
+        await sendNative("host.ping", {}, 3000, 0).catch(() => undefined);
+      }
       return {
         ok: true,
         extensionVersion: EXTENSION_VERSION,
@@ -1088,8 +1093,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         destinationDirectory: destination || undefined,
       });
 
-      pendingHandoffs.delete(id);
-      await chrome.storage.session.remove(`handoff.${id}`);
+      // Keep a rejected request so the user can correct it and try again.
+      if (ack?.accepted) {
+        pendingHandoffs.delete(id);
+        await chrome.storage.session.remove(`handoff.${id}`);
+      }
 
       // A folder selected here belongs only to this request. The configured
       // default destination is changed exclusively in extension Options.
@@ -1120,7 +1128,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.bypass": {
-      bypassUntil = Date.now() + 5 * 60 * 1000;
+      bypassUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
       await chrome.storage.local.set({ bypassUntil });
       await syncDownloadUi();
       return { ok: true, bypassUntil };

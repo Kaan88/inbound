@@ -64,16 +64,16 @@ public sealed class TrayIconController : IDisposable
         _resumeItem = new ToolStripMenuItem("Resume All", null, (_, _) => _actions.ResumeAll());
         _menu.Items.Add(_pauseItem);
         _menu.Items.Add(_resumeItem);
-        _updateItem = new ToolStripMenuItem("Update available", null,
+        _updateItem = new ToolStripMenuItem("Update Available", null,
             (_, _) => _actions.InstallUpdate()) { Visible = false };
         _menu.Items.Add(_updateItem);
-        _menu.Items.Add(new ToolStripMenuItem("Check for updates...", null,
+        _menu.Items.Add(new ToolStripMenuItem("Check for Updates…", null,
             (_, _) => _actions.CheckForUpdates()));
         _menu.Items.Add(new ToolStripSeparator());
 
         _integrationItem = new ToolStripMenuItem("Browser integration: checking…") { Enabled = false };
         _menu.Items.Add(_integrationItem);
-        _menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => _actions.OpenSettings()));
+        _menu.Items.Add(new ToolStripMenuItem("Options…", null, (_, _) => _actions.OpenSettings()));
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => _actions.Exit()));
 
@@ -116,7 +116,7 @@ public sealed class TrayIconController : IDisposable
             _integrationItem.Text = $"Browser integration: {_actions.IntegrationStatus()}";
             var updateText = _actions.UpdateText();
             _updateItem.Visible = !string.IsNullOrWhiteSpace(updateText);
-            _updateItem.Text = updateText ?? "Update available";
+            _updateItem.Text = updateText ?? "Update Available";
         }
         catch
         {

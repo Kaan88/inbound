@@ -6,8 +6,8 @@
   --text: #172033;
   --muted: #627089;
   --line: #dbe3f0;
-  --accent: #185abc;
-  --accent-2: #0f4aa0;
+  --accent: #1f6fc5;
+  --accent-2: #1a5fa8;
   --ok: #1b7f4b;
   --warn: #a35b00;
   --bad: #b42318;
@@ -22,8 +22,8 @@
     --text: #e8edf6;
     --muted: #a0aec2;
     --line: #303b4c;
-    --accent: #6ea8ff;
-    --accent-2: #8cbcff;
+    --accent: #4aa3f0;
+    --accent-2: #84bdf3;
     --ok: #62d394;
     --warn: #f0b35a;
     --bad: #ff8a80;
@@ -175,9 +175,13 @@ h2 {
 .state {
   font-size: 11px;
   color: var(--muted);
-  text-transform: capitalize;
   align-self: start;
 }
+
+.state[data-state="completed"] { color: var(--ok); }
+.state[data-state="failed"] { color: var(--bad); }
+.state[data-state="paused"], .state[data-state="retryWaiting"] { color: var(--warn); }
+.state[data-state="downloading"], .state[data-state="connecting"] { color: var(--accent); }
 
 button, .link-button {
   font: inherit;

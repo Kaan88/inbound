@@ -333,16 +333,24 @@ function collectLinks(): PageLink[] {
   return [...found.values()];
 }
 
+let firstPendingAt = 0;
+
 function scheduleScan(): void {
   if (!mediaDetectionEnabled) return;
+  const now = Date.now();
   if (timer) {
     clearTimeout(timer);
+  } else {
+    firstPendingAt = now;
   }
 
+  // Debounce, but never postpone a scan by more than 2 s: pages that mutate
+  // continuously (feeds, tickers) would otherwise never be scanned.
+  const delay = Math.max(0, Math.min(500, firstPendingAt + 2000 - now));
   timer = setTimeout(() => {
     timer = null;
     if (mediaDetectionEnabled) scan();
-  }, 500);
+  }, delay);
 }
 
 function setMediaDetectionEnabled(enabled: boolean): void {

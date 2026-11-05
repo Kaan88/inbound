@@ -64,7 +64,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 confirmButton.addEventListener("click", async () => {
   confirmButton.disabled = true;
-  showError("");
+  errorBox.classList.add("hidden");
   try {
     const response = (await chrome.runtime.sendMessage({
       type: "dm.confirmHandoff",
@@ -103,6 +103,12 @@ confirmButton.addEventListener("click", async () => {
 });
 
 cancelButton.addEventListener("click", () => window.close());
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") window.close();
+  else if (event.key === "Enter" && !confirmButton.disabled &&
+           (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
+});
 
 browseDestinationButton.addEventListener("click", () => {
   void pickDestinationFolder(destinationInput, browseDestinationButton, showError);
