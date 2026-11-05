@@ -193,5 +193,10 @@ not as acceptance evidence.
 - Native-host registration is per user and must point at an absolute
   `DownloadManager.NativeHost.exe`; `scripts\register-native-host.ps1` does this.
 - Never dump registry values containing cookies into committed files; redact.
+- The repo root has an explicit **Low mandatory integrity label** (agent sandbox setup); everything
+  built here inherits it, and Windows runs Low-labelled exes at Low integrity. That is the real cause
+  of "harness can't write LocalAppData/Downloads" and of the local installer failing with
+  "unable to create the directory %TEMP%\is-*.tmp, Error 5" unless run as admin.
+  `scriptsuild-installer.ps1` now relabels the setup Medium; check with `icacls <file>`.
 - TestServer and UI executables lock their output during builds; stop them or use
   `scripts\publish.ps1`, which handles this.

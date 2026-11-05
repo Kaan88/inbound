@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Version = "0.1.6",
     [string]$Iscc
@@ -77,4 +77,10 @@ Copy-Item -LiteralPath $publishedExtension -Destination $extOut -Recurse -Force
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed." }
 
 $setup = Join-Path $root "artifacts\installer\DownloadManagerSetup-$Version.exe"
+# The repository root carries an explicit Low mandatory label (agent sandbox), which files built here
+# inherit. Windows starts a Low-labelled exe at Low integrity, and Inno Setup then cannot create its
+# %TEMP%\is-*.tmp folder ("Error 5: Access is denied") unless run as admin. Give the setup an explicit
+# Medium label so a local build behaves like one downloaded from the release page.
+& icacls $setup /setintegritylevel M | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not set Medium integrity on $setup." }
 Write-Host ("Installer: {0} ({1:N1} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
