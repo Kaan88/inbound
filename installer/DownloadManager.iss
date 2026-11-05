@@ -57,6 +57,9 @@ Source: "{#SourceRoot}\installer-extension\*"; DestDir: "{app}\extension"; Flags
 Source: "..\scripts\apply-update.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\repair.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\register-native-host.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\scripts\stop-for-setup.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; Extracted to {tmp} before files are replaced (the installed copy may be older or missing).
+Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 
 [InstallDelete]
 ; Upgrades replace the program folder completely, like install.ps1 does.
@@ -101,6 +104,44 @@ begin
     RaiseException('Could not write ' + FileName);
 end;
 
+// Restart Manager cannot close the tray-only Host, so ask it to exit through
+// its own shutdown (as tray Exit does) before files are replaced or removed.
+function StopRunningInstance(const Script, AppDir: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  if not DirExists(AppDir) then
+    exit;
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+              '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -AppDir "' + AppDir + '"',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := False
+  else
+    Result := ResultCode = 0;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  ExtractTemporaryFile('stop-for-setup.ps1');
+  if not StopRunningInstance(ExpandConstant('{tmp}\stop-for-setup.ps1'), ExpandConstant('{app}\app')) then
+    Result := '{#AppName} is still running and could not be closed. Exit it from the tray icon, then run Setup again.';
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  Script: String;
+begin
+  Result := True;
+  Script := ExpandConstant('{app}\stop-for-setup.ps1');
+  if FileExists(Script) and not StopRunningInstance(Script, ExpandConstant('{app}\app')) then
+  begin
+    MsgBox('{#AppName} is still running and could not be closed. Exit it from the tray icon, then uninstall again.', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Root, ManifestDir, StartupArgument: String;
@@ -123,7 +164,7 @@ begin
   WriteUtf8(ManifestDir + '\{#NativeHostName}.json',
     '{' + #13#10 +
     '  "name": "{#NativeHostName}",' + #13#10 +
-    '  "description": "Download Manager Chrome bridge",' + #13#10 +
+    '  "description": "{#AppName} browser bridge",' + #13#10 +
     '  "path": "' + JsonEscape(Root + '\app\DownloadManager.NativeHost.exe') + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
     '  "allowed_origins": [ "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
@@ -152,5 +193,5 @@ begin
               Root + '\app', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     RaiseException('Could not configure sign-in startup.');
   if ResultCode <> 0 then
-    RaiseException('Could not configure sign-in startup. Exit Download Manager and run Setup again.');
+    RaiseException('Could not configure sign-in startup. Exit {#AppName} and run Setup again.');
 end;

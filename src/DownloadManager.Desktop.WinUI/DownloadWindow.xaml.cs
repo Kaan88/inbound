@@ -244,6 +244,8 @@ public sealed partial class DownloadWindow : Window
         ResumeButton.IsEnabled = _connected && _job?.CanResume == true;
         CancelButton.IsEnabled = _connected && _job?.CanCancel == true;
         ShowCompletionForJob.IsEnabled = _connected && _job is not null;
+        DeleteButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
+        DeleteButton.IsEnabled = _connected && _job is not null;
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility =
             complete ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -456,6 +458,34 @@ public sealed partial class DownloadWindow : Window
     private void Open_Click(object sender, RoutedEventArgs e) => OpenPath(false);
     private void OpenWith_Click(object sender, RoutedEventArgs e) => OpenPathWith();
     private void Folder_Click(object sender, RoutedEventArgs e) => OpenPath(true);
+
+    private async void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_job is null) return;
+        var name = string.IsNullOrWhiteSpace(_job.FileName) ? "this download" : $"“{_job.FileName}”";
+        var confirm = new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
+            Title = "Delete download?",
+            Content = $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await confirm.ShowAsync() != ContentDialogResult.Primary || _closed || _job is null) return;
+        try
+        {
+            var reply = await _connection.RemoveAsync(_jobId, deleteFile: true);
+            if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
+            {
+                Notice.Text = result.Error ?? "The host could not delete this download.";
+                return;
+            }
+            Close();
+        }
+        catch (Exception ex) { if (!_closed) Notice.Text = ex.Message; }
+    }
 
     private async void Cancel_Click(object sender, RoutedEventArgs e)
     {

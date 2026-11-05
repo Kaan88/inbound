@@ -65,7 +65,7 @@
                             <TextBlock Grid.Row="5" Text="Resume capability" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" />
                         </Grid>
-                        <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="True" HorizontalContentAlignment="Stretch"
+                        <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="False" HorizontalContentAlignment="Stretch"
                                   HorizontalAlignment="Stretch">
                             <StackPanel Spacing="7">
                                 <StackPanel x:Name="Segments" Spacing="2" HorizontalAlignment="Stretch" />
@@ -129,6 +129,7 @@
             <Button x:Name="PauseButton" Content="Pause" Click="Pause_Click" />
             <Button x:Name="ResumeButton" Content="Resume" Click="Resume_Click" />
             <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
+            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" ToolTipService.ToolTip="Remove this download and delete its file" />
             <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" />
             <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Visibility="Collapsed" />
             <Button x:Name="FolderButton" Content="Open folder" Click="Folder_Click" Visibility="Collapsed" />
