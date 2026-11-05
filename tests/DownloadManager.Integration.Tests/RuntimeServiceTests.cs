@@ -1224,25 +1224,6 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task SavedRetiredUpdateFeedMovesToCurrentFeed()
-    {
-        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
-        var paths = new StoragePaths(Path.Combine(root, "state"));
-        try
-        {
-            var store = new JsonSettingsStore(paths);
-            await store.SaveAsync(new AppSettings { UpdateManifestUrl = ReleaseUpdates.RetiredManifestUrl });
-            Assert.Equal(ReleaseUpdates.ManifestUrl, (await store.LoadAsync()).UpdateManifestUrl);
-            await store.SaveAsync(new AppSettings { UpdateManifestUrl = "https://example.test/feed.json" });
-            Assert.Equal("https://example.test/feed.json", (await store.LoadAsync()).UpdateManifestUrl);
-        }
-        finally
-        {
-            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
-        }
-    }
-
-    [Fact]
     public async Task BuiltInCategoryFoldersSeedFollowDefaultFolderAndRespectClearedOrCustom()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
@@ -2058,44 +2039,6 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task LegacyGrabberSchedulesAreDroppedOnLoad()
-    {
-        // State written before the site grabber was removed: one grabber schedule, one queue schedule.
-        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
-        var paths = new StoragePaths(Path.Combine(root, "state"));
-        var destination = Path.Combine(root, "downloads");
-        Directory.CreateDirectory(destination);
-        paths.EnsureCreated();
-        var legacy = new AppSettings();
-        var queueScheduleId = Guid.NewGuid();
-        legacy.Schedules.Add(new ScheduleRule { Name = "Old grabber", GrabberProjectId = Guid.NewGuid(), StartTime = "00:00" });
-        legacy.Schedules.Add(new ScheduleRule { Id = queueScheduleId, Name = "Main", QueueId = 0, StartTime = "09:00" });
-        await new JsonSettingsStore(paths).SaveAsync(legacy);
-
-        try
-        {
-            // Only InitializeAsync runs (no settings update), so the reload below proves the
-            // startup cleanup itself persisted the removal.
-            using var engine = new HttpDownloadEngine(new EngineOptions { AllowLocalNetwork = true });
-            var checkpoints = new JsonCheckpointStore(paths);
-            var service = new DownloadManagerService(
-                paths, new JsonJobStore(paths), checkpoints, new JsonSettingsStore(paths), engine,
-                enableSchedulerTimer: false);
-            await service.InitializeAsync();
-            var schedule = Assert.Single(service.GetSnapshot().Settings.Schedules);
-            Assert.Equal(queueScheduleId, schedule.Id);
-
-            var reloaded = await new JsonSettingsStore(paths).LoadAsync();
-            Assert.Equal(queueScheduleId, Assert.Single(reloaded.Schedules).Id);
-            await service.ShutdownAsync();
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
     public async Task DailyScheduleStartsAndStopsOnlyItsQueue()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 3);
@@ -2426,57 +2369,6 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task LegacyPlaintextProxyPasswordIsMigratedOffDisk()
-    {
-        await using var proxy = TestProxyServer.Start();
-        var ctx = await ServiceContext.CreateAsync(_server);
-        try
-        {
-            var settings = ctx.Service.GetSnapshot().Settings;
-            settings.Proxy = new ProxyDto
-            {
-                Mode = "manual",
-                Address = proxy.Address,
-                Username = "proxyuser",
-                Password = "proxypass",
-            };
-            Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-
-            // Rewrite the file the way a pre-DPAPI build wrote it.
-            var node = System.Text.Json.Nodes.JsonNode.Parse(
-                await File.ReadAllTextAsync(ctx.Paths.SettingsFile))!.AsObject();
-            var proxyNode = node["proxy"]!.AsObject();
-            proxyNode.Remove("passwordProtected");
-            proxyNode["password"] = "proxypass";
-            await File.WriteAllTextAsync(ctx.Paths.SettingsFile, node.ToJsonString());
-            Assert.Contains("proxypass", await File.ReadAllTextAsync(ctx.Paths.SettingsFile));
-
-            await using var second = await ServiceContext.CreateAsync(
-                _server, ctx.Paths, ctx.Destination, autoResume: false);
-            var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
-            Assert.DoesNotContain("proxypass", json);
-            Assert.Contains("dpapi:v1:", json);
-            Assert.True(second.Service.GetSnapshot().Settings.Proxy.HasPassword);
-
-            var response = await second.Service.AddJobAsync(new AddJobRequest
-            {
-                Url = $"{_server.BaseAddress}/file/proxy-legacy.bin?size=131072&seed=102",
-                DestinationDirectory = ctx.Destination,
-                FileName = "proxy-legacy.bin",
-                Source = "cli",
-            });
-            Assert.True(response.Accepted, response.Error);
-            await second.WaitFor(response.Job!.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
-            Assert.True(proxy.Authorized > 0);
-            Assert.Equal(0, proxy.Denied);
-        }
-        finally
-        {
-            await ctx.DisposeAsync();
-        }
-    }
-
-    [Fact]
     public async Task UndecryptableProxyBlobYieldsNoPasswordWithoutCrashing()
     {
         var ctx = await ServiceContext.CreateAsync(_server);
@@ -2631,7 +2523,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task HeaderPersistenceMigratesLegacySecretsAndDropsUndecryptableValues()
+    public async Task HeaderPersistenceProtectsSecretsAndDropsUndecryptableValues()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
         var store = new JsonJobStore(ctx.Paths);

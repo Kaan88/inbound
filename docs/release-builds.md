@@ -1,8 +1,7 @@
 # Public builds repository
 
 Source, installers and update-feed assets live in the public `Kaan88/inbound`
-repository; releases are GitHub release assets there. (`Kaan88/download-manager-builds`
-served 0.1.1–0.2.0 and is retired; saved settings pointing at it migrate automatically.) Preparing assets
+repository; releases are GitHub release assets there. Preparing assets
 is a local, reviewable step; `scripts/prepare-release.ps1` does not build the
 application, create a GitHub release, or upload files.
 

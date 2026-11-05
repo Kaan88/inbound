@@ -4,8 +4,6 @@ public static class ReleaseUpdates
 {
     public const string ManifestUrl = "https://github.com/Kaan88/inbound/releases/latest/download/manifest.json";
 
-    /// <summary>Feed used up to 0.2.0 (retired builds-only repository); saved settings are moved off it.</summary>
-    public const string RetiredManifestUrl = "https://github.com/Kaan88/download-manager-builds/releases/latest/download/manifest.json";
     public const string PublicKey = """
 -----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA1W0KyYSscsM/EKIAV13Y

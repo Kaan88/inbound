@@ -84,7 +84,8 @@ during a transition must reconcile to a safe state, never to `Completed`.
 ## Persistence layout
 
 ```
-%LOCALAPPDATA%\DownloadManager\
+%LOCALAPPDATA%\Programs\Inbound Download Manager\   program (app\, extension\, native-host\, install.json)
+%LOCALAPPDATA%\Inbound Download Manager\             user data (kept on uninstall)
   settings.json
   jobs\<jobId>.json
   jobs\<jobId>.part

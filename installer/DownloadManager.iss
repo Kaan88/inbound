@@ -3,13 +3,14 @@
 ; artifacts\installer-app and the Chrome extension into artifacts\installer-extension.
 ;
 ; Layout matches scripts\install.ps1 so the in-app updater and repair script keep working:
-;   %LOCALAPPDATA%\DownloadManager\app\          program files (replaced on upgrade)
-;   %LOCALAPPDATA%\DownloadManager\extension\    unpacked Chrome extension
-;   %LOCALAPPDATA%\DownloadManager\install.json  installed version/channel
-;   %LOCALAPPDATA%\DownloadManager\ (other)      user data: jobs, settings - kept on uninstall
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\app\           program files (replaced on upgrade)
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked Chrome extension
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\native-host\   browser bridge manifest
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\install.json   installed version/channel
+;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.2.1"
+  #define AppVersion "0.3.0"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -27,7 +28,8 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName=Inbound Download Manager {#AppVersion}
 AppPublisher=Kaan
-DefaultDirName={localappdata}\DownloadManager
+DefaultDirName={localappdata}\Programs\{#AppName}
+UsePreviousAppDir=no
 DisableDirPage=yes
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -65,9 +67,6 @@ Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 ; Upgrades replace the program folder completely, like install.ps1 does.
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\extension"
-; Shortcuts from versions named plain "Download Manager".
-Type: files; Name: "{userprograms}\Download Manager.lnk"
-Type: files; Name: "{userdesktop}\Download Manager.lnk"
 
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}\app"; IconFilename: "{app}\app\{#HostExe}"
@@ -182,7 +181,7 @@ begin
     'The app lives in the notification area (tray). Closing the main window hides it;' + #13#10 +
     'downloads continue. Use Exit in the tray menu to stop it.' + #13#10 + #13#10 +
     'Uninstall from Settings > Apps. Your download list and settings are kept in' + #13#10 +
-    '  ' + Root + #13#10 +
+    '  ' + ExpandConstant('{localappdata}\{#AppName}') + #13#10 +
     'Uninstall does not delete your download list, settings or downloaded files.' + #13#10, False);
 
   if WizardIsTaskSelected('startup') then

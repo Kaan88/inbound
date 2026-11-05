@@ -1,8 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$Source,
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "DownloadManager"),
-    [string]$Version = "0.2.1",
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
+    [string]$Version = "0.3.0",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -81,7 +81,6 @@ if (-not $NoShortcut) {
         $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
         New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
-        Remove-Item (Join-Path $startMenu "Download Manager.lnk") -Force -ErrorAction SilentlyContinue
         $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Inbound Download Manager.lnk"))
         $shortcut.TargetPath = Join-Path $appDir "DownloadManager.Host.exe"
         $shortcut.Arguments = "--background"

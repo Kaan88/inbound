@@ -107,14 +107,6 @@ public sealed partial class DownloadManagerService
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
 
-        // The site grabber was removed; schedules that ran a grabber project are dropped.
-        var legacyGrabberSchedules = _settings.Schedules.RemoveAll(schedule => schedule.GrabberProjectId is not null);
-        if (legacyGrabberSchedules > 0)
-        {
-            _log?.Invoke($"Removed {legacyGrabberSchedules} schedule(s) for the removed site grabber.");
-            await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
-        }
-
         var jobs = await _jobStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var job in jobs)
@@ -462,7 +454,7 @@ public sealed partial class DownloadManagerService
             settingsChanged = true;
         }
 
-        if (source is not (DownloadSource.Grabber or DownloadSource.Import))
+        if (source is not DownloadSource.Import)
         {
             lock (_sync)
             {

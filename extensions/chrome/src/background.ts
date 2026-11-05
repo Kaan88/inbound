@@ -11,7 +11,6 @@ interface Settings {
   autoIntercept: boolean;
   mediaDetectionEnabled: boolean;
   startMode: StartMode;
-  defaultDestination: string;
   interceptedExtensions: string[];
   excludedExtensions: string[];
   excludedHosts: string[];
@@ -76,7 +75,6 @@ const DEFAULT_SETTINGS: Settings = {
   autoIntercept: true,
   mediaDetectionEnabled: false,
   startMode: "now",
-  defaultDestination: "",
   interceptedExtensions: [
     "3gp", "7z", "aac", "ace", "aif", "apk", "arj", "asf", "avi", "bin", "bz2",
     "exe", "gz", "gzip", "img", "iso", "lzh", "m4a", "m4v", "mkv", "mov", "mp3",
@@ -196,19 +194,6 @@ async function loadSettings(): Promise<void> {
     ...DEFAULT_SETTINGS,
     ...(stored.settings ?? {}),
   };
-  // Earlier releases saved one-off handoff destinations as a global override.
-  // Browser downloads now defer to the application's configured default.
-  let changed = false;
-  if (settings.defaultDestination) {
-    settings.defaultDestination = "";
-    changed = true;
-  }
-  if (typeof stored.settings?.mediaDetectionEnabled !== "boolean") {
-    changed = true;
-  }
-  if (changed) {
-    await chrome.storage.local.set({ settings });
-  }
   const normalized = await chrome.storage.local.get("bypassUntil");
   bypassUntil = typeof normalized.bypassUntil === "number" ? normalized.bypassUntil : 0;
   settingsLoaded = true;
@@ -367,7 +352,6 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       startMode: settings.startMode,
       isAutoIntercept: true,
       headers: await cookieHeaders(item.url),
-      destinationDirectory: settings.defaultDestination || undefined,
     });
 
     if (ack.accepted) {
@@ -936,7 +920,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const startMode = message.startMode === "later" ? "later" : "now";
       const destination = typeof message.destination === "string" && message.destination.trim()
         ? message.destination.trim()
-        : settings.defaultDestination || undefined;
+        : undefined;
       const results: Array<Record<string, unknown>> = [];
       // One Download All batch becomes one package in the list.
       const packageKey = urls.length >= 2 ? crypto.randomUUID() : undefined;
@@ -1042,7 +1026,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             ok: true,
             handoff: pending,
             defaults: {
-              destination: settings.defaultDestination,
+              destination: "",
               startMode: settings.startMode,
             },
           }
@@ -1060,7 +1044,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const startMode: StartMode = message.startMode === "later" ? "later" : "now";
       const destination = typeof message.destination === "string"
         ? message.destination.trim()
-        : settings.defaultDestination;
+        : "";
       const ack = await requestHandoff({
         requestId: crypto.randomUUID(),
         extensionId: chrome.runtime.id,
@@ -1100,9 +1084,6 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       settings = {
         ...DEFAULT_SETTINGS,
         ...message.settings,
-        // An Options page left open across an extension reload may still send
-        // the removed persistent-folder field. It must not restore the override.
-        defaultDestination: "",
       };
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;

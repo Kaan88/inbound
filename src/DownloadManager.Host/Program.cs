@@ -100,19 +100,6 @@ internal static class Program
             completionExecutor.ExitHost = ExitApplication;
             pipe.Start();
 
-            // Passed by the installer when "Start when I sign in" is selected; afterwards the
-            // Options setting owns the Run key (applied just below and on every settings change).
-            if (args.Contains("--enable-sign-in-launch", StringComparer.OrdinalIgnoreCase))
-            {
-                var startupSettings = service.GetSnapshot().Settings;
-                if (!startupSettings.LaunchAtStartup)
-                {
-                    startupSettings.LaunchAtStartup = true;
-                    service.UpdateSettingsAsync(startupSettings).GetAwaiter().GetResult();
-                    log.Info("Launch at sign-in enabled by the installer.");
-                }
-            }
-
             var currentSettings = service.GetSnapshot().Settings;
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);

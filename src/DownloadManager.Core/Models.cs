@@ -50,8 +50,6 @@ public enum DownloadSource
     Batch,
     ClipboardMonitor,
     Import,
-    /// <summary>Legacy: jobs queued by the removed site grabber.</summary>
-    Grabber,
 }
 
 public enum StartMode
@@ -251,25 +249,6 @@ public sealed class ProxySettings
     /// <summary>DPAPI-protected password blob written by the settings store.</summary>
     public string? PasswordProtected { get; set; }
 
-    /// <summary>
-    /// Read-only migration hook for settings files written before DPAPI
-    /// protection: a legacy plaintext <c>password</c> value is adopted on load
-    /// and is never written back.
-    /// </summary>
-    [System.Text.Json.Serialization.JsonPropertyName("password")]
-    [System.Text.Json.Serialization.JsonIgnore(
-        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyPlaintextPassword
-    {
-        get => null;
-        set
-        {
-            if (!string.IsNullOrEmpty(value))
-            {
-                Password ??= value;
-            }
-        }
-    }
 }
 
 public sealed record EngineOptions
@@ -362,8 +341,6 @@ public sealed class ScheduleRule
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Daily";
     public int QueueId { get; set; }
-    /// <summary>Legacy: set on schedules for the removed site grabber; such schedules are dropped on load.</summary>
-    public Guid? GrabberProjectId { get; set; }
     public bool Enabled { get; set; } = true;
 
     /// <summary>daily or oneTime.</summary>

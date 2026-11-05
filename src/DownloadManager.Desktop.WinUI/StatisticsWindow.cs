@@ -58,7 +58,7 @@ public sealed class StatisticsWindow : Window
 
         root.Children.Add(new TextBlock
         {
-            Text = "Recorded data measures saved download progress, not network-interface traffic. Removed entries are retained in statistics starting with this version; older deleted history cannot be recovered.",
+            Text = "Recorded data measures saved download progress, not network-interface traffic. Removed entries stay in the statistics.",
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.78,
             Margin = new Thickness(0, 3, 0, 4),

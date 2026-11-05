@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$AppDir = (Join-Path $env:LOCALAPPDATA "DownloadManager\app"),
+    [string]$AppDir = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager\app"),
     [switch]$Force
 )
 
@@ -12,13 +12,13 @@ if (-not (Test-Path $nativeExe)) {
     throw "Native host executable not found: $nativeExe. Run publish.ps1 first."
 }
 
-$manifestDir = Join-Path $env:LOCALAPPDATA "DownloadManager\native-host"
+$manifestDir = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($AppDir))) "native-host"
 $manifestPath = Join-Path $manifestDir "$hostName.json"
 New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
 
 $manifest = [ordered]@{
     name = $hostName
-    description = "Download Manager Chrome bridge"
+    description = "Inbound Download Manager browser bridge"
     path = (Resolve-Path $nativeExe).Path
     type = "stdio"
     allowed_origins = @($extensionOrigin)

@@ -2,7 +2,6 @@ interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
   startMode: "now" | "later";
-  defaultDestination: string;
   notifications: boolean;
 }
 

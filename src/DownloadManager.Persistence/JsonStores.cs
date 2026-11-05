@@ -45,13 +45,13 @@ public sealed class StoragePaths
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!string.IsNullOrWhiteSpace(local))
         {
-            candidates.Add(Path.Combine(local, "DownloadManager"));
+            candidates.Add(Path.Combine(local, DownloadManager.Contracts.AppFolders.Name));
         }
 
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (!string.IsNullOrWhiteSpace(roaming))
         {
-            candidates.Add(Path.Combine(roaming, "DownloadManager"));
+            candidates.Add(Path.Combine(roaming, DownloadManager.Contracts.AppFolders.Name));
         }
 
         candidates.Add(Path.Combine(AppContext.BaseDirectory, "data"));
@@ -192,7 +192,7 @@ public sealed class JsonJobStore : IJobStore
                     throw new InvalidDataException("The job document is missing its id or URL.");
                 }
 
-                Migrate(job);
+                NormalizeJob(job);
                 jobs.Add(job);
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException)
@@ -222,7 +222,7 @@ public sealed class JsonJobStore : IJobStore
                 return null;
             }
 
-            Migrate(job);
+            NormalizeJob(job);
             return job;
         }
         catch (Exception ex) when (ex is JsonException or IOException)
@@ -369,9 +369,8 @@ public sealed class JsonJobStore : IJobStore
         return Task.CompletedTask;
     }
 
-    private static void Migrate(DownloadJob job)
+    private static void NormalizeJob(DownloadJob job)
     {
-        // Version 1 is the first persisted schema. Future migrations go here.
         job.SchemaVersion = DownloadJob.CurrentSchemaVersion;
         job.RequestHeaders ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         job.RequestHeaders = new Dictionary<string, string>(job.RequestHeaders, StringComparer.OrdinalIgnoreCase);
@@ -592,17 +591,9 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
 
             Normalize(settings);
-            var hadLegacyPlaintext = settings.Proxy.Password is { Length: > 0 } &&
-                                     string.IsNullOrEmpty(settings.Proxy.PasswordProtected);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
                 settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
-            }
-
-            if (hadLegacyPlaintext)
-            {
-                // Rewrite a pre-DPAPI settings file so the plaintext password leaves disk.
-                await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
 
             return settings;
@@ -705,8 +696,6 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(settings.UpdateManifestUrl)
             ? null
             : settings.UpdateManifestUrl.Trim();
-        if (string.Equals(settings.UpdateManifestUrl, ReleaseUpdates.RetiredManifestUrl, StringComparison.OrdinalIgnoreCase))
-            settings.UpdateManifestUrl = ReleaseUpdates.ManifestUrl;
         settings.UpdateChannel = string.IsNullOrWhiteSpace(settings.UpdateChannel)
             ? "stable"
             : settings.UpdateChannel.Trim().ToLowerInvariant();

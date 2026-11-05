@@ -158,12 +158,11 @@ test('right-click handoff retains its source frame and refreshes matching partit
   } finally { global.chrome = old; }
 });
 
-test('legacy persistent folder is cleared and one-off handoff folder is still used', async () => {
+test('one-off handoff folder is used for that download only', async () => {
   const initialSettings = {
     enabled: true,
     autoIntercept: true,
     startMode: 'now',
-    defaultDestination: 'C:\\Configured\\Downloads',
     interceptedExtensions: [],
     excludedExtensions: [],
     excludedHosts: [],
@@ -184,11 +183,6 @@ test('legacy persistent folder is cleared and one-off handoff folder is still us
     const source = path.join(__dirname, '..', 'src', 'background.ts');
     await startBackground(source);
 
-    assert.equal(harness.values.settings.defaultDestination, '');
-    await sendRuntimeMessage(harness, {
-      type: 'dm.saveSettings', settings: { ...initialSettings, defaultDestination: 'C:\\Stale\\Options' },
-    });
-    assert.equal(harness.values.settings.defaultDestination, '');
     const handoffInfo = await sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: pending.id });
     assert.equal(handoffInfo.defaults.destination, '');
 
@@ -207,7 +201,6 @@ test('legacy persistent folder is cleared and one-off handoff folder is still us
       payload: { accepted: true },
     });
     assert.equal((await response).ack.accepted, true);
-    assert.equal(harness.values.settings.defaultDestination, '');
     assert.equal(harness.values.settings.startMode, 'later');
   } finally {
     global.chrome = oldChrome;
@@ -216,7 +209,7 @@ test('legacy persistent folder is cleared and one-off handoff folder is still us
 
 test('folder picker rejects page senders and forwards extension requests to the native host', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const pendingHandoff = {
@@ -276,7 +269,7 @@ test('folder picker rejects page senders and forwards extension requests to the 
   }
 });
 
-test('media detection defaults off for legacy settings and can be enabled then disabled', async () => {
+test('media detection defaults off and can be enabled then disabled', async () => {
   const settings = {
     enabled: true,
     autoIntercept: true,
@@ -303,7 +296,6 @@ test('media detection defaults off for legacy settings and can be enabled then d
     await startBackground(path.join(__dirname, '..', 'src', 'background.ts'));
     const status = await sendRuntimeMessage(harness, { type: 'dm.status' });
     assert.equal(status.settings.mediaDetectionEnabled, false);
-    assert.equal(harness.values.settings.mediaDetectionEnabled, false);
 
     const stale = await sendRuntimeMessage(harness, {
       type: 'dm.mediaDetected', pageUrl: 'https://example.test/',
@@ -397,7 +389,7 @@ test('latest media option wins when tab synchronization overlaps', async () => {
 
 test('download without a Delete gesture is paused for normal bridge capture', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const pages = new Map([[4, () => ({ bypass: false })]]);
@@ -421,7 +413,7 @@ test('download without a Delete gesture is paused for normal bridge capture', as
 
 test('one Delete gesture bypasses one matching download and the next is captured', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const url = 'https://example.test/file.zip';
@@ -454,7 +446,7 @@ test('one Delete gesture bypasses one matching download and the next is captured
 
 test('gesture in a content script survives a fresh service-worker load', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const url = 'https://example.test/file.zip';
@@ -486,7 +478,7 @@ test('gesture in a content script survives a fresh service-worker load', async (
 
 test('restricted or unloaded pages fall back to normal bridge capture', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const pages = new Map([[4, null]]);
@@ -506,7 +498,7 @@ test('restricted or unloaded pages fall back to normal bridge capture', async ()
 
 test('file-name hook holds the download and answers when the browser keeps it', async () => {
   const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now', defaultDestination: '',
+    enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: ['zip'], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
   const harness = makeChrome(settings, { id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0 }, new Map());

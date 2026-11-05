@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

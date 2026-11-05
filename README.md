@@ -1,6 +1,6 @@
 # Inbound Download Manager
 
-Inbound is the app's display name. Existing DownloadManager install/data paths, native-host identity and update identity remain compatible with earlier builds.
+Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; settings, the download list and logs live in `%LOCALAPPDATA%\Inbound Download Manager`. 0.3.0 is a fresh start: it does not read state or settings from earlier builds.
 
 A private-use Windows download manager built around a durable background engine,
 a replaceable WinUI 3 frontend, and a Manifest V3 Chrome bridge. It implements
@@ -67,7 +67,7 @@ verified.
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-The installer publishes to `%LOCALAPPDATA%\DownloadManager`, registers the
+The installer publishes to `%LOCALAPPDATA%\Programs\Inbound Download Manager`, registers the
 per-user Chrome native-messaging host, and optionally enables launch at sign-in.
 Then load `extensions\chrome\dist` as an unpacked extension in
 `chrome://extensions`. The extension ID is pinned by the manifest key.

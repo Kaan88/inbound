@@ -36,7 +36,4 @@ public static class NativeHostRegistration
         }
     }
 
-    public static string ManifestPath()
-        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DownloadManager", "native-host", "com.kaank.downloadmanager.json");
 }

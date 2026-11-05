@@ -32,7 +32,7 @@ internal static class UiStateStore
             if (!string.IsNullOrWhiteSpace(isolated)) return [Path.Combine(isolated, "ui-state.json")];
             return
             [
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DownloadManager", "ui-state.json"),
+                Path.Combine(DownloadManager.Contracts.AppFolders.DataRoot(), "ui-state.json"),
                 Path.Combine(AppContext.BaseDirectory, "ui-state.json"),
             ];
         }
