@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
@@ -267,7 +267,7 @@ public sealed partial class DownloadManagerService
         if (!TryCopyHeaders(request.Headers, out var headers, out _)) return;
         await _addProbeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             var metadata = await reader.ReadMetadataAsync(new DownloadJob
@@ -694,6 +694,57 @@ public sealed partial class DownloadManagerService
             return await RemoveCoreAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
         }
         finally { _settingsUpdateGate.Release(); }
+    }
+
+    /// <summary>
+    /// Removes several downloads (a package) as one operation. Every member is stopped first, so
+    /// their transfers wind down together and the scheduler cannot start a queued member that is
+    /// about to be removed; each is then removed as <see cref="RemoveAsync"/> would.
+    /// </summary>
+    public async Task<JobActionResponse> RemoveManyAsync(
+        IReadOnlyList<Guid> ids,
+        bool deleteFile,
+        CancellationToken cancellationToken = default)
+    {
+        if (ids.Count > 1000) return new JobActionResponse { Error = "Remove at most 1000 downloads at a time." };
+        var unique = ids.Distinct().ToList();
+        var names = new Dictionary<Guid, string>();
+        lock (_sync)
+        {
+            foreach (var id in unique)
+            {
+                if (!_jobs.TryGetValue(id, out var runtime)) continue;
+                names[id] = runtime.Job.FileName;
+                runtime.AdmissionSuspended = true;
+                if (runtime.Runner is { IsCompleted: false })
+                {
+                    runtime.CancelRequested = true;
+                    runtime.CancelledForRemoval = true;
+                    runtime.Cts?.Cancel();
+                }
+            }
+        }
+
+        var failures = new List<string>();
+        try
+        {
+            foreach (var id in unique)
+            {
+                var result = await RemoveAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+                if (!result.Ok && result.Error != "Job not found.")
+                    failures.Add($"{names.GetValueOrDefault(id, id.ToString("D"))}: {result.Error}");
+            }
+        }
+        finally
+        {
+            lock (_sync)
+                foreach (var id in unique)
+                    if (_jobs.TryGetValue(id, out var runtime)) runtime.AdmissionSuspended = false;
+            Schedule();
+        }
+        return failures.Count == 0
+            ? new JobActionResponse { Ok = true }
+            : new JobActionResponse { Error = string.Join(Environment.NewLine, failures.Take(5)) };
     }
 
     private async Task<JobActionResponse> RemoveCoreAsync(Guid id, bool deleteFile, CancellationToken cancellationToken)

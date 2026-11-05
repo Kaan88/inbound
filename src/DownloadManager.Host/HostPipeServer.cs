@@ -267,7 +267,9 @@ public sealed class HostPipeServer
                 case MessageTypes.JobRemove:
                     var remove = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.RemoveAsync(remove.JobId, remove.DeleteFile, cancellationToken).ConfigureAwait(false))
+                        await (remove.JobIds is { Count: > 0 } removeIds
+                            ? _service.RemoveManyAsync(removeIds, remove.DeleteFile, cancellationToken)
+                            : _service.RemoveAsync(remove.JobId, remove.DeleteFile, cancellationToken)).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 

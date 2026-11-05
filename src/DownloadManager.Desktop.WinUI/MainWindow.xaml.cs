@@ -2520,7 +2520,8 @@ public sealed partial class MainWindow : Window
                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 .Select(match => match.Success ? match.Groups["b"].Value : null)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            packageName = bases is [{ } archive] ? archive : $"Links {DateTime.Now:MMM dd HH:mm}";
+            // Otherwise the Host names it from the file names the servers report.
+            packageName = bases is [{ } archive] ? archive : null;
         }
 
         var queueId = _settings.Queues.OrderBy(q => q.Order)
@@ -4113,6 +4114,20 @@ public sealed partial class MainWindow : Window
         }
 
         var includeFiles = deleteFiles.IsChecked == true;
+        if (selection.Count > 1)
+        {
+            // One Host operation: every file stops together and none restarts while others are removed.
+            StatusText.Text = $"Deleting {selection.Count} downloads…";
+            try
+            {
+                var result = (await _connection.RemoveManyAsync(selection.Select(job => job.Id).ToList(), includeFiles))
+                    .GetPayload<JobActionResponse>();
+                await RefreshAsync();
+                if (!result.Ok) await ShowMessageAsync("Delete incomplete", result.Error ?? "Some downloads could not be removed.");
+            }
+            catch (Exception ex) { await RefreshAsync(); await ShowMessageAsync("Delete incomplete", ex.Message); }
+            return;
+        }
         await RunBulkActionAsync(
             selection,
             id => _connection.RemoveAsync(id, deleteFile: includeFiles),

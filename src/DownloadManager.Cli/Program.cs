@@ -65,7 +65,7 @@ internal static class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--package KEY] [--package-name NAME] [--wait]");
                     return 2;
                 }
 
@@ -88,6 +88,9 @@ internal static class Program
                     Referrer = GetOption(args, "--referrer"),
                     UserAgent = GetOption(args, "--user-agent"),
                     ExpectedSha256 = GetOption(args, "--sha256"),
+                    // Adds that share a key form one package, as an Add Links batch does.
+                    PackageKey = GetOption(args, "--package"),
+                    PackageName = GetOption(args, "--package-name"),
                     Source = "cli",
                 };
                 if (int.TryParse(GetOption(args, "--connections"), out var connections))
@@ -377,15 +380,18 @@ internal static class Program
             }
             case "remove":
             {
-                if (!Guid.TryParse(optionArgs.FirstOrDefault(), out var id))
+                var ids = optionArgs.Select(arg => Guid.TryParse(arg, out var parsed) ? parsed : (Guid?)null).ToList();
+                if (ids.Count == 0 || ids.Any(id => id is null))
                 {
-                    Console.Error.WriteLine("usage: remove <job-id> [--keep-file]");
+                    Console.Error.WriteLine("usage: remove <job-id> [<job-id>...] [--keep-file]");
                     return 2;
                 }
 
                 var keep = args.Contains("--keep-file", StringComparer.OrdinalIgnoreCase);
-                var reply = await client.RequestAsync(MessageTypes.JobRemove,
-                    new JobActionRequest { JobId = id, DeleteFile = !keep }).ConfigureAwait(false);
+                // Several ids are removed as one Host operation, as deleting a package does.
+                var reply = await client.RequestAsync(MessageTypes.JobRemove, ids.Count == 1
+                    ? new JobActionRequest { JobId = ids[0]!.Value, DeleteFile = !keep }
+                    : new JobActionRequest { JobIds = ids.Select(id => id!.Value).ToList(), DeleteFile = !keep }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
             case "pause-all":

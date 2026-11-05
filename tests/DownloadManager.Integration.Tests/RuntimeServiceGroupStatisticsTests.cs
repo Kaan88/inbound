@@ -197,4 +197,57 @@ public sealed partial class RuntimeServiceTests
             return response.Job!;
         }
     }
+
+    [Fact]
+    public async Task UnnamedBatchPackageFollowsMemberFileNames()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        foreach (var name in new[] { "data1.doi", "data2.doi", "Setup.exe" })
+        {
+            var added = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=2048&seed=11", DestinationDirectory = ctx.Destination,
+                FileName = name, Source = "batch", StartMode = "later", PackageKey = "auto-name",
+            });
+            Assert.True(added.Accepted, added.Error);
+        }
+        var package = Assert.Single(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.Key == "batch:auto-name");
+        Assert.Equal("data", package.Name);
+
+        var renamed = await ctx.Service.GroupActionAsync(new GroupActionRequest { Action = "rename", GroupId = package.Id, Name = "Game" });
+        Assert.True(renamed.Ok, renamed.Error);
+        var more = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/file/data3.doi?size=2048&seed=12", DestinationDirectory = ctx.Destination,
+            FileName = "data3.doi", Source = "batch", StartMode = "later", PackageKey = "auto-name",
+        });
+        Assert.True(more.Accepted, more.Error);
+        Assert.Equal("Game", Assert.Single(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.Key == "batch:auto-name").Name);
+    }
+
+    [Fact]
+    public async Task RemovingSeveralRunningDownloadsStopsThemTogetherAndStartsNoneOfThem()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var ids = new List<Guid>();
+        for (var i = 0; i < 4; i++)
+        {
+            var added = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/slow/remove-many-{i}.bin?size=8388608&seed={20 + i}&bps=131072",
+                DestinationDirectory = ctx.Destination, Source = "cli", PackageKey = "remove-many",
+            });
+            Assert.True(added.Accepted, added.Error);
+            ids.Add(added.Job!.Id);
+        }
+        await ctx.WaitFor(ids[0], job => job.State == "downloading" && job.ReceivedBytes > 0);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var removed = await ctx.Service.RemoveManyAsync(ids, deleteFile: true);
+        Assert.True(removed.Ok, removed.Error);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Removal took {stopwatch.Elapsed}.");
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Jobs, job => ids.Contains(job.Id));
+        Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.Key == "batch:remove-many");
+        Assert.Empty(Directory.GetFiles(ctx.Destination, "remove-many-*", SearchOption.AllDirectories));
+    }
 }

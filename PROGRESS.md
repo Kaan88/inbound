@@ -1,6 +1,24 @@
 # Progress — session handoff
 
 
+### Package names, package delete and sparse part files (2026-11-06)
+
+- Name probe on add no longer waits for a per-host connection slot, so a running segmented download
+  to the same CDN no longer times out the names of the rest of a batch. Live: three TorBox CDN links
+  resolved to data1.doi, data2.doi and Setup.exe in about 1 s each.
+- Unnamed batch packages are named by the Host from the resolved file names (archive name, else the
+  largest shared beginning, else the first file) and follow later members until the user renames
+  them (`DownloadGroup.AutoNamed`). Live: "data". Test `UnnamedBatchPackageFollowsMemberFileNames`.
+- Deleting a package (or several downloads) is one Host operation, `RemoveManyAsync` (`JobIds` on
+  `JobRemove`): all members stop together and the scheduler cannot start a member being removed.
+  CLI `remove` accepts several ids; `add --package KEY [--package-name NAME]`.
+- Root cause of the slow stop: segmented part files were pre-sized non-sparse, so NTFS zero-filled
+  everything before a far segment's first write (measured 28.5 s for a write at 18 GB; a 58.7 GB
+  download took about 105 s to stop). Part files are now marked sparse before sizing. Live: package
+  delete while downloading at 110 MB/s took 0.2 s. Test
+  `RemovingSeveralRunningDownloadsStopsThemTogetherAndStartsNoneOfThem`.
+- Validation: Release build 0 warnings; Core 107, Engine 57, Integration 98 passed.
+
 ### Main window, extension review and Edge flyout (2026-11-05)
 
 - 2026-11-06: repository consolidated to public `Kaan88/inbound` (source + releases). `credentials.txt` purged from all history before publishing; the old private `Kaan88/download-manager` and builds-only `Kaan88/download-manager-builds` were deleted at owner request. 0.2.0 rebuilt with the new feed URL and released at https://github.com/Kaan88/inbound/releases/tag/v0.2.0; anonymous `releases/latest/download/manifest.json` returns 0.2.0. Saved settings on the retired feed migrate to the new one (test `SavedRetiredUpdateFeedMovesToCurrentFeed`). Installs of 0.1.5 or older still poll the deleted feed and need the 0.2.0 installer once.

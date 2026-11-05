@@ -6,10 +6,45 @@ namespace DownloadManager.Runtime;
 public sealed partial class DownloadManagerService
 {
     private static List<DownloadGroup> CloneGroups(IEnumerable<DownloadGroup> groups) => groups.Select(group =>
-        new DownloadGroup { Id = group.Id, Name = group.Name, Key = group.Key, JobIds = new(group.JobIds) }).ToList();
+        new DownloadGroup { Id = group.Id, Name = group.Name, Key = group.Key, AutoNamed = group.AutoNamed, JobIds = new(group.JobIds) }).ToList();
 
     private static List<DownloadGroupDto> MapGroups(IEnumerable<DownloadGroup> groups) => groups.Select(group =>
         new DownloadGroupDto { Id = group.Id, Name = group.Name, Key = group.Key, JobIds = new(group.JobIds) }).ToList();
+
+    /// <summary>
+    /// A name for a batch from its members' file names: the split archive's name, else the
+    /// names' common beginning, else the first file's name.
+    /// </summary>
+    internal static string DerivePackageName(IReadOnlyList<string> fileNames)
+    {
+        var archive = fileNames.Select(name => MultipartArchiveName.TryGetBaseName(name, out var archiveBase) ? archiveBase : null)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .GroupBy(name => name!, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count()).Select(group => group.Key).FirstOrDefault();
+        if (archive is not null) return Limit(archive);
+        var stems = fileNames.Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => Path.GetFileNameWithoutExtension(name)).Where(stem => stem.Length > 0).ToList();
+        if (stems.Count == 0) return "Downloads";
+        // The largest set of names that begin alike (data1, data2 beside a Setup.exe) names the package.
+        var family = stems.GroupBy(stem => stem.Length >= 3 ? stem[..3].ToUpperInvariant() : stem.ToUpperInvariant())
+            .OrderByDescending(group => group.Count()).First().ToList();
+        var prefix = family[0];
+        foreach (var stem in family.Skip(1))
+        {
+            var length = 0;
+            while (length < prefix.Length && length < stem.Length &&
+                   char.ToUpperInvariant(prefix[length]) == char.ToUpperInvariant(stem[length])) length++;
+            prefix = prefix[..length];
+        }
+        prefix = prefix.TrimEnd(' ', '.', '_', '-', '(', '[');
+        return Limit(family.Count > 1 && prefix.Length >= 3 ? prefix : stems[0]);
+
+        static string Limit(string name)
+        {
+            name = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+            return name.Length == 0 ? "Downloads" : name.Length > 100 ? name[..100] : name;
+        }
+    }
 
     /// <summary>The package a job belongs to when it shows as a package (two or more members).</summary>
     public Guid? FindPackageOf(Guid jobId)
@@ -54,12 +89,18 @@ public sealed partial class DownloadManagerService
                 if (batch is null)
                 {
                     var name = request.PackageName?.Trim();
-                    if (string.IsNullOrWhiteSpace(name) || name.Length > 100 || name.Any(char.IsControl))
-                        name = MultipartArchiveName.TryGetBaseName(job.FileName, out var archive) ? archive : "Downloads";
+                    var auto = string.IsNullOrWhiteSpace(name) || name.Length > 100 || name.Any(char.IsControl);
+                    if (auto) name = DerivePackageName([job.FileName]);
                     // A batch package is created with its first job; it shows as a package from the second.
-                    next.Add(new DownloadGroup { Name = name, Key = batchKey, JobIds = [jobId] });
+                    next.Add(new DownloadGroup { Name = name!, Key = batchKey, AutoNamed = auto, JobIds = [jobId] });
                 }
-                else batch.JobIds.Add(jobId);
+                else
+                {
+                    batch.JobIds.Add(jobId);
+                    // A Host-chosen name follows the file names the servers report as parts arrive.
+                    if (batch.AutoNamed)
+                        batch.Name = DerivePackageName(batch.JobIds.Where(_jobs.ContainsKey).Select(id => _jobs[id].Job.FileName).ToList());
+                }
             }
             else
             {
@@ -160,7 +201,7 @@ public sealed partial class DownloadManagerService
                     group = new DownloadGroup { Name = name };
                     next.Add(group);
                 }
-                else group!.Name = name;
+                else { group!.Name = name; group.AutoNamed = false; }
             }
             switch (action)
             {

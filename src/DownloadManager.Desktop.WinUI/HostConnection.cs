@@ -82,6 +82,11 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRemove, new JobActionRequest { JobId = id, DeleteFile = deleteFile },
             TimeSpan.FromSeconds(10), cancellationToken);
 
+    /// <summary>Removes several downloads in one Host operation; stopping them may take a while.</summary>
+    public Task<IpcMessage> RemoveManyAsync(IReadOnlyList<Guid> ids, bool deleteFile, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobRemove, new JobActionRequest { JobIds = ids.ToList(), DeleteFile = deleteFile },
+            TimeSpan.FromSeconds(30 + 2 * ids.Count), cancellationToken);
+
     public Task<IpcMessage> UpdateSettingsAsync(SettingsDto settings, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings },
             TimeSpan.FromSeconds(10), cancellationToken);

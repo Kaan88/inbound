@@ -396,6 +396,8 @@ public sealed class DownloadGroup
     public string Name { get; set; } = string.Empty;
     /// <summary>Automatic package identity (multipart archive or browser batch); null for manual packages.</summary>
     public string? Key { get; set; }
+    /// <summary>The name was chosen by the Host and follows the members' file names until the user renames it.</summary>
+    public bool AutoNamed { get; set; }
     public List<Guid> JobIds { get; set; } = new();
 }
 

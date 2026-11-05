@@ -302,6 +302,8 @@ public sealed class JobActionRequest
     public Guid JobId { get; set; }
     public bool DeleteFile { get; set; }
     public bool OnlyIfUnfinished { get; set; }
+    /// <summary>Remove only: several downloads in one request (a package). <see cref="JobId"/> is ignored when set.</summary>
+    public List<Guid>? JobIds { get; set; }
 }
 
 public sealed class JobActionResponse

@@ -2627,7 +2627,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private async Task<FileMetadata> ReadMetadataCoreAsync(DownloadJob request, CancellationToken cancellationToken)
     {
         if (!TryCreateUri(request.Url, out var uri, out var error)) throw new ArgumentException(error);
-        using var lease = await _hostLimiter.AcquireAsync(uri.Host, cancellationToken).ConfigureAwait(false);
+        // One short request, not a transfer connection: it must not queue behind a running
+        // segmented download to the same host, or names for the rest of a batch time out.
         var response = await SendWithRedirectsAsync(request, 0, cancellationToken, method: HttpMethod.Head).ConfigureAwait(false);
         try
         {
@@ -2885,6 +2886,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 FileOptions.Asynchronous | FileOptions.RandomAccess);
             if (checkpoint is null)
             {
+                SparseFile.TryMarkSparse(file.SafeFileHandle);
                 file.SetLength(plan.Total);
             }
 
