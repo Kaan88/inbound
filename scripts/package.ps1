@@ -9,7 +9,9 @@ $packageRoot = Join-Path $root "artifacts\package\download-manager-$Version"
 $packageFile = Join-Path $root "artifacts\package\download-manager-$Version.zip"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Configuration Release
-& (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release
+# Self-contained like Setup: an update replaces the whole app folder, so it must not start
+# depending on a .NET or Windows App SDK runtime that Setup never asked the PC to have.
+& (Join-Path $PSScriptRoot "publish.ps1") -Configuration Release -SelfContained
 
 if (Test-Path $packageRoot) { Remove-Item $packageRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null

@@ -68,6 +68,14 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Files and programs opened from a window inherit the current directory; keep it out of
+        // app\, or they hold that folder against updates for as long as they stay open.
+        try
+        {
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (Directory.Exists(profile)) Environment.CurrentDirectory = profile;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
         var commandLine = Environment.GetCommandLineArgs();
         var pageIndex = Array.FindIndex(commandLine, arg => string.Equals(arg, "--page", StringComparison.OrdinalIgnoreCase));
         var openSettings = pageIndex >= 0 && pageIndex + 1 < commandLine.Length &&

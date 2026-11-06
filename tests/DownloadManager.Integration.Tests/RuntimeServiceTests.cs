@@ -2434,6 +2434,162 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task UpdateOutcomeIsToldOnlyWhileItStillApplies()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "install.json"), """{"version":"0.3.2","channel":"stable"}""");
+        var updates = Path.Combine(ctx.Paths.Root, "updates");
+        Directory.CreateDirectory(updates);
+        var result = Path.Combine(updates, "install-result.json");
+        void Write(string status, string version, string at) => File.WriteAllText(result,
+            $$"""{"status":"{{status}}","version":"{{version}}","error":"The file is in use.","at":"{{at}}"}""");
+
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+        try
+        {
+            // Setup has installed this version since the update to it failed: old news.
+            Write("failed", "0.3.2", "2026-11-06T01:00:00+03:00");
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+            Assert.Null(ctx.Service.GetSnapshot().UpdateProgress);
+
+            Write("failed", "0.3.3", "2026-11-06T02:00:00+03:00");
+            var failed = ctx.Service.TakeUpdateInstallOutcome();
+            Assert.NotNull(failed);
+            Assert.False(failed.Succeeded);
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+            // Still there when the update window is opened later.
+            Assert.Equal("failed", ctx.Service.GetSnapshot().UpdateProgress?.Stage);
+            Assert.Equal("The file is in use.", ctx.Service.GetSnapshot().UpdateProgress?.Error);
+
+            Write("succeeded", "0.3.2", "2026-11-06T03:00:00+03:00");
+            Assert.True(ctx.Service.TakeUpdateInstallOutcome()?.Succeeded);
+
+            // "Succeeded" while that version is not what is installed tells nothing true.
+            Write("succeeded", "0.3.3", "2026-11-06T04:00:00+03:00");
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Offers version 1.0.1 of a package holding only this helper script. Returns the install root.
+    private async Task<string> OfferUpdateWithHelperAsync(ServiceContext ctx, string helperScript)
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"), "install");
+        Directory.CreateDirectory(root);
+        await File.WriteAllTextAsync(Path.Combine(root, "install.json"), """{"version":"1.0.0","channel":"stable"}""");
+
+        using var zipped = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(zipped, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        using (var writer = new StreamWriter(zip.CreateEntry("apply-update.ps1").Open()))
+        {
+            await writer.WriteAsync(helperScript);
+        }
+
+        var package = zipped.ToArray();
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var manifest = new UpdateManifest
+        {
+            Version = "1.0.1",
+            Channel = "stable",
+            InstallerUrl = $"{_server.BaseAddress}/update/package",
+            Size = package.Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(package)).ToLowerInvariant(),
+        };
+        manifest.Signature = Convert.ToBase64String(rsa.SignData(
+            System.Text.Encoding.UTF8.GetBytes(UpdateManifestVerifier.Canonical(manifest)),
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1));
+        _server.SetUpdatePayload(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(manifest, IpcJson.Options), package);
+
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.UpdateManifestUrl = $"{_server.BaseAddress}/update/manifest";
+        settings.UpdatePublicKey = rsa.ExportSubjectPublicKeyInfoPem();
+        settings.UpdateChannel = "stable";
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        return root;
+    }
+
+    [Fact]
+    public async Task UpdateHelperThatExitsAtOnceLeavesTheHostRunning()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var root = await OfferUpdateWithHelperAsync(ctx, "exit 3");
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+        try
+        {
+            var result = await ctx.Service.InstallUpdateAsync();
+
+            // Not "scheduled", which is what makes the Host shut down.
+            Assert.False(result.Ok);
+            Assert.Equal("launchFailed", result.Status);
+            Assert.False(string.IsNullOrWhiteSpace(result.Error));
+            Assert.Equal("failed", ctx.Service.GetSnapshot().UpdateProgress?.Stage);
+
+            // Told now, so not again at the next start, and not retried on its own.
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+            Assert.True(ctx.Service.UpdateFailedRecently("1.0.1"));
+
+            // The Host is still in business.
+            var following = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/after-helper-exit.bin?size=4096&seed=412",
+                Source = "cli",
+            });
+            Assert.True(following.Accepted, following.Error);
+            await ctx.WaitFor(following.Job!.Id, job => job.State == "completed");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateHelperStillWaitingForTheHostIsScheduled()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var root = await OfferUpdateWithHelperAsync(ctx, "Start-Sleep -Seconds 120");
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+        try
+        {
+            var result = await ctx.Service.InstallUpdateAsync();
+
+            Assert.True(result.Ok, result.Error);
+            Assert.Equal("scheduled", result.Status);
+            Assert.Equal("installing", ctx.Service.GetSnapshot().UpdateProgress?.Stage);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            var pending = Path.Combine(ctx.Paths.Root, "updates", "install-pending.json");
+            if (File.Exists(pending))
+            {
+                using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(pending));
+                try
+                {
+                    using var helper = System.Diagnostics.Process.GetProcessById(
+                        document.RootElement.GetProperty("helperProcessId").GetInt32());
+                    helper.Kill();
+                    await helper.WaitForExitAsync();
+                }
+                catch (ArgumentException) { }
+            }
+
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AddWithoutFileNameUsesServerContentDispositionName()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

@@ -64,7 +64,7 @@ if (-not $NoShortcut) {
         $shortcut = $shell.CreateShortcut((Join-Path $startMenu "Inbound Download Manager.lnk"))
         $shortcut.TargetPath = Join-Path $AppDir "DownloadManager.Host.exe"
         $shortcut.Arguments = "--background"
-        $shortcut.WorkingDirectory = $AppDir
+        $shortcut.WorkingDirectory = (Split-Path -Parent ([IO.Path]::GetFullPath($AppDir)))
         $shortcut.Description = "Inbound Download Manager background host"
         $shortcut.Save()
         Write-Host "Restored the Start Menu shortcut."

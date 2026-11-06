@@ -95,7 +95,8 @@ public sealed class HostController : IHostController
                 FileName = executable,
                 Arguments = arguments,
                 UseShellExecute = false,
-                WorkingDirectory = Path.GetDirectoryName(executable)!,
+                // Not app\: what a window opens inherits this, and it would hold that folder (see Program.LeaveProgramFolder).
+                WorkingDirectory = Environment.CurrentDirectory,
             });
             _log.Info($"Opened desktop UI '{executable}'.");
         }

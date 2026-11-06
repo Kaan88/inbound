@@ -50,6 +50,11 @@ try {
     foreach ($requiredEntry in @(
         "app/DownloadManager.Host.exe",
         "app/DownloadManager.Desktop.WinUI.exe",
+        # The bundled runtimes: without them the update only runs on a PC that happens to have them.
+        "app/hostfxr.dll",
+        "app/coreclr.dll",
+        "app/Microsoft.ui.xaml.dll",
+        "app/DownloadManager.Desktop.WinUI.pri",
         "extension/manifest.json",
         "install.ps1",
         "apply-update.ps1"

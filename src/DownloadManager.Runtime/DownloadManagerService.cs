@@ -1725,7 +1725,9 @@ public sealed partial class DownloadManagerService
                 };
             }
 
-            var resultPath = Path.Combine(_paths.Root, "updates", "install-result.json");
+            var journal = UpdateJournal;
+            journal.ClearForNewInstall();
+            var resultPath = journal.ResultPath;
             var start = new System.Diagnostics.ProcessStartInfo("powershell.exe")
             {
                 UseShellExecute = false,
@@ -1746,7 +1748,7 @@ public sealed partial class DownloadManagerService
                 start.ArgumentList.Add(argument);
             }
 
-            var helper = System.Diagnostics.Process.Start(start);
+            using var helper = System.Diagnostics.Process.Start(start);
             if (helper is null)
             {
                 return new UpdateInstallResult
@@ -1758,9 +1760,28 @@ public sealed partial class DownloadManagerService
                 };
             }
 
+            journal.MarkPending(check.AvailableVersion, helper.Id);
+            ReportUpdateProgress("installing", check.AvailableVersion, download.Size ?? 0, download.Size);
+
+            // The helper waits for this Host to exit, so one that has already gone never got going
+            // and nothing will bring the app back. Staying up is the only way to keep it running.
+            // The caller's token is not used: the helper is running now whatever the caller wants.
+            if (await ExitsWithinAsync(helper, UpdateHelperStartGrace).ConfigureAwait(false))
+            {
+                var outcome = journal.TakeUnreported(_ => false);
+                _log?.Invoke($"Update helper for {check.AvailableVersion} exited at once " +
+                    $"with code {helper.ExitCode}; the Host stays up. {outcome?.Error}");
+                return new UpdateInstallResult
+                {
+                    Ok = false,
+                    Status = "launchFailed",
+                    Error = outcome?.Error ?? "The update helper stopped as soon as it started.",
+                    Version = check.AvailableVersion,
+                };
+            }
+
             _log?.Invoke(
                 $"Update {check.AvailableVersion} staged; the Host will shut down for the installer.");
-            ReportUpdateProgress("installing", check.AvailableVersion, download.Size ?? 0, download.Size);
             return new UpdateInstallResult
             {
                 Ok = true,
@@ -1780,6 +1801,46 @@ public sealed partial class DownloadManagerService
             };
         }
     }
+
+    private UpdateInstallJournal UpdateJournal => new(Path.Combine(_paths.Root, "updates"));
+
+    private static readonly TimeSpan UpdateHelperStartGrace = TimeSpan.FromSeconds(5);
+
+    private static async Task<bool> ExitsWithinAsync(System.Diagnostics.Process process, TimeSpan time)
+    {
+        using var timeout = new CancellationTokenSource(time);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// What became of the update applied before this Host started, once. A success is told when
+    /// that version is now installed, a failure only while that version is still not installed
+    /// (Setup may have installed it since). A failure also shows in the update window.
+    /// </summary>
+    public UpdateInstallOutcome? TakeUpdateInstallOutcome()
+    {
+        UpdateInstallOutcome? outcome;
+        try { outcome = UpdateJournal.TakeUnreported(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        var installed = InstalledBuild.TryLoad()?.Version;
+        if (outcome is null || installed is null) return null;
+        var stillMissing = IsNewerVersion(outcome.Version, installed);
+        if (outcome.Succeeded) return stillMissing ? null : outcome;
+        if (!stillMissing) return null;
+        ReportUpdateProgress("failed", outcome.Version, error: outcome.Error);
+        return outcome;
+    }
+
+    /// <summary>True while an automatic retry of a failed update would be too soon; the user can still install it.</summary>
+    public bool UpdateFailedRecently(string version) => UpdateJournal.FailedRecently(version, TimeSpan.FromHours(24));
 
     public async Task<SettingsResult> DeferUpdateAsync(
         string version,

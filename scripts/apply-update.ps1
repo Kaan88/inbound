@@ -8,6 +8,10 @@ param(
     [switch]$NoStart
 )
 
+# Replaces the installed app with the one in $PackageDir. The new files are staged beside the
+# old ones and swapped in with renames, never by deleting the live folder, so any failure can put
+# the old version back instead of leaving a half-deleted one.
+
 $ErrorActionPreference = "Stop"
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 if ($InstallRoot -eq [IO.Path]::GetPathRoot($InstallRoot).TrimEnd('\')) {
@@ -15,42 +19,24 @@ if ($InstallRoot -eq [IO.Path]::GetPathRoot($InstallRoot).TrimEnd('\')) {
 }
 $appDir = Join-Path $InstallRoot "app"
 $backupDir = Join-Path $InstallRoot "app-rollback"
+$newAppDir = Join-Path $InstallRoot "app-new"
 $extensionDir = Join-Path $InstallRoot "extension"
 $extensionBackupDir = Join-Path $InstallRoot "extension-rollback"
-$hadExtension = $false
+$newExtensionDir = Join-Path $InstallRoot "extension-new"
 $metadataPath = Join-Path $InstallRoot "install.json"
 $metadataBackup = $null
-$startedNewHost = $false
-$replacementStarted = $false
-# Never hold the directory that install.ps1 needs to replace as our current directory.
-Set-Location -LiteralPath $PackageDir
-[Environment]::CurrentDirectory = (Get-Location).ProviderPath
+$appSwapped = $false
+$extensionSwapped = $false
+$script:frontendsWereOpen = $false
+$script:waitedForHost = $false
 $newProcesses = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+$appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
 
-function Start-InstalledApplication {
-    $start = New-Object System.Diagnostics.ProcessStartInfo
-    $start.FileName = Join-Path $appDir "DownloadManager.Host.exe"
-    $start.Arguments = "--background"
-    $start.WorkingDirectory = $appDir
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $newProcesses.Add([System.Diagnostics.Process]::Start($start))
-    if ($frontends.Count -gt 0) {
-        $start.FileName = Join-Path $appDir "DownloadManager.Desktop.WinUI.exe"
-        $start.Arguments = ""
-        $newProcesses.Add([System.Diagnostics.Process]::Start($start))
-    }
+try {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $ResultPath) -Force | Out-Null
+    Start-Transcript -LiteralPath (Join-Path (Split-Path -Parent $ResultPath) "apply-update.log") -Force | Out-Null
 }
-
-foreach ($targetPath in @($appDir, $backupDir, $extensionDir, $extensionBackupDir)) {
-    if (-not [IO.Path]::GetFullPath($targetPath).StartsWith($InstallRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Update target is outside the installation directory."
-    }
-    if ((Test-Path -LiteralPath $targetPath) -and
-        ((Get-Item -LiteralPath $targetPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Update targets must not be directory links."
-    }
-}
+catch { }
 
 function Write-Result([string]$status, [string]$errorText) {
     $payload = [ordered]@{
@@ -60,139 +46,328 @@ function Write-Result([string]$status, [string]$errorText) {
         at = (Get-Date).ToString("O")
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $ResultPath) -Force | Out-Null
-    [System.IO.File]::WriteAllText(
-        $ResultPath,
-        ($payload | ConvertTo-Json -Depth 3),
-        (New-Object System.Text.UTF8Encoding($false)))
+    $temp = "$ResultPath.tmp"
+    [System.IO.File]::WriteAllText($temp, ($payload | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temp -Destination $ResultPath -Force
 }
 
-try {
-    # Older frontends restart the Host on disconnect. Close only this install's
-    # UI processes before waiting for the old Host, so they cannot race upgrade.
-    $appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
-    $frontends = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
-        $_.Name -eq 'DownloadManager.Desktop.WinUI.exe' -and $_.ExecutablePath -and
-        $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase)
+function Get-InstallProcesses {
+    @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase)
     })
-    foreach ($frontend in $frontends) {
-        Stop-Process -Id $frontend.ProcessId -Force -ErrorAction Stop
+}
+
+# A window the user has up comes back after the update. The update's own progress window does not,
+# and neither does a main window closed to the tray: that process is still running, but hidden.
+function Note-OpenWindow($process) {
+    if ($process.CommandLine -like '*update-progress*') { return }
+    $window = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+    if ($window -and $window.MainWindowHandle -ne [IntPtr]::Zero) { $script:frontendsWereOpen = $true }
+}
+
+# Every process running from app\ must have exited, not just been told to: a killed process
+# keeps its executable and DLLs locked until Windows has torn it down.
+function Wait-InstallIdle([int]$seconds) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ($true) {
+        $running = @(Get-InstallProcesses)
+        if ($running.Count -eq 0) { return }
+        foreach ($process in $running) {
+            if ($process.Name -eq 'DownloadManager.Desktop.WinUI.exe') { Note-OpenWindow $process }
+            # The old Host was asked to exit and is waited for; anything else from this install
+            # is a UI window, the browser bridge or the CLI, which must not hold files now.
+            # A Host started since then (by the browser bridge, say) would hold files too.
+            if ($process.ProcessId -ne $HostPid) {
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ((Get-Date) -gt $deadline) {
+            throw ("These programs did not exit for the update: " +
+                (($running | ForEach-Object Name | Sort-Object -Unique) -join ', ') +
+                ". Application files were not replaced.")
+        }
+        Start-Sleep -Milliseconds 250
     }
-    if ($HostPid -gt 0) {
-        $running = Get-Process -Id $HostPid -ErrorAction SilentlyContinue
-        if ($running) {
-            Wait-Process -Id $HostPid -Timeout 120 -ErrorAction SilentlyContinue
-            if (Get-Process -Id $HostPid -ErrorAction SilentlyContinue) {
-                throw "The Host did not exit for the update. Application files were not replaced."
+}
+
+# A directory rename is atomic: the folder is either the old or the new version, never a mix.
+# It fails while something holds a file inside, so it is retried briefly (antivirus scans).
+function Move-Directory([string]$from, [string]$to, [int]$seconds = 30) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ($true) {
+        try { [IO.Directory]::Move($from, $to); return }
+        catch {
+            if ((Get-Date) -gt $deadline) {
+                $reason = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+                throw "Could not rename '$from' to '$to' because a file in it is in use: $reason"
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
+# Moves the named items of $from into $to, noting each one in $moved as soon as it has gone, so
+# a failure part way leaves an exact record of what to undo.
+function Move-Items([string]$from, [string]$to, [string[]]$names, [Collections.Generic.List[string]]$moved, [int]$seconds = 10) {
+    New-Item -ItemType Directory -Path $to -Force | Out-Null
+    foreach ($name in $names) {
+        $source = Join-Path $from $name
+        $target = Join-Path $to $name
+        $isFolder = Test-Path -LiteralPath $source -PathType Container
+        $deadline = (Get-Date).AddSeconds($seconds)
+        while ($true) {
+            try {
+                if ($isFolder) { [IO.Directory]::Move($source, $target) } else { [IO.File]::Move($source, $target) }
+                if ($null -ne $moved) { $moved.Add($name) }
+                break
+            }
+            catch {
+                if ((Get-Date) -gt $deadline) { throw "Could not move '$source' because it is in use." }
+                Start-Sleep -Milliseconds 500
             }
         }
     }
-    # The native bridge can briefly outlive the Host and hold its install files.
-    $bridges = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
-        $_.Name -eq 'DownloadManager.NativeHost.exe' -and $_.ExecutablePath -and
-        $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase)
-    })
-    foreach ($bridge in $bridges) {
-        Stop-Process -Id $bridge.ProcessId -Force -ErrorAction Stop
+}
+
+function Get-ItemNames([string]$folder) { @(Get-ChildItem -LiteralPath $folder -Force | ForEach-Object Name) }
+
+# What each in-place swap has moved so far, by live folder.
+$script:inPlaceSwaps = @{}
+
+# Puts $new in place of $live and keeps $live as $backup. Renaming the whole folder is atomic, but
+# Windows refuses it while any program has the folder as its current directory. Programs opened
+# from older versions of this app inherited app\ that way and may still be running (a downloaded
+# installer, WinRAR). The files inside can still be moved, so that is the fallback.
+function Swap-In([string]$live, [string]$new, [string]$backup) {
+    if (-not (Test-Path -LiteralPath $live)) { Move-Directory $new $live; return }
+    try { Move-Directory $live $backup 10 }
+    catch {
+        Write-Warning "$($_.Exception.Message) Replacing its contents instead."
+        $record = @{
+            Old = [Collections.Generic.List[string]]::new()
+            New = [Collections.Generic.List[string]]::new()
+        }
+        $script:inPlaceSwaps[$live] = $record
+        Move-Items $live $backup (Get-ItemNames $live) $record.Old
+        Move-Items $new $live (Get-ItemNames $new) $record.New
+        Remove-Item -LiteralPath $new -Recurse -Force
+        return
+    }
+    Move-Directory $new $live
+}
+
+# Undoes Swap-In from wherever it stopped. An in-place swap is undone item by item, touching only
+# what it moved: anything else in $live never left, and may be the very file that stopped it.
+function Restore-Folder([string]$live, [string]$backup) {
+    if (-not (Test-Path -LiteralPath $backup)) { return }
+    $failed = "$live.failed-" + [guid]::NewGuid().ToString("N")
+    $record = $script:inPlaceSwaps[$live]
+    if ($null -ne $record) {
+        Move-Items $live $failed $record.New.ToArray() $null
+        Move-Items $backup $live $record.Old.ToArray() $null
+        Remove-Item -LiteralPath $backup -Recurse -Force
+        return
+    }
+    if (Test-Path -LiteralPath $live) { Move-Directory $live $failed 5 }
+    Move-Directory $backup $live
+}
+
+function Remove-Directory([string]$path, [int]$seconds = 30) {
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    # Renamed first, so a partly deleted folder never keeps a name the app uses.
+    $doomed = "$path.delete-" + [guid]::NewGuid().ToString("N")
+    Move-Directory $path $doomed $seconds
+    try { Remove-Item -LiteralPath $doomed -Recurse -Force }
+    catch { Write-Warning "Left '$doomed' behind: $($_.Exception.Message)" }
+}
+
+function Start-InstalledProgram([string]$name, [string]$arguments) {
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = Join-Path $appDir $name
+    $start.Arguments = $arguments
+    # Not app\ itself: a process whose current directory is app\ holds that folder.
+    $start.WorkingDirectory = $InstallRoot
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $newProcesses.Add([System.Diagnostics.Process]::Start($start))
+}
+
+function Start-InstalledApplication {
+    Start-InstalledProgram "DownloadManager.Host.exe" "--background"
+    if ($script:frontendsWereOpen) { Start-InstalledProgram "DownloadManager.Desktop.WinUI.exe" "" }
+}
+
+# The new version must survive starting. A Host or window that crashes straight away means this
+# version cannot run on this PC, and the rollback brings the old one back. Exit code 0 is a clean
+# exit (for example another instance was found), which is not a failure.
+function Confirm-Started([int]$seconds = 8) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    foreach ($process in $newProcesses) {
+        $remaining = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+        if ($process.WaitForExit($remaining) -and $process.ExitCode -ne 0) {
+            throw ("The new version did not start: {0} exited with code {1}." -f
+                [IO.Path]::GetFileName($process.StartInfo.FileName), $process.ExitCode)
+        }
+    }
+}
+
+function Show-Failure([string]$text) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show($text, "Inbound Download Manager update", 'OK', 'Error') | Out-Null
+    }
+    catch { }
+}
+
+try {
+    # Never hold a directory this script renames as our current directory.
+    Set-Location -LiteralPath $PackageDir
+    [Environment]::CurrentDirectory = (Get-Location).ProviderPath
+
+    foreach ($targetPath in @($appDir, $backupDir, $newAppDir, $extensionDir, $extensionBackupDir, $newExtensionDir)) {
+        if (-not [IO.Path]::GetFullPath($targetPath).StartsWith($InstallRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Update target is outside the installation directory."
+        }
+        if ((Test-Path -LiteralPath $targetPath) -and
+            ((Get-Item -LiteralPath $targetPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Update targets must not be directory links."
+        }
     }
 
-    if (Test-Path $backupDir) {
-        Remove-Item $backupDir -Recurse -Force
+    $packageApp = Join-Path $PackageDir "app"
+    if (-not (Test-Path (Join-Path $packageApp "DownloadManager.Host.exe"))) {
+        throw "The update package has no application files."
     }
 
-    if (Test-Path $appDir) {
-        Copy-Item $appDir $backupDir -Recurse -Force
-    }
-    if (Test-Path $extensionBackupDir) {
-        Remove-Item $extensionBackupDir -Recurse -Force
-    }
-    $hadExtension = Test-Path $extensionDir
-    if ($hadExtension) {
-        Copy-Item $extensionDir $extensionBackupDir -Recurse -Force
+    # UI windows go first: an older window restarts the Host when it loses its connection,
+    # which would race the wait below. They are reopened after the update.
+    foreach ($frontend in @(Get-InstallProcesses | Where-Object Name -eq 'DownloadManager.Desktop.WinUI.exe')) {
+        Note-OpenWindow $frontend
+        Stop-Process -Id $frontend.ProcessId -Force -ErrorAction SilentlyContinue
     }
 
-    if (Test-Path $metadataPath) {
-        $metadataBackup = Get-Content $metadataPath -Raw
+    if ($HostPid -gt 0 -and (Get-Process -Id $HostPid -ErrorAction SilentlyContinue)) {
+        $script:waitedForHost = $true
+        Wait-Process -Id $HostPid -Timeout 120 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $HostPid -ErrorAction SilentlyContinue) {
+            throw "The Host did not exit for the update. Application files were not replaced."
+        }
     }
 
-    $installer = Join-Path $PackageDir "install.ps1"
-    if (-not (Test-Path $installer)) {
-        throw "The update package has no install.ps1."
+    # Folders left by an earlier failed update; best effort, they are never used.
+    Get-ChildItem -LiteralPath $InstallRoot -Directory -Force |
+        Where-Object { $_.Name -like 'app.failed-*' -or $_.Name -like 'extension.failed-*' -or $_.Name -like '*.delete-*' } |
+        ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Recurse -Force } catch { } }
+
+    # Stage the new version beside the old one; nothing installed has changed yet.
+    Remove-Directory $newAppDir
+    Copy-Item -LiteralPath $packageApp -Destination $newAppDir -Recurse -Force
+    $packageExtension = Join-Path $PackageDir "extension"
+    $hasNewExtension = Test-Path (Join-Path $packageExtension "manifest.json")
+    if ($hasNewExtension) {
+        Remove-Directory $newExtensionDir
+        Copy-Item -LiteralPath $packageExtension -Destination $newExtensionDir -Recurse -Force
+    }
+    if (Test-Path $metadataPath) { $metadataBackup = Get-Content -LiteralPath $metadataPath -Raw }
+
+    # The previous rollback copy goes only now that this update's own is about to exist. The check
+    # comes after it, right before the swap: deleting takes a moment, and a Host started meanwhile
+    # (by the browser bridge) would hold files.
+    Remove-Directory $backupDir
+    Wait-InstallIdle 60
+    $appSwapped = $true
+    Swap-In $appDir $newAppDir $backupDir
+    if ($hasNewExtension) {
+        Remove-Directory $extensionBackupDir
+        $extensionSwapped = $true
+        Swap-In $extensionDir $newExtensionDir $extensionBackupDir
     }
 
-    $replacementStarted = $true
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer `
-        -Source (Join-Path $PackageDir "app") `
-        -InstallRoot $InstallRoot `
-        -Version $Version `
-        -NoShortcut -NoLaunch
-    if ($LASTEXITCODE -ne 0) {
-        throw "The installer exited with $LASTEXITCODE."
+    $register = Join-Path $PackageDir "register-native-host.ps1"
+    if (Test-Path $register) {
+        & $register -AppDir $appDir -Force
     }
 
-    if (-not (Test-Path $metadataPath)) {
-        throw "The installer did not write install.json."
+    # Publish the version only after every file is in place.
+    $metadata = [ordered]@{
+        version = $Version
+        channel = "stable"
+        installRoot = $InstallRoot
+        installedAt = (Get-Date).ToString("O")
     }
+    [System.IO.File]::WriteAllText("$metadataPath.tmp", ($metadata | ConvertTo-Json -Depth 3),
+        (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath "$metadataPath.tmp" -Destination $metadataPath -Force
 
-    $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-    if ($metadata.version -ne $Version) {
-        throw "Installed version '$($metadata.version)' does not match expected '$Version'."
-    }
-
-    if (-not (Test-Path (Join-Path $appDir "DownloadManager.Host.exe"))) {
-        throw "The installed app is missing DownloadManager.Host.exe."
-    }
-
-    # Keep the backup through restart. The next update replaces it only after
-    # its Host has exited, so a launch failure cannot discard both versions.
+    # Keep the rollback copy through restart. The next update replaces it only after its
+    # Host has exited, so a launch failure cannot discard both versions.
     if (-not $NoStart) {
         Start-InstalledApplication
-        $startedNewHost = $true
+        Confirm-Started
     }
 
-    Write-Result "succeeded" ""
+    # Last of all, so "succeeded" means the new version is in place and running. The new Host
+    # looks again a few seconds after it starts. Not being able to say so is no reason to undo it.
+    try { Write-Result "succeeded" "" }
+    catch { Write-Warning "Could not record the result: $($_.Exception.Message)" }
 
+    try { Stop-Transcript | Out-Null } catch { }
     exit 0
 }
 catch {
     $message = $_.Exception.Message
-    # If reopening partially succeeded, release only processes created by us
-    # before attempting to put the previous files back.
+    Write-Warning "Update failed: $message"
     foreach ($newProcess in $newProcesses) {
         try { if (-not $newProcess.HasExited) { $newProcess.Kill(); $newProcess.WaitForExit(10000) | Out-Null } }
         catch { $message = "$message; restart cleanup error: $($_.Exception.Message)" }
     }
-    # Repair the version record even when a locked binary prevents file rollback.
-    if ($replacementStarted -and $null -ne $metadataBackup) {
-        try {
-            [System.IO.File]::WriteAllText($metadataPath, $metadataBackup,
-                (New-Object System.Text.UTF8Encoding($false)))
+    # Each step is tried whatever became of the one before: the more that goes back, the better.
+    $restored = $true
+    if ($appSwapped) {
+        # Something still running does not stop the attempt; the moves retry on their own.
+        try { Wait-InstallIdle 30 }
+        catch { Write-Warning $_.Exception.Message }
+        try { Restore-Folder $appDir $backupDir }
+        catch {
+            $restored = $false
+            $message = "$message; rollback error: $($_.Exception.Message)"
         }
+    }
+    if ($extensionSwapped) {
+        try { Restore-Folder $extensionDir $extensionBackupDir }
+        catch {
+            $restored = $false
+            $message = "$message; extension rollback error: $($_.Exception.Message)"
+        }
+    }
+    if ($null -ne $metadataBackup) {
+        try { [System.IO.File]::WriteAllText($metadataPath, $metadataBackup, (New-Object System.Text.UTF8Encoding($false))) }
         catch { $message = "$message; metadata rollback error: $($_.Exception.Message)" }
     }
-    try {
-        if ($replacementStarted -and (Test-Path $appDir)) {
-            Remove-Item $appDir -Recurse -Force
-        }
-
-        if ($replacementStarted -and (Test-Path $backupDir)) {
-            Move-Item $backupDir $appDir -Force
-        }
-
-        if ($replacementStarted -and (Test-Path $extensionDir)) {
-            Remove-Item $extensionDir -Recurse -Force
-        }
-        if ($replacementStarted -and $hadExtension -and (Test-Path $extensionBackupDir)) {
-            Move-Item $extensionBackupDir $extensionDir -Force
-        }
-
-        if ($replacementStarted -and -not $NoStart -and (Test-Path (Join-Path $appDir "DownloadManager.Host.exe"))) {
-            Start-InstalledApplication
+    # Recorded before the restart, because the restored Host reads it as it starts.
+    try { Write-Result "failed" $message } catch { }
+    $newProcesses.Clear()
+    # A Host too slow to exit is still shutting down. Another started now would find it and step
+    # aside, and then nothing would be running. A failure before it was asked to wait leaves it up.
+    if ($script:waitedForHost -and (Get-Process -Id $HostPid -ErrorAction SilentlyContinue)) {
+        Wait-Process -Id $HostPid -Timeout 300 -ErrorAction SilentlyContinue
+    }
+    $restarted = $false
+    if (-not $NoStart -and (Test-Path (Join-Path $appDir "DownloadManager.Host.exe"))) {
+        try { Start-InstalledApplication; $restarted = $true }
+        catch {
+            $message = "$message; restart error: $($_.Exception.Message)"
+            try { Write-Result "failed" $message } catch { }
         }
     }
-    catch {
-        $message = "$message; rollback error: $($_.Exception.Message)"
-    }
 
-    Write-Result "failed" $message
+    try { Stop-Transcript | Out-Null } catch { }
+    # A restarted Host reports an ordinary failure itself. It cannot tell that the install is damaged,
+    # and without a Host nothing else would say anything.
+    if (-not $NoStart -and (-not $restarted -or -not $restored)) {
+        $what = if ($restored) { "the app could not be restarted" } else { "the previous version could not be put back" }
+        $where = if ($restored) { "" } else { "`n`nThe previous version is kept in:`n$backupDir`nRun Setup again to repair the installation." }
+        Show-Failure ("The update to $Version could not be installed and $what.`n`n$message$where")
+    }
     exit 1
 }

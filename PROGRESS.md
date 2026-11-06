@@ -1,6 +1,43 @@
 # Progress — session handoff
 
 
+### Auto-update: no more broken installs or silent failures (2026-11-06)
+
+- Owner report: auto-update sometimes fails silently and leaves a broken install. Reproduced 2/2 on
+  this PC's exact state. Root cause: a program opened from the app (RustDesk, WinRAR here) inherits
+  current directory = `app\`, and Windows then refuses to rename or remove that folder, though the
+  files inside can still be moved. The old script deleted the contents, failed on the empty folder,
+  then failed its rollback the same way. Nothing read `install-result.json`, so it was silent, and
+  every Host start retried. A DLL-release race was also tested and disproved.
+- `apply-update.ps1` rewritten: new files are staged beside the old ones and swapped by rename, with
+  an item-by-item fallback (undone exactly) when the folder is held. Each rollback step runs whatever
+  became of the one before. "Succeeded" is written last, after the new version has survived starting;
+  a crash on start rolls back and restarts the old version. A damaged install gets a dialog naming
+  where the old version is.
+- Host, windows and shortcuts no longer use `app\` as current directory, so nothing new can hold it.
+- `UpdateInstallJournal` (new): the next Host reports the outcome once, in the log, tray and update
+  window, including a helper that died without a result. A version that failed is not retried
+  automatically for 24 h (the tray still offers it). A helper that exits at once now keeps the Host up
+  instead of closing the app with nothing to bring it back.
+- Update zips were framework-dependent (91 files, against Setup's 626) and only worked because this PC
+  has the runtimes. `package.ps1` now publishes self-contained, and `prepare-release.ps1` requires the
+  runtime files in the zip. This affects every release so far.
+- Only a window that was really visible comes back after an update: not the update's own progress
+  window, and not a main window closed to the tray. The released script reopened the main window for
+  either, so background updates popped it up.
+- Evidence (sandbox install and data, real Host and WinUI, signed local feed, a program holding
+  `app\`): update with window open succeeds, window returns, "Updated to 0.3.2." logged; new version
+  crashing on start rolls back to a running old version, logs the failure and "Not retrying", no loop;
+  dead helper leaves the Host running with the install untouched; window closed to the tray stays
+  closed. Nine scripted cases plus a blocked rollback (`app\` stays new, extension goes back, error
+  says so). Release build 0 warnings; Core 107, Engine 57, Integration 114 passed.
+- Review input: a subagent read-through found the rollback-failure wording, success announced before
+  the start check, and the Host-still-exiting restart, all fixed here.
+- Not verified: the tray notification and failure dialog on screen (the log and result file are);
+  the path where the old Host takes over 120 s to exit (read, not run); Setup repairing an install
+  whose `app\` is held. Not handled: logoff or a kill in the instant between the two renames leaves
+  `app\` missing, and Setup is the repair.
+
 ### Package names, package delete and sparse part files (2026-11-06)
 
 - Name probe on add no longer waits for a per-host connection slot, so a running segmented download

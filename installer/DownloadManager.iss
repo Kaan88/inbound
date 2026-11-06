@@ -67,10 +67,16 @@ Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 ; Upgrades replace the program folder completely, like install.ps1 does.
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\extension"
+; Leftovers of an interrupted or failed auto-update.
+Type: filesandordirs; Name: "{app}\app-new"
+Type: filesandordirs; Name: "{app}\extension-new"
+Type: filesandordirs; Name: "{app}\app.failed-*"
+Type: filesandordirs; Name: "{app}\extension.failed-*"
+Type: filesandordirs; Name: "{app}\*.delete-*"
 
 [Icons]
-Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}\app"; IconFilename: "{app}\app\{#HostExe}"
-Name: "{userdesktop}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}\app"; IconFilename: "{app}\app\{#HostExe}"; Tasks: desktopicon
+Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; IconFilename: "{app}\app\{#HostExe}"
+Name: "{userdesktop}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; IconFilename: "{app}\app\{#HostExe}"; Tasks: desktopicon
 
 [Registry]
 ; Chrome native messaging host (the browser bridge).
@@ -80,13 +86,20 @@ Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#NativeHostNam
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "DownloadManagerHost"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
-Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}\app"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\INSTALL.txt"; Description: "Show how to add the Chrome extension"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
 Type: files; Name: "{app}\INSTALL.txt"
 Type: filesandordirs; Name: "{app}\native-host"
+Type: filesandordirs; Name: "{app}\app-rollback"
+Type: filesandordirs; Name: "{app}\extension-rollback"
+Type: filesandordirs; Name: "{app}\app-new"
+Type: filesandordirs; Name: "{app}\extension-new"
+Type: filesandordirs; Name: "{app}\app.failed-*"
+Type: filesandordirs; Name: "{app}\extension.failed-*"
+Type: filesandordirs; Name: "{app}\*.delete-*"
 
 [Code]
 function JsonEscape(const Value: String): String;

@@ -11,9 +11,26 @@ namespace DownloadManager.Host;
 
 internal static class Program
 {
+    /// <summary>
+    /// Every program the Host opens (a downloaded file, a completion program) inherits its current
+    /// directory, and Windows will not rename or remove a folder that a running program has as
+    /// its current directory. Starting from app\ therefore blocked updates and uninstall for as
+    /// long as anything opened from here stayed open. Work from a folder the app does not own.
+    /// </summary>
+    private static void LeaveProgramFolder()
+    {
+        try
+        {
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (Directory.Exists(profile)) Environment.CurrentDirectory = profile;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
+        LeaveProgramFolder();
         var configureStartup = args.FirstOrDefault(arg =>
             arg.StartsWith("--configure-sign-in-launch=", StringComparison.OrdinalIgnoreCase));
         using var mutex = new Mutex(initiallyOwned: true, PipeNames.MutexName(), out var createdNew);

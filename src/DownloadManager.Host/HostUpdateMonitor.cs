@@ -71,6 +71,8 @@ internal sealed class HostUpdateMonitor : IDisposable
 
     public void Start()
     {
+        ReportLastInstall();
+        _ = ReportLastInstallLaterAsync();
         ApplySettings(_service.GetSnapshot().Settings);
         if (_autoCheck)
         {
@@ -79,6 +81,37 @@ internal sealed class HostUpdateMonitor : IDisposable
     }
 
     public void CheckNow() => _ = CheckAsync(manual: true);
+
+    /// <summary>
+    /// The helper records success only once this Host has survived starting, which is after the
+    /// first look. A rollback restarts the old Host with its result already written.
+    /// </summary>
+    private async Task ReportLastInstallLaterAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(12)).ConfigureAwait(false);
+        lock (_sync)
+        {
+            if (_disposed) return;
+        }
+
+        ReportLastInstall();
+    }
+
+    private void ReportLastInstall()
+    {
+        var outcome = _service.TakeUpdateInstallOutcome();
+        if (outcome is null) return;
+        if (outcome.Succeeded)
+        {
+            _log($"Updated to {outcome.Version}.");
+            _notify?.Invoke("Update installed", $"Inbound Download Manager {outcome.Version} is ready.");
+            return;
+        }
+
+        _log($"Update to {outcome.Version} failed: {outcome.Error}");
+        _notify?.Invoke("Update failed",
+            $"Version {outcome.Version} could not be installed. You can try again from the tray or Help menu.");
+    }
 
     public async Task InstallAsync()
     {
@@ -163,6 +196,13 @@ internal sealed class HostUpdateMonitor : IDisposable
             {
                 if (!_autoCheck) return;
                 lock (_sync) _available = check;
+                // The tray still offers it; only the automatic retry waits.
+                if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
+                {
+                    _log($"Not retrying update {check.AvailableVersion} automatically yet; it failed recently.");
+                    return;
+                }
+
                 await InstallAsync().ConfigureAwait(false);
                 return;
             }
