@@ -1,0 +1,651 @@
+using System.Text.RegularExpressions;
+using DownloadManager.Contracts;
+using DownloadManager.Core.Providers;
+
+namespace DownloadManager.Desktop.WinUI;
+
+/// <summary>Which way into the add dialog this is. It decides what the dialog shows, and what it accepts.</summary>
+internal enum AddFocus
+{
+    /// <summary>Add Links: anything pasted.</summary>
+    Links,
+    /// <summary>Add Magnet: only magnets get through.</summary>
+    Magnet,
+    /// <summary>Import Torrent File: the files picked, with no paste box.</summary>
+    TorrentFiles,
+    /// <summary>Add URL, for an address already found to go through a provider.</summary>
+    OneAddress,
+}
+
+/// <summary>Where a line goes when it is added. Nothing but <see cref="Direct"/> ever becomes a <c>job.add</c>.</summary>
+internal enum AddRoute
+{
+    /// <summary>Not known yet. It can't go anywhere until it is.</summary>
+    Checking,
+    /// <summary><c>job.add</c>, like any ordinary download.</summary>
+    Direct,
+    /// <summary><c>remote.add</c> with the input.</summary>
+    Provider,
+    /// <summary>The file selection dialog on the item it refers to, then <c>remote.add</c> with that item.</summary>
+    FolderLink,
+    /// <summary>It can't be added as it is.</summary>
+    None,
+}
+
+/// <summary>Finds what could be added in pasted text. Nothing here looks at the network or at a file.</summary>
+internal static partial class LinkExtractor
+{
+    private static readonly char[] TrailingPunctuation = ['.', ',', ';', ')', ']', '}', '!', '?'];
+
+    [GeneratedRegex(@"https?://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HttpPattern();
+
+    // A path counts only as a whole line, because "C:\x.torrent" inside a sentence is anyone's guess.
+    [GeneratedRegex(@"(?<link>(?:https?://|magnet:)[^\s""'<>`]+)|^[ \t]*(?<path>(?:[a-z]:\\|\\\\)[^\r\n""<>|*?]*\.torrent)[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline)]
+    private static partial Regex InputPattern();
+
+    /// <summary>What Add Links takes with no provider to send anything to: distinct http and https links in free text.</summary>
+    public static List<string> HttpLinks(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        return HttpPattern().Matches(text)
+            .Select(match => match.Value.TrimEnd(TrailingPunctuation))
+            .Where(IsWebLink)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// With a provider: links, folder links and magnets anywhere in the text, and .torrent paths on a line
+    /// of their own, in the order they appear. Case counts: a hoster link's key is case-sensitive, so two
+    /// that differ only by case are two different links.
+    /// </summary>
+    public static List<string> Inputs(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        var found = new List<string>();
+        foreach (Match match in InputPattern().Matches(text))
+        {
+            var path = match.Groups["path"];
+            var input = path.Success ? path.Value : match.Groups["link"].Value.TrimEnd(TrailingPunctuation);
+            if (path.Success || IsMagnet(input) || IsWebLink(input)) found.Add(input);
+        }
+
+        return found.Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    public static bool IsMagnet(string input) => input.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsTorrentPath(string input) => input.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && !IsMagnet(input) && !input.Contains("://", StringComparison.Ordinal);
+
+    public static bool IsWebLink(string input)
+        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+}
+
+/// <summary>
+/// One line of the add dialog. <see cref="Input"/> can hold a secret, such as a hoster link's key or a
+/// direct link's token, so it is only ever sent to the Host and never shown.
+/// </summary>
+internal sealed class AddLine(string input)
+{
+    public string Input { get; } = input;
+
+    /// <summary>What the Host said. Null until it has, and failed calls have <c>Ok = false</c>.</summary>
+    public RemoteClassifyResult? Result { get; internal set; }
+
+    /// <summary>Refused before anything was asked, such as a web link in Add Magnet.</summary>
+    public string? Refusal { get; internal set; }
+
+    /// <summary>A job with this address is already on the list. Only matters for direct downloads.</summary>
+    public bool IsListed { get; internal set; }
+
+    public bool IsSelected { get; internal set; }
+
+    /// <summary>Where it is among the lines, from 1, when there is more than one. Lines showing only a host are told apart by this.</summary>
+    public int Position { get; internal set; }
+
+    /// <summary>The user said so, and a later answer from the Host doesn't change it.</summary>
+    public bool SelectionTouched { get; internal set; }
+
+    /// <summary>The one way a link nobody could classify may become a direct download: the user asked for exactly that.</summary>
+    public bool DirectChosen { get; internal set; }
+
+    public bool IsChecking => Result is null && Refusal is null;
+
+    /// <summary>The Host didn't answer, or said it can't tell. The link could be one a provider handles.</summary>
+    public bool CantTell => Result is { Ok: false } or { Kind: "undetermined" };
+
+    public AddRoute Route
+    {
+        get
+        {
+            if (Refusal is not null) return AddRoute.None;
+            if (Result is not { } result) return AddRoute.Checking;
+            if (CantTell) return DirectChosen && LinkExtractor.IsWebLink(Input) ? AddRoute.Direct : AddRoute.None;
+            return result.Kind switch
+            {
+                "ordinaryLink" or "providerDirectLink" => AddRoute.Direct,
+                "magnet" or "torrentFile" or "hosterLink" => AddRoute.Provider,
+                "folderLink" when result.ItemId is not null && result.ItemKind is not null && result.Provider is not null => AddRoute.FolderLink,
+                // Includes any kind this build has never heard of.
+                _ => AddRoute.None,
+            };
+        }
+    }
+
+    /// <summary>The provider says the site is down, or that today's allowance for it is gone. Adding it would most likely just fail.</summary>
+    public bool HosterLooksUnusable => Result is { Kind: "hosterLink" } hoster &&
+        (hoster.HosterAvailable == false || hoster.HosterDailyLinksLeft == 0 || hoster.HosterDailyBytesLeft == 0);
+
+    public override string ToString() => "[add line]";
+}
+
+/// <summary>
+/// The lines of one add dialog and what the Host says about each. Text changes are debounced, a line
+/// keeps its answer while it stays in the text, and only new ones are asked about, one at a time on one
+/// connection of their own. Closing the session closes that connection, which cancels the call.
+/// Every public member belongs to the UI thread, and every event is raised on it.
+/// </summary>
+internal sealed class AddLineSession : IDisposable
+{
+    private static readonly TimeSpan DefaultDebounce = TimeSpan.FromMilliseconds(400);
+
+    private readonly AddFocus _focus;
+    private readonly Func<IRemoteClassifier> _open;
+    private readonly Func<string, bool> _isListed;
+    private readonly Action<Action> _post;
+    private readonly TimeSpan _debounce;
+    private readonly CancellationTokenSource _closing = new();
+    private readonly Lock _queueSync = new();
+    private readonly Queue<AddLine> _queue = new();
+    private readonly List<AddLine> _lines = [];
+    private CancellationTokenSource? _pendingText;
+    private bool _working;
+    private bool _skipListed = true;
+    private bool _closed;
+
+    public AddLineSession(AddFocus focus, Func<IRemoteClassifier> open, Func<string, bool> isListed, Action<Action> post, TimeSpan? debounce = null)
+    {
+        _focus = focus;
+        _open = open;
+        _isListed = isListed;
+        _post = post;
+        _debounce = debounce ?? DefaultDebounce;
+    }
+
+    /// <summary>Which lines there are changed.</summary>
+    public event Action? LinesChanged;
+
+    /// <summary>What is known about a line changed.</summary>
+    public event Action<AddLine>? LineChanged;
+
+    public IReadOnlyList<AddLine> Lines => _lines;
+
+    /// <summary>The same rule as the Skip URLs box: a direct link already on the list starts unticked.</summary>
+    public bool SkipListed
+    {
+        get => _skipListed;
+        set
+        {
+            if (_skipListed == value) return;
+            _skipListed = value;
+            foreach (var line in _lines.Where(line => line.Route == AddRoute.Direct)) Default(line);
+        }
+    }
+
+    /// <summary>At least one line goes somewhere, and none of those chosen is still unknown.</summary>
+    public bool CanAdd => _lines.Any(line => line.IsSelected && line.Route is AddRoute.Direct or AddRoute.Provider or AddRoute.FolderLink)
+        && !_lines.Any(line => line.IsSelected && line.Route == AddRoute.Checking);
+
+    public IReadOnlyList<AddLine> Chosen => _lines.Where(line => line.IsSelected && line.Route != AddRoute.Checking && line.Route != AddRoute.None).ToList();
+
+    /// <summary>The text changed. Nothing happens until it has stopped changing for a moment.</summary>
+    public void SetText(string? text)
+    {
+        if (_closed) return;
+        _pendingText?.Cancel();
+        var pending = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token);
+        _pendingText = pending;
+        _ = ApplyAfterDebounceAsync(text, pending.Token);
+    }
+
+    /// <summary>For text that was already there when the dialog opened.</summary>
+    public void SetTextNow(string? text)
+    {
+        _pendingText?.Cancel();
+        ApplyInputs(LinkExtractor.Inputs(text));
+    }
+
+    public void SetInputs(IEnumerable<string> inputs) => ApplyInputs(inputs.Distinct(StringComparer.Ordinal).ToList());
+
+    /// <summary>A line whose answer is already in hand, as from Add URL's own check.</summary>
+    public void Seed(string input, RemoteClassifyResult result)
+    {
+        var line = new AddLine(input) { Result = result, IsListed = _isListed(input) };
+        Default(line, raise: false);
+        _lines.Add(line);
+        Number();
+        LinesChanged?.Invoke();
+    }
+
+    /// <summary>Asks again. Whatever was chosen about the old answer no longer counts.</summary>
+    public void Retry(AddLine line)
+    {
+        if (_closed || !_lines.Contains(line)) return;
+        line.Result = null;
+        line.DirectChosen = false;
+        line.SelectionTouched = false;
+        Default(line);
+        Enqueue(line);
+    }
+
+    public void Select(AddLine line, bool selected)
+    {
+        if (!CanSelect(line)) selected = false;
+        line.IsSelected = selected;
+        line.SelectionTouched = true;
+        LineChanged?.Invoke(line);
+    }
+
+    public void SelectAll(bool selected)
+    {
+        foreach (var line in _lines) Select(line, selected);
+    }
+
+    /// <summary>The explicit choice for a link that can't be told apart from one a provider handles.</summary>
+    public void ChooseDirect(AddLine line, bool direct)
+    {
+        if (!line.CantTell || !LinkExtractor.IsWebLink(line.Input)) direct = false;
+        line.DirectChosen = direct;
+        line.SelectionTouched = false;
+        Default(line);
+    }
+
+    public static bool CanSelect(AddLine line) => line.Route != AddRoute.None;
+
+    private async Task ApplyAfterDebounceAsync(string? text, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(_debounce, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        _post(() =>
+        {
+            if (!cancellationToken.IsCancellationRequested) ApplyInputs(LinkExtractor.Inputs(text));
+        });
+    }
+
+    private void ApplyInputs(List<string> inputs)
+    {
+        if (_closed) return;
+        var known = _lines.ToDictionary(line => line.Input, StringComparer.Ordinal);
+        var next = new List<AddLine>(inputs.Count);
+        var fresh = new List<AddLine>();
+        foreach (var input in inputs)
+        {
+            if (!known.TryGetValue(input, out var line))
+            {
+                line = new AddLine(input) { IsListed = _isListed(input) };
+                if (_focus == AddFocus.Magnet && !LinkExtractor.IsMagnet(input))
+                {
+                    line.Refusal = "This isn't a magnet. Use Add Links for other links.";
+                }
+
+                Default(line, raise: false);
+                if (line.IsChecking) fresh.Add(line);
+            }
+
+            next.Add(line);
+        }
+
+        var same = next.SequenceEqual(_lines);
+        _lines.Clear();
+        _lines.AddRange(next);
+        Number();
+        if (!same) LinesChanged?.Invoke();
+        foreach (var line in fresh) Enqueue(line);
+    }
+
+    private void Number()
+    {
+        for (var i = 0; i < _lines.Count; i++) _lines[i].Position = _lines.Count > 1 ? i + 1 : 0;
+    }
+
+    private void Default(AddLine line, bool raise = true)
+    {
+        if (!line.SelectionTouched)
+        {
+            line.IsSelected = line.Route switch
+            {
+                AddRoute.Checking or AddRoute.FolderLink => true,
+                AddRoute.Provider => !line.HosterLooksUnusable,
+                AddRoute.Direct => !(line.IsListed && _skipListed),
+                _ => false,
+            };
+        }
+        else if (!CanSelect(line))
+        {
+            line.IsSelected = false;
+        }
+
+        if (raise) LineChanged?.Invoke(line);
+    }
+
+    private void Enqueue(AddLine line)
+    {
+        var start = false;
+        lock (_queueSync)
+        {
+            _queue.Enqueue(line);
+            if (!_working)
+            {
+                _working = true;
+                start = true;
+            }
+        }
+
+        if (start) _ = Task.Run(() => WorkAsync(_closing.Token));
+    }
+
+    /// <summary>Ends by itself when there is nothing left to ask, so it never holds a connection for no reason.</summary>
+    private async Task WorkAsync(CancellationToken cancellationToken)
+    {
+        IRemoteClassifier? classifier = null;
+        try
+        {
+            classifier = _open();
+            while (TryNext(out var line))
+            {
+                RemoteClassifyResult result;
+                try
+                {
+                    result = await classifier.ClassifyAsync(line.Input, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    lock (_queueSync) _working = false;
+                    return;
+                }
+
+                _post(() => Complete(line, result));
+                if (classifier.Broken)
+                {
+                    // It would be the same for every other line, so each would wait to be told for no reason.
+                    while (TryNext(out var next)) _post(() => Complete(next, new RemoteClassifyResult { Error = result.Error }));
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            if (classifier is not null) await classifier.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private bool TryNext(out AddLine line)
+    {
+        lock (_queueSync)
+        {
+            if (_queue.TryDequeue(out line!)) return true;
+            _working = false;
+            return false;
+        }
+    }
+
+    private void Complete(AddLine line, RemoteClassifyResult result)
+    {
+        if (_closed || !_lines.Contains(line) || !line.IsChecking) return;
+        line.Result = result;
+        Default(line);
+    }
+
+    public void Dispose()
+    {
+        if (_closed) return;
+        _closed = true;
+        _closing.Cancel();
+        _closing.Dispose();
+    }
+
+    public override string ToString() => "[add lines]";
+}
+
+/// <summary>What a line of the add dialog shows, and what it lets the user do.</summary>
+/// <param name="Word">The kind of input, in a word or two.</param>
+/// <param name="CanChooseDirect">A link nobody could classify: offer an explicit direct download. Never true for a hoster link.</param>
+/// <param name="CanTakeLinkPassword">Goes to a site through the provider, and such a site can want a password for the link.</param>
+internal sealed record AddLineView(
+    string Name,
+    string Word,
+    string Detail,
+    bool IsProblem,
+    bool CanSelect,
+    bool CanRetry,
+    bool CanChooseDirect,
+    bool CanTakeLinkPassword,
+    string ToolTip,
+    string AccessibleName);
+
+/// <summary>What the Host says about something just added, while it is still worth watching in the dialog.</summary>
+/// <param name="NeedsFiles">Ready, and waiting for the user to choose among its files, which is done from the download list.</param>
+internal sealed record AddOutcomeView(
+    string Word,
+    string Detail,
+    bool NeedsApproval,
+    bool NeedsLinkPassword,
+    bool NeedsFiles,
+    bool IsChecking,
+    bool IsProblem,
+    string AccessibleName);
+
+internal static partial class RemoteText
+{
+    public const string ClassifyLost = "The background Host didn't answer, so this wasn't checked. Nothing was sent. Try again.";
+
+    /// <summary>A lost classify call changed nothing, so the words about having possibly gone through don't apply.</summary>
+    public static string ClassifyFailure(string error) => error is HostLost or HostTooSlow ? ClassifyLost : error;
+
+    /// <param name="fallbackProvider">The account's name, for a line the Host named no provider for.</param>
+    public static AddLineView AddLineWords(AddLine line, string fallbackProvider)
+    {
+        var result = line.Result;
+        var provider = string.IsNullOrWhiteSpace(result?.ProviderName) ? fallbackProvider : result.ProviderName;
+        var name = AddLineName(line);
+        var details = new List<string>();
+        var word = "Checking…";
+        var problem = false;
+        var retry = false;
+        var direct = false;
+        var linkPassword = false;
+        if (line.Refusal is { } refusal)
+        {
+            word = "Unsupported";
+            details.Add(refusal);
+            problem = true;
+        }
+        else if (result is { Ok: false } || result is { Kind: "undetermined" })
+        {
+            word = "Can't tell";
+            details.Add(Failure(result.Ok ? result.Reason : result.Error, null, provider));
+            AddNote(details, result.Note);
+            direct = LinkExtractor.IsWebLink(line.Input);
+            if (direct) details.Add("So it isn't treated as an ordinary link unless you say so.");
+            problem = true;
+            retry = true;
+        }
+        else if (result is not null)
+        {
+            switch (result.Kind)
+            {
+                case "folderLink":
+                    word = "Folder link";
+                    details.Add($"Refers to an item on your {provider} account. You choose its files next.");
+                    AddNote(details, result.Note);
+                    break;
+                case "magnet":
+                    word = "Magnet";
+                    details.Add($"Goes through {provider}.");
+                    AddNote(details, result.Note);
+                    break;
+                case "torrentFile":
+                    word = "Torrent file";
+                    details.Add($"Goes through {provider}.");
+                    AddNote(details, result.Note);
+                    break;
+                case "hosterLink":
+                    word = $"Hoster through {provider}";
+                    details.AddRange(HosterDetails(result, provider));
+                    AddNote(details, result.Note);
+                    problem = line.HosterLooksUnusable;
+                    linkPassword = true;
+                    break;
+                case "providerDirectLink":
+                    word = "Direct provider link";
+                    AddNote(details, result.Note);
+                    break;
+                case "ordinaryLink":
+                    word = "Ordinary link";
+                    if (line.IsListed) details.Add("Already in the list");
+                    AddNote(details, result.Note);
+                    break;
+                default:
+                    word = "Unsupported";
+                    details.Add(string.IsNullOrWhiteSpace(result.Reason) ? "This app can't use this." : UrlRedactor.HideAddresses(result.Reason));
+                    problem = true;
+                    break;
+            }
+        }
+
+        if (line is { DirectChosen: true, CantTell: true })
+        {
+            details.Clear();
+            details.Add($"It will download directly, not through {provider}, because you chose that.");
+            problem = false;
+        }
+
+        var detail = string.Join(" ", details);
+        var spoken = detail.Length > 0 ? $"{name}, {word}, {detail}" : $"{name}, {word}";
+        var tip = result?.Kind == "ordinaryLink" ? UrlRedactor.Redact(line.Input) : spoken;
+        return new AddLineView(name, word, detail, problem, AddLineSession.CanSelect(line), retry, direct, linkPassword, tip, spoken);
+    }
+
+    private static void AddNote(List<string> details, string? note)
+    {
+        if (!string.IsNullOrWhiteSpace(note)) details.Add(UrlRedactor.HideAddresses(note));
+    }
+
+    /// <summary>Only what the provider itself said about the site. Nothing here says whether the file is cached: adding it finds that out.</summary>
+    private static IEnumerable<string> HosterDetails(RemoteClassifyResult result, string provider)
+    {
+        if (result.HosterAvailable == false) yield return $"{provider} says this site isn't available right now, so adding it will probably fail.";
+        else if (result.HosterAvailable == true) yield return $"{provider} says this site is available.";
+        if (!string.IsNullOrWhiteSpace(result.HosterNote))
+        {
+            var note = UrlRedactor.HideAddresses(result.HosterNote).TrimEnd();
+            yield return note.EndsWith('.') || note.EndsWith('!') || note.EndsWith('?') ? note : $"{provider} notes: {note}.";
+        }
+
+        var limits = new List<string>();
+        if (result.HosterDailyLinksLeft is { } links)
+        {
+            limits.Add(links switch { 0 => "no links left today", 1 => "1 link left today", _ => $"{links} links left today" });
+        }
+
+        if (result.HosterDailyBytesLeft is { } bytes) limits.Add(bytes > 0 ? $"{Bytes(bytes)} left today" : "no data left today");
+        if (result.HosterLargestFile is { } largest) limits.Add($"largest file {Bytes(largest)}");
+        if (limits.Count > 0) yield return $"Limits {provider} gives for this site: {string.Join(", ", limits)}.";
+    }
+
+    /// <summary>Host names and file names only. The rest of an address can be a key, and is never shown here.</summary>
+    private static string AddLineName(AddLine line)
+    {
+        var input = line.Input;
+        var result = line.Result;
+        if (LinkExtractor.IsMagnet(input)) return Clean(result?.Name, "Magnet link");
+        if (LinkExtractor.IsTorrentPath(input)) return Clean(Path.GetFileName(input), "Torrent file");
+
+        var host = Uri.TryCreate(input, UriKind.Absolute, out var uri) ? uri.IdnHost : "This link";
+        if (result?.Kind == "ordinaryLink" && uri is not null)
+        {
+            var segment = Uri.UnescapeDataString(uri.Segments.LastOrDefault()?.Trim('/') ?? string.Empty);
+            return segment.Length > 0 ? UrlRedactor.HideAddresses(segment) : host;
+        }
+
+        if (!string.IsNullOrWhiteSpace(result?.Name)) return UrlRedactor.HideAddresses(result.Name);
+        if (result is { Kind: "folderLink", ItemId.Length: > 0 }) return $"{KindSingular(result.ItemKind)} {result.ItemId}";
+        var shown = Clean(result?.DisplayHost, host);
+        return line.Position > 0 ? $"{shown} (link {line.Position})" : shown;
+    }
+
+    /// <summary>The line of status under the list.</summary>
+    public static (string Text, bool IsProblem) AddSummary(IReadOnlyList<AddLine> lines, AddFocus focus, bool hasText)
+    {
+        if (lines.Count == 0)
+        {
+            return (hasText
+                ? focus == AddFocus.Magnet ? "No magnet was found in this text." : "No links were found in this text."
+                : string.Empty, hasText);
+        }
+
+        var checking = lines.Count(line => line.IsChecking);
+        if (checking > 0) return ($"Checking {checking} of {lines.Count}…", false);
+        var chosen = lines.Count(line => line.IsSelected);
+        var stuck = lines.Count(line => line.Route == AddRoute.None);
+        return (stuck == 0
+            ? $"{chosen} of {lines.Count} selected."
+            : $"{chosen} of {lines.Count} selected. {stuck} can't be added as {(stuck == 1 ? "it is" : "they are")}.", false);
+    }
+
+    /// <param name="job">Null once it has gone from the list.</param>
+    /// <param name="note">What the Host said when it was added, such as that it was already there.</param>
+    public static AddOutcomeView AddOutcome(RemoteJobDto? job, string name, string? note, DateTimeOffset now, IFormatProvider? culture = null)
+    {
+        if (job is null) return new AddOutcomeView("Removed from the list", string.Empty, false, false, false, false, false, $"{name}, removed from the list");
+
+        var provider = ProviderName(job);
+        var row = JobRow(job, now, culture);
+        var needsApproval = job is { State: "intended", ApprovalNeeded: true };
+        var cached = job.Cached && job.State != "failed";
+        var word = needsApproval ? $"Not cached, needs {provider} to fetch it"
+            : cached ? $"Cached on {provider}"
+            : row.Status;
+        var parts = new List<string>();
+        if (cached && row.Status != word && job.State is not ("intended" or "submitting")) parts.Add($"{row.Status}.");
+        if (!needsApproval && row.Detail.Length > 0) parts.Add(row.Detail);
+        if (!string.IsNullOrWhiteSpace(note)) parts.Add(UrlRedactor.HideAddresses(note));
+        var detail = string.Join(" ", parts);
+        var checking = job is { State: "intended" or "submissionUnknown", ApprovalNeeded: false, Cached: false };
+        return new AddOutcomeView(
+            word,
+            detail,
+            needsApproval,
+            job is { State: "failed", FailureKind: "linkPasswordRequired" },
+            job.State == "awaitingSelection",
+            checking,
+            job.State == "failed",
+            detail.Length > 0 ? $"{name}, {word}, {detail}" : $"{name}, {word}");
+    }
+
+    public static string AddOutcomeSummary(IReadOnlyCollection<AddOutcomeView> rows, string provider)
+    {
+        var waiting = rows.Count(row => row.NeedsApproval);
+        var checking = rows.Count(row => row.IsChecking);
+        if (checking > 0) return $"Asking {provider} about {(checking == 1 ? "1 item" : $"{checking} items")}…";
+        if (waiting > 0) return waiting == 1 ? "1 item is waiting for your approval." : $"{waiting} items are waiting for your approval.";
+        if (rows.Any(row => row.NeedsLinkPassword)) return "An item needs its link password.";
+        return rows.Any(row => row.NeedsFiles)
+            ? "Ready. Close this and choose the files from the download list: select the item and press Enter."
+            : "Nothing here needs you now. These carry on in the download list.";
+    }
+
+    public static string ApproveExplanation(string provider)
+        => $"{provider} fetches what isn't cached on your account, and that uses your account's quota. Nothing is sent to {provider} until you approve it. Anything you leave stays on the list as not cached, and you can approve it there later.";
+
+    public static string CacheHint(string provider)
+        => $"Adding asks {provider} whether each of these is cached. Anything that isn't waits for your approval, and {provider} fetches nothing before that.";
+}

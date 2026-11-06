@@ -118,7 +118,14 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     public Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken = default)
         => SlowAsync(MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = text }, MessageTypes.RemoteClassifyResult,
-            error => new RemoteClassifyResult { Error = error }, cancellationToken);
+            error => new RemoteClassifyResult { Error = RemoteText.ClassifyFailure(error) }, cancellationToken);
+
+    /// <summary>
+    /// For many lines in a row: one connection, one command at a time, so a long paste doesn't open a
+    /// connection and read a whole snapshot per line. It connects when first used, and holds one of the
+    /// slow-call turns until it is disposed, so dispose it as soon as there is nothing left to ask.
+    /// </summary>
+    public IRemoteClassifier OpenClassifier() => new ClassifierChannel(this);
 
     public async Task<RemoteAddResultDto> AddAsync(RemoteAddRequestDto request, CancellationToken cancellationToken = default)
     {
@@ -575,6 +582,80 @@ internal sealed class RemoteClient : IAsyncDisposable
         FailPending();
     }
 
+    private sealed class ClassifierChannel(RemoteClient client) : IRemoteClassifier
+    {
+        private IRemotePipe? _pipe;
+        private bool _holdsTurn;
+
+        public bool Broken { get; private set; }
+
+        public async Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken)
+        {
+            if (Broken) return new RemoteClassifyResult { Error = RemoteText.ClassifyLost };
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, client._stopping.Token);
+            deadline.CancelAfter(client._slowTimeout);
+            var connected = _pipe is not null;
+            try
+            {
+                if (_pipe is null)
+                {
+                    await client._slowCalls.WaitAsync(deadline.Token).ConfigureAwait(false);
+                    _holdsTurn = true;
+                    _pipe = await client._connect(ConnectTimeout, deadline.Token).ConfigureAwait(false);
+                    connected = true;
+                }
+
+                var message = IpcMessage.Create(MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = text });
+                await _pipe.SendAsync(message, deadline.Token).ConfigureAwait(false);
+                while (await _pipe.ReadAsync(deadline.Token).ConfigureAwait(false) is { } reply)
+                {
+                    if (reply.ReplyTo != message.Id) continue;
+                    var result = Read(reply, MessageTypes.RemoteClassifyResult, Failed, raw => raw.GetPayload<RemoteClassifyResult>());
+                    if (reply.Type != MessageTypes.RemoteClassifyResult) Broken = true;
+                    return result;
+                }
+
+                Broken = true;
+                return Failed(RemoteText.HostLost);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Broken = true;
+                throw;
+            }
+            catch (Exception ex) when (IsCommunicationFailure(ex))
+            {
+                Broken = true;
+                return Failed(DescribeFailure(ex, connected));
+            }
+        }
+
+        private static RemoteClassifyResult Failed(string error) => new() { Error = RemoteText.ClassifyFailure(error) };
+
+        public async ValueTask DisposeAsync()
+        {
+            Broken = true;
+            var pipe = _pipe;
+            _pipe = null;
+            try
+            {
+                if (pipe is not null) await pipe.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsCommunicationFailure(ex))
+            {
+                // Closing is the point, and it is closed now.
+            }
+            finally
+            {
+                if (_holdsTurn)
+                {
+                    _holdsTurn = false;
+                    client._slowCalls.Release();
+                }
+            }
+        }
+    }
+
     private sealed class HostPipe(IpcClient client) : IRemotePipe
     {
         public Task SendAsync(IpcMessage message, CancellationToken cancellationToken) => client.SendAsync(message, cancellationToken);
@@ -583,6 +664,16 @@ internal sealed class RemoteClient : IAsyncDisposable
 
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
+}
+
+/// <summary>Sorts one input after another on one connection of its own. Closing it cancels whatever it was asking.</summary>
+internal interface IRemoteClassifier : IAsyncDisposable
+{
+    /// <summary>The connection failed or the Host doesn't offer this, so nothing more can be asked here.</summary>
+    bool Broken { get; }
+
+    /// <summary>A failure comes back as <c>Ok = false</c> with words for the user. Only the caller's own cancellation throws.</summary>
+    Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken);
 }
 
 /// <summary><c>archive.listResult</c> has no ok or error of its own, and a call can still fail on its way there.</summary>

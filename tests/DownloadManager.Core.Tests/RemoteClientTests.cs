@@ -106,6 +106,116 @@ public sealed class RemoteClientTests
         Assert.False(host.Connections[0].Disposed);
     }
 
+    [Fact]
+    public async Task AClassifierAsksManyThingsOnOneConnectionOfItsOwn()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        var before = host.Connections.Count;
+
+        await using (var classifier = client.OpenClassifier())
+        {
+            Assert.Equal(before, host.Connections.Count);
+            var first = await classifier.ClassifyAsync("one", CancellationToken.None).WaitAsync(Patience);
+            var second = await classifier.ClassifyAsync("two", CancellationToken.None).WaitAsync(Patience);
+
+            Assert.True(first.Ok);
+            Assert.True(second.Ok);
+            Assert.False(classifier.Broken);
+            Assert.Equal(before + 1, host.Connections.Count);
+            Assert.Equal(2, host.Received(MessageTypes.RemoteClassify));
+            Assert.NotSame(host.Connections[0], host.ConnectionOf(MessageTypes.RemoteClassify));
+        }
+
+        Assert.True(host.Connections[^1].Disposed);
+    }
+
+    [Fact]
+    public async Task ClosingAClassifierEndsItsCallAndGivesItsTurnBack()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        host.Hold(MessageTypes.RemoteClassify);
+        using var cancel = new CancellationTokenSource();
+
+        var classifier = client.OpenClassifier();
+        var asking = classifier.ClassifyAsync("one", cancel.Token);
+        await host.UntilAsync(() => host.Received(MessageTypes.RemoteClassify) == 1);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => asking.WaitAsync(Patience));
+        Assert.True(classifier.Broken);
+        await classifier.DisposeAsync();
+        Assert.True(host.ConnectionOf(MessageTypes.RemoteClassify).Disposed);
+
+        // Three more slow calls can run, so the turn it held came back.
+        host.Answer(MessageTypes.RemoteFiles, MessageTypes.RemoteFilesResult, new RemoteFilesResultDto { Ok = true });
+        var calls = Enumerable.Range(0, 4).Select(_ => client.GetFilesAsync(Guid.NewGuid())).ToArray();
+        await Task.WhenAll(calls).WaitAsync(Patience);
+        Assert.All(calls, call => Assert.True(call.Result.Ok));
+    }
+
+    [Fact]
+    public async Task AClassifierWhoseHostGoesAwaySaysSoInWordsAndStops()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        host.Hold(MessageTypes.RemoteClassify);
+
+        await using var classifier = client.OpenClassifier();
+        var asking = classifier.ClassifyAsync("one", CancellationToken.None);
+        await host.UntilAsync(() => host.Received(MessageTypes.RemoteClassify) == 1);
+        host.ConnectionOf(MessageTypes.RemoteClassify).Drop();
+        var result = await asking.WaitAsync(Patience);
+
+        Assert.False(result.Ok);
+        Assert.Equal(RemoteText.ClassifyLost, result.Error);
+        Assert.True(classifier.Broken);
+        Assert.Equal(RemoteText.ClassifyLost, (await classifier.ClassifyAsync("two", CancellationToken.None).WaitAsync(Patience)).Error);
+        Assert.Equal(1, host.Received(MessageTypes.RemoteClassify));
+    }
+
+    [Fact]
+    public async Task AClassifierOnAHostThatDoesntKnowTheMessageStops()
+    {
+        var host = new FakeHost();
+        host.AnswerRaw(MessageTypes.RemoteClassify, request => IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }, request.Id));
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        await using var classifier = client.OpenClassifier();
+        var result = await classifier.ClassifyAsync("one", CancellationToken.None).WaitAsync(Patience);
+
+        Assert.False(result.Ok);
+        Assert.Equal(RemoteText.HostDoesNotOffer, result.Error);
+        Assert.True(classifier.Broken);
+    }
+
+    [Fact]
+    public async Task AClassifierThatCantConnectSaysSo()
+    {
+        var host = new FakeHost { Refuse = true };
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        await using var classifier = client.OpenClassifier();
+        var result = await classifier.ClassifyAsync("one", CancellationToken.None).WaitAsync(Patience);
+
+        Assert.False(result.Ok);
+        Assert.Equal(RemoteText.HostNotRunning, result.Error);
+        Assert.True(classifier.Broken);
+    }
+
     [Theory]
     [InlineData(MessageTypes.RemoteClassify)]
     [InlineData(MessageTypes.RemoteAdd)]
