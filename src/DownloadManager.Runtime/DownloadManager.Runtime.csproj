@@ -7,5 +7,6 @@
     <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
     <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
     <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
   </ItemGroup>
 </Project>

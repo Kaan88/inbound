@@ -41,6 +41,14 @@ public static class SecretProtector
 
     public static string? UnprotectProxy(string? protectedValue) => Unprotect(protectedValue, ProxyEntropy);
 
+    private static readonly byte[] ArchivePasswordEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.ArchivePassword.v1");
+
+    /// <summary>Extraction passwords, in their own purpose so a blob cannot be read as any other kind of secret.</summary>
+    public static string ProtectArchivePassword(string plaintext) => Protect(plaintext, ArchivePasswordEntropy);
+
+    public static string? UnprotectArchivePassword(string? protectedValue) => Unprotect(protectedValue, ArchivePasswordEntropy);
+
     private static string Protect(string plaintext, byte[] entropy)
     {
         var cipher = Transform(Encoding.UTF8.GetBytes(plaintext), protect: true, entropy);
