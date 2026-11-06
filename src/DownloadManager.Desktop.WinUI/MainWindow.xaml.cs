@@ -71,8 +71,12 @@ public sealed partial class MainWindow : Window
         {
             DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
             ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
+            StatusBrushes.UseTheme(RootGrid.ActualTheme);
+            // They share the status colors, so they can't be left on the other theme.
+            foreach (var window in _providerWindows.Values) window.UseTheme(RootGrid.RequestedTheme);
         };
         DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
+        StatusBrushes.UseTheme(RootGrid.ActualTheme);
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
         UiTrace.Write("MainWindow collections initialized");
@@ -414,12 +418,40 @@ public sealed partial class MainWindow : Window
         ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
         CancelPackageButton.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
         CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
-        DeleteButton.IsEnabled = connected && selection.Count > 0;
+        var sideRows = rows.Count(row => row.IsSideRow);
+        var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
+        DeleteButton.IsEnabled = connected && (selection.Count > 0 || removableSideRows > 0);
+        var deleteToolTip = FirstLocalRow is null && sideRows > 0 ? "Remove the selected rows from the list" : "Delete the selected download and its partial data";
+        if (deleteToolTip != _deleteToolTip) ToolTipService.SetToolTip(DeleteButton, _deleteToolTip = deleteToolTip);
+        SyncFileMenu(sideRows, removableSideRows);
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
         StartQueueButton.IsEnabled = connected && _settings is not null;
         StopQueueButton.IsEnabled = connected && _settings is not null;
         SyncArchiveMenus();
+    }
+
+    private string _deleteToolTip = string.Empty;
+
+    /// <summary>A command with nothing to act on is dimmed and says why in its own words, like Extract.</summary>
+    private void SyncFileMenu(int sideRows, int removableSideRows)
+    {
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows);
+        Apply(FileOpenItem, "Open", plan.FileReason);
+        Apply(FileOpenFolderItem, "Open Folder", plan.FileReason);
+        Apply(FileMoveRenameItem, "Move/Rename…", plan.FileReason);
+        Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
+        Apply(FileDownloadNowItem, "Download Now", plan.LocalReason);
+        Apply(FileStopItem, "Stop Download", plan.LocalReason);
+        Apply(FileRedownloadItem, "Redownload", plan.FileReason);
+        Apply(FileRemoveItem, "Remove", plan.RemoveReason);
+
+        static void Apply(MenuFlyoutItem item, string text, string? reason)
+        {
+            var label = FileMenuRules.Label(text, reason);
+            if (item.Text != label) item.Text = label;
+            if (item.IsEnabled != (reason is null)) item.IsEnabled = reason is null;
+        }
     }
 
     /// <summary>A message about something just done. The usual counts come back by themselves.</summary>
@@ -1813,6 +1845,7 @@ public sealed partial class MainWindow : Window
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
+            if (FirstLocalRow is null) await RemoveSideRowsAsync();
             return;
         }
 
@@ -4437,6 +4470,7 @@ public sealed partial class MainWindow : Window
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
+            if (FirstLocalRow is null) await RemoveSideRowsAsync();
             return;
         }
 

@@ -287,7 +287,7 @@ public sealed partial class MainWindow
         {
             case Windows.System.VirtualKey.Delete:
                 e.Handled = true;
-                _ = RemoveArchiveRecordsAsync(CurrentArchivePlan().Remove);
+                _ = RemoveSideRowsAsync();
                 return true;
             case Windows.System.VirtualKey.Enter when rows is [{ ArchiveSet: { } set }]:
                 e.Handled = true;
@@ -502,8 +502,11 @@ public sealed partial class MainWindow
     private async Task RemoveArchiveRecordsAsync(IReadOnlyList<ArchiveSetDto> sets)
     {
         if (sets.Count == 0 || !await ConfirmAsync("Remove extraction record?", ArchiveText.RemoveQuestion(sets), "Remove Record")) return;
-        await RunOnSetsAsync("Remove extraction record", sets, _remote.RemoveArchiveAsync);
+        await RemoveArchiveRecordsConfirmedAsync(sets);
     }
+
+    private Task RemoveArchiveRecordsConfirmedAsync(IReadOnlyList<ArchiveSetDto> sets)
+        => RunOnSetsAsync("Remove extraction record", sets, _remote.RemoveArchiveAsync);
 
     private async Task RunOnSetsAsync(string title, IReadOnlyList<ArchiveSetDto> sets, Func<Guid, CancellationToken, Task<ArchiveActionResult>> action)
     {

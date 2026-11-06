@@ -376,6 +376,8 @@ public sealed partial class MainWindow
     /// </summary>
     private void JobsList_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // A button on the row, such as the archive password key, has the focus and answers Enter itself.
+        if (e.Key == Windows.System.VirtualKey.Enter && e.OriginalSource is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase) return;
         if (HandleArchiveRowKey(e)) return;
         var jobs = SelectedRemoteJobs;
         if (jobs.Count == 0)
@@ -398,7 +400,7 @@ public sealed partial class MainWindow
                 break;
             case Windows.System.VirtualKey.Delete when FirstLocalRow is null:
                 e.Handled = true;
-                _ = RemoveRemoteAsync(jobs);
+                _ = RemoveSideRowsAsync();
                 break;
             case Windows.System.VirtualKey.Enter when FirstLocalRow is null && jobs.Count == 1:
                 e.Handled = true;
@@ -513,6 +515,39 @@ public sealed partial class MainWindow
     private async Task RemoveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)
     {
         if (jobs.Count == 0 || !await ConfirmAsync("Remove from list?", RemoteText.RemoveQuestion(jobs), "Remove from list")) return;
+        await RemoveRemoteConfirmedAsync(jobs);
+    }
+
+    /// <summary>Del, File > Remove and the toolbar's Delete when no local row is selected. Rows it can't remove are named, not skipped in silence.</summary>
+    private async Task RemoveSideRowsAsync()
+    {
+        var jobs = SelectedRemoteJobs;
+        var archiveRows = SelectedArchiveRows.Count;
+        var sets = archiveRows > 0 ? CurrentArchivePlan().Remove : [];
+        var left = ArchiveText.LeftExtracting(archiveRows - sets.Count);
+
+        if (jobs.Count > 0 && sets.Count > 0)
+        {
+            if (await ConfirmAsync("Remove from list?", $"{RemoteText.RemoveQuestion(jobs)} {ArchiveText.RemoveQuestion(sets)}", "Remove from list"))
+            {
+                await RemoveRemoteConfirmedAsync(jobs);
+                await RemoveArchiveRecordsConfirmedAsync(sets);
+            }
+        }
+        else if (jobs.Count > 0)
+        {
+            await RemoveRemoteAsync(jobs);
+        }
+        else
+        {
+            await RemoveArchiveRecordsAsync(sets);
+        }
+
+        if (left is not null) ShowPassingStatus(left);
+    }
+
+    private async Task RemoveRemoteConfirmedAsync(IReadOnlyList<RemoteJobDto> jobs)
+    {
         var problems = new List<string>();
         foreach (var job in jobs)
         {

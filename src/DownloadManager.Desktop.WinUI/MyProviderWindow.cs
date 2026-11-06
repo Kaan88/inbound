@@ -80,6 +80,18 @@ internal sealed class MyProviderWindow : Window
     private const int PageSize = 50;
     private const long LocationCheckEveryMilliseconds = 1500;
 
+    /// <summary>Header and a row or two, with Load more when it shows.</summary>
+    private const double ListMinimumHeight = 110;
+
+    /// <summary>The detail's own lines, each on one line, and about 120 for the file tree.</summary>
+    private const double DetailMinimumHeight = 300;
+
+    /// <summary>All six buttons fit in a row at this width.</summary>
+    private const int WindowMinimumWidth = 880;
+
+    /// <summary>What both minimums above need, with the rest of the window's lines and the title bar.</summary>
+    private const int WindowMinimumHeight = 620;
+
     private const string ItemTemplate = """
         <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
             <Grid Height="27" Padding="6,0" ColumnSpacing="8" Background="Transparent" ToolTipService.ToolTip="{Binding ToolTip}">
@@ -189,6 +201,7 @@ internal sealed class MyProviderWindow : Window
         var theme = UiStateStore.Load().DarkMode;
         _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
         Title = $"My {_name} — Inbound Download Manager";
+        WindowLayout.SetMinimumSize(this, WindowMinimumWidth, WindowMinimumHeight);
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "my-provider");
 
@@ -252,6 +265,9 @@ internal sealed class MyProviderWindow : Window
         if (_tabs.Items.Count > 0) _tabs.SelectedItem = _tabs.Items[0];
     }
 
+    /// <summary>Follows the main window, whose theme the status colors in this list come from.</summary>
+    internal void UseTheme(ElementTheme theme) => _root.RequestedTheme = theme;
+
     public void ShowWindow()
     {
         AppWindow.Show();
@@ -265,6 +281,10 @@ internal sealed class MyProviderWindow : Window
         {
             _root.RowDefinitions.Add(new RowDefinition { Height = height });
         }
+
+        // On a short window the list gives up its room first, so the file tree keeps enough rows to use.
+        _root.RowDefinitions[1].MinHeight = ListMinimumHeight;
+        _root.RowDefinitions[2].MinHeight = DetailMinimumHeight;
 
         var top = new Grid { ColumnSpacing = 8 };
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -341,7 +361,7 @@ internal sealed class MyProviderWindow : Window
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
         foreach (var button in new[] { _downloadSelected, _downloadAll, _showProgress, _openLocation, _delete, _close }) buttons.Children.Add(button);
-        AddAt(_root, buttons, row: 4);
+        AddAt(_root, new ScrollViewer { Content = buttons, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollMode = ScrollMode.Disabled }, row: 4);
 
         void ApplyColors()
         {

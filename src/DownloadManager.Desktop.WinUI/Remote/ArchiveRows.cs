@@ -179,6 +179,14 @@ internal static partial class ArchiveText
         ? $"Forget the extraction record for \"{sets[0].Name}\", and any archive password saved for it? No file is deleted, neither the archive nor what was extracted."
         : $"Forget the extraction records for these {sets.Count} archives, and any archive passwords saved for them? No file is deleted, neither the archives nor what was extracted.";
 
+    /// <summary>Why selected records stayed on the list. Null when none did.</summary>
+    public static string? LeftExtracting(int count) => count switch
+    {
+        <= 0 => null,
+        1 => "An archive that is still extracting stays on the list. Cancel the extraction first.",
+        _ => $"{count} archives that are still extracting stay on the list. Cancel the extraction first.",
+    };
+
     /// <summary>Says what came of asking for extraction.</summary>
     public static string ExtractSummary(ArchiveExtractResult result)
     {

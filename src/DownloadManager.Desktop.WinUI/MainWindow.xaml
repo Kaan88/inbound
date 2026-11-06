@@ -56,16 +56,16 @@
             </MenuBarItem>
 
             <MenuBarItem Title="File" AccessKey="F">
-                <MenuFlyoutItem Text="Open" AccessKey="O" Click="MenuOpen_Click" />
-                <MenuFlyoutItem Text="Open Folder" AccessKey="F" Click="MenuOpenFolder_Click" />
-                <MenuFlyoutItem Text="Move/Rename…" AccessKey="M" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
+                <MenuFlyoutItem x:Name="FileOpenItem" Text="Open" AccessKey="O" Click="MenuOpen_Click" />
+                <MenuFlyoutItem x:Name="FileOpenFolderItem" Text="Open Folder" AccessKey="F" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutItem x:Name="FileMoveRenameItem" Text="Move/Rename…" AccessKey="M" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
-                <MenuFlyoutItem Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
-                <MenuFlyoutItem Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
-                <MenuFlyoutItem Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
+                <MenuFlyoutItem x:Name="FileProgressItem" Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
+                <MenuFlyoutItem x:Name="FileDownloadNowItem" Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
+                <MenuFlyoutItem x:Name="FileStopItem" Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
+                <MenuFlyoutItem x:Name="FileRedownloadItem" Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Remove" AccessKey="V" Click="MenuRemove_Click" />
+                <MenuFlyoutItem x:Name="FileRemoveItem" Text="Remove" AccessKey="V" Click="MenuRemove_Click" />
             </MenuBarItem>
 
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">

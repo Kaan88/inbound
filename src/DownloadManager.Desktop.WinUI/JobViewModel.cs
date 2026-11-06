@@ -77,12 +77,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public Microsoft.UI.Xaml.Media.Brush StatusBrush { get => _statusBrush; private set => Set(ref _statusBrush, value); }
     private Microsoft.UI.Xaml.Media.Brush _statusBrush = NeutralStatus;
 
-    // Mid-tone status colors chosen to keep contrast on both the dark (#181818) and light (#FFFFFF) list surfaces.
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush ActiveStatus = new(Windows.UI.Color.FromArgb(255, 61, 143, 224));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush DoneStatus = new(Windows.UI.Color.FromArgb(255, 56, 158, 76));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush FailedStatus = new(Windows.UI.Color.FromArgb(255, 222, 78, 78));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WaitingStatus = new(Windows.UI.Color.FromArgb(255, 201, 140, 32));
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NeutralStatus = new(Windows.UI.Color.FromArgb(255, 138, 138, 138));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush ActiveStatus = StatusBrushes.Active;
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush DoneStatus = StatusBrushes.Done;
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush FailedStatus = StatusBrushes.Failed;
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush WaitingStatus = StatusBrushes.Waiting;
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NeutralStatus = StatusBrushes.Neutral;
     public DateTimeOffset CreatedAt { get => _createdAt; private set => Set(ref _createdAt, value); }
 
     public event PropertyChangedEventHandler? PropertyChanged;

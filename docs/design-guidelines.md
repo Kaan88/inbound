@@ -36,16 +36,17 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 ## 2. Status colors
 
-Download states use fixed mid-tone colors (`JobViewModel.StatusBrush`) that stay
-readable on both list surfaces:
+Download states use the `InboundStatus*Brush` tokens, at least 4.5:1 on the list surface and on a selected row in
+each theme (a test in `SelectionCommandsTests` checks this). Rows bind to the shared brushes in `StatusBrushes`, not
+to a resource lookup, and those change color when the main window's theme changes.
 
-| State | Color |
-|---|---|
-| downloading / connecting / verifying | blue `#3D8FE0` |
-| completed | green `#389E4C` |
-| failed | red `#DE4E4E` |
-| paused / queued / retry waiting | amber `#C98C20` |
-| anything else | gray `#8A8A8A` |
+| State | Token | Dark | Light |
+|---|---|---|---|
+| downloading / connecting / verifying | `InboundStatusActiveBrush` | `#6DB3F2` | `#1B65B4` |
+| completed | `InboundStatusDoneBrush` | `#5DC879` | `#1B7130` |
+| failed | `InboundStatusFailedBrush` | `#F58B8B` | `#B3261E` |
+| paused / queued / retry waiting | `InboundStatusWaitingBrush` | `#E0A93E` | `#8A5A00` |
+| anything else | `InboundStatusNeutralBrush` | `#A3A3A3` | `#5F5F5F` |
 
 Color only the status text. Don't tint whole rows.
 

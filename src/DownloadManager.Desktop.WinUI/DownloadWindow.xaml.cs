@@ -178,11 +178,12 @@ public sealed partial class DownloadWindow : Window
         CompletedUrl.Text = hasAddress ? job.Url : string.Empty;
         CompletedPath.Text = job.FinalFilePath;
         CompletedSize.Text = $"Downloaded {Bytes(job.ReceivedBytes)} ({job.ReceivedBytes:N0} bytes)";
-        OverallFooter.IsIndeterminate = job.TotalBytes is not > 0 && !job.IsTerminal;
+        var moving = ProgressBarRules.ShowsMovingBar(job.State, job.TotalBytes);
+        OverallFooter.IsIndeterminate = moving;
         OverallFooter.Value = complete ? 100 : percent;
         // One main bar: the segment map when the size is known, the indeterminate bar only for unknown sizes.
         var sized = job.TotalBytes is > 0 || complete;
-        OverallFooter.Visibility = sized ? Visibility.Collapsed : Visibility.Visible;
+        OverallFooter.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
         SegmentMap.Visibility = sized ? Visibility.Visible : Visibility.Collapsed;
         if (complete) SegmentMap.SetFraction(1);
         else if (!_haveSegmentMap) SegmentMap.SetFraction(percent / 100);
