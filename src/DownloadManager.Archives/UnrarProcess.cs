@@ -61,6 +61,10 @@ internal static class UnrarProcess
             throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, $"UnRAR could not be started: {exception.GetType().Name}.");
         }
 
+        // If this process dies, the tool goes with it. Left running it would keep writing into a
+        // staging folder the next start needs to wipe.
+        using var lifetime = ToolLifetime.Tie(process);
+
         var lastActivity = Stopwatch.GetTimestamp();
         var stdout = new BoundedText(invocation.KeepOutputCharacters);
         var stderr = new BoundedText(null);

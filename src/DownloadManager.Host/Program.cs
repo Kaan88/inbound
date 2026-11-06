@@ -6,6 +6,7 @@ using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Archives;
 using DownloadManager.Runtime.Remote;
 using DownloadManager.Tray;
 
@@ -130,9 +131,12 @@ internal static class Program
                 }
             }
 
+            // Attaches to the service, so it must exist before anything can finish.
+            var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
             var remoteJobs = remote.CreateCoordinator(paths, service, log.Info);
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
             service.InitializeAsync().GetAwaiter().GetResult();
+            archives.InitializeAsync().GetAwaiter().GetResult();
 
             // After the service, because reconciling can create local jobs straight away. A job left
             // Submitting by a crash becomes SubmissionUnknown here, and the provider's list decides.
@@ -154,7 +158,8 @@ internal static class Program
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null);
+            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = new ArchiveIpcDispatcher(archives) };
+            archives.Changed += (_, change) => pipe.BroadcastArchiveChanged(change);
             void ExitApplication() => _ = Task.Run(async () =>
             {
                 try { await pipe.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
@@ -190,6 +195,16 @@ internal static class Program
             var tray = new TrayApplicationContext(trayActions, icon);
             updateMonitor.Attach(tray.Notify);
             updateMonitor.Start();
+            var toldAboutArchives = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string>();
+            archives.Changed += (_, change) =>
+            {
+                // Each outcome once: progress and later saves repeat the same state.
+                if (change.Set is not { State: "completed" or "failed" } set) return;
+                var outcome = $"{set.Attempts}:{set.State}:{set.FailureKind}";
+                if (toldAboutArchives.TryGetValue(set.Id, out var told) && told == outcome) return;
+                toldAboutArchives[set.Id] = outcome;
+                tray.Notify(set.State == "completed" ? "Extraction complete" : "Extraction stopped", $"{set.Name}: {set.StateText}");
+            };
             controller.UiContext = SynchronizationContext.Current;
             if (controller.UiContext is null)
             {
@@ -288,6 +303,15 @@ internal static class Program
             catch (Exception ex)
             {
                 log.Warn($"Pipe shutdown: {ex.Message}");
+            }
+
+            try
+            {
+                archives.ShutdownAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                log.Error($"Archive shutdown: {ex.GetType().Name}");
             }
 
             try

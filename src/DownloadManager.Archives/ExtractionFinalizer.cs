@@ -15,10 +15,11 @@ public static class ExtractionFinalizer
         ExtractionConflictPolicy policy,
         bool preserveFolders,
         IProgress<ExtractionProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? keepFiles = null)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
-        var state = new State(staging, root);
+        using var state = new State(staging, root, keepFiles);
         var results = new List<ExtractedFile>(content.Files.Count);
 
         try
@@ -50,11 +51,15 @@ public static class ExtractionFinalizer
         }
     }
 
-    private sealed class State(StagingArea staging, string root)
+    private sealed class State(StagingArea staging, string root, IReadOnlyCollection<string>? keepFiles) : IDisposable
     {
         private readonly List<Step> _steps = [];
         private readonly Stack<string> _createdDirectories = new();
         private readonly HashSet<string> _placedThisAttempt = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _keep = new((keepFiles ?? []).Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        private readonly PlacementLog _log = staging.OpenPlacementLog();
+
+        public void Dispose() => _log.Dispose();
 
         public ExtractedFile Place(string relativeSource, string relativeTarget, ExtractionConflictPolicy policy)
         {
@@ -70,11 +75,14 @@ public static class ExtractionFinalizer
             // Without folders two entries can share a name. Neither Overwrite nor Skip should
             // silently lose a file that came from this same archive.
             var effective = _placedThisAttempt.Contains(target) ? ExtractionConflictPolicy.Rename : policy;
+
+            // Next to its archive, an entry can carry the name of one of the volumes.
+            if (effective == ExtractionConflictPolicy.Overwrite && _keep.Contains(target)) effective = ExtractionConflictPolicy.Rename;
             var exists = File.Exists(target) || Directory.Exists(target);
 
             if (!exists)
             {
-                MoveNew(source, target);
+                MoveNew(relativeSource, source, target);
                 return new ExtractedFile(relativeSource, target, ExtractedFileOutcome.Written);
             }
 
@@ -85,7 +93,7 @@ public static class ExtractionFinalizer
 
                 case ExtractionConflictPolicy.Rename:
                     var renamed = FreeName(target);
-                    MoveNew(source, renamed);
+                    MoveNew(relativeSource, source, renamed);
                     return new ExtractedFile(relativeSource, renamed, ExtractedFileOutcome.Renamed);
 
                 default:
@@ -95,6 +103,7 @@ public static class ExtractionFinalizer
                     }
 
                     Displace(target, relativeTarget);
+                    _log.Record(new PlacementEntry(relativeSource, target, relativeTarget));
                     File.Move(source, target);
                     _steps[^1] = _steps[^1] with { Placed = true };
                     _placedThisAttempt.Add(target);
@@ -159,8 +168,9 @@ public static class ExtractionFinalizer
             }
         }
 
-        private void MoveNew(string source, string target)
+        private void MoveNew(string relativeSource, string source, string target)
         {
+            _log.Record(new PlacementEntry(relativeSource, target, null));
             File.Move(source, target, overwrite: false);
             _steps.Add(new Step(target, null, Placed: true));
             _placedThisAttempt.Add(target);

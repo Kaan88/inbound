@@ -106,6 +106,21 @@ public sealed class ExtractionRequest
     public ExtractionConflictPolicy ConflictPolicy { get; init; } = ExtractionConflictPolicy.Rename;
 
     public bool PreserveFolders { get; init; } = true;
+
+    /// <summary>
+    /// Files an overwrite must not replace, normally the archive's own volumes. An entry that would
+    /// land on one is renamed instead.
+    /// </summary>
+    public IReadOnlyCollection<string>? KeepFiles { get; init; }
+
+    /// <summary>
+    /// Runs once every file is in place and before the staging folder goes, and is the caller's
+    /// chance to record success durably. Staging still knows what it placed until this returns, so
+    /// a crash before then, or a throw from here, undoes the attempt and a retry cannot duplicate
+    /// its output. A caller that has recorded success must discard that attempt's leftover staging
+    /// rather than recover it, because recovery undoes the attempt.
+    /// </summary>
+    public Func<ExtractionResult, Task>? Committed { get; init; }
 }
 
 public enum ExtractionPhase
