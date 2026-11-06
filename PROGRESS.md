@@ -1,6 +1,14 @@
 # Progress — session handoff
 
 
+### Owner's first try of TorBox in a sandbox copy (2026-11-07)
+
+Build: snapshot `f6aebae`, from `feature/torbox-integration` plus `torbox-winui` at `e5a4113`, real TorBox, the owner's own account. Tracked as ROADMAP TB.F1 to TB.F9. Causes are not traced yet, so the wording below is what the owner reported.
+
+**Worked, owner-reported, not acceptance evidence:** TorBox's own links; browsing files; a mega link through caching, downloading and extraction, "pretty much perfectly"; extraction from a direct TorBox link. Live scenarios A to J are still not run as a set.
+
+**Quota wording, corrected.** The app says fetching "uses your account's quota" or "may count against your limits". The owner says there isn't really a quota and asked for the source. There is none for that claim: it was an assumption stated as fact. The brief mentions quotas only in general terms (failure causes, testing care) and asks for confirmation before submitting uncached content. The API research shows a 300 request rate limit and per-hoster daily limits, nothing saying a fetch uses up an account quota.
+
 ### Open for the owner (recorded 2026-11-06, for later)
 
 - **Chrome Web Store:** upload `artifacts\chrome-store\inbound-bridge-0.4.0-chrome.zip` as a draft and send the Item ID. The app then accepts that ID, 0.3.3 is built and published on request, and the listing is submitted only after 0.3.3 is out. See ROADMAP EXT.S2.
