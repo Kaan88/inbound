@@ -5,7 +5,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$installRoot = $InstallRoot
+$installRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+if ($installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\')) {
+    throw "InstallRoot must be an application directory, not a drive root."
+}
 $appDir = Join-Path $installRoot "app"
 
 Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |
@@ -13,8 +16,17 @@ Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction Sil
 Start-Sleep -Milliseconds 500
 
 # Chrome and Edge each have a key; keep in step with BrowserBridge.NativeHostKeyPaths.
-# A key is removed only when it points at this install's manifest, so another program's
-# registration under the same name is left alone.
+# A key is removed only when it points at this install's manifest or at a file that no longer exists,
+# so another program's working registration under the same name is left alone.
+function Test-NativeKeyIsOurs([string]$registered, [string]$ownManifest) {
+    if (-not $registered) { return $true }
+    try {
+        if (-not (Test-Path -LiteralPath $registered)) { return $true }
+        return [IO.Path]::GetFullPath($registered) -ieq [IO.Path]::GetFullPath($ownManifest)
+    }
+    catch { return $false }
+}
+
 $hostName = "com.kaank.downloadmanager"
 $ownManifest = Join-Path $installRoot "native-host\$hostName.json"
 $nativeKeys = [ordered]@{
@@ -25,7 +37,7 @@ foreach ($browser in $nativeKeys.Keys) {
     $nativeKey = $nativeKeys[$browser]
     if (-not (Test-Path $nativeKey)) { continue }
     $registered = (Get-Item $nativeKey).GetValue("")
-    if ($registered -and ($registered -ne $ownManifest)) {
+    if (-not (Test-NativeKeyIsOurs $registered $ownManifest)) {
         Write-Warning "Left the $browser native-host registration alone: it points at $registered, not at this install."
         continue
     }

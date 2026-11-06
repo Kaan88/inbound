@@ -2,22 +2,82 @@ using System.Text.Json;
 
 namespace DownloadManager.Contracts;
 
+/// <summary>What one browser's native-messaging key adds up to.</summary>
+public enum NativeHostKeyState
+{
+    /// <summary>The key is missing or has no value.</summary>
+    Absent = 0,
+
+    /// <summary>The key points at a manifest that lists the store origin and names a program that exists.</summary>
+    Usable,
+
+    /// <summary>The key has a value, but the browser would not reach the host through it.</summary>
+    Broken,
+}
+
 /// <summary>
 /// What the per-browser native-messaging registrations add up to. Pure logic over manifest text and
 /// registry values, so it can be tested without touching the registry.
 /// </summary>
-public readonly record struct NativeHostRegistrationState(bool ChromeUsable, bool EdgeUsable)
+public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chrome, NativeHostKeyState Edge)
 {
-    /// <summary>
-    /// True when at least one browser can reach the host. A working Chrome is not reported as broken
-    /// because Edge's key is absent (Edge is optional), and the other way round.
-    /// </summary>
+    public bool ChromeUsable => Chrome == NativeHostKeyState.Usable;
+
+    public bool EdgeUsable => Edge == NativeHostKeyState.Usable;
+
+    /// <summary>True when at least one browser can reach the host.</summary>
     public bool IsRegistered => ChromeUsable || EdgeUsable;
 
-    /// <param name="chromeManifestText">The manifest the Chrome key points to; null when the key or file is missing.</param>
-    /// <param name="edgeManifestText">The manifest the Edge key points to; null when the key or file is missing.</param>
-    public static NativeHostRegistrationState Evaluate(string? chromeManifestText, string? edgeManifestText) =>
-        new(IsManifestUsable(chromeManifestText), IsManifestUsable(edgeManifestText));
+    /// <summary>
+    /// The browser integration status every surface shows (tray, status bar, CLI), naming a browser that
+    /// cannot reach the host while the other can. An absent Edge key is not named: installs from 0.4.0
+    /// have none until the Host adds it, and Edge may not be installed. Every version has written
+    /// Chrome's key, so its absence means something removed it.
+    /// </summary>
+    public string IntegrationText(bool integrationEnabled)
+    {
+        if (!integrationEnabled)
+        {
+            return "disabled";
+        }
+
+        if (!IsRegistered)
+        {
+            return "native host not registered";
+        }
+
+        var problems = new List<string>(2);
+        if (Chrome == NativeHostKeyState.Broken)
+        {
+            problems.Add("Chrome registration is broken");
+        }
+        else if (Chrome == NativeHostKeyState.Absent)
+        {
+            problems.Add("not registered for Chrome");
+        }
+
+        if (Edge == NativeHostKeyState.Broken)
+        {
+            problems.Add("Edge registration is broken");
+        }
+
+        return problems.Count == 0 ? "connected" : "connected; " + string.Join("; ", problems);
+    }
+
+    /// <param name="keyValue">The value of the browser's key; null when the key is missing.</param>
+    /// <param name="manifestText">The file that value points to; null when it is missing or unreadable.</param>
+    /// <param name="executableExists">Whether the program the manifest names exists.</param>
+    public static NativeHostKeyState EvaluateKey(string? keyValue, string? manifestText, bool executableExists)
+    {
+        if (string.IsNullOrWhiteSpace(keyValue))
+        {
+            return NativeHostKeyState.Absent;
+        }
+
+        return executableExists && IsManifestUsable(manifestText)
+            ? NativeHostKeyState.Usable
+            : NativeHostKeyState.Broken;
+    }
 
     /// <summary>
     /// A manifest is usable when it names the store extension as an allowed origin. One written before
@@ -50,23 +110,50 @@ public readonly record struct NativeHostRegistrationState(bool ChromeUsable, boo
         }
     }
 
-    /// <summary>
-    /// A 0.4.0 install has only the Chrome key. Returns the manifest path to write under the Edge key,
-    /// or null when nothing should be written: Chrome is not set up, or Edge already has a registration
-    /// whose manifest exists (ours or someone else's, and not ours to replace).
-    /// </summary>
-    public static string? PlanEdgeRepair(string? chromeKeyValue, bool chromeUsable, string? edgeKeyValue, bool edgeManifestExists)
+    /// <summary>The program a manifest names, resolved against the manifest's folder; null when it names none.</summary>
+    public static string? ManifestExecutable(string? manifestText, string manifestPath)
     {
-        if (!chromeUsable || string.IsNullOrWhiteSpace(chromeKeyValue))
+        if (string.IsNullOrWhiteSpace(manifestText))
         {
             return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(edgeKeyValue) && edgeManifestExists)
+        try
+        {
+            using var document = JsonDocument.Parse(manifestText);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("path", out var path) ||
+                path.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(path.GetString()))
+            {
+                return null;
+            }
+
+            return Path.Combine(Path.GetDirectoryName(manifestPath) ?? string.Empty, path.GetString()!);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns the manifest path to write under one browser's key, copied from the other browser's
+    /// working key, or null when nothing should be written: the source is not usable, or the target
+    /// already has a registration whose manifest exists (ours or someone else's, and not ours to replace).
+    /// </summary>
+    public static string? PlanKeyRepair(string? sourceKeyValue, bool sourceUsable, string? targetKeyValue, bool targetManifestExists)
+    {
+        if (!sourceUsable || string.IsNullOrWhiteSpace(sourceKeyValue))
         {
             return null;
         }
 
-        return chromeKeyValue;
+        if (!string.IsNullOrWhiteSpace(targetKeyValue) && targetManifestExists)
+        {
+            return null;
+        }
+
+        return sourceKeyValue;
     }
 }

@@ -27,14 +27,15 @@ $manifestDir = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($AppDir))) 
 $manifestPath = Join-Path $manifestDir "$hostName.json"
 
 # Check every key before writing any, so a conflict in one browser's key cannot leave the other
-# browser registered and the first one not.
+# browser registered and the first one not. A key whose manifest file is gone is not a conflict: it
+# cannot work for anyone, and the 0.4.0 uninstaller leaves one behind after an in-app update.
 if (-not $Force) {
     $conflicts = @()
     foreach ($browser in $browserKeys.Keys) {
         $key = $browserKeys[$browser]
         if (Test-Path $key) {
             $existing = (Get-Item $key).GetValue("")
-            if ($existing -and $existing -ne $manifestPath) {
+            if ($existing -and $existing -ne $manifestPath -and (Test-Path -LiteralPath $existing)) {
                 $conflicts += "$browser ($existing)"
             }
         }
@@ -55,13 +56,23 @@ $manifest = [ordered]@{
 $json = $manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText($manifestPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 
+# Chrome's key must be written. Edge's is optional: a machine that cannot write it must still be able
+# to install, repair and update, and the Host tries again at every start.
+$registered = @()
 foreach ($browser in $browserKeys.Keys) {
     $key = $browserKeys[$browser]
-    New-Item -Path $key -Force | Out-Null
-    Set-Item -Path $key -Value $manifestPath
+    try {
+        New-Item -Path $key -Force | Out-Null
+        Set-Item -Path $key -Value $manifestPath
+        $registered += $browser
+    }
+    catch {
+        if ($browser -ne "Edge") { throw }
+        Write-Warning "Could not register $hostName for Edge, so Edge may not reach the app: $($_.Exception.Message)"
+    }
 }
 
-Write-Host "Registered $hostName for $($browserKeys.Keys -join ' and ')"
+Write-Host "Registered $hostName for $($registered -join ' and ')"
 Write-Host "  manifest: $manifestPath"
 Write-Host "  native:   $nativeExe"
 Write-Host "  origins:  $($extensionOrigins -join ', ')"

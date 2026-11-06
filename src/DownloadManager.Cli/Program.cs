@@ -1485,7 +1485,6 @@ internal static class Program
         try
         {
             await using var client = await CliClient.ConnectAsync(startHost: !noStart).ConfigureAwait(false);
-            var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
             var status = await client.StatusAsync().ConfigureAwait(false);
             Console.WriteLine("Inbound Download Manager diagnostics");
             Console.WriteLine($"  host:        {status.HostVersion} (protocol {status.ProtocolVersion})");
@@ -1493,7 +1492,7 @@ internal static class Program
             Console.WriteLine($"  tray:        {(status.TrayAvailable ? "yes" : "no")}");
             Console.WriteLine($"  native host: {(status.NativeHostRegistered ? "registered" : "not registered")}");
             Console.WriteLine($"  jobs:        {status.TotalJobs} total, {status.ActiveDownloads} active, {status.QueuedDownloads} queued");
-            Console.WriteLine($"  integration: {(snapshot.Settings.BrowserIntegrationEnabled ? "enabled" : "disabled")}");
+            Console.WriteLine($"  integration: {status.BrowserIntegration}");
             return 0;
         }
         catch (HostUnavailableException ex)
