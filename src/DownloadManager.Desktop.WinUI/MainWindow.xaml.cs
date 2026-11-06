@@ -3802,6 +3802,7 @@ public sealed partial class MainWindow : Window
                 foreach (var account in _remote.State.Accounts.Where(account => account.Capabilities.Contains("account", StringComparer.OrdinalIgnoreCase)))
                 {
                     var page = new ProviderAccountPage(_remote, account);
+                    page.KeyBoxEmptied += window.ClearMessage;
                     window.AddPage(page.Title, "\uE77B", page.Controls);
                     accountPages.Add((page, nextPage++));
                 }

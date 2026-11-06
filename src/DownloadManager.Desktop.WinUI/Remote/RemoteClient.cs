@@ -349,7 +349,8 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private async Task<IpcMessage> RequestOnControlAsync<T>(string type, T payload, CancellationToken cancellationToken)
     {
-        var pipe = await ControlSource().Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // A Host that is down gets said so soon, rather than after the whole time a reply may take.
+        var pipe = await ControlSource().Task.WaitAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
         var request = IpcMessage.Create(type, payload);
         var completion = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.Id] = completion;

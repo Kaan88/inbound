@@ -89,7 +89,9 @@ internal sealed class SettingsWindow : Window
         var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(4, 2, 4, 2) };
         item.Children.Add(new FontIcon { Glyph = glyph, FontSize = 15 });
         item.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
-        _nav.Items.Add(new ListViewItem { Content = item, MinHeight = 34 });
+        var navItem = new ListViewItem { Content = item, MinHeight = 34 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(navItem, title);
+        _nav.Items.Add(navItem);
 
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(24, 18, 28, 24), MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left };
         panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 4) });
@@ -97,6 +99,9 @@ internal sealed class SettingsWindow : Window
         _pages.Add(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         if (_nav.SelectedIndex < 0) _nav.SelectedIndex = 0;
     }
+
+    /// <summary>Takes back what the footer says, once what it complained about is dealt with.</summary>
+    public void ClearMessage() => _error.Text = string.Empty;
 
     public void ShowPage(int index)
     {

@@ -40,7 +40,11 @@ internal sealed class ProviderAccountPage
 
         _keyBox = new PasswordBox { Header = _view.KeyBoxHeader, PasswordRevealMode = PasswordRevealMode.Hidden };
         AutomationProperties.SetName(_keyBox, $"{_name} API key");
-        _keyBox.PasswordChanged += (_, _) => UpdateButtons();
+        _keyBox.PasswordChanged += (_, _) =>
+        {
+            UpdateButtons();
+            if (_keyBox.Password.Length == 0) KeyBoxEmptied?.Invoke();
+        };
         _keyBox.KeyDown += (_, args) =>
         {
             if (args.Key == Windows.System.VirtualKey.Enter && _save.IsEnabled)
@@ -78,6 +82,9 @@ internal sealed class ProviderAccountPage
         _client.State.AccountChanged += OnAccountChanged;
     }
 
+    /// <summary>The box no longer holds a key that OK would have complained about.</summary>
+    public event Action? KeyBoxEmptied;
+
     public string Title { get; }
 
     public string ProviderName => _name;
@@ -106,7 +113,7 @@ internal sealed class ProviderAccountPage
     {
         _keyStatus.Show(_view.KeyStatus, _view.KeyStatusIsProblem);
         _keyBox.Header = _view.KeyBoxHeader;
-        _details.Show(_view.AccountDetails.Length > 0 ? _view.AccountDetails : $"Nothing to show until a key is saved and validated.");
+        _details.Show(_view.AccountDetails.Length > 0 ? _view.AccountDetails : "Nothing to show until a key is saved and validated.");
         UpdateButtons();
     }
 
@@ -125,7 +132,7 @@ internal sealed class ProviderAccountPage
 
         // Out of the box before anything is sent, whatever the answer turns out to be.
         _keyBox.Password = string.Empty;
-        await RunAsync($"Saving the key…", async token =>
+        await RunAsync("Saving the key…", async token =>
         {
             var result = await _client.SetKeyAsync(key, _provider, token);
             key = string.Empty;

@@ -128,7 +128,7 @@ internal sealed class ExtractionOptionsPage
 
         // It is saved. A path with nothing there deserves a look before the window closes, once.
         return update.UnrarPath is not null && !result.Tool.ConfiguredPathFound
-            ? "Saved, but there is no UnRAR at that path. Choose it again, or select OK again to leave it."
+            ? "Saved, but there is no UnRAR at that path. Choose it again, or select OK to leave it as it is."
             : null;
     }
 
