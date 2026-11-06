@@ -21,9 +21,16 @@ public static class SecretProtector
         Encoding.UTF8.GetBytes("DownloadManager.Proxy.v1");
     private static readonly byte[] HeaderEntropy =
         Encoding.UTF8.GetBytes("DownloadManager.RequestHeader.v1");
+    private static readonly byte[] UrlEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.ProtectedUrl.v1");
 
     public static string ProtectHeader(string plaintext) => Protect(plaintext, HeaderEntropy);
     public static string? UnprotectHeader(string? protectedValue) => Unprotect(protectedValue, HeaderEntropy);
+
+    public static string ProtectUrl(string plaintext) => Protect(plaintext, UrlEntropy);
+    public static string? UnprotectUrl(string? protectedValue) => Unprotect(protectedValue, UrlEntropy);
+
+    public static bool IsProtected(string? value) => value?.StartsWith(Prefix, StringComparison.Ordinal) == true;
 
     public static string Protect(string plaintext) => Protect(plaintext, Entropy);
 

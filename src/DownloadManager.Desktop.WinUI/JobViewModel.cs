@@ -43,7 +43,12 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public string CategoryId { get; private set; } = "other";
     public bool CategoryIsAutomatic { get; private set; } = true;
     public JobCompletionOptionsDto CompletionOptions { get; private set; } = new();
-    public string QueueName { get; private set; } = "Main";
+    public string QueueName { get => _queueName; private set => Set(ref _queueName, value); }
+    private string _queueName = "Main";
+    /// <summary>For a package row: the queue all its files are in, if they share one.</summary>
+    public int? SharedQueueId { get; private set; }
+    /// <summary>For a package row: whether its Cancel would stop any file.</summary>
+    public bool CanCancelPackage { get; private set; }
 
     public string FileName { get => _fileName; private set => Set(ref _fileName, value); }
     public string Url { get => _url; private set => Set(ref _url, value); }
@@ -186,7 +191,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
         IsPackage = true;
         IsExpanded = expanded;
         Children = children;
-        var summary = DownloadGroupSummary.Create(children.Where(child => child.Dto is not null).Select(child => child.Dto!));
+        var dtos = children.Where(child => child.Dto is not null).Select(child => child.Dto!).ToList();
+        var summary = DownloadGroupSummary.Create(dtos);
         FileName = group.Name;
         Url = string.Empty;
         State = summary.State == "active" ? "downloading" : summary.State;
@@ -198,13 +204,18 @@ public sealed class JobViewModel : INotifyPropertyChanged
         EtaText = FormatDuration(summary.EstimatedRemaining);
         ProgressPercent = summary.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
         ProgressVisibility = summary.State is "active" or "paused" && ProgressPercent > 0 ? Visibility.Visible : Visibility.Collapsed;
-        CanPause = children.Any(child => child.CanPause);
-        CanResume = children.Any(child => child.CanResume);
+        CanPause = PackageRules.PauseTargets(dtos).Count > 0;
+        CanResume = PackageRules.ResumeTargets(group.Id, dtos).Count > 0;
+        CanCancelPackage = PackageRules.CancelTargets(dtos).Count > 0;
         IsTerminal = children.All(child => child.IsTerminal);
         DetailText = $"{summary.MemberCount} files";
         Description = $"{summary.MemberCount} files";
         RawDescription = string.Empty;
-        QueueText = string.Empty;
+        QueueText = PackageRules.QueueText(dtos);
+        SharedQueueId = PackageRules.SharedQueueId(dtos);
+        QueueName = QueueText.Length == 0 ? "None"
+            : QueueText == PackageRules.MixedQueueMarker ? "Files are in different queues"
+            : dtos[0].QueueName ?? $"Queue {dtos[0].QueueId}";
         LastUpdated = children.Count == 0 ? DateTimeOffset.MinValue : children.Max(child => child.LastUpdated);
         CreatedAt = children.Count == 0 ? DateTimeOffset.MinValue : children.Min(child => child.CreatedAt);
         LastTryText = children.Count == 0 ? string.Empty

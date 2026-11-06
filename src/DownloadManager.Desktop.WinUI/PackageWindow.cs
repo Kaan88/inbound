@@ -32,6 +32,7 @@ internal sealed class PackageWindow : Window
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
     private readonly Button _pause = new() { Content = "Pause all", MinWidth = 100 };
     private readonly Button _resume = new() { Content = "Resume all", MinWidth = 100 };
+    private readonly Button _cancel = new() { Content = "Cancel package", MinWidth = 100 };
     private readonly Button _openFolder = new() { Content = "Open folder", MinWidth = 100, Visibility = Visibility.Collapsed };
     private readonly Button _close = new() { Content = "Hide", MinWidth = 92 };
 
@@ -61,10 +62,10 @@ internal sealed class PackageWindow : Window
         Add(listFrame, 3);
         var footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        for (var i = 0; i < 4; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        for (var i = 0; i < 5; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.Children.Add(_notice);
         var column = 1;
-        foreach (var button in new[] { _openFolder, _pause, _resume, _close })
+        foreach (var button in new[] { _openFolder, _pause, _resume, _cancel, _close })
         {
             Grid.SetColumn(button, column++);
             footer.Children.Add(button);
@@ -79,8 +80,9 @@ internal sealed class PackageWindow : Window
         _root.Loaded += (_, _) => ApplyColors();
         _root.ActualThemeChanged += (_, _) => ApplyColors();
 
-        _pause.Click += async (_, _) => await ForEachMemberAsync(job => job.CanPause, id => _connection.PauseAsync(id));
-        _resume.Click += async (_, _) => await ForEachMemberAsync(job => job.CanResume, id => _connection.ResumeAsync(id));
+        _pause.Click += async (_, _) => await RunPackageActionAsync("pause");
+        _resume.Click += async (_, _) => await RunPackageActionAsync("resume");
+        _cancel.Click += async (_, _) => await ConfirmCancelAsync();
         _openFolder.Click += (_, _) => OpenFolder();
         _close.Click += (_, _) => Close();
 
@@ -199,8 +201,9 @@ internal sealed class PackageWindow : Window
 
         var allDone = members.Count > 0 && completed == members.Count;
         _openFolder.Visibility = allDone ? Visibility.Visible : Visibility.Collapsed;
-        _pause.IsEnabled = members.Any(job => job.CanPause);
-        _resume.IsEnabled = members.Any(job => job.CanResume);
+        _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
+        _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
+        _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
         _close.Content = allDone ? "Close" : "Hide";
         if (allDone) Title = "Package complete — Inbound Download Manager";
     }
@@ -230,20 +233,38 @@ internal sealed class PackageWindow : Window
         return new Row(grid, name, status, bar, size);
     }
 
-    private async Task ForEachMemberAsync(Func<JobDto, bool> eligible, Func<Guid, Task<IpcMessage>> action)
+    private async Task RunPackageActionAsync(string action)
     {
-        var targets = _members.Where(id => _jobs.TryGetValue(id, out var job) && eligible(job)).ToList();
-        var failed = 0;
-        foreach (var id in targets)
+        try
         {
-            try
-            {
-                var reply = await action(id);
-                if (reply.Type == "error") failed++;
-            }
-            catch (Exception) { failed++; }
+            var result = (await _connection.GroupActionAsync(new GroupActionRequest { GroupId = _packageId, Action = action }))
+                .GetPayload<GroupActionResult>();
+            _notice.Text = !result.Ok
+                ? result.FailedJobs.Count > 0 ? $"{result.FailedJobs.Count} file(s) could not be changed." : result.Error ?? "The package could not be changed."
+                : result.LeftCancelled > 0 ? $"{result.LeftCancelled} cancelled file(s) stayed cancelled. Resume them one by one to bring them back."
+                : string.Empty;
         }
-        _notice.Text = failed == 0 ? string.Empty : $"{failed} file(s) could not be changed.";
+        catch (Exception ex) { _notice.Text = ex.Message; }
+    }
+
+    private async Task ConfirmCancelAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _root.XamlRoot,
+            RequestedTheme = _root.ActualTheme,
+            Title = "Cancel package?",
+            Content = new TextBlock
+            {
+                Text = "Cancel the unfinished files in this package? Finished files and partial data are kept. " +
+                       "Resume can undo this only if the cancel stopped every file in the package.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Cancel Package",
+            CloseButtonText = "Keep Downloading",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
     }
 
     private void OpenFileWindow(Guid jobId)

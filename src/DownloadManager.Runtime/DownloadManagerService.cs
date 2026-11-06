@@ -2,6 +2,7 @@
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 
 namespace DownloadManager.Runtime;
@@ -35,6 +36,7 @@ public sealed partial class DownloadManagerService
     private readonly ISleepPrevention _sleepPrevention;
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IDownloadEngine? _ftpEngine;
+    private readonly IRemoteLinkBroker? _linkBroker;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly SemaphoreSlim _updateInstallGate = new(1, 1);
     private bool _updateInstallScheduled;
@@ -71,7 +73,8 @@ public sealed partial class DownloadManagerService
         ISleepPrevention? sleepPrevention = null,
         IMediaCheckpointStore? mediaCheckpoints = null,
         IDownloadEngine? ftpEngine = null,
-        IPostDownloadHook? postDownloadHook = null)
+        IPostDownloadHook? postDownloadHook = null,
+        IRemoteLinkBroker? linkBroker = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -86,6 +89,7 @@ public sealed partial class DownloadManagerService
         _mediaCheckpoints = mediaCheckpoints;
         _ftpEngine = ftpEngine;
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
+        _linkBroker = linkBroker;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -116,6 +120,12 @@ public sealed partial class DownloadManagerService
             _jobs[job.Id] = runtime;
         }
 
+        // Removals a crash interrupted: the user already decided, so these jobs must not run again.
+        foreach (var removal in jobs.Where(job => job.RemovalPending).ToList())
+        {
+            await RemoveCoreAsync(removal.Id, removal.DeleteFileOnCancel, cancellationToken).ConfigureAwait(false);
+        }
+
         foreach (var runtime in _jobs.Values)
         {
             var changed = await ReconcileAsync(runtime, cancellationToken).ConfigureAwait(false);
@@ -134,6 +144,9 @@ public sealed partial class DownloadManagerService
         }
 
         ScanOrphanPartFiles();
+        // A crash can land between a job's final save and its package's, so this may have news.
+        await AdoptUntrackedPackagesAsync(cancellationToken).ConfigureAwait(false);
+        await AnnouncePackageCompletionsAsync(cancellationToken).ConfigureAwait(false);
         _initialized = true;
         Schedule();
         StartSchedulerLoop();
@@ -230,7 +243,7 @@ public sealed partial class DownloadManagerService
             var metadata = await reader.ReadMetadataAsync(new DownloadJob { Url = uri.AbsoluteUri, RequestHeaders = headers,
                 UserAgent = request.UserAgent, Referrer = request.Referrer }, timeout.Token).ConfigureAwait(false);
             return new FileMetadataResult { Ok = true, FileName = metadata.FileName, TotalBytes = metadata.TotalBytes,
-                ContentType = metadata.ContentType, FinalUrl = metadata.FinalUrl };
+                ContentType = metadata.ContentType, FinalUrl = MaskIfProviderLink(metadata.FinalUrl) };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { return new FileMetadataResult { Error = "File information request timed out. You can still start the download." }; }
@@ -241,14 +254,26 @@ public sealed partial class DownloadManagerService
 
     public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
     {
+        // A provider's package counts its files and drives what follows them, so no client may join one.
+        if (request.PackageKey?.Trim().StartsWith(RemotePackagePrefix, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return new AddJobResponse { Accepted = false, Error = "That package key is reserved.", ErrorCode = "invalid_package" };
+        }
+
         // Outside the settings gate: the probe is network-bound and must not block other adds.
         await ResolveServerFileNameAsync(request, cancellationToken).ConfigureAwait(false);
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (RefuseIfPackageFull(request) is { } refused) return refused;
             var result = await AddJobCoreAsync(request, cancellationToken).ConfigureAwait(false);
-            if (result.Accepted && !result.Duplicate && result.Job is { } job)
+            if (result.Accepted && result.Job is { } job)
+            {
                 await AssignPackageAfterAddAsync(job.Id, request, cancellationToken).ConfigureAwait(false);
+                // A small file can finish before its package is saved, which no job event then reports.
+                if (GetJob(job.Id)?.State == "completed") RequestPackageCheck();
+            }
+
             return result;
         }
         finally { _settingsUpdateGate.Release(); }
@@ -287,15 +312,47 @@ public sealed partial class DownloadManagerService
         finally { _addProbeGate.Release(); }
     }
 
-    private async Task<AddJobResponse> AddJobCoreAsync(AddJobRequest request, CancellationToken cancellationToken)
+    private async Task<AddJobResponse> AddJobCoreAsync(
+        AddJobRequest request,
+        CancellationToken cancellationToken,
+        RemoteAddContext? remote = null)
     {
-        if (!TryValidateUrl(request.Url, out var uri, out var urlError))
+        if (request.Priority is { } requestedPriority && !JobPriorities.IsValid(requestedPriority))
+        {
+            return new AddJobResponse { Accepted = false, Error = "Choose a priority of High, Normal or Low.", ErrorCode = "invalid_priority" };
+        }
+
+        Uri uri;
+        if (remote is not null)
+        {
+            uri = new Uri(request.Url, UriKind.Absolute);
+        }
+        else if (!TryValidateUrl(request.Url, out uri, out var urlError))
         {
             return new AddJobResponse { Accepted = false, Error = urlError, ErrorCode = "invalid_url" };
         }
 
         var owner = string.IsNullOrWhiteSpace(request.OwnerExtensionId) ? null : request.OwnerExtensionId.Trim();
         var clientRequestId = string.IsNullOrWhiteSpace(request.ClientRequestId) ? null : request.ClientRequestId.Trim();
+        if (remote is null)
+        {
+            // Claiming a provider's request id would make a later real add find a stranger's job.
+            if (owner?.StartsWith(RemoteOwnerPrefix, StringComparison.Ordinal) == true)
+            {
+                return new AddJobResponse { Accepted = false, Error = "That owner name is reserved.", ErrorCode = "invalid_owner" };
+            }
+
+            if (ProviderLinks.IsMasked(request.Url) || ProviderLinks.IsMasked(request.FinalUrl))
+            {
+                return new AddJobResponse
+                {
+                    Accepted = false,
+                    Error = "This address has its key hidden, so it cannot download anything. Paste the original link.",
+                    ErrorCode = "masked_url",
+                };
+            }
+        }
+
         if (owner is not null && clientRequestId is not null)
         {
             lock (_sync)
@@ -333,7 +390,13 @@ public sealed partial class DownloadManagerService
 
         var startMode = ParseEnum(request.StartMode, StartMode.StartNow);
         var source = ParseEnum(request.Source, DownloadSource.Api);
+        if (source == DownloadSource.Remote && remote is null)
+        {
+            source = DownloadSource.Api;
+        }
+
         var conflictPolicy = ParseEnum(request.ConflictPolicy, ConflictPolicy.Rename);
+        var (jobUrl, finalUrl, protectedUrl) = SplitOffProviderLink(request.Url, request.FinalUrl);
 
         var fileName = string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameResolver.Resolve(null, uri)
@@ -379,15 +442,21 @@ public sealed partial class DownloadManagerService
             : _settings.DefaultQueueId;
         var queue = _settings.Queues.First(q => q.Id == queueId);
 
+        var providerCap = remote?.MaxConnections ?? (protectedUrl is not null ? ProviderLinks.MaxConnections : int.MaxValue);
         var job = new DownloadJob
         {
-            Url = request.Url,
-            FinalUrl = request.FinalUrl,
-            PageUrl = request.PageUrl,
-            Referrer = request.Referrer,
+            Url = jobUrl,
+            FinalUrl = finalUrl,
+            ProtectedUrl = protectedUrl,
+            RemoteSource = remote?.Source,
+            ExpectedTotalBytes = remote?.ExpectedTotalBytes,
+            ExpectedMd5 = remote?.ExpectedMd5,
+            PageUrl = MaskIfProviderLink(request.PageUrl),
+            Referrer = MaskIfProviderLink(request.Referrer),
             UserAgent = request.UserAgent,
             QueueId = queueId,
             QueueName = queue.Name,
+            Priority = request.Priority ?? JobPriorities.Normal,
             FileName = Path.GetFileName(finalPath),
             CategoryId = categoryId,
             CategoryIsAutomatic = string.IsNullOrWhiteSpace(request.CategoryId),
@@ -402,8 +471,8 @@ public sealed partial class DownloadManagerService
             RequestHeaders = headers,
             RequestedConnections = Math.Clamp(
                 Math.Min(
-                    request.Connections ?? _settings.DefaultConnections,
-                    EffectiveConnectionLimit(uri)),
+                    Math.Min(request.Connections ?? _settings.DefaultConnections, EffectiveConnectionLimit(uri)),
+                    providerCap),
                 1, 32),
             SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
             Description = request.Description,
@@ -411,7 +480,7 @@ public sealed partial class DownloadManagerService
             ConflictPolicy = conflictPolicy,
             State = DownloadState.Queued,
             AutoResumeAfterRestart = request.AutoResumeAfterRestart ?? _settings.AutoResumeUnfinishedOnStartup,
-            TotalBytes = null,
+            TotalBytes = remote?.ExpectedTotalBytes,
             ReceivedBytes = 0,
         };
 
@@ -490,7 +559,7 @@ public sealed partial class DownloadManagerService
             settingsChanged = true;
         }
 
-        if (source is not DownloadSource.Import)
+        if (source is not (DownloadSource.Import or DownloadSource.Remote) && protectedUrl is null)
         {
             lock (_sync)
             {
@@ -578,7 +647,8 @@ public sealed partial class DownloadManagerService
 
             if (runtime.Starting || (runtime.Runner is { IsCompleted: false }))
             {
-                if (!runtime.PauseRequested)
+                // Undoing a cancel right away waits for the transfer to wind down, as after a pause.
+                if (!runtime.PauseRequested && (!runtime.CancelRequested || runtime.CancelledForRemoval))
                 {
                     return new JobActionResponse { Ok = false, Error = "Job is already running.", Job = Map(runtime.Job) };
                 }
@@ -612,6 +682,7 @@ public sealed partial class DownloadManagerService
             runtime.Job.StartMode = StartMode.StartNow;
             runtime.Job.Failure = null;
             runtime.Job.CompletedAt = null;
+            runtime.Job.CancelledByPackageId = null;
             runtime.Job.AutoResumeAfterRestart = true;
             runtime.Job.Touch();
         }
@@ -626,7 +697,8 @@ public sealed partial class DownloadManagerService
         Guid id,
         bool deleteFile = true,
         CancellationToken cancellationToken = default,
-        bool onlyIfUnfinished = false)
+        bool onlyIfUnfinished = false,
+        Guid? cancelledByPackage = null)
     {
         JobRuntime? runtime;
         lock (_sync)
@@ -644,6 +716,7 @@ public sealed partial class DownloadManagerService
             runtime.Job.DeleteFileOnCancel = deleteFile;
             runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Cancelled;
+            runtime.Job.CancelledByPackageId = cancelledByPackage;
             runtime.Job.BytesPerSecond = null;
             runtime.Job.EstimatedRemaining = null;
             runtime.Job.ActiveConnections = 0;
@@ -671,27 +744,17 @@ public sealed partial class DownloadManagerService
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            AppSettings? staged = null;
+            bool inPackage;
             lock (_sync)
             {
                 if (!_jobs.ContainsKey(id)) return new JobActionResponse { Error = "Job not found." };
-                if (_settings.DownloadGroups.Any(group => group.JobIds.Contains(id)))
-                {
-                    var groups = CloneGroups(_settings.DownloadGroups);
-                    foreach (var group in groups) group.JobIds.Remove(id);
-                    groups.RemoveAll(group => group.JobIds.Count < 2); // a package of one is just a download
-                    staged = _settings.WithDownloadGroups(groups);
-                }
+                inPackage = _settings.DownloadGroups.Any(group => group.JobIds.Contains(id));
             }
-            if (staged is not null)
-            {
-                try { await _settingsStore.SaveAsync(staged, cancellationToken).ConfigureAwait(false); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                { return new JobActionResponse { Error = "The download was retained because download history could not be saved. " + ex.Message }; }
-                lock (_sync) _settings.DownloadGroups = staged.DownloadGroups;
-                SettingsChanged?.Invoke(this, _settings);
-            }
-            return await RemoveCoreAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+
+            var removed = await RemoveCoreAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+            // Losing its last unfinished file can leave a package finished.
+            if (removed.Ok && inPackage) RequestPackageCheck();
+            return removed;
         }
         finally { _settingsUpdateGate.Release(); }
     }
@@ -711,6 +774,9 @@ public sealed partial class DownloadManagerService
         var names = new Dictionary<Guid, string>();
         lock (_sync)
         {
+            // The gate is released between removals, and what is left partway through
+            // a package's removal can look finished. Its files are about to go.
+            _packageChecksHeld++;
             foreach (var id in unique)
             {
                 if (!_jobs.TryGetValue(id, out var runtime)) continue;
@@ -738,8 +804,12 @@ public sealed partial class DownloadManagerService
         finally
         {
             lock (_sync)
+            {
+                _packageChecksHeld--;
                 foreach (var id in unique)
                     if (_jobs.TryGetValue(id, out var runtime)) runtime.AdmissionSuspended = false;
+            }
+            RequestPackageCheck();
             Schedule();
         }
         return failures.Count == 0
@@ -778,18 +848,47 @@ public sealed partial class DownloadManagerService
             }
         }
 
+        // Recorded before anything is taken apart, so a kill from here on still ends with the job
+        // gone at the next start, not running again outside its package.
+        var deleteOnCancelBefore = runtime.Job.DeleteFileOnCancel;
+        if (await SaveRemovalMarkerAsync(runtime, true, deleteFile).ConfigureAwait(false) is { } markerError)
+        {
+            lock (_sync) runtime.Job.DeleteFileOnCancel = deleteOnCancelBefore;
+            return new JobActionResponse { Error = "The stopped download was retained because its removal could not be saved. " + markerError, Job = Map(runtime.Job) };
+        }
+
         AppSettings archived;
+        bool leftPackage;
         lock (_sync)
         {
-            archived = _settings.WithDownloadGroups(CloneGroups(_settings.DownloadGroups));
+            var groups = CloneGroups(_settings.DownloadGroups);
+            var own = groups.FirstOrDefault(group => group.JobIds.Contains(id));
+            leftPackage = own is not null;
+            if (own is not null)
+            {
+                own.JobIds.Remove(id);
+                // A package of one is just a download. Only this job's package can have become
+                // one here; another with a single member may simply still be getting its files.
+                if (own.JobIds.Count < 2) groups.Remove(own);
+            }
+
+            archived = _settings.WithDownloadGroups(groups);
             archived.ArchivedDownloads = _settings.ArchivedDownloads.Where(record => record.Id != id).ToList();
             archived.ArchivedDownloads.Add(new ArchivedDownloadRecord { Id = id, ReceivedBytes = runtime.Job.ReceivedBytes,
                 State = runtime.Job.State, CreatedAt = runtime.Job.CreatedAt, CompletedAt = runtime.Job.CompletedAt });
         }
         try { await _settingsStore.SaveAsync(archived, CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { return new JobActionResponse { Error = "The stopped download was retained because its statistics could not be saved. " + ex.Message, Job = Map(runtime.Job) }; }
-        lock (_sync) _settings.ArchivedDownloads = archived.ArchivedDownloads;
+        {
+            await SaveRemovalMarkerAsync(runtime, false, deleteOnCancelBefore).ConfigureAwait(false);
+            return new JobActionResponse { Error = "The stopped download was retained because its statistics could not be saved. " + ex.Message, Job = Map(runtime.Job) };
+        }
+        lock (_sync)
+        {
+            _settings.ArchivedDownloads = archived.ArchivedDownloads;
+            _settings.DownloadGroups = archived.DownloadGroups;
+        }
+        if (leftPackage) SettingsChanged?.Invoke(this, _settings);
 
         if (deleteFile)
         {
@@ -807,6 +906,32 @@ public sealed partial class DownloadManagerService
         JobChanged?.Invoke(this, new JobChangeEventArgs(Map(runtime.Job), "removed"));
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+    }
+
+    /// <summary>Writes directly, because the usual save skips a job that is being removed. Returns why it failed.</summary>
+    private async Task<string?> SaveRemovalMarkerAsync(JobRuntime runtime, bool pending, bool deleteFile)
+    {
+        DownloadJob snapshot;
+        lock (_sync)
+        {
+            runtime.Job.RemovalPending = pending;
+            runtime.Job.DeleteFileOnCancel = deleteFile;
+            snapshot = runtime.Job.Clone();
+        }
+
+        await _persistGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await _jobStore.SaveAsync(snapshot, CancellationToken.None).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lock (_sync) runtime.Job.RemovalPending = false;
+            _log?.Invoke($"Could not save the removal of job {snapshot.Id}: {ex.Message}");
+            return ex.Message;
+        }
+        finally { _persistGate.Release(); }
     }
 
     public async Task PauseAllAsync(CancellationToken cancellationToken = default)
@@ -1989,6 +2114,16 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
             }
 
+            if (request.Priority is { } priority)
+            {
+                if (!JobPriorities.IsValid(priority))
+                    return new JobActionResponse { Error = "Choose a priority of High, Normal or Low." };
+                if (runtime.Job.State == DownloadState.Completed)
+                    return new JobActionResponse { Error = "This download has already finished, so its priority has no effect." };
+                if (request.NewFilePath is not null)
+                    return new JobActionResponse { Error = "Change the priority and Move/Rename in separate requests." };
+            }
+
             if (request.SpeedLimitBytesPerSecond is < 0)
                 return new JobActionResponse { Ok = false, Error = "The speed limit must be zero (unlimited) or a positive number of bytes per second." };
             if (request.NewFilePath is not null &&
@@ -2001,6 +2136,8 @@ public sealed partial class DownloadManagerService
                 runtime.Job.SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond;
             if (request.ShowCompletionDialog is not null)
                 runtime.Job.ShowCompletionDialog = request.ShowCompletionDialog;
+            if (request.Priority is { } newPriority)
+                runtime.Job.Priority = newPriority;
 
             if (request.Description is not null)
             {
@@ -2098,7 +2235,8 @@ public sealed partial class DownloadManagerService
         try
         {
             await PersistAsync(runtime, cancellationToken,
-                requireSuccess: request.CategoryId is not null || request.CompletionOptions is not null, gateHeld: true).ConfigureAwait(false);
+                requireSuccess: request.CategoryId is not null || request.CompletionOptions is not null || request.Priority is not null,
+                gateHeld: true).ConfigureAwait(false);
         }
         catch
         {
@@ -2116,11 +2254,13 @@ public sealed partial class DownloadManagerService
                 if (request.Description is not null) runtime.Job.Description = beforeEdit!.Description;
                 if (request.SpeedLimitBytesPerSecond is not null) runtime.Job.SpeedLimitBytesPerSecond = beforeEdit!.SpeedLimitBytesPerSecond;
                 if (request.ShowCompletionDialog is not null) runtime.Job.ShowCompletionDialog = beforeEdit!.ShowCompletionDialog;
+                if (request.Priority is not null) runtime.Job.Priority = beforeEdit!.Priority;
                 runtime.Job.Touch();
             }
             throw;
         }
         Raise(runtime, "updated");
+        if (request.Priority is not null) Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
 
@@ -2229,6 +2369,29 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = "Job not found." };
             }
 
+            if (runtime.Job.RemoteSource is not null)
+            {
+                return new JobActionResponse
+                {
+                    Ok = false,
+                    Error = "This download gets its address from its provider, so it cannot be changed here.",
+                    Job = Map(runtime.Job),
+                };
+            }
+
+            // The refresh dialog starts from the masked address. Accepting it unchanged
+            // keeps the real one; any other masked address has nothing real behind it.
+            var keepProtected = runtime.Job.ProtectedUrl is not null && newUrl == runtime.Job.Url;
+            if (!keepProtected && ProviderLinks.IsMasked(newUrl))
+            {
+                return new JobActionResponse
+                {
+                    Ok = false,
+                    Error = "This address has its key hidden, so it cannot download anything. Paste the original link.",
+                    Job = Map(runtime.Job),
+                };
+            }
+
             if (runtime.Job.State == DownloadState.Completed)
             {
                 return new JobActionResponse { Ok = false, Error = "Job is already complete.", Job = Map(runtime.Job) };
@@ -2258,7 +2421,14 @@ public sealed partial class DownloadManagerService
                 runtime.Job.Referrer = null;
             }
 
-            runtime.Job.Url = uri.AbsoluteUri;
+            if (!keepProtected)
+            {
+                var (jobUrl, _, protectedUrl) = SplitOffProviderLink(uri.AbsoluteUri, null);
+                runtime.Job.Url = jobUrl;
+                runtime.Job.ProtectedUrl = protectedUrl;
+            }
+
+            runtime.Job.ResolvedUrl = null;
             runtime.Job.FinalUrl = null;
             runtime.Job.State = DownloadState.Queued;
             runtime.Job.StartMode = StartMode.StartNow;
@@ -2361,11 +2531,13 @@ public sealed partial class DownloadManagerService
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         List<JobRuntime> active;
+        Task packageCheck;
         var schedulerTask = _schedulerTask;
         _schedulerCts?.Cancel();
         lock (_sync)
         {
             _shuttingDown = true;
+            packageCheck = _packageCheckWorker;
             active = _jobs.Values.Where(r => r.Starting || r.Runner is { IsCompleted: false }).ToList();
             foreach (var runtime in active)
             {
@@ -2414,6 +2586,10 @@ public sealed partial class DownloadManagerService
 
             await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
         }
+
+        // A check still running finishes its save; one that never ran is picked up by the next start.
+        try { await Task.WhenAny(packageCheck, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)).ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* continue */ }
 
         if (schedulerTask is not null)
         {
@@ -2608,6 +2784,7 @@ public sealed partial class DownloadManagerService
     {
         var changed = false;
         var job = runtime.Job;
+        changed |= await ProtectStoredProviderLinksAsync(job, cancellationToken).ConfigureAwait(false);
         if (job.ReceivedBytes < 0)
         {
             job.ReceivedBytes = 0;
@@ -2630,10 +2807,19 @@ public sealed partial class DownloadManagerService
                 job.ReceivedBytes = new FileInfo(job.FinalFilePath).Length;
                 changed = job.ReceivedBytes != 0 || changed;
             }
+
+            // A kill between saving this job and deleting its checkpoint leaves one behind.
+            await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
             return changed;
         }
 
         var checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        if (checkpoint is not null && TryAdoptFinishedFile(job, checkpoint))
+        {
+            await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
+            return true;
+        }
+
         if (checkpoint is not null)
         {
             if (checkpoint.TotalBytes is > 0 && job.TotalBytes != checkpoint.TotalBytes)
@@ -2725,6 +2911,48 @@ public sealed partial class DownloadManagerService
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// The process died after the final rename and before the job was saved as completed. Without
+    /// this the job downloads the whole file again and leaves a second copy beside the first.
+    /// </summary>
+    private bool TryAdoptFinishedFile(DownloadJob job, DownloadCheckpoint checkpoint)
+    {
+        if (checkpoint.FinalizingTo is not { } finalPath ||
+            job.State == DownloadState.Cancelled ||
+            File.Exists(job.PartFilePath))
+        {
+            return false;
+        }
+
+        var final = new FileInfo(finalPath);
+        if (!final.Exists || final.Length != checkpoint.CompletedBytes)
+        {
+            return false;
+        }
+
+        job.State = DownloadState.Completed;
+        job.Failure = null;
+        job.CompletedAt = _timeProvider.GetUtcNow();
+        job.FinalFilePath = finalPath;
+        job.FileName = final.Name;
+        job.ReceivedBytes = final.Length;
+        job.TotalBytes = final.Length;
+        job.ETag = checkpoint.ETag ?? job.ETag;
+        job.LastModified = checkpoint.LastModified ?? job.LastModified;
+        job.ContentType = checkpoint.ContentType ?? job.ContentType;
+        _log?.Invoke($"Job {job.Id}: its file was already in place after a restart, so it was not downloaded again.");
+        return true;
+    }
+
+    private async Task DeleteCheckpointQuietlyAsync(Guid jobId)
+    {
+        try { await _checkpointStore.DeleteAsync(jobId, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not delete the checkpoint of job {jobId}: {ex.Message}");
+        }
     }
 
     private void ResetQuotaWindowsLocked(DateTimeOffset now)
@@ -2919,37 +3147,56 @@ public sealed partial class DownloadManagerService
     private async Task RunJobAsync(JobRuntime runtime)
     {
         var job = runtime.Job;
-        CancellationTokenSource cts;
+        CancellationTokenSource? cts = null;
         lock (_sync)
         {
-            if (runtime.PauseRequested || _shuttingDown)
+            // Schedule picks a job and calls this after releasing the lock, and a cancel in that
+            // gap finds no transfer to stop. Going on would undo it and run the whole download.
+            if (runtime.CancelRequested)
             {
-                if (runtime.ResumeWhenStopped && !_shuttingDown)
-                {
-                    runtime.PauseRequested = false;
-                    runtime.ResumeWhenStopped = false;
-                }
-                else
-                {
-                    job.State = DownloadState.Paused;
-                    job.BytesPerSecond = null;
-                    job.EstimatedRemaining = null;
-                    job.ActiveConnections = 0;
-                    job.Touch();
-                    runtime.Starting = false;
-                    return;
-                }
+                job.State = DownloadState.Cancelled;
+                job.Touch();
+                runtime.Starting = false;
             }
+            else
+            {
+                if (runtime.PauseRequested || _shuttingDown)
+                {
+                    if (runtime.ResumeWhenStopped && !_shuttingDown)
+                    {
+                        runtime.PauseRequested = false;
+                        runtime.ResumeWhenStopped = false;
+                    }
+                    else
+                    {
+                        job.State = DownloadState.Paused;
+                        job.BytesPerSecond = null;
+                        job.EstimatedRemaining = null;
+                        job.ActiveConnections = 0;
+                        job.Touch();
+                        runtime.Starting = false;
+                        return;
+                    }
+                }
 
-            runtime.Cts?.Dispose();
-            cts = new CancellationTokenSource();
-            runtime.Cts = cts;
-            job.State = DownloadState.Connecting;
-            job.Failure = null;
-            job.StartedAt ??= DateTimeOffset.UtcNow;
-            job.CompletedAt = null;
-            job.ActiveConnections = 0;
-            job.Touch();
+                runtime.Cts?.Dispose();
+                cts = new CancellationTokenSource();
+                runtime.Cts = cts;
+                job.KeepCheckpointAfterFinalize = true;
+                job.State = DownloadState.Connecting;
+                job.Failure = null;
+                job.StartedAt ??= DateTimeOffset.UtcNow;
+                job.CompletedAt = null;
+                job.ActiveConnections = 0;
+                job.Touch();
+            }
+        }
+
+        if (cts is null)
+        {
+            // The slot this job held is free again.
+            Schedule();
+            return;
         }
 
         await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
@@ -3021,7 +3268,6 @@ public sealed partial class DownloadManagerService
         DownloadResult result;
         try
         {
-            var checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
             var engine = job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase)
                 ? _ftpEngine
                 : _engine;
@@ -3030,7 +3276,7 @@ public sealed partial class DownloadManagerService
                 throw new InvalidOperationException("FTP support is not configured.");
             }
 
-            result = await engine.ExecuteAsync(job, checkpoint, progress, cts.Token).ConfigureAwait(false);
+            result = await ExecuteWithLinksAsync(runtime, engine, progress, cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -3040,16 +3286,19 @@ public sealed partial class DownloadManagerService
         }
         catch (Exception ex)
         {
-            _log?.Invoke($"Job {job.Id} crashed: {ex}");
+            _log?.Invoke($"Job {job.Id} crashed: {UrlRedactor.RedactText(ex.ToString())}");
             result = DownloadResult.Fail(DownloadState.Failed,
-                new JobFailure(FailureKind.Unknown, ex.Message, false, true, DateTimeOffset.UtcNow),
+                new JobFailure(FailureKind.Unknown, UrlRedactor.RedactText(ex.Message), false, true, DateTimeOffset.UtcNow),
                 job.ReceivedBytes, job.TotalBytes);
         }
 
         var deletePayload = false;
+        var deleteFinal = false;
         string changeType;
         lock (_sync)
         {
+            // A provider's link is for one run; a later run asks for a fresh one.
+            job.ResolvedUrl = null;
             job.ReceivedBytes = result.BytesWritten;
             if (result.TotalBytes is not null)
             {
@@ -3061,12 +3310,36 @@ public sealed partial class DownloadManagerService
             job.ActiveConnections = 0;
             job.ActiveConnections = 0;
 
-            if (runtime.CancelRequested)
+            // The file is where it landed, whatever else happened while it got there.
+            if (result.Success)
+            {
+                job.FinalFilePath = result.FinalFilePath ?? job.FinalFilePath;
+                job.FileName = Path.GetFileName(job.FinalFilePath);
+            }
+
+            // A file that is finished stays finished unless the user wanted it gone: a stop that
+            // arrives just after the rename must not leave it looking like one to download again.
+            if (runtime.CancelRequested && (!result.Success || runtime.DeleteOnCancel || runtime.CancelledForRemoval))
             {
                 job.State = DownloadState.Cancelled;
                 job.Failure = new JobFailure(FailureKind.Cancelled, "Cancelled by the user.", false, true, DateTimeOffset.UtcNow);
                 deletePayload = runtime.DeleteOnCancel;
+                deleteFinal = result.Success && runtime.DeleteOnCancel && !runtime.CancelledForRemoval;
                 changeType = "cancelled";
+            }
+            else if (result.Success)
+            {
+                job.State = DownloadState.Completed;
+                job.Failure = null;
+                job.CompletedAt = DateTimeOffset.UtcNow;
+                job.CancelledByPackageId = null;
+                job.ETag = result.ETag ?? job.ETag;
+                job.LastModified = result.LastModified ?? job.LastModified;
+                job.ContentType = result.ContentType ?? job.ContentType;
+                runtime.CancelRequested = false;
+                runtime.PauseRequested = false;
+                runtime.ResumeWhenStopped = false;
+                changeType = "completed";
             }
             else if (runtime.PauseRequested || _shuttingDown)
             {
@@ -3085,25 +3358,16 @@ public sealed partial class DownloadManagerService
                     changeType = "paused";
                 }
             }
-            else if (result.Success)
-            {
-                job.State = DownloadState.Completed;
-                job.Failure = null;
-                job.CompletedAt = DateTimeOffset.UtcNow;
-                job.FinalFilePath = result.FinalFilePath ?? job.FinalFilePath;
-                job.FileName = Path.GetFileName(job.FinalFilePath);
-                job.ETag = result.ETag ?? job.ETag;
-                job.LastModified = result.LastModified ?? job.LastModified;
-                job.ContentType = result.ContentType ?? job.ContentType;
-                changeType = "completed";
-            }
             else
             {
                 job.State = DownloadState.Failed;
                 job.Failure = result.Failure ?? new JobFailure(FailureKind.Unknown,
                     "The download failed for an unknown reason.", false, true, DateTimeOffset.UtcNow);
                 var queue = _settings.Queues.FirstOrDefault(item => item.Id == job.QueueId);
-                if (job.IsQueued && job.QueueProcessing && queue is { IsRunning: true } && !job.IsTerminal &&
+                // A failed check means the whole file arrived and was wrong. Repeating that
+                // unattended can spend the same gigabytes all night and still end here.
+                if (job.Failure.Kind != FailureKind.VerificationFailed &&
+                    job.IsQueued && job.QueueProcessing && queue is { IsRunning: true } && !job.IsTerminal &&
                     (queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit))
                 {
                     job.QueueRetryCount++;
@@ -3118,11 +3382,30 @@ public sealed partial class DownloadManagerService
         if (deletePayload)
         {
             DeleteFileQuietly(job.PartFilePath);
-            await _checkpointStore.DeleteAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            if (deleteFinal) DeleteFileQuietly(job.FinalFilePath);
+            await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
         }
 
-        await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
+        if (changeType == "completed")
+        {
+            try
+            {
+                await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
+                // Only now: until the job says completed, this is what lets a restart recognise the file.
+                await _checkpointStore.DeleteAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException or InvalidOperationException)
+            {
+                // Already logged if it was the save, and the next start recovers from the checkpoint.
+            }
+        }
+        else
+        {
+            await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
+        }
+
         Raise(runtime, changeType);
+        if (changeType == "completed") RequestPackageCheck();
 
         var lateResume = false;
         lock (_sync)
@@ -3389,7 +3672,9 @@ public sealed partial class DownloadManagerService
             DeleteFileQuietly(job.FinalFilePath);
         }
 
-        await _checkpointStore.DeleteAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        // A transfer still winding down can be replacing this file, which Windows refuses to
+        // delete meanwhile. The runner deletes it again when it ends, and a stray one is harmless.
+        await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
         if (_mediaCheckpoints is not null)
         {
             await _mediaCheckpoints.DeleteAsync(job.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -3584,7 +3869,8 @@ public sealed partial class DownloadManagerService
     }
 
     private static bool SupportsLiveSpeedLimit(DownloadJob job)
-        => Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
+        => job.RemoteSource is not null ||
+           Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
            uri.Scheme is "http" or "https" &&
            !uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
            !uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase) &&
@@ -3640,6 +3926,7 @@ public sealed partial class DownloadManagerService
             OwnerExtensionId = job.OwnerExtensionId,
             QueueId = job.QueueId,
             Priority = job.Priority,
+            CancelledByPackageId = job.CancelledByPackageId,
             Description = job.Description,
             ExpectedSha256 = job.ExpectedSha256,
             QueueName = job.QueueName,
@@ -3648,6 +3935,8 @@ public sealed partial class DownloadManagerService
             CanPause = job.CanPause,
             CanResume = job.CanResume,
             IsTerminal = job.IsTerminal,
+            IsRemote = job.RemoteSource is not null,
+            RemoteProvider = job.RemoteSource?.Provider,
             Failure = job.Failure is null
                 ? null
                 : new FailureDto
@@ -3657,6 +3946,7 @@ public sealed partial class DownloadManagerService
                     IsRetryable = job.Failure.IsRetryable,
                     IsResumable = job.Failure.IsResumable,
                     OccurredAt = job.Failure.OccurredAt,
+                    HttpStatus = job.Failure.HttpStatus,
                 },
         };
 

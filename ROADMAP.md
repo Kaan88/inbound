@@ -45,6 +45,10 @@ jobs, persisting and restoring membership, and safely aggregating mixed child
 states. This is a prerequisite for future TorBox integration, where one
 transfer can contain multiple files. Validate restart recovery, partial child
 failure, pause/resume/cancel behavior and UI expansion before marking complete.
+Update 2026-11-06 (TorBox phase 1): parent controls, queue, priority, membership repair,
+member limit and a once-per-completion event are in with tests of restart, partial
+failure and mixed states. UI expansion and the new package controls still need a look
+on screen before this is complete. See `PROGRESS.md`.
 
 2026-11-05 release increment: public builds-only repository created with source
 privacy verified unchanged. Signed 0.1.2 release assets prepared, default trust

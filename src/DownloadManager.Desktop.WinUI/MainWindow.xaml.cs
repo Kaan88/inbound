@@ -352,6 +352,21 @@ public sealed partial class MainWindow : Window
 
     private JobViewModel? SelectedPackage => JobsList.SelectedItem as JobViewModel is { IsPackage: true } row ? row : null;
 
+    /// <summary>Selected package rows. The Host acts on each as one unit.</summary>
+    private List<JobViewModel> SelectedPackageRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsPackage).ToList();
+
+    /// <summary>Selected file rows that a selected package row does not already cover.</summary>
+    private List<JobViewModel> SelectedLooseFiles
+    {
+        get
+        {
+            var packages = SelectedPackageRows.Select(row => row.Id).ToHashSet();
+            return JobsList.SelectedItems.OfType<JobViewModel>()
+                .Where(row => !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
+                .ToList();
+        }
+    }
+
     /// <summary>The package a job is shown in; only packages with at least two listed files count.</summary>
     private DownloadGroupDto? PackageOf(Guid jobId) =>
         _groups.FirstOrDefault(group => group.JobIds.Contains(jobId) && group.JobIds.Count(_jobsById.ContainsKey) >= 2);
@@ -364,9 +379,12 @@ public sealed partial class MainWindow : Window
     {
         var connected = _connection?.IsConnected ?? false;
         var selection = SelectedJobs;
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
         AddButton.IsEnabled = connected;
-        PauseButton.IsEnabled = connected && selection.Any(job => job.CanPause);
-        ResumeButton.IsEnabled = connected && selection.Any(job => job.CanResume);
+        PauseButton.IsEnabled = connected && rows.Any(row => row.CanPause);
+        ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
+        CancelPackageButton.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
+        CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
         DeleteButton.IsEnabled = connected && selection.Count > 0;
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
@@ -773,12 +791,21 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
+        flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
         flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
         flyout.Items.Add(CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to Queue" };
         flyout.Items.Add(_addToQueueMenu);
         flyout.Items.Add(CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
+        _priorityMenu = new MenuFlyoutSubItem { Text = "Priority" };
+        foreach (var priority in new[] { JobPriorities.High, JobPriorities.Normal, JobPriorities.Low })
+        {
+            var item = new ToggleMenuFlyoutItem { Text = JobPriorities.Name(priority), Tag = priority };
+            item.Click += MenuPriority_Click;
+            _priorityMenu.Items.Add(item);
+        }
+        flyout.Items.Add(_priorityMenu);
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
@@ -802,6 +829,8 @@ public sealed partial class MainWindow : Window
     private MenuFlyoutItem? _menuGroup;
     private MenuFlyoutItem? _menuUngroup;
     private MenuFlyoutItem? _menuRenamePackage;
+    private MenuFlyoutItem? _menuCancelPackage;
+    private MenuFlyoutSubItem? _priorityMenu;
 
     private void JobsContextMenu_Opening(object? sender, object e)
     {
@@ -812,6 +841,20 @@ public sealed partial class MainWindow : Window
         if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
         if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
+        if (_menuCancelPackage is not null)
+        {
+            var packages = SelectedPackageRows;
+            _menuCancelPackage.Visibility = Show(packages.Count > 0);
+            _menuCancelPackage.IsEnabled = packages.Any(row => row.CanCancelPackage);
+        }
+
+        if (_priorityMenu is not null)
+        {
+            var unfinished = selection.Where(job => job.State != "completed").ToList();
+            _priorityMenu.IsEnabled = unfinished.Count > 0;
+            foreach (var item in _priorityMenu.Items.OfType<ToggleMenuFlyoutItem>())
+                item.IsChecked = item.Tag is int priority && unfinished.Count > 0 && unfinished.All(job => job.Priority == priority);
+        }
 
         if (_addToQueueMenu is null)
         {
@@ -850,18 +893,86 @@ public sealed partial class MainWindow : Window
 
     private async void MenuAddToQueue_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job && sender is MenuFlyoutItem { Tag: int queueId })
+        if (sender is MenuFlyoutItem { Tag: int queueId })
         {
-            await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, queueId));
+            await RunOnSelectionAsync("Add to Queue", new GroupActionRequest { Action = "queue", QueueId = queueId },
+                _ => true, id => _connection.MoveToQueueAsync(id, queueId));
         }
     }
 
     private async void MenuDeleteFromQueue_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job && _settings is { } settings)
+        await RunOnSelectionAsync("Remove from Queue", new GroupActionRequest { Action = "unqueue" },
+            _ => true, id => _connection.DetachFromQueueAsync(id));
+    }
+
+    private async void MenuPriority_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleMenuFlyoutItem { Tag: int priority })
         {
-            await RunActionAsync(() => _connection.DetachFromQueueAsync(job.Id));
+            await RunOnSelectionAsync("Priority", new GroupActionRequest { Action = "priority", Priority = priority },
+                job => job.State != "completed", id => _connection.SetPriorityAsync(id, priority));
         }
+    }
+
+    private async void MenuCancelPackage_Click(object sender, RoutedEventArgs e)
+    {
+        var packages = SelectedPackageRows.Where(row => row.CanCancelPackage).ToList();
+        if (packages.Count == 0) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = packages.Count == 1 ? "Cancel package?" : $"Cancel {packages.Count} packages?",
+            Content = new TextBlock
+            {
+                Text = (packages.Count == 1 ? $"Cancel the unfinished files in '{packages[0].FileName}'?" : "Cancel the unfinished files in these packages?") +
+                       " Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Cancel Package",
+            CloseButtonText = "Keep Downloading",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        await RunOnSelectionAsync("Cancel Package", new GroupActionRequest { Action = "cancel" });
+    }
+
+    /// <summary>
+    /// Applies one action to the selection: each package row as one Host action, so the Host's
+    /// rules for mixed files hold, and any other selected file by itself.
+    /// </summary>
+    private async Task RunOnSelectionAsync(
+        string label,
+        GroupActionRequest packageAction,
+        Func<JobViewModel, bool>? fileEligible = null,
+        Func<Guid, Task<IpcMessage>>? fileAction = null)
+    {
+        var problems = new List<string>();
+        var notes = new List<string>();
+        var files = fileEligible is null ? [] : SelectedLooseFiles.Where(fileEligible).ToList();
+        foreach (var package in SelectedPackageRows)
+        {
+            try
+            {
+                var result = (await _connection.GroupActionAsync(new GroupActionRequest
+                {
+                    GroupId = package.Id,
+                    Action = packageAction.Action,
+                    QueueId = packageAction.QueueId,
+                    Priority = packageAction.Priority,
+                })).GetPayload<GroupActionResult>();
+                if (!result.Ok) problems.Add($"{package.FileName}: {result.Error ?? "The package could not be changed."}");
+                if (result.LeftCancelled > 0)
+                    notes.Add($"{package.FileName}: {result.LeftCancelled} cancelled file(s) stayed cancelled. Resume them one by one to bring them back.");
+            }
+            catch (Exception ex) { problems.Add($"{package.FileName}: {ex.Message}"); }
+        }
+
+        if (files.Count > 0) await RunBulkActionAsync(files, fileAction!, label);
+        else await RefreshAsync();
+        if (problems.Count > 0) await ShowMessageAsync($"{label} incomplete", string.Join(Environment.NewLine, problems.Take(5)));
+        else if (notes.Count > 0) StatusText.Text = string.Join("  ", notes.Take(2));
     }
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
@@ -985,6 +1096,19 @@ public sealed partial class MainWindow : Window
         if (job.State is "connecting" or "downloading" or "queued" or "paused" or "retryWaiting")
         {
             await ShowMessageAsync("Redownload", "Stop the current download before redownloading.");
+            return;
+        }
+
+        // The list holds no real address for these, and sending what it does hold could only fail.
+        if (job.Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync("Redownload", "This file comes from a provider account, so it can't be redownloaded from here. Add it again from the account.");
+            return;
+        }
+
+        if (DownloadManager.Core.Providers.ProviderLinks.IsMasked(job.Url))
+        {
+            await ShowMessageAsync("Redownload", "This address has its key hidden, so it can't be sent again. Paste the original link to download the file again.");
             return;
         }
 
@@ -3417,9 +3541,15 @@ public sealed partial class MainWindow : Window
     }
 
     private JobViewModel? FindExistingJob(string url)
-        => _jobsById.Values.FirstOrDefault(job =>
-            string.Equals(job.Url, url, StringComparison.OrdinalIgnoreCase) &&
+    {
+        // The Host stores a provider link with its key masked, so that is what the list holds.
+        var listed = DownloadManager.Core.Providers.ProviderLinks.IsProviderLink(url)
+            ? DownloadManager.Core.Providers.ProviderLinks.MaskToken(url)
+            : url;
+        return _jobsById.Values.FirstOrDefault(job =>
+            string.Equals(job.Url, listed, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
+    }
 
     private async Task ShowSettingsDialogAsync()
     {
@@ -4019,7 +4149,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var queueId = SelectedJob?.QueueId ?? _settings.DefaultQueueId;
+        var queueId = SelectedJob?.QueueId ?? SelectedPackage?.SharedQueueId ?? _settings.DefaultQueueId;
         try
         {
             var reply = await _connection.QueueActionAsync(new QueueActionRequest
@@ -4045,20 +4175,14 @@ public sealed partial class MainWindow : Window
 
     private async void PauseButton_Click(object sender, RoutedEventArgs e)
     {
-        var selection = SelectedJobs.Where(job => job.CanPause).ToList();
-        if (selection.Count > 0)
-        {
-            await RunBulkActionAsync(selection, id => _connection.PauseAsync(id), "Stop");
-        }
+        await RunOnSelectionAsync("Stop", new GroupActionRequest { Action = "pause" },
+            job => job.CanPause, id => _connection.PauseAsync(id));
     }
 
     private async void ResumeButton_Click(object sender, RoutedEventArgs e)
     {
-        var selection = SelectedJobs.Where(job => job.CanResume).ToList();
-        if (selection.Count > 0)
-        {
-            await RunBulkActionAsync(selection, id => _connection.ResumeAsync(id), "Resume");
-        }
+        await RunOnSelectionAsync("Resume", new GroupActionRequest { Action = "resume" },
+            job => job.CanResume, id => _connection.ResumeAsync(id));
     }
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e)

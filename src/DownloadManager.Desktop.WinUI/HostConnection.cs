@@ -140,6 +140,10 @@ public sealed class HostConnection : IAsyncDisposable
             ShowCompletionDialog = showCompletionDialog,
         }, TimeSpan.FromSeconds(10), cancellationToken);
 
+    public Task<IpcMessage> SetPriorityAsync(Guid jobId, int priority, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Priority = priority },
+            TimeSpan.FromSeconds(10), cancellationToken);
+
     public Task<IpcMessage> MoveJobAsync(Guid jobId, string newFilePath, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, NewFilePath = newFilePath },
             TimeSpan.FromSeconds(30), cancellationToken);

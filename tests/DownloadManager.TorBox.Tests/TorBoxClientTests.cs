@@ -119,6 +119,19 @@ public sealed class TorBoxClientTests
         Assert.Equal("ACTIVE_LIMIT", failure.ProviderCode);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, RemoteFailureKind.Rejected)]
+    [InlineData(HttpStatusCode.TooManyRequests, RemoteFailureKind.RateLimited)]
+    public async Task WhatWasSubmittedDoesNotComeBackInTheMessage(HttpStatusCode status, RemoteFailureKind kind)
+    {
+        var (client, _) = Make(_ => Json("""{"success":false,"error":"LINK_OFFLINE","detail":"Dead: https://hoster.test/file/s3cret and magnet:?xt=urn:btih:s3cret","data":null}""", status));
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => client.GetAccountAsync());
+        Assert.Equal(kind, failure.Kind);
+        Assert.DoesNotContain("s3cret", failure.Message);
+        Assert.DoesNotContain("hoster.test", failure.Message);
+        Assert.StartsWith("Dead:", failure.Message);
+    }
+
     [Fact]
     public async Task TooManyRequestsCarriesTheWait()
     {

@@ -138,8 +138,9 @@ public static partial class TorBoxMapping
         };
         if (detail?.Contains("password protected", StringComparison.OrdinalIgnoreCase) == true) kind = RemoteFailureKind.LinkPasswordRequired;
         if (detail is not null && kind != RemoteFailureKind.RateLimited && RatePhrase().IsMatch(detail)) kind = RemoteFailureKind.RateLimited;
+        // The detail can quote the submitted magnet or hoster link, and this text reaches job failures.
         var message = !string.IsNullOrWhiteSpace(detail)
-            ? detail
+            ? UrlRedactor.HideAddresses(detail)
             : code ?? $"TorBox answered with status {(int)status}.";
         return new RemoteProviderException(kind, code, message);
     }

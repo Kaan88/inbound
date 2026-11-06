@@ -65,7 +65,7 @@ internal static class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--package KEY] [--package-name NAME] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--wait]");
                     return 2;
                 }
 
@@ -93,6 +93,17 @@ internal static class Program
                     PackageName = GetOption(args, "--package-name"),
                     Source = "cli",
                 };
+                if (GetOption(args, "--priority") is { } priorityText)
+                {
+                    if (!JobPriorities.TryParse(priorityText, out var priority))
+                    {
+                        Console.Error.WriteLine("--priority expects high, normal, or low.");
+                        return 2;
+                    }
+
+                    request.Priority = priority;
+                }
+
                 if (int.TryParse(GetOption(args, "--connections"), out var connections))
                 {
                     request.Connections = connections;
@@ -348,6 +359,23 @@ internal static class Program
                 return PrintAction(reply, json);
             }
 
+            case "priority":
+            {
+                if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var priorityId) ||
+                    !JobPriorities.TryParse(optionArgs[1], out var priority))
+                {
+                    Console.Error.WriteLine("usage: priority <job-id> high|normal|low");
+                    return 2;
+                }
+
+                var reply = await client.RequestAsync(MessageTypes.JobUpdate,
+                    new JobUpdateRequest { JobId = priorityId, Priority = priority }).ConfigureAwait(false);
+                return PrintAction(reply, json);
+            }
+
+            case "package":
+                return await PackageAsync(client, optionArgs, json).ConfigureAwait(false);
+
             case "pause":
                 return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobPause, json).ConfigureAwait(false);
             case "resume":
@@ -501,6 +529,93 @@ internal static class Program
                 PrintHelp();
                 return 2;
         }
+    }
+
+    private static async Task<int> PackageAsync(CliClient client, string[] positional, bool json)
+    {
+        const string usage = "usage: package list | package pause|resume|cancel|unqueue <package-id> | " +
+                             "package queue <package-id> <queue-id> | package priority <package-id> high|normal|low";
+        var action = positional.FirstOrDefault()?.ToLowerInvariant();
+        if (action == "list")
+        {
+            var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+            if (json)
+            {
+                PrintJson(snapshot.Settings.DownloadGroups);
+                return 0;
+            }
+
+            if (snapshot.Settings.DownloadGroups.Count == 0)
+            {
+                Console.WriteLine("No packages.");
+            }
+
+            foreach (var group in snapshot.Settings.DownloadGroups)
+            {
+                var children = group.JobIds.Select(id => snapshot.Jobs.FirstOrDefault(job => job.Id == id))
+                    .Where(job => job is not null).Select(job => job!).ToList();
+                var summary = DownloadGroupSummary.Create(children);
+                var queue = PackageRules.QueueText(children);
+                Console.WriteLine($"{group.Id:N}  {summary.State,-10} {summary.CompletedCount}/{summary.MemberCount}  queue {(queue.Length == 0 ? "-" : queue)}  {group.Name}");
+            }
+
+            return 0;
+        }
+
+        if (action is not ("pause" or "resume" or "cancel" or "queue" or "unqueue" or "priority") ||
+            !Guid.TryParse(positional.ElementAtOrDefault(1), out var packageId))
+        {
+            Console.Error.WriteLine(usage);
+            return 2;
+        }
+
+        var request = new GroupActionRequest { GroupId = packageId, Action = action };
+        if (action == "queue")
+        {
+            if (!int.TryParse(positional.ElementAtOrDefault(2), out var queueId))
+            {
+                Console.Error.WriteLine(usage);
+                return 2;
+            }
+
+            request.QueueId = queueId;
+        }
+        else if (action == "priority")
+        {
+            if (!JobPriorities.TryParse(positional.ElementAtOrDefault(2), out var priority))
+            {
+                Console.Error.WriteLine(usage);
+                return 2;
+            }
+
+            request.Priority = priority;
+        }
+
+        var reply = await client.RequestAsync(MessageTypes.GroupAction, request).ConfigureAwait(false);
+        var result = reply.GetPayload<GroupActionResult>();
+        if (json)
+        {
+            PrintJson(result);
+        }
+        else
+        {
+            Console.WriteLine($"changed {result.Changed} file(s)");
+            if (result.LeftCancelled > 0)
+            {
+                Console.WriteLine($"{result.LeftCancelled} cancelled file(s) stayed cancelled; resume them one by one.");
+            }
+
+            if (!result.Ok)
+            {
+                Console.Error.WriteLine($"failed: {result.Error}");
+                foreach (var (id, error) in result.FailedJobs)
+                {
+                    Console.Error.WriteLine($"  {id:N}: {error}");
+                }
+            }
+        }
+
+        return result.Ok ? 0 : 1;
     }
 
     private static async Task<int> SimpleJobActionAsync(CliClient client, string[] positional, string type, bool json)
@@ -967,7 +1082,7 @@ internal static class Program
     {
         if (positional.Length == 0)
         {
-            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--wait] [--yes]");
+            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--priority high|normal|low] [--wait] [--yes]");
             return 2;
         }
 
@@ -1011,6 +1126,18 @@ internal static class Program
             return 2;
         }
 
+        int? priority = null;
+        if (GetOption(args, "--priority") is { } priorityText)
+        {
+            if (!JobPriorities.TryParse(priorityText, out var parsedPriority))
+            {
+                Console.Error.WriteLine("--priority expects high, normal, or low.");
+                return 2;
+            }
+
+            priority = parsedPriority;
+        }
+
         var results = new List<(string Url, AddJobResponse Result)>();
         foreach (var url in urls)
         {
@@ -1025,6 +1152,7 @@ internal static class Program
                     Source = "batch",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
+                    Priority = priority,
                 }).ConfigureAwait(false);
                 var result = reply.GetPayload<AddJobResponse>();
                 results.Add((url, result));
@@ -1617,9 +1745,10 @@ internal static class Program
             Usage:
               dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
-                          [--conflict rename|overwrite|fail]
+                          [--conflict rename|overwrite|fail] [--priority high|normal|low]
               dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
+                          [--priority high|normal|low]
               dm list [--json]
               dm status <job-id> [--json]
               dm open|reveal <job-id>
@@ -1629,6 +1758,11 @@ internal static class Program
               dm export <file.json>
               dm import <file.json> [--start now|later] [--yes]
               dm pause|resume|retry <job-id>
+              dm priority <job-id> high|normal|low
+              dm package list
+              dm package pause|resume|cancel|unqueue <package-id>
+              dm package queue <package-id> <queue-id>
+              dm package priority <package-id> high|normal|low
               dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all

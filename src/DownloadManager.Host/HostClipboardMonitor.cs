@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Host;
 
@@ -71,7 +72,7 @@ internal sealed class HostClipboardMonitor : IDisposable
 
             _lastUrl = url;
             _lastUrlAt = now;
-            _log($"Clipboard URL detected: {url}");
+            _log($"Clipboard URL detected: {UrlRedactor.Redact(url)}");
             _onUrl(url);
         }
         catch (ExternalException ex)

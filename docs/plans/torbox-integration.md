@@ -123,6 +123,8 @@ These are binding. Research notes are in `notes-local/` (`torbox-code-audit.md`,
 
 **Input classification** (Host): folder link, magnet, `.torrent`, hoster link (provider regex with a 100 ms match timeout, hoster list cached for 1 hour, real availability shown), provider direct link, ordinary link, unsupported with a reason. With no key set, hoster links stay ordinary links; there is no fallback once TorBox has refused one.
 
+**Packages.** Parent Resume does not revive a file cancelled by itself. It undoes a parent Cancel only when that Cancel stopped every file (`PackageRules.ResumeTargets`). A package holds at most 1000 files; an add over that fails before any job exists, because a second part would give one provider item two sets of controls and two completions. `PackageCompleted` means every job in the package finished; it is saved before it is raised, so a subscriber that must not miss one sweeps `GetCompletedPackages` at startup and dedupes by package id and `CompletedAt`. `AddRemoteJobsAsync` completes once per batch. A package built by single `job.add` calls has no end marker, so it waits for 10 s of quiet and can still complete more than once; a subscriber that needs a whole set has to check for it.
+
 **IPC.** Protocol version stays 1. Add new message types only: `remote.*` and `archive.*`. No DTO carries the key, a direct link, a magnet or a hoster link. The key is write-only, with `HasKey` as the only read. The native host gets an allowlist: `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`, `jobs.query`, and does not forward `remote.*` or `archive.*` events to the browser. Slow calls use a separate connection from the frontend.
 
 **API proxy.** The API client uses the same proxy settings as downloads.

@@ -7,6 +7,7 @@ public sealed class FailureDto
     public bool IsRetryable { get; set; }
     public bool IsResumable { get; set; }
     public DateTimeOffset OccurredAt { get; set; }
+    public int? HttpStatus { get; set; }
 }
 
 public sealed class JobDto
@@ -61,6 +62,11 @@ public sealed class JobDto
     public bool CanResume { get; set; }
     public bool IsTerminal { get; set; }
     public FailureDto? Failure { get; set; }
+    /// <summary>True when a provider supplies this file; its Url is then a reference, not an address.</summary>
+    public bool IsRemote { get; set; }
+    public string? RemoteProvider { get; set; }
+    /// <summary>The package whose Cancel stopped this file; null when it was cancelled on its own.</summary>
+    public Guid? CancelledByPackageId { get; set; }
 }
 
 public sealed class CategoryDefinitionDto
@@ -285,6 +291,8 @@ public sealed class AddJobRequest
     /// <summary>Jobs added with the same key are shown as one package (for example one pasted batch).</summary>
     public string? PackageKey { get; set; }
     public string? PackageName { get; set; }
+    /// <summary>A <see cref="JobPriorities"/> value; null is normal.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class AddJobResponse
@@ -366,6 +374,9 @@ public sealed class JobUpdateRequest
 
     /// <summary>New absolute path for a completed download (Move/Rename).</summary>
     public string? NewFilePath { get; set; }
+
+    /// <summary>Null leaves unchanged; otherwise a <see cref="JobPriorities"/> value.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class SegmentDto
@@ -450,6 +461,10 @@ public sealed class GroupActionRequest
     public string Action { get; set; } = string.Empty;
     public string? Name { get; set; }
     public List<Guid>? JobIds { get; set; }
+    /// <summary>Action "queue": the queue every file moves to.</summary>
+    public int? QueueId { get; set; }
+    /// <summary>Action "priority": a <see cref="JobPriorities"/> value.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class GroupActionResult
@@ -459,6 +474,10 @@ public sealed class GroupActionResult
     public string? Error { get; set; }
     public Dictionary<Guid, string> FailedJobs { get; set; } = new();
     public List<DownloadGroupDto> Groups { get; set; } = new();
+    /// <summary>Files the action changed.</summary>
+    public int Changed { get; set; }
+    /// <summary>Resume only: cancelled files it left alone, see <see cref="PackageRules.ResumeTargets"/>.</summary>
+    public int LeftCancelled { get; set; }
 }
 
 public sealed class JobCompletionOptionsDto

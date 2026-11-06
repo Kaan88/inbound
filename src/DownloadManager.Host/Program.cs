@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Tray;
@@ -180,8 +181,10 @@ internal static class Program
                 var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
                     (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
                 if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
+                // Provider files start by themselves, often many at once, so they stay in the main list.
+                var opensWindows = e.Job.Source is not ("cli" or "remote");
                 // Package members share one package window instead of one window per file.
-                var package = e.Job.Source != "cli" && (starting || e.ChangeType == "completed")
+                var package = opensWindows && (starting || e.ChangeType == "completed")
                     ? service.FindPackageOf(e.Job.Id) : null;
                 if (package is { } packageId)
                 {
@@ -191,7 +194,7 @@ internal static class Program
                         _ = Task.Run(() => controller.OpenPackage(packageId));
                     if (showCompletion) shownDownloads.TryRemove(packageId, out byte _);
                 }
-                else if (e.Job.Source != "cli" &&
+                else if (opensWindows &&
                     ((starting && shownDownloads.TryAdd(e.Job.Id, 0)) ||
                      (e.ChangeType == "completed" && (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog))))
                 {
@@ -301,16 +304,16 @@ internal static class Program
 
             if (result.Accepted && !result.Duplicate)
             {
-                tray.Notify("Clipboard download added", result.Job?.FileName ?? url);
+                tray.Notify("Clipboard download added", result.Job?.FileName ?? UrlRedactor.Redact(url));
             }
             else if (!result.Accepted)
             {
-                log.Warn($"Clipboard URL rejected ({url}): {result.Error}");
+                log.Warn($"Clipboard URL rejected ({UrlRedactor.Redact(url)}): {result.Error}");
             }
         }
         catch (Exception ex)
         {
-            log.Error($"Clipboard download failed ({url}): {ex}");
+            log.Error($"Clipboard download failed ({UrlRedactor.Redact(url)}): {UrlRedactor.RedactText(ex.ToString())}");
         }
     }
 

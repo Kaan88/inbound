@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Threading.Channels;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 using DownloadManager.Runtime;
 using DownloadManager.Tray;
 
@@ -173,7 +174,7 @@ public sealed class HostPipeServer
         }
         catch (Exception ex)
         {
-            _log.Error($"IPC client failed: {ex}");
+            _log.Error($"IPC client failed: {UrlRedactor.RedactText(ex.ToString())}");
         }
         finally
         {
@@ -423,9 +424,10 @@ public sealed class HostPipeServer
         }
         catch (Exception ex)
         {
-            _log.Error($"IPC command '{message.Type}' failed: {ex.Message}");
+            var reason = UrlRedactor.RedactText(ex.Message);
+            _log.Error($"IPC command '{message.Type}' failed: {reason}");
             await Reply(client, message, MessageTypes.HostActionResult,
-                new HostActionResult { Ok = false, Message = ex.Message }).ConfigureAwait(false);
+                new HostActionResult { Ok = false, Message = reason }).ConfigureAwait(false);
         }
     }
 
@@ -525,25 +527,44 @@ public sealed class HostPipeServer
         })).ConfigureAwait(false);
     }
 
+    private static readonly TimeSpan GroupsBroadcastDelay = TimeSpan.FromMilliseconds(100);
     private List<DownloadGroupDto>? _lastGroups;
+    private int _groupsBroadcastPending;
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
         // Packages are shown in the download list, so clients need membership changes live
-        // (a browser batch or a split archive can form one without any UI involvement).
-        var groups = _service.GetSnapshot().Settings.DownloadGroups;
-        var signature = System.Text.Json.JsonSerializer.Serialize(groups);
-        lock (_clients)
-        {
-            if (_lastGroups is not null && System.Text.Json.JsonSerializer.Serialize(_lastGroups) == signature) return;
-            _lastGroups = groups;
-        }
-        var message = IpcMessage.Create(MessageTypes.GroupsChanged, groups);
-        foreach (var client in _clients.Values)
-        {
-            client.Writer.TryWrite(message);
-        }
+        // (a browser batch or a split archive can form one without any UI involvement). A batch
+        // changes them once per file and each message carries every package, so a burst shares one.
+        if (Interlocked.Exchange(ref _groupsBroadcastPending, 1) == 0) _ = BroadcastGroupsAsync();
     }
+
+    private async Task BroadcastGroupsAsync()
+    {
+        try
+        {
+            await Task.Delay(GroupsBroadcastDelay, _cts.Token).ConfigureAwait(false);
+            Interlocked.Exchange(ref _groupsBroadcastPending, 0);
+            var groups = _service.GetDownloadGroups();
+            lock (_clients)
+            {
+                if (_lastGroups is not null && SameGroups(_lastGroups, groups)) return;
+                _lastGroups = groups;
+            }
+            var message = IpcMessage.Create(MessageTypes.GroupsChanged, groups);
+            foreach (var client in _clients.Values)
+            {
+                client.Writer.TryWrite(message);
+            }
+        }
+        catch (OperationCanceledException) { /* stopping */ }
+        catch (Exception ex) { _log.Warn($"Could not announce package changes: {ex.GetType().Name}"); }
+    }
+
+    private static bool SameGroups(List<DownloadGroupDto> left, List<DownloadGroupDto> right)
+        => left.Count == right.Count && left.Zip(right).All(pair =>
+            pair.First.Id == pair.Second.Id && pair.First.Name == pair.Second.Name && pair.First.Key == pair.Second.Key &&
+            pair.First.JobIds.SequenceEqual(pair.Second.JobIds));
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)
     {

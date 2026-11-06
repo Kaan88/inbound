@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Persistence;
 
@@ -252,6 +253,9 @@ public sealed class JsonJobStore : IJobStore
             stored.RequestHeadersProtected[name] = SecretProtector.ProtectHeader(value);
             stored.RequestHeaders.Remove(name);
         }
+        // Already ciphertext only when it could not be decrypted at load; keep it as it is.
+        if (!string.IsNullOrEmpty(stored.ProtectedUrl) && !SecretProtector.IsProtected(stored.ProtectedUrl))
+            stored.ProtectedUrl = SecretProtector.ProtectUrl(stored.ProtectedUrl);
         var json = JsonSerializer.Serialize(stored, PersistenceJson.Options);
         var path = JobPath(job.Id);
         await AtomicFile.WriteAsync(path, json, cancellationToken).ConfigureAwait(false);
@@ -382,7 +386,10 @@ public sealed class JsonJobStore : IJobStore
             var value = SecretProtector.UnprotectHeader(protectedValue);
             if (value is not null) job.RequestHeaders[name] = value;
         }
-        job.CreatedAt = job.CreatedAt == default ? DateTimeOffset.UtcNow : job.CreatedAt;
+        // Unreadable ciphertext stays in place: a run can then say why it cannot start, and a
+        // later save does not destroy it. Unlike a lost header, this address has no fallback.
+        job.ProtectedUrl = SecretProtector.UnprotectUrl(job.ProtectedUrl) ?? job.ProtectedUrl;
+        job.CreatedAt =job.CreatedAt == default ? DateTimeOffset.UtcNow : job.CreatedAt;
         job.UpdatedAt = job.UpdatedAt == default ? DateTimeOffset.UtcNow : job.UpdatedAt;
     }
 
@@ -590,10 +597,18 @@ public sealed class JsonSettingsStore : ISettingsStore
                 throw new InvalidDataException($"Unsupported settings schema {settings.SchemaVersion}.");
             }
 
+            // Saved by a build from before provider links were recognised. Filtering them in memory
+            // would leave the account key on disk until the next unrelated settings change.
+            var heldProviderLink = settings.RecentUrls?.Any(ProviderLinks.IsProviderLink) == true;
             Normalize(settings);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
                 settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
+            }
+
+            if (heldProviderLink)
+            {
+                await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
 
             return settings;
@@ -755,7 +770,8 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.RecentUrls = settings.RecentUrls
             .Where(value => !string.IsNullOrWhiteSpace(value) &&
                             Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-                            uri.Scheme is "http" or "https" or "ftp")
+                            uri.Scheme is "http" or "https" or "ftp" &&
+                            !ProviderLinks.IsProviderLink(value))
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(20)

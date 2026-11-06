@@ -14,6 +14,28 @@
 - **Check whether these are stale:** ROADMAP UI.R3 and UI.R4, clean-machine install testing, independent recovery review.
 - **TorBox:** work is on the `feature/torbox-integration` branch, not merged. Its plan is `docs/plans/torbox-integration.md`.
 
+### TorBox: review fixes (2026-11-06, branch `feature/torbox-integration`, not committed)
+
+- Durability: a finished file survives a failed rename, a stop that lands just before it, and a kill just after it (`DownloadCheckpoint.FinalizingTo`, cleared once the job is saved). Part files are flushed before each checkpoint, which now comes every 5 s rather than every 1 s. Removal is durable (`DownloadJob.RemovalPending`) and commits package and statistics in one save.
+- Dead links: a 200 that can't be the promised file keeps saved progress and counts as `ExpiredUrl`, so a provider job gets a fresh link. A 206 with another total still discards.
+- Verification: new `FailureKind.VerificationFailed`, never retried by a queue. A hash the user typed keeps the bytes; provider md5, size or hash deletes them.
+- Secrets: API `requestdl` links count as provider links, old jobs and `RecentUrls` are migrated at load, scheduler sync no longer stores a redirected link, `UrlRedactor` handles nested addresses, more names, `;`, bare pairs and magnets, provider text loses addresses. The extension no longer receives settings or `groups.changed`.
+- Packages: `remote:` keys are refused from clients. A package built by single adds waits 10 s of quiet before completing (`PackageSettleDelay`); `AddRemoteJobsAsync` is the once-per-batch path.
+- Evidence: `RuntimeReviewRegressionTests`, `EngineRecoveryTests`, `ProviderLinkTests`.
+- Not verified: the part-file flush has no power-loss test and its cost on a slow disk was not measured. The WinUI duplicate check and Redownload messages were built, not run. Matching a URL against the stored account key waits for key storage (phase 2). A pasted provider link has no promised size, so a dead link's 200 can still reset it.
+
+### TorBox phase 1: package gap check (2026-11-06, branch `feature/torbox-integration`, not committed)
+
+- Package row now has Resume, Stop, Cancel Package (with confirmation), Add to Queue, Remove from Queue and Priority, in the context menu; Resume, Stop and Cancel on the toolbar; Pause, Resume and Cancel in the package window; `dm package ...` and `dm priority` in the CLI. All go through `group.action`. The Q column shows the shared queue or `*`.
+- Rule (`PackageRules.ResumeTargets`): parent Resume leaves cancelled files alone, except it undoes a parent Cancel that stopped every file. Parent Cancel keeps partial data.
+- Membership: re-adds repair a package lost between job save and package save; a failed package save is logged and the next add saves it. `RemoveAsync` only dissolves the removed job's own package.
+- `AddJobRequest` and `JobUpdateRequest` carry `Priority` (High, Normal, Low).
+- Member limit: an add that would pass 1000 fails before any job is created, rather than starting a second package, so one provider item never has two sets of controls or two completions.
+- `PackageCompleted` is raised once per completion, saved first so a restart does not repeat it. `GetCompletedPackages` is the startup sweep. Nothing in the Host subscribes yet.
+- `groups.changed` is coalesced over 100 ms and no longer builds a full snapshot per change.
+- Evidence: `RuntimePackageTests`, `PackageRulesTests`. Undoing 14 of these changes one at a time made their tests fail (queue actions and sizes were not checked this way).
+- Not verified: the WinUI changes were built but not looked at on screen, in either theme. CLI commands and the pipe coalescing have no automated test. `AddJobAsync` is still one job and up to two settings writes per link for Add Links; only the provider batch path has one commit.
+
 ### Repository clean-up and media panel removal (2026-11-06)
 
 - Removed from the extension at the owner's decision: media detection, in-page panel, popup card, Settings option, playlist fetching and badge. The extension now makes no network requests of its own. Right-click on links, images, video and audio, Download All, automatic sending and the Delete gesture remain. The app still downloads stream addresses it is given.

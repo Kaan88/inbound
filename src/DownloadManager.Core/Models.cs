@@ -38,6 +38,8 @@ public enum FailureKind
     DestinationUnavailable,
     Cancelled,
     Unknown,
+    /// <summary>The bytes all arrived and are not the file that was asked for. Retrying unattended only repeats that.</summary>
+    VerificationFailed,
 }
 
 public enum DownloadSource
@@ -50,6 +52,7 @@ public enum DownloadSource
     Batch,
     ClipboardMonitor,
     Import,
+    Remote,
 }
 
 public enum StartMode
@@ -71,9 +74,24 @@ public sealed record JobFailure(
     string Message,
     bool IsRetryable,
     bool IsResumable,
-    DateTimeOffset OccurredAt)
+    DateTimeOffset OccurredAt,
+    int? HttpStatus = null)
 {
     public static JobFailure None { get; } = new(FailureKind.None, string.Empty, false, false, DateTimeOffset.MinValue);
+}
+
+/// <summary>Which file on which provider a job downloads. Holds no link and no secret.</summary>
+public sealed record RemoteSource(
+    string Provider,
+    string Kind,
+    string ItemId,
+    string FileId,
+    string? RelativePath = null,
+    string? RemoteJobId = null)
+{
+    /// <summary>The job's durable identity, stored in <see cref="DownloadJob.Url"/>. It is not an address anything can fetch.</summary>
+    public string ToReferenceUrl()
+        => $"remote://{Provider}/{Kind}/{Uri.EscapeDataString(ItemId)}/{Uri.EscapeDataString(FileId)}";
 }
 
 public sealed class DownloadJob
@@ -133,8 +151,42 @@ public sealed class DownloadJob
     public int QueueId { get; set; }
     public string? QueueName { get; set; }
     public int Priority { get; set; }
+    /// <summary>The package whose Cancel stopped this job. A job cancelled on its own has none.</summary>
+    public Guid? CancelledByPackageId { get; set; }
     public string? Description { get; set; }
     public string? ExpectedSha256 { get; set; }
+    public string? ExpectedMd5 { get; set; }
+    /// <summary>The size a provider promised. A response of any other size is not this file.</summary>
+    public long? ExpectedTotalBytes { get; set; }
+    public RemoteSource? RemoteSource { get; set; }
+
+    /// <summary>
+    /// A real address too sensitive for <see cref="Url"/>, which then holds a masked copy. Plaintext
+    /// in memory, like <see cref="RequestHeaders"/>; the job store writes it only as ciphertext. It
+    /// stays as ciphertext here when it could not be decrypted at load.
+    /// </summary>
+    public string? ProtectedUrl { get; set; }
+
+    /// <summary>The address this run should fetch. Memory only, and never copied to another field.</summary>
+    [JsonIgnore]
+    public string? ResolvedUrl { get; set; }
+
+    /// <summary>
+    /// The job's owner deletes the checkpoint itself once the job is saved as completed, because
+    /// until then the checkpoint is the only record of where the finished file went.
+    /// </summary>
+    [JsonIgnore]
+    public bool KeepCheckpointAfterFinalize { get; set; }
+
+    /// <summary>The user removed this job. A restart finishes that instead of bringing the job back.</summary>
+    public bool RemovalPending { get; set; }
+
+    /// <summary>The address requests go to. Credentials stay bound to <see cref="Url"/>'s origin.</summary>
+    [JsonIgnore]
+    public string EffectiveUrl =>
+        !string.IsNullOrWhiteSpace(ResolvedUrl) ? ResolvedUrl
+        : !string.IsNullOrWhiteSpace(FinalUrl) ? FinalUrl
+        : Url;
 
     public StartMode StartMode { get; set; } = StartMode.StartNow;
     public ConflictPolicy ConflictPolicy { get; set; } = ConflictPolicy.Rename;
@@ -257,6 +309,8 @@ public sealed record EngineOptions
     public TimeSpan InitialRetryDelay { get; init; } = TimeSpan.FromSeconds(1);
     public double RetryBackoffFactor { get; init; } = 2.0;
     public TimeSpan MaxRetryDelay { get; init; } = TimeSpan.FromSeconds(30);
+    /// <summary>The longest a server's Retry-After can make a retry wait.</summary>
+    public TimeSpan MaxRetryAfterDelay { get; init; } = TimeSpan.FromMinutes(5);
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(20);
     public TimeSpan ReadTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(60);
@@ -266,6 +320,13 @@ public sealed record EngineOptions
     public int MaxConnectionsPerHost { get; init; } = 8;
     public string AcceptEncoding { get; init; } = "identity";
     public long MinimumFreeSpaceReserveBytes { get; init; } = 1024 * 1024;
+
+    /// <summary>
+    /// How often progress is made durable. Each save first flushes the part file to disk, so that
+    /// a checkpoint never describes bytes a power cut could still lose; that flush is why this is
+    /// not shorter. A kill costs at most this much re-downloading.
+    /// </summary>
+    public TimeSpan CheckpointInterval { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Mutable proxy state; updated at runtime when settings change.</summary>
     public ProxySettings Proxy { get; init; } = new();
@@ -288,6 +349,12 @@ public sealed class DownloadCheckpoint
     public string? ContentType { get; set; }
     public List<SegmentCheckpoint> Segments { get; set; } = new();
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Written just before the part file is renamed to this path. With the part gone and this
+    /// file at the recorded size, a restart knows the rename happened and the file is the job's.
+    /// </summary>
+    public string? FinalizingTo { get; set; }
 
     public long CompletedBytes => Segments.Sum(s => s.Completed);
 }
@@ -399,6 +466,18 @@ public sealed class DownloadGroup
     /// <summary>The name was chosen by the Host and follows the members' file names until the user renames it.</summary>
     public bool AutoNamed { get; set; }
     public List<Guid> JobIds { get; set; } = new();
+
+    /// <summary>
+    /// The last completion announced, as the newest member's finish time. A later finish is a new
+    /// completion, so this also tells a restart which ones were already announced.
+    /// </summary>
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    /// <summary>
+    /// False on packages saved before completions were announced. Those may have finished long
+    /// ago, so the first start records them instead of announcing them.
+    /// </summary>
+    public bool CompletionTracked { get; set; }
 }
 
 public sealed class AppSettings

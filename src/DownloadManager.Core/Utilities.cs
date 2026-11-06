@@ -347,12 +347,36 @@ public sealed class SpeedEstimator
 
 public static class RetryPolicy
 {
-    public static TimeSpan Delay(int attempt, EngineOptions options)
+    private const double JitterFraction = 0.2;
+
+    /// <param name="jitterSample">From 0 to 1; random when omitted. Tests pass a fixed value.</param>
+    public static TimeSpan Delay(int attempt, EngineOptions options, double? jitterSample = null)
     {
         var exponent = Math.Max(0, attempt - 1);
         var seconds = options.InitialRetryDelay.TotalSeconds * Math.Pow(options.RetryBackoffFactor, exponent);
         seconds = Math.Min(seconds, options.MaxRetryDelay.TotalSeconds);
+        // Jitter only shortens, so MaxRetryDelay stays a true bound and delays at the cap still
+        // spread out: connections that failed together should not all reconnect together.
+        seconds *= 1 - JitterFraction * (jitterSample ?? Random.Shared.NextDouble());
         return TimeSpan.FromSeconds(seconds);
+    }
+
+    /// <summary>
+    /// The wait before a retry when the server may have asked for one: at least what it asked,
+    /// up to <see cref="EngineOptions.MaxRetryAfterDelay"/>, and never less than the normal backoff.
+    /// </summary>
+    public static TimeSpan Delay(int attempt, EngineOptions options, TimeSpan? retryAfter, double? jitterSample = null)
+    {
+        var backoff = Delay(attempt, options, jitterSample);
+        if (retryAfter is not { } requested || requested <= TimeSpan.Zero)
+        {
+            return backoff;
+        }
+
+        // Added on top here: shortening would come back before the server's stated time.
+        var jittered = requested * (1 + JitterFraction * (jitterSample ?? Random.Shared.NextDouble()));
+        var bounded = jittered < options.MaxRetryAfterDelay ? jittered : options.MaxRetryAfterDelay;
+        return bounded > backoff ? bounded : backoff;
     }
 }
 
@@ -368,6 +392,20 @@ public static class Hashing
             1024 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>For comparing with a checksum a provider supplies. Not a security check.</summary>
+    public static async Task<string> Md5FileAsync(string path, CancellationToken cancellationToken = default)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            1024 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hash = await System.Security.Cryptography.MD5.HashDataAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

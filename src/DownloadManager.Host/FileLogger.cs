@@ -1,4 +1,5 @@
 using System.Text;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Host;
 
@@ -35,7 +36,8 @@ public sealed class FileLogger
                     _currentPath = Path.Combine(_directory, $"{_prefix}-{date}.log");
                 }
 
-                var line = $"{now:O} [{level}] {message}{Environment.NewLine}";
+                // Every line, so an address in an unexpected exception's text can't reach the file.
+                var line = $"{now:O} [{level}] {UrlRedactor.RedactText(message)}{Environment.NewLine}";
                 File.AppendAllText(_currentPath, line, new UTF8Encoding(false));
             }
         }

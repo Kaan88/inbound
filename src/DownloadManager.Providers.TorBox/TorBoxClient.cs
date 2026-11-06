@@ -297,7 +297,8 @@ public sealed class TorBoxClient :
             {
                 document?.Dispose();
                 var wait = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(60);
-                throw new RemoteProviderException(RemoteFailureKind.RateLimited, code, detail ?? "TorBox asked to slow down.", wait);
+                throw new RemoteProviderException(RemoteFailureKind.RateLimited, code,
+                    detail is null ? "TorBox asked to slow down." : UrlRedactor.HideAddresses(detail), wait);
             }
 
             if (code is not null || !response.IsSuccessStatusCode)

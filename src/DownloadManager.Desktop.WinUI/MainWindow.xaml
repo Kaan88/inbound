@@ -162,6 +162,14 @@
                             <TextBlock Text="Stop All" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
+                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
+                            Visibility="Collapsed"
+                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                     <Button x:Name="DeleteButton" AutomationProperties.Name="Delete" Style="{StaticResource InboundToolButtonStyle}" Click="DeleteButton_Click"
                             ToolTipService.ToolTip="Delete the selected download and its partial data">
