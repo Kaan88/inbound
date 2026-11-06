@@ -162,6 +162,56 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task AccountsThatCouldNotBeReadKeepEveryLineGoingToTheHost()
+    {
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteAccountGet, MessageTypes.RemoteAccountResult, new RemoteAccountResult { Ok = false, Error = "No." });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        Assert.True(RemoteRules.ProviderAddApplies(client.State));
+        client.Start();
+
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.False(client.State.AccountsKnown);
+        Assert.Empty(client.State.Accounts);
+        Assert.True(RemoteRules.ProviderAddApplies(client.State));
+    }
+
+    [Fact]
+    public async Task AHostWithNoRemoteSupportLetsAddingStayOrdinary()
+    {
+        var host = new FakeHost { Capabilities = ["jobs", "settings"] };
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        client.Start();
+
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.True(client.State.AccountsKnown);
+        Assert.False(RemoteRules.ProviderAddApplies(client.State));
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    public async Task AnAccountReadThatWorkedDecidesByTheKey(bool hasKey, bool unreadable, bool expected)
+    {
+        var host = new FakeHost();
+        host.Account.HasKey = hasKey;
+        host.Account.KeyUnreadable = unreadable;
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        client.Start();
+
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.True(client.State.AccountsKnown);
+        Assert.Equal(expected, RemoteRules.ProviderAddApplies(client.State));
+    }
+
+    [Fact]
     public async Task AHostThatDoesNotKnowArchiveMessagesHidesThem()
     {
         var host = new FakeHost { KnowsArchives = false };

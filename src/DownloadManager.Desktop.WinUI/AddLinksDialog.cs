@@ -146,6 +146,7 @@ internal sealed class AddLinksDialog
                 AddFocus.Magnet => "Add magnet",
                 AddFocus.TorrentFiles => "Import torrent file",
                 AddFocus.OneAddress => "Add link",
+                AddFocus.ImportedLinks => "Import download list",
                 _ => "Add links",
             },
             Content = new ScrollViewer

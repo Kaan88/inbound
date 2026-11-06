@@ -23,6 +23,7 @@ internal sealed class RemoteState : INotifyPropertyChanged
     private bool _remoteSupported;
     private bool _archivesSupported;
     private bool _isReady;
+    private bool _accountsKnown;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -48,6 +49,9 @@ internal sealed class RemoteState : INotifyPropertyChanged
 
     /// <summary>The first connection has been read, so the two above can be trusted.</summary>
     public bool IsReady { get => _isReady; internal set => Set(ref _isReady, value); }
+
+    /// <summary>The last whole read of the accounts worked, or the Host has no remote support at all. Until then, an empty list says nothing about keys.</summary>
+    public bool AccountsKnown { get => _accountsKnown; internal set => Set(ref _accountsKnown, value); }
 
     public RemoteAccountDto? FindAccount(string? provider)
         => Accounts.FirstOrDefault(account => string.Equals(account.Provider, provider, StringComparison.OrdinalIgnoreCase));

@@ -80,6 +80,13 @@ internal static class RemoteRules
 
     public static bool HasUsableKey(RemoteAccountDto account) => account is { HasKey: true, KeyUnreadable: false };
 
+    /// <summary>
+    /// Whether adding has to ask the Host about each input. Only a Host with no remote support, or an
+    /// account read that worked and found no usable key, lets a link skip that.
+    /// </summary>
+    public static bool ProviderAddApplies(RemoteState state)
+        => !state.AccountsKnown || (state.RemoteSupported && state.Accounts.Any(HasUsableKey));
+
     public static bool CanBrowse(RemoteAccountDto account)
         => HasUsableKey(account) && account.ItemKinds.Count > 0 &&
            account.Capabilities.Contains("catalog", StringComparer.OrdinalIgnoreCase);

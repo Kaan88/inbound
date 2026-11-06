@@ -1204,6 +1204,24 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        // Only a web link can be a provider's. The job may be a direct choice made on purpose, so that stays on offer.
+        if (LinkExtractor.IsWebLink(job.Url) && await ProviderAddAppliesAsync())
+        {
+            var address = await CheckGivenAddressAsync("Redownload", job.Url);
+            if (address.Way == AddressWay.Cancelled) return;
+            if (address.Way == AddressWay.Provider)
+            {
+                var provider = ProviderNameFor(address.Result);
+                var answer = await AskAsync("Redownload", RemoteText.ProviderOffer(provider), $"Add through {provider}", "Download directly");
+                if (answer == ContentDialogResult.None) return;
+                if (answer == ContentDialogResult.Primary)
+                {
+                    await ShowProviderAddAsync(AddFocus.OneAddress, [job.Url], address.Result);
+                    return;
+                }
+            }
+        }
+
         try
         {
             var reply = await _connection.AddAsync(new AddJobRequest
@@ -1338,7 +1356,20 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, input.Text.Trim()));
+        // The address it already has stays usable: refusing that would strand a retry of a direct download.
+        var newAddress = input.Text.Trim();
+        if (newAddress != job.Url && LinkExtractor.IsWebLink(newAddress) && await ProviderAddAppliesAsync())
+        {
+            var address = await CheckGivenAddressAsync("Refresh download address", newAddress);
+            if (address.Way == AddressWay.Cancelled) return;
+            if (address.Way == AddressWay.Provider)
+            {
+                await ShowMessageAsync("Refresh download address", RemoteText.RefreshRefused(ProviderNameFor(address.Result)));
+                return;
+            }
+        }
+
+        await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, newAddress));
     }
 
     private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
@@ -1671,7 +1702,8 @@ public sealed partial class MainWindow : Window
             Title = "Import downloads?",
             Content = new TextBlock
             {
-                Text = $"Add {entries.Count} downloads from this file?",
+                Text = $"Add {entries.Count} downloads from this file?" +
+                    (RemoteText.UnreadableKeyNotice(_remote.State.Accounts) is { } keyNotice ? $" {keyNotice}" : string.Empty),
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Add",
@@ -1683,9 +1715,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        Dictionary<string, RemoteClassifyResult>? answers = null;
+        if (await ProviderAddAppliesAsync())
+        {
+            ShowPassingStatus($"Checking {entries.Count} addresses…");
+            answers = await ImportRouting.ClassifyAllAsync(entries.Select(entry => entry.Url).Where(LinkExtractor.IsWebLink), _remote.OpenClassifier);
+        }
+
         var accepted = 0;
         var failed = 0;
         string? firstError = null;
+        var toReview = new List<(string Input, RemoteClassifyResult Result)>();
         foreach (var entry in entries)
         {
             if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
@@ -1693,6 +1733,21 @@ public sealed partial class MainWindow : Window
             {
                 failed++;
                 firstError ??= $"Invalid URL: {entry.Url}";
+                continue;
+            }
+
+            var answer = answers?.GetValueOrDefault(entry.Url);
+            var way = ImportRouting.WayFor(entry.Url, answer);
+            if (way == ImportWay.Refused)
+            {
+                failed++;
+                firstError ??= RemoteText.AddLineWords(new AddLine(entry.Url) { Result = answer }, ProviderNameFor(answer)).Detail;
+                continue;
+            }
+
+            if (way == ImportWay.Review)
+            {
+                if (toReview.All(line => line.Input != entry.Url)) toReview.Add((entry.Url, answer!));
                 continue;
             }
 
@@ -1731,9 +1786,8 @@ public sealed partial class MainWindow : Window
         }
 
         await RefreshAsync();
-        await ShowMessageAsync("Import download list",
-            $"Added {accepted} of {entries.Count} downloads" +
-            (failed > 0 ? $"; {failed} failed. {firstError}" : "."));
+        await ShowMessageAsync("Import download list", RemoteText.ImportSummary(accepted, entries.Count, failed, firstError, toReview.Count));
+        if (toReview.Count > 0) await ShowProviderAddAsync(AddFocus.ImportedLinks, answered: toReview);
     }
 
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);
@@ -2182,6 +2236,7 @@ public sealed partial class MainWindow : Window
         var addressPanel = new StackPanel { Spacing = 8, MinWidth = 460 };
         addressPanel.Children.Add(urlBox);
         addressPanel.Children.Add(addressError);
+        if (!providerAdd) AddUnreadableKeyNotice(addressPanel);
         var addressDialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -2201,7 +2256,7 @@ public sealed partial class MainWindow : Window
             addressDialog.Hide();
         };
         string url;
-        var showMasked = false;
+        RemoteClassifyResult? addressResult = null;
         string? addressNote = null;
         if (providerAdd)
         {
@@ -2216,7 +2271,7 @@ public sealed partial class MainWindow : Window
             }
 
             url = checkedAddress.Input;
-            showMasked = checkedAddress.Result?.Kind == "providerDirectLink" || DownloadManager.Core.Providers.ProviderLinks.IsProviderLink(url);
+            addressResult = checkedAddress.Result;
             addressNote = checkedAddress.Result?.Note;
         }
         else
@@ -2236,7 +2291,7 @@ public sealed partial class MainWindow : Window
         }
 
         // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
-        var urlDisplay = new TextBox { Header = "URL", Text = showMasked ? DownloadManager.Core.Providers.ProviderLinks.MaskToken(url) : url, IsReadOnly = true };
+        var urlDisplay = new TextBox { Header = addressResult?.Kind == "providerDirectLink" ? "Site" : "URL", Text = RemoteText.AddressToShow(url, addressResult), IsReadOnly = true };
         var nameBox = new TextBox
         {
             Header = "File name (optional)",
@@ -2687,6 +2742,7 @@ public sealed partial class MainWindow : Window
         };
 
         var panel = new StackPanel { Spacing = 10 };
+        AddUnreadableKeyNotice(panel);
         panel.Children.Add(pasteBox);
         panel.Children.Add(destinationBox);
         panel.Children.Add(startMode);
@@ -2742,7 +2798,7 @@ public sealed partial class MainWindow : Window
                     },
                 },
             };
-            ToolTipService.SetToolTip(box, link);
+            ToolTipService.SetToolTip(box, RemoteText.AddressToShow(link, null));
             checks.Add((box, link));
             list.Children.Add(box);
         }
@@ -2781,6 +2837,15 @@ public sealed partial class MainWindow : Window
         var added = await AddOrdinaryLinksAsync(urls, keepPackage.IsChecked == true, destination, startMode.SelectedIndex == 1 ? "later" : "now", queueId, conflictBox.SelectedIndex);
         await RefreshAsync();
         await ShowMessageAsync("Add links", added.Summary);
+    }
+
+    /// <summary>Says why this ordinary dialog opened when the reason is a saved key that can't be read.</summary>
+    private void AddUnreadableKeyNotice(Panel panel)
+    {
+        if (RemoteText.UnreadableKeyNotice(_remote.State.Accounts) is not { } words) return;
+        var notice = new StatusLine("Provider key");
+        notice.Show(words, isProblem: true);
+        panel.Children.Add(notice.Text);
     }
 
     /// <summary>What came of adding ordinary links. The first job is how the package they went into gets found.</summary>

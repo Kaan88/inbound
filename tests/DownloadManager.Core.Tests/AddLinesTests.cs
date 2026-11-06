@@ -698,6 +698,107 @@ public sealed class AddLinesTests
         }
     }
 
+    [Theory]
+    [InlineData("ordinaryLink", nameof(ImportWay.Direct))]
+    [InlineData("providerDirectLink", nameof(ImportWay.Direct))]
+    [InlineData("hosterLink", nameof(ImportWay.Review))]
+    [InlineData("undetermined", nameof(ImportWay.Review))]
+    [InlineData("unsupported", nameof(ImportWay.Refused))]
+    [InlineData("somethingNewerThanThisBuild", nameof(ImportWay.Refused))]
+    public void AnImportedEntryGoesTheWayTheHostsAnswerSays(string kind, string expected)
+        => Assert.Equal(expected, ImportRouting.WayFor("https://example.com/a", Kind(kind)).ToString());
+
+    [Fact]
+    public void AnImportedFolderLinkGoesToReviewOnlyWhenItNamesAnItem()
+    {
+        var named = Kind("folderLink", result => { result.Provider = "torbox"; result.ItemKind = "torrents"; result.ItemId = "7"; });
+        Assert.Equal(ImportWay.Review, ImportRouting.WayFor("https://example.com/a", named));
+        Assert.Equal(ImportWay.Refused, ImportRouting.WayFor("https://example.com/a", Kind("folderLink", result => result.ItemId = null)));
+    }
+
+    [Fact]
+    public void AnImportedEntryNobodyAnsweredIsNotTreatedAsOrdinary()
+        => Assert.Equal(ImportWay.Review, ImportRouting.WayFor(HosterLink, new RemoteClassifyResult { Error = RemoteText.ClassifyLost }));
+
+    [Fact]
+    public void WithNothingAskedAnImportedEntryIsAddedAsBefore()
+        => Assert.Equal(ImportWay.Direct, ImportRouting.WayFor(HosterLink, null));
+
+    [Fact]
+    public async Task AnImportedListIsAskedAboutOnOneConnectionAndEachAddressOnce()
+    {
+        var classifier = new FakeClassifier { Answer = input => input == HosterLink ? Kind("hosterLink") : Kind("ordinaryLink") };
+
+        var answers = await ImportRouting.ClassifyAllAsync(["https://example.com/a", HosterLink, "https://example.com/a"], classifier.Open);
+
+        Assert.Equal(1, classifier.Opened);
+        Assert.Equal(1, classifier.Disposed);
+        Assert.Equal(["https://example.com/a", HosterLink], classifier.Asked);
+        Assert.Equal("hosterLink", answers[HosterLink].Kind);
+    }
+
+    [Fact]
+    public async Task ALostConnectionLeavesEveryRemainingEntryUnsureAndNoneDirect()
+    {
+        var classifier = new FakeClassifier { BreakAfterFirst = true };
+
+        var answers = await ImportRouting.ClassifyAllAsync(["https://example.com/a", HosterLink], classifier.Open);
+
+        Assert.All(answers, answer => Assert.Equal(ImportWay.Review, ImportRouting.WayFor(answer.Key, answer.Value)));
+    }
+
+    [Fact]
+    public void TheImportSummarySaysHowManyWentEachWay()
+    {
+        Assert.Equal("Added 3 of 3 downloads.", RemoteText.ImportSummary(3, 3, 0, null, 0));
+        Assert.Equal("Added 1 of 2 downloads; 1 failed. No.", RemoteText.ImportSummary(1, 2, 1, "No.", 0));
+
+        var mixed = RemoteText.ImportSummary(2, 4, 0, null, 2);
+        Assert.StartsWith("Added 2 of 4 downloads directly.", mixed);
+        Assert.Contains("2 entries aren't added yet", mixed);
+        Assert.Contains("don't carry over", mixed);
+        Assert.Contains("1 entry isn't added yet", RemoteText.ImportSummary(0, 1, 0, null, 1));
+    }
+
+    [Fact]
+    public void ADirectLinkNeverShowsItsTokenEvenWithNoAnswerFromTheHost()
+    {
+        var shown = RemoteText.AddressToShow(DirectLink, null);
+        Assert.DoesNotContain("aaaa-bbbb-cccc", shown);
+        Assert.Contains("cdn1.tb-cdn.io", shown);
+    }
+
+    [Fact]
+    public void AKeyHeldAnywhereInALinkIsLeftOutByShowingOnlyTheHost()
+    {
+        const string link = "https://example.com/dl/aaaa-bbbb-cccc/file.zip?id=aaaa-bbbb-cccc";
+
+        Assert.Equal("example.com", RemoteText.AddressToShow(link, Kind("providerDirectLink", result => result.DisplayHost = "example.com")));
+        Assert.Equal("example.com", RemoteText.AddressToShow(link, Kind("providerDirectLink")));
+    }
+
+    [Fact]
+    public void AnOrdinaryAddressIsShownAsItIs()
+        => Assert.Equal("https://example.com/a.zip?id=1", RemoteText.AddressToShow("https://example.com/a.zip?id=1", Kind("ordinaryLink")));
+
+    [Fact]
+    public void AKeyThatCantBeReadIsGivenAsTheReasonInTheProvidersOwnName()
+    {
+        var notice = RemoteText.UnreadableKeyNotice([new RemoteAccountDto { Provider = "acme", ProviderName = "Acme Cloud", HasKey = true, KeyUnreadable = true }]);
+
+        Assert.Contains("Acme Cloud API key can't be read", notice);
+        Assert.Contains("aren't going through Acme Cloud", notice);
+        Assert.Null(RemoteText.UnreadableKeyNotice([new RemoteAccountDto { Provider = "acme", ProviderName = "Acme Cloud" }]));
+        Assert.Null(RemoteText.UnreadableKeyNotice([]));
+    }
+
+    [Fact]
+    public void TheWordsAboutAProviderLinkUseItsOwnName()
+    {
+        Assert.Contains("Acme Cloud handles this site", RemoteText.ProviderOffer("Acme Cloud"));
+        Assert.Contains("through Acme Cloud", RemoteText.RefreshRefused("Acme Cloud"));
+    }
+
     private sealed class FakeClassifier
     {
         private readonly ConcurrentDictionary<string, TaskCompletionSource> _held = new();

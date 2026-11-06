@@ -26,14 +26,78 @@ public sealed partial class MainWindow
 
     /// <summary>
     /// The dialogs follow what the Host says about each input only when an account could take one. With
-    /// no usable key they stay exactly as they are. If the first read hasn't come back yet nobody knows,
-    /// so the Host gets asked about each line, which gives the right answer either way.
+    /// no usable key they stay exactly as they are. If the accounts couldn't be read nobody knows, so the
+    /// Host gets asked about each line, which gives the right answer either way.
     /// </summary>
     private async Task<bool> ProviderAddAppliesAsync()
     {
         var state = _remote.State;
         if (!state.IsReady) await _remote.WaitUntilReadyAsync(TimeSpan.FromSeconds(1.5));
-        return !state.IsReady || (state.RemoteSupported && state.Accounts.Any(RemoteRules.HasUsableKey));
+        return RemoteRules.ProviderAddApplies(state);
+    }
+
+    /// <summary>
+    /// For an address a command already has, with no dialog of its own to stay open in. Something the
+    /// Host can't classify gets a retry and an explicit way past, and something it can't use is said here.
+    /// </summary>
+    private async Task<CheckedAddress> CheckGivenAddressAsync(string title, string input)
+    {
+        while (true)
+        {
+            ShowPassingStatus("Checking this address…");
+            var result = await _remote.ClassifyAsync(input);
+            var line = new AddLine(input) { Result = result };
+            switch (line.Route)
+            {
+                case AddRoute.Direct:
+                    return new CheckedAddress(AddressWay.Direct, input, result);
+                case AddRoute.Provider or AddRoute.FolderLink:
+                    return new CheckedAddress(AddressWay.Provider, input, result);
+            }
+
+            var words = RemoteText.AddLineWords(line, ProviderNameFor(result)).Detail;
+            if (!line.CantTell)
+            {
+                await ShowMessageAsync(title, words);
+                return new CheckedAddress(AddressWay.Cancelled, input, result);
+            }
+
+            switch (await AskAsync(title, words, "Try again", "Download directly"))
+            {
+                case ContentDialogResult.Secondary:
+                    return new CheckedAddress(AddressWay.Direct, input, result);
+                case ContentDialogResult.None:
+                    return new CheckedAddress(AddressWay.Cancelled, input, result);
+            }
+        }
+    }
+
+    private string ProviderNameFor(RemoteClassifyResult? result)
+        => string.IsNullOrWhiteSpace(result?.ProviderName) ? ProviderWordForAdding() : result.ProviderName;
+
+    /// <summary>A question with two answers and Cancel. If another dialog is open, it counts as Cancel.</summary>
+    private async Task<ContentDialogResult> AskAsync(string title, string words, string primary, string secondary)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = title,
+            Content = new TextBlock { Text = words, TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = primary,
+            SecondaryButtonText = secondary,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            return ContentDialogResult.None;
+        }
     }
 
     private string ProviderWordForAdding()
@@ -170,7 +234,7 @@ public sealed partial class MainWindow
     }
 
     /// <summary>The add dialog for this way in, and everything that follows from what it was told.</summary>
-    private async Task ShowProviderAddAsync(AddFocus focus, IReadOnlyList<string>? inputs = null, RemoteClassifyResult? known = null)
+    private async Task ShowProviderAddAsync(AddFocus focus, IReadOnlyList<string>? inputs = null, RemoteClassifyResult? known = null, IReadOnlyList<(string Input, RemoteClassifyResult Result)>? answered = null)
     {
         if (_settings is null) return;
         AddLinksChoice? choice;
@@ -184,6 +248,7 @@ public sealed partial class MainWindow
         {
             if (inputs is [var only] && known is not null) session.Seed(only, known);
             else if (inputs is not null) session.SetInputs(inputs);
+            foreach (var (input, result) in answered ?? []) session.Seed(input, result);
 
             var initial = focus is AddFocus.Links or AddFocus.Magnet ? await ClipboardInputsAsync(focus) : null;
             var dialog = new AddLinksDialog(

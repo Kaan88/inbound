@@ -15,6 +15,8 @@ internal enum AddFocus
     TorrentFiles,
     /// <summary>Add URL, for an address already found to go through a provider.</summary>
     OneAddress,
+    /// <summary>Import Download List, for the entries that can't simply be added. No paste box: the lines are the file's.</summary>
+    ImportedLinks,
 }
 
 /// <summary>Where a line goes when it is added. Nothing but <see cref="Direct"/> ever becomes a <c>job.add</c>.</summary>
@@ -428,6 +430,48 @@ internal sealed class AddLineSession : IDisposable
     public override string ToString() => "[add lines]";
 }
 
+/// <summary>What happens to one entry of an imported download list.</summary>
+internal enum ImportWay
+{
+    /// <summary><c>job.add</c>, with everything the file says about it.</summary>
+    Direct,
+    /// <summary>The add dialog, which offers what it can go through or asks what to do with it.</summary>
+    Review,
+    /// <summary>It can't be added any way at all, and the Host has said why.</summary>
+    Refused,
+}
+
+/// <summary>Sorts an imported list by the same answers and the same rules as the lines of Add Links.</summary>
+internal static class ImportRouting
+{
+    /// <param name="input">The entry's address.</param>
+    /// <param name="result">Null when no provider could take it, so nothing was asked.</param>
+    public static ImportWay WayFor(string input, RemoteClassifyResult? result)
+    {
+        if (result is null) return ImportWay.Direct;
+        var line = new AddLine(input) { Result = result };
+        return line.Route switch
+        {
+            AddRoute.Direct => ImportWay.Direct,
+            AddRoute.None when !line.CantTell => ImportWay.Refused,
+            _ => ImportWay.Review,
+        };
+    }
+
+    /// <summary>One connection, one call at a time, so a long list doesn't read a whole snapshot per entry. A lost connection answers the rest as failed.</summary>
+    public static async Task<Dictionary<string, RemoteClassifyResult>> ClassifyAllAsync(IEnumerable<string> inputs, Func<IRemoteClassifier> open, CancellationToken cancellationToken = default)
+    {
+        var answers = new Dictionary<string, RemoteClassifyResult>(StringComparer.Ordinal);
+        await using var classifier = open();
+        foreach (var input in inputs)
+        {
+            if (!answers.ContainsKey(input)) answers[input] = await classifier.ClassifyAsync(input, cancellationToken);
+        }
+
+        return answers;
+    }
+}
+
 /// <summary>What a line of the add dialog shows, and what it lets the user do.</summary>
 /// <param name="Word">The kind of input, in a word or two.</param>
 /// <param name="CanChooseDirect">A link nobody could classify: offer an explicit direct download. Never true for a hoster link.</param>
@@ -551,6 +595,45 @@ internal static partial class RemoteText
     {
         if (!string.IsNullOrWhiteSpace(note)) details.Add(UrlRedactor.HideAddresses(note));
     }
+
+    /// <summary>
+    /// An address for a read-only box. A link the Host says holds an account key shows its host alone,
+    /// because the key can be anywhere in it and only the Host knows what it looks like.
+    /// </summary>
+    public static string AddressToShow(string url, RemoteClassifyResult? result)
+    {
+        if (result?.Kind == "providerDirectLink")
+        {
+            return Clean(result.DisplayHost, Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.IdnHost : "This link");
+        }
+
+        return ProviderLinks.IsProviderLink(url) ? ProviderLinks.MaskToken(url) : url;
+    }
+
+    /// <summary>Why an ordinary add dialog opened although a key is saved. Null when that isn't why.</summary>
+    public static string? UnreadableKeyNotice(IEnumerable<RemoteAccountDto> accounts)
+    {
+        var account = accounts.FirstOrDefault(candidate => candidate.KeyUnreadable);
+        if (account is null) return null;
+        var name = ProviderName(account);
+        return $"The saved {name} API key can't be read on this Windows account, so links here aren't going through {name}. Enter the key again in Options to use it.";
+    }
+
+    public static string ImportSummary(int accepted, int total, int failed, string? firstError, int toReview)
+    {
+        var added = $"Added {accepted} of {total} downloads{(toReview > 0 ? " directly" : string.Empty)}";
+        var outcome = added + (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
+        if (toReview == 0) return outcome;
+        var entries = toReview == 1 ? "1 entry isn't" : $"{toReview} entries aren't";
+        var them = toReview == 1 ? "it" : "them";
+        return $"{outcome} {entries} added yet: the next dialog shows what can be done with {them}. Saved names, folders and checksums from the file don't carry over to {them}.";
+    }
+
+    public static string ProviderOffer(string provider)
+        => $"{provider} handles this site, so this link can go through your account. It can also download directly from the site instead.";
+
+    public static string RefreshRefused(string provider)
+        => $"{provider} handles this link, so it can't replace this download's address. The address wasn't changed. Use Add Links to send it through {provider}.";
 
     /// <summary>Only what the provider itself said about the site. Nothing here says whether the file is cached: adding it finds that out.</summary>
     private static IEnumerable<string> HosterDetails(RemoteClassifyResult result, string provider)

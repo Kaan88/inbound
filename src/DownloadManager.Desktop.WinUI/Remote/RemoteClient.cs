@@ -515,6 +515,7 @@ internal sealed class RemoteClient : IAsyncDisposable
             _post(() =>
             {
                 State.RemoteSupported = false;
+                State.AccountsKnown = true;
                 State.ClearRemote();
             });
             return;
@@ -527,7 +528,12 @@ internal sealed class RemoteClient : IAsyncDisposable
             {
                 State.ApplyAccounts(accountsReply.Accounts, wholeList: true);
                 State.RemoteSupported = accountsReply.Accounts.Count > 0;
+                State.AccountsKnown = true;
             });
+        }
+        else
+        {
+            _post(() => State.AccountsKnown = false);
         }
 
         await ListAsync(cancellationToken).ConfigureAwait(false);
