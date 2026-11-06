@@ -126,6 +126,12 @@ public sealed class DownloadJob
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
 
+    /// <summary>
+    /// This completed download's file was deleted on purpose, after a verified extraction read it. Saved before
+    /// the delete, so a restart that finds the file gone knows why and leaves the job completed.
+    /// </summary>
+    public bool FileRemovedAfterExtraction { get; set; }
+
     public string? ETag { get; set; }
     public string? LastModified { get; set; }
     public string? ContentType { get; set; }

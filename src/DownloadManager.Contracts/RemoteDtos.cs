@@ -104,6 +104,8 @@ public sealed class RemoteAddRequestDto
     /// <summary>Go ahead and have the provider fetch it if it isn't cached.</summary>
     public bool ApproveUncached { get; set; }
     public string? LinkPassword { get; set; }
+    /// <summary>For the archives this brings, not for the link. Kept encrypted, and only <c>hasArchivePassword</c> ever comes back.</summary>
+    public string? ArchivePassword { get; set; }
 
     public override string ToString() => "[remote add]";
 }
@@ -135,6 +137,8 @@ public sealed class RemoteJobDto
     public bool ApprovalNeeded { get; set; }
     public bool ApprovedUncached { get; set; }
     public bool HasLinkPassword { get; set; }
+    /// <summary>An archive password is on record for what this job brings. Nothing else about it can be read.</summary>
+    public bool HasArchivePassword { get; set; }
     public string? FailureKind { get; set; }
     public string? FailureMessage { get; set; }
     public DateTimeOffset? NextCheckAt { get; set; }
@@ -281,6 +285,133 @@ public sealed class RemoteActionResultDto
     public bool Ok { get; set; }
     public string? Error { get; set; }
     public RemoteJobDto? Job { get; set; }
+}
+
+public sealed class RemoteArchivePasswordRequest
+{
+    public Guid JobId { get; set; }
+    /// <summary>For this job's archives, whether or not its downloads exist yet. Empty clears it.</summary>
+    public string? Password { get; set; }
+
+    public override string ToString() => $"[archive password {JobId:N}]";
+}
+
+public sealed class RemoteContainerPreviewRequest
+{
+    /// <summary>The full path of a local .rsdf, .ccf or .dlc file on a drive of this computer.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    public override string ToString() => "[container preview]";
+}
+
+public sealed class RemoteContainerPackageDto
+{
+    /// <summary>What <see cref="RemoteContainerEntryDto.PackageIndex"/> refers to.</summary>
+    public int Index { get; set; }
+    public string? Name { get; set; }
+    public string? Comment { get; set; }
+    /// <summary>The container states an archive password for this package. Only this can be learned about it.</summary>
+    public bool HasArchivePassword { get; set; }
+    public int EntryCount { get; set; }
+}
+
+/// <summary>One link of a container, without the link: the Host keeps that, and a client chooses by <see cref="EntryId"/>.</summary>
+public sealed class RemoteContainerEntryDto
+{
+    public int EntryId { get; set; }
+    /// <summary>Null when the container puts it in no package.</summary>
+    public int? PackageIndex { get; set; }
+    public string? DisplayHost { get; set; }
+    public string? DisplayName { get; set; }
+    /// <summary>As the container states it, so only a hint.</summary>
+    public long? Size { get; set; }
+    /// <summary>folderLink, magnet, hosterLink, undetermined or unsupported. Treat one you don't know as unsupported.</summary>
+    public string Kind { get; set; } = string.Empty;
+    /// <summary>Why it can't be used, or something to know about one that can.</summary>
+    public string? Reason { get; set; }
+    public bool CanAdd { get; set; }
+}
+
+public sealed class RemoteContainerPreviewResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    /// <summary>rsdf, ccf, dlc or unknown.</summary>
+    public string Format { get; set; } = "unknown";
+    public string? FormatVersion { get; set; }
+    /// <summary>This format can't be opened here. <see cref="Error"/> says why and what can be done instead.</summary>
+    public bool NotSupported { get; set; }
+    /// <summary><c>remote.container.sendToJd</c> can take this kind of file. It is a separate choice, and never happens by itself.</summary>
+    public bool CanSendToJd { get; set; }
+    /// <summary>What <c>remote.container.add</c> needs. Null when nothing in the file can be added.</summary>
+    public Guid? PreviewId { get; set; }
+    /// <summary>The links are forgotten at this time, and then the file has to be read again.</summary>
+    public DateTimeOffset? ExpiresAt { get; set; }
+    /// <summary>Why no account can take anything right now, such as no API key being set.</summary>
+    public string? AccountProblem { get; set; }
+    public List<RemoteContainerPackageDto> Packages { get; set; } = [];
+    public List<RemoteContainerEntryDto> Entries { get; set; } = [];
+    /// <summary>What was wrong with parts of the file, and anything else worth saying about it as a whole.</summary>
+    public List<string> Problems { get; set; } = [];
+}
+
+public sealed class RemoteContainerAddRequest
+{
+    public Guid PreviewId { get; set; }
+    public List<int> EntryIds { get; set; } = [];
+    /// <summary>A full path. Null uses the default download folder.</summary>
+    public string? Destination { get; set; }
+    public int QueueId { get; set; }
+    /// <summary>startNow, queue or later.</summary>
+    public string StartMode { get; set; } = "startNow";
+    /// <summary>Go ahead and have the provider fetch these if they aren't cached.</summary>
+    public bool ApproveUncached { get; set; }
+}
+
+public sealed class RemoteContainerAddOutcomeDto
+{
+    public int EntryId { get; set; }
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    /// <summary>Something asked for that didn't happen, or something to know about what did.</summary>
+    public string? Note { get; set; }
+    /// <summary>An active job already covers this entry, and it is the one returned.</summary>
+    public bool Existing { get; set; }
+    public string? InputKind { get; set; }
+    /// <summary>The job this entry became, whether or not <see cref="Job"/> is filled in.</summary>
+    public Guid? JobId { get; set; }
+    /// <summary>Null for an entry that wasn't added, and for every entry when <see cref="RemoteContainerAddResult.JobsLeftOut"/> is set.</summary>
+    public RemoteJobDto? Job { get; set; }
+}
+
+public sealed class RemoteContainerAddResult
+{
+    /// <summary>At least one entry was added. <see cref="Outcomes"/> says how each one went.</summary>
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public List<RemoteContainerAddOutcomeDto> Outcomes { get; set; } = [];
+    /// <summary>So many entries were added that their full jobs wouldn't fit one answer. <see cref="Ok"/> and each outcome still hold, and <c>remote.list</c> has the jobs.</summary>
+    public bool JobsLeftOut { get; set; }
+}
+
+public sealed class RemoteContainerSendRequest
+{
+    /// <summary>The full path of a local .dlc or .ccf file on a drive of this computer.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    public override string ToString() => "[container send]";
+}
+
+public sealed class RemoteContainerSendResult
+{
+    /// <summary>JDownloader said it accepted the file.</summary>
+    public bool Ok { get; set; }
+    /// <summary>sent, notRunning, rejected, timedOut, invalidInput or failed.</summary>
+    public string Status { get; set; } = string.Empty;
+    /// <summary>JDownloader itself gave an answer, whichever way. False means nothing is known to have reached it.</summary>
+    public bool JdAnswered { get; set; }
+    /// <summary>What happened, in words for the user.</summary>
+    public string Message { get; set; } = string.Empty;
 }
 
 /// <summary>Whole state, so a client that missed one can't drift. On connect, read <c>remote.list</c>.</summary>

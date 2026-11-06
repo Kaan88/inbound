@@ -31,6 +31,8 @@ public static class SecretProtector
         Encoding.UTF8.GetBytes("DownloadManager.RemoteTorrent.v1");
     private static readonly byte[] RemoteLinkPasswordEntropy =
         Encoding.UTF8.GetBytes("DownloadManager.RemoteLinkPassword.v1");
+    private static readonly byte[] RemoteArchivePasswordEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.RemoteArchivePassword.v1");
 
     public static string ProtectHeader(string plaintext) => Protect(plaintext, HeaderEntropy);
     public static string? UnprotectHeader(string? protectedValue) => Unprotect(protectedValue, HeaderEntropy);
@@ -70,6 +72,10 @@ public static class SecretProtector
     /// <summary>The password a source site wants for a link. Never an archive password.</summary>
     public static string ProtectRemoteLinkPassword(string plaintext) => Protect(plaintext, RemoteLinkPasswordEntropy);
     public static string? UnprotectRemoteLinkPassword(string? protectedValue) => Unprotect(protectedValue, RemoteLinkPasswordEntropy);
+
+    /// <summary>An archive password a remote job holds until it has a package. Its own purpose: it is not a link password.</summary>
+    public static string ProtectRemoteArchivePassword(string plaintext) => Protect(plaintext, RemoteArchivePasswordEntropy);
+    public static string? UnprotectRemoteArchivePassword(string? protectedValue) => Unprotect(protectedValue, RemoteArchivePasswordEntropy);
 
     public static bool IsProtected(string? value) => value?.StartsWith(Prefix, StringComparison.Ordinal) == true;
 

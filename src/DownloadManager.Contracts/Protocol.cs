@@ -98,6 +98,13 @@ public static class MessageTypes
     public const string RemoteRemove = "remote.remove";
     public const string RemoteDeleteRemote = "remote.deleteRemote";
     public const string RemoteActionResult = "remote.actionResult";
+    public const string RemoteArchivePassword = "remote.archivePassword";
+    public const string RemoteContainerPreview = "remote.container.preview";
+    public const string RemoteContainerPreviewResult = "remote.container.previewResult";
+    public const string RemoteContainerAdd = "remote.container.add";
+    public const string RemoteContainerAddResult = "remote.container.addResult";
+    public const string RemoteContainerSendToJd = "remote.container.sendToJd";
+    public const string RemoteContainerSendResult = "remote.container.sendResult";
     /// <summary>Host push: one remote job, or the account, changed.</summary>
     public const string RemoteChanged = "remote.changed";
 }

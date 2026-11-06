@@ -65,7 +65,7 @@ public static class ExtractionFinalizer
         {
             var source = Path.Combine(staging.PayloadFolder, relativeSource);
             var target = Path.GetFullPath(Path.Combine(root, relativeTarget));
-            if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (!target.StartsWith(ExtractionSafety.WithSeparator(root), StringComparison.OrdinalIgnoreCase))
             {
                 throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"A file would land outside the destination: {ExtractionSafety.SafeForDisplay(relativeTarget)}");
             }
@@ -92,7 +92,7 @@ public static class ExtractionFinalizer
                     return new ExtractedFile(relativeSource, target, ExtractedFileOutcome.Skipped);
 
                 case ExtractionConflictPolicy.Rename:
-                    var renamed = FreeName(target);
+                    var renamed = ExtractionSafety.FreeName(target);
                     MoveNew(relativeSource, source, renamed);
                     return new ExtractedFile(relativeSource, renamed, ExtractedFileOutcome.Renamed);
 
@@ -103,7 +103,7 @@ public static class ExtractionFinalizer
                     }
 
                     Displace(target, relativeTarget);
-                    _log.Record(new PlacementEntry(relativeSource, target, relativeTarget));
+                    _log.Record(PlacementEntry.For(relativeSource, target, relativeTarget, new FileInfo(source)));
                     File.Move(source, target);
                     _steps[^1] = _steps[^1] with { Placed = true };
                     _placedThisAttempt.Add(target);
@@ -145,12 +145,19 @@ public static class ExtractionFinalizer
                 var step = _steps[index];
                 try
                 {
-                    if (step.Placed) File.Delete(step.Target);
+                    if (step.Placed)
+                    {
+                        // UnRAR restores the read-only attribute, and a delete refuses such a file.
+                        File.SetAttributes(step.Target, FileAttributes.Normal);
+                        File.Delete(step.Target);
+                    }
+
                     if (step.Displaced is not null) File.Move(step.Displaced, step.Target);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
-                    if (step.Displaced is not null) staging.KeepForRecovery = true;
+                    // Staging holds the record of what was placed, so the next attempt can finish this.
+                    staging.KeepForRecovery = true;
                 }
             }
 
@@ -170,7 +177,7 @@ public static class ExtractionFinalizer
 
         private void MoveNew(string relativeSource, string source, string target)
         {
-            _log.Record(new PlacementEntry(relativeSource, target, null));
+            _log.Record(PlacementEntry.For(relativeSource, target, null, new FileInfo(source)));
             File.Move(source, target, overwrite: false);
             _steps.Add(new Step(target, null, Placed: true));
             _placedThisAttempt.Add(target);
@@ -183,20 +190,6 @@ public static class ExtractionFinalizer
             Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
             File.Move(target, backup);
             _steps.Add(new Step(target, backup, Placed: false));
-        }
-
-        private static string FreeName(string target)
-        {
-            var directory = Path.GetDirectoryName(target)!;
-            var stem = Path.GetFileNameWithoutExtension(target);
-            var extension = Path.GetExtension(target);
-            for (var number = 1; number < 100_000; number++)
-            {
-                var candidate = Path.Combine(directory, $"{stem} ({number}){extension}");
-                if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
-            }
-
-            throw new IOException("No free name for the file.");
         }
 
         private sealed record Step(string Target, string? Displaced, bool Placed);

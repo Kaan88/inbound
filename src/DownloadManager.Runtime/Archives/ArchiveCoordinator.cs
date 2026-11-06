@@ -39,7 +39,7 @@ public sealed record ArchiveCoordinatorOptions
 /// is saved before the tool starts, and only a recorded success counts as finished.
 /// </para>
 /// </summary>
-public sealed partial class ArchiveCoordinator : IAsyncDisposable
+public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePasswordKeeper
 {
     private static readonly JsonSerializerOptions CompareOptions = new();
 
@@ -59,6 +59,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
 
     /// <summary>Guarded by <see cref="_sync"/>.</summary>
     private readonly Dictionary<Guid, RunningExtraction> _running = [];
+
+    /// <summary>Sets on disk whose documents couldn't be read at the start. Their ids stay out of use until a later start can read them.</summary>
+    private readonly HashSet<Guid> _unreadable = [];
     private readonly ConcurrentDictionary<Guid, ExtractionProgress> _live = new();
     private readonly Channel<Trigger> _triggers = Channel.CreateUnbounded<Trigger>(new UnboundedChannelOptions { SingleReader = true });
     private ArchiveSettings _settings = new();
@@ -131,8 +134,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
         var snapshot = _service.GetSnapshot();
         var packageIds = _service.GetDownloadGroups().Select(group => group.Id).ToHashSet();
         var jobIds = snapshot.Jobs.Select(job => job.Id).ToHashSet();
+        lock (_sync) _unreadable.UnionWith(_store.UnreadableSets);
 
-        await RecoverStagingAsync(sets).ConfigureAwait(false);
+        var leftInPlace = await RecoverStagingAsync(sets).ConfigureAwait(false);
 
         foreach (var password in passwords.Where(password => !packageIds.Contains(password.PackageId)))
         {
@@ -156,12 +160,27 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
             }
 
             var current = set;
-            if (set.State == ArchiveSetState.Extracting)
+
+            // Keys used to be folded for padding, so a saved part01 could carry part1's key.
+            var key = ArchiveSetIdentity.KeyFor(set.Directory, set.FirstVolumeName);
+            if (set.State == ArchiveSetState.Extracting || !string.Equals(set.Key, key, StringComparison.Ordinal))
             {
                 current = set.Clone();
-                current.State = ArchiveSetState.Waiting;
-                current.Note = "Extraction was interrupted, so it runs again.";
+                current.Key = key;
+                if (set.State == ArchiveSetState.Extracting)
+                {
+                    current.State = ArchiveSetState.Waiting;
+                    current.Note = "Extraction was interrupted, so it runs again.";
+                }
+
                 current.UpdatedAt = _time.GetUtcNow();
+                await _store.SaveSetAsync(current, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (leftInPlace.TryGetValue(current.Id, out var kept) && kept > 0)
+            {
+                current = current.Clone();
+                current.Note = $"{current.Note} {kept} {(kept == 1 ? "file" : "files")} from the interrupted run changed since then and {(kept == 1 ? "was" : "were")} left in place.".TrimStart();
                 await _store.SaveSetAsync(current, cancellationToken).ConfigureAwait(false);
             }
 
@@ -291,26 +310,61 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
         foreach (var id in affected) await RefreshAsync(id, jobs).ConfigureAwait(false);
     }
 
-    private async Task<Guid> TouchAsync(ArchiveDirectoryView view, ArchiveVolumeSet set, JobDto job, string change)
+    /// <summary>The record for a set in this view, by its key or by the name it had to guess. Null when there is none yet.</summary>
+    private ArchiveSetRecord? RecordFor(ArchiveDirectoryView view, ArchiveVolumeSet set, string key)
     {
-        var key = ArchiveSetIdentity.KeyFor(view.Directory, set, view.Sets);
-        var id = ArchiveSetIdentity.IdFor(key);
+        lock (_sync)
+        {
+            return _sets.Values.FirstOrDefault(record => record.Key == key)
+                ?? _sets.Values.FirstOrDefault(record =>
+                    string.Equals(ArchiveSetIdentity.NormalizeDirectory(record.Directory), view.Directory, StringComparison.OrdinalIgnoreCase) &&
+                    ReferenceEquals(view.FindFor(record), set));
+        }
+    }
+
+    /// <summary>
+    /// A new record's id. It comes from the key, so that a set whose document can't be read now is recognised,
+    /// unless an older record that later learned its real name is still using that id.
+    /// </summary>
+    private Guid NewIdFor(string key)
+    {
+        lock (_sync)
+        {
+            var id = ArchiveSetIdentity.IdFor(key);
+            for (var attempt = 2; _sets.TryGetValue(id, out var holder) && holder.Key != key; attempt++)
+            {
+                id = ArchiveSetIdentity.IdFor($"{key}#{attempt}");
+            }
+
+            return id;
+        }
+    }
+
+    private bool IsUnreadable(Guid id)
+    {
+        lock (_sync) return _unreadable.Contains(id);
+    }
+
+    private async Task<Guid?> TouchAsync(ArchiveDirectoryView view, ArchiveVolumeSet set, JobDto job, string change)
+    {
+        var key = ArchiveSetIdentity.KeyFor(view.Directory, set);
+        set = view.FindByKey(key) ?? set;
         var now = _time.GetUtcNow();
         var isCompletion = change == "completed" && job.State == "completed";
         var completedAt = job.CompletedAt ?? now;
         ArchiveSetDto? announce = null;
+        Guid id;
 
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             ArchiveSettings settings;
-            ArchiveSetRecord? existing;
-            lock (_sync)
-            {
-                settings = _settings;
-                existing = _sets.GetValueOrDefault(id);
-            }
+            lock (_sync) settings = _settings;
+            var existing = RecordFor(view, set, key);
+            id = existing?.Id ?? NewIdFor(key);
 
+            // Its record is there and can't be read right now, so this is not a new set. The next start counts this again.
+            if (existing is null && IsUnreadable(id)) return null;
             if (existing is null && (isCompletion ? completedAt < settings.TrackSince : change != "added")) return id;
 
             var next = existing?.Clone() ?? NewRecord(id, key, view, set, now);
@@ -389,6 +443,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
 
         next.Directory = view.Directory;
         next.FirstVolumeName = ArchiveSetIdentity.FirstName(set);
+        next.Key = ArchiveSetIdentity.KeyFor(view.Directory, set);
         next.BaseName = set.BaseName;
 
         var present = new List<string>();
@@ -416,7 +471,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
         next.FailedVolumes = failed;
         next.MissingVolumes = missing;
         next.JobIds = jobIds.Distinct().ToList();
-        if (next.JobIds.Select(_service.FindPackageOf).FirstOrDefault(package => package is not null) is { } packageId) next.PackageId = packageId;
+        // Any size of package: a password can be kept for one that has only this download so far.
+        if (next.JobIds.Select(_service.FindGroupOf).FirstOrDefault(package => package is not null) is { } packageId) next.PackageId = packageId;
 
         switch (next.State)
         {
@@ -446,7 +502,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable
         if (record is null || record.Removed) return;
 
         var view = ArchiveDirectoryView.Read(record.Directory, jobs);
-        var set = view.FindByKey(record.Key);
+        var set = view.FindFor(record);
         ArchiveSetDto? announce = null;
         Guid? gone = null;
 

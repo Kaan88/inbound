@@ -18,6 +18,8 @@ internal sealed partial class UnrarListing
     };
 
     private readonly Dictionary<string, ArchiveEntry> _entries = new(StringComparer.Ordinal);
+    private readonly List<string> _archives = [];
+    private readonly HashSet<string> _inThisVolume = new(StringComparer.Ordinal);
 
     private UnrarListing()
     {
@@ -35,8 +37,14 @@ internal sealed partial class UnrarListing
 
     public bool HasUnknownLines { get; private set; }
 
+    /// <summary>A name came up a second time other than as a file carried over from the previous volume.</summary>
+    public bool HasRepeatedNames { get; private set; }
+
     /// <summary>One per path: a file split across volumes is listed once per volume.</summary>
     public IReadOnlyList<ArchiveEntry> Entries => _entries.Values.ToList();
+
+    /// <summary>Each volume the tool went through, as its <c>Archive:</c> lines name them.</summary>
+    public IReadOnlyList<string> Archives => _archives;
 
     public bool IsRar5OrLater =>
         int.TryParse(Version.Split('.')[0], NumberStyles.None, CultureInfo.InvariantCulture, out var major) && major >= 5;
@@ -64,6 +72,8 @@ internal sealed partial class UnrarListing
             {
                 case "Archive":
                     listing.Commit(ref entry);
+                    listing._inThisVolume.Clear();
+                    if (value.Length > 0) listing._archives.Add(value.Trim());
                     break;
                 case "Details":
                     listing.Commit(ref entry);
@@ -86,6 +96,10 @@ internal sealed partial class UnrarListing
                     break;
                 case "Flags" when entry is not null:
                     if (value.Contains("encrypted", StringComparison.Ordinal)) entry.Encrypted = true;
+                    break;
+                case "Ratio" when entry is not null:
+                    // <-- and <-> mark a file that started in an earlier volume.
+                    if (value.Contains("<-", StringComparison.Ordinal)) entry.ContinuesEarlierVolume = true;
                     break;
                 default:
                     if (entry is null || !IgnoredLabels.Contains(label)) listing.HasUnknownLines = true;
@@ -139,7 +153,13 @@ internal sealed partial class UnrarListing
         var entry = new ArchiveEntry(pending.Name, pending.Size, kind, pending.Encrypted, pending.Target);
         if (_entries.TryGetValue(pending.Name, out var earlier))
         {
+            // A folder can be stored again in each volume. Two files of one name are two files, however the merge below would read them.
+            if (kind != ArchiveEntryKind.Directory && (!_inThisVolume.Add(pending.Name) || !pending.ContinuesEarlierVolume)) HasRepeatedNames = true;
             entry = entry with { Size = Math.Max(earlier.Size, entry.Size), IsEncrypted = earlier.IsEncrypted || entry.IsEncrypted };
+        }
+        else
+        {
+            _inThisVolume.Add(pending.Name);
         }
 
         _entries[pending.Name] = entry;
@@ -162,5 +182,7 @@ internal sealed partial class UnrarListing
         public long Size { get; set; }
 
         public bool Encrypted { get; set; }
+
+        public bool ContinuesEarlierVolume { get; set; }
     }
 }

@@ -188,7 +188,17 @@ public sealed partial class DownloadManagerService
             return Array.Empty<SegmentDto>();
         }
 
-        var checkpoint = await _checkpointStore.LoadAsync(id, cancellationToken).ConfigureAwait(false);
+        DownloadCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = await _checkpointStore.LoadAsync(id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Only a display, and it can look again.
+            return Array.Empty<SegmentDto>();
+        }
+
         if (checkpoint is null)
         {
             return Array.Empty<SegmentDto>();
@@ -669,8 +679,30 @@ public sealed partial class DownloadManagerService
         finally { _settingsUpdateGate.Release(); }
     }
 
+    /// <summary>
+    /// A client sees a job's outcome as soon as it is decided, a moment before its run has finished saving it. An
+    /// answer of "still running" to someone who was just told it failed would be wrong, so that moment is waited out.
+    /// </summary>
+    private async Task WaitForEndedRunAsync(Guid id, CancellationToken cancellationToken)
+    {
+        Task? runner;
+        lock (_sync)
+        {
+            runner = _jobs.TryGetValue(id, out var runtime) && runtime.Job.State is DownloadState.Failed or DownloadState.Cancelled or DownloadState.Paused
+                ? runtime.Runner
+                : null;
+        }
+
+        if (runner is { IsCompleted: false })
+        {
+            await Task.WhenAny(runner, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)).ConfigureAwait(false);
+        }
+    }
+
     private async Task<JobActionResponse> ResumeCoreAsync(Guid id, CancellationToken cancellationToken)
     {
+        await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
+
         JobRuntime? runtime;
         Task? stopping = null;
         lock (_sync)
@@ -2401,6 +2433,8 @@ public sealed partial class DownloadManagerService
             return new JobActionResponse { Ok = false, Error = urlError };
         }
 
+        await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
+
         JobRuntime? runtime;
         lock (_sync)
         {
@@ -2837,6 +2871,13 @@ public sealed partial class DownloadManagerService
         {
             if (!File.Exists(job.FinalFilePath))
             {
+                // Deleted on purpose after a verified extraction, so nothing has gone wrong with this download.
+                if (job.FileRemovedAfterExtraction)
+                {
+                    await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
+                    return changed;
+                }
+
                 job.State = DownloadState.Failed;
                 job.Failure = new JobFailure(FailureKind.DestinationUnavailable,
                     "The completed file is missing from its destination.", false, false, DateTimeOffset.UtcNow);
@@ -2853,7 +2894,17 @@ public sealed partial class DownloadManagerService
             return changed;
         }
 
-        var checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        DownloadCheckpoint? checkpoint = null;
+        try
+        {
+            checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The run reads it again before it starts, and won't go on without it.
+            _log?.Invoke($"Could not read the checkpoint of job {job.Id} at startup: {ex.GetType().Name}");
+        }
+
         if (checkpoint is not null && TryAdoptFinishedFile(job, checkpoint))
         {
             await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
@@ -3227,6 +3278,7 @@ public sealed partial class DownloadManagerService
                 job.Failure = null;
                 job.StartedAt ??= DateTimeOffset.UtcNow;
                 job.CompletedAt = null;
+                job.FileRemovedAfterExtraction = false;
                 job.ActiveConnections = 0;
                 job.Touch();
             }
@@ -3678,6 +3730,42 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    /// <summary>
+    /// Records that the completed downloads of these files are gone on purpose, or are not after all. Saved
+    /// before it returns, because the caller deletes the files next. Throws if it could not be saved.
+    /// </summary>
+    public async Task MarkFilesRemovedAfterExtractionAsync(IReadOnlyCollection<string> paths, bool removed, CancellationToken cancellationToken = default)
+    {
+        List<JobRuntime> marked;
+        lock (_sync)
+        {
+            marked = _jobs.Values
+                .Where(runtime => runtime.Job.State == DownloadState.Completed && runtime.Job.FileRemovedAfterExtraction != removed &&
+                    paths.Contains(runtime.Job.FinalFilePath, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var runtime in marked)
+            {
+                runtime.Job.FileRemovedAfterExtraction = removed;
+                runtime.Job.Touch();
+            }
+        }
+
+        foreach (var runtime in marked)
+        {
+            try
+            {
+                await PersistAsync(runtime, cancellationToken, requireSuccess: true).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException)
+            {
+                // It is being removed from the list, so there is nothing left to mark.
+                continue;
+            }
+
+            Raise(runtime, "updated");
+        }
+    }
+
     private async Task PersistQuietlyAsync(JobRuntime runtime)
     {
         try
@@ -3977,6 +4065,8 @@ public sealed partial class DownloadManagerService
             IsTerminal = job.IsTerminal,
             IsRemote = job.RemoteSource is not null,
             RemoteProvider = job.RemoteSource?.Provider,
+            FileRemovedAfterExtraction = job.FileRemovedAfterExtraction,
+            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction" : null,
             Failure = job.Failure is null
                 ? null
                 : new FailureDto

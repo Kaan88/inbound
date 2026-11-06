@@ -199,7 +199,7 @@ public sealed partial class MockTorBox
     private long _nextFileId;
     private int _budgetUsed;
     private DateTimeOffset _windowEnds;
-    private int _activeCdn;
+    private readonly HashSet<HttpContext> _activeAnswers = [];
     private int _peakCdn;
     private int _cdnWithCredentials;
     private int _hosterRequests;
@@ -251,8 +251,12 @@ public sealed partial class MockTorBox
             _nextFileId = 0;
             _budgetUsed = 0;
             _windowEnds = default;
-            _activeCdn = 0;
-            _peakCdn = 0;
+            lock (_activeAnswers)
+            {
+                _activeAnswers.Clear();
+                _peakCdn = 0;
+            }
+
             _cdnWithCredentials = 0;
             _nextLinkDiesAfter = null;
             ApiKey = DefaultApiKey;
@@ -448,7 +452,13 @@ public sealed partial class MockTorBox
         }
     }
 
-    public int PeakCdnConnections => Volatile.Read(ref _peakCdn);
+    public int PeakCdnConnections
+    {
+        get
+        {
+            lock (_activeAnswers) return _peakCdn;
+        }
+    }
 
     /// <summary>CDN requests that arrived with a login or cookie. Should stay at zero: only the link itself authorizes.</summary>
     public int CdnRequestsWithCredentials
@@ -459,7 +469,10 @@ public sealed partial class MockTorBox
         }
     }
 
-    public void ResetCdnPeak() => Volatile.Write(ref _peakCdn, Volatile.Read(ref _activeCdn));
+    public void ResetCdnPeak()
+    {
+        lock (_activeAnswers) _peakCdn = _activeAnswers.Count;
+    }
 
     /// <summary>A few items for looking at real screens with the sandbox profile.</summary>
     public void SeedSandbox()
@@ -1215,17 +1228,16 @@ public sealed partial class MockTorBox
             return;
         }
 
-        var active = Interlocked.Increment(ref _activeCdn);
-        var peak = Volatile.Read(ref _peakCdn);
-        while (active > peak)
+        // Only clients still there count. An answer whose client has closed it can take a moment to wind down here,
+        // and that is no connection the client is holding, which is what the provider's limit is about.
+        lock (_activeAnswers)
         {
-            var seen = Interlocked.CompareExchange(ref _peakCdn, active, peak);
-            if (seen == peak)
+            _activeAnswers.Add(context);
+            var active = _activeAnswers.Count(answer => !answer.RequestAborted.IsCancellationRequested);
+            if (active > _peakCdn)
             {
-                break;
+                _peakCdn = active;
             }
-
-            peak = seen;
         }
 
         try
@@ -1267,7 +1279,7 @@ public sealed partial class MockTorBox
         }
         finally
         {
-            Interlocked.Decrement(ref _activeCdn);
+            lock (_activeAnswers) _activeAnswers.Remove(context);
         }
     }
 }

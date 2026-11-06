@@ -56,6 +56,9 @@ public static partial class ExtractionSafety
 
             // Windows drops these, so "a." and "a" would be the same file.
             if (segment[^1] is '.' or ' ') return "name ends in a dot or space";
+
+            // Inside a destination this name means a crashed extraction of ours, and it must not come from outside.
+            if (ArchiveWorkingFolders.IsReserved(segment)) return "name this app keeps for its own working folders";
             if (segment.IndexOfAny(['<', '>', '"', '|', '?', '*']) >= 0) return "character Windows does not allow";
 
             var dot = segment.IndexOf('.');
@@ -84,6 +87,16 @@ public static partial class ExtractionSafety
             throw new ExtractionException(ExtractionFailureKind.DiskSpace, $"The archive lists {probe.TotalListedSize} bytes, over the limit of {limits.MaxTotalBytes}.");
         }
 
+        if (probe.HoldsDataStreams)
+        {
+            throw new ExtractionException(ExtractionFailureKind.UnsafePath, "The archive carries hidden data streams, which its listing doesn't show and the size limits can't count.");
+        }
+
+        if (probe.ListingHasRepeatedNames)
+        {
+            throw new ExtractionException(ExtractionFailureKind.UnsafePath, "The archive lists the same name twice, so one file would overwrite the other.");
+        }
+
         foreach (var entry in probe.Entries)
         {
             if (entry.Kind is not (ArchiveEntryKind.File or ArchiveEntryKind.Directory))
@@ -97,6 +110,58 @@ public static partial class ExtractionSafety
                 throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Unsafe entry ({reason}): {SafeForDisplay(entry.Path)}");
             }
         }
+
+        RefuseNamesWindowsCannotKeepApart(probe);
+    }
+
+    /// <summary>
+    /// Archives from other systems can hold a.txt and A.TXT. Windows keeps one name for both, UnRAR writes the
+    /// second over the first and exits 0, and with archives deleted the first would then exist nowhere.
+    /// </summary>
+    private static void RefuseNamesWindowsCannotKeepApart(ArchiveProbe probe)
+    {
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in probe.Entries)
+        {
+            var path = entry.Path.Replace('/', '\\');
+            if (entry.Kind == ArchiveEntryKind.Directory)
+            {
+                folders.Add(path);
+            }
+            else if (!files.Add(path))
+            {
+                throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"The archive holds two files whose names differ only by capital letters, and Windows can keep only one of them: {SafeForDisplay(path)}");
+            }
+
+            for (var parent = Path.GetDirectoryName(path); !string.IsNullOrEmpty(parent); parent = Path.GetDirectoryName(parent))
+            {
+                folders.Add(parent);
+            }
+        }
+
+        if (files.FirstOrDefault(folders.Contains) is { } both)
+        {
+            throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"The archive holds a file and a folder that Windows would see as the same name: {SafeForDisplay(both)}");
+        }
+    }
+
+    /// <summary>A folder as the start of a path, for checking that another path is inside it. A drive's root already ends in its separator.</summary>
+    internal static string WithSeparator(string folder) =>
+        Path.EndsInDirectorySeparator(folder) ? folder : folder + Path.DirectorySeparatorChar;
+
+    internal static string FreeName(string target)
+    {
+        var directory = Path.GetDirectoryName(target)!;
+        var stem = Path.GetFileNameWithoutExtension(target);
+        var extension = Path.GetExtension(target);
+        for (var number = 1; number < 100_000; number++)
+        {
+            var candidate = Path.Combine(directory, $"{stem} ({number}){extension}");
+            if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+        }
+
+        throw new IOException("No free name for the file.");
     }
 
     public static long RequiredFreeBytes(long listedBytes, ExtractionLimits limits) =>
@@ -127,12 +192,13 @@ public static partial class ExtractionSafety
     }
 
     /// <summary>
-    /// Walks what was really written. Refuses reparse points, hard links, unsafe names, anything
-    /// the listing did not name and more bytes than it stated; a listed file that did not appear
-    /// means the extraction cannot be trusted despite the exit code.
+    /// Walks what was really written. Refuses reparse points, hard links, unsafe names, hidden data
+    /// streams, anything the listing did not name and more bytes than it stated; a listed file that did
+    /// not appear means the extraction cannot be trusted despite the exit code.
     /// </summary>
     public static StagedContent WalkStaging(string payloadRoot, ArchiveProbe probe, ExtractionLimits limits)
     {
+        var zoneAllowed = DataStreams.HasZoneIdentifier(probe.FirstVolume);
         var listedFiles = probe.Entries
             .Where(entry => entry.Kind == ArchiveEntryKind.File)
             .Select(entry => entry.Path.Replace('/', '\\'))
@@ -171,6 +237,12 @@ public static partial class ExtractionSafety
                     throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced an unsafe name ({reason}): {SafeForDisplay(relative)}");
                 }
 
+                // UnRAR restores NTFS streams without listing them, so nothing above counts or names them.
+                if (DataStreams.FindUnexpected(item.FullName, zoneAllowed) is { } stream)
+                {
+                    throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"A file in the archive carries a hidden data stream ({SafeForDisplay(stream)}): {SafeForDisplay(relative)}");
+                }
+
                 if (item is DirectoryInfo directory)
                 {
                     if (!listedFolders.Contains(relative))
@@ -207,6 +279,13 @@ public static partial class ExtractionSafety
         if (listedFiles.FirstOrDefault(file => !written.Contains(file)) is { } absent)
         {
             throw new ExtractionException(ExtractionFailureKind.Corrupted, $"A listed file was not extracted: {SafeForDisplay(absent)}");
+        }
+
+        // The checks above fold capital letters, so one file on disk could answer for two listed names.
+        var listedCount = probe.Entries.Count(entry => entry.Kind == ArchiveEntryKind.File);
+        if (files.Count < listedCount)
+        {
+            throw new ExtractionException(ExtractionFailureKind.Corrupted, $"The archive lists {listedCount} files, and {files.Count} came out of it.");
         }
 
         directories.Sort(StringComparer.OrdinalIgnoreCase);

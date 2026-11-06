@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DownloadManager.Containers;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
@@ -27,15 +28,17 @@ public sealed class RemoteCommands : IDisposable
     private readonly Lock _sync = new();
     private readonly Dictionary<string, LastAnswer> _answers = new(StringComparer.Ordinal);
     private readonly List<(RemoteAccountStore Store, EventHandler Handler)> _accountHandlers = [];
+    private readonly ContainerImportService _containers;
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
-    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null)
+    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null, ContainerImportService? containers = null)
     {
         _providers = providers;
         _jobs = jobs;
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
+        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log);
 
         _jobs.Changed += OnJobChanged;
         _jobs.Removed += OnJobRemoved;
@@ -63,6 +66,7 @@ public sealed class RemoteCommands : IDisposable
         }
 
         _accountHandlers.Clear();
+        _containers.Dispose();
     }
 
     private void OnJobChanged(object? sender, RemoteJobView view)
@@ -280,6 +284,7 @@ public sealed class RemoteCommands : IDisposable
             FileIds = request.FileIds,
             ApprovedUncached = request.ApproveUncached,
             LinkPassword = request.LinkPassword,
+            ArchivePassword = request.ArchivePassword,
         }, cancellationToken).ConfigureAwait(false);
 
         return new RemoteAddResultDto
@@ -432,6 +437,83 @@ public sealed class RemoteCommands : IDisposable
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(RemoteDeleteRequest request, CancellationToken cancellationToken = default)
         => ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
 
+    public async Task<RemoteActionResultDto> SetArchivePasswordAsync(RemoteArchivePasswordRequest request, CancellationToken cancellationToken = default)
+        => ToDto(await _jobs.SetArchivePasswordAsync(request.JobId, request.Password, cancellationToken).ConfigureAwait(false));
+
+    // ---- Containers ---------------------------------------------------------------------------
+
+    public async Task<RemoteContainerPreviewResult> ContainerPreviewAsync(RemoteContainerPreviewRequest request, CancellationToken cancellationToken = default)
+    {
+        var preview = await _containers.PreviewAsync(request.Path, cancellationToken).ConfigureAwait(false);
+        preview.Error = Safe(preview.Error);
+        preview.AccountProblem = Safe(preview.AccountProblem);
+        preview.Problems = preview.Problems.Select(problem => Safe(problem) ?? string.Empty).ToList();
+        foreach (var package in preview.Packages)
+        {
+            package.Name = Safe(package.Name);
+            package.Comment = Safe(package.Comment);
+        }
+
+        foreach (var entry in preview.Entries)
+        {
+            entry.DisplayHost = Safe(entry.DisplayHost);
+            entry.DisplayName = Safe(entry.DisplayName);
+            entry.Reason = Safe(entry.Reason);
+        }
+
+        return preview;
+    }
+
+    public async Task<RemoteContainerAddResult> ContainerAddAsync(RemoteContainerAddRequest request, CancellationToken cancellationToken = default)
+    {
+        var added = await _containers.AddAsync(request, cancellationToken).ConfigureAwait(false);
+        var outcomes = added.Outcomes.Select(outcome => new RemoteContainerAddOutcomeDto
+        {
+            EntryId = outcome.EntryId,
+            Ok = outcome.Result.Job is not null,
+            Error = Safe(outcome.Result.Error),
+            Note = Safe(outcome.Result.Note),
+            Existing = outcome.Result.Existing,
+            InputKind = outcome.Result.Kind is { } kind ? Word(kind) : null,
+            JobId = outcome.Result.Job?.Id,
+            Job = outcome.Result.Job is { } job ? ToDto(job) : null,
+        }).ToList();
+        return FitInOneAnswer(new RemoteContainerAddResult { Ok = outcomes.Any(outcome => outcome.Ok), Error = Safe(added.Error), Outcomes = outcomes });
+    }
+
+    /// <summary>
+    /// By now the entries are saved, and may already be sending links to the provider. A container can hold enough that the
+    /// whole list of jobs won't fit one answer, and the worst thing to tell the client then is that adding failed. So the
+    /// full jobs are what goes: the client still learns how each entry went, and can read the jobs through remote.list.
+    /// </summary>
+    public static RemoteContainerAddResult FitInOneAnswer(RemoteContainerAddResult result, int mostChars = Protocol.MaxFrameBytes - (64 * 1024))
+    {
+        if (IpcMessage.Create(MessageTypes.RemoteContainerAddResult, result).Payload?.GetRawText().Length < mostChars)
+        {
+            return result;
+        }
+
+        foreach (var outcome in result.Outcomes)
+        {
+            outcome.Job = null;
+        }
+
+        result.JobsLeftOut = true;
+        return result;
+    }
+
+    public async Task<RemoteContainerSendResult> ContainerSendToJdAsync(RemoteContainerSendRequest request, CancellationToken cancellationToken = default)
+    {
+        var sent = await _containers.SendToJDownloaderAsync(request.Path, cancellationToken).ConfigureAwait(false);
+        return new RemoteContainerSendResult
+        {
+            Ok = sent.Status == JDownloaderBridgeStatus.Sent,
+            Status = Word(sent.Status),
+            JdAnswered = sent.Status is JDownloaderBridgeStatus.Sent or JDownloaderBridgeStatus.Rejected,
+            Message = Safe(sent.Message) ?? string.Empty,
+        };
+    }
+
     // ---- Calling a provider -------------------------------------------------------------------
 
     /// <summary>A provider's failure as the words and kind a client gets. Only the caller going away is left to throw.</summary>
@@ -530,6 +612,7 @@ public sealed class RemoteCommands : IDisposable
         ApprovalNeeded = view.ApprovalNeeded,
         ApprovedUncached = view.ApprovedUncached,
         HasLinkPassword = view.HasLinkPassword,
+        HasArchivePassword = view.HasArchivePassword,
         FailureKind = view.FailureKind is { } failure ? Word(failure) : null,
         FailureMessage = Safe(view.FailureMessage),
         NextCheckAt = view.NextCheckAt,

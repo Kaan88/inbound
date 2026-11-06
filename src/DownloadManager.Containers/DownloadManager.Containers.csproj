@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DownloadManager.Containers.Tests" />
+    <InternalsVisibleTo Include="DownloadManager.Integration.Tests" />
   </ItemGroup>
 
 </Project>

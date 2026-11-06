@@ -58,6 +58,6 @@ public static class RemotePaths
         var clean = new string(buffer).Trim().TrimEnd('.', ' ');
         if (clean.Length == 0 || clean is "." or "..") return null;
         var stem = clean.Split('.', 2)[0].TrimEnd();
-        return ReservedNames.Contains(stem) ? "_" + clean : clean;
+        return ReservedNames.Contains(stem) || Archives.ArchiveWorkingFolders.IsReserved(clean) ? "_" + clean : clean;
     }
 }

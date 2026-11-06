@@ -44,8 +44,8 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Assert.True(File.Exists(Space.Output("b (1).txt")));
         Assert.False(File.Exists(Space.Output("c.txt")));
 
-        var leftover = Assert.Single(StagingArea.FindLeftovers(Space.Staging));
-        Assert.True(await StagingArea.RecoverAndRemoveAsync(leftover.Folder));
+        Assert.Single(StagingArea.FindLeftovers(Space.Staging));
+        Assert.True((await StagingArea.RecoverAndRemoveAsync(Space.Staging, archive, Space.Destination)).Removed);
 
         Assert.Equal(["b.txt"], Directory.EnumerateFiles(Space.Destination).Select(file => Path.GetFileName(file)!));
         Assert.Equal(UserContent, File.ReadAllBytes(Space.Output("b.txt")));
@@ -67,8 +67,8 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         await RunAndRewindToMidFinalize(archive, ExtractionConflictPolicy.Overwrite);
         Assert.Equal(Content, File.ReadAllBytes(Space.Output("b.txt")));
 
-        var leftover = Assert.Single(StagingArea.FindLeftovers(Space.Staging));
-        Assert.True(await StagingArea.RecoverAndRemoveAsync(leftover.Folder));
+        Assert.Single(StagingArea.FindLeftovers(Space.Staging));
+        Assert.True((await StagingArea.RecoverAndRemoveAsync(Space.Staging, archive, Space.Destination)).Removed);
 
         Assert.Equal(UserContent, File.ReadAllBytes(Space.Output("b.txt")));
         Assert.False(File.Exists(Space.Output("a.txt")));
@@ -80,9 +80,9 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         var archive = BuildThreeFiles();
         await RunAndRewindToMidFinalize(archive, ExtractionConflictPolicy.Rename);
         var leftover = Assert.Single(StagingArea.FindLeftovers(Space.Staging));
-        File.AppendAllText(Path.Combine(leftover.Folder, "placed.log"), "{\"Source\":\"c.txt\",\"Tar");
+        File.AppendAllText(Path.Combine(leftover, "placed.log"), "{\"Source\":\"c.txt\",\"Tar");
 
-        Assert.True(await StagingArea.RecoverAndRemoveAsync(leftover.Folder));
+        Assert.True((await StagingArea.RecoverAndRemoveAsync(Space.Staging, archive, Space.Destination)).Removed);
 
         Assert.Empty(Directory.EnumerateFiles(Space.Destination));
     }
@@ -142,7 +142,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         await RunAndRewindToMidFinalize(archive, ExtractionConflictPolicy.Rename);
         var leftover = Assert.Single(StagingArea.FindLeftovers(Space.Staging));
 
-        Assert.True(await StagingArea.DiscardFinishedAsync(leftover.Folder));
+        Assert.True(await StagingArea.DiscardFinishedAsync(Space.Staging, archive, Space.Destination));
 
         Space.AssertNoStagingLeft();
         Assert.True(File.Exists(Space.Output("a.txt")));

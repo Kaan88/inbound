@@ -1,3 +1,4 @@
+using DownloadManager.Core.Archives;
 using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 
@@ -31,6 +32,8 @@ public sealed record RemoteCoordinatorOptions
     public int MostResubmits { get; init; } = 3;
     /// <summary>0 to 1. Fixed in tests.</summary>
     public Func<double> Jitter { get; init; } = Random.Shared.NextDouble;
+    /// <summary>Takes a job's archive password once it has a package. Without one, the password stays on the job.</summary>
+    public IPackagePasswordKeeper? PackagePasswords { get; init; }
 }
 
 /// <summary>What a user or a frontend asked to add. Holds secrets, so it prints as nothing.</summary>
@@ -55,6 +58,17 @@ public sealed record RemoteAddRequest
     /// <summary>The user agreed to have the provider start work on this if it isn't cached.</summary>
     public bool ApprovedUncached { get; init; }
     public string? LinkPassword { get; init; }
+    /// <summary>For the archives this brings. Never sent to the provider, and not the same thing as <see cref="LinkPassword"/>.</summary>
+    public string? ArchivePassword { get; init; }
+    /// <summary>
+    /// It came with the input and nobody typed it. Several jobs of one package can bring the same one at
+    /// different times, and none of them may undo what the user has said in between.
+    /// </summary>
+    public bool ArchivePasswordOffered { get; init; }
+    /// <summary>Set when this is one of several that belong together.</summary>
+    public RemoteJobPlacement? Placement { get; init; }
+    /// <summary>A name to show until the provider gives one. Already free of secrets.</summary>
+    public string? NameHint { get; init; }
 
     public override string ToString() => "[remote add request]";
 }
@@ -81,6 +95,7 @@ public sealed record RemoteJobView
     public bool ApprovalNeeded { get; init; }
     public bool ApprovedUncached { get; init; }
     public bool HasLinkPassword { get; init; }
+    public bool HasArchivePassword { get; init; }
     public RemoteFailureKind? FailureKind { get; init; }
     public string? FailureMessage { get; init; }
     public DateTimeOffset? NextCheckAt { get; init; }
@@ -289,6 +304,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             }
         }
         finally { _gate.Release(); }
+
+        await HandOverWhatWasLeftAsync().ConfigureAwait(false);
     }
 
     public async Task StopAsync()
@@ -395,6 +412,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             ApprovalNeeded = record.ApprovalNeeded,
             ApprovedUncached = record.ApprovedUncached,
             HasLinkPassword = record.ProtectedLinkPassword is not null,
+            HasArchivePassword = record.ProtectedArchivePassword is not null || record.ArchivePasswordHandedOver,
             FailureKind = record.FailureKind,
             FailureMessage = record.FailureMessage,
             NextCheckAt = record.NextCheckAt,
@@ -422,6 +440,28 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         return first.Kind == RemoteInputKind.OrdinaryLink
             ? RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false))
             : first;
+    }
+
+    /// <summary>Sorts many at once, fetching what they all need only once. Each answer is in the place of its input.</summary>
+    public async Task<IReadOnlyList<RemoteInputClassification>> ClassifyAllAsync(IReadOnlyList<string> inputs, CancellationToken cancellationToken = default)
+    {
+        var plain = await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false);
+        List<RemoteClassifierProvider>? withHosters = null;
+        var answers = new List<RemoteInputClassification>(inputs.Count);
+        foreach (var input in inputs)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var first = RemoteInputClassifier.Classify(input, plain);
+            if (first.Kind == RemoteInputKind.OrdinaryLink)
+            {
+                withHosters ??= await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false);
+                first = RemoteInputClassifier.Classify(input, withHosters);
+            }
+
+            answers.Add(first);
+        }
+
+        return answers;
     }
 
     private async Task<List<RemoteClassifierProvider>> ClassifierProvidersAsync(bool withHosters, CancellationToken cancellationToken)
@@ -463,6 +503,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         if (request.Selection == RemoteSelectionMode.Chosen && request.FileIds is not { Count: > 0 })
         {
             return new RemoteAddResult { Error = "Choose at least one file." };
+        }
+
+        if (RemoteJobRules.DescribeBadArchivePassword(request.ArchivePassword) is { } badPassword)
+        {
+            return new RemoteAddResult { Error = badPassword };
         }
 
         var built = await BuildRecordAsync(request, cancellationToken).ConfigureAwait(false);
@@ -508,6 +553,20 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
         Raise(saved);
         WakeLoop(saved.Provider);
+
+        // Whoever gives a password now wants it used, whichever job ends up bringing the files.
+        var alreadyHasOne = saved.ProtectedArchivePassword is not null || saved.ArchivePasswordHandedOver;
+        if (existing && !string.IsNullOrEmpty(request.ArchivePassword) && !(request.ArchivePasswordOffered && alreadyHasOne))
+        {
+            var given = await SetArchivePasswordAsync(saved.Id, request.ArchivePassword, request.ArchivePasswordOffered, cancellationToken).ConfigureAwait(false);
+            if (!given.Ok)
+            {
+                note = note is null ? given.Error : $"{note} {given.Error}";
+            }
+
+            return new RemoteAddResult { Job = given.Job ?? Find(saved.Id) ?? ToView(saved), Existing = true, Kind = built.Kind, Note = note };
+        }
+
         return new RemoteAddResult { Job = ToView(saved), Existing = existing, Kind = built.Kind, Note = note };
     }
 
@@ -591,7 +650,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                     ProtectedInput = SecretProtector.ProtectRemoteInput(request.Input!.Trim()),
                     ProtectedLinkPassword = string.IsNullOrEmpty(request.LinkPassword) ? null : SecretProtector.ProtectRemoteLinkPassword(request.LinkPassword),
                     PredictedHash = classification.Hash,
-                    Name = classification.Name,
+                    Name = classification.Name ?? request.NameHint,
                     DisplayHost = classification.DisplayHost,
                     HosterName = classification.HosterName,
                     State = RemoteJobState.Intended,
@@ -662,6 +721,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             SelectionMode = request.Selection ?? RemoteSelectionMode.AskWhenReady,
             SelectedFileIds = request.Selection == RemoteSelectionMode.Chosen ? request.FileIds!.ToList() : [],
             ApprovedUncached = request.ApprovedUncached,
+            ProtectedArchivePassword = string.IsNullOrEmpty(request.ArchivePassword) ? null : SecretProtector.ProtectRemoteArchivePassword(request.ArchivePassword),
+            ArchivePasswordOffered = request.ArchivePasswordOffered,
+            Placement = request.Placement,
+            Name = request.NameHint,
             NextCheckAt = now,
             CreatedAt = now,
             UpdatedAt = now,
@@ -785,6 +848,148 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         }, "Only a failed or blocked item can be retried.", cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sets the password for this job's archives, whether or not its downloads exist yet. It is saved on
+    /// the job first, so a crash can't lose it, and goes on to the archive side once there is a package.
+    /// An empty one clears it, on both sides.
+    /// </summary>
+    public Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, CancellationToken cancellationToken = default)
+        => SetArchivePasswordAsync(id, password, offered: false, cancellationToken);
+
+    private async Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, bool offered, CancellationToken cancellationToken)
+    {
+        if (RemoteJobRules.DescribeBadArchivePassword(password) is { } bad)
+        {
+            return new RemoteActionResult(false, bad);
+        }
+
+        if (Find(id) is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        var clearing = string.IsNullOrEmpty(password);
+        var sealedPassword = clearing ? null : SecretProtector.ProtectRemoteArchivePassword(password!);
+        var updated = await UpdateAsync(id, record => record with
+        {
+            ProtectedArchivePassword = sealedPassword,
+            ArchivePasswordHandedOver = false,
+            ArchivePasswordOffered = offered,
+        }, cancellationToken).ConfigureAwait(false);
+        if (updated is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        string? problem = null;
+        if (clearing)
+        {
+            // One password serves a whole package, so its other jobs must not hand it back later or go on saying they have one.
+            List<Guid> siblings;
+            lock (_sync)
+            {
+                siblings = _records.Values
+                    .Where(other => other.Id != id && SharesPackage(other, updated) && (other.ProtectedArchivePassword is not null || other.ArchivePasswordHandedOver))
+                    .Select(other => other.Id)
+                    .ToList();
+            }
+
+            foreach (var sibling in siblings)
+            {
+                await UpdateAsync(sibling, record => record with
+                {
+                    ProtectedArchivePassword = null,
+                    ArchivePasswordHandedOver = false,
+                    ArchivePasswordOffered = false,
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (updated.PackageId is { } package && _options.PackagePasswords is { } keeper)
+            {
+                problem = await KeepPasswordAsync(keeper, package, null, keepExisting: false).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            problem = await HandOverArchivePasswordAsync(id).ConfigureAwait(false);
+        }
+
+        return new RemoteActionResult(problem is null, problem, Find(id));
+    }
+
+    private static bool SharesPackage(RemoteJobRecord one, RemoteJobRecord other) =>
+        (one.PackageId is { } package && package == other.PackageId) ||
+        (one.Placement?.PackageKey is { } key && key == other.Placement?.PackageKey);
+
+    /// <summary>
+    /// Gives a job's archive password to the archive side and takes it off the job, so one copy is kept.
+    /// Does nothing until there is a package. A crash before the job is saved means handing it over twice,
+    /// which changes nothing. Returns why it couldn't be done.
+    /// </summary>
+    private async Task<string?> HandOverArchivePasswordAsync(Guid id)
+    {
+        RemoteJobRecord? record;
+        lock (_sync) _records.TryGetValue(id, out record);
+        if (record is not { PackageId: { } package, ProtectedArchivePassword: { } sealedPassword } || _options.PackagePasswords is not { } keeper)
+        {
+            return null;
+        }
+
+        var plain = SecretProtector.UnprotectRemoteArchivePassword(sealedPassword);
+        if (plain is null)
+        {
+            await UpdateAsync(id, latest => latest.ProtectedArchivePassword == sealedPassword
+                ? latest with { ProtectedArchivePassword = null, Notes = [.. latest.Notes, "The saved archive password can't be read on this Windows account. Enter it again if extraction asks."] }
+                : null).ConfigureAwait(false);
+            return null;
+        }
+
+        if (await KeepPasswordAsync(keeper, package, plain, record.ArchivePasswordOffered).ConfigureAwait(false) is { } problem)
+        {
+            return problem;
+        }
+
+        await UpdateAsync(id, latest => latest.ProtectedArchivePassword == sealedPassword
+            ? latest with { ProtectedArchivePassword = null, ArchivePasswordHandedOver = true }
+            : null).ConfigureAwait(false);
+        return null;
+    }
+
+    private async Task<string?> KeepPasswordAsync(IPackagePasswordKeeper keeper, Guid package, string? password, bool keepExisting)
+    {
+        try
+        {
+            return RemoteText.Clean(await keeper.SetPackagePasswordAsync(package, password, keepExisting, CancellationToken.None).ConfigureAwait(false), 300, hide: [password]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"An archive password could not be saved: {ex.GetType().Name}.");
+            return "The archive password could not be saved, so it stays with this item. Try again in a moment.";
+        }
+    }
+
+    /// <summary>A crash can fall between saving a password on a job that has its package and handing it over.</summary>
+    private async Task HandOverWhatWasLeftAsync()
+    {
+        List<Guid> waiting;
+        lock (_sync) waiting = _records.Values.Where(record => record is { PackageId: not null, ProtectedArchivePassword: not null }).Select(record => record.Id).ToList();
+        foreach (var id in waiting)
+        {
+            try
+            {
+                if (await HandOverArchivePasswordAsync(id).ConfigureAwait(false) is { } problem)
+                {
+                    _log?.Invoke($"Remote job {id:N}: its archive password was not handed over: {problem}");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // It stays on the job, and the next start tries again.
+                _log?.Invoke($"Remote job {id:N}: could not save after handing over its archive password: {ex.GetType().Name}.");
+            }
+        }
+    }
+
     /// <summary>Check Now: looks at these jobs on the next pass, without waiting for their timers. A 429's wait still holds.</summary>
     public async Task<RemoteActionResult> CheckNowAsync(Guid id, CancellationToken cancellationToken = default)
         => await ActAsync(id, record => CheckedNow(record), "This item has nothing to check.", cancellationToken).ConfigureAwait(false);
@@ -839,6 +1044,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 ProtectedInput = null,
                 ProtectedTorrent = null,
                 ProtectedLinkPassword = null,
+                ProtectedArchivePassword = null,
                 NextCheckAt = null,
             }, CancellationToken.None).ConfigureAwait(false);
             lock (_sync) _records.Remove(id);

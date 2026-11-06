@@ -225,6 +225,28 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(Sha256Of(seed, size), await Hashing.Sha256FileAsync(done.FinalFilePath));
     }
 
+    /// <summary>Null only for a save's own temporary file. Anything else that can't be read is a reason to fail.</summary>
+    private static string? ReadIfOpenable(string file)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (file.EndsWith(".tmp", StringComparison.Ordinal))
+            {
+                return null;
+            }
+            catch (IOException) when (attempt < 10)
+            {
+                Thread.Sleep(20);
+            }
+        }
+    }
+
     private static void AssertFakeSecretsNowhere(NeutralRig rig, ServiceContext ctx, params string[] more)
     {
         var snapshot = JsonSerializer.Serialize(ctx.Service.GetSnapshot());
@@ -236,7 +258,8 @@ public sealed partial class RuntimeServiceTests
             Assert.DoesNotContain(secret, lines);
             foreach (var file in Directory.GetFiles(ctx.Paths.Root, "*", SearchOption.AllDirectories))
             {
-                Assert.DoesNotContain(secret, File.ReadAllText(file));
+                // The service is still running, so a save's temporary file can be here, held open or already gone.
+                if (ReadIfOpenable(file) is { } text) Assert.DoesNotContain(secret, text);
             }
         }
     }

@@ -132,6 +132,76 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
     // ----- Scenario H: multi-part sets -----
 
+    [Fact]
+    public async Task AVolumeThatFinishesDuringARunIsPartOfItsResultIfTheToolReadItAndGoesWhenArchivesAreDeleted()
+    {
+        var tool = new FakeExtractor
+        {
+            Hold = TimeSpan.FromSeconds(2),
+            VolumesRead = request => [request.FirstVolume, Path.Combine(Path.GetDirectoryName(request.FirstVolume)!, "late.part2.rar")],
+        };
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool });
+        await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { AutoExtract = true, DeleteArchives = true });
+
+        await run.DownloadAsync("late.part1.rar", Text);
+        await tool.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Another download's volume, unknown when the set was claimed.
+        var second = await run.DownloadAsync("late.part2.rar", Text);
+        await run.WaitForJobAsync(second.Id, "completed");
+
+        var done = await run.WaitForStateAsync("completed");
+        Assert.Contains(second.Id, done.JobIds);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
+        while (run.AllFiles().Count > 0 && DateTimeOffset.UtcNow < deadline) await Task.Delay(20);
+        Assert.Empty(run.AllFiles());
+
+        // What this run extracted is never mistaken for one of its volumes, whatever it is called.
+        await using var other = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => new WritingExtractor("inner.part2.rar", Text) });
+        await other.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { AutoExtract = true, DeleteArchives = true });
+        await other.DownloadAsync("inner.part1.rar", Text);
+        await other.WaitForStateAsync("completed");
+        await Task.Delay(200);
+        Assert.Equal(["inner.part2.rar"], other.AllFiles());
+    }
+
+    [Fact]
+    public async Task AnOfferedPackagePasswordNeverReplacesOneAlreadyThere()
+    {
+        var tool = new FakeExtractor();
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool });
+        var job = await run.DownloadAsync("single.rar", Text, packageKey: "one-file-package");
+        await run.WaitForJobAsync(job.Id, "completed");
+        var package = run.Service.FindGroupOf(job.Id)!.Value;
+
+        // A package of one file is still a package, which a set can be told about.
+        Assert.Null(run.Service.FindPackageOf(job.Id));
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, Secret, keepExisting: true));
+        var set = await run.WaitForSetAsync(candidate => candidate.HasPassword);
+        Assert.Equal(package, set.PackageId);
+        var saved = File.ReadAllText(Path.Combine(run.Paths.Root, "archive", "packages", $"{package:N}.json"));
+
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, "Another-Pw", keepExisting: true));
+        Assert.Equal(saved, File.ReadAllText(Path.Combine(run.Paths.Root, "archive", "packages", $"{package:N}.json")));
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, "Another-Pw"));
+        Assert.NotEqual(saved, File.ReadAllText(Path.Combine(run.Paths.Root, "archive", "packages", $"{package:N}.json")));
+
+        Assert.Contains("no such package", await run.Archives.SetPackagePasswordAsync(Guid.NewGuid(), Secret));
+    }
+
+    /// <summary>Puts one file next to the archive, as an extraction would.</summary>
+    private sealed class WritingExtractor(string name, byte[] bytes) : IArchiveExtractor
+    {
+        public Task<ArchiveProbe> ProbeAsync(string firstVolume, string? password, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public async Task<ExtractionResult> ExtractAsync(ExtractionRequest request, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
+        {
+            var path = Path.Combine(request.Destination, name);
+            await File.WriteAllBytesAsync(path, bytes, cancellationToken);
+            return new ExtractionResult(request.Destination, [new ExtractedFile(name, path, ExtractedFileOutcome.Written)]) { VolumesRead = [request.FirstVolume], FlushedToDisk = true };
+        }
+    }
+
     [RarFact]
     public async Task APartNumberedSetWaitsForEveryRealDownloadAndRunsOnce()
     {
@@ -1156,7 +1226,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => fake });
 
         // part10 alone suggests no padding, and part01 then corrects that.
-        var late = run.WriteFile("v.part10.rar", OneFileRar());
+        var late = run.WriteFile("v.part10.rar", Text);
         var first = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = late, Password = Secret });
         var other = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = run.PathOf("v.part01.rar"), Password = Secret });
         var upper = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = run.PathOf("V.PART10.RAR"), Password = Secret });

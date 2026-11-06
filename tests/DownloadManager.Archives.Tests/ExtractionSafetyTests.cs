@@ -424,16 +424,15 @@ public sealed class StagingAreaTests : IDisposable
     }
 
     [Fact]
-    public async Task ALeftoverIsDetectableAndNamesItsArchive()
+    public async Task ALeftoverIsFoundByTheArchiveAndDestinationItIsFor()
     {
         var area = await PrepareAsync();
 
         var leftover = Assert.Single(StagingArea.FindLeftovers(_space.Staging));
 
-        Assert.Equal(area.Folder, leftover.Folder);
-        Assert.Equal(_space.Archive("x.rar"), leftover.FirstVolume);
-        Assert.Equal(_space.Destination, leftover.Destination);
-        Assert.True(await StagingArea.RecoverAndRemoveAsync(leftover.Folder));
+        Assert.Equal(area.Folder, leftover);
+        Assert.Equal(area.Folder, StagingArea.FolderFor(_space.Staging, _space.Archive("x.rar"), _space.Destination));
+        Assert.True((await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination)).Removed);
         Assert.Empty(StagingArea.FindLeftovers(_space.Staging));
     }
 
@@ -451,7 +450,7 @@ public sealed class StagingAreaTests : IDisposable
     }
 
     [Fact]
-    public async Task ACrashAfterTheNewFileLandedKeepsTheNewFile()
+    public async Task AnOriginalWhosePlaceIsTakenGoesInBesideItAndIsNeverLost()
     {
         var area = await PrepareAsync();
         var displaced = Path.Combine(area.DisplacedFolder, "a.txt");
@@ -463,6 +462,147 @@ public sealed class StagingAreaTests : IDisposable
         await PrepareAsync();
 
         Assert.Equal("new", File.ReadAllText(_space.Output("a.txt")));
+        Assert.Equal("old", File.ReadAllText(_space.Output("a (1).txt")));
+    }
+
+    // ----- A staging folder sits among the user's files, so nothing in it is taken at its word -----
+
+    private string PlantedFolder() => StagingArea.FolderFor(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+    private void Plant(string folder, params string[] logLines)
+    {
+        Directory.CreateDirectory(folder);
+        File.WriteAllLines(Path.Combine(folder, "placed.log"), logLines);
+    }
+
+    private static string LogLine(object entry) => System.Text.Json.JsonSerializer.Serialize(entry);
+
+    [Fact]
+    public async Task AFileChangedSinceItWasPlacedIsLeftAlone()
+    {
+        Directory.CreateDirectory(_space.Destination);
+        var target = _space.Output("a.txt");
+        File.WriteAllText(target, "the user re-extracted this and edited it");
+        var info = new FileInfo(target);
+
+        Plant(PlantedFolder(), LogLine(new { Source = "a.txt", Target = target, DisplacedAs = (string?)null, Length = info.Length + 1, LastWriteTicks = info.LastWriteTimeUtc.Ticks }));
+        var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(recovery.Removed);
+        Assert.Equal(1, recovery.LeftInPlace);
+        Assert.Equal("the user re-extracted this and edited it", File.ReadAllText(target));
+    }
+
+    [Fact]
+    public async Task ALogLineWithoutAnIdentityRemovesNothing()
+    {
+        Directory.CreateDirectory(_space.Destination);
+        var target = _space.Output("precious.txt");
+        File.WriteAllText(target, "precious");
+
+        Plant(PlantedFolder(), LogLine(new { Source = "a.txt", Target = target }));
+        var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(recovery.Removed);
+        Assert.True(File.Exists(target));
+    }
+
+    [Fact]
+    public async Task ALogLineOutsideTheDestinationRemovesNothing()
+    {
+        var outside = Path.Combine(_space.Root, "elsewhere.txt");
+        File.WriteAllText(outside, "precious");
+        var info = new FileInfo(outside);
+
+        Plant(PlantedFolder(), LogLine(new { Source = "a.txt", Target = outside, DisplacedAs = (string?)null, info.Length, LastWriteTicks = info.LastWriteTimeUtc.Ticks }));
+        await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(File.Exists(outside));
+    }
+
+    [Theory]
+    [InlineData("""{"Source":"a.txt","Target":"a\u0000b"}""")]
+    [InlineData("""{"Target":"C:\\x.txt"}""")]
+    [InlineData("""{"Source":"..\\..\\x","Target":"C:\\x.txt"}""")]
+    [InlineData("""{"Source":"a.txt"}""")]
+    [InlineData("""not json at all""")]
+    public async Task ABadLogLineIsSkippedAndCanNotThrow(string line)
+    {
+        Plant(PlantedFolder(), line);
+
+        var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(recovery.Removed);
+    }
+
+    [Fact]
+    public async Task ADisplacedFileHasNowhereToGoButTheDestination()
+    {
+        // The destination comes from the caller, so nothing in the folder can point this anywhere else.
+        var folder = PlantedFolder();
+        Directory.CreateDirectory(Path.Combine(folder, "displaced", "Startup"));
+        File.WriteAllText(Path.Combine(folder, "displaced", "Startup", "planted.cmd"), "x");
+        File.WriteAllText(Path.Combine(folder, "attempt.json"), $$"""{"FirstVolume":"x","Destination":{{System.Text.Json.JsonSerializer.Serialize(_space.Root)}}}""");
+
+        await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(File.Exists(_space.Output(@"Startup\planted.cmd")));
+        Assert.False(File.Exists(Path.Combine(_space.Root, "Startup", "planted.cmd")));
+    }
+
+    [Fact]
+    public async Task AnEmptyOrUnreadableMarkerFromAnOlderBuildCostsNoOriginal()
+    {
+        var folder = PlantedFolder();
+        Directory.CreateDirectory(Path.Combine(folder, "displaced"));
+        File.WriteAllText(Path.Combine(folder, "attempt.json"), string.Empty);
+        File.WriteAllText(Path.Combine(folder, "displaced", "users-file.txt"), "the only copy");
+
+        var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(recovery.Removed);
+        Assert.Equal("the only copy", File.ReadAllText(_space.Output("users-file.txt")));
+    }
+
+    [Fact]
+    public async Task ALockedLogKeepsTheFolderForLater()
+    {
+        var folder = PlantedFolder();
+        Plant(folder);
+        var log = Path.Combine(folder, "placed.log");
+        using (new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+            Assert.False(recovery.Removed);
+            Assert.True(Directory.Exists(folder));
+        }
+    }
+
+    [Fact]
+    public async Task AFolderThatIsALinkIsRemovedWithoutFollowingIt()
+    {
+        var outside = Path.Combine(_space.Root, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "keep.txt"), "keep");
+        File.SetAttributes(Path.Combine(outside, "keep.txt"), FileAttributes.ReadOnly);
+        var folder = PlantedFolder();
+        Directory.CreateDirectory(_space.Staging);
+        try
+        {
+            Directory.CreateSymbolicLink(folder, outside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Making a symbolic link needs a privilege this account may not have, which leaves nothing to test.
+            return;
+        }
+
+        var recovery = await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
+
+        Assert.True(recovery.Removed);
+        Assert.True(File.Exists(Path.Combine(outside, "keep.txt")));
+        Assert.True(new FileInfo(Path.Combine(outside, "keep.txt")).IsReadOnly);
+        File.SetAttributes(Path.Combine(outside, "keep.txt"), FileAttributes.Normal);
     }
 
     [Fact]

@@ -480,7 +480,17 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
 
     private async Task ProtectCheckpointLinksAsync(DownloadJob job, CancellationToken cancellationToken)
     {
-        var checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        DownloadCheckpoint? checkpoint;
+        try
+        {
+            checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not read the checkpoint of job {job.Id}: {ex.GetType().Name}");
+            return;
+        }
+
         if (checkpoint is not null && (HoldsProviderSecret(checkpoint.Url) || HoldsProviderSecret(checkpoint.FinalUrl)))
         {
             checkpoint.Url = job.Url;
@@ -571,7 +581,22 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
                 return DownloadResult.Fail(DownloadState.Failed, linkFailure, job.ReceivedBytes, job.TotalBytes);
             }
 
-            var checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            DownloadCheckpoint? checkpoint;
+            try
+            {
+                checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Going on without it would have the engine delete the part file and start again from nothing.
+                _log?.Invoke($"Could not read the checkpoint of job {job.Id}: {ex.GetType().Name}");
+                return DownloadResult.Fail(DownloadState.Failed,
+                    new JobFailure(FailureKind.Unknown,
+                        "This download's saved progress couldn't be read just now, so it was not started. Nothing was lost. Resume it to try again.",
+                        true, true, DateTimeOffset.UtcNow),
+                    job.ReceivedBytes, job.TotalBytes);
+            }
+
             var result = await engine.ExecuteAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
             if (result.Success || result.Failure is not { } failure ||
                 job.RemoteSource is null || _linkBroker is null ||

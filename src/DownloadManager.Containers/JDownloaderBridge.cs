@@ -122,7 +122,9 @@ public sealed class JDownloaderBridge : IDisposable
 
         if (extension == CcfExtension)
         {
-            return await DeliverAsync(AddLinksRoute, [new("urls", ToFileUrl(path))], cancellationToken).ConfigureAwait(false);
+            return ToFileUrl(path) is { } fileUrl
+                ? await DeliverAsync(AddLinksRoute, [new("urls", fileUrl)], cancellationToken).ConfigureAwait(false)
+                : Invalid("This file's path can't be written as an address JDownloader would read the same way.");
         }
 
         string dlcText;
@@ -248,11 +250,22 @@ public sealed class JDownloaderBridge : IDisposable
         }
     }
 
-    private static string ToFileUrl(string path)
+    /// <summary>
+    /// Built from escaped segments rather than handed to <see cref="Uri"/>, which reads a %41 in a file's name as an
+    /// escape and so names another file. Null when the result still wouldn't lead back to this exact path.
+    /// </summary>
+    internal static string? ToFileUrl(string path)
     {
-        const string Tripled = "file:///";
-        var url = new Uri(path).AbsoluteUri;
-        return url.StartsWith(Tripled, StringComparison.OrdinalIgnoreCase) ? "file:/" + url[Tripled.Length..] : url;
+        var segments = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (segments.Length < 2 || segments[0].Length != 2 || !char.IsAsciiLetter(segments[0][0]) || segments[0][1] != ':')
+        {
+            return null;
+        }
+
+        var url = "file:/" + segments[0] + "/" + string.Join('/', segments.Skip(1).Select(Uri.EscapeDataString));
+        return Uri.TryCreate(url, UriKind.Absolute, out var parsed) && string.Equals(parsed.LocalPath, path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar), StringComparison.Ordinal)
+            ? url
+            : null;
     }
 
     private static JDownloaderBridgeResult Invalid(string message) => new(JDownloaderBridgeStatus.InvalidInput, message);

@@ -1,8 +1,10 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using DownloadManager.Archives;
 using DownloadManager.Contracts;
+using DownloadManager.Core.Archives;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -25,32 +27,28 @@ internal static partial class ArchiveSetIdentity
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
 
     /// <summary>
-    /// part1 and part01 mean one first volume unless both sets really exist. Without this, a set
-    /// seen first as part10 alone would be keyed for an unpadded part1 and change when part01
-    /// arrives, leaving a record waiting for a file that will never come.
+    /// A set is its folder and its first volume's real name, so part1 and part01 are two sets from the
+    /// start, and a record cannot turn into the other's when the other shows up. Only a name worked out
+    /// from a later volume can be wrong, and <see cref="ArchiveDirectoryView.FindFor"/> deals with that.
     /// </summary>
-    public static string KeyFor(string directory, ArchiveVolumeSet set, IReadOnlyList<ArchiveVolumeSet> allSets)
-    {
-        var name = FirstName(set);
-        var hasTwin = allSets.Count(other => other.Scheme == ArchiveVolumeScheme.PartNumbered &&
-            string.Equals(other.BaseName, set.BaseName, StringComparison.OrdinalIgnoreCase)) > 1;
-        if (set.Scheme == ArchiveVolumeScheme.PartNumbered && !hasTwin)
-        {
-            name = PaddedPartNumber().Replace(name, ".part$1.rar");
-        }
+    public static string KeyFor(string directory, ArchiveVolumeSet set) => KeyFor(directory, FirstName(set));
 
-        return (NormalizeDirectory(directory) + "|" + name).ToUpperInvariant();
-    }
+    public static string KeyFor(string directory, string firstVolumeName) =>
+        (NormalizeDirectory(directory) + "|" + firstVolumeName).ToUpperInvariant();
 
     /// <summary>The same set gets the same id on every start, so its claim and its file are one thing.</summary>
     public static Guid IdFor(string key) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
 
+    /// <summary>The base of a name that is part number 1 of a set, in any padding, or null.</summary>
+    public static string? BaseOfFirstPart(string name) =>
+        FirstPartName().Match(name) is { Success: true } first ? first.Groups["base"].Value : null;
+
     [GeneratedRegex(@"\.[r-z]\d{2}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OldStyleVolumeName();
 
-    [GeneratedRegex(@"\.part0*(\d+)\.rar$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex PaddedPartNumber();
+    [GeneratedRegex(@"^(?<base>.+)\.part0*1\.rar$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FirstPartName();
 }
 
 /// <summary>What one folder holds right now: files on disk, and files that downloads there will bring.</summary>
@@ -105,13 +103,77 @@ internal sealed class ArchiveDirectoryView
             list.Add(job);
         }
 
-        var sets = ArchiveVolumes.Group(onDisk.Concat(jobsByName.Keys).Concat(expectedNames ?? []));
+        var sets = ArchiveVolumes.Group(
+            onDisk.Concat(jobsByName.Keys).Concat(expectedNames ?? []),
+            name => onDisk.Contains(name) && VolumeHeaders.SaysWholeArchive(Path.Combine(folder, name)));
         return new ArchiveDirectoryView(folder, onDisk, jobsByName, sets);
     }
 
     public ArchiveVolumeSet? FindSet(string fileName) =>
         Sets.FirstOrDefault(set => set.Members.Contains(fileName, StringComparer.OrdinalIgnoreCase));
 
-    public ArchiveVolumeSet? FindByKey(string key) =>
-        Sets.FirstOrDefault(set => string.Equals(ArchiveSetIdentity.KeyFor(Directory, set, Sets), key, StringComparison.Ordinal));
+    /// <summary>
+    /// A set whose first volume really exists goes first: a later volume with nothing before it works out
+    /// the same first name, and a whole archive of that name must not wait for it.
+    /// </summary>
+    public ArchiveVolumeSet? FindByKey(string key)
+    {
+        ArchiveVolumeSet? worked = null;
+        foreach (var set in Sets)
+        {
+            if (!string.Equals(ArchiveSetIdentity.KeyFor(Directory, set), key, StringComparison.Ordinal)) continue;
+            if (set.FirstVolume is not null) return set;
+            worked ??= set;
+        }
+
+        return worked;
+    }
+
+    /// <summary>
+    /// The set a record is about. Its key says, unless the record's first volume was only ever worked out: part10
+    /// alone suggests an unpadded part1, and if part01 arrives instead, that is the file the record was waiting for.
+    /// Never when the part1 it named turned out to exist, because then these are two sets.
+    /// </summary>
+    public ArchiveVolumeSet? FindFor(ArchiveSetRecord record)
+    {
+        if (FindByKey(record.Key) is { } set) return set;
+        if (record.Attempts > 0 || record.State == ArchiveSetState.Completed) return null;
+        if (ArchiveSetIdentity.BaseOfFirstPart(record.FirstVolumeName) is not { } baseName) return null;
+        if (IsOnDisk(record.FirstVolumeName) || JobsNamed(record.FirstVolumeName).Count > 0) return null;
+
+        return Sets.FirstOrDefault(candidate =>
+            candidate is { Scheme: ArchiveVolumeScheme.PartNumbered, FirstVolume: { } first } &&
+            ArchiveSetIdentity.BaseOfFirstPart(first) is { } candidateBase &&
+            string.Equals(candidateBase, baseName, StringComparison.OrdinalIgnoreCase) &&
+            (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, StringComparer.OrdinalIgnoreCase))));
+    }
+}
+
+/// <summary>
+/// What each file's header says about being a volume. A folder is read again on every job event and a set can
+/// have a thousand volumes, so a file is only opened again when its size or time has changed.
+/// </summary>
+internal static class VolumeHeaders
+{
+    private const int MostRemembered = 4096;
+    private static readonly ConcurrentDictionary<string, (long Length, long Ticks, bool Whole)> Known = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool SaysWholeArchive(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            var (length, ticks) = (info.Length, info.LastWriteTimeUtc.Ticks);
+            if (Known.TryGetValue(path, out var seen) && seen.Length == length && seen.Ticks == ticks) return seen.Whole;
+
+            var whole = RarVolumeHeader.Read(path) == RarVolumeHeaderKind.NotAVolume;
+            if (Known.Count >= MostRemembered) Known.Clear();
+            Known[path] = (length, ticks, whole);
+            return whole;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 }

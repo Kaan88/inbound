@@ -10,6 +10,7 @@ public sealed class HostController : IHostController
     private readonly DownloadManagerService _service;
     private readonly FileLogger _log;
     private int _folderPickerOpen;
+    private bool _exitRequested;
 
     public HostController(DownloadManagerService service, FileLogger log)
     {
@@ -111,15 +112,14 @@ public sealed class HostController : IHostController
     public void RequestShutdown()
     {
         _log.Info("Exit requested from the tray or IPC.");
-        if (UiContext is not null)
-        {
-            UiContext.Post(_ => Application.ExitThread(), null);
-        }
-        else
-        {
-            Application.ExitThread();
-        }
+
+        // Written before UiContext is read, and Program sets UiContext before reading this, so one of the two always sees the other.
+        Volatile.Write(ref _exitRequested, true);
+        UiContext?.Post(_ => Application.ExitThread(), null);
     }
+
+    /// <summary>An exit came before there was a message loop for it to end, as a client can ask as soon as the pipe is open.</summary>
+    public bool ExitWasRequested => Volatile.Read(ref _exitRequested);
 
     private static string? FindUiExecutable()
     {

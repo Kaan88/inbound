@@ -57,6 +57,12 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    /// <summary>The package a job is in, however few members it has so far. Null when it is in none.</summary>
+    public Guid? FindGroupOf(Guid jobId)
+    {
+        lock (_sync) return _settings.DownloadGroups.FirstOrDefault(candidate => candidate.JobIds.Contains(jobId))?.Id;
+    }
+
     /// <summary>
     /// True when the package has at least one job and all of them have finished. An id with no job
     /// says nothing about completion, so it neither counts as finished nor holds the package back.

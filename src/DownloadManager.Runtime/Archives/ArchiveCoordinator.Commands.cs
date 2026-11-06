@@ -9,6 +9,7 @@ namespace DownloadManager.Runtime.Archives;
 public sealed partial class ArchiveCoordinator
 {
     private const int MaxNamesInText = 5;
+    private const string UnreadableRecord = "The saved state of this archive couldn't be read when the app started, so it is left alone for now. Restart the app to try again.";
 
     public List<ArchiveSetDto> List()
     {
@@ -167,9 +168,17 @@ public sealed partial class ArchiveCoordinator
                     continue;
                 }
 
-                var id = ArchiveSetIdentity.IdFor(ArchiveSetIdentity.KeyFor(view.Directory, set, view.Sets));
+                var key = ArchiveSetIdentity.KeyFor(view.Directory, set);
+                var chosen = view.FindByKey(key) ?? set;
+                var id = RecordFor(view, chosen, key)?.Id ?? NewIdFor(key);
                 if (sets.ContainsKey(id)) continue;
-                sets[id] = await RequestExtractionAsync(id, view, set, jobs, setPassword, ignored, target, cancellationToken).ConfigureAwait(false);
+                if (RecordFor(view, chosen, key) is null && IsUnreadable(id))
+                {
+                    ignored.Add(new ArchiveExtractIgnored { Item = target, Reason = UnreadableRecord });
+                    continue;
+                }
+
+                sets[id] = await RequestExtractionAsync(id, view, chosen, jobs, setPassword, ignored, target, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -216,7 +225,7 @@ public sealed partial class ArchiveCoordinator
                 }
             }
 
-            var key = ArchiveSetIdentity.KeyFor(view.Directory, set, view.Sets);
+            var key = ArchiveSetIdentity.KeyFor(view.Directory, set);
             var next = existing?.Clone() ?? NewRecord(id, key, view, set, now);
             next.Removed = false;
             next.RemovedAt = null;
@@ -251,11 +260,14 @@ public sealed partial class ArchiveCoordinator
 
         if (request.PackageId is { } packageId)
         {
-            if (_service.GetDownloadGroups().All(group => group.Id != packageId)) return new ArchiveActionResult { Ok = false, Error = "There is no such package." };
+            var group = _service.GetDownloadGroups().FirstOrDefault(candidate => candidate.Id == packageId);
+            if (group is null) return new ArchiveActionResult { Ok = false, Error = "There is no such package." };
             await SavePackagePasswordAsync(packageId, request.Password, cancellationToken).ConfigureAwait(false);
 
+            // By its downloads too: a set may have been listed before its package was saved.
+            var members = group.JobIds.ToHashSet();
             List<Guid> asking;
-            lock (_sync) asking = _sets.Values.Where(set => set.PackageId == packageId && AsksForPassword(set)).Select(set => set.Id).ToList();
+            lock (_sync) asking = _sets.Values.Where(set => AsksForPassword(set) && (set.PackageId == packageId || set.JobIds.Any(members.Contains))).Select(set => set.Id).ToList();
             foreach (var id in asking) await ResumeAskingSetAsync(id, cancellationToken).ConfigureAwait(false);
             Wake();
             return new ArchiveActionResult { Ok = true };
@@ -307,6 +319,19 @@ public sealed partial class ArchiveCoordinator
         return new ArchiveActionResult { Ok = true, Set = announce };
     }
 
+    public async Task<string?> SetPackagePasswordAsync(Guid packageId, string? password, bool keepExisting = false, CancellationToken cancellationToken = default)
+    {
+        if (keepExisting)
+        {
+            lock (_sync)
+            {
+                if (_packagePasswords.ContainsKey(packageId)) return null;
+            }
+        }
+
+        return (await SetPasswordAsync(new ArchiveSetPasswordRequest { PackageId = packageId, Password = password }, cancellationToken).ConfigureAwait(false)).Error;
+    }
+
     private async Task<(Guid Id, string? Error)> RecordInAdvanceAsync(string path, CancellationToken cancellationToken)
     {
         if (!Path.IsPathFullyQualified(path)) return (Guid.Empty, "The file must be given as a full path.");
@@ -318,13 +343,14 @@ public sealed partial class ArchiveCoordinator
         var view = ArchiveDirectoryView.Read(directory, jobs, [name]);
         if (view.FindSet(name) is not { } set) return (Guid.Empty, "This is not part of a RAR set.");
 
-        var key = ArchiveSetIdentity.KeyFor(view.Directory, set, view.Sets);
-        var id = ArchiveSetIdentity.IdFor(key);
+        var key = ArchiveSetIdentity.KeyFor(view.Directory, set);
+        set = view.FindByKey(key) ?? set;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ArchiveSetRecord? existing;
-            lock (_sync) existing = _sets.GetValueOrDefault(id);
+            var existing = RecordFor(view, set, key);
+            var id = existing?.Id ?? NewIdFor(key);
+            if (existing is null && IsUnreadable(id)) return (Guid.Empty, UnreadableRecord);
             if (existing is not null && !existing.Removed) return (id, null);
 
             var next = existing?.Clone() ?? NewRecord(id, key, view, set, _time.GetUtcNow());
@@ -665,6 +691,7 @@ public sealed partial class ArchiveCoordinator
                 var text = $"Extraction completed: {files} {(files == 1 ? "file" : "files")} in {set.Destination}";
                 if (set.FilesRenamed > 0) text += $", {set.FilesRenamed} renamed";
                 if (set.FilesSkipped > 0) text += $", {set.FilesSkipped} skipped";
+                if (set.ArchivesDeleted) text += ", archive removed";
                 return text;
 
             default:

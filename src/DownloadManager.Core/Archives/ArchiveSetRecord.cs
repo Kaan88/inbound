@@ -70,7 +70,7 @@ public sealed class ArchiveSetRecord
 
     public Guid Id { get; set; }
 
-    /// <summary>Folder and normalized first volume name. Two triggers for one set arrive at one key.</summary>
+    /// <summary>Folder and the first volume's name as it is really spelled. Two triggers for one set arrive at one key.</summary>
     public string Key { get; set; } = string.Empty;
 
     public string Directory { get; set; } = string.Empty;
@@ -174,6 +174,12 @@ public sealed class ArchivePackagePassword
 
 public interface IArchiveStore
 {
+    /// <summary>
+    /// Sets whose documents are there but could not be read by the last <see cref="LoadSetsAsync"/>, which says
+    /// nothing about what they hold. They stay on disk, and nothing may start the same set over until a later start can read them.
+    /// </summary>
+    IReadOnlyCollection<Guid> UnreadableSets => [];
+
     /// <summary>Null when none was ever saved.</summary>
     Task<ArchiveSettings?> LoadSettingsAsync(CancellationToken cancellationToken = default);
 

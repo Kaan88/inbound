@@ -462,6 +462,7 @@ internal sealed class CrashingExtractor(
             ConflictPolicy = request.ConflictPolicy,
             PreserveFolders = request.PreserveFolders,
             KeepFiles = request.KeepFiles,
+            MakeDurable = request.MakeDurable,
             Committed = async result =>
             {
                 await request.Committed!(result);
@@ -537,6 +538,15 @@ internal sealed class FakeExtractor : IArchiveExtractor
 
     public ExtractionFailureKind? FailWith { get; set; }
 
+    /// <summary>What this run should fail with, by run number from 1. Null lets it succeed.</summary>
+    public Func<int, ExtractionException?>? FailOnRun { get; init; }
+
+    /// <summary>Waits for this before finishing. Null doesn't wait.</summary>
+    public TaskCompletionSource? Release { get; init; }
+
+    /// <summary>What the tool would say it read. By default just the first volume, as for a whole archive.</summary>
+    public Func<ExtractionRequest, IReadOnlyList<string>>? VolumesRead { get; init; }
+
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public int Peak => Volatile.Read(ref _peak);
@@ -548,7 +558,7 @@ internal sealed class FakeExtractor : IArchiveExtractor
 
     public async Task<ExtractionResult> ExtractAsync(ExtractionRequest request, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _runs);
+        var run = Interlocked.Increment(ref _runs);
         var active = Interlocked.Increment(ref _active);
         int peak;
         while (active > (peak = Volatile.Read(ref _peak)) && Interlocked.CompareExchange(ref _peak, active, peak) != peak)
@@ -571,8 +581,10 @@ internal sealed class FakeExtractor : IArchiveExtractor
             }
 
             if (Hold > TimeSpan.Zero) await Task.Delay(Hold, cancellationToken);
+            if (Release is { } release) await release.Task.WaitAsync(cancellationToken);
+            if (FailOnRun?.Invoke(run) is { } failure) throw failure;
             if (FailWith is { } kind) throw new ExtractionException(kind, $"Failed as asked: {kind}.");
-            return new ExtractionResult(request.Destination, []);
+            return new ExtractionResult(request.Destination, []) { VolumesRead = VolumesRead?.Invoke(request) ?? [request.FirstVolume], FlushedToDisk = true };
         }
         finally
         {
