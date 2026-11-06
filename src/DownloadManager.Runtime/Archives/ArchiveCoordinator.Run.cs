@@ -136,11 +136,28 @@ public sealed partial class ArchiveCoordinator
             await SaveLockedAsync(next).ConfigureAwait(false);
             announce = Map(next);
 
+            // Listed before it can start or finish, and only if a shutdown has not looked already.
+            // One that has counts as interrupted: the next start finds the saved claim.
             var cancellation = new CancellationTokenSource();
-            var run = new RunningExtraction(cancellation);
-            lock (_sync) _running[id] = run;
-            run.Task = Task.Run(() => RunAsync(next, settings, cancellation), CancellationToken.None);
-            claimed = true;
+            var listed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var run = new RunningExtraction(cancellation)
+            {
+                Task = Task.Run(
+                    async () =>
+                    {
+                        if (await listed.Task.ConfigureAwait(false)) await RunAsync(next, settings, cancellation).ConfigureAwait(false);
+                    },
+                    CancellationToken.None),
+            };
+
+            lock (_sync)
+            {
+                claimed = !_stopping;
+                if (claimed) _running[id] = run;
+            }
+
+            listed.SetResult(claimed);
+            if (!claimed) cancellation.Dispose();
         }
         finally
         {

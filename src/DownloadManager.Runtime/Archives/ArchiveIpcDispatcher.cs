@@ -57,6 +57,11 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator)
         {
             return Action(request, new ArchiveActionResult { Ok = false, Error = "The request could not be read." });
         }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Every result type has ok and error, so whichever one the client expects reads this.
+            return Action(request, new ArchiveActionResult { Ok = false, Error = $"The change could not be saved: {exception.GetType().Name}." });
+        }
     }
 
     private static IpcMessage Action(IpcMessage request, ArchiveActionResult result) =>

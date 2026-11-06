@@ -1237,6 +1237,24 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
     }
 
     [Fact]
+    public async Task AChangeThatCannotBeSavedIsAnsweredAsAFailureEveryClientCanRead()
+    {
+        FreezableStore? store = null;
+        var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() };
+        await using var run = await ArchiveHarness.StartAsync(_server, options, wrap => store = new FreezableStore(wrap));
+        var archive = run.WriteFile("once.rar", OneFileRar());
+        store!.Freeze();
+        var dispatcher = new ArchiveIpcDispatcher(run.Archives);
+
+        var reply = await dispatcher.DispatchAsync(IpcMessage.Create(ArchiveMessageTypes.Extract, new ArchiveExtractRequest { FilePath = archive, Password = Secret }), CancellationToken.None);
+
+        var result = reply.GetPayload<ArchiveExtractResult>();
+        Assert.False(result.Ok);
+        Assert.Contains("could not be saved", result.Error);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(reply, IpcJson.Options));
+    }
+
+    [Fact]
     public async Task APasswordWithALineBreakIsRefusedWithoutRepeatingIt()
     {
         await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() });
