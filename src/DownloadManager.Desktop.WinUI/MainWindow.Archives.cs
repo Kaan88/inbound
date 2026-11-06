@@ -335,7 +335,7 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(ArchiveNoticeText, notice.Text);
         AutomationProperties.SetName(ArchiveNoticeText, $"Extraction notice: {notice.Text}");
         ArchiveNoticeAction.Content = notice.ActionText;
-        FrameworkElementAutomationPeer.FromElement(ArchiveNoticeText)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        LiveRegion.Announce(ArchiveNoticeText);
     }
 
     private async void ArchiveNoticeAction_Click(object sender, RoutedEventArgs e)

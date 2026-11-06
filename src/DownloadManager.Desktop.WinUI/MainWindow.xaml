@@ -517,6 +517,9 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusText" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <!-- Passing messages are announced here. StatusText changes on its own as counts move, so it isn't a live region. -->
+                <TextBlock x:Name="StatusAnnouncer" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
+                           AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
                 <TextBlock x:Name="ConnectionText" Grid.Column="1" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
             </Grid>

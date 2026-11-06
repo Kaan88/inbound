@@ -99,6 +99,24 @@ public sealed class AddLinesTests
         => Assert.Equal(AddRoute.None, Line(HosterLink, Kind("folderLink", result => result.ItemId = null)).Route);
 
     [Fact]
+    public void SelectAllIsOffOnOrMixedOverTheLinesThatCanBeSelected()
+    {
+        var first = Line("https://example.com/a.zip", Kind("ordinaryLink"));
+        var second = Line("https://example.com/b.zip", Kind("ordinaryLink"));
+        var stuck = Line("https://unknown.example/f", Kind("undetermined"));
+        Assert.Equal(AddRoute.None, stuck.Route);
+
+        Assert.Equal<bool?>(false, AddLineSession.SelectAllState([first, second, stuck]));
+
+        first.IsSelected = true;
+        Assert.Null(AddLineSession.SelectAllState([first, second, stuck]));
+
+        second.IsSelected = true;
+        Assert.Equal<bool?>(true, AddLineSession.SelectAllState([first, second, stuck]));
+        Assert.Equal<bool?>(false, AddLineSession.SelectAllState([stuck]));
+    }
+
+    [Fact]
     public void ALinkNobodyCouldClassifyIsDirectOnlyByExplicitChoice()
     {
         var line = Line("https://unknown.example/f", Kind("undetermined"));

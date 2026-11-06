@@ -111,7 +111,7 @@ public sealed partial class MainWindow
     /// Add URL's first step when a provider could take the address: stays open until the Host has said
     /// what it is. Something it can't classify stays here too, with a retry and an explicit way past.
     /// </summary>
-    private async Task<CheckedAddress> CheckAddressAsync(ContentDialog dialog, ComboBox urlBox, TextBlock error, StackPanel panel)
+    private async Task<CheckedAddress> CheckAddressAsync(ContentDialog dialog, ComboBox urlBox, StatusLine error, StackPanel panel)
     {
         var provider = ProviderWordForAdding();
         urlBox.PlaceholderText = "https://example.com/file.zip, or a magnet";
@@ -145,7 +145,7 @@ public sealed partial class MainWindow
             running = true;
             busy.IsActive = true;
             busy.Visibility = Visibility.Visible;
-            error.Visibility = Visibility.Collapsed;
+            error.Show(string.Empty);
             status.Show("Checking this address…");
             direct.Visibility = Visibility.Collapsed;
             direct.IsChecked = false;
@@ -212,8 +212,7 @@ public sealed partial class MainWindow
 
             if (!LinkExtractor.IsWebLink(text) && !LinkExtractor.IsMagnet(text) && !LinkExtractor.IsTorrentPath(text))
             {
-                error.Text = "Enter an http or https address, a magnet, or the full path of a .torrent file.";
-                error.Visibility = Visibility.Visible;
+                error.Say("Enter an http or https address, a magnet, or the full path of a .torrent file.", isProblem: true);
                 return;
             }
 
@@ -459,6 +458,7 @@ public sealed partial class MainWindow
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Close,
             IsPrimaryButtonEnabled = false,
+            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
         };
         dialog.Resources["ContentDialogMaxWidth"] = 720d;
 
@@ -473,6 +473,8 @@ public sealed partial class MainWindow
             var approving = waiting.Any(row => row.Approved);
             var withPassword = rows.Any(row => row.HasPasswordTyped);
             dialog.IsPrimaryButtonEnabled = approving || withPassword;
+            // Enter takes the default button, so it only means the action while the action can run.
+            dialog.DefaultButton = dialog.IsPrimaryButtonEnabled ? ContentDialogButton.Primary : ContentDialogButton.Close;
             dialog.PrimaryButtonText = withPassword ? approving ? "Approve and retry" : "Retry with this password" : "Approve selected";
         }
 

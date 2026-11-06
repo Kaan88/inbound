@@ -113,7 +113,7 @@ internal static class RemoteFileSelectionDialog
                 offerLater?.Invoke();
                 status.Show(laterText is null
                     ? $"{providerName} doesn't know the files yet. Try again when it does."
-                    : $"{providerName} doesn't know the files yet. Select {laterText} to choose them when it does.");
+                    : $"{providerName} doesn't know the files yet. Select \"{laterText}\" to choose them when it does.");
             }
             else if (result.Files.Count == 0)
             {

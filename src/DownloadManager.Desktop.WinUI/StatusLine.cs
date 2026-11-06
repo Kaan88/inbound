@@ -24,7 +24,13 @@ internal sealed class StatusLine
 
     public TextBlock Text { get; }
 
-    public void Show(string text, bool isProblem = false)
+    /// <summary>Shows words that may be refreshed on their own. Screen readers hear them only when they change, so a timer can't repeat itself.</summary>
+    public void Show(string text, bool isProblem = false) => Apply(text, isProblem, announceSameWords: false);
+
+    /// <summary>Shows the outcome of something the user just did. It is announced even when the words are the same as last time.</summary>
+    public void Say(string text, bool isProblem = false) => Apply(text, isProblem, announceSameWords: true);
+
+    private void Apply(string text, bool isProblem, bool announceSameWords)
     {
         var changed = Text.Text != text;
         _isProblem = isProblem;
@@ -32,10 +38,7 @@ internal sealed class StatusLine
         Text.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetName(Text, text.Length == 0 ? AccessibleName : $"{AccessibleName}: {text}");
         ApplyColor();
-        if (changed && text.Length > 0)
-        {
-            FrameworkElementAutomationPeer.FromElement(Text)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-        }
+        if (text.Length > 0 && (changed || announceSameWords)) LiveRegion.Announce(Text);
     }
 
     private void ApplyColor()

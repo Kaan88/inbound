@@ -19,7 +19,7 @@ internal sealed class SettingsWindow : Window
         ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
     };
     private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
-    private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, MaxLines = 3 };
+    private readonly StatusLine _error = new("Settings message");
     private readonly Button _ok = new() { Content = "OK", MinWidth = 92, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     private readonly Button _cancel = new() { Content = "Cancel", MinWidth = 92 };
     private readonly Button _apply = new() { Content = "Apply", MinWidth = 92 };
@@ -51,7 +51,9 @@ internal sealed class SettingsWindow : Window
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footer.Children.Add(_error);
+        _error.Text.VerticalAlignment = VerticalAlignment.Center;
+        _error.Text.MaxLines = 3;
+        footer.Children.Add(_error.Text);
         Grid.SetColumn(_ok, 1); footer.Children.Add(_ok);
         Grid.SetColumn(_cancel, 2); footer.Children.Add(_cancel);
         Grid.SetColumn(_apply, 3); footer.Children.Add(_apply);
@@ -65,7 +67,6 @@ internal sealed class SettingsWindow : Window
             var divider = InboundTheme.Brush("InboundDividerBrush", _root);
             navBorder.Background = chrome; navBorder.BorderBrush = divider;
             footer.Background = chrome; footer.BorderBrush = divider;
-            _error.Foreground = InboundTheme.Brush("InboundErrorTextBrush", _root);
         }
         _root.Loaded += (_, _) => ApplyColors();
         _root.ActualThemeChanged += (_, _) => ApplyColors();
@@ -106,7 +107,7 @@ internal sealed class SettingsWindow : Window
     }
 
     /// <summary>Takes back what the footer says, once what it complained about is dealt with.</summary>
-    public void ClearMessage() => _error.Text = string.Empty;
+    public void ClearMessage() => _error.Show(string.Empty);
 
     public void ShowPage(int index)
     {
@@ -141,7 +142,7 @@ internal sealed class SettingsWindow : Window
             }
             catch (Exception ex)
             {
-                _error.Text = $"Could not open the folder picker: {ex.Message}";
+                _error.Say($"Could not open the folder picker: {ex.Message}", isProblem: true);
             }
         };
         var row = new Grid { ColumnSpacing = 8 };
@@ -178,18 +179,18 @@ internal sealed class SettingsWindow : Window
     {
         if (Save is null) return true;
         _ok.IsEnabled = _apply.IsEnabled = false;
-        _error.Text = string.Empty;
+        _error.Show(string.Empty);
         try
         {
             var (error, page) = await Save();
             if (error is null) return true;
-            _error.Text = error;
+            _error.Say(error, isProblem: true);
             ShowPage(page);
             return false;
         }
         catch (Exception ex)
         {
-            _error.Text = ex.Message;
+            _error.Say(ex.Message, isProblem: true);
             return false;
         }
         finally

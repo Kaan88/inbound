@@ -274,6 +274,15 @@ internal sealed class AddLineSession : IDisposable
 
     public static bool CanSelect(AddLine line) => line.Route != AddRoute.None;
 
+    /// <summary>The Select all box: on when every selectable line is ticked, off when none is, and mixed (null) when only some are.</summary>
+    public static bool? SelectAllState(IEnumerable<AddLine> lines)
+    {
+        var selectable = lines.Where(CanSelect).ToList();
+        var ticked = selectable.Count(line => line.IsSelected);
+        if (ticked == 0) return false;
+        return ticked == selectable.Count ? true : null;
+    }
+
     private async Task ApplyAfterDebounceAsync(string? text, CancellationToken cancellationToken)
     {
         try

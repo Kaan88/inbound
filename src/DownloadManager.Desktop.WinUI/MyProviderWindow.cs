@@ -848,7 +848,7 @@ internal sealed class MyProviderWindow : Window
             {
                 var result = await _client.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = all, FileIds = chosen }, token);
                 return result.Ok
-                    ? (Sent(), false)
+                    ? ("Your file choice was sent.", false)
                     : (RemoteText.Failure(result.Error, null, _name), true);
             });
             return;

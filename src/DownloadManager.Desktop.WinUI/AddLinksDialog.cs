@@ -355,9 +355,8 @@ internal sealed class AddLinksDialog
         _dialog.IsPrimaryButtonEnabled = _session.CanAdd;
 
         _selectAll.Visibility = lines.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
-        var selectable = lines.Where(AddLineSession.CanSelect).ToList();
-        _selectAll.IsEnabled = selectable.Count > 0;
-        _selectAll.IsChecked = selectable.Count > 0 && selectable.All(line => line.IsSelected);
+        _selectAll.IsEnabled = lines.Any(AddLineSession.CanSelect);
+        _selectAll.IsChecked = AddLineSession.SelectAllState(lines);
 
         _cacheHint.Visibility = lines.Any(line => line.IsSelected && line.Route == AddRoute.Provider) ? Visibility.Visible : Visibility.Collapsed;
 

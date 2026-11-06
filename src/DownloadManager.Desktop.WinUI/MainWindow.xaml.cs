@@ -460,6 +460,8 @@ public sealed partial class MainWindow : Window
         _passingStatus = words;
         _passingStatusUntil = DateTimeOffset.UtcNow + PassingStatusTime;
         StatusText.Text = words;
+        StatusAnnouncer.Text = words;
+        LiveRegion.Announce(StatusAnnouncer);
         var timer = DispatcherQueue.CreateTimer();
         timer.IsRepeating = false;
         timer.Interval = PassingStatusTime;
@@ -2264,11 +2266,10 @@ public sealed partial class MainWindow : Window
         {
             // Clipboard access is best-effort.
         }
-        var addressError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
-            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid) };
+        var addressError = new StatusLine("Address error");
         var addressPanel = new StackPanel { Spacing = 8, MinWidth = 460 };
         addressPanel.Children.Add(urlBox);
-        addressPanel.Children.Add(addressError);
+        addressPanel.Children.Add(addressError.Text);
         if (!providerAdd) AddUnreadableKeyNotice(addressPanel);
         var addressDialog = new ContentDialog
         {
@@ -2314,8 +2315,7 @@ public sealed partial class MainWindow : Window
                 if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
                     candidate.Scheme is not ("http" or "https"))
                 {
-                    addressError.Text = "Enter an absolute http or https URL.";
-                    addressError.Visibility = Visibility.Visible;
+                    addressError.Say("Enter an absolute http or https URL.", isProblem: true);
                     args.Cancel = true;
                 }
             };
@@ -4653,7 +4653,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception)
         {
-            StatusText.Text = $"{title}: {message}";
+            ShowPassingStatus($"{title}: {message}");
         }
     }
 }
