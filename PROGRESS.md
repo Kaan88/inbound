@@ -12,6 +12,19 @@
 - **Check whether these are stale:** ROADMAP UI.R3 and UI.R4, clean-machine install testing, independent recovery review.
 - **TorBox:** work is on the `feature/torbox-integration` branch, not merged. Its plan is `docs/plans/torbox-integration.md`.
 
+### Store package unpacked by hand is refused (2026-11-07)
+
+- Owner report: Setup 0.4.0 "does not work with the store extension", with a "signature error", after unpacking the packaged extension because the listing is not public yet.
+- Cause: a store package has no `key`, so a copy loaded unpacked gets an ID from its folder, and the native host's `allowed_origins` refuses it. Setup 0.4.0 is correct and needs no change. The extension then said "Update the desktop app", which was wrong advice for this case.
+- Evidence, in Chrome for Testing 156 from a normal terminal, against the owner's installed Setup 0.4.0 (real registry value read through WMI, manifest lists both IDs; local Setup hash equals the published asset):
+  - Store CRX's code under the store ID (key added): `connected: true`, `dm.ping` ok, "Connected to the desktop app."
+  - The CRX and the zip unpacked unchanged: IDs `eahiead…` and `dpjlmpm…`, `Access to the specified native messaging host is forbidden.`
+  - The CRX's three signatures verify, and it differs from the uploaded zip only by `update_url` and `_metadata`.
+- Not found: the word "signature". It is in neither Chrome's extension status nor its log for these copies, nor in any bridge code. The only such text in the app is the updater's. The owner's exact wording is an open question, so this cause is inferred from the reported steps.
+- Fix: the extension now names the refused ID and what to do, and still says to update the app when an accepted ID is refused. `scripts\make-store-id-test.ps1` makes a folder that runs the uploaded package under the store ID. New tests tie the store key, manifest key, `.iss`, registration script and extension to `BrowserBridge`.
+- Fix evidence: extension 56/56, typecheck, Integration 139/139. In the same browser, the uploaded zip through the new script runs as `olhbcdb…` and shows "Connected to the desktop app."; a keyless build of this source shows the new message with its ID.
+- Not verified: a real store install (the listing is not public); a real handoff under the store ID, skipped so as not to add a job to the owner's list. The new message is not in the package under review. **Bump the extension version before the next store upload**, since this source differs from the uploaded 0.4.0.
+
 ### Repository clean-up and media panel removal (2026-11-06)
 
 - Removed from the extension at the owner's decision: media detection, in-page panel, popup card, Settings option, playlist fetching and badge. The extension now makes no network requests of its own. Right-click on links, images, video and audio, Download All, automatic sending and the Delete gesture remain. The app still downloads stream addresses it is given.

@@ -117,7 +117,9 @@ first install and explains beside the checkbox what it shares.
 
 - Cookies and Authorization values are never written to diagnostic logs.
 - The native host accepts only our two extension origins (store and unpacked) (validated by Chrome's
-  invocation and by `allowed_origins`).
+  invocation and by `allowed_origins`). Any other ID is refused, including a store package unpacked
+  by hand, whose ID comes from its folder. Chrome reports that as `forbidden`, and the extension says
+  which ID was refused. To test a store package unpacked: `docs/chrome-store/LISTING.md`.
 - Inside the extension, content scripts can send only the messages they need
   (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.
 - The host validates every field and enforces size/depth limits.
