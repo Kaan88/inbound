@@ -68,7 +68,9 @@ and its tooltip has the Host's whole sentence, including every missing volume. A
 list gets a row of its own, above the local rows on All Downloads and in the Extractions view; Status stays
 blank on it. Nothing about extraction opens by itself: a set that needs a password gets a key button on its
 row and one line in a notice bar above the list, and the password dialog opens only when asked for. The column
-and every extraction command hide when the Host doesn't answer `archive.*`.
+and every extraction command hide when the Host doesn't answer `archive.*`. The column also stays away until there is an
+archive to talk about, so the Description column, where a provider's words and a remote failure's cause go, fits at the
+default window width. With one remote or archive row selected, the status bar says what Description says.
 
 ## 3. Progress bars
 
@@ -158,5 +160,8 @@ and every extraction command hide when the Host doesn't answer `archive.*`.
    file that completes so every status color is on screen.
 4. Capture both themes. To switch, set `"DarkMode": false|true` in
    `artifacts\uiqa\data\ui-state.json` and restart the UI.
-5. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
+5. Capture a window with `PrintWindow` and flag 2 (`PW_RENDERFULLCONTENT`). It needs no focus and takes in nothing
+   else on the desktop, while a copy of the screen can come out black. A menu or flyout is a window of its own, with
+   class `Microsoft.UI.Content.PopupWindowSiteBridge` or `Xaml_WindowedPopupClass`, so capture it by itself.
+6. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
    user's Downloads folder during harness runs.

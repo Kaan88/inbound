@@ -444,4 +444,14 @@ public sealed class ArchiveRowsTests
             [Set("failed", "passwordRequired"), Set("failed", "passwordRequired"), Set("failed", "wrongPassword")], Since, true);
         Assert.Contains("2 more archives need one too", notice!.Text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("Missing volume: Missing volume: a.part3.rar", "Missing volume: a.part3.rar")]
+    [InlineData("Password required: This archive needs a password.", "Password required: This archive needs a password.")]
+    [InlineData(@"Extraction completed: 1 file in C:\x", @"Extraction completed: 1 file in C:\x")]
+    [InlineData("no label", "no label")]
+    public void ALabelTheReasonRepeatsIsSaidOnce(string text, string expected)
+    {
+        Assert.Equal(expected, ArchiveText.Full(Set("failed", stateText: text)));
+    }
 }

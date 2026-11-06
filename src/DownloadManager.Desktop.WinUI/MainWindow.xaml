@@ -41,85 +41,85 @@
         </Grid.RowDefinitions>
 
         <MenuBar Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
-            <MenuBarItem x:Name="TasksMenu" Title="Tasks">
-                <MenuFlyoutItem Text="Add New Download…" Click="MenuAdd_Click">
+            <MenuBarItem x:Name="TasksMenu" Title="Tasks" AccessKey="T">
+                <MenuFlyoutItem Text="Add New Download…" AccessKey="N" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Add Links…" Click="MenuAddBatch_Click" />
+                <MenuFlyoutItem Text="Add Links…" AccessKey="L" Click="MenuAddBatch_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Export Download List…" Click="MenuExport_Click" />
-                <MenuFlyoutItem Text="Import Download List…" Click="MenuImport_Click" />
+                <MenuFlyoutItem Text="Export Download List…" AccessKey="E" Click="MenuExport_Click" />
+                <MenuFlyoutItem Text="Import Download List…" AccessKey="I" Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
+                <MenuFlyoutItem Text="Exit" AccessKey="X" Click="MenuExit_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="File">
-                <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
-                <MenuFlyoutItem Text="Open Folder" Click="MenuOpenFolder_Click" />
-                <MenuFlyoutItem Text="Move/Rename…" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
+            <MenuBarItem Title="File" AccessKey="F">
+                <MenuFlyoutItem Text="Open" AccessKey="O" Click="MenuOpen_Click" />
+                <MenuFlyoutItem Text="Open Folder" AccessKey="F" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutItem Text="Move/Rename…" AccessKey="M" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Progress Details…" Click="MenuProgressDetails_Click" />
-                <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />
-                <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
-                <MenuFlyoutItem Text="Redownload" Click="MenuRedownload_Click" />
+                <MenuFlyoutItem Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
+                <MenuFlyoutItem Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
+                <MenuFlyoutItem Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
+                <MenuFlyoutItem Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
+                <MenuFlyoutItem Text="Remove" AccessKey="V" Click="MenuRemove_Click" />
             </MenuBarItem>
 
-            <MenuBarItem x:Name="DownloadsMenu" Title="Downloads">
-                <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
+            <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
+                <MenuFlyoutItem Text="Stop All" AccessKey="S" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
-                <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" Click="MenuCleanOrphans_Click" />
+                <MenuFlyoutItem Text="Delete All Completed" AccessKey="D" Click="MenuDeleteCompleted_Click" />
+                <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" AccessKey="L" Click="MenuCleanOrphans_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Find…" Click="MenuFind_Click">
+                <MenuFlyoutItem Text="Find…" AccessKey="F" Click="MenuFind_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Find Next" Click="MenuFindNext_Click">
+                <MenuFlyoutItem Text="Find Next" AccessKey="N" Click="MenuFindNext_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F3" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" />
-                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" />
+                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" AccessKey="Q" />
+                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" AccessKey="U" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Scheduler…" Click="MenuScheduler_Click" />
-                <MenuFlyoutItem Text="Options…" Click="MenuOptions_Click" />
+                <MenuFlyoutItem Text="Scheduler…" AccessKey="H" Click="MenuScheduler_Click" />
+                <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="View">
-                <MenuFlyoutItem Text="Statistics…" Click="MenuStatistics_Click" />
-                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" IsChecked="True" Click="MenuSpeedGraph_Click" />
-                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" Click="MenuHideCategories_Click" />
-                <MenuFlyoutSubItem Text="Arrange Files">
-                    <MenuFlyoutItem Text="By Order of Addition" Tag="added" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By File Name" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
+            <MenuBarItem Title="View" AccessKey="V">
+                <MenuFlyoutItem Text="Statistics…" AccessKey="S" Click="MenuStatistics_Click" />
+                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" AccessKey="G" IsChecked="True" Click="MenuSpeedGraph_Click" />
+                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" AccessKey="C" Click="MenuHideCategories_Click" />
+                <MenuFlyoutSubItem Text="Arrange Files" AccessKey="A">
+                    <MenuFlyoutItem Text="By Order of Addition" AccessKey="A" Tag="added" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By File Name" AccessKey="N" Tag="name" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
                         <MenuFlyoutItem.KeyboardAccelerators>
                             <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
                         </MenuFlyoutItem.KeyboardAccelerators>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem Text="By Status" Tag="status" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Transfer Rate" Tag="rate" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Last Try Date" Tag="lastTry" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Status" AccessKey="T" Tag="status" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Transfer Rate" AccessKey="R" Tag="rate" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Last Try Date" AccessKey="L" Tag="lastTry" Click="MenuSort_Click" />
                 </MenuFlyoutSubItem>
-                <MenuFlyoutSubItem Text="Toolbar">
-                    <MenuFlyoutItem Text="Large Buttons" Click="MenuLargeToolbar_Click" />
-                    <MenuFlyoutItem Text="Small Buttons" Click="MenuSmallToolbar_Click" />
+                <MenuFlyoutSubItem Text="Toolbar" AccessKey="T">
+                    <MenuFlyoutItem Text="Large Buttons" AccessKey="L" Click="MenuLargeToolbar_Click" />
+                    <MenuFlyoutItem Text="Small Buttons" AccessKey="S" Click="MenuSmallToolbar_Click" />
                 </MenuFlyoutSubItem>
-                <ToggleMenuFlyoutItem x:Name="DarkModeMenuItem" Text="Dark Mode" IsChecked="True" Click="MenuDarkMode_Click" />
+                <ToggleMenuFlyoutItem x:Name="DarkModeMenuItem" Text="Dark Mode" AccessKey="D" IsChecked="True" Click="MenuDarkMode_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="Help">
-                <MenuFlyoutItem Text="Check for Updates…" Click="MenuUpdate_Click" />
+            <MenuBarItem Title="Help" AccessKey="H">
+                <MenuFlyoutItem Text="Check for Updates…" AccessKey="U" Click="MenuUpdate_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="About Inbound Download Manager" Click="MenuAbout_Click" />
-                <MenuFlyoutItem Text="Open Diagnostics Folder" Click="MenuDiagnostics_Click" />
+                <MenuFlyoutItem Text="About Inbound Download Manager" AccessKey="A" Click="MenuAbout_Click" />
+                <MenuFlyoutItem Text="Open Diagnostics Folder" AccessKey="D" Click="MenuDiagnostics_Click" />
             </MenuBarItem>
         </MenuBar>
 
@@ -306,7 +306,7 @@
                                 <TextBlock Text="Other" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" />
+                        <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" AutomationProperties.AccessibilityView="Raw" />
                         <ListBoxItem Tag="unfinished" AutomationProperties.Name="Unfinished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
@@ -515,9 +515,9 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" AutomationProperties.Name="Status" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                <TextBlock x:Name="StatusText" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="ConnectionText" AutomationProperties.Name="Host connection" Grid.Column="1" Text="Connecting…" FontSize="11"
+                <TextBlock x:Name="ConnectionText" Grid.Column="1" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Border>

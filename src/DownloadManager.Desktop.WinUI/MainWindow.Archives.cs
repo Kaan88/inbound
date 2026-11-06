@@ -79,7 +79,11 @@ public sealed partial class MainWindow
 
     private void InitializeArchiveUi()
     {
-        _remote.State.ArchiveSets.CollectionChanged += (_, _) => QueueArchiveSync();
+        _remote.State.ArchiveSets.CollectionChanged += (_, _) =>
+        {
+            SyncExtractionColumn();
+            QueueArchiveSync();
+        };
 
         // Right after the Open group, whose separator follows Move/Rename.
         if (JobsList.ContextFlyout is MenuFlyout flyout && _menuMoveRename is not null)
@@ -93,6 +97,13 @@ public sealed partial class MainWindow
         _downloadsArchiveMenu = CreateArchiveMenu();
         var position = 2;
         foreach (var item in _downloadsArchiveMenu.All) DownloadsMenu.Items.Insert(position++, item);
+        _downloadsArchiveMenu.Extract.AccessKey = "E";
+        _downloadsArchiveMenu.ExtractFile.AccessKey = "A";
+        _downloadsArchiveMenu.Password.AccessKey = "P";
+        _downloadsArchiveMenu.Retry.AccessKey = "R";
+        _downloadsArchiveMenu.Cancel.AccessKey = "C";
+        _downloadsArchiveMenu.OpenFolder.AccessKey = "O";
+        _downloadsArchiveMenu.Remove.AccessKey = "M";
 
         SyncArchiveEntryPoints();
     }
@@ -113,18 +124,25 @@ public sealed partial class MainWindow
 
     // ---- Entry points ------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Only there once there is an archive to talk about. It takes 140px, and without it the Description
+    /// column, which holds a provider's own words and a remote failure's cause, stays on screen at the default width.
+    /// </summary>
+    private void SyncExtractionColumn()
+    {
+        var show = _remote.State.ArchivesSupported && _remote.State.ArchiveSets.Count > 0;
+        ExtractionHeader.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        DownloadListGrid.MinWidth = ListWidthWithoutExtraction + (show ? ExtractionColumnWidth : 0);
+        if (JobViewModel.ShowExtractionColumn == show) return;
+        JobViewModel.ShowExtractionColumn = show;
+        foreach (var row in _jobsById.Values.Concat(_packageRows.Values).Concat(_remoteRows.Values).Concat(_archiveRows.Values)) row.NotifyExtractionColumn();
+    }
+
     private void SyncArchiveEntryPoints()
     {
         var state = _remote.State;
         var supported = state.ArchivesSupported;
-        ExtractionHeader.Visibility = supported ? Visibility.Visible : Visibility.Collapsed;
-        DownloadListGrid.MinWidth = ListWidthWithoutExtraction + (supported ? ExtractionColumnWidth : 0);
-        if (JobViewModel.ShowExtractionColumn != supported)
-        {
-            JobViewModel.ShowExtractionColumn = supported;
-            foreach (var row in _jobsById.Values.Concat(_packageRows.Values).Concat(_remoteRows.Values).Concat(_archiveRows.Values)) row.NotifyExtractionColumn();
-        }
-
+        SyncExtractionColumn();
         SyncArchiveSidebar(supported);
         SyncArchiveMenus();
         QueueArchiveSync();

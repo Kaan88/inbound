@@ -266,6 +266,7 @@ internal sealed class MyProviderWindow : Window
         AddAt(_root, top, row: 0);
 
         AutomationProperties.SetName(_tabs, $"{_name} item types");
+        _tabs.Loaded += (_, _) => NameItemsList(_tabs);
         AutomationProperties.SetName(_busy, $"Asking {_name}");
         AutomationProperties.SetName(_refresh, $"Refresh the list from {_name}");
         ToolTipService.SetToolTip(_refresh, $"Read this list from {_name} again (F5)");
@@ -653,10 +654,28 @@ internal sealed class MyProviderWindow : Window
         {
             _tree.ShowMessage(row.Item.Stage == "ready"
                 ? $"{_name} lists no files for this."
-                : $"{_name} doesn't list the files yet. Download all still works: it starts when {_name} has them.");
+                : !row.View.CanDownload
+                    ? $"This item failed on {_name}, so there are no files to download."
+                    : $"{_name} doesn't list the files yet. Download all still works: it starts when {_name} has them.");
         }
 
         UpdateActions();
+    }
+
+    /// <summary>The bar has a list inside its template, which a screen reader would otherwise reach with no name.</summary>
+    private void NameItemsList(DependencyObject parent)
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is ItemsView list)
+            {
+                AutomationProperties.SetName(list, $"{_name} item types");
+                return;
+            }
+
+            NameItemsList(child);
+        }
     }
 
     private void UpdateActions()

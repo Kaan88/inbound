@@ -126,7 +126,7 @@ internal sealed class AddLinksDialog
         _directOptions.Children.Add(_archivePanel);
 
         _selectAll.Click += (_, _) => _session.SelectAll(_selectAll.IsChecked == true);
-        var panel = new StackPanel { Spacing = 10, MinWidth = 640 };
+        var panel = new StackPanel { Spacing = 10, MinWidth = 640, Padding = new Thickness(0, 0, 14, 0) };
         if (_focus is AddFocus.Links or AddFocus.Magnet) panel.Children.Add(_paste);
         panel.Children.Add(_status.Text);
         panel.Children.Add(_selectAll);

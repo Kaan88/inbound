@@ -4,8 +4,12 @@ namespace DownloadManager.Desktop.WinUI;
 
 internal sealed class UiState
 {
-    public int WindowWidth { get; set; } = 1180;
-    public int WindowHeight { get; set; } = 760;
+    /// <summary>In device-independent pixels until the window is first closed, and in real pixels after that.</summary>
+    public const int FirstWindowWidth = 1400;
+    public const int FirstWindowHeight = 760;
+
+    public int WindowWidth { get; set; } = FirstWindowWidth;
+    public int WindowHeight { get; set; } = FirstWindowHeight;
     public string Category { get; set; } = "all";
     public string SortKey { get; set; } = "added";
     public bool SortAscending { get; set; }

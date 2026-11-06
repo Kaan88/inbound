@@ -18,7 +18,7 @@ internal sealed class SettingsWindow : Window
         SelectionMode = ListViewSelectionMode.Single, Padding = new Thickness(0, 6, 0, 6),
         ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
     };
-    private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+    private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch, IsTabStop = false };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, MaxLines = 3 };
     private readonly Button _ok = new() { Content = "OK", MinWidth = 92, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     private readonly Button _cancel = new() { Content = "Cancel", MinWidth = 92 };
@@ -40,6 +40,7 @@ internal sealed class SettingsWindow : Window
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_nav, "Options pages");
         var navBorder = new Border { Child = _nav, BorderThickness = new Thickness(0, 0, 1, 0) };
         _root.Children.Add(navBorder);
         Grid.SetColumn(_page, 1);
@@ -96,7 +97,11 @@ internal sealed class SettingsWindow : Window
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(24, 18, 28, 24), MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left };
         panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 4) });
         foreach (var control in controls) panel.Children.Add(control);
-        _pages.Add(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        var scroller = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+
+        // Tab stops on it, to scroll with the keys.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(scroller, $"{title} page");
+        _pages.Add(scroller);
         if (_nav.SelectedIndex < 0) _nav.SelectedIndex = 0;
     }
 

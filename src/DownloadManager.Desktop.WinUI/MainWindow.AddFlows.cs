@@ -261,9 +261,10 @@ public sealed partial class MainWindow
 
         choice.ArchivePassword = null;
 
+        var folderLinks = 0;
         foreach (var pick in choice.Picks.Where(pick => pick.Line.Route == AddRoute.FolderLink))
         {
-            await AddFolderLinkAsync(pick.Line, choice, problems);
+            if (await AddFolderLinkAsync(pick.Line, choice, problems)) folderLinks++;
         }
 
         var sent = new List<RemoteAdded>();
@@ -289,13 +290,15 @@ public sealed partial class MainWindow
 
         if (sent.Count > 0) await ShowAddOutcomesAsync(sent, provider);
 
-        if (sent.Count > 0 && messages.Count == 0 && problems.Count == 0)
+        var addedCount = sent.Count + folderLinks;
+        var addedWords = addedCount == 1 ? $"Added 1 item for {provider}." : $"Added {addedCount} items for {provider}.";
+        if (addedCount > 0 && messages.Count == 0 && problems.Count == 0)
         {
-            StatusText.Text = sent.Count == 1 ? $"Added 1 item for {provider}." : $"Added {sent.Count} items for {provider}.";
+            ShowPassingStatus(addedWords);
             return;
         }
 
-        if (sent.Count > 0) messages.Add(sent.Count == 1 ? $"Added 1 item for {provider}." : $"Added {sent.Count} items for {provider}.");
+        if (addedCount > 0) messages.Add(addedWords);
         messages.AddRange(problems.Take(5));
         if (messages.Count > 0) await ShowMessageAsync("Add links", string.Join(Environment.NewLine, messages));
     }
@@ -316,9 +319,9 @@ public sealed partial class MainWindow
     }
 
     /// <summary>A folder link refers to an item already on the account, so its files can be chosen before anything is added.</summary>
-    private async Task AddFolderLinkAsync(AddLine line, AddLinksChoice choice, List<string> problems)
+    private async Task<bool> AddFolderLinkAsync(AddLine line, AddLinksChoice choice, List<string> problems)
     {
-        if (line.Result is not { Provider: { } providerId, ItemKind: { } kind, ItemId: { } itemId } found) return;
+        if (line.Result is not { Provider: { } providerId, ItemKind: { } kind, ItemId: { } itemId } found) return false;
         var provider = string.IsNullOrWhiteSpace(found.ProviderName) ? ProviderWordForAdding() : found.ProviderName;
         var name = RemoteText.AddLineWords(line, provider).Name;
         var answer = await RemoteFileSelectionDialog.AskAsync(
@@ -331,12 +334,12 @@ public sealed partial class MainWindow
                 var result = await _remote.GetItemsAsync(new RemoteItemRequest { Provider = providerId, Kind = kind, ItemId = itemId }, token);
                 if (!result.Ok) return new RemoteFilesToShow([], Error: RemoteText.Failure(result.Error, result.FailureKind, provider));
                 if (result.Items is not [var item]) return new RemoteFilesToShow([], Error: $"{provider} has no such item on your account.");
-                return new RemoteFilesToShow(item.Files ?? [], item.Stage != "ready");
+                return new RemoteFilesToShow(item.Files ?? [], item.Stage != "ready", Title: string.IsNullOrWhiteSpace(item.Name) ? null : $"Choose files: {UrlRedactor.HideAddresses(item.Name)}");
             },
             primaryText: "Add",
             closeText: "Skip this link",
             laterText: "Add, choose later");
-        if (answer.Choice is null && !answer.Later) return;
+        if (answer.Choice is null && !answer.Later) return false;
 
         var added = await _remote.AddAsync(new RemoteAddRequestDto
         {
@@ -351,6 +354,7 @@ public sealed partial class MainWindow
         });
         if (!added.Ok) problems.Add($"{name}: {RemoteText.Failure(added.Error, null, provider)}");
         else if (!string.IsNullOrWhiteSpace(added.Note)) problems.Add($"{name}: {UrlRedactor.HideAddresses(added.Note)}");
+        return added.Ok;
     }
 
     /// <summary>
@@ -360,7 +364,7 @@ public sealed partial class MainWindow
     private async Task ShowAddOutcomesAsync(IReadOnlyList<RemoteAdded> added, string provider)
     {
         var state = _remote.State;
-        var rows = added.Select(item => new OutcomeRow(item.Name, item.Result, provider, RootGrid)).ToList();
+        var rows = added.Select(item => new OutcomeRow(item.Name, item.Result, provider, RootGrid, LocalStatusOf)).ToList();
         var explanation = new TextBlock { Text = RemoteText.ApproveExplanation(provider), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         AutomationProperties.SetName(explanation, explanation.Text);
         var approveAll = new CheckBox { Content = "Approve all", Visibility = Visibility.Collapsed };
@@ -436,6 +440,11 @@ public sealed partial class MainWindow
             }
         };
 
+        // The local files behind an item finish without any word about the item, so its words are looked at again.
+        var localWatch = DispatcherQueue.CreateTimer();
+        localWatch.Interval = TimeSpan.FromSeconds(1);
+        localWatch.Tick += (_, _) => Refresh();
+        localWatch.Start();
         state.Jobs.CollectionChanged += onJobs;
         Refresh();
         try
@@ -448,6 +457,7 @@ public sealed partial class MainWindow
         }
         finally
         {
+            localWatch.Stop();
             state.Jobs.CollectionChanged -= onJobs;
             foreach (var row in rows) row.ClearPassword();
         }
@@ -460,6 +470,7 @@ public sealed partial class MainWindow
         private readonly string? _note;
         private readonly string _provider;
         private readonly FrameworkElement _themeRoot;
+        private readonly Func<RemoteJobDto, string?> _localStatus;
         private readonly TextBlock _nameText = new() { TextTrimming = TextTrimming.CharacterEllipsis };
         private readonly TextBlock _word = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         private readonly TextBlock _detail = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
@@ -468,8 +479,9 @@ public sealed partial class MainWindow
         private readonly StatusLine _problem = new("Problem");
         private string? _problemWords;
 
-        public OutcomeRow(string name, RemoteAddResultDto result, string provider, FrameworkElement themeRoot)
+        public OutcomeRow(string name, RemoteAddResultDto result, string provider, FrameworkElement themeRoot, Func<RemoteJobDto, string?> localStatus)
         {
+            _localStatus = localStatus;
             _name = name;
             _note = result.Note;
             _provider = provider;
@@ -521,7 +533,7 @@ public sealed partial class MainWindow
         public void Update(RemoteState state)
         {
             var job = state.Jobs.FirstOrDefault(candidate => candidate.Id == JobId);
-            View = RemoteText.AddOutcome(job, _name, _note, DateTimeOffset.Now);
+            View = RemoteText.AddOutcome(job, _name, _note, DateTimeOffset.Now, localStatus: job is null ? null : _localStatus(job));
             _word.Text = View.Word;
             _detail.Text = View.Detail;
             _detail.Visibility = View.Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;

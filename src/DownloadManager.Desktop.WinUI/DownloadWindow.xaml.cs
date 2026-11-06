@@ -160,7 +160,7 @@ public sealed partial class DownloadWindow : Window
             _completedLayout = true;
             DetailsTabs.Visibility = Visibility.Collapsed;
             CompletionSummary.Visibility = Visibility.Visible;
-            WindowLayout.ResizeForDpi(this, 600, 400);
+            WindowLayout.ResizeForDpi(this, 600, 480);
         }
 
         var percent = job.TotalBytes is > 0
@@ -170,9 +170,12 @@ public sealed partial class DownloadWindow : Window
         Heading.Text = complete ? "Download complete" : JobViewModel.ToDisplayState(job.State);
         Title = complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}";
         FileNameText.Text = displayName;
-        UrlText.Text = job.Url;
+        // A file from a provider account has no address of its own: only a reference to the account's item.
+        var hasAddress = !job.IsRemote && !job.Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase);
+        UrlHeader.Visibility = UrlText.Visibility = CompletedUrlHeader.Visibility = CompletedUrl.Visibility = hasAddress ? Visibility.Visible : Visibility.Collapsed;
+        UrlText.Text = hasAddress ? job.Url : string.Empty;
         CompletionPath.Text = job.FinalFilePath;
-        CompletedUrl.Text = job.Url;
+        CompletedUrl.Text = hasAddress ? job.Url : string.Empty;
         CompletedPath.Text = job.FinalFilePath;
         CompletedSize.Text = $"Downloaded {Bytes(job.ReceivedBytes)} ({job.ReceivedBytes:N0} bytes)";
         OverallFooter.IsIndeterminate = job.TotalBytes is not > 0 && !job.IsTerminal;

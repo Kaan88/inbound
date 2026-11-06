@@ -26,7 +26,10 @@ public sealed partial class MainWindow : Window
     private SettingsWindow? _settingsWindow;
     private bool _pendingSettingsOpen;
     private string _category = "all";
+    private static readonly TimeSpan PassingStatusTime = TimeSpan.FromSeconds(5);
     private string _search = string.Empty;
+    private string? _passingStatus;
+    private DateTimeOffset _passingStatusUntil;
     private string _sortKey = "added";
     private bool _sortAscending;
     private bool _toolbarLarge = true;
@@ -78,7 +81,10 @@ public sealed partial class MainWindow : Window
         {
             var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
             var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
-            AppWindow.Resize(new SizeInt32(width, height));
+
+            // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
+            if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
+            else AppWindow.Resize(new SizeInt32(width, height));
             WindowPlacement.Track(this, "main");
             var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
             if (File.Exists(icon))
@@ -353,11 +359,9 @@ public sealed partial class MainWindow : Window
             ? "Host connected"
             : $"Host unavailable{(error is null ? string.Empty : $": {error}")}";
         if (connected) UpdateStatusText();
-        if (!connected)
-        {
-            EmptyText.Visibility = Visibility.Visible;
-        }
 
+        // The rows stay on the list while the Host is away, so it isn't empty.
+        EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
 
@@ -418,6 +422,19 @@ public sealed partial class MainWindow : Window
         SyncArchiveMenus();
     }
 
+    /// <summary>A message about something just done. The usual counts come back by themselves.</summary>
+    private void ShowPassingStatus(string words)
+    {
+        _passingStatus = words;
+        _passingStatusUntil = DateTimeOffset.UtcNow + PassingStatusTime;
+        StatusText.Text = words;
+        var timer = DispatcherQueue.CreateTimer();
+        timer.IsRepeating = false;
+        timer.Interval = PassingStatusTime;
+        timer.Tick += (_, _) => UpdateStatusText();
+        timer.Start();
+    }
+
     private void UpdateStatusText()
     {
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "verifying");
@@ -435,6 +452,18 @@ public sealed partial class MainWindow : Window
         if (selected > 1)
         {
             StatusText.Text += $"  ({selected} selected)";
+        }
+
+        // One selected row with no local file: what is known about it, which the Description column may have off screen.
+        if (FirstLocalRow is null && JobsList.SelectedItems.Count == 1 && JobsList.SelectedItem is JobViewModel { IsSideRow: true } side && side.Description.Length > 0)
+        {
+            StatusText.Text = $"{side.FileName}: {side.Description}";
+        }
+
+        if (_passingStatus is { } passing)
+        {
+            if (DateTimeOffset.UtcNow < _passingStatusUntil) StatusText.Text = passing;
+            else _passingStatus = null;
         }
 
         if (_status?.StateDirectory is { } stateDirectory)
@@ -717,17 +746,12 @@ public sealed partial class MainWindow : Window
         UpdateStatusText();
     }
 
-    private async void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Delete && SelectedJobs.Count > 0)
         {
             e.Handled = true;
             DeleteButton_Click(sender, e);
-        }
-        else if (e.Key == Windows.System.VirtualKey.Enter && SelectedJob is { } job)
-        {
-            e.Handled = true;
-            await OpenJobAsync(job);
         }
     }
 
@@ -778,7 +802,10 @@ public sealed partial class MainWindow : Window
         finally { _refreshingCategories = false; }
     }
 
-    private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e) => await RunRowPrimaryAsync();
+
+    /// <summary>What double-clicking a row does. Enter does the same.</summary>
+    private async Task RunRowPrimaryAsync()
     {
         if (SelectedPackage is { } package)
         {
@@ -2164,6 +2191,14 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = "Next",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
+        };
+
+        // An editable ComboBox keeps Escape for itself, even with its list closed.
+        urlBox.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Escape || urlBox.IsDropDownOpen) return;
+            args.Handled = true;
+            addressDialog.Hide();
         };
         string url;
         var showMasked = false;

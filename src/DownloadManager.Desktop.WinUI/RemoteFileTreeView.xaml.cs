@@ -55,7 +55,12 @@ public sealed class RemoteFileRow : INotifyPropertyChanged
         {
             var size = SizeText.Length > 0 ? $", {SizeText}" : string.Empty;
             var kind = Node.IsFolder ? "Folder " : string.Empty;
-            return Node.Note is { } note ? $"{kind}{Node.Name}{size}. Can't be selected: {note}" : $"{kind}{Node.Name}{size}";
+
+            // Two files can have the same name and size, and only their folders tell them apart.
+            var folders = new List<string>();
+            for (var parent = Node.Parent; parent is not null; parent = parent.Parent) folders.Insert(0, parent.Name);
+            var where = folders.Count > 0 ? $" in {string.Join(" / ", folders)}" : string.Empty;
+            return Node.Note is { } note ? $"{kind}{Node.Name}{where}{size}. Can't be selected: {note}" : $"{kind}{Node.Name}{where}{size}";
         }
     }
 

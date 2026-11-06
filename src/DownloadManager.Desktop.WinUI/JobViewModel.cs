@@ -95,7 +95,9 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileName = job.FileName;
         Url = job.Url;
         State = job.State;
-        StateText = job.QueueRetryAt is not null ? "Queue retry scheduled" : ToDisplayState(job.State);
+        StateText = job.QueueRetryAt is not null ? "Queue retry scheduled"
+            : IsProviderFile && job.State == "downloading" ? "Downloading locally"
+            : ToDisplayState(job.State);
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
         BytesPerSecond = job.BytesPerSecond ?? 0;
         LastUpdated = job.UpdatedAt;
@@ -196,7 +198,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
         FileName = group.Name;
         Url = string.Empty;
         State = summary.State == "active" ? "downloading" : summary.State;
-        StateText = $"{ToDisplayState(State)} · {summary.CompletedCount}/{summary.MemberCount}";
+        var word = State == "downloading" && children.Any(child => child.IsProviderFile) ? "Downloading locally" : ToDisplayState(State);
+        StateText = $"{word} · {summary.CompletedCount}/{summary.MemberCount}";
         TotalSize = summary.TotalBytes ?? summary.ReceivedBytes;
         BytesPerSecond = summary.BytesPerSecond;
         SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;

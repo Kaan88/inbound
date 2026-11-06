@@ -46,7 +46,16 @@ internal static partial class ArchiveText
     }
 
     /// <summary>The Host's whole sentence for a set, with any address taken out.</summary>
-    public static string Full(ArchiveSetDto set) => UrlRedactor.HideAddresses(set.StateText);
+    public static string Full(ArchiveSetDto set) => WithoutRepeatedLabel(UrlRedactor.HideAddresses(set.StateText));
+
+    /// <summary>The Host puts its label in front of a reason that can start with the same label. Once is enough.</summary>
+    internal static string WithoutRepeatedLabel(string text)
+    {
+        var colon = text.IndexOf(": ", StringComparison.Ordinal);
+        if (colon <= 0) return text;
+        var label = text[..(colon + 2)];
+        return text.AsSpan(colon + 2).StartsWith(label, StringComparison.OrdinalIgnoreCase) ? text[(colon + 2)..] : text;
+    }
 
     private static (string Text, RemoteRowTone Tone) PackageLabel(IReadOnlyList<ArchiveSetDto> sets)
     {

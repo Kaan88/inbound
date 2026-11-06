@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>What a file selection dialog was given to show.</summary>
-internal sealed record RemoteFilesToShow(IReadOnlyList<RemoteFileDto> Files, bool Pending = false, string? Error = null);
+internal sealed record RemoteFilesToShow(IReadOnlyList<RemoteFileDto> Files, bool Pending = false, string? Error = null, string? Title = null);
 
 /// <summary>What came of a file selection dialog: files chosen, or to be chosen once the provider knows them. Neither means it was cancelled.</summary>
 internal sealed record RemoteFileAnswer(RemoteFileChoice? Choice, bool Later);
@@ -59,13 +59,16 @@ internal static class RemoteFileSelectionDialog
             CloseButtonText = closeText,
             DefaultButton = ContentDialogButton.Primary,
             IsPrimaryButtonEnabled = false,
+
+            // A default button that starts disabled doesn't pick up the accent by itself.
+            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
         };
         dialog.Resources["ContentDialogMaxWidth"] = 760d;
         tree.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = tree.Tree.ChosenCount > 0;
 
         using var closing = new CancellationTokenSource();
         var shown = dialog.ShowAsync();
-        _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterText, closing.Token);
+        _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterText, title => dialog.Title = title, closing.Token);
         try
         {
             var answer = await shown;
@@ -88,6 +91,7 @@ internal static class RemoteFileSelectionDialog
         Func<CancellationToken, Task<RemoteFilesToShow>> load,
         Action? offerLater,
         string? laterText,
+        Action<string> setTitle,
         CancellationToken cancellationToken)
     {
         try
@@ -96,6 +100,7 @@ internal static class RemoteFileSelectionDialog
             cancellationToken.ThrowIfCancellationRequested();
             busy.IsActive = false;
             busy.Visibility = Visibility.Collapsed;
+            if (result.Title is { } title) setTitle(title);
             if (result.Error is { } error)
             {
                 tree.ShowMessage(string.Empty);

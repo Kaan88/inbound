@@ -54,6 +54,18 @@ public sealed class AddLinesTests
         Assert.Equal(["https://mega.nz/file/a#Key", "https://mega.nz/file/a#kEY"], found);
     }
 
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void ATorrentPathOnItsOwnLineIsFoundHoweverLinesEnd(string end)
+    {
+        // A multi-line TextBox gives back bare CRs.
+        var found = LinkExtractor.Inputs($"{MagnetLink}{end}C:\\t\\My File.torrent{end}https://a.example/x");
+
+        Assert.Equal([MagnetLink, @"C:\t\My File.torrent", "https://a.example/x"], found);
+    }
+
     [Fact]
     public void NothingUsableIsNothing()
     {
@@ -515,6 +527,18 @@ public sealed class AddLinesTests
         Assert.Equal("Not cached, needs TorBox to fetch it", view.Word);
         Assert.True(view.NeedsApproval);
         Assert.False(view.IsChecking);
+    }
+
+    [Fact]
+    public void WhatLocalFilesAreDoingReplacesTheWordSavedWithTheItem()
+    {
+        var job = Job("localStarted", job => { job.Cached = true; job.Status = "Downloading locally"; });
+
+        var view = RemoteText.AddOutcome(job, "x", null, DateTimeOffset.Now, localStatus: "Completed");
+
+        Assert.Contains("Completed", view.Detail);
+        Assert.DoesNotContain("Downloading locally", view.Detail);
+        Assert.DoesNotContain("Downloading locally", view.AccessibleName);
     }
 
     [Fact]

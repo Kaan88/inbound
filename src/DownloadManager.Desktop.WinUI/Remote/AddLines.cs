@@ -64,7 +64,10 @@ internal static partial class LinkExtractor
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
         var found = new List<string>();
-        foreach (Match match in InputPattern().Matches(text))
+
+        // A multi-line TextBox hands back bare CRs, and the regular expression's ^ and $ only know LF.
+        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (Match match in InputPattern().Matches(lines))
         {
             var path = match.Groups["path"];
             var input = path.Success ? path.Value : match.Groups["link"].Value.TrimEnd(TrailingPunctuation);
@@ -603,12 +606,15 @@ internal static partial class RemoteText
 
     /// <param name="job">Null once it has gone from the list.</param>
     /// <param name="note">What the Host said when it was added, such as that it was already there.</param>
-    public static AddOutcomeView AddOutcome(RemoteJobDto? job, string name, string? note, DateTimeOffset now, IFormatProvider? culture = null)
+    public static AddOutcomeView AddOutcome(RemoteJobDto? job, string name, string? note, DateTimeOffset now, IFormatProvider? culture = null, string? localStatus = null)
     {
         if (job is null) return new AddOutcomeView("Removed from the list", string.Empty, false, false, false, false, false, $"{name}, removed from the list");
 
         var provider = ProviderName(job);
         var row = JobRow(job, now, culture);
+
+        // The Host works its words out when the job changes, and local files finish without that.
+        if (job.State == "localStarted" && !string.IsNullOrEmpty(localStatus)) row = row with { Status = localStatus };
         var needsApproval = job is { State: "intended", ApprovalNeeded: true };
         var cached = job.Cached && job.State != "failed";
         var word = needsApproval ? $"Not cached, needs {provider} to fetch it"

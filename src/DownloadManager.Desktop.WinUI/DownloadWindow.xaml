@@ -34,7 +34,7 @@
             <TabViewItem Header="Download status" IsClosable="False">
                 <ScrollViewer x:Name="StatusScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8" Padding="4,8,10,10">
-                        <TextBlock Text="URL" FontWeight="SemiBold" />
+                        <TextBlock x:Name="UrlHeader" Text="URL" FontWeight="SemiBold" />
                         <TextBlock x:Name="UrlText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
                                    FontSize="12" />
                         <Grid ColumnSpacing="12" RowSpacing="4">
@@ -111,7 +111,7 @@
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="6">
                 <TextBlock x:Name="CompletedSize" />
-                <TextBlock Text="Address" FontWeight="SemiBold" Margin="0,6,0,0" />
+                <TextBlock x:Name="CompletedUrlHeader" Text="Address" FontWeight="SemiBold" Margin="0,6,0,0" />
                 <TextBox x:Name="CompletedUrl" IsReadOnly="True" />
                 <TextBlock Text="The file saved as" FontWeight="SemiBold" />
                 <TextBox x:Name="CompletedPath" IsReadOnly="True" />

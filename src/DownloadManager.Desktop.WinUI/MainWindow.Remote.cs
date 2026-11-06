@@ -243,9 +243,9 @@ public sealed partial class MainWindow
 
         // After Add Links, before the export group.
         var at = 2;
-        void Add(string text, RoutedEventHandler click, bool enabled = true)
+        void Add(string text, string accessKey, RoutedEventHandler click, bool enabled = true)
         {
-            var item = new MenuFlyoutItem { Text = text, IsEnabled = enabled };
+            var item = new MenuFlyoutItem { Text = text, AccessKey = accessKey, IsEnabled = enabled };
             item.Click += click;
             TasksMenu.Items.Insert(at++, item);
             _remoteTasksItems.Add(item);
@@ -253,24 +253,24 @@ public sealed partial class MainWindow
 
         if (torrents)
         {
-            Add("Add Magnet…", async (_, _) => await ShowProviderAddAsync(AddFocus.Magnet));
-            Add("Import Torrent File…", async (_, _) => await ImportTorrentFilesAsync());
+            Add("Add Magnet…", "M", async (_, _) => await ShowProviderAddAsync(AddFocus.Magnet));
+            Add("Import Torrent File…", "T", async (_, _) => await ImportTorrentFilesAsync());
         }
 
         foreach (var account in browsable)
         {
-            Add($"Browse My {RemoteText.ProviderName(account)}…", (_, _) => OpenProviderWindow(account.Provider));
+            Add($"Browse My {RemoteText.ProviderName(account)}…", "B", (_, _) => OpenProviderWindow(account.Provider));
         }
 
         // Dimmed with nothing waiting, because then there is nothing for it to do.
-        Add("Check Remote Status Now", async (_, _) => await CheckRemoteStatusNowAsync(), canCheck);
+        Add("Check Remote Status Now", "C", async (_, _) => await CheckRemoteStatusNowAsync(), canCheck);
     }
 
     private async Task CheckRemoteStatusNowAsync()
     {
         var result = await _remote.CheckNowAsync();
         if (!result.Ok) await ShowMessageAsync("Check remote status now", RemoteText.Failure(result.Error));
-        else StatusText.Text = "Checking remote status now…";
+        else ShowPassingStatus("Checking remote status now…");
     }
 
     private void OpenProviderWindow(string provider)
@@ -382,7 +382,18 @@ public sealed partial class MainWindow
     {
         if (HandleArchiveRowKey(e)) return;
         var jobs = SelectedRemoteJobs;
-        if (jobs.Count == 0) return;
+        if (jobs.Count == 0)
+        {
+            // The list takes Enter for itself before KeyDown, so it is caught here for local rows too.
+            if (e.Key == Windows.System.VirtualKey.Enter && JobsList.SelectedItems.Count == 1)
+            {
+                e.Handled = true;
+                _ = RunRowPrimaryAsync();
+            }
+
+            return;
+        }
+
         switch (e.Key)
         {
             case Windows.System.VirtualKey.F5:
@@ -500,7 +511,7 @@ public sealed partial class MainWindow
         }
 
         if (problems.Count > 0) await ShowMessageAsync("Check Now", string.Join(Environment.NewLine, problems.Take(5)));
-        else if (asked > 0) StatusText.Text = asked == 1 ? "Checking now…" : $"Checking {asked} items now…";
+        else if (asked > 0) ShowPassingStatus(asked == 1 ? "Checking now…" : $"Checking {asked} items now…");
     }
 
     private async Task RemoveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)
