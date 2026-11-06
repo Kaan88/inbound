@@ -10,6 +10,7 @@
     <Project Path="src/DownloadManager.Host/DownloadManager.Host.csproj" />
     <Project Path="src/DownloadManager.NativeHost/DownloadManager.NativeHost.csproj" />
     <Project Path="src/DownloadManager.Persistence/DownloadManager.Persistence.csproj" />
+    <Project Path="src/DownloadManager.Providers.TorBox/DownloadManager.Providers.TorBox.csproj" />
     <Project Path="src/DownloadManager.Runtime/DownloadManager.Runtime.csproj" />
     <Project Path="src/DownloadManager.Tray/DownloadManager.Tray.csproj" />
   </Folder>
@@ -17,6 +18,7 @@
     <Project Path="tests/DownloadManager.Core.Tests/DownloadManager.Core.Tests.csproj" />
     <Project Path="tests/DownloadManager.Engine.Tests/DownloadManager.Engine.Tests.csproj" />
     <Project Path="tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj" />
+    <Project Path="tests/DownloadManager.TorBox.Tests/DownloadManager.TorBox.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/TestServer/TestServer.csproj" />
