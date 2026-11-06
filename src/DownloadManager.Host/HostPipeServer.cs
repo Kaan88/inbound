@@ -448,7 +448,7 @@ public sealed class HostPipeServer
             await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck
             {
                 Accepted = false,
-                Error = "The handoff came from an unknown extension.",
+                Error = "The desktop app does not recognise this extension. Update the app.",
                 ErrorCode = "untrusted_extension",
             }).ConfigureAwait(false);
             return;
@@ -460,7 +460,7 @@ public sealed class HostPipeServer
             await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck
             {
                 Accepted = false,
-                Error = "Browser integration is disabled.",
+                Error = "Turn on browser downloads in the desktop app's Options.",
                 ErrorCode = "integration_disabled",
             }).ConfigureAwait(false);
             return;

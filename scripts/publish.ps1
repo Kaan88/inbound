@@ -94,7 +94,10 @@ Publish-Project (Join-Path $root "src\DownloadManager.Cli\DownloadManager.Cli.cs
 # "XAML parsing failed". Clean this project before publishing it.
 $winuiProject = Join-Path $root "src\DownloadManager.Desktop.WinUI\DownloadManager.Desktop.WinUI.csproj"
 Write-Host "Cleaning WinUI intermediates..."
-& dotnet clean $winuiProject -c $Configuration -p:Platform=x64 | Out-Null
+$cleanArgs = @($winuiProject, "-c", $Configuration, "-p:Platform=x64")
+# A self-contained build keeps its intermediates in a folder of its own.
+if ($SelfContained) { $cleanArgs += @("-r", "win-x64") }
+& dotnet clean @cleanArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "WinUI clean failed." }
 Publish-Project $winuiProject @("-p:Platform=x64")
 

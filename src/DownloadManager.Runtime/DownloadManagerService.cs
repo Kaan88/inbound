@@ -1508,6 +1508,18 @@ public sealed partial class DownloadManagerService
         ReportUpdateProgress("downloading", check.AvailableVersion, total: check.Size);
         try
         {
+            // "Download" followed by "Install now" must not fetch it twice. The hash is from the
+            // signed manifest, so this is exactly as trustworthy as a fresh download.
+            if (File.Exists(target) && new FileInfo(target).Length == check.Size)
+            {
+                ReportUpdateProgress("verifying", check.AvailableVersion, check.Size ?? 0, check.Size);
+            }
+
+            if (await MatchesManifestAsync(target, check, cancellationToken).ConfigureAwait(false))
+            {
+                return new UpdateDownloadResult { Ok = true, Path = target, Size = check.Size, Sha256 = check.Sha256 };
+            }
+
             using var response = await UpdateClient.GetAsync(
                 installerUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if (response.RequestMessage?.RequestUri is { } finalInstallerUri &&
@@ -1603,6 +1615,45 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    private static async Task<bool> MatchesManifestAsync(string path, UpdateCheckResult check, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(path) || new FileInfo(path).Length != check.Size) return false;
+            var hash = await Hashing.Sha256FileAsync(path, cancellationToken).ConfigureAwait(false);
+            return hash.Equals(check.Sha256, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Best effort. A package is of no use once its update has been applied or has failed, and each
+    /// takes hundreds of MB. A folder the helper is still running from is left for next time.
+    /// </summary>
+    private void RemoveUpdatePackages(string? keepVersion = null)
+    {
+        try
+        {
+            var directory = Path.Combine(_paths.Root, "updates");
+            if (!Directory.Exists(directory)) return;
+            foreach (var stage in Directory.EnumerateDirectories(directory, "stage-*"))
+            {
+                if (Path.GetFileName(stage) == $"stage-{keepVersion}") continue;
+                try { Directory.Delete(stage, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+
+            foreach (var package in Directory.EnumerateFiles(directory, "installer-*.zip"))
+            {
+                if (Path.GetFileName(package) != $"installer-{keepVersion}.zip") DeleteFileQuietly(package);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     public async Task<UpdateInstallResult> InstallUpdateAsync(
         UpdateInstallRequest? request = null,
         CancellationToken cancellationToken = default)
@@ -1643,6 +1694,13 @@ public sealed partial class DownloadManagerService
                 Status = "notInstalled",
                 Error = "Portable and development builds do not auto-update.",
             };
+        }
+
+        // A Host started while the helper copies from the stage folder (the browser bridge can do
+        // that) must not pull that folder out from under it.
+        if (UpdateBeingInstalled())
+        {
+            return new UpdateInstallResult { Ok = false, Status = "busy", Error = "An update is already being installed." };
         }
 
         if (request?.Force != true)
@@ -1702,6 +1760,7 @@ public sealed partial class DownloadManagerService
                 return new UpdateInstallResult { Ok = false, Status = "busy", Error = "Downloads became active while the update was downloading." };
             _updateQuiescing = true;
         }
+        RemoveUpdatePackages(keepVersion: check.AvailableVersion);
         var staging = Path.Combine(_paths.Root, "updates", $"stage-{check.AvailableVersion}");
         ReportUpdateProgress("staging", check.AvailableVersion, download.Size ?? 0, download.Size);
         try
@@ -1832,8 +1891,9 @@ public sealed partial class DownloadManagerService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
         var installed = InstalledBuild.TryLoad()?.Version;
         if (outcome is null || installed is null) return null;
+        RemoveUpdatePackages();
         var stillMissing = IsNewerVersion(outcome.Version, installed);
-        if (outcome.Succeeded) return stillMissing ? null : outcome;
+        if (outcome.Succeeded) return stillMissing || IsNewerVersion(installed, outcome.Version) ? null : outcome;
         if (!stillMissing) return null;
         ReportUpdateProgress("failed", outcome.Version, error: outcome.Error);
         return outcome;
@@ -1841,6 +1901,9 @@ public sealed partial class DownloadManagerService
 
     /// <summary>True while an automatic retry of a failed update would be too soon; the user can still install it.</summary>
     public bool UpdateFailedRecently(string version) => UpdateJournal.FailedRecently(version, TimeSpan.FromHours(24));
+
+    /// <summary>True while the helper of an earlier Host is still applying an update.</summary>
+    public bool UpdateBeingInstalled() => UpdateJournal.HelperStillRunning();
 
     public async Task<SettingsResult> DeferUpdateAsync(
         string version,
@@ -2187,6 +2250,17 @@ public sealed partial class DownloadManagerService
             runtime.PauseRequested = false;
             runtime.CancelRequested = false;
             runtime.CancelledForRemoval = false;
+            // The saved login belongs to the site it came from, and the engine trusts whatever site
+            // the job now points at. A move to another site must leave it behind.
+            if (!Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var previous) ||
+                previous.GetLeftPart(UriPartial.Authority) != uri.GetLeftPart(UriPartial.Authority))
+            {
+                runtime.Job.RequestHeaders.Remove("Cookie");
+                runtime.Job.RequestHeaders.Remove("Authorization");
+                runtime.Job.RequestHeaders.Remove("Proxy-Authorization");
+                runtime.Job.Referrer = null;
+            }
+
             runtime.Job.Url = uri.AbsoluteUri;
             runtime.Job.FinalUrl = null;
             runtime.Job.State = DownloadState.Queued;

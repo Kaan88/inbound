@@ -196,6 +196,7 @@ internal sealed class HostUpdateMonitor : IDisposable
             {
                 if (!_autoCheck) return;
                 lock (_sync) _available = check;
+                if (_service.UpdateBeingInstalled()) return;
                 // The tray still offers it; only the automatic retry waits.
                 if (_service.UpdateFailedRecently(check.AvailableVersion ?? string.Empty))
                 {

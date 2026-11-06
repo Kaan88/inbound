@@ -2470,11 +2470,130 @@ public sealed partial class RuntimeServiceTests
             // "Succeeded" while that version is not what is installed tells nothing true.
             Write("succeeded", "0.3.3", "2026-11-06T04:00:00+03:00");
             Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+
+            // Nor does an older success left by an earlier version of the helper.
+            Write("succeeded", "0.3.1", "2026-11-06T05:00:00+03:00");
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
         }
         finally
         {
             Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RefreshingToAnotherSiteLeavesTheSavedLoginBehind()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        const string path = "/slow/refresh-login.bin?size=4194304&seed=97&bps=131072";
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}{path}",
+            DestinationDirectory = ctx.Destination,
+            FileName = "refresh-login.bin",
+            Source = "cli",
+            Referrer = "https://page.test/list",
+            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Cookie"] = "session=secret" },
+        });
+        Assert.True(response.Accepted, response.Error);
+        var id = response.Job!.Id;
+        var jobFile = Path.Combine(ctx.Paths.JobsDirectory, $"{id:D}.json");
+        async Task PauseAsync()
+        {
+            await ctx.WaitFor(id, job => job.ReceivedBytes > 0);
+            Assert.True((await ctx.Service.PauseAsync(id)).Ok);
+            await ctx.WaitFor(id, job => job.State == "paused");
+        }
+
+        await PauseAsync();
+        Assert.Contains("Cookie", await File.ReadAllTextAsync(jobFile));
+
+        // The same site: a fresh link to the same file keeps the login.
+        Assert.True((await ctx.Service.RefreshUrlAsync(id, $"{_server.BaseAddress}{path}&fresh=1")).Ok);
+        await PauseAsync();
+        var kept = await File.ReadAllTextAsync(jobFile);
+        Assert.Contains("Cookie", kept);
+        Assert.Contains("page.test", kept);
+
+        // Another site, here the same server under another name: nothing of the login goes with it.
+        var elsewhere = _server.BaseAddress.ToString().Replace("127.0.0.1", "localhost");
+        Assert.NotEqual(_server.BaseAddress.ToString(), elsewhere);
+        Assert.True((await ctx.Service.RefreshUrlAsync(id, $"{elsewhere}{path}&fresh=2")).Ok);
+        await PauseAsync();
+        var moved = await File.ReadAllTextAsync(jobFile);
+        Assert.DoesNotContain("Cookie", moved);
+        Assert.DoesNotContain("page.test", moved);
+
+        await ctx.Service.CancelAsync(id, deleteFile: true);
+    }
+
+    [Fact]
+    public async Task UpdatePackagesAreRemovedOnceTheirOutcomeIsKnown()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "install.json"), """{"version":"0.3.2","channel":"stable"}""");
+        var updates = Path.Combine(ctx.Paths.Root, "updates");
+        var stage = Path.Combine(updates, "stage-0.3.1");
+        Directory.CreateDirectory(Path.Combine(stage, "app"));
+        File.WriteAllText(Path.Combine(stage, "app", "file.dll"), "x");
+        var zip = Path.Combine(updates, "installer-0.3.1.zip");
+        File.WriteAllText(zip, "x");
+        var result = Path.Combine(updates, "install-result.json");
+
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+        try
+        {
+            // Nothing known yet: the helper may still be using them.
+            Assert.Null(ctx.Service.TakeUpdateInstallOutcome());
+            Assert.True(Directory.Exists(stage));
+            Assert.True(File.Exists(zip));
+
+            File.WriteAllText(result, """{"status":"succeeded","version":"0.3.2","error":"","at":"2026-11-06T01:00:00+03:00"}""");
+            Assert.NotNull(ctx.Service.TakeUpdateInstallOutcome());
+            Assert.False(Directory.Exists(stage));
+            Assert.False(File.Exists(zip));
+            Assert.True(File.Exists(result));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnUpdateAlreadyDownloadedAndIntactIsNotFetchedAgain()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var root = await OfferUpdateWithHelperAsync(ctx, "exit 3");
+        var previous = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT");
+        Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", root);
+        try
+        {
+            var first = await ctx.Service.DownloadUpdateAsync();
+            Assert.True(first.Ok, first.Error);
+            var written = File.GetLastWriteTimeUtc(first.Path!);
+            await Task.Delay(50);
+
+            var again = await ctx.Service.DownloadUpdateAsync();
+            Assert.True(again.Ok, again.Error);
+            Assert.Equal(written, File.GetLastWriteTimeUtc(again.Path!));
+            Assert.Equal(first.Sha256, again.Sha256);
+
+            // A damaged copy does not pass for the real one.
+            File.WriteAllBytes(first.Path!, new byte[first.Size!.Value]);
+            var repaired = await ctx.Service.DownloadUpdateAsync();
+            Assert.True(repaired.Ok, repaired.Error);
+            Assert.Equal(first.Sha256, await Hashing.Sha256FileAsync(repaired.Path!));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOWNLOADMANAGER_INSTALL_ROOT", previous);
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
         }
     }
 

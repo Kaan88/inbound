@@ -101,6 +101,15 @@ public sealed class UpdateInstallJournalTests : IDisposable
     }
 
     [Fact]
+    public void AHelperIsRunningOnlyWhileItsProcessIs()
+    {
+        Assert.False(_journal.HelperStillRunning(Running));
+        _journal.MarkPending("0.3.3", 4242);
+        Assert.True(_journal.HelperStillRunning(Running));
+        Assert.False(_journal.HelperStillRunning(Dead));
+    }
+
+    [Fact]
     public void AnotherProgramWithTheHelpersProcessIdDoesNotCountAsTheHelper()
     {
         // After a restart the number can belong to anything; here, this test process.

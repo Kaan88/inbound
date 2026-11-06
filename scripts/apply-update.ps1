@@ -122,7 +122,10 @@ function Move-Items([string]$from, [string]$to, [string[]]$names, [Collections.G
                 break
             }
             catch {
-                if ((Get-Date) -gt $deadline) { throw "Could not move '$source' because it is in use." }
+                if ((Get-Date) -gt $deadline) {
+                    $reason = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+                    throw "Could not move '$source': $reason"
+                }
                 Start-Sleep -Milliseconds 500
             }
         }
@@ -143,6 +146,9 @@ function Swap-In([string]$live, [string]$new, [string]$backup) {
     try { Move-Directory $live $backup 10 }
     catch {
         Write-Warning "$($_.Exception.Message) Replacing its contents instead."
+        # A program may have started during those seconds (a Host, from the browser bridge). Its
+        # files can be moved while it runs, so it must go first or it would run on from the backup.
+        Wait-InstallIdle 30
         $record = @{
             Old = [Collections.Generic.List[string]]::new()
             New = [Collections.Generic.List[string]]::new()
@@ -164,7 +170,15 @@ function Restore-Folder([string]$live, [string]$backup) {
     $record = $script:inPlaceSwaps[$live]
     if ($null -ne $record) {
         Move-Items $live $failed $record.New.ToArray() $null
-        Move-Items $backup $live $record.Old.ToArray() $null
+        # The new version may have created a file the old one also had (ui-trace.log), which would
+        # stop the old one going back. Anything of that name now in $live was made since the swap.
+        # One that cannot be moved costs that one file, not the rest of the old version.
+        $stuck = @()
+        foreach ($stray in @($record.Old | Where-Object { Test-Path -LiteralPath (Join-Path $live $_) })) {
+            try { Move-Items $live $failed @($stray) $null }
+            catch { Write-Warning $_.Exception.Message; $stuck += $stray }
+        }
+        Move-Items $backup $live @($record.Old | Where-Object { $stuck -notcontains $_ }) $null
         Remove-Item -LiteralPath $backup -Recurse -Force
         return
     }
@@ -209,6 +223,26 @@ function Confirm-Started([int]$seconds = 8) {
                 [IO.Path]::GetFileName($process.StartInfo.FileName), $process.ExitCode)
         }
     }
+}
+
+# Marks this version as one the user chose to skip. A Host from before 0.3.3 cannot read the result
+# file and installs again the moment it starts, but it does respect a skipped version, and it can
+# still install this one on request. Written while no Host is running, so nothing overwrites it.
+function Set-SkippedVersion {
+    $settingsPath = Join-Path (Split-Path -Parent (Split-Path -Parent $ResultPath)) "settings.json"
+    $settings = [IO.File]::ReadAllText($settingsPath) | ConvertFrom-Json
+    $settings | Add-Member -NotePropertyName skippedUpdateVersion -NotePropertyValue $Version -Force
+    $json = $settings | ConvertTo-Json -Depth 32
+    $json | ConvertFrom-Json | Out-Null
+    [IO.File]::WriteAllText("$settingsPath.tmp", $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath "$settingsPath.tmp" -Destination $settingsPath -Force
+}
+
+# The Host names this process as the one to watch just before this script can start, unless it is
+# too old to read the result. Without that, nothing will ever report a failure.
+function Test-HostIsWatching {
+    try { ([IO.File]::ReadAllText((Join-Path (Split-Path -Parent $ResultPath) "install-pending.json")) | ConvertFrom-Json).helperProcessId -eq $PID }
+    catch { $false }
 }
 
 function Show-Failure([string]$text) {
@@ -317,26 +351,29 @@ try {
 catch {
     $message = $_.Exception.Message
     Write-Warning "Update failed: $message"
+    # Asked first: a Host started meanwhile clears the mark once the result below is written.
+    $hostCannotTell = $HostPid -gt 0 -and -not (Test-HostIsWatching)
     foreach ($newProcess in $newProcesses) {
         try { if (-not $newProcess.HasExited) { $newProcess.Kill(); $newProcess.WaitForExit(10000) | Out-Null } }
         catch { $message = "$message; restart cleanup error: $($_.Exception.Message)" }
     }
     # Each step is tried whatever became of the one before: the more that goes back, the better.
-    $restored = $true
+    $appRestored = $true
+    $extensionRestored = $true
     if ($appSwapped) {
         # Something still running does not stop the attempt; the moves retry on their own.
         try { Wait-InstallIdle 30 }
         catch { Write-Warning $_.Exception.Message }
         try { Restore-Folder $appDir $backupDir }
         catch {
-            $restored = $false
+            $appRestored = $false
             $message = "$message; rollback error: $($_.Exception.Message)"
         }
     }
     if ($extensionSwapped) {
         try { Restore-Folder $extensionDir $extensionBackupDir }
         catch {
-            $restored = $false
+            $extensionRestored = $false
             $message = "$message; extension rollback error: $($_.Exception.Message)"
         }
     }
@@ -348,9 +385,15 @@ catch {
     try { Write-Result "failed" $message } catch { }
     $newProcesses.Clear()
     # A Host too slow to exit is still shutting down. Another started now would find it and step
-    # aside, and then nothing would be running. A failure before it was asked to wait leaves it up.
-    if ($script:waitedForHost -and (Get-Process -Id $HostPid -ErrorAction SilentlyContinue)) {
+    # aside, and then nothing would be running. A current Host stays up if this script fails while
+    # it is still waiting to hear; an older one always exits.
+    if (($script:waitedForHost -or $hostCannotTell) -and $HostPid -gt 0 -and
+        (Get-Process -Id $HostPid -ErrorAction SilentlyContinue)) {
         Wait-Process -Id $HostPid -Timeout 300 -ErrorAction SilentlyContinue
+    }
+    if ($hostCannotTell) {
+        try { Set-SkippedVersion }
+        catch { Write-Warning "Could not skip this version: $($_.Exception.Message)" }
     }
     $restarted = $false
     if (-not $NoStart -and (Test-Path (Join-Path $appDir "DownloadManager.Host.exe"))) {
@@ -363,11 +406,16 @@ catch {
 
     try { Stop-Transcript | Out-Null } catch { }
     # A restarted Host reports an ordinary failure itself. It cannot tell that the install is damaged,
-    # and without a Host nothing else would say anything.
-    if (-not $NoStart -and (-not $restarted -or -not $restored)) {
-        $what = if ($restored) { "the app could not be restarted" } else { "the previous version could not be put back" }
-        $where = if ($restored) { "" } else { "`n`nThe previous version is kept in:`n$backupDir`nRun Setup again to repair the installation." }
-        Show-Failure ("The update to $Version could not be installed and $what.`n`n$message$where")
+    # and without a Host, or with one too old to read the result, nothing else would say anything.
+    if (-not $NoStart -and (-not $restarted -or -not $appRestored -or -not $extensionRestored -or $hostCannotTell)) {
+        $outcome = if (-not $appRestored) { "the previous version could not be put back" }
+            elseif (-not $extensionRestored) { "the previous browser extension could not be put back" }
+            elseif (-not $restarted) { "the app could not be restarted" }
+            else { "the previous version is still in use" }
+        $repair = if (-not $appRestored) { "`n`nRun Setup again to repair the installation. Files from the previous version are in:`n$backupDir" }
+            elseif (-not $extensionRestored) { "`n`nRun Setup again to repair the installation. Files from the previous extension are in:`n$extensionBackupDir" }
+            else { "" }
+        Show-Failure ("The update to $Version could not be installed and $outcome.`n`n$message$repair")
     }
     exit 1
 }

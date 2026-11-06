@@ -47,6 +47,10 @@ public sealed class UpdateInstallJournal
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    /// <summary>True while the helper named by the pending file is still at work.</summary>
+    public bool HelperStillRunning(Func<int, bool>? isHelperRunning = null) =>
+        TryReadPending(out _, out var helperId) && (isHelperRunning ?? IsHelperRunning)(helperId);
+
     /// <summary>
     /// The outcome not yet told to the user, once. A later result counts as new. Null while the
     /// helper is still working.
