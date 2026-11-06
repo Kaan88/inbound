@@ -373,6 +373,9 @@ internal static class Program
                 return PrintAction(reply, json);
             }
 
+            case "archive":
+                return await ArchiveCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
+
             case "package":
                 return await PackageAsync(client, optionArgs, json).ConfigureAwait(false);
 
@@ -1763,6 +1766,14 @@ internal static class Program
               dm package pause|resume|cancel|unqueue <package-id>
               dm package queue <package-id> <queue-id>
               dm package priority <package-id> high|normal|low
+              dm archive status|list
+              dm archive extract <path> | --job ID | --package ID [--password-stdin]
+              dm archive password <set-id> | --package ID | --file PATH  (password from stdin)
+              dm archive retry|cancel|remove <set-id>
+              dm archive settings [--auto-extract on|off] [--unrar-path PATH | --unrar-path-default]
+                          [--destination next|subfolder|folder] [--folder PATH]
+                          [--preserve-folders on|off] [--conflict rename|overwrite|skip]
+                          [--archives keep|delete]
               dm refresh <job-id> <new-url>
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all

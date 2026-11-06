@@ -7,6 +7,7 @@ using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Archives;
 using DownloadManager.Tray;
 
 namespace DownloadManager.Host;
@@ -34,6 +35,16 @@ public sealed class HostPipeServer
         _service = service;
         _controller = controller;
         _log = log;
+    }
+
+    /// <summary>Answers <c>archive.*</c>. Set before <see cref="Start"/>.</summary>
+    public ArchiveIpcDispatcher? Archives { get; init; }
+
+    /// <summary>Whole-state broadcast of one set. The Host subscribes this to the coordinator's change event.</summary>
+    public void BroadcastArchiveChanged(ArchiveChangedDto change)
+    {
+        var message = IpcMessage.Create(ArchiveMessageTypes.Changed, change);
+        foreach (var client in _clients.Values) client.Writer.TryWrite(message);
     }
 
     public void Start()
@@ -197,6 +208,12 @@ public sealed class HostPipeServer
     {
         try
         {
+            if (Archives is { } archives && ArchiveIpcDispatcher.Handles(message.Type))
+            {
+                await client.SendAsync(await archives.DispatchAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
             switch (message.Type)
             {
                 case MessageTypes.HostPing:
