@@ -9,6 +9,10 @@ Build: snapshot `f6aebae`, from `feature/torbox-integration` plus `torbox-winui`
 
 **Quota wording, corrected.** The app says fetching "uses your account's quota" or "may count against your limits". The owner says there isn't really a quota and asked for the source. There is none for that claim: it was an assumption stated as fact. The brief mentions quotas only in general terms (failure causes, testing care) and asks for confirmation before submitting uncached content. The API research shows a 300 request rate limit and per-hoster daily limits, nothing saying a fetch uses up an account quota.
 
+**Live tests (owner, 2026-11-07):** allowed unattended, including adding, caching, magnets, torrents and deleting from the TorBox account: "files there don't matter if deleted". Local files, the installed app, pushing and releasing are not covered.
+
+**Add flow (owner, 2026-11-07):** TB.F10 waits for the owner's answer on the proposal. Everything else continues.
+
 ### Open for the owner (recorded 2026-11-06, for later)
 
 - **Chrome Web Store:** upload `artifacts\chrome-store\inbound-bridge-0.4.0-chrome.zip` as a draft and send the Item ID. The app then accepts that ID, 0.3.3 is built and published on request, and the listing is submitted only after 0.3.3 is out. See ROADMAP EXT.S2.
