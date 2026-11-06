@@ -11,7 +11,10 @@ try {
     $projects = @(
         "tests\DownloadManager.Core.Tests\DownloadManager.Core.Tests.csproj",
         "tests\DownloadManager.Engine.Tests\DownloadManager.Engine.Tests.csproj",
-        "tests\DownloadManager.Integration.Tests\DownloadManager.Integration.Tests.csproj"
+        "tests\DownloadManager.Integration.Tests\DownloadManager.Integration.Tests.csproj",
+        "tests\DownloadManager.TorBox.Tests\DownloadManager.TorBox.Tests.csproj",
+        "tests\DownloadManager.Archives.Tests\DownloadManager.Archives.Tests.csproj",
+        "tests\DownloadManager.Containers.Tests\DownloadManager.Containers.Tests.csproj"
     )
 
     foreach ($project in $projects) {
