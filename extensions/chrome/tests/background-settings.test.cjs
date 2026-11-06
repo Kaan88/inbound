@@ -114,7 +114,8 @@ async function startBackground(source) {
   await new Promise(resolve => setImmediate(resolve));
 }
 
-function sendRuntimeMessage(harness, message, sender = { tab: { id: 4 }, frameId: 0 }) {
+function sendRuntimeMessage(harness, message,
+  sender = { id: 'test-extension', url: 'chrome-extension://test/options.html', tab: { id: 4 }, frameId: 0 }) {
   return new Promise((resolve, reject) => {
     const handled = harness.runtimeOnMessage.listeners[0](message, sender, resolve);
     if (handled !== true) reject(new Error('Runtime listener did not keep the response channel open.'));
@@ -392,7 +393,7 @@ test('download without a Delete gesture is paused for normal bridge capture', as
     enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
   };
-  const pages = new Map([[4, () => ({ bypass: false })]]);
+  const pages = new Map([[4, () => ({ keep: false })]]);
   const harness = makeChrome(settings, { id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0 }, pages);
   const oldChrome = global.chrome;
   global.chrome = harness.chrome;
@@ -411,7 +412,7 @@ test('download without a Delete gesture is paused for normal bridge capture', as
   }
 });
 
-test('one Delete gesture bypasses one matching download and the next is captured', async () => {
+test('one Delete gesture keeps one matching download and the next is captured', async () => {
   const settings = {
     enabled: true, autoIntercept: true, startMode: 'now',
     interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
@@ -419,11 +420,11 @@ test('one Delete gesture bypasses one matching download and the next is captured
   const url = 'https://example.test/file.zip';
   const gestures = [{ url, expires: Date.now() + 15000 }];
   const page = message => {
-    if (message?.type !== 'dm.consumeCaptureBypass') return undefined;
+    if (message?.type !== 'dm.consumeKeepInBrowser') return undefined;
     const index = gestures.findIndex(item => item.expires > Date.now() && item.url === message.url);
-    if (index < 0) return { bypass: false };
+    if (index < 0) return { keep: false };
     gestures.splice(index, 1);
-    return { bypass: true };
+    return { keep: true };
   };
   const harness = makeChrome(settings, { id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0 }, new Map([[4, page]]));
   const oldChrome = global.chrome;
@@ -452,11 +453,11 @@ test('gesture in a content script survives a fresh service-worker load', async (
   const url = 'https://example.test/file.zip';
   const gestures = [{ url, expires: Date.now() + 15000 }];
   const pages = new Map([[4, message => {
-    if (message?.type !== 'dm.consumeCaptureBypass') return undefined;
+    if (message?.type !== 'dm.consumeKeepInBrowser') return undefined;
     const index = gestures.findIndex(item => item.expires > Date.now() && item.url === message.url);
-    if (index < 0) return { bypass: false };
+    if (index < 0) return { keep: false };
     gestures.splice(index, 1);
-    return { bypass: true };
+    return { keep: true };
   }]]);
   const harness = makeChrome(settings, { id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0 }, pages);
   const oldChrome = global.chrome;
@@ -517,4 +518,203 @@ test('file-name hook holds the download and answers when the browser keeps it', 
   } finally {
     global.chrome = oldChrome;
   }
+});
+
+const backgroundSource = path.join(__dirname, '..', 'src', 'background.ts');
+const ruleSettings = { enabled: true, autoIntercept: true, startMode: 'now',
+  interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false };
+const settle = async (done) => {
+  for (let attempt = 0; attempt < 40 && !done(); attempt++) await new Promise(resolve => setImmediate(resolve));
+};
+const startDownload = (harness, item) => new Promise(resolve => {
+  harness.downloadsCreated.listeners[0]({ id: 1, filename: 'a.zip', referrer: '', mime: '', totalBytes: 1, fileSize: 1, ...item }, resolve);
+});
+async function withBackground(harness, run) {
+  const old = global.chrome;
+  global.chrome = harness.chrome;
+  try {
+    await startBackground(backgroundSource);
+    await run();
+  } finally { global.chrome = old; }
+}
+
+test('a fresh install opens Settings and catches nothing until the user turns it on', async () => {
+  const harness = makeChrome(undefined, { id: 'seed' });
+  let opened = 0;
+  harness.chrome.runtime.openOptionsPage = async () => { opened++; };
+  await withBackground(harness, async () => {
+    harness.chrome.runtime.onInstalled.listeners[0]({ reason: 'install' });
+    assert.equal(opened, 1);
+    await startDownload(harness, { url: 'https://file.test/a.zip' });
+    assert.deepEqual(harness.pausedDownloads, []);
+    assert.equal(harness.nativeMessages.length, 0);
+    assert.equal(harness.values.settings, undefined);
+  });
+});
+
+test('an upgrade from before catching was a choice keeps it on, once', async () => {
+  const relied = makeChrome(undefined, { id: 'seed' });
+  await withBackground(relied, async () => {
+    relied.chrome.runtime.onInstalled.listeners[0]({ reason: 'update', previousVersion: '0.3.0' });
+    await settle(() => relied.values.settings);
+    assert.equal(relied.values.settings.autoIntercept, true);
+  });
+
+  // Someone who chose is not overruled.
+  const chose = makeChrome({ ...ruleSettings, autoIntercept: false }, { id: 'seed' });
+  await withBackground(chose, async () => {
+    chose.chrome.runtime.onInstalled.listeners[0]({ reason: 'update', previousVersion: '0.3.0' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(chose.values.settings.autoIntercept, false);
+  });
+
+  // Updating from a version that already asks changes nothing.
+  const current = makeChrome(undefined, { id: 'seed' });
+  await withBackground(current, async () => {
+    current.chrome.runtime.onInstalled.listeners[0]({ reason: 'update', previousVersion: '0.4.0' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(current.values.settings, undefined);
+  });
+});
+
+test('YouTube stays out of every way of sending a download', async () => {
+  const pages = new Map([[4, () => ({ ok: true, pageUrl: 'https://page.test/', links: [
+    { url: 'https://www.youtube.com/watch?v=1', text: 'video' },
+    { url: 'https://i.ytimg.com/vi/1/hq.jpg', text: 'thumbnail' },
+    { url: 'https://file.test/a.zip', text: 'archive' },
+  ] })]]);
+  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' }, pages);
+  let windowsOpened = 0;
+  harness.chrome.windows.create = async () => { windowsOpened++; };
+  await withBackground(harness, async () => {
+    harness.contextMenuClicked.listeners[0]({ linkUrl: 'https://www.youtube.com/watch?v=1', pageUrl: 'https://www.youtube.com/' }, { id: 4 });
+    harness.contextMenuClicked.listeners[0]({ linkUrl: 'https://file.test/a.zip', pageUrl: 'https://m.youtube.com/watch?v=1' }, { id: 4 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(windowsOpened, 0);
+
+    await startDownload(harness, { url: 'https://rr1.googlevideo.com/videoplayback' });
+    await startDownload(harness, { url: 'https://file.test/b.zip', referrer: 'https://www.youtube.com/watch?v=1' });
+    assert.deepEqual(harness.pausedDownloads, []);
+    await startDownload(harness, { url: 'https://file.test/c.zip' });
+    assert.equal(harness.pausedDownloads.length, 1, 'an ordinary download is still caught');
+
+    const links = await sendRuntimeMessage(harness, { type: 'dm.pageLinks', tabId: 4 });
+    assert.deepEqual(links.links.map(link => link.url), ['https://file.test/a.zip']);
+
+    const media = await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://page.test/', items: [
+      { url: 'https://www.youtube.com/watch?v=1', kind: 'video' }, { url: 'https://file.test/a.mp4', kind: 'video' },
+    ] });
+    assert.equal(media.count, 1);
+  });
+});
+
+test('pages can reach only what the content script needs', async () => {
+  const harness = makeChrome({ ...ruleSettings, autoIntercept: false, mediaDetectionEnabled: true }, { id: 'seed' });
+  const page = { tab: { id: 4 }, frameId: 0, url: 'https://evil.test/' };
+  await withBackground(harness, async () => {
+    for (const message of [
+      { type: 'dm.saveSettings', settings: { autoIntercept: true } },
+      { type: 'dm.confirmBatch', urls: ['https://bank.test/statement.pdf'] },
+      { type: 'dm.getHandoff', id: 'seed' },
+      { type: 'dm.jobs' },
+    ]) {
+      assert.equal((await sendRuntimeMessage(harness, message, page)).ok, false, message.type);
+    }
+    assert.equal(harness.values.settings.autoIntercept, false);
+
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' }, page)).enabled, true);
+
+    const saved = await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...ruleSettings } },
+      { url: 'chrome-extension://test/options.html' });
+    assert.equal(saved.ok, true);
+    assert.equal(harness.values.settings.autoIntercept, true);
+  });
+});
+
+test('a playlist on another site is requested without the user\'s cookies', async () => {
+  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' });
+  const oldFetch = global.fetch;
+  const requests = new Map();
+  global.fetch = async (url, options) => { requests.set(url, options.credentials); return new Response('#EXTM3U'); };
+  try {
+    await withBackground(harness, async () => {
+      await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://video.test/watch', items: [
+        { url: 'https://video.test/own.m3u8', kind: 'hls' }, { url: 'https://bank.test/x.m3u8', kind: 'hls' },
+      ] });
+      await sendRuntimeMessage(harness, { type: 'dm.media', tabId: 4 });
+      assert.equal(requests.get('https://video.test/own.m3u8'), 'include');
+      assert.equal(requests.get('https://bank.test/x.m3u8'), 'omit');
+    });
+  } finally { global.fetch = oldFetch; }
+});
+
+test('a playlist on the page\'s own site loses the cookies if it redirects', async () => {
+  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' });
+  const oldFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ credentials: options.credentials, redirect: options.redirect });
+    return options.redirect === 'manual'
+      ? { type: 'opaqueredirect', ok: false, status: 0 }
+      : new Response('#EXTM3U');
+  };
+  try {
+    await withBackground(harness, async () => {
+      await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://video.test/watch',
+        items: [{ url: 'https://video.test/moved.m3u8', kind: 'hls' }] });
+      await sendRuntimeMessage(harness, { type: 'dm.media', tabId: 4 });
+      assert.deepEqual(requests, [{ credentials: 'include', redirect: 'manual' }, { credentials: 'omit', redirect: undefined }]);
+    });
+  } finally { global.fetch = oldFetch; }
+});
+
+test('an excluded site stays out however the download got there', async () => {
+  const harness = makeChrome({ ...ruleSettings, excludedHosts: ['bank.test'] }, { id: 'seed' });
+  await withBackground(harness, async () => {
+    await startDownload(harness, { url: 'https://bank.test/a.zip', finalUrl: 'https://cdn.test/a.zip' });
+    await startDownload(harness, { url: 'https://cdn.test/b.zip', referrer: 'https://bank.test/statements' });
+    await startDownload(harness, { url: 'https://cdn.test/c.zip', finalUrl: 'https://files.bank.test/c.zip' });
+    assert.deepEqual(harness.pausedDownloads, []);
+    await startDownload(harness, { url: 'https://cdn.test/d.zip' });
+    assert.equal(harness.pausedDownloads.length, 1);
+  });
+});
+
+test('Download All on a YouTube page lists nothing, and the panel cannot send its media', async () => {
+  const pages = new Map([[4, () => ({ ok: true, pageUrl: 'https://www.youtube.com/watch?v=1', links: [
+    { url: 'https://file.test/a.zip', text: 'archive' },
+  ] })]]);
+  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' }, pages);
+  await withBackground(harness, async () => {
+    assert.deepEqual((await sendRuntimeMessage(harness, { type: 'dm.pageLinks', tabId: 4 })).links, []);
+    const queued = await sendRuntimeMessage(harness, { type: 'dm.queueMedia', url: 'https://rr1.googlevideo.com/x', pageUrl: 'https://page.test/' });
+    assert.equal(queued.ok, false);
+  });
+});
+
+test('page scripts learn whether automatic sending is on, and a sender with no address gets nothing else', async () => {
+  const harness = makeChrome({ ...ruleSettings, autoIntercept: false }, { id: 'seed' });
+  await withBackground(harness, async () => {
+    const page = { id: 'test-extension', tab: { id: 4 }, url: 'https://page.test/' };
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' }, page)).autoSend, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: {} }, { tab: { id: 4 } })).ok, false);
+  });
+});
+
+test('a missing desktop app is explained in plain words wherever it shows', async () => {
+  const harness = makeChrome(ruleSettings, { id: 'seed' });
+  harness.chrome.runtime.connectNative = () => { throw new Error('Specified native messaging host not found.'); };
+  await withBackground(harness, async () => {
+    const opened = await sendRuntimeMessage(harness, { type: 'dm.openApp' });
+    assert.equal(opened.ok, false);
+    assert.match(opened.error, /needs the Inbound Download Manager desktop app/);
+    assert.doesNotMatch(opened.error, /native/i);
+  });
+});
+
+test('turning the connection off also turns off media detection', async () => {
+  const harness = makeChrome({ ...ruleSettings, enabled: false, mediaDetectionEnabled: true }, { id: 'seed' });
+  await withBackground(harness, async () => {
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' })).enabled, false);
+  });
 });

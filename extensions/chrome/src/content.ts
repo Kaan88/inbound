@@ -1,5 +1,6 @@
 /// <reference types="chrome" />
-import { CaptureBypass, consumeCaptureBypass, normalizeDownloadUrl } from "./capture-bypass";
+import { isUnsupportedHost } from "./unsupported-sites";
+import { KeepInBrowserToken, consumeKeepInBrowser, normalizeDownloadUrl } from "./keep-in-browser";
 
 interface MediaCandidate {
   url: string;
@@ -21,17 +22,20 @@ let mediaDetectionEnabled = false;
 let mediaDetectionGeneration = 0;
 let observer: MutationObserver | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
-const captureGestures: CaptureBypass[] = [];
-document.addEventListener("keydown", event => {
+const captureGestures: KeepInBrowserToken[] = [];
+let watchingDelete = false;
+function onKeyDown(event: KeyboardEvent): void {
   if (event.isTrusted && event.key === "Delete") deleteHeld = true;
-}, true);
-document.addEventListener("keyup", event => {
+}
+function onKeyUp(event: KeyboardEvent): void {
   if (event.isTrusted && event.key === "Delete") deleteHeld = false;
-}, true);
-window.addEventListener("blur", () => { deleteHeld = false; });
-document.addEventListener("visibilitychange", () => {
+}
+function releaseDelete(): void {
+  deleteHeld = false;
+}
+function onVisibilityChange(): void {
   if (document.hidden) deleteHeld = false;
-});
+}
 // Capture before the page's click handler initiates navigation or a download.
 function rememberCaptureGesture(event: MouseEvent): void {
   if (!event.isTrusted) return;
@@ -41,8 +45,23 @@ function rememberCaptureGesture(event: MouseEvent): void {
   const url = normalizeDownloadUrl(anchor?.href ?? "");
   if (url) captureGestures.push({ url, expires: Date.now() + 15000 });
 }
-document.addEventListener("click", rememberCaptureGesture, true);
-document.addEventListener("auxclick", rememberCaptureGesture, true);
+// Holding Delete keeps a download out of automatic sending, so nothing listens unless that is on.
+function watchDelete(on: boolean): void {
+  if (on === watchingDelete) return;
+  watchingDelete = on;
+  const documentListeners = [["keydown", onKeyDown], ["keyup", onKeyUp], ["visibilitychange", onVisibilityChange],
+    ["click", rememberCaptureGesture], ["auxclick", rememberCaptureGesture]] as [string, EventListener][];
+  for (const [name, listener] of documentListeners) {
+    if (on) document.addEventListener(name, listener, true);
+    else document.removeEventListener(name, listener, true);
+  }
+  if (on) window.addEventListener("blur", releaseDelete);
+  else {
+    window.removeEventListener("blur", releaseDelete);
+    deleteHeld = false;
+    captureGestures.length = 0;
+  }
+}
 function kindFor(url: string, tag: string): string {
   const lower = url.toLowerCase();
   if (lower.includes(".m3u8")) {
@@ -70,6 +89,9 @@ function add(url: string | null | undefined, tag: string, label: string): void {
     if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
       return;
     }
+    if (isUnsupportedHost(resolved.hostname)) {
+      return;
+    }
 
     const absolute = resolved.href;
     if (!seen.has(absolute)) {
@@ -90,7 +112,7 @@ function add(url: string | null | undefined, tag: string, label: string): void {
 }
 
 function scan(): void {
-  if (!mediaDetectionEnabled) return;
+  if (!mediaDetectionEnabled || isUnsupportedHost(location.hostname)) return;
 
   for (const video of Array.from(document.querySelectorAll("video"))) {
     add(video.currentSrc, "video", video.getAttribute("title") || "video");
@@ -201,7 +223,7 @@ function updatePanel(): void {
 
     const kind = document.createElement("span");
     kind.className = "kind";
-    kind.textContent = item.kind;
+    kind.textContent = item.kind === "hls" || item.kind === "dash" ? "stream" : item.kind;
 
     const button = document.createElement("button");
     button.type = "button";
@@ -209,14 +231,14 @@ function updatePanel(): void {
     button.textContent = "Download";
     button.addEventListener("click", async () => {
       button.disabled = true;
-      button.textContent = "Sending...";
+      button.textContent = "Opening...";
       try {
         const result = (await chrome.runtime.sendMessage({
           type: "dm.queueMedia",
           url: item.url,
           pageUrl: location.href,
         })) as { ok?: boolean; error?: string };
-        button.textContent = result?.ok ? "Sent" : "Retry";
+        button.textContent = result?.ok ? "Confirm in window" : "Retry";
         button.title = result?.error ?? "";
       } catch (error) {
         button.textContent = "Retry";
@@ -396,8 +418,8 @@ function setMediaDetectionEnabled(enabled: boolean): void {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "dm.consumeCaptureBypass") {
-    sendResponse({ bypass: consumeCaptureBypass(captureGestures, String(message.url ?? ""), Date.now()) });
+  if (message?.type === "dm.consumeKeepInBrowser") {
+    sendResponse({ keep: consumeKeepInBrowser(captureGestures, String(message.url ?? ""), Date.now()) });
     return false;
   }
   if (message?.type === "dm.scan") {
@@ -408,6 +430,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "dm.mediaDetectionChanged") {
     setMediaDetectionEnabled(message.enabled === true);
+    watchDelete(message.autoSend === true);
     sendResponse({ ok: true, enabled: mediaDetectionEnabled });
     return false;
   }
@@ -424,7 +447,9 @@ const initialMediaDetectionGeneration = mediaDetectionGeneration;
 void chrome.runtime.sendMessage({ type: "dm.getMediaDetectionEnabled" })
   .then(response => {
     // Ignore an initial read that races a newer live Options change.
-    if (mediaDetectionGeneration === initialMediaDetectionGeneration)
+    if (mediaDetectionGeneration === initialMediaDetectionGeneration) {
       setMediaDetectionEnabled(response?.enabled === true);
+      watchDelete(response?.autoSend === true);
+    }
   })
   .catch(() => undefined);

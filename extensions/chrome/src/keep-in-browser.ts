@@ -1,4 +1,4 @@
-export interface CaptureBypass {
+export interface KeepInBrowserToken {
   url: string;
   expires: number;
 }
@@ -14,9 +14,9 @@ export function normalizeDownloadUrl(value: string): string {
   }
 }
 
-// A gesture bypasses one transfer only. Match the original link so redirects
+// A gesture keeps one transfer in the browser. Match the original link so redirects
 // cannot make the token apply to unrelated downloads at the final host.
-export function consumeCaptureBypass(tokens: CaptureBypass[], url: string, now: number): boolean {
+export function consumeKeepInBrowser(tokens: KeepInBrowserToken[], url: string, now: number): boolean {
   const normalized = normalizeDownloadUrl(url);
   const index = tokens.findIndex(token => token.expires > now && token.url === normalized);
   if (index < 0) return false;

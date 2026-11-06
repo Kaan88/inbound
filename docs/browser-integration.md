@@ -11,7 +11,8 @@ Chrome version during Phase 4.
 1. **No arbitrary request replay.** A service worker cannot read a request body
    and construct an equivalent authenticated request for a different client in
    the general case. POST bodies, multipart uploads and short-lived signed URLs
-   may be unavailable. Such downloads stay in Chrome.
+   may be unavailable, and the extension cannot tell when they are in play. See
+   the table below.
 2. **Interception point is `downloads.onDeterminingFilename`.** Chromium adds a
    download to its UI (the Chrome/Edge download bubble) only after the target
    name is decided. The listener returns `true` to hold the decision, pauses,
@@ -21,8 +22,8 @@ Chrome version during Phase 4.
    `suggest()` once and resumes. reference app's own MV3 extension uses the same hook;
    `downloads.setUiOptions` is not needed and is not used.
 3. **`webRequest` is observational in MV3.** Blocking requires a
-   policy-installed extension; we do not rely on it. `onBeforeSendHeaders` /
-   `onHeadersReceived` are used to enrich metadata, not to redirect.
+   policy-installed extension, so the extension does not use it and does not
+   request the permission.
 4. **Cookies are readable with the `cookies` permission + host permissions.**
    `chrome.cookies.getAll({url})` gives the cookie set for the target; this is
    the main way to transfer a browser session.
@@ -36,7 +37,10 @@ Chrome version during Phase 4.
    native host's stdout is reserved for 32-bit length-prefixed frames. Logs go
    to stderr/a file.
 8. **Extension identity is fixed by the manifest `key`.** The native-host
-   manifest must list exactly our extension origin.
+   manifest must list exactly our extension origins. The Chrome Web Store refuses
+   a first upload that has a `key` and assigns its own ID, so the store zip
+   (`scripts\package-extension-store.ps1`) has none, and that ID must be added to
+   the native side before the listing can work. See `docs/chrome-store/LISTING.md`.
 
 ## Handoff flow (durable)
 
@@ -73,13 +77,14 @@ configurable window but remain keyed by `(extensionId, requestId)`.
 | Ordinary GET (link, file, attachment) | **Supported** | URL + cookies + referrer are sufficient |
 | GET with query/signed URL | **Supported while valid** | Replayable; refresh flow needed when expired |
 | GET after cross-origin redirect | **Supported with scope checks** | Cookies selected per origin; auth headers dropped cross-origin |
-| Cookie-authenticated GET | **Supported** | Cookie set transferred; redacted in logs |
+| Cookie-authenticated GET | **Supported** | Cookies for the original address go with it, and only to that site; not logged |
 | Basic/Bearer-auth GET | **Conditional** | Only if header is visible and user enables header transfer |
-| POST form/file upload | **Unsupported → Chrome** | Body replay is not reliable |
+| POST form/file upload | **Cannot be detected** | Chrome's download API does not show the method, so it is treated like any other download. If the app accepts it, Chrome's copy is gone and the app's GET may fail. Pause catching first |
 | `blob:` / `data:` generated downloads | **Unsupported → Chrome** | Not addressable by the native client |
 | DRM-protected media segments | **Unsupported** | Detection only; no decryption |
 | Chrome Web Store / browser-protected URLs | **Unsupported → Chrome** | Browser policy |
-| Incognito (unless extension allowed) | **Unsupported → Chrome** | Session boundary |
+| Incognito | **Unsupported → Chrome** | Session boundary; the manifest sets `"incognito": "not_allowed"` |
+| YouTube | **Unsupported → Chrome** | Chrome Web Store policy; `src/unsupported-sites.ts` |
 | Very short-lived URL | **Ask / later** | May need refresh-address workflow |
 
 The fallback is explicit: if we cannot accept, the extension resumes or never
@@ -103,17 +108,24 @@ The host replies with `handoff.ack` / `handoff.error`, then streams
 
 ## Permissions requested by our extension
 
-Minimal but sufficient: `downloads`, `contextMenus`, `storage`, `cookies`,
-`webRequest`, `nativeMessaging`, `notifications` (optional), `tabs` (page URL
-for context/referrer). Host permissions only for origins the user enables
-where practical; the first version uses `<all_urls>` for parity with the
-reference, with an explicit settings toggle.
+`downloads`, `contextMenus`, `storage`, `cookies`, `nativeMessaging` and
+`notifications`, with host permissions for `http://*/*` and `https://*/*`, since a
+download can start from any site. `docs/chrome-store/LISTING.md` gives the reason
+for each. What the extension does with data is in
+`docs/chrome-extension-privacy.md`; keep both true when behaviour changes.
+
+Automatic catching is off until the user turns it on in Settings, which opens on
+first install and explains beside the checkbox what it shares.
 
 ## Security boundaries
 
 - Cookies and Authorization values are never written to diagnostic logs.
 - The native host accepts only our extension origin (validated by Chrome's
   invocation and by `allowed_origins`).
+- Inside the extension, content scripts can send only the messages they need
+  (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages. A stream
+  playlist named by a page is requested with the user's cookies only from the site
+  the page itself is on.
 - The host validates every field and enforces size/depth limits.
 - The extension may not request arbitrary local file destinations; the host
   applies its own destination policy and shows the resolved path in the UI.

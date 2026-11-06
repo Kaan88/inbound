@@ -20,19 +20,31 @@
       <h2>Integration</h2>
       <label class="check">
         <input id="enabled" type="checkbox" />
-        <span>Enable the browser bridge</span>
+        <span>Allow automatic sending and media detection (right-click and Download all links work either way)</span>
       </label>
       <label class="check">
         <input id="autoIntercept" type="checkbox" />
-        <span>Automatically take over eligible downloads</span>
+        <span>Automatically send downloads to the desktop app</span>
       </label>
+      <p class="consent small">
+        When this is on, downloads that match your rules stop in Chrome and start again in the desktop app, and they leave Chrome's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. Nothing is sent to the developer.
+        <a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a>
+      </p>
       <label class="check">
         <input id="mediaDetectionEnabled" type="checkbox" />
         <span>Detect media on pages and show the in-page download panel</span>
       </label>
+      <p class="consent small">
+        Off unless you turn it on. It looks for video and audio addresses on each page you visit, keeps them
+        in memory until the page is closed or reloaded, and sends one to the desktop app only when you choose
+        to download it. To list a stream's qualities, opening the toolbar popup may request its playlist from
+        the site hosting it, with your cookies only if that is the site you are on. YouTube is not supported,
+        and the app refuses live streams and streams it detects as DRM-protected. Download only what you have
+        the right to.
+      </p>
       <label class="check">
         <input id="notifications" type="checkbox" />
-        <span>Show notifications for handoff results</span>
+        <span>Show notifications about sending downloads</span>
       </label>
 
       <label class="field">
@@ -43,37 +55,46 @@
         </select>
       </label>
 
-      <p class="muted small">New downloads use the app's default folder. Choose a one-off folder on the handoff screen.</p>
+      <p class="muted small">New downloads use the app's default folder. To use a different folder for one download, right-click its link and choose Download with Inbound Download Manager.</p>
     </section>
 
     <section class="card form-card">
       <h2>File and site rules</h2>
       <label class="field">
-        <span>Intercept these file extensions (comma-separated; empty means all)</span>
+        <span>Catch these file types (comma-separated; empty means all). Files with no file type are also caught, unless they are web pages.</span>
         <textarea id="interceptedExtensions" rows="4" spellcheck="false"></textarea>
       </label>
       <label class="field">
-        <span>Never intercept these extensions</span>
+        <span>Never catch these file types</span>
         <textarea id="excludedExtensions" rows="2" spellcheck="false"></textarea>
       </label>
       <label class="field">
-        <span>Never intercept these hosts (one per line or comma-separated)</span>
+        <span>Never catch downloads from these sites (one per line or comma-separated)</span>
         <textarea id="excludedHosts" rows="3" spellcheck="false"></textarea>
       </label>
+      <p class="muted small">
+        To keep a single download in Chrome, hold Delete while you click its link. To keep them all for a
+        while, or for buttons and links inside embedded frames where holding Delete does not work, use Pause
+        catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
+        it does not record what you type.
+      </p>
     </section>
 
     <section class="card form-card">
       <h2>Connection</h2>
       <p class="muted small">
-        The browser launches the native host named <code>com.kaank.downloadmanager</code>. The host is
-        registered per user by the installer and must be present before automatic interception is
-        useful. Unsupported requests stay in the browser.
+        This extension needs the Inbound Download Manager desktop app for Windows, and sends download details
+        only to that app on this computer. Using the extension starts the app's background process if it is not
+        running. If the app is not installed or cannot be reached, or it refuses a download, the download stays
+        in Chrome. Once the app has accepted one, Chrome's copy is gone, so pause catching first for a file from a
+        submitted form or a link that works only once.
       </p>
       <div class="row">
-        <button id="test" type="button">Test native host</button>
+        <button id="test" type="button">Check connection</button>
         <button id="openApp" type="button">Open Inbound Download Manager</button>
       </div>
       <p id="testResult" class="muted small"></p>
+      <p><a id="getApp" class="hidden" href="https://github.com/Kaan88/inbound/releases/latest" target="_blank" rel="noopener">Get the desktop app</a></p>
     </section>
 
     <div class="actions sticky">

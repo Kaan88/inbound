@@ -97,8 +97,8 @@ protocol-only; log to stderr/file.
 Browser strategy: the extension observes eligible Chrome downloads and sends
 URL, final URL, cookies, referrer, UA and relevant headers to our native host;
 the host durably records and ACKs before Chrome’s download is cancelled. On any
-failure Chrome’s download is resumed. POST bodies and unsupported request types
-stay in Chrome. See `docs/browser-integration.md`.
+failure Chrome’s download is resumed. `blob:` and `data:` downloads stay in Chrome.
+A form POST cannot be told apart from a GET, so it can fail in the app once accepted. See `docs/browser-integration.md`.
 
 ## UI structure (current Inbound shell)
 
@@ -109,7 +109,7 @@ Delete, Delete Completed | Options, Scheduler | Start/Stop Queue), category
 sidebar (categories, Unfinished/Active/Queued/Failed, Finished, Queues), the
 download list (File Name, Q, Size, Status, Time left, Transfer rate, Last Try
 Date, Description) with expandable packages, a collapsible bottom speed graph
-(Expander opens Up by design) and a status bar. Secondary windows (Options,
+(a slim bar that opens upward by design) and a status bar. Secondary windows (Options,
 Scheduler, progress, statistics) use `WindowLayout.ApplyChrome`. Closing hides
 the window; a second launch activates the existing UI via a named event.
 

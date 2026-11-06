@@ -1,6 +1,29 @@
 # Progress — session handoff
 
 
+### Chrome Web Store package and listing (2026-11-06)
+
+- Ready for the owner's upload; not uploaded. Zip: `scripts\package-extension-store.ps1`. Dashboard text, images and the order of steps: `docs/chrome-store/`. Privacy policy: `docs/chrome-extension-privacy.md`, which must be pushed before submitting. See ROADMAP EXT.S2.
+- The store assigns a new ID, because the private key for the current one is not available. The app must accept that ID before the listing can work. That is not done yet: it needs the Item ID from the draft upload.
+- Extension 0.4.0: automatic sending is off until turned on in Settings, which opens on first install and explains what it shares. Host permissions narrowed to http and https. Incognito not allowed. YouTube refused on every path. Content scripts limited to three messages, failing closed. Delete-key listeners attach only while automatic sending is on. Stream playlists get cookies only from the page's own site, and not through a redirect. Excluded sites also cover the original address and referrer. A missing app is explained in plain words with a link.
+- Evidence: extension typecheck and tests; the zip's contents loaded in real Edge (worker runs, Settings opens on install, offline popup and Settings captured). Policy and listing claims were checked sentence by sentence against the code, and that check caught two false statements, both fixed in code.
+- Not verified: a real store upload; the extension talking to the app under a store-assigned ID. Accepted limits: a form POST cannot be detected, so it can fail in the app once accepted, and this is disclosed. Cookies stay with a finished download until it is removed, also disclosed. Clearing them on completion is an open owner decision.
+- Open for the owner: the public repository's README and `notes/`, `reference notes`, `reference-screens/` name another product, and a reviewer following the installer link lands there; rights to the icon artwork; whether to keep the opt-in media panel in the store build.
+- Known, not changed: a package row's Size shows bytes received until every part's size is known.
+
+### Speed graph bar (2026-11-06)
+
+- The stock Expander (about 210 px, with an animation that reserved the space first and left a blank band) is replaced by a 23 px bar styled like the status bar, with an 85 px plot. The panel's real height animates, so the list moves with it.
+- Evidence: frame captures before and after show the blank band gone; a click during the animation turns round smoothly, with no step over 11 px, and ten of ten interrupted runs ended exactly closed; period menu; theme switched while running, open and closed; a killed window remembers the collapsed state.
+- SaveUiState now updates the one state object, so it no longer wipes expanded packages.
+
+### Auto-update: second round (2026-11-06)
+
+- Two independent reviews found more, all fixed: an in-place rollback could stop on a log file created at runtime and leave a mixed install; a stale success was announced; about 390 MB per update was never deleted; the first hop from a 0.3.2 Host looped silently on failure, because that Host cannot read the result (the script now skips the version and shows a dialog); a Host started during the helper's copy could empty the stage folder; the clean step missed the self-contained build. Refresh Download Address sent a site's saved login to whatever site the job was pointed at; it now drops them when the site changes.
+- Evidence: real 0.3.2 Host to the new script, both success and crash (one attempt, version skipped, dialog, no loop); scripted case for the runtime log collision.
+- Known narrow, not changed: a failed retry can later delete a kept rollback copy; a tray retry postponed by active downloads is dropped; plot labels clip at 200% text size.
+- At the time of this commit, the final full run and a last review of the second round were still in progress.
+
 ### Auto-update: no more broken installs or silent failures (2026-11-06)
 
 - Owner report: auto-update sometimes fails silently and leaves a broken install. Reproduced 2/2 on

@@ -1,5 +1,7 @@
 /// <reference types="chrome" />
 
+import { connectionProblem, readableError } from "./connection-problem";
+import { isUnsupportedUrl, UNSUPPORTED_SITE_MESSAGE } from "./unsupported-sites";
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
 import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
@@ -72,7 +74,8 @@ interface NativeEnvelope {
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  autoIntercept: true,
+  // Off until the user turns it on in Settings, next to the explanation of what it shares.
+  autoIntercept: false,
   mediaDetectionEnabled: false,
   startMode: "now",
   interceptedExtensions: [
@@ -87,12 +90,15 @@ const DEFAULT_SETTINGS: Settings = {
   notifications: true,
 };
 
+// Content scripts run alongside pages this extension does not trust, so they get only what they
+// need. Everything else, cookies and settings above all, is for the extension's own pages.
+const CONTENT_SCRIPT_MESSAGES = new Set(["dm.getMediaDetectionEnabled", "dm.mediaDetected", "dm.queueMedia"]);
 const NATIVE_HOST = "com.kaank.downloadmanager";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 let settings: Settings = DEFAULT_SETTINGS;
 let settingsLoaded = false;
 let settingsLoadPromise: Promise<void> | null = null;
-let bypassUntil = 0;
+let pauseUntil = 0;
 let nativePort: chrome.runtime.Port | null = null;
 let lastNativeError = "";
 let lastJobs = new Map<string, JobSummary>();
@@ -118,8 +124,8 @@ async function hasDeleteGesture(url: string): Promise<boolean> {
     const replies = new Promise<boolean>(resolve => {
       void Promise.all(tabs.filter(tab => tab.id !== undefined).map(async tab => {
         try {
-          const response = await chrome.tabs.sendMessage(tab.id!, { type: "dm.consumeCaptureBypass", url }, { frameId: 0 });
-          if (response?.bypass === true) resolve(true);
+          const response = await chrome.tabs.sendMessage(tab.id!, { type: "dm.consumeKeepInBrowser", url }, { frameId: 0 });
+          if (response?.keep === true) resolve(true);
         } catch { /* Restricted pages have no content script. */ }
       })).then(() => resolve(false));
     });
@@ -164,8 +170,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     void updateBadge(tabId, 0);
   }
 });
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void installMenus();
+  if (details.reason === "install") {
+    void chrome.runtime.openOptionsPage();
+  } else if (details.reason === "update") {
+    void keepCatchingAfterUpgrade(details.previousVersion);
+  }
 });
 chrome.runtime.onStartup.addListener(() => {
   void loadSettings().then(syncMediaDetectionWithTabs);
@@ -194,19 +205,41 @@ async function loadSettings(): Promise<void> {
     ...DEFAULT_SETTINGS,
     ...(stored.settings ?? {}),
   };
-  const normalized = await chrome.storage.local.get("bypassUntil");
-  bypassUntil = typeof normalized.bypassUntil === "number" ? normalized.bypassUntil : 0;
+  const normalized = await chrome.storage.local.get("pauseUntil");
+  pauseUntil = typeof normalized.pauseUntil === "number" ? normalized.pauseUntil : 0;
   settingsLoaded = true;
+}
+
+// Automatic catching was on from the start before 0.4.0. A copy that never saved its settings was
+// relying on that, and should not stop catching downloads because of an update.
+async function keepCatchingAfterUpgrade(previousVersion: string | undefined): Promise<void> {
+  const [major = 0, minor = 0] = (previousVersion ?? "").split(".").map(Number);
+  if (!previousVersion || major > 0 || minor >= 4) return;
+  await ensureSettingsLoaded();
+  const stored = await chrome.storage.local.get("settings");
+  if (stored.settings) return;
+  settings = { ...settings, autoIntercept: true };
+  await chrome.storage.local.set({ settings });
+  await syncMediaDetectionWithTabs();
+}
+
+function mediaDetectionActive(): boolean {
+  return settings.enabled && settings.mediaDetectionEnabled === true;
+}
+
+function automaticSendingActive(): boolean {
+  return settings.enabled && settings.autoIntercept;
 }
 
 function syncMediaDetectionWithTabs(): Promise<void> {
   const sync = mediaSyncQueue.then(async () => {
-    const enabled = settings.mediaDetectionEnabled === true;
+    const enabled = mediaDetectionActive();
+    const autoSend = automaticSendingActive();
     try {
       const tabs = await chrome.tabs.query({});
       // A newer Options save may have happened during the query. Its queued sync
       // will publish the latest value; this stale pass must not clear/broadcast.
-      if (enabled !== (settings.mediaDetectionEnabled === true)) return;
+      if (enabled !== (mediaDetectionActive())) return;
       if (!enabled) {
         mediaByTab.clear();
         await Promise.all(tabs
@@ -214,11 +247,11 @@ function syncMediaDetectionWithTabs(): Promise<void> {
           .map(tab => updateBadge(tab.id!, 0)));
       }
       for (const tab of tabs) {
-        if (enabled !== (settings.mediaDetectionEnabled === true)) return;
+        if (enabled !== (mediaDetectionActive())) return;
         if (typeof tab.id !== "number") continue;
         try {
           await chrome.tabs.sendMessage(
-            tab.id, { type: "dm.mediaDetectionChanged", enabled }, { frameId: 0 });
+            tab.id, { type: "dm.mediaDetectionChanged", enabled, autoSend }, { frameId: 0 });
         } catch {
           // The tab may be restricted or may not have loaded the content script yet.
         }
@@ -233,15 +266,11 @@ function syncMediaDetectionWithTabs(): Promise<void> {
 
 async function installMenus(): Promise<void> {
   await chrome.contextMenus.removeAll();
+  // One item: two with the same title would show as a submenu of two identical lines on a linked image.
   chrome.contextMenus.create({
-    id: "dm.download-link",
+    id: "dm.download",
     title: "Download with Inbound Download Manager",
-    contexts: ["link"],
-  });
-  chrome.contextMenus.create({
-    id: "dm.download-media",
-    title: "Download with Inbound Download Manager",
-    contexts: ["video", "audio", "image"],
+    contexts: ["link", "video", "audio", "image"],
   });
 }
 
@@ -253,6 +282,11 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
 
   if (!isHttpUrl(url)) {
     notify("Inbound Download Manager", "This link type cannot be handed to the download manager.");
+    return;
+  }
+
+  if ([url, info.pageUrl, tab?.url].some(isUnsupportedUrl)) {
+    notify("Inbound Download Manager", UNSUPPORTED_SITE_MESSAGE, true);
     return;
   }
 
@@ -284,7 +318,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
     return false;
   }
 
-  if (Date.now() < bypassUntil) {
+  if (Date.now() < pauseUntil) {
     return false;
   }
 
@@ -297,6 +331,10 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
     return false;
   }
 
+  if ([item.url, item.finalUrl, item.referrer].some(isUnsupportedUrl)) {
+    return false;
+  }
+
   const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
   const extension = extensionOf(fileName || url);
   const host = hostOf(url);
@@ -304,7 +342,12 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
     return false;
   }
 
-  if (settings.excludedHosts.some((h) => hostMatches(host, h))) {
+  // Every site involved, not just where a redirect ended up: an excluded site's cookies are read for
+  // the original address, and files behind a login often redirect to a storage host.
+  const sourceHosts = [item.url, item.finalUrl, item.referrer]
+    .map((value) => (value ? hostOf(value) : null))
+    .filter((value): value is string => !!value);
+  if (settings.excludedHosts.some((pattern) => sourceHosts.some((candidate) => hostMatches(candidate, pattern)))) {
     return false;
   }
 
@@ -361,13 +404,13 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       notify(
         browserEntryRemoved
           ? ack.duplicate ? "Already in Inbound" : "Sent to Inbound"
-          : "Sent to Inbound; browser cleanup incomplete",
-        browserEntryRemoved ? fileName : "The browser entry could not be cleared. Check the browser's Downloads menu.",
+          : "Sent to Inbound, but still listed in Chrome",
+        browserEntryRemoved ? fileName : "Chrome's copy could not be removed. Check Chrome's download list.",
       );
       return true;
     } else {
       await chrome.downloads.resume(item.id).catch(() => undefined);
-      notify("Inbound did not accept the download", ack.error ?? "The host rejected the request.");
+      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} This download stays in Chrome.`);
       lastNativeError = ack.error ?? "handoff rejected";
     }
   } catch (error) {
@@ -381,19 +424,23 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
     lastNativeError = message;
-    notify("Inbound unavailable", `${message}. The browser will keep downloading.`);
+    notify("Inbound unavailable", `${readableError(message)} This download stays in Chrome.`);
   }
   return false;
 }
 
 async function requestHandoff(payload: Record<string, unknown>): Promise<any> {
+  if ([payload.url, payload.finalUrl, payload.pageUrl].some(isUnsupportedUrl)) {
+    throw new Error(UNSUPPORTED_SITE_MESSAGE);
+  }
+
   try {
     return await sendNative("handoff.request", payload, 15000, 1);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/native|not found|disconnected|host/i.test(message)) {
       // One reconnect is already attempted inside sendNative; surface a usable error.
-      throw new Error(`Could not reach Inbound Download Manager: ${message}`);
+      throw new Error(connectionProblem(message));
     }
     throw error;
   }
@@ -418,7 +465,7 @@ async function sendNative(
     }
   }
 
-  throw lastError ?? new Error("Native messaging failed.");
+  throw lastError ?? new Error("Could not reach the desktop app.");
 }
 
 async function sendNativeOnce(type: string, payload: unknown, timeoutMs: number): Promise<any> {
@@ -433,7 +480,7 @@ async function sendNativeOnce(type: string, payload: unknown, timeoutMs: number)
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(envelope.id!);
-      reject(new Error(`Timed out waiting for the native host (${type}).`));
+      reject(new Error("Timed out waiting for the desktop app."));
     }, timeoutMs);
 
     pendingRequests.set(envelope.id!, {
@@ -496,7 +543,7 @@ function pickNativeFolder(initialPath?: string): Promise<any> {
     port.onMessage.addListener((message: NativeEnvelope) => {
       if (message.replyTo !== id) return;
       if (message.type !== "host.folderPicked") {
-        finish(null, new Error("This Host does not support folder selection. Update the desktop application."));
+        finish(null, new Error("This version of the desktop app cannot show a folder picker. Update the app."));
       } else finish(message.payload);
     });
     port.onDisconnect.addListener(() => finish(null,
@@ -681,13 +728,15 @@ function parseHlsVariants(text: string, baseUrl: string): MediaVariant[] {
   return variants.sort((a, b) => (b.bandwidth ?? 0) - (a.bandwidth ?? 0));
 }
 
-async function enrichMediaItem(item: MediaItem): Promise<MediaItem> {
+async function enrichMediaItem(item: MediaItem, pageUrl: string): Promise<MediaItem> {
   const isHls = item.kind === "hls" || /\.m3u8(\?|#|$)/i.test(item.url);
   if (!isHls) {
     return item;
   }
 
-  const cached = variantCache.get(item.url);
+  const sameSite = hostOf(item.url) !== null && hostOf(item.url) === hostOf(pageUrl);
+  const cacheKey = `${sameSite ? "include" : "omit"}|${item.url}`;
+  const cached = variantCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) {
     return { ...item, variants: cached.variants.length ? cached.variants : undefined };
   }
@@ -697,7 +746,17 @@ async function enrichMediaItem(item: MediaItem): Promise<MediaItem> {
     const timer = setTimeout(() => controller.abort(), 4000);
     let response: Response;
     try {
-      response = await fetch(item.url, { credentials: "include", signal: controller.signal });
+      // The address comes from the page, which could name any site. The user's cookies go only to
+      // the site the page itself is on; a playlist elsewhere just lists no qualities if it needs them.
+      // Fetch would carry them through a redirect, so a redirected playlist is asked for without them.
+      response = await fetch(item.url, {
+        credentials: sameSite ? "include" : "omit",
+        redirect: sameSite ? "manual" : "follow",
+        signal: controller.signal,
+      });
+      if (response.type === "opaqueredirect") {
+        response = await fetch(item.url, { credentials: "omit", signal: controller.signal });
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -706,8 +765,10 @@ async function enrichMediaItem(item: MediaItem): Promise<MediaItem> {
       return item;
     }
 
-    const variants = parseHlsVariants(await response.text(), response.url || item.url);
-    variantCache.set(item.url, { expires: Date.now() + 5 * 60_000, variants });
+    const variants = parseHlsVariants(await response.text(), response.url || item.url)
+      .filter((variant) => !isUnsupportedUrl(variant.url));
+    variantCache.set(cacheKey, { expires: Date.now() + 5 * 60_000, variants });
+    setTimeout(() => variantCache.delete(cacheKey), 5 * 60_000);
     return { ...item, variants: variants.length ? variants : undefined };
   } catch {
     return item;
@@ -725,8 +786,8 @@ async function updateBadge(tabId: number, count: number): Promise<void> {
   }
 }
 
-function notify(title: string, message: string): void {
-  if (!settings.notifications) {
+function notify(title: string, message: string, always = false): void {
+  if (!always && !settings.notifications) {
     return;
   }
 
@@ -745,29 +806,34 @@ function notify(title: string, message: string): void {
 chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
   void handleRuntimeMessage(message, sender)
     .then((result) => sendResponse(result))
-    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    .catch((error) => sendResponse({ ok: false, error: readableError(error instanceof Error ? error.message : String(error)) }));
   return true;
 });
 
 async function handleRuntimeMessage(message: any, sender?: chrome.runtime.MessageSender): Promise<any> {
   await ensureSettingsLoaded();
+  const fromOwnPage = sender?.id === chrome.runtime.id && (sender.url ?? "").startsWith(chrome.runtime.getURL(""));
+  if (!fromOwnPage && !CONTENT_SCRIPT_MESSAGES.has(message?.type)) {
+    return { ok: false, error: "This request is only available from the extension's own pages." };
+  }
+
   switch (message?.type) {
     case "dm.getMediaDetectionEnabled":
-      return { ok: true, enabled: settings.mediaDetectionEnabled === true };
+      return { ok: true, enabled: mediaDetectionActive(), autoSend: automaticSendingActive() };
 
     case "dm.mediaDetected": {
       const tabId = sender?.tab?.id;
       if (typeof tabId !== "number") {
         return { ok: false, error: "No sender tab." };
       }
-      if (settings.mediaDetectionEnabled !== true) {
+      if (!mediaDetectionActive()) {
         mediaByTab.delete(tabId);
         await updateBadge(tabId, 0);
         return { ok: true, count: 0, disabled: true };
       }
 
       const items = (Array.isArray(message.items) ? message.items : [])
-        .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url))
+        .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url) && !isUnsupportedUrl(item.url))
         .slice(0, 40)
         .map((item: any) => ({
           url: item.url,
@@ -784,7 +850,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.rescan": {
-      if (settings.mediaDetectionEnabled !== true) return { ok: true, disabled: true };
+      if (!mediaDetectionActive()) return { ok: true, disabled: true };
       const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       const tabId = tabs[0]?.id;
       if (typeof tabId === "number") {
@@ -804,12 +870,12 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         tabId = tabs[0]?.id;
       }
 
-      if (settings.mediaDetectionEnabled !== true) {
+      if (!mediaDetectionActive()) {
         return { ok: true, tabId, pageUrl: "", items: [] };
       }
 
       const media = typeof tabId === "number" ? mediaByTab.get(tabId) : undefined;
-      const items = await Promise.all((media?.items ?? []).map(enrichMediaItem));
+      const items = await Promise.all((media?.items ?? []).map(item => enrichMediaItem(item, media?.pageUrl ?? "")));
       return {
         ok: true,
         tabId,
@@ -819,12 +885,15 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.queueMedia": {
-      if (settings.mediaDetectionEnabled !== true) {
+      if (!mediaDetectionActive()) {
         return { ok: false, error: "Media detection is disabled in extension settings." };
       }
       const url = String(message.url ?? "");
       if (!isHttpUrl(url)) {
         return { ok: false, error: "This media URL cannot be downloaded." };
+      }
+      if ([url, message.pageUrl].some(isUnsupportedUrl)) {
+        return { ok: false, error: UNSUPPORTED_SITE_MESSAGE };
       }
 
       const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
@@ -884,8 +953,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
           pageUrl?: string;
           links?: any[];
         };
-        const links = (Array.isArray(response?.links) ? response.links : [])
-          .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url))
+        const links = (Array.isArray(response?.links) && !isUnsupportedUrl(response.pageUrl) ? response.links : [])
+          .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url) && !isUnsupportedUrl(item.url))
           .slice(0, 2000)
           .map((item: any) => ({
             url: item.url,
@@ -990,7 +1059,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         autoIntercept: settings.autoIntercept,
         connected: nativePort !== null,
         lastError: lastNativeError,
-        bypassUntil,
+        pauseUntil,
         settings,
         jobs: [...lastJobs.values()],
       };
@@ -1030,7 +1099,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
               startMode: settings.startMode,
             },
           }
-        : { ok: false, error: "Handoff request expired." };
+        : { ok: false, error: "This download request has expired. Start again from the right-click menu." };
     }
 
     case "dm.confirmHandoff": {
@@ -1038,7 +1107,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const pending = pendingHandoffs.get(id) ??
         (await chrome.storage.session.get(`handoff.${id}`))[`handoff.${id}`] as PendingHandoff | undefined;
       if (!pending) {
-        return { ok: false, error: "Handoff request expired." };
+        return { ok: false, error: "This download request has expired. Start again from the right-click menu." };
       }
 
       const startMode: StartMode = message.startMode === "later" ? "later" : "now";
@@ -1091,10 +1160,10 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true, settings };
     }
 
-    case "dm.bypass": {
-      bypassUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
-      await chrome.storage.local.set({ bypassUntil });
-      return { ok: true, bypassUntil };
+    case "dm.pauseCatching": {
+      pauseUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
+      await chrome.storage.local.set({ pauseUntil });
+      return { ok: true, pauseUntil };
     }
 
     case "dm.jobs": {

@@ -34,7 +34,7 @@ function showSuccess(message: string): void {
 
 document.addEventListener("DOMContentLoaded", async () => {
   if (!handoffId) {
-    showError("This window is missing its handoff request.");
+    showError("This window has no download to confirm. Start again from the right-click menu.");
     confirmButton.disabled = true;
     return;
   }
@@ -47,7 +47,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
-      showError(response?.error || "This handoff request has expired. Start it again from the link menu.");
+      showError(response?.error || "This download request has expired. Start again from the right-click menu.");
       confirmButton.disabled = true;
       return;
     }
@@ -79,7 +79,7 @@ confirmButton.addEventListener("click", async () => {
     };
 
     if (!response?.ok) {
-      showError(response?.error || "The handoff failed.");
+      showError(response?.error || "The download could not be sent to the app.");
       confirmButton.disabled = false;
       return;
     }

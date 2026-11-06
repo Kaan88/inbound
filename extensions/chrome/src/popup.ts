@@ -1,3 +1,5 @@
+import { connectionProblem } from "./connection-problem";
+
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
@@ -24,7 +26,7 @@ interface Status {
   autoIntercept?: boolean;
   connected?: boolean;
   lastError?: string;
-  bypassUntil?: number;
+  pauseUntil?: number;
   settings?: Settings;
   jobs?: JobSummary[];
 }
@@ -59,6 +61,7 @@ const jobsList = document.getElementById("jobs") as HTMLUListElement;
 const mediaCard = document.getElementById("mediaCard") as HTMLElement;
 const mediaList = document.getElementById("media") as HTMLUListElement;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
+const getApp = document.getElementById("getApp") as HTMLAnchorElement;
 
 function showError(message: string): void {
   errorBox.textContent = message;
@@ -153,7 +156,7 @@ function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
 }
 
-let bypassActive = false;
+let pauseActive = false;
 
 function renderJobs(jobs: JobSummary[]): void {
   jobsList.replaceChildren();
@@ -256,7 +259,7 @@ function renderMedia(items: MediaItem[], pageUrl: string): void {
 
     const kind = document.createElement("span");
     kind.className = "state";
-    kind.textContent = item.kind;
+    kind.textContent = item.kind === "hls" || item.kind === "dash" ? "stream" : item.kind;
 
     row.append(name, kind, mediaButton(item.url, pageUrl));
     mediaList.append(row);
@@ -297,7 +300,7 @@ async function refresh(): Promise<void> {
   try {
     const status = (await chrome.runtime.sendMessage({ type: "dm.status" })) as Status;
     if (!status?.ok) {
-      throw new Error("The extension worker did not respond.");
+      throw new Error("The extension is not responding. Close and reopen this popup.");
     }
 
     const enabled = status.settings?.enabled ?? status.enabled ?? false;
@@ -305,27 +308,32 @@ async function refresh(): Promise<void> {
     statusDot.className = "dot";
     if (!enabled) {
       statusDot.classList.add("warn");
-      statusLabel.textContent = "Download catching is off";
-      statusDetail.textContent = "Turn it on in Settings.";
-      statusText.textContent = "Disabled";
+      statusLabel.textContent = "Automatic sending and media detection are off";
+      statusDetail.textContent = "Right-click a link to send it, or turn them on in Settings.";
+      statusText.textContent = "Automatic off";
     } else if (connected) {
       statusDot.classList.add("ok");
       statusLabel.textContent = "Connected to the desktop app";
-      statusDetail.textContent = status.settings?.autoIntercept ? "Browser downloads are caught automatically" : "Automatic catching is off; use the context menu";
+      statusDetail.textContent = !status.settings?.autoIntercept
+        ? "Automatic sending is off. Right-click a link to send it, or turn it on in Settings."
+        : status.pauseUntil && status.pauseUntil > Date.now()
+          ? "Catching is paused. Downloads stay in Chrome."
+          : "Downloads that match your rules are sent automatically";
       statusText.textContent = "Connected";
     } else {
       statusDot.classList.add("bad");
       statusLabel.textContent = "Desktop app not reachable";
-      statusDetail.textContent = status.lastError || "Start Inbound Download Manager, or run Repair from its installer.";
+      statusDetail.textContent = connectionProblem(status.lastError);
       statusText.textContent = "Disconnected";
     }
 
-    bypassActive = !!status.bypassUntil && status.bypassUntil > Date.now();
-    const bypassButton = document.getElementById("bypass") as HTMLButtonElement;
-    bypassButton.textContent = bypassActive
-      ? `Resume catching (${Math.ceil((status.bypassUntil! - Date.now()) / 60000)} min left)`
+    getApp.classList.toggle("hidden", !enabled || connected);
+    pauseActive = !!status.pauseUntil && status.pauseUntil > Date.now();
+    const pauseButton = document.getElementById("pauseCatching") as HTMLButtonElement;
+    pauseButton.textContent = pauseActive
+      ? `Resume catching (${Math.ceil((status.pauseUntil! - Date.now()) / 60000)} min left)`
       : "Pause catching for 5 min";
-    bypassButton.title = bypassActive
+    pauseButton.title = pauseActive
       ? "Downloads currently stay in the browser. Click to resume catching now."
       : "Let the browser handle downloads for the next 5 minutes.";
 
@@ -405,10 +413,10 @@ document.addEventListener("DOMContentLoaded", () => {
     void chrome.runtime.openOptionsPage();
   });
 
-  (document.getElementById("bypass") as HTMLButtonElement).addEventListener("click", async () => {
+  (document.getElementById("pauseCatching") as HTMLButtonElement).addEventListener("click", async () => {
     clearError();
     try {
-      const result = (await chrome.runtime.sendMessage({ type: "dm.bypass", cancel: bypassActive })) as { ok?: boolean; error?: string };
+      const result = (await chrome.runtime.sendMessage({ type: "dm.pauseCatching", cancel: pauseActive })) as { ok?: boolean; error?: string };
       if (!result?.ok) {
         showError(result?.error || "Could not change download catching.");
       }

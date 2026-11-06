@@ -12,7 +12,7 @@
       <img src="icons/icon48.png" alt="" width="36" height="36" />
       <div>
         <h1>Download All</h1>
-        <p class="muted small">Pick the links from this page that should become download jobs.</p>
+        <p class="muted small">Pick the links on this page to send to the desktop app.</p>
       </div>
     </header>
 
@@ -22,7 +22,7 @@
         <span id="count" class="muted small">Scanning...</span>
       </div>
       <div class="filter-row">
-        <input id="filter" type="text" spellcheck="false" placeholder="Filter by name, type, or host" />
+        <input id="filter" type="text" spellcheck="false" placeholder="Filter by name, type or site" />
         <label class="inline-check">
           <input id="selectAll" type="checkbox" />
           Select all shown
@@ -49,6 +49,8 @@
         </select>
       </label>
     </section>
+
+    <p class="muted small">Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you send two or more, the page's title names the group in the app. YouTube links are not listed.</p>
 
     <div class="actions">
       <button id="confirm" class="primary" type="button" disabled>Download selected</button>

@@ -21,12 +21,25 @@ try {
             try {
                 $iconBitmap.Save($iconStream, [System.Drawing.Imaging.ImageFormat]::Png)
                 $iconFrames.Add($iconStream.ToArray())
-                if ($iconSize -in @(16,32,48,128)) {
+                if ($iconSize -in @(16,32,48)) {
                     [System.IO.File]::WriteAllBytes((Join-Path $iconRoot "extensions\chrome\icons\icon$iconSize.png"), $iconStream.ToArray())
                 }
             } finally { $iconStream.Dispose() }
         } finally { $iconBitmap.Dispose() }
     }
+    # The extension's 128 px icon follows the Chrome Web Store's layout: 96 px of artwork with 16 px
+    # of transparent padding on each side.
+    $storeIcon = [System.Drawing.Bitmap]::new(128, 128, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $storeGraphics = [System.Drawing.Graphics]::FromImage($storeIcon)
+        try {
+            $storeGraphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $storeGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $storeGraphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $storeGraphics.DrawImage($iconSource, 16, 16, 96, 96)
+        } finally { $storeGraphics.Dispose() }
+        $storeIcon.Save((Join-Path $iconRoot 'extensions\chrome\icons\icon128.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally { $storeIcon.Dispose() }
     $iconWriter = [System.IO.BinaryWriter]::new([System.IO.File]::Create((Join-Path $iconRoot 'assets\app.ico')))
     try {
         $iconWriter.Write([uint16]0); $iconWriter.Write([uint16]1); $iconWriter.Write([uint16]$iconSizes.Count)

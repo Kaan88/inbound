@@ -123,6 +123,9 @@ h2 {
 .dot.warn { background: var(--warn); }
 
 .muted { color: var(--muted); }
+.consent { margin: 2px 0 10px 28px; color: var(--text); opacity: .85; }
+.get-app { margin: -4px 0 10px; }
+.get-app:has(a.hidden) { display: none; }
 .small { font-size: 12px; }
 .hidden { display: none !important; }
 

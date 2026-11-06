@@ -217,7 +217,7 @@ confirmButton.addEventListener("click", async () => {
     })) as BatchResponse;
 
     if (!response?.ok) {
-      showError(response?.error || "The batch handoff failed.");
+      showError(response?.error || "The downloads could not be sent to the app.");
       return;
     }
 

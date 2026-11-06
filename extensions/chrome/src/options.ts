@@ -1,3 +1,5 @@
+import { connectionProblem } from "./connection-problem";
+
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
@@ -11,7 +13,7 @@ interface Settings {
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  autoIntercept: true,
+  autoIntercept: false,
   mediaDetectionEnabled: false,
   startMode: "now",
   interceptedExtensions: [],
@@ -55,7 +57,16 @@ function collect(): Settings {
   };
 }
 
+// Settings opens by itself on first install, and reading the settings can take a few seconds if the
+// app has to start. A tick made before then would be overwritten, so the form waits.
+function setFormEnabled(enabled: boolean): void {
+  for (const field of document.querySelectorAll<HTMLInputElement>("input, select, textarea, #save")) {
+    field.disabled = !enabled;
+  }
+}
+
 async function load(): Promise<void> {
+  setFormEnabled(false);
   try {
     const status = (await chrome.runtime.sendMessage({ type: "dm.status" })) as {
       ok?: boolean;
@@ -64,9 +75,11 @@ async function load(): Promise<void> {
       lastError?: string;
     };
     fill({ ...DEFAULT_SETTINGS, ...(status?.settings ?? {}) });
+    setFormEnabled(true);
     byId<HTMLParagraphElement>("testResult").textContent = status?.connected
-      ? "Native host connected."
-      : `Native host not connected${status?.lastError ? `: ${status.lastError}` : "."}`;
+      ? "Connected to the desktop app."
+      : connectionProblem(status?.lastError);
+    byId<HTMLAnchorElement>("getApp").classList.toggle("hidden", status?.connected === true);
     document.body.dataset.settingsLoaded = "true";
   } catch (error) {
     byId<HTMLParagraphElement>("testResult").textContent =
@@ -100,11 +113,11 @@ document.addEventListener("DOMContentLoaded", () => {
         ok?: boolean;
         error?: string;
       };
-      result.textContent = response?.ok
-        ? "Native host responded."
-        : `Native host failed: ${response?.error || "unknown error"}`;
+      result.textContent = response?.ok ? "Connected to the desktop app." : connectionProblem(response?.error);
+      byId<HTMLAnchorElement>("getApp").classList.toggle("hidden", response?.ok === true);
     } catch (error) {
-      result.textContent = `Native host failed: ${error instanceof Error ? error.message : String(error)}`;
+      result.textContent = connectionProblem(error instanceof Error ? error.message : String(error));
+      byId<HTMLAnchorElement>("getApp").classList.remove("hidden");
     }
   });
 
