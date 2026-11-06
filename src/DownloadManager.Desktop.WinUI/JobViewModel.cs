@@ -232,6 +232,78 @@ public sealed class JobViewModel : INotifyPropertyChanged
         };
     }
 
+    // ---- Remote rows: work on a provider's side, with no local transfer behind them yet ----
+
+    private string? _rowToolTip;
+    private string? _accessibleName;
+    private Thickness _rowBorder;
+
+    /// <summary>A row for a remote job. It never joins the local job list, its counts or its bulk actions.</summary>
+    public bool IsRemoteRow { get; private set; }
+
+    /// <summary>The last remote job applied to this row; null for any other row.</summary>
+    public RemoteJobDto? RemoteJob { get; private set; }
+
+    /// <summary>A local file a provider supplies. Its address is a reference, not something to edit or send again.</summary>
+    public bool IsProviderFile => !IsRemoteRow && (Dto?.IsRemote == true || Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase));
+
+    public string? RowToolTip { get => _rowToolTip; private set => Set(ref _rowToolTip, value); }
+
+    /// <summary>The line under the last remote row, which sets them apart from the local rows below.</summary>
+    public Thickness RowBorder { get => _rowBorder; private set => Set(ref _rowBorder, value); }
+
+    public Windows.UI.Text.FontStyle NameStyle => IsRemoteRow ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal;
+
+    public void MarkLastRemoteRow(bool last) => RowBorder = last ? new Thickness(0, 0, 0, 1) : default;
+
+    /// <summary>
+    /// Shows a remote job. Size, speed and time left stay blank because those columns are about bytes
+    /// reaching this computer, and none are yet. No bar either: the stage is said in words.
+    /// </summary>
+    internal void UpdateRemote(RemoteJobDto job, RemoteRowView view)
+    {
+        var first = !IsRemoteRow;
+        IsRemoteRow = true;
+        RemoteJob = job;
+        Id = job.Id;
+        FileName = view.Name;
+        State = "remote";
+        StateText = view.Status;
+        DetailText = view.Detail;
+        Description = view.Detail;
+        RowToolTip = view.ToolTip;
+        _accessibleName = view.AccessibleName;
+        FileGlyph = "";
+        CreatedAt = job.CreatedAt;
+        LastUpdated = job.UpdatedAt;
+        LastTryText = job.UpdatedAt.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        StatusBrush = ToneBrush(view.Tone);
+        if (first) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NameStyle)));
+    }
+
+    internal static Microsoft.UI.Xaml.Media.Brush ToneBrush(RemoteRowTone tone) => tone switch
+    {
+        RemoteRowTone.Failed => FailedStatus,
+        RemoteRowTone.Waiting => WaitingStatus,
+        RemoteRowTone.Active => ActiveStatus,
+        RemoteRowTone.Done => DoneStatus,
+        _ => NeutralStatus,
+    };
+
+    /// <summary>Says which account a provider's file came from, when its row has nothing else to say.</summary>
+    public void ShowProviderSource(string words)
+    {
+        if (RawDescription.Length == 0) Description = words;
+    }
+
+    /// <summary>What a screen reader says for this row.</summary>
+    public override string ToString()
+    {
+        if (_accessibleName is not null) return _accessibleName;
+        var parts = new[] { FileName, StateText, SizeText, EtaText.Length > 0 ? $"{EtaText} left" : string.Empty, SpeedText };
+        return string.Join(", ", parts.Where(part => part.Length > 0));
+    }
+
     private async Task LoadFileIconAsync(string fileName, string? completedPath, string key)
     {
         try

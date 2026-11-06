@@ -49,6 +49,12 @@ readable on both list surfaces:
 
 Color only the status text. Don't tint whole rows.
 
+Remote rows, for work on a provider's side with no local download yet, sit above the local rows in All
+Downloads and in their own Waiting view. They show a cloud glyph and an italic name, with a divider under
+the last one. Their stage is words and never a bar. Size, Time left and Transfer rate stay blank, because
+those columns are about bytes reaching this computer. A provider's own progress goes in Description,
+labelled as the provider's.
+
 ## 3. Progress bars
 
 - Every `ProgressBar` uses `InboundProgressBarStyle`: 6px tall, rounded,
@@ -111,7 +117,7 @@ Color only the status text. Don't tint whole rows.
   scrolling page with `Section`/`Hint` headings on the right, and
   OK / Cancel / Apply in a footer. Validation errors appear inline in the footer
   and select the offending page; the window never closes on invalid input.
-- Smaller multi-page windows (Scheduler) use a `SelectorBar` above the page.
+- Smaller multi-page windows (Scheduler, My provider) use a `SelectorBar` above the page.
 - Use the right control for the value: `NumberBox` for numbers,
   `FolderField` (text box with Browse…) for folders, `TimeField`/`DaysField`/
   `DateField` (`FormFields.cs`) for schedule times, weekdays and dates,

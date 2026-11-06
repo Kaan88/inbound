@@ -112,6 +112,7 @@ public sealed partial class MainWindow : Window
 
         // On connections of its own: nothing it waits for can hold up the one above.
         _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        InitializeRemoteUi();
         _remote.Start();
 
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
@@ -164,6 +165,10 @@ public sealed partial class MainWindow : Window
             else if (_uiState.Category.StartsWith("category:", StringComparison.Ordinal))
             {
                 _category = _uiState.Category; // Restored once Host category definitions arrive.
+            }
+            else if (_uiState.Category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal))
+            {
+                _pendingRemoteCategory = _uiState.Category; // Restored once the Host says what it has.
             }
         }
 
@@ -283,6 +288,7 @@ public sealed partial class MainWindow : Window
             }
 
             member.Update(job);
+            ShowProviderSource(member);
             var row = _packageRows.GetValueOrDefault(package.Id);
             var shouldShow = row is not null && row.IsExpanded && Matches(member);
             if (row is null || member.PackageId != package.Id || shouldShow != _visibleJobs.Contains(member))
@@ -299,6 +305,7 @@ public sealed partial class MainWindow : Window
             }
 
             vm.Update(job);
+            ShowProviderSource(vm);
             if (vm.PackageId is not null)
             {
                 // It just left its package.
@@ -313,7 +320,8 @@ public sealed partial class MainWindow : Window
             {
                 if (!isVisible)
                 {
-                    _visibleJobs.Insert(0, vm);
+                    // Under the remote rows, which stay on top.
+                    _visibleJobs.Insert(_visibleJobs.TakeWhile(row => row.IsRemoteRow).Count(), vm);
                 }
             }
             else if (isVisible)
@@ -347,15 +355,21 @@ public sealed partial class MainWindow : Window
         UpdateButtons();
     }
 
-    private JobViewModel? SelectedJob => JobsList.SelectedItem as JobViewModel is { IsPackage: false } job ? job : null;
+    /// <summary>What single-item commands act on. A remote row is never it: those have commands of their own.</summary>
+    private JobViewModel? FirstLocalRow => JobsList.SelectedItem is JobViewModel { IsRemoteRow: false } row
+        ? row
+        : JobsList.SelectedItems.OfType<JobViewModel>().FirstOrDefault(candidate => !candidate.IsRemoteRow);
+
+    private JobViewModel? SelectedJob => FirstLocalRow is { IsPackage: false } job ? job : null;
 
     /// <summary>Selected files; a selected package row contributes all of its files.</summary>
     private List<JobViewModel> SelectedJobs =>
         JobsList.SelectedItems.OfType<JobViewModel>()
+            .Where(row => !row.IsRemoteRow)
             .SelectMany(row => row.IsPackage ? row.Children : [row])
             .Distinct().ToList();
 
-    private JobViewModel? SelectedPackage => JobsList.SelectedItem as JobViewModel is { IsPackage: true } row ? row : null;
+    private JobViewModel? SelectedPackage => FirstLocalRow is { IsPackage: true } row ? row : null;
 
     /// <summary>Selected package rows. The Host acts on each as one unit.</summary>
     private List<JobViewModel> SelectedPackageRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsPackage).ToList();
@@ -367,7 +381,7 @@ public sealed partial class MainWindow : Window
         {
             var packages = SelectedPackageRows.Select(row => row.Id).ToHashSet();
             return JobsList.SelectedItems.OfType<JobViewModel>()
-                .Where(row => !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
+                .Where(row => !row.IsRemoteRow && !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
                 .ToList();
         }
     }
@@ -445,6 +459,7 @@ public sealed partial class MainWindow : Window
             "queued" => job.State is "queued" or "paused",
             "failed" => job.State == "failed",
             "compressed" or "documents" or "music" or "programs" or "video" or "other" => job.CategoryId == _category,
+            _ when _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) => false,
             _ when _category.StartsWith("category:", StringComparison.Ordinal) => job.CategoryId == _category[9..],
             _ => true,
         };
@@ -477,6 +492,7 @@ public sealed partial class MainWindow : Window
         foreach (var stale in _packageRows.Keys.Where(id => !liveRows.Contains(id)).ToList()) _packageRows.Remove(stale);
         foreach (var job in _jobsById.Values)
         {
+            ShowProviderSource(job);
             if (packaged.Contains(job.Id)) continue;
             job.PackageId = null;
             if (Matches(job)) top.Add(job);
@@ -491,6 +507,9 @@ public sealed partial class MainWindow : Window
             "lastTry" => _sortAscending ? top.OrderBy(j => j.LastUpdated) : top.OrderByDescending(j => j.LastUpdated),
             _ => _sortAscending ? top.OrderBy(j => j.CreatedAt) : top.OrderByDescending(j => j.CreatedAt),
         };
+
+        // On top and in their own order: a sort is about local files, and these have no size or rate.
+        target.AddRange(RemoteRowsInView());
 
         foreach (var row in ordered)
         {
@@ -526,6 +545,7 @@ public sealed partial class MainWindow : Window
         var added = target.Where(row => row.PackageId is not null && !before.Contains(row)).ToList();
         if (added.Count > 0 && before.Count > 0) FadeIn(added);
 
+        UpdateEmptyText();
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -710,6 +730,13 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            if (tag.StartsWith(RemoteBrowseTag, StringComparison.Ordinal))
+            {
+                OpenProviderWindow(tag[RemoteBrowseTag.Length..]);
+                RestoreCategorySelection();
+                return;
+            }
+
             _category = tag;
             RebuildVisible();
         }
@@ -744,6 +771,11 @@ public sealed partial class MainWindow : Window
         if (SelectedPackage is { } package)
         {
             TogglePackage(package);
+            return;
+        }
+        if (FirstLocalRow is null && SelectedRemoteRows is [{ RemoteJob: { } remote }])
+        {
+            await RunRemotePrimaryAsync(remote);
             return;
         }
         if (SelectedJob is { } job)
@@ -797,8 +829,8 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
         flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
-        flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
-        flyout.Items.Add(CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
+        flyout.Items.Add(_menuRedownload = CreateContextItem("Redownload", MenuRedownload_Click));
+        flyout.Items.Add(_menuRefreshUrl = CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to Queue" };
         flyout.Items.Add(_addToQueueMenu);
@@ -820,6 +852,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
+        AddRemoteContextItems(flyout);
         JobsList.ContextFlyout = flyout;
     }
 
@@ -835,23 +868,32 @@ public sealed partial class MainWindow : Window
     private MenuFlyoutItem? _menuUngroup;
     private MenuFlyoutItem? _menuRenamePackage;
     private MenuFlyoutItem? _menuCancelPackage;
+    private MenuFlyoutItem? _menuRedownload;
+    private MenuFlyoutItem? _menuRefreshUrl;
     private MenuFlyoutSubItem? _priorityMenu;
 
     private void JobsContextMenu_Opening(object? sender, object e)
     {
         // Offer only what applies to the current selection.
         var selection = SelectedJobs;
+        ShowContextItemsForSelection();
         if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed";
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
         if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
         if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
+        // A provider's file has no address of its own to edit or send again.
+        var providerFile = selection.Any(job => job.IsProviderFile);
+        if (_menuRedownload is not null) _menuRedownload.Visibility = Show(!providerFile);
+        if (_menuRefreshUrl is not null) _menuRefreshUrl.Visibility = Show(!providerFile);
         if (_menuCancelPackage is not null)
         {
             var packages = SelectedPackageRows;
             _menuCancelPackage.Visibility = Show(packages.Count > 0);
             _menuCancelPackage.IsEnabled = packages.Any(row => row.CanCancelPackage);
         }
+
+        HideLocalContextItemsIfRemoteOnly();
 
         if (_priorityMenu is not null)
         {
@@ -1222,6 +1264,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (job.IsProviderFile)
+        {
+            await ShowMessageAsync("Refresh download address", "This file comes from a provider account, which supplies a new address by itself whenever one is needed.");
+            return;
+        }
+
         var input = new TextBox
         {
             Text = job.Url,
@@ -1400,8 +1448,10 @@ public sealed partial class MainWindow : Window
         foreach (var (label, value) in new[]
         {
             ("File", job.FileName), ("Status", job.StateText), ("Size", job.SizeText),
-            ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName), ("Source", job.SourceText),
-            ("Address", job.Url), ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
+            ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName),
+            ("Source", job.IsProviderFile ? ProviderDisplayName(job.Dto?.RemoteProvider) : job.SourceText),
+            ("Package", job.IsProviderFile ? _groups.FirstOrDefault(group => group.JobIds.Contains(job.Id))?.Name : null),
+            ("Address", job.IsProviderFile ? null : job.Url), ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
         })
         {
             if (string.IsNullOrWhiteSpace(value)) continue;

@@ -40,7 +40,7 @@
         </Grid.RowDefinitions>
 
         <MenuBar Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
-            <MenuBarItem Title="Tasks">
+            <MenuBarItem x:Name="TasksMenu" Title="Tasks">
                 <MenuFlyoutItem Text="Add New Download…" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
@@ -246,80 +246,80 @@
                                 <Setter Property="Foreground" Value="{ThemeResource SystemControlForegroundBaseHighBrush}" />
                             </Style>
                         </ListBox.Resources>
-                        <ListBoxItem Tag="all" Padding="24,2,8,2">
+                        <ListBoxItem Tag="all" AutomationProperties.Name="All Downloads" Padding="24,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="All Downloads" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="compressed" Padding="38,2,8,2">
+                        <ListBoxItem Tag="compressed" AutomationProperties.Name="Compressed" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Compressed" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="documents" Padding="38,2,8,2">
+                        <ListBoxItem Tag="documents" AutomationProperties.Name="Documents" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8A5;" FontSize="14" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Documents" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="music" Padding="38,2,8,2">
+                        <ListBoxItem Tag="music" AutomationProperties.Name="Music" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource InboundIconMediaBrush}" />
                                 <TextBlock Text="Music" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="programs" Padding="38,2,8,2">
+                        <ListBoxItem Tag="programs" AutomationProperties.Name="Programs" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Programs" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="video" Padding="38,2,8,2">
+                        <ListBoxItem Tag="video" AutomationProperties.Name="Video" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE714;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Video" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="other" Padding="38,2,8,2">
+                        <ListBoxItem Tag="other" AutomationProperties.Name="Other" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Other" />
                             </StackPanel>
                         </ListBoxItem>
                         <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" />
-                        <ListBoxItem Tag="unfinished" Padding="14,2,8,2">
+                        <ListBoxItem Tag="unfinished" AutomationProperties.Name="Unfinished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Unfinished" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="active" Padding="30,2,8,2">
+                        <ListBoxItem Tag="active" AutomationProperties.Name="Active" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE895;" FontSize="13" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Active" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="queued" Padding="30,2,8,2">
+                        <ListBoxItem Tag="queued" AutomationProperties.Name="Queued" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE823;" FontSize="13" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Queued" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="failed" Padding="30,2,8,2">
+                        <ListBoxItem Tag="failed" AutomationProperties.Name="Failed" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE783;" FontSize="13" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Failed" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="finished" Padding="14,2,8,2">
+                        <ListBoxItem Tag="finished" AutomationProperties.Name="Finished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Finished" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="queues" Padding="14,2,8,2">
+                        <ListBoxItem Tag="queues" AutomationProperties.Name="Queues" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Queues" />
@@ -374,6 +374,7 @@
                               ItemContainerStyle="{StaticResource InboundListRowStyle}"
                               SelectionChanged="JobsList_SelectionChanged"
                               KeyDown="JobsList_KeyDown"
+                              PreviewKeyDown="JobsList_PreviewKeyDown"
                               DoubleTapped="JobsList_DoubleTapped"
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -387,7 +388,9 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="27" Padding="{Binding RowPadding}" ColumnSpacing="0" Background="Transparent">
+                                <Grid Height="27" Padding="{Binding RowPadding}" ColumnSpacing="0" Background="Transparent"
+                                      BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="{Binding RowBorder}"
+                                      ToolTipService.ToolTip="{Binding RowToolTip}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
@@ -418,7 +421,7 @@
                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}"
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"
