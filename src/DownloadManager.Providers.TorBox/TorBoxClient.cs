@@ -14,26 +14,35 @@ namespace DownloadManager.Providers.TorBox;
 /// </summary>
 public sealed class TorBoxClient :
     IRemoteProvider, IRemoteCatalog, IRemoteCacheChecker, IRemoteSubmitter, IRemoteLinkResolver,
-    IRemoteHosterDirectory, IRemoteItemRemover
+    IRemoteHosterDirectory, IRemoteItemRemover, IRemoteQueue, IRemoteFolderLinkParser
 {
     public const string ProviderId = "torbox";
     public static readonly Uri DefaultBaseAddress = new("https://api.torbox.app/v1/api/");
+
+    /// <summary>Far more than a page of the largest real items, and small enough that no answer can take the Host down with it.</summary>
+    public const long DefaultMostResponseBytes = 64 * 1024 * 1024;
+
+    /// <summary>The window is about a minute. Anything much later isn't a window, so nothing waits for it.</summary>
+    private static readonly TimeSpan LongestBudgetWindow = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan LongestBudgetWait = TimeSpan.FromSeconds(90);
 
     private readonly HttpClient _http;
     private readonly Func<string?> _key;
     private readonly Uri _base;
     private readonly TimeProvider _time;
-    private readonly SemaphoreSlim _budgetGate = new(1, 1);
-    private DateTimeOffset _budgetExhaustedUntil = DateTimeOffset.MinValue;
+    private readonly long _mostResponseBytes;
+    // Ticks of the time, for an atomic read and write. Zero is the distant past.
+    private long _budgetExhaustedUntilTicks;
 
     /// <param name="http">Must not follow the API's links by itself on behalf of callers; requests are all to the API.</param>
     /// <param name="key">Reads the current key each call, so changing it takes effect at once.</param>
-    public TorBoxClient(HttpClient http, Func<string?> key, Uri? baseAddress = null, TimeProvider? time = null)
+    public TorBoxClient(HttpClient http, Func<string?> key, Uri? baseAddress = null, TimeProvider? time = null, long mostResponseBytes = DefaultMostResponseBytes)
     {
         _http = http;
         _key = key;
         _base = baseAddress ?? DefaultBaseAddress;
         _time = time ?? TimeProvider.System;
+        _mostResponseBytes = mostResponseBytes;
     }
 
     public string Id => ProviderId;
@@ -47,8 +56,13 @@ public sealed class TorBoxClient :
     public RemoteTransferPolicy TransferPolicy { get; } = new()
     {
         MaxConnectionsPerFile = 4,
-        LinkLifetime = TimeSpan.FromHours(3),
+        CreationSpacing = TimeSpan.FromSeconds(65),
+        ShortestPoll = TimeSpan.FromSeconds(15),
+        LongestPoll = TimeSpan.FromSeconds(60),
+        DefaultPoll = TimeSpan.FromSeconds(30),
     };
+
+    public string? NormalizeItemId(string itemId) => TorBoxMapping.CanonicalId(itemId);
 
     public async Task<RemoteAccountInfo> GetAccountAsync(CancellationToken cancellationToken = default)
     {
@@ -68,11 +82,37 @@ public sealed class TorBoxClient :
     public async Task<IReadOnlyList<RemoteItem>> ListAsync(RemoteItemKind kind, int offset, int limit, bool fresh, CancellationToken cancellationToken = default)
     {
         var path = $"{Family(kind)}/mylist?offset={offset}&limit={limit}{(fresh ? "&bypass_cache=true" : "")}";
-        using var document = await SendAsync(HttpMethod.Get, path, null, false, cancellationToken).ConfigureAwait(false);
-        var data = Data(document);
-        if (data.ValueKind != JsonValueKind.Array) return [];
-        return data.EnumerateArray().Select(element => TorBoxMapping.Item(kind, element)).ToList();
+        try
+        {
+            using var document = await SendAsync(HttpMethod.Get, path, null, false, cancellationToken).ConfigureAwait(false);
+            return ReadList(document, element => TorBoxMapping.Item(kind, element));
+        }
+        catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.NotFound)
+        {
+            // "No torrents found for this user" is an answer, not a failure. Only that gets here: see TorBoxMapping.Failure.
+            return [];
+        }
     }
+
+    /// <summary>
+    /// A complete list, or a failure. Calling a broken answer empty would let a lost submission look
+    /// absent, and that sends it again. Null is the one way of saying "nothing" other than an empty
+    /// list that the reference client accepts, along with a single item not wrapped in a list.
+    /// </summary>
+    private static List<T> ReadList<T>(JsonDocument document, Func<JsonElement, T> read)
+    {
+        var data = Data(document);
+        return data.ValueKind switch
+        {
+            JsonValueKind.Array => data.EnumerateArray().Select(read).ToList(),
+            JsonValueKind.Null => [],
+            JsonValueKind.Object when data.TryGetProperty("id", out _) => [read(data)],
+            _ => throw NotAList(),
+        };
+    }
+
+    private static RemoteProviderException NotAList() =>
+        new(RemoteFailureKind.BadResponse, null, "TorBox sent a list that could not be read.");
 
     public async Task<RemoteItem?> GetAsync(RemoteItemRef item, bool fresh, CancellationToken cancellationToken = default)
     {
@@ -81,18 +121,50 @@ public sealed class TorBoxClient :
         {
             using var document = await SendAsync(HttpMethod.Get, path, null, false, cancellationToken).ConfigureAwait(false);
             var data = Data(document);
-            return data.ValueKind switch
+            var read = data.ValueKind switch
             {
-                JsonValueKind.Object when data.TryGetProperty("id", out _) => TorBoxMapping.Item(item.Kind, data),
-                JsonValueKind.Array when data.GetArrayLength() > 0 => TorBoxMapping.Item(item.Kind, data[0]),
-                _ => null,
+                JsonValueKind.Object when data.TryGetProperty("id", out _) => data,
+                JsonValueKind.Array when data.GetArrayLength() == 0 => (JsonElement?)null,
+                JsonValueKind.Array => data.EnumerateArray().Cast<JsonElement?>().FirstOrDefault(entry => SameId(entry!.Value, item.ItemId))
+                    ?? throw NotAList(),
+                // A missing item answers with its own error code. This says nothing either way.
+                _ => throw NotAList(),
             };
+            return read is { } element ? TorBoxMapping.Item(item.Kind, element) : null;
         }
         catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.NotFound)
         {
             return null;
         }
     }
+
+    private static bool SameId(JsonElement element, string id)
+    {
+        var read = TorBoxMapping.IdText(element, "id");
+        return read == id || (read is not null && TorBoxMapping.CanonicalId(read) is { } canonical && canonical == TorBoxMapping.CanonicalId(id));
+    }
+
+    public async Task<IReadOnlyList<RemoteQueuedItem>> ListQueuedAsync(RemoteItemKind kind, int offset, int limit, bool fresh, CancellationToken cancellationToken = default)
+    {
+        var type = kind switch
+        {
+            RemoteItemKind.Torrent => "torrent",
+            RemoteItemKind.WebDownload => "webdl",
+            _ => "usenet",
+        };
+        var path = $"queued/getqueued?type={type}&offset={offset}&limit={limit}{(fresh ? "&bypass_cache=true" : "")}";
+        try
+        {
+            using var document = await SendAsync(HttpMethod.Get, path, null, false, cancellationToken).ConfigureAwait(false);
+            return ReadList(document, entry => new RemoteQueuedItem(TorBoxMapping.IdText(entry, "id"), Text(entry, "hash"), Text(entry, "name")));
+        }
+        catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.NotFound)
+        {
+            return [];
+        }
+    }
+
+    public RemoteFolderLinkParse? ParseFolderLink(string? text) => TorBoxFolderLink.Parse(text);
 
     public async Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default)
     {
@@ -149,7 +221,6 @@ public sealed class TorBoxClient :
                     throw new ArgumentException("A torrent submission needs a magnet or a file.", nameof(submission));
                 }
 
-                if (!string.IsNullOrWhiteSpace(submission.DisplayName)) multipart.Add(new StringContent(submission.DisplayName), "name");
                 if (submission.OnlyIfCached) multipart.Add(new StringContent("true"), "add_only_if_cached");
                 content = multipart;
                 path = "torrents/createtorrent";
@@ -164,7 +235,6 @@ public sealed class TorBoxClient :
 
                 var fields = new List<KeyValuePair<string, string>> { new("link", submission.Link) };
                 if (!string.IsNullOrEmpty(submission.LinkPassword)) fields.Add(new("password", submission.LinkPassword));
-                if (!string.IsNullOrWhiteSpace(submission.DisplayName)) fields.Add(new("name", submission.DisplayName));
                 if (submission.OnlyIfCached) fields.Add(new("add_only_if_cached", "true"));
                 content = new FormUrlEncodedContent(fields);
                 path = "webdl/createwebdownload";
@@ -206,9 +276,9 @@ public sealed class TorBoxClient :
         var data = Data(document);
         if (data.ValueKind == JsonValueKind.String &&
             Uri.TryCreate(data.GetString(), UriKind.Absolute, out var url) &&
-            url.Scheme == Uri.UriSchemeHttps)
+            IsAcceptableLink(url))
         {
-            return new RemoteDirectLink(url, _time.GetUtcNow());
+            return new RemoteDirectLink(url);
         }
 
         throw new RemoteProviderException(RemoteFailureKind.BadResponse, null, "TorBox did not return a usable download link.");
@@ -218,7 +288,8 @@ public sealed class TorBoxClient :
     {
         using var document = await SendAsync(HttpMethod.Get, "webdl/hosters", null, false, cancellationToken).ConfigureAwait(false);
         var data = Data(document);
-        if (data.ValueKind != JsonValueKind.Array) return [];
+        // "None" here would turn every hoster link into an ordinary one for an hour.
+        if (data.ValueKind != JsonValueKind.Array) throw NotAList();
         return data.EnumerateArray().Select(TorBoxMapping.Hoster).ToList();
     }
 
@@ -239,6 +310,11 @@ public sealed class TorBoxClient :
         using var body = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         using var document = await SendAsync(HttpMethod.Post, path, body, false, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>A link carries the key, so it must be encrypted, unless the whole API is a local test server.</summary>
+    private bool IsAcceptableLink(Uri url) =>
+        url.Scheme == Uri.UriSchemeHttps ||
+        (url.Scheme == Uri.UriSchemeHttp && url.IsLoopback && _base.IsLoopback);
 
     private static string Family(RemoteItemKind kind) => kind switch
     {
@@ -264,39 +340,40 @@ public sealed class TorBoxClient :
         HttpResponseMessage response;
         try
         {
-            response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
+            // Headers only: the body is read below, up to a limit, because it can be any size at all once unpacked.
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
             // HttpRequestException text can quote the address, which holds the key on requestdl.
-            throw new RemoteProviderException(
-                RemoteFailureKind.Network, null,
-                isSubmission ? "TorBox could not be reached, and may have received the request." : "TorBox could not be reached.");
+            throw Unreachable(isSubmission);
         }
 
         using (response)
         {
             NoteBudget(response);
-            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             JsonDocument? document = null;
             try
             {
-                if (!string.IsNullOrWhiteSpace(text)) document = JsonDocument.Parse(text);
+                using var body = await ReadBodyAsync(response, isSubmission, cancellationToken).ConfigureAwait(false);
+                document = JsonDocument.Parse(body);
             }
             catch (JsonException)
             {
                 document = null;
             }
 
-            var code = document?.RootElement is { ValueKind: JsonValueKind.Object } root ? Text(root, "error") : null;
-            var detail = document?.RootElement is { ValueKind: JsonValueKind.Object } root2 ? Text(root2, "detail") : null;
+            var root = document?.RootElement;
+            var code = root is { ValueKind: JsonValueKind.Object } read ? Text(read, "error") : null;
+            var detail = root is { ValueKind: JsonValueKind.Object } read2 ? Text(read2, "detail") : null;
             var status = response.StatusCode;
 
             // TorBox can answer 404 with success:true, so the error field decides, not success.
             if (status == HttpStatusCode.TooManyRequests)
             {
                 document?.Dispose();
-                var wait = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(60);
+                var wait = response.Headers.RetryAfter?.Delta
+                    ?? (response.Headers.RetryAfter?.Date is { } until && until > _time.GetUtcNow() ? until - _time.GetUtcNow() : TorBoxMapping.RateLimitWait(detail));
                 throw new RemoteProviderException(RemoteFailureKind.RateLimited, code,
                     detail is null ? "TorBox asked to slow down." : UrlRedactor.HideAddresses(detail), wait);
             }
@@ -312,44 +389,114 @@ public sealed class TorBoxClient :
                 throw new RemoteProviderException(RemoteFailureKind.BadResponse, null, "TorBox sent a response that could not be read.");
             }
 
+            // Success with no code to go by: it didn't work, and it doesn't say that nothing happened.
+            if (root is { ValueKind: JsonValueKind.Object } envelope && envelope.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False)
+            {
+                document.Dispose();
+                throw new RemoteProviderException(RemoteFailureKind.BadResponse, null,
+                    detail is null ? "TorBox answered that this failed, without saying why." : UrlRedactor.HideAddresses(detail));
+            }
+
             return document;
         }
     }
 
+    private static RemoteProviderException Unreachable(bool isSubmission) => new(
+        RemoteFailureKind.Network, null,
+        isSubmission ? "TorBox could not be reached, and may have received the request." : "TorBox could not be reached.");
+
+    /// <summary>
+    /// The unpacked body, up to the limit. Reading with the headers alone means the client's own timeout
+    /// no longer covers this, so it is applied here.
+    /// </summary>
+    private async Task<MemoryStream> ReadBodyAsync(HttpResponseMessage response, bool isSubmission, CancellationToken cancellationToken)
+    {
+        if (response.Content.Headers.ContentLength > _mostResponseBytes)
+        {
+            throw TooLarge();
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (_http.Timeout != Timeout.InfiniteTimeSpan)
+        {
+            timeout.CancelAfter(_http.Timeout);
+        }
+
+        var body = new MemoryStream();
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            var chunk = new byte[64 * 1024];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, timeout.Token).ConfigureAwait(false)) > 0)
+            {
+                if (body.Length + read > _mostResponseBytes)
+                {
+                    throw TooLarge();
+                }
+
+                body.Write(chunk, 0, read);
+            }
+
+            body.Position = 0;
+            return body;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            await body.DisposeAsync().ConfigureAwait(false);
+            throw Unreachable(isSubmission);
+        }
+        catch
+        {
+            await body.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static RemoteProviderException TooLarge() =>
+        new(RemoteFailureKind.BadResponse, null, "TorBox sent a response too large to read.");
+
     /// <summary>
     /// Waits only when the window is actually used up. Retry-After is not consulted here because
-    /// TorBox sends it on every response, including successful ones.
+    /// TorBox sends it on every response, including successful ones. Each caller waits for itself:
+    /// holding a gate across this would queue every other call behind it, a submission among them.
     /// </summary>
     private async Task WaitForBudgetAsync(CancellationToken cancellationToken)
     {
-        await _budgetGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var until = new DateTimeOffset(Interlocked.Read(ref _budgetExhaustedUntilTicks), TimeSpan.Zero);
+        var wait = until - _time.GetUtcNow();
+        if (wait > TimeSpan.Zero)
         {
-            var wait = _budgetExhaustedUntil - _time.GetUtcNow();
-            if (wait > TimeSpan.Zero)
-            {
-                await Task.Delay(wait > TimeSpan.FromSeconds(90) ? TimeSpan.FromSeconds(90) : wait, _time, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            _budgetGate.Release();
+            await Task.Delay(wait > LongestBudgetWait ? LongestBudgetWait : wait, _time, cancellationToken).ConfigureAwait(false);
         }
     }
 
     private void NoteBudget(HttpResponseMessage response)
     {
         if (!response.Headers.TryGetValues("X-RateLimit-Remaining", out var remainingValues) ||
-            !int.TryParse(remainingValues.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var remaining) ||
-            remaining > 1)
+            !int.TryParse(remainingValues.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var remaining))
         {
             return;
         }
 
-        if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) &&
-            double.TryParse(resetValues.FirstOrDefault(), NumberStyles.Float, CultureInfo.InvariantCulture, out var reset))
+        if (remaining > 1)
         {
-            _budgetExhaustedUntil = DateTimeOffset.FromUnixTimeMilliseconds((long)(reset * 1000));
+            // Budget is back, whatever an earlier answer said about when it would be.
+            Interlocked.Exchange(ref _budgetExhaustedUntilTicks, 0);
+            return;
+        }
+
+        if (!response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) ||
+            !double.TryParse(resetValues.FirstOrDefault(), NumberStyles.Float, CultureInfo.InvariantCulture, out var reset) ||
+            !double.IsFinite(reset) || reset <= 0 || reset * 1000 >= DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
+        {
+            return;
+        }
+
+        var until = DateTimeOffset.FromUnixTimeMilliseconds((long)(reset * 1000));
+        if (until - _time.GetUtcNow() <= LongestBudgetWindow)
+        {
+            Interlocked.Exchange(ref _budgetExhaustedUntilTicks, until.UtcTicks);
         }
     }
 

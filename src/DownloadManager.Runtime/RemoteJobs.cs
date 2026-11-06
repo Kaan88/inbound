@@ -1,6 +1,7 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
+using DownloadManager.Runtime.Remote;
 
 namespace DownloadManager.Runtime;
 
@@ -20,14 +21,19 @@ public sealed record RemoteJobRequest
 
 public sealed record RemoteJobsResult
 {
+    /// <summary>This one file's path can't be made under a folder that is otherwise fine. Worth skipping, not retrying.</summary>
+    public const string UnusablePathCode = "unusable_path";
+
     /// <summary>One per request, in order. A retried file comes back as a duplicate of its job.</summary>
     public IReadOnlyList<AddJobResponse> Items { get; init; } = [];
     public Guid? PackageId { get; init; }
     /// <summary>Set when the package could not be saved. The jobs exist; adding the same batch again repairs it.</summary>
     public string? Error { get; init; }
+    /// <summary>What the user should hear about existing jobs in this batch.</summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
 }
 
-public sealed partial class DownloadManagerService
+public sealed partial class DownloadManagerService : IRemoteJobHost
 {
     private const string RemoteOwnerPrefix = "provider:";
     private const string RemotePackagePrefix = "remote:";
@@ -35,6 +41,15 @@ public sealed partial class DownloadManagerService
     private const int MaxPackageMembers = 1000;
 
     private sealed record RemoteAddContext(RemoteSource Source, long? ExpectedTotalBytes, string? ExpectedMd5, int MaxConnections);
+
+    /// <summary>Where a provider's files go when the user named no folder.</summary>
+    public string DefaultDownloadDirectory
+    {
+        get
+        {
+            lock (_sync) return _settings.DefaultDownloadDirectory;
+        }
+    }
 
     /// <summary>
     /// Creates local jobs for a provider's files as one batch: one package, one settings commit.
@@ -57,6 +72,9 @@ public sealed partial class DownloadManagerService
             return new RemoteJobsResult { Error = "A package key is required." };
         }
 
+        var notes = new List<string>();
+        var revived = new List<Guid>();
+        RemoteJobsResult result;
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -68,7 +86,10 @@ public sealed partial class DownloadManagerService
             var items = new List<AddJobResponse>(requests.Count);
             foreach (var request in requests)
             {
-                items.Add(await AddRemoteJobAsync(request, cancellationToken).ConfigureAwait(false));
+                var added = await AddRemoteJobAsync(request, cancellationToken).ConfigureAwait(false);
+                items.Add(added.Duplicate && added.Job is { } job
+                    ? await RepointIfMovedAsync(job.Id, request, added, notes, revived, cancellationToken).ConfigureAwait(false)
+                    : added);
             }
 
             var jobIds = items.Where(item => item is { Accepted: true, Job: not null }).Select(item => item.Job!.Id).ToList();
@@ -76,9 +97,124 @@ public sealed partial class DownloadManagerService
                 .ConfigureAwait(false);
             // A small file can finish before its package is saved, which no job event then reports.
             RequestPackageCheck();
-            return new RemoteJobsResult { Items = items, PackageId = packageId, Error = error };
+            result = new RemoteJobsResult { Items = items, PackageId = packageId, Error = error, Notes = notes };
         }
         finally { _settingsUpdateGate.Release(); }
+
+        // Stopped only because their item had gone, and it is back under a new id. The rest are the user's to resume.
+        foreach (var id in revived)
+        {
+            await ResumeAsync(id, cancellationToken).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// A job is claimed by its remote job and file id, which stay the same when the provider's item
+    /// changes: a retry can resubmit something gone, and a new item takes its place. The job must
+    /// follow, or it would go on asking for an item that no longer exists. Its bytes stay: the next
+    /// run compares size and md5 with the file on the new item, and starts over only if they differ. A
+    /// finished file that is no longer what the item holds stays finished, and the user hears of it.
+    /// </summary>
+    private async Task<AddJobResponse> RepointIfMovedAsync(
+        Guid jobId,
+        RemoteJobRequest request,
+        AddJobResponse added,
+        List<string> notes,
+        List<Guid> revived,
+        CancellationToken cancellationToken)
+    {
+        JobRuntime? runtime;
+        RemoteSource previous;
+        string previousUrl;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(jobId, out runtime) || runtime.Job.RemoteSource is not { } current ||
+                (current.ItemId == request.Source.ItemId && current.Kind == request.Source.Kind))
+            {
+                return added;
+            }
+
+            var job = runtime.Job;
+            var sameFile =
+                (job.ExpectedTotalBytes is null || request.ExpectedTotalBytes is null || job.ExpectedTotalBytes == request.ExpectedTotalBytes) &&
+                (string.IsNullOrWhiteSpace(job.ExpectedMd5) || string.IsNullOrWhiteSpace(request.ExpectedMd5) ||
+                 job.ExpectedMd5.Equals(request.ExpectedMd5, StringComparison.OrdinalIgnoreCase));
+            if (job.State == DownloadState.Completed && !sameFile)
+            {
+                notes.Add($"{RemoteText.Clean(job.FileName, 200)} is finished, but the provider now holds a different file under this name. Yours was kept.");
+                return added;
+            }
+
+            previous = current;
+            previousUrl = job.Url;
+            job.RemoteSource = request.Source;
+            job.Url = request.Source.ToReferenceUrl();
+            job.Touch();
+            if (job is { State: DownloadState.Failed, Failure.Kind: FailureKind.NotFound })
+            {
+                revived.Add(jobId);
+            }
+        }
+
+        try
+        {
+            await PersistAsync(runtime, cancellationToken, requireSuccess: true).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Nothing counts until it is saved. The job's next look is still at the old item, and repeating this batch repeats this.
+            lock (_sync)
+            {
+                runtime.Job.RemoteSource = previous;
+                runtime.Job.Url = previousUrl;
+            }
+
+            revived.Remove(jobId);
+            return new AddJobResponse
+            {
+                Accepted = false,
+                Error = "Could not save a download's new reference.",
+                ErrorCode = "persistence_failed",
+            };
+        }
+
+        Raise(runtime, "updated");
+        return added;
+    }
+
+    /// <summary>The package's local jobs right now, for the words on its remote job.</summary>
+    public RemoteLocalSummary? GetLocalSummary(Guid packageId)
+    {
+        lock (_sync)
+        {
+            var group = _settings.DownloadGroups.FirstOrDefault(candidate => candidate.Id == packageId);
+            if (group is null)
+            {
+                return null;
+            }
+
+            int total = 0, completed = 0, failed = 0, paused = 0, active = 0;
+            foreach (var id in group.JobIds)
+            {
+                if (!_jobs.TryGetValue(id, out var runtime))
+                {
+                    continue;
+                }
+
+                total++;
+                switch (runtime.Job.State)
+                {
+                    case DownloadState.Completed: completed++; break;
+                    case DownloadState.Failed: failed++; break;
+                    case DownloadState.Paused or DownloadState.Cancelled: paused++; break;
+                    case DownloadState.Connecting or DownloadState.Downloading or DownloadState.RetryWaiting or DownloadState.Verifying: active++; break;
+                }
+            }
+
+            return new RemoteLocalSummary(total, completed, failed, paused, active);
+        }
     }
 
     /// <summary>
@@ -129,7 +265,7 @@ public sealed partial class DownloadManagerService
             return new AddJobResponse { Error = "The file's path leaves the download folder.", ErrorCode = "invalid_path" };
         }
 
-        return await AddJobCoreAsync(new AddJobRequest
+        var added = await AddJobCoreAsync(new AddJobRequest
         {
             Url = source.ToReferenceUrl(),
             FileName = request.FileName,
@@ -142,6 +278,27 @@ public sealed partial class DownloadManagerService
             ClientRequestId = $"{source.RemoteJobId}/{source.FileId}",
         }, cancellationToken, new RemoteAddContext(source, request.ExpectedTotalBytes, request.ExpectedMd5, request.MaxConnections))
             .ConfigureAwait(false);
+
+        if (added.ErrorCode == "invalid_destination" && FolderCanBeUsed(request.DestinationRoot))
+        {
+            added.ErrorCode = RemoteJobsResult.UnusablePathCode;
+        }
+
+        return added;
+    }
+
+    /// <summary>A folder that can't be used is worth waiting for, such as a drive plugged in later. One path under a good folder isn't.</summary>
+    private static bool FolderCanBeUsed(string folder)
+    {
+        try
+        {
+            Directory.CreateDirectory(folder);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static bool IsReferenceWord(string? value)
@@ -256,24 +413,31 @@ public sealed partial class DownloadManagerService
         return (group?.Id, null);
     }
 
+    /// <summary>On a provider's own host with a token, or anywhere at all with a stored account key in it.</summary>
+    private bool HoldsProviderSecret(string? url)
+        => ProviderLinks.IsProviderLink(url) || _linkSecrets?.Holds(url) == true;
+
+    private string MaskProviderSecret(string url)
+        => ProviderLinks.MaskToken(_linkSecrets?.Mask(url) ?? url);
+
     /// <summary>
     /// A pasted provider link carries the account key, so the job keeps a masked copy and the
     /// real address goes to the field the store encrypts.
     /// </summary>
-    private static (string Url, string? FinalUrl, string? ProtectedUrl) SplitOffProviderLink(string url, string? finalUrl)
+    private (string Url, string? FinalUrl, string? ProtectedUrl) SplitOffProviderLink(string url, string? finalUrl)
     {
-        var urlIsLink = ProviderLinks.IsProviderLink(url);
-        var finalIsLink = ProviderLinks.IsProviderLink(finalUrl);
+        var urlIsLink = HoldsProviderSecret(url);
+        var finalIsLink = HoldsProviderSecret(finalUrl);
         if (!urlIsLink && !finalIsLink)
         {
             return (url, finalUrl, null);
         }
 
-        return (urlIsLink ? ProviderLinks.MaskToken(url) : url, null, finalIsLink ? finalUrl : url);
+        return (urlIsLink ? MaskProviderSecret(url) : url, null, finalIsLink ? finalUrl : url);
     }
 
-    private static string? MaskIfProviderLink(string? url)
-        => ProviderLinks.IsProviderLink(url) ? ProviderLinks.MaskToken(url!) : url;
+    private string? MaskIfProviderLink(string? url)
+        => HoldsProviderSecret(url) ? MaskProviderSecret(url!) : url;
 
     /// <summary>
     /// Takes the account key out of a job saved before its address was recognised as a provider
@@ -282,8 +446,15 @@ public sealed partial class DownloadManagerService
     /// </summary>
     private async Task<bool> ProtectStoredProviderLinksAsync(DownloadJob job, CancellationToken cancellationToken)
     {
+        var changed = ProtectJobLinks(job);
+        await ProtectCheckpointLinksAsync(job, cancellationToken).ConfigureAwait(false);
+        return changed;
+    }
+
+    private bool ProtectJobLinks(DownloadJob job)
+    {
         var changed = false;
-        if (ProviderLinks.IsProviderLink(job.Url) || ProviderLinks.IsProviderLink(job.FinalUrl))
+        if (HoldsProviderSecret(job.Url) || HoldsProviderSecret(job.FinalUrl))
         {
             var (url, finalUrl, protectedUrl) = SplitOffProviderLink(job.Url, job.FinalUrl);
             job.Url = url;
@@ -292,20 +463,25 @@ public sealed partial class DownloadManagerService
             changed = true;
         }
 
-        if (ProviderLinks.IsProviderLink(job.PageUrl))
+        if (HoldsProviderSecret(job.PageUrl))
         {
             job.PageUrl = MaskIfProviderLink(job.PageUrl);
             changed = true;
         }
 
-        if (ProviderLinks.IsProviderLink(job.Referrer))
+        if (HoldsProviderSecret(job.Referrer))
         {
             job.Referrer = MaskIfProviderLink(job.Referrer);
             changed = true;
         }
 
+        return changed;
+    }
+
+    private async Task ProtectCheckpointLinksAsync(DownloadJob job, CancellationToken cancellationToken)
+    {
         var checkpoint = await _checkpointStore.LoadAsync(job.Id, cancellationToken).ConfigureAwait(false);
-        if (checkpoint is not null && (ProviderLinks.IsProviderLink(checkpoint.Url) || ProviderLinks.IsProviderLink(checkpoint.FinalUrl)))
+        if (checkpoint is not null && (HoldsProviderSecret(checkpoint.Url) || HoldsProviderSecret(checkpoint.FinalUrl)))
         {
             checkpoint.Url = job.Url;
             checkpoint.FinalUrl = job.FinalUrl;
@@ -315,8 +491,64 @@ public sealed partial class DownloadManagerService
                 _log?.Invoke($"Could not rewrite the checkpoint of job {job.Id}: {ex.Message}");
             }
         }
+    }
 
-        return changed;
+    /// <summary>
+    /// For when an account key has just been stored: addresses saved earlier may turn out to hold
+    /// it. A startup does the same for jobs through reconciling them.
+    /// </summary>
+    public async Task ProtectStoredSecretsAsync(CancellationToken cancellationToken = default)
+    {
+        await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            List<JobRuntime> runtimes;
+            lock (_sync) runtimes = _jobs.Values.ToList();
+            foreach (var runtime in runtimes)
+            {
+                bool running;
+                bool changed;
+                lock (_sync)
+                {
+                    running = runtime.Starting || runtime.Runner is { IsCompleted: false };
+                    changed = ProtectJobLinks(runtime.Job);
+                    // The transfer goes on with the address it had, for as long as this run lasts.
+                    if (changed && running) runtime.Job.ResolvedUrl ??= runtime.Job.ProtectedUrl;
+                }
+
+                // A running engine writes its own checkpoints, and takes the masked address from the job.
+                if (!running) await ProtectCheckpointLinksAsync(runtime.Job, cancellationToken).ConfigureAwait(false);
+                if (changed)
+                {
+                    await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+                    Raise(runtime, "updated");
+                }
+            }
+
+            await ScrubRecentUrlsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _settingsUpdateGate.Release(); }
+    }
+
+    private async Task ScrubRecentUrlsAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_settings.RecentUrls is null || _settings.RecentUrls.RemoveAll(HoldsProviderSecret) == 0)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
+            SettingsChanged?.Invoke(this, _settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Could not remove a recent address that holds an account key: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -341,10 +573,28 @@ public sealed partial class DownloadManagerService
 
             var checkpoint = await _checkpointStore.LoadAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
             var result = await engine.ExecuteAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
-            if (result.Success || result.Failure is not { } failure || refreshes >= MaxLinkRefreshesPerRun ||
+            if (result.Success || result.Failure is not { } failure ||
                 job.RemoteSource is null || _linkBroker is null ||
-                failure.Kind is not (FailureKind.ExpiredUrl or FailureKind.Unauthorized or FailureKind.Forbidden or FailureKind.NotFound) ||
-                !await ShouldRefreshLinkAsync(job, failure, cancellationToken).ConfigureAwait(false))
+                failure.Kind is not (FailureKind.ExpiredUrl or FailureKind.Unauthorized or FailureKind.Forbidden or FailureKind.NotFound))
+            {
+                return result;
+            }
+
+            if (refreshes >= MaxLinkRefreshesPerRun)
+            {
+                // The engine's own wording points at Refresh Download Address, which these jobs don't have.
+                var status = failure.HttpStatus is { } code ? $" (HTTP {code})" : string.Empty;
+                return result with
+                {
+                    Failure = failure with
+                    {
+                        Message = $"Fresh download links keep failing{status}. Anything already downloaded was kept, so try again later.",
+                        IsResumable = true,
+                    },
+                };
+            }
+
+            if (!await ShouldRefreshLinkAsync(job, failure, cancellationToken).ConfigureAwait(false))
             {
                 return result;
             }
@@ -448,7 +698,7 @@ public sealed partial class DownloadManagerService
         if (resolution.Failure is { } failure)
         {
             // Saved in plain job JSON and sent to every client, and a provider can quote what was submitted.
-            return failure with { Message = UrlRedactor.HideAddresses(failure.Message) };
+            return failure with { Message = RemoteText.Clean(failure.Message, 1000) ?? "The provider gave no reason." };
         }
 
         if (!Uri.TryCreate(resolution.Url, UriKind.Absolute, out var uri))

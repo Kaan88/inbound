@@ -7,7 +7,7 @@ using DownloadManager.Core;
 
 namespace DownloadManager.Cli;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
 
@@ -65,8 +65,13 @@ internal static class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--direct] [--wait]");
                     return 2;
+                }
+
+                if (await RefuseIfForProviderAsync(client, optionArgs[0], args.Contains("--direct", StringComparer.OrdinalIgnoreCase)).ConfigureAwait(false) is { } refused)
+                {
+                    return refused;
                 }
 
                 var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
@@ -432,6 +437,8 @@ internal static class Program
                 var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new { }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
+            case "remote":
+                return await RemoteAsync(client, args, json).ConfigureAwait(false);
             case "queue":
                 return await QueueAsync(client, args, json).ConfigureAwait(false);
             case "schedule":
@@ -1773,6 +1780,20 @@ internal static class Program
               dm site list|add|remove
               dm settings [get] | settings set <key> <value>
               | settings export <file.json> | settings import <file.json>
+              dm remote status
+              dm remote key set        (reads the key from standard input, never from the command line)
+              dm remote key clear
+              dm remote classify <link>
+              dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
+                          [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
+              dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
+              dm remote list
+              dm remote files <id>
+              dm remote select <id> all|<file-id>...
+              dm remote retry <id> [--approve-uncached] [--link-password-stdin]
+              dm remote check [<id>]
+              dm remote remove <id> [--delete-from-provider --yes]
+              dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
               dm host status|open|shutdown
               dm doctor [--no-start]
 

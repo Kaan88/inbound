@@ -44,7 +44,23 @@ public sealed partial class RuntimeServiceTests
     {
         foreach (var file in Directory.GetFiles(ctx.Paths.Root, "*", SearchOption.AllDirectories))
         {
-            Assert.DoesNotContain(secret, await File.ReadAllTextAsync(file));
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    Assert.DoesNotContain(secret, await File.ReadAllTextAsync(file));
+                    break;
+                }
+                // A store can be replacing the file right now, and the file after that will be read instead.
+                catch (FileNotFoundException)
+                {
+                    break;
+                }
+                catch (IOException) when (attempt < 20)
+                {
+                    await Task.Delay(50);
+                }
+            }
         }
     }
 

@@ -36,8 +36,6 @@ public static partial class TorBoxMapping
         var error = Text(element, "error");
         var finished = Bool(element, "download_finished");
         var present = Bool(element, "download_present");
-        var stage = present && (finished || Bool(element, "cached")) ? RemoteStage.Ready : StageFromState(state);
-        if (!string.IsNullOrWhiteSpace(error)) stage = RemoteStage.Failed;
 
         var files = new List<RemoteFile>();
         if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty("files", out var list) && list.ValueKind == JsonValueKind.Array)
@@ -59,8 +57,13 @@ public static partial class TorBoxMapping
             }
         }
 
-        // No file list yet means the content can't be fetched, whatever the flags say.
-        if (stage == RemoteStage.Ready && files.Count == 0) stage = RemoteStage.MetadataPending;
+        // Readiness is checked first, as the reference client does: a file that can be fetched can be
+        // fetched, whatever an earlier attempt left in the error field. No file list yet means it can't.
+        var stage = present && (finished || Bool(element, "cached")) && files.Count > 0
+            ? RemoteStage.Ready
+            : !string.IsNullOrWhiteSpace(error) ? RemoteStage.Failed
+            : present && (finished || Bool(element, "cached")) ? RemoteStage.MetadataPending
+            : StageFromState(state);
 
         var alternatives = new List<string>();
         if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty("alternative_hashes", out var other) && other.ValueKind == JsonValueKind.Array)
@@ -97,11 +100,16 @@ public static partial class TorBoxMapping
             domains.AddRange(list.EnumerateArray().Where(domain => domain.ValueKind == JsonValueKind.String).Select(domain => domain.GetString()!));
         }
 
+        // As the reference client does: with no list, the name is the only domain there is.
+        var name = Text(element, "name") ?? "";
+        if (domains.Count == 0 && name.Length > 0) domains.Add(name);
+
         return new RemoteHoster
         {
-            Name = Text(element, "name") ?? "",
+            Name = name,
             Domains = domains,
-            Available = Bool(element, "status"),
+            // Only an exact false means down. A missing status says nothing against it.
+            Available = !(element.ValueKind == JsonValueKind.Object && element.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.False),
             Pattern = Text(element, "regex"),
             Note = Text(element, "note"),
             DailyLinkLimit = (int?)Long(element, "daily_link_limit"),
@@ -121,17 +129,26 @@ public static partial class TorBoxMapping
         var kind = code?.ToUpperInvariant() switch
         {
             "NO_AUTH" or "BAD_TOKEN" or "AUTH_ERROR" or "INVALID_DEVICE" => RemoteFailureKind.Authentication,
-            "PLAN_RESTRICTED_FEATURE" or "MONTHLY_LIMIT" or "DOWNLOAD_TOO_LARGE" or "TOO_MUCH_DATA" or "VENDOR_DISABLED" or "PAYMENT_REQUIRED" => RemoteFailureKind.AccountLimit,
+            // The whole account can't do these for now, whatever is asked next.
+            "MONTHLY_LIMIT" or "TOO_MUCH_DATA" or "VENDOR_DISABLED" or "PAYMENT_REQUIRED" => RemoteFailureKind.AccountLimit,
             "ACTIVE_LIMIT" or "COOLDOWN_LIMIT" or "DOWNLOAD_LIMIT_REACHED" => RemoteFailureKind.AccountBusy,
-            "ITEM_NOT_FOUND" or "ENDPOINT_NOT_FOUND" => RemoteFailureKind.NotFound,
-            "BOZO_TORRENT" or "BOZO_NZB" or "LINK_OFFLINE" or "UNSUPPORTED_SITE" or "INVALID_OPTION" or "MISSING_REQUIRED_OPTION" or "TOO_MANY_OPTIONS" or "DOWNLOAD_NOT_CACHED" or "DUPLICATE_ITEM" => RemoteFailureKind.Rejected,
+            "ITEM_NOT_FOUND" => RemoteFailureKind.NotFound,
+            // About this one input. The next link may well be fine, as the reference client assumes too.
+            "DOWNLOAD_TOO_LARGE" or "PLAN_RESTRICTED_FEATURE" or
+            "BOZO_TORRENT" or "BOZO_NZB" or "LINK_OFFLINE" or "UNSUPPORTED_SITE" or "INVALID_OPTION" or "MISSING_REQUIRED_OPTION" or "TOO_MANY_OPTIONS" => RemoteFailureKind.Rejected,
+            "DOWNLOAD_NOT_CACHED" => RemoteFailureKind.NotCached,
+            "DUPLICATE_ITEM" => RemoteFailureKind.AlreadyExists,
+            // The address went away, not the item: "not found" here would read as an empty account.
+            "ENDPOINT_NOT_FOUND" or "DEPRECATED" or
             "DATABASE_ERROR" or "UNKNOWN_ERROR" or "DOWNLOAD_SERVER_ERROR" or "NO_SERVERS_AVAILABLE_ERROR" or "DIFF_ISSUE" => RemoteFailureKind.ServiceError,
             "SLOW_DOWN" or "RATE_LIMITED" or "RATE_LIMIT_EXCEEDED" => RemoteFailureKind.RateLimited,
             _ => status switch
             {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => RemoteFailureKind.Authentication,
                 HttpStatusCode.PaymentRequired => RemoteFailureKind.AccountLimit,
-                HttpStatusCode.NotFound or HttpStatusCode.Gone => RemoteFailureKind.NotFound,
+                // A 404 with a body that doesn't say what isn't there is a gateway's, or a proxy's, and says nothing about the account.
+                HttpStatusCode.NotFound when detail is not null && NoItemsPhrase().IsMatch(detail) => RemoteFailureKind.NotFound,
+                HttpStatusCode.NotFound or HttpStatusCode.Gone => RemoteFailureKind.ServiceError,
                 >= HttpStatusCode.InternalServerError => RemoteFailureKind.ServiceError,
                 _ => RemoteFailureKind.Rejected,
             },
@@ -142,7 +159,23 @@ public static partial class TorBoxMapping
         var message = !string.IsNullOrWhiteSpace(detail)
             ? UrlRedactor.HideAddresses(detail)
             : code ?? $"TorBox answered with status {(int)status}.";
-        return new RemoteProviderException(kind, code, message);
+        return new RemoteProviderException(kind, code, message, kind == RemoteFailureKind.RateLimited ? RateLimitWait(detail) : null);
+    }
+
+    /// <summary>
+    /// How long a rate limit answer with no usable Retry-After is worth. TorBox's words give the
+    /// window, such as "60 per 1 hour", and the reference client reads them the same way.
+    /// </summary>
+    public static TimeSpan RateLimitWait(string? detail)
+        => detail?.Contains("hour", StringComparison.OrdinalIgnoreCase) == true ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(1);
+
+    /// <summary>The one way TorBox writes an item id: a whole number, with no padding. Null if it can't be one.</summary>
+    public static string? CanonicalId(string? id)
+    {
+        var trimmed = id?.Trim();
+        return !string.IsNullOrEmpty(trimmed) && trimmed.All(char.IsAsciiDigit) && long.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
+            ? value.ToString(CultureInfo.InvariantCulture)
+            : null;
     }
 
     /// <summary>The info hash from a magnet, lower case hex. Base32 hashes are converted. Null if none.</summary>
@@ -225,6 +258,10 @@ public static partial class TorBoxMapping
 
     [GeneratedRegex(@"^\d+ per \d* ?(second|minute|hour|day)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RatePhrase();
+
+    // "No torrents found for this user."
+    [GeneratedRegex(@"^\s*no\b.{0,80}\bfound\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NoItemsPhrase();
 
     [GeneratedRegex(@"[?&]xt=urn:btih:([0-9a-fA-F]{40}|[A-Za-z2-7]{32})(?:&|$)", RegexOptions.CultureInvariant)]
     private static partial Regex MagnetHash();

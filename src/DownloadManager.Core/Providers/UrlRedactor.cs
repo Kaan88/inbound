@@ -8,7 +8,15 @@ public static partial class UrlRedactor
 {
     public const string Mask = "***";
 
+    /// <summary>
+    /// Text past this isn't looked at, or kept. The patterns below take quadratic time on text built
+    /// to make them, and much of what comes here is whatever a provider chose to send.
+    /// </summary>
+    public const int LongestText = 64 * 1024;
+
     private const string HiddenAddress = "[link]";
+    private const string HiddenText = "[text hidden]";
+    private const int PatternTimeoutMilliseconds = 1000;
 
     private static readonly HashSet<string> SecretNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -46,9 +54,16 @@ public static partial class UrlRedactor
     public static string RedactText(string? text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
-        var redacted = MagnetPattern().Replace(text, "magnet:" + Mask);
-        redacted = AddressPattern().Replace(redacted, match => RedactJoined(match.Value));
-        return MaskBarePairs(redacted);
+        try
+        {
+            var redacted = MagnetPattern().Replace(Bounded(text), "magnet:" + Mask);
+            redacted = AddressPattern().Replace(redacted, match => RedactJoined(match.Value));
+            return MaskBarePairs(redacted);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return HiddenText;
+        }
     }
 
     /// <summary>
@@ -58,10 +73,19 @@ public static partial class UrlRedactor
     public static string HideAddresses(string? text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
-        var hidden = MagnetPattern().Replace(text, HiddenAddress);
-        hidden = AddressPattern().Replace(hidden, HiddenAddress);
-        return MaskBarePairs(hidden);
+        try
+        {
+            var hidden = MagnetPattern().Replace(Bounded(text), HiddenAddress);
+            hidden = AddressPattern().Replace(hidden, HiddenAddress);
+            return MaskBarePairs(hidden);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return HiddenText;
+        }
     }
+
+    private static string Bounded(string text) => text.Length <= LongestText ? text : text[..LongestText];
 
     /// <summary>The address pattern takes addresses joined by a comma as one match, and each needs its own redaction.</summary>
     private static string RedactJoined(string match)
@@ -110,27 +134,38 @@ public static partial class UrlRedactor
     private static bool HoldsAnAddress(string value)
     {
         var text = Uri.UnescapeDataString(Uri.UnescapeDataString(value));
-        return text.Contains("://", StringComparison.Ordinal) ||
-               text.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase) ||
-               BarePairPattern().IsMatch(text);
+        if (text.Contains("://", StringComparison.Ordinal) || text.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            return BarePairPattern().IsMatch(Bounded(text));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return true;
+        }
     }
 
     private static string MaskBarePairs(string text)
         => BarePairPattern().Replace(text, match => match.Groups["name"].Value + "=" + Mask);
 
     // An apostrophe is legal in a URL, and stopping at one would leave the rest of a value behind.
-    [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://[^\s""<>]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://[^\s""<>]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, PatternTimeoutMilliseconds)]
     private static partial Regex AddressPattern();
 
-    [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, PatternTimeoutMilliseconds)]
     private static partial Regex SchemePattern();
 
-    [GeneratedRegex(@"\bmagnet:\?[^\s""<>]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // Any magnet: the classifier takes one with no question mark, and that is still someone's private input.
+    [GeneratedRegex(@"\bmagnet:[^\s""<>]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, PatternTimeoutMilliseconds)]
     private static partial Regex MagnetPattern();
 
     // For a request line or a message that quotes a query without its address.
     [GeneratedRegex(
         @"(?<![\w.\-])(?<name>[\w.\-]*(?:token|signature|credential|secret|password|_key|-key)|key|apikey|auth|sig|passwd|pass|pwd|session|sessionid)=(?<value>[^\s&;""'<>,)]+)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, PatternTimeoutMilliseconds)]
     private static partial Regex BarePairPattern();
 }

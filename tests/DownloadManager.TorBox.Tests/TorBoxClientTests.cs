@@ -98,7 +98,8 @@ public sealed class TorBoxClientTests
     [InlineData("""{"success":false,"error":"RATE_LIMIT_EXCEEDED","detail":"60 per 1 hour","data":null}""", HttpStatusCode.OK, RemoteFailureKind.RateLimited)]
     [InlineData("""{"success":false,"error":"UNKNOWN_ERROR","detail":"This link is password protected.","data":null}""", HttpStatusCode.OK, RemoteFailureKind.LinkPasswordRequired)]
     [InlineData("""{"success":false,"error":"UNSUPPORTED_SITE","detail":"No","data":null}""", HttpStatusCode.OK, RemoteFailureKind.Rejected)]
-    [InlineData("""{"success":false,"error":"PLAN_RESTRICTED_FEATURE","detail":"Plan","data":null}""", HttpStatusCode.Forbidden, RemoteFailureKind.AccountLimit)]
+    [InlineData("""{"success":false,"error":"PLAN_RESTRICTED_FEATURE","detail":"Plan","data":null}""", HttpStatusCode.Forbidden, RemoteFailureKind.Rejected)]
+    [InlineData("""{"success":false,"error":"MONTHLY_LIMIT","detail":"Plan","data":null}""", HttpStatusCode.Forbidden, RemoteFailureKind.AccountLimit)]
     [InlineData("""{"success":false,"error":"DATABASE_ERROR","detail":"Oops","data":null}""", HttpStatusCode.InternalServerError, RemoteFailureKind.ServiceError)]
     [InlineData("""{"success":false,"error":"LINK_OFFLINE","detail":"Gone","data":null}""", HttpStatusCode.BadRequest, RemoteFailureKind.Rejected)]
     [InlineData("""{"success":false,"error":"A_NEW_CODE","detail":"Who knows","data":null}""", HttpStatusCode.BadGateway, RemoteFailureKind.ServiceError)]
@@ -108,6 +109,161 @@ public sealed class TorBoxClientTests
         var (client, _) = Make(_ => Json(body, status));
         var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => client.GetAccountAsync());
         Assert.Equal(expected, failure.Kind);
+    }
+
+    /// <summary>Doesn't say how long it is, so only reading it finds out.</summary>
+    private sealed class UnsizedContent(int bytes) : HttpContent
+    {
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context)
+            => await stream.WriteAsync(new byte[bytes]);
+
+        protected override Task<Stream> CreateContentReadStreamAsync()
+            => Task.FromResult<Stream>(new MemoryStream(new byte[bytes]));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnAnswerTooLargeIsABadResponseAndNeverWholeInMemory(bool saysSoUpFront)
+    {
+        var stub = new Stub(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = saysSoUpFront ? new StringContent(new string(' ', 70_000)) : new UnsizedContent(200_000),
+        });
+        var client = new TorBoxClient(new HttpClient(stub), () => Key, mostResponseBytes: 64 * 1024);
+
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true));
+        Assert.Equal(RemoteFailureKind.BadResponse, failure.Kind);
+        Assert.Contains("too large", failure.Message);
+    }
+
+    [Fact]
+    public async Task AnAnswerWithinTheLimitIsRead()
+    {
+        var stub = new Stub(_ => Json($$"""{"success":true,"error":null,"data":[{{TorrentItem}}]}"""));
+        var client = new TorBoxClient(new HttpClient(stub), () => Key, mostResponseBytes: 64 * 1024);
+        Assert.Single(await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true));
+    }
+
+    private static HttpResponseMessage WithBudget(string remaining, string reset)
+    {
+        var response = Json("""{"success":true,"error":null,"data":[]}""");
+        response.Headers.TryAddWithoutValidation("X-RateLimit-Remaining", remaining);
+        response.Headers.TryAddWithoutValidation("X-RateLimit-Reset", reset);
+        return response;
+    }
+
+    [Theory]
+    [InlineData("4102444800")] // The year 2100.
+    [InlineData("1e30")]       // Past anything a date can be.
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-5")]
+    public async Task AnAbsurdBudgetResetIsIgnored(string reset)
+    {
+        var (client, _) = Make(_ => WithBudget("0", reset));
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true);
+        // Would wait 90 s if it counted, and the first call would have thrown on the worst of them.
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true).WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task AWaitForBudgetEndsWhenTheProviderSaysThereIsSome()
+    {
+        var soon = DateTimeOffset.UtcNow.AddSeconds(1).ToUnixTimeMilliseconds() / 1000.0;
+        var later = DateTimeOffset.UtcNow.AddSeconds(240).ToUnixTimeSeconds();
+        var calls = 0;
+        var (client, _) = Make(_ =>
+        {
+            calls++;
+            return calls switch
+            {
+                1 => WithBudget("0", soon.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                2 => WithBudget("100", later.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                _ => WithBudget("100", later.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            };
+        });
+
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true);
+        // Waits out the short window, and that answer says there is budget again, so the next doesn't wait at all.
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true).WaitAsync(TimeSpan.FromSeconds(10));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"Took {clock.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task ACallWaitingForBudgetCanBeCancelled()
+    {
+        var later = DateTimeOffset.UtcNow.AddSeconds(240).ToUnixTimeSeconds();
+        var (client, stub) = Make(_ => WithBudget("0", later.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true);
+
+        using var stop = new CancellationTokenSource();
+        var waiting = client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true, stop.Token);
+        await Task.Delay(100);
+        Assert.False(waiting.IsCompleted);
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        Assert.Single(stub.Calls);
+    }
+
+    [Fact]
+    public async Task OneCallWaitingForBudgetDoesNotHoldUpAnother()
+    {
+        var soon = DateTimeOffset.UtcNow.AddSeconds(1).ToUnixTimeMilliseconds() / 1000.0;
+        var (client, _) = Make(_ => WithBudget("0", soon.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true);
+
+        // Queued behind a gate, these would each wait a turn. Side by side they all end with the one window.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await Task.WhenAll(
+            client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true),
+            client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true),
+            client.ListAsync(RemoteItemKind.Torrent, 0, 50, fresh: true)).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(3), $"Took {clock.Elapsed}.");
+    }
+
+    [Theory]
+    [InlineData("60 per 1 hour", 3600)]
+    [InlineData("Too many requests", 60)]
+    public async Task ATooManyRequestsWithNoRetryAfterGoesByItsWords(string detail, int seconds)
+    {
+        var (client, _) = Make(_ => Json($$"""{"detail":"{{detail}}"}""", HttpStatusCode.TooManyRequests));
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => client.GetAccountAsync());
+        Assert.Equal(RemoteFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), failure.RetryAfter);
+    }
+
+    [Theory]
+    [InlineData("RATE_LIMIT_EXCEEDED", "60 per 1 hour", 3600)]
+    [InlineData("SLOW_DOWN", "Too fast", 60)]
+    public async Task ARateLimitSaidWithAnyOtherStatusCarriesAWaitToo(string code, string detail, int seconds)
+    {
+        var (client, _) = Make(_ => Json($$"""{"success":false,"error":"{{code}}","detail":"{{detail}}","data":null}"""));
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => client.GetAccountAsync());
+        Assert.Equal(RemoteFailureKind.RateLimited, failure.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), failure.RetryAfter);
+    }
+
+    [Fact]
+    public void AHosterIsReadTheWayTheReferenceClientReadsIt()
+    {
+        using var nothing = System.Text.Json.JsonDocument.Parse("""{"name":"mega.nz","domains":null}""");
+        var hoster = TorBoxMapping.Hoster(nothing.RootElement);
+        Assert.Equal(["mega.nz"], hoster.Domains);
+        Assert.True(hoster.Available);
+
+        using var down = System.Text.Json.JsonDocument.Parse("""{"name":"x","domains":["x.invalid"],"status":false}""");
+        Assert.False(TorBoxMapping.Hoster(down.RootElement).Available);
+        using var up = System.Text.Json.JsonDocument.Parse("""{"name":"x","domains":["x.invalid"],"status":true}""");
+        Assert.True(TorBoxMapping.Hoster(up.RootElement).Available);
     }
 
     [Fact]

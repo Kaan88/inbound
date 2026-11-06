@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 
 namespace TestServer;
 
-public sealed class TestServerHost : IAsyncDisposable
+public sealed partial class TestServerHost : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
@@ -157,6 +157,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private TestServerHost(WebApplication app)
     {
         _app = app;
+        TorBox = new MockTorBox(() => BaseAddress);
     }
 
     public string BaseAddress { get; private set; } = string.Empty;
@@ -196,6 +197,7 @@ public sealed class TestServerHost : IAsyncDisposable
 
     private void MapEndpoints()
     {
+        MapTorBoxEndpoints();
         _app.MapGet("/health", () => Results.Text("ok"));
 
         _app.MapGet("/update/manifest", () =>
@@ -1135,6 +1137,7 @@ public sealed class TestServerHost : IAsyncDisposable
             ResetAuthStats();
             ResetExpiringStats();
             ResetSiteAuthStats();
+            TorBox.Reset();
             return Results.Ok();
         });
     }
@@ -1287,7 +1290,7 @@ public sealed class TestServerHost : IAsyncDisposable
         }
     }
 
-    private static bool TryParseRange(string header, int length, out long start, out long end)
+    internal static bool TryParseRange(string header, int length, out long start, out long end)
     {
         start = 0;
         end = 0;

@@ -6,6 +6,7 @@ using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Remote;
 using DownloadManager.Tray;
 
 namespace DownloadManager.Host;
@@ -47,8 +48,19 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
-        var paths = StoragePaths.CreateDefault();
-        paths.EnsureCreated();
+        StoragePaths paths;
+        try
+        {
+            paths = StoragePaths.CreateDefault();
+            paths.EnsureCreated();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // There is nowhere to log this: a sandbox profile whose folder can't be used, or no folder at all.
+            Console.Error.WriteLine($"Host could not use a data folder: {ex.GetType().Name}");
+            return 5;
+        }
+
         var log = new FileLogger(paths.LogsDirectory);
         log.Info($"Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
 
@@ -98,21 +110,51 @@ internal static class Program
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
             var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
             var postDownloadHook = new HostPostDownloadHook(log.Info);
+            var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
+            log.Secrets = remote.Registry;
             var service = new DownloadManagerService(
                 paths, jobStore, checkpoints, settingsStore, engine, log.Info,
                 completionActions: completionExecutor,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
                 ftpEngine: ftpEngine,
-                postDownloadHook: postDownloadHook);
+                postDownloadHook: postDownloadHook,
+                linkBroker: remote.Broker,
+                linkSecrets: remote.Registry);
+            foreach (var provider in remote.Registry.All)
+            {
+                // Addresses saved earlier may turn out to hold a key that was only just entered.
+                if (provider.Account is { } account)
+                {
+                    account.Changed += (_, _) => FireAndForget(service.ProtectStoredSecretsAsync(), log);
+                }
+            }
+
+            var remoteJobs = remote.CreateCoordinator(paths, service, log.Info);
+            var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
             service.InitializeAsync().GetAwaiter().GetResult();
+
+            // After the service, because reconciling can create local jobs straight away. A job left
+            // Submitting by a crash becomes SubmissionUnknown here, and the provider's list decides.
+            var remoteStarted = false;
+            try
+            {
+                remoteJobs.StartAsync().GetAwaiter().GetResult();
+                remoteStarted = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Ordinary downloads don't depend on this. Clients just don't get the remote commands.
+                log.Warn($"Remote jobs could not start: {ex.GetType().Name}");
+            }
+
             service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var pipe = new HostPipeServer(service, controller, log);
+            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null);
             void ExitApplication() => _ = Task.Run(async () =>
             {
                 try { await pipe.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
@@ -250,6 +292,15 @@ internal static class Program
 
             try
             {
+                remoteJobs.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"Remote jobs shutdown: {ex.GetType().Name}");
+            }
+
+            try
+            {
                 service.ShutdownAsync().GetAwaiter().GetResult();
             }
             catch (Exception ex)
@@ -257,7 +308,9 @@ internal static class Program
                 log.Error($"Service shutdown: {ex.Message}");
             }
 
+            remoteCommands.Dispose();
             sleepPrevention.Dispose();
+            remote.Dispose();
             engine.Dispose();
             tray.ExitNow();
             log.Info("Host stopped.");

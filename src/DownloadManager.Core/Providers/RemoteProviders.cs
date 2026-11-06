@@ -66,6 +66,10 @@ public enum RemoteFailureKind
     Network,
     /// <summary>The response could not be understood.</summary>
     BadResponse,
+    /// <summary>Refused because the input was only to be accepted if already cached, and it isn't.</summary>
+    NotCached,
+    /// <summary>Refused because the account already holds this input. Find it rather than submit again.</summary>
+    AlreadyExists,
 }
 
 public sealed class RemoteProviderException : Exception
@@ -154,32 +158,47 @@ public sealed record RemoteSubmission
     public byte[]? TorrentFile { get; init; }
     /// <summary>The password the source site wants for the link. Not an archive password.</summary>
     public string? LinkPassword { get; init; }
-    public string? DisplayName { get; init; }
     /// <summary>Have the provider refuse rather than start work when the content isn't cached.</summary>
     public bool OnlyIfCached { get; init; }
+
+    /// <summary>The generated text would print the link and the password.</summary>
+    public override string ToString() => $"[{Kind} submission]";
 }
 
 public sealed record RemoteSubmissionResult(RemoteItemRef? Ref, string? Hash, bool Queued);
 
+/// <summary>An item the provider accepted and hasn't started, waiting for a free slot on the account.</summary>
+public sealed record RemoteQueuedItem(string? QueueId, string? Hash, string? Name);
+
+/// <summary>Which item a provider's folder link points at. Only the provider's own list can say whether it exists.</summary>
+public sealed record RemoteFolderReference(RemoteItemKind Kind, string ItemId);
+
+/// <summary>A link in the provider's folder link shape: either what it points at, or why it can't be used.</summary>
+public sealed record RemoteFolderLinkParse(RemoteFolderReference? Reference, string? Problem);
+
 /// <summary>A direct address that works for a short time. Secret: never persist or log it.</summary>
 public sealed class RemoteDirectLink
 {
-    public RemoteDirectLink(Uri url, DateTimeOffset issuedAt)
+    public RemoteDirectLink(Uri url)
     {
         Url = url;
-        IssuedAt = issuedAt;
     }
 
     public Uri Url { get; }
-    public DateTimeOffset IssuedAt { get; }
     public override string ToString() => "[direct link]";
 }
 
-/// <summary>Limits a provider sets on how its direct links are used.</summary>
+/// <summary>Limits a provider sets on how it is used: its direct links, and how often its API is called.</summary>
 public sealed record RemoteTransferPolicy
 {
     public int MaxConnectionsPerFile { get; init; } = 4;
-    public TimeSpan LinkLifetime { get; init; } = TimeSpan.FromHours(3);
+    /// <summary>How far apart web downloads are created on one account, reserved before each request. Zero means no spacing.</summary>
+    public TimeSpan CreationSpacing { get; init; } = TimeSpan.Zero;
+    /// <summary>A provider's own estimate of when an item is ready is kept between these when polling.</summary>
+    public TimeSpan ShortestPoll { get; init; } = TimeSpan.FromSeconds(15);
+    public TimeSpan LongestPoll { get; init; } = TimeSpan.FromSeconds(60);
+    /// <summary>How often to look when the provider gives no estimate.</summary>
+    public TimeSpan DefaultPoll { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>Everything a provider has. Optional abilities are separate interfaces it may also implement.</summary>
@@ -197,6 +216,12 @@ public interface IRemoteCatalog
     Task<IReadOnlyList<RemoteItem>> ListAsync(RemoteItemKind kind, int offset, int limit, bool fresh, CancellationToken cancellationToken = default);
     /// <returns>Null when the provider has no such item on this account.</returns>
     Task<RemoteItem?> GetAsync(RemoteItemRef item, bool fresh, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The one spelling the provider uses for this id, so what it answers can be matched against what
+    /// was asked. Null when it can't be one of this provider's ids at all.
+    /// </summary>
+    string? NormalizeItemId(string itemId) => itemId;
 }
 
 public interface IRemoteCacheChecker
@@ -216,6 +241,19 @@ public interface IRemoteSubmitter
     Task<RemoteSubmissionResult> SubmitAsync(RemoteSubmission submission, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Items waiting for a slot, which a provider can keep apart from its ordinary list.</summary>
+public interface IRemoteQueue
+{
+    Task<IReadOnlyList<RemoteQueuedItem>> ListQueuedAsync(RemoteItemKind kind, int offset, int limit, bool fresh, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Recognises the links a provider's website hands out for items on an account.</summary>
+public interface IRemoteFolderLinkParser
+{
+    /// <returns>Null when the text isn't in this provider's folder link shape at all.</returns>
+    RemoteFolderLinkParse? ParseFolderLink(string? text);
+}
+
 public interface IRemoteLinkResolver
 {
     Task<RemoteDirectLink> ResolveLinkAsync(RemoteItemRef item, string fileId, CancellationToken cancellationToken = default);
@@ -230,4 +268,47 @@ public interface IRemoteHosterDirectory
 public interface IRemoteItemRemover
 {
     Task RemoveAsync(RemoteItemRef item, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The words <see cref="RemoteSource.Kind"/> holds, which are part of a job's durable reference.</summary>
+public static class RemoteKinds
+{
+    public static string ToWord(RemoteItemKind kind) => kind switch
+    {
+        RemoteItemKind.Torrent => "torrents",
+        RemoteItemKind.WebDownload => "webdl",
+        RemoteItemKind.Usenet => "usenet",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    public static bool TryParse(string? word, out RemoteItemKind kind)
+    {
+        switch (word)
+        {
+            case "torrents":
+                kind = RemoteItemKind.Torrent;
+                return true;
+            case "webdl":
+                kind = RemoteItemKind.WebDownload;
+                return true;
+            case "usenet":
+                kind = RemoteItemKind.Usenet;
+                return true;
+            default:
+                kind = default;
+                return false;
+        }
+    }
+}
+
+/// <summary>
+/// Recognises text holding a secret only this app's accounts know, such as an API key sitting in
+/// an address the host name gives no hint about.
+/// </summary>
+public interface IRemoteSecretMatcher
+{
+    bool Holds(string? text);
+
+    /// <summary>The same text with every known secret replaced. Text holding none comes back unchanged.</summary>
+    string Mask(string text);
 }

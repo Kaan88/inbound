@@ -19,6 +19,8 @@ public sealed class StoragePaths
         DedupeDirectory = Path.Combine(root, "dedupe");
         LogsDirectory = Path.Combine(root, "logs");
         CorruptDirectory = Path.Combine(root, "corrupt");
+        RemoteDirectory = Path.Combine(root, "remote");
+        RemoteJobsDirectory = Path.Combine(RemoteDirectory, "jobs");
         SettingsFile = Path.Combine(root, "settings.json");
         HistoryFile = Path.Combine(root, "history.jsonl");
     }
@@ -31,6 +33,8 @@ public sealed class StoragePaths
     public string DedupeDirectory { get; }
     public string LogsDirectory { get; }
     public string CorruptDirectory { get; }
+    public string RemoteDirectory { get; }
+    public string RemoteJobsDirectory { get; }
     public string SettingsFile { get; }
     public string HistoryFile { get; }
 
@@ -42,6 +46,9 @@ public sealed class StoragePaths
         {
             candidates.Add(overridden);
         }
+
+        var sandboxProfile = !string.IsNullOrWhiteSpace(overridden) &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTANCE"));
 
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!string.IsNullOrWhiteSpace(local))
@@ -69,6 +76,9 @@ public sealed class StoragePaths
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
+                // A sandbox profile exists to stay away from the real state, so failing is the only safe answer.
+                if (sandboxProfile && candidate == overridden) throw;
+
                 // Try the next location. This also covers sandboxed development shells
                 // where LocalAppData exists but is not writable by child processes.
             }
@@ -87,6 +97,8 @@ public sealed class StoragePaths
         Directory.CreateDirectory(DedupeDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(CorruptDirectory);
+        Directory.CreateDirectory(RemoteDirectory);
+        Directory.CreateDirectory(RemoteJobsDirectory);
     }
 }
 

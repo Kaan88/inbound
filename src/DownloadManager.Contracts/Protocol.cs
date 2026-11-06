@@ -74,6 +74,32 @@ public static class MessageTypes
     public const string UpdateInstall = "update.install";
     public const string UpdateInstallResult = "update.installResult";
     public const string UpdateDefer = "update.defer";
+
+    // Remote provider accounts and items. Some of these wait on the network, and commands run one
+    // at a time per connection, so a frontend sends those on a connection of their own.
+    public const string RemoteAccountGet = "remote.account.get";
+    public const string RemoteAccountSetKey = "remote.account.setKey";
+    public const string RemoteAccountClearKey = "remote.account.clearKey";
+    public const string RemoteAccountValidate = "remote.account.validate";
+    public const string RemoteAccountResult = "remote.account.result";
+    public const string RemoteClassify = "remote.classify";
+    public const string RemoteClassifyResult = "remote.classifyResult";
+    public const string RemoteAdd = "remote.add";
+    public const string RemoteAddResult = "remote.addResult";
+    public const string RemoteList = "remote.list";
+    public const string RemoteListResult = "remote.listResult";
+    public const string RemoteItemGet = "remote.item.get";
+    public const string RemoteItemResult = "remote.item.result";
+    public const string RemoteFiles = "remote.files";
+    public const string RemoteFilesResult = "remote.filesResult";
+    public const string RemoteSelect = "remote.select";
+    public const string RemoteRetry = "remote.retry";
+    public const string RemoteCheckNow = "remote.checkNow";
+    public const string RemoteRemove = "remote.remove";
+    public const string RemoteDeleteRemote = "remote.deleteRemote";
+    public const string RemoteActionResult = "remote.actionResult";
+    /// <summary>Host push: one remote job, or the account, changed.</summary>
+    public const string RemoteChanged = "remote.changed";
 }
 
 public static class IpcJson

@@ -264,6 +264,24 @@ public sealed class NativeBridgePolicyTests
     }
 
     [Fact]
+    public void EveryProviderMessageStaysOnTheHostsSideInBothDirections()
+    {
+        var types = typeof(MessageTypes).GetFields()
+            .Select(field => (string)field.GetRawConstantValue()!)
+            .Where(type => type.StartsWith("remote.", StringComparison.Ordinal) || type.StartsWith("archive.", StringComparison.Ordinal))
+            .ToList();
+        Assert.Contains(MessageTypes.RemoteAccountSetKey, types);
+        Assert.Contains(MessageTypes.RemoteChanged, types);
+        Assert.Contains(MessageTypes.RemoteAdd, types);
+        Assert.All(types, type =>
+        {
+            Assert.False(NativeBridgePolicy.AllowFromExtension(type), type);
+            Assert.False(NativeBridgePolicy.AllowToExtension(type), type);
+            Assert.Null(NativeBridgePolicy.ToExtension(IpcMessage.Create(type, new { })));
+        });
+    }
+
+    [Fact]
     public void OtherMessagesPassUnchangedOrNotAtAll()
     {
         var job = IpcMessage.Create(MessageTypes.JobEvent, new JobDto { FileName = "a.bin" });

@@ -126,6 +126,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>The proxy settings changed. <see cref="CreateProxiedHandler()"/> handlers made before this keep their open connections.</summary>
+    public event Action? ProxyChanged;
+
     public void UpdateProxy(ProxySettings settings)
     {
         var changed = !string.Equals(_options.Proxy.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase) ||
@@ -141,6 +144,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         _options.Proxy.Address = settings.Address;
         _options.Proxy.Username = settings.Username;
         _options.Proxy.Password = settings.Password;
+        ProxyChanged?.Invoke();
 
         if (!_ownsClient)
         {
@@ -358,7 +362,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 RetryAfterOf(response));
         }
 
-        if (status == 416)
+        // Some servers say "nothing past the end" with a 206 and no range, rather than a 416.
+        if (status == 416 || (status == 206 && response.Content.Headers.ContentRange is { HasRange: false, HasLength: true }))
         {
             // The bytes are all here only if the checkpoint recorded them and the server's
             // own size agrees; the part file's length alone proves nothing.
@@ -540,6 +545,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 {
                     throw new DownloadEngineException(
                         new JobFailure(FailureKind.Timeout, "The connection stalled while reading.", true, true, DateTimeOffset.UtcNow),
+                        isRetryable: true, inner: ex);
+                }
+                catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // This only reads the network, so it can't be a disk problem. The bytes so far
+                    // are good, and the next attempt asks for the rest.
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Network, "The connection was lost while reading.", true, true, DateTimeOffset.UtcNow),
                         isRetryable: true, inner: ex);
                 }
 
@@ -2773,6 +2786,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         isRetryable: false);
                 }
 
+                // A resolved link holds an account key, which a plain http request would send in the open.
+                if (job.ResolvedUrl is not null && currentUri.Scheme == Uri.UriSchemeHttps && next.Scheme == Uri.UriSchemeHttp && !next.IsLoopback)
+                {
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Http,
+                            "The download server redirected to an unencrypted address. The link holds your account key, so it wasn't followed. Anything already downloaded was kept.",
+                            false, true, DateTimeOffset.UtcNow),
+                        isRetryable: false);
+                }
+
                 currentUri = next;
                 continue;
             }
@@ -3312,7 +3335,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         throw new SegmentationUnsupportedException();
                     }
 
-                    if (status == 416)
+                    // The same past-the-end answer as the single-stream path knows, in both its forms.
+                    if (status == 416 || (status == 206 && response.Content.Headers.ContentRange is { HasRange: false, HasLength: true }))
                     {
                         lock (run.Sync)
                         {

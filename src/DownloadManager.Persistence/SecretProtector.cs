@@ -23,12 +23,53 @@ public static class SecretProtector
         Encoding.UTF8.GetBytes("DownloadManager.RequestHeader.v1");
     private static readonly byte[] UrlEntropy =
         Encoding.UTF8.GetBytes("DownloadManager.ProtectedUrl.v1");
+    private static readonly byte[] ProviderKeyEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.ProviderKey.v1");
+    private static readonly byte[] RemoteInputEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.RemoteInput.v1");
+    private static readonly byte[] RemoteTorrentEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.RemoteTorrent.v1");
+    private static readonly byte[] RemoteLinkPasswordEntropy =
+        Encoding.UTF8.GetBytes("DownloadManager.RemoteLinkPassword.v1");
 
     public static string ProtectHeader(string plaintext) => Protect(plaintext, HeaderEntropy);
     public static string? UnprotectHeader(string? protectedValue) => Unprotect(protectedValue, HeaderEntropy);
 
     public static string ProtectUrl(string plaintext) => Protect(plaintext, UrlEntropy);
     public static string? UnprotectUrl(string? protectedValue) => Unprotect(protectedValue, UrlEntropy);
+
+    /// <summary>A provider account's API key. Its own entropy, so no other stored blob can stand in for it.</summary>
+    public static string ProtectProviderKey(string plaintext) => Protect(plaintext, ProviderKeyEntropy);
+    public static string? UnprotectProviderKey(string? protectedValue) => Unprotect(protectedValue, ProviderKeyEntropy);
+
+    /// <summary>What a user gave a remote job: a magnet or a hoster link. It can hold a decryption key.</summary>
+    public static string ProtectRemoteInput(string plaintext) => Protect(plaintext, RemoteInputEntropy);
+    public static string? UnprotectRemoteInput(string? protectedValue) => Unprotect(protectedValue, RemoteInputEntropy);
+
+    /// <summary>A .torrent file a remote job submits. It names the content and any private tracker's passkey.</summary>
+    public static string ProtectRemoteTorrent(byte[] plaintext) => Protect(Convert.ToBase64String(plaintext), RemoteTorrentEntropy);
+
+    public static byte[]? UnprotectRemoteTorrent(string? protectedValue)
+    {
+        var text = Unprotect(protectedValue, RemoteTorrentEntropy);
+        if (text is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromBase64String(text);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The password a source site wants for a link. Never an archive password.</summary>
+    public static string ProtectRemoteLinkPassword(string plaintext) => Protect(plaintext, RemoteLinkPasswordEntropy);
+    public static string? UnprotectRemoteLinkPassword(string? protectedValue) => Unprotect(protectedValue, RemoteLinkPasswordEntropy);
 
     public static bool IsProtected(string? value) => value?.StartsWith(Prefix, StringComparison.Ordinal) == true;
 

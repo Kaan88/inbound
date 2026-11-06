@@ -106,6 +106,9 @@ during a transition must reconcile to a safe state, never to `Completed`.
 
 ## IPC
 
+Message-level details, including the remote provider messages and why slow calls use their own
+connection, are in `docs/ipc-protocol.md`.
+
 - Pipe name includes the current user SID hash:
   `\\.\pipe\DownloadManager-<sidHash>`.
 - `PipeSecurity` grants full control to the current user SID and SYSTEM only;

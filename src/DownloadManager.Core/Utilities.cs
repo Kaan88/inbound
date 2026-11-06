@@ -90,6 +90,13 @@ public static class FileNameResolver
         }
     }
 
+    /// <summary>
+    /// Control characters, and the invisible marks that reorder text: with these, "photo[RLO]gpj.exe" shows
+    /// as "photoexe.jpg" in a list and in Explorer, hiding what the file really is.
+    /// </summary>
+    public static bool IsDeceptiveOrControl(char c)
+        => char.IsControl(c) || c is >= '‎' and <= '‏' or >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '؜';
+
     public static string Sanitize(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -106,7 +113,7 @@ public static class FileNameResolver
         var builder = new StringBuilder(name.Length);
         foreach (var c in name)
         {
-            if (c < 32 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+            if (IsDeceptiveOrControl(c) || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
             {
                 builder.Append('_');
             }

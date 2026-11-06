@@ -37,6 +37,7 @@ public sealed partial class DownloadManagerService
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private readonly IDownloadEngine? _ftpEngine;
     private readonly IRemoteLinkBroker? _linkBroker;
+    private readonly IRemoteSecretMatcher? _linkSecrets;
     private static readonly HttpClient UpdateClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly SemaphoreSlim _updateInstallGate = new(1, 1);
     private bool _updateInstallScheduled;
@@ -74,7 +75,8 @@ public sealed partial class DownloadManagerService
         IMediaCheckpointStore? mediaCheckpoints = null,
         IDownloadEngine? ftpEngine = null,
         IPostDownloadHook? postDownloadHook = null,
-        IRemoteLinkBroker? linkBroker = null)
+        IRemoteLinkBroker? linkBroker = null,
+        IRemoteSecretMatcher? linkSecrets = null)
     {
         _paths = paths;
         _jobStore = jobStore;
@@ -90,6 +92,7 @@ public sealed partial class DownloadManagerService
         _ftpEngine = ftpEngine;
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
         _linkBroker = linkBroker;
+        _linkSecrets = linkSecrets;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -143,6 +146,7 @@ public sealed partial class DownloadManagerService
             }
         }
 
+        await ScrubRecentUrlsAsync(cancellationToken).ConfigureAwait(false);
         ScanOrphanPartFiles();
         // A crash can land between a job's final save and its package's, so this may have news.
         await AdoptUntrackedPackagesAsync(cancellationToken).ConfigureAwait(false);
@@ -401,6 +405,8 @@ public sealed partial class DownloadManagerService
         var fileName = string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameResolver.Resolve(null, uri)
             : FileNameResolver.Sanitize(request.FileName);
+        // A name taken from the address would carry the key into the path, the list and every client.
+        if (_linkSecrets?.Holds(fileName) == true) fileName = "download";
         var browserDownload = source is DownloadSource.ChromeAuto or DownloadSource.ChromeContextMenu;
         var categoryId = request.CategoryId;
         if (Guid.TryParseExact(categoryId, "N", out var requestedCategoryGuid)) categoryId = requestedCategoryGuid.ToString("N");
@@ -505,8 +511,42 @@ public sealed partial class DownloadManagerService
 
         if (owner is not null && clientRequestId is not null)
         {
-            var claimed = await _jobStore.TryClaimRequestAsync(owner, clientRequestId, job.Id, cancellationToken)
-                .ConfigureAwait(false);
+            bool claimed;
+            try
+            {
+                claimed = await _jobStore.TryClaimRequestAsync(owner, clientRequestId, job.Id, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The saved job has no claim and isn't in memory yet, so a retry would make a second
+                // one for the same request, and the next start would load both.
+                var takenBack = true;
+                try
+                {
+                    await _jobStore.DeleteAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception deleteFailure) when (deleteFailure is IOException or UnauthorizedAccessException)
+                {
+                    // It will be back at the next start whatever happens, so it had better count now: in
+                    // memory, a retry finds it by its owner and request id, with or without the claim.
+                    _log?.Invoke($"Could not take back job {job.Id} after its claim failed: {deleteFailure.GetType().Name}.");
+                    takenBack = false;
+                }
+
+                if (takenBack)
+                {
+                    return new AddJobResponse
+                    {
+                        Accepted = false,
+                        Error = $"Could not persist the download: {ex.Message}",
+                        ErrorCode = "persistence_failed",
+                    };
+                }
+
+                claimed = true;
+            }
+
             if (!claimed)
             {
                 var existingId = await _jobStore.FindClaimedRequestAsync(owner, clientRequestId, cancellationToken)

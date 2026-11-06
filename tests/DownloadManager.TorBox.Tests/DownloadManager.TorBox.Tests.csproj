@@ -26,6 +26,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DownloadManager.Core\DownloadManager.Core.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\..\tools\TestServer\TestServer.csproj" />
   </ItemGroup>
 
 </Project>

@@ -3927,6 +3927,7 @@ public sealed partial class RuntimeServiceTests
             ISleepPrevention? sleepPrevention = null,
             IPostDownloadHook? postDownloadHook = null,
             IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
             HttpMessageHandler? handler = null,
             ContextHooks? hooks = null)
         {
@@ -3936,7 +3937,7 @@ public sealed partial class RuntimeServiceTests
             Directory.CreateDirectory(destination);
             paths.EnsureCreated();
             return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true,
-                completionActions, sleepPrevention, postDownloadHook, linkBroker, handler, hooks);
+                completionActions, sleepPrevention, postDownloadHook, linkBroker, linkSecrets, handler, hooks);
         }
 
         public static Task<ServiceContext> CreateAsync(
@@ -3948,11 +3949,12 @@ public sealed partial class RuntimeServiceTests
             ISleepPrevention? sleepPrevention = null,
             IPostDownloadHook? postDownloadHook = null,
             IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
             HttpMessageHandler? handler = null,
             ContextHooks? hooks = null,
             int maxConcurrent = 2)
             => BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: false,
-                completionActions, sleepPrevention, postDownloadHook, linkBroker, handler, hooks);
+                completionActions, sleepPrevention, postDownloadHook, linkBroker, linkSecrets, handler, hooks);
 
         private static async Task<ServiceContext> BuildAsync(
             TestServerHost server,
@@ -3965,6 +3967,7 @@ public sealed partial class RuntimeServiceTests
             ISleepPrevention? sleepPrevention = null,
             IPostDownloadHook? postDownloadHook = null,
             IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
             HttpMessageHandler? handler = null,
             ContextHooks? hooks = null)
         {
@@ -4001,7 +4004,8 @@ public sealed partial class RuntimeServiceTests
                 mediaCheckpoints: mediaCheckpoints,
                 ftpEngine: ftpEngine,
                 postDownloadHook: postDownloadHook,
-                linkBroker: linkBroker);
+                linkBroker: linkBroker,
+                linkSecrets: linkSecrets);
             // Most tests have nothing to wait for; the ones about the quiet period set their own.
             service.PackageSettleDelay = TimeSpan.Zero;
             hooks?.BeforeInitialize?.Invoke(service);

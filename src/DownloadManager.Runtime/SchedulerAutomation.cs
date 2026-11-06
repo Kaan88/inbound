@@ -225,7 +225,7 @@ public sealed partial class DownloadManagerService
                             runtime.Job.LastModified = null;
                             // An ordinary address can redirect to a provider's, whose key must not be
                             // stored. The next run follows the redirect again and needs nothing kept.
-                            runtime.Job.FinalUrl = ProviderLinks.IsProviderLink(metadata.FinalUrl) ? null : metadata.FinalUrl;
+                            runtime.Job.FinalUrl = HoldsProviderSecret(metadata.FinalUrl) ? null : metadata.FinalUrl;
                             runtime.Job.CompletedAt = null;
                             runtime.Job.StartedAt = null;
                             runtime.Job.CompletionActionsStarted = false;

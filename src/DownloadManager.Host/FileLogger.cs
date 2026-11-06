@@ -18,6 +18,9 @@ public sealed class FileLogger
         Directory.CreateDirectory(_directory);
     }
 
+    /// <summary>Account keys to keep out of the file, wherever a line happens to quote one.</summary>
+    public IRemoteSecretMatcher? Secrets { get; set; }
+
     public void Info(string message) => Write("INFO", message);
     public void Warn(string message) => Write("WARN", message);
     public void Error(string message) => Write("ERROR", message);
@@ -37,7 +40,8 @@ public sealed class FileLogger
                 }
 
                 // Every line, so an address in an unexpected exception's text can't reach the file.
-                var line = $"{now:O} [{level}] {UrlRedactor.RedactText(message)}{Environment.NewLine}";
+                var text = UrlRedactor.RedactText(Secrets?.Mask(message) ?? message);
+                var line = $"{now:O} [{level}] {text}{Environment.NewLine}";
                 File.AppendAllText(_currentPath, line, new UTF8Encoding(false));
             }
         }
