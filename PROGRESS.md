@@ -14,8 +14,45 @@
 - **Check whether these are stale:** ROADMAP UI.R3 and UI.R4, clean-machine install testing, independent recovery review.
 - **TorBox:** work is on the `feature/torbox-integration` branch, not merged. Its plan is `docs/plans/torbox-integration.md`.
 - **Extraction refusals the owner may want to know about:** an archive whose entries differ only by capital letters, one holding NTFS streams, and one with an entry named like the app's working folder are all refused with `Unsafe archive` and kept. Nothing can be extracted from such an archive through the app. WinRAR still can.
+- **TorBox, decisions for the owner:**
+  - DLC is not read locally; it answers "not supported" with an explicit hand-over to a running JDownloader. Reading back through JDownloader's port 3128 was not built.
+  - The CCF reader's constants come from a public GPLv3 mirror, so it is not clean-room and has never met a real file. Remove it before any merge if that is uneasy.
+  - Should this feature ship in a public release at all?
+  - The extractor is not bundled: the app uses an UnRAR that is already on the machine.
+  - Rotate the TorBox API key after testing.
+- **TorBox, behaviour to check you are happy with:**
+  - Empty files in a provider item are skipped.
+  - An archive set does not follow a download that was moved.
+  - After a crashed extraction, rollback deletes placed files by size and time match; a file changed while the Host was down stays.
+  - A wrong package password is marked refused per set rather than cleared.
+  - Add Links still makes one `job.add` per link.
+  - Re-adding a duplicate regroups a job that had been detached from its package.
+  - The owner's magnet is already cached, so the uncached torrent case needs another input.
 
-### TorBox: review of extraction and containers, flaky tests, deleted archives (2026-11-06, branch `feature/torbox-integration`, not committed)
+### Checkpoint: paused by the owner (2026-11-06, about 15:50)
+
+The owner needed the PC, so work stopped here. **The goal is not finished: no live scenario A to J has been run yet.** Nothing was pushed, merged or released. Nothing from this work is left running.
+
+| Branch | Tip | State |
+| --- | --- | --- |
+| `feature/torbox-integration` | this commit, on `23c4414` | Host side of everything, containers, archive review fixes. Build 0 warnings; Core 249, Engine 132, TorBox 291, Archives 293, Containers 183, Integration 876, extension 50, all passing on `23c4414`, run by the main session. Does not yet contain the WinUI work or `main`'s 0.4.0 commits. |
+| `torbox-winui` (`.claude\worktrees\winui`) | WIP commit on `ba2137f` | Options, My provider window, file selection, add flows, extraction screens. Stopped during on-screen checks. Its last commit is labelled WIP and was not built. |
+| `feature/edge-support` (`.claude\worktrees\edge`) | `0f60dfe` | From `origin/main` (0.4.0). Separate from TorBox. Integration failed 1 of 7 runs with the name lost; unexplained. Core 107, Engine 57, extension 50 passing. |
+
+**To resume, in order:**
+1. WinUI: build `torbox-winui`, finish the on-screen checks (dark was in progress, then light), then the UI review and fixes, which have not started. The job's script is `workflows\scripts` in the session folder, named for the WinUI build.
+2. Merge `torbox-winui` into `feature/torbox-integration`, then merge `origin/main` so the tests cover 0.4.0's two trusted extension IDs. Remove the worktree and branch.
+3. WinUI still has to show `statusNote` and `fileRemovedAfterExtraction` and read `jobsLeftOut`, `jobId` and a set's `note`. Add the Import JD Container dialog.
+4. Final stage: all suites, interruption matrix, regression of ordinary HTTP, Chrome handoff, queues and updater; opt-in live test project; live scenarios A to J in a sandbox Host; compare with JDownloader; secret search over the whole branch; update ROADMAP, GOAL, PROGRESS and CLAUDE.
+
+**For the final stage:**
+- Run browser tests from a normal terminal, not an agent shell, and use `cft2`; see `CLAUDE.md` on `feature/edge-support`. Chrome handoff testing must leave the owner's installed 0.4.0 registration as it was.
+- A link was checked for 4 hours and never expired, and `requestdl` returned a different link from about 60 minutes while the old one kept working. So real expiry in scenario F will probably be "not verified live" with that reason.
+- `UpdateHelperThatExitsAtOnceLeavesTheHostRunning` failed in 2 runs under heavy load and was left alone, outside this work. `TheJDownloaderRouteOverThePipeSaysWhatReallyHappened` failed once under stress, probably two test processes sharing the fixed port. `BrowsingReadsTheProvidersList` never reproduced.
+
+**Separate, later:** Firefox is required and comes last, after everything else (owner, 2026-11-06). Edge's first release should go through Setup. UI.R2 still needs a check that the flyout appears normally for a download left to the browser.
+
+### TorBox: review of extraction and containers, flaky tests, deleted archives (2026-11-06, branch `feature/torbox-integration`, `23c4414`)
 
 Twenty-two review findings checked, all against the mock and real UnRAR 7.23. No live call. No WinUI.
 
