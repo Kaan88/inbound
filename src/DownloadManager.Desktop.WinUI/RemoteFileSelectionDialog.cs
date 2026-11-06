@@ -8,8 +8,8 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>What a file selection dialog was given to show.</summary>
 internal sealed record RemoteFilesToShow(IReadOnlyList<RemoteFileDto> Files, bool Pending = false, string? Error = null, string? Title = null);
 
-/// <summary>What came of a file selection dialog: files chosen, or to be chosen once the provider knows them. Neither means it was cancelled.</summary>
-internal sealed record RemoteFileAnswer(RemoteFileChoice? Choice, bool Later);
+/// <summary>What came of a file selection dialog: files chosen, or to be chosen once the provider knows them. Neither means it was cancelled, or with <paramref name="CouldNotOpen"/> that it never showed.</summary>
+internal sealed record RemoteFileAnswer(RemoteFileChoice? Choice, bool Later, bool CouldNotOpen = false);
 
 /// <summary>
 /// Which of a provider item's files to download: a tree with select all and none, sizes, and files that
@@ -67,10 +67,11 @@ internal static class RemoteFileSelectionDialog
         tree.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = tree.Tree.ChosenCount > 0;
 
         using var closing = new CancellationTokenSource();
-        var shown = dialog.ShowAsync();
-        _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterText, title => dialog.Title = title, closing.Token);
         try
         {
+            // This call is what throws when another dialog is open, and then nothing has been asked yet.
+            var shown = dialog.ShowAsync();
+            _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterText, title => dialog.Title = title, closing.Token);
             var answer = await shown;
             closing.Cancel();
             return new RemoteFileAnswer(answer == ContentDialogResult.Primary && tree.Tree.ChosenCount > 0 ? tree.Tree.Choice : null, answer == ContentDialogResult.Secondary);
@@ -79,7 +80,7 @@ internal static class RemoteFileSelectionDialog
         {
             // Another dialog is already open over this window.
             closing.Cancel();
-            return new RemoteFileAnswer(null, false);
+            return new RemoteFileAnswer(null, false, CouldNotOpen: true);
         }
     }
 

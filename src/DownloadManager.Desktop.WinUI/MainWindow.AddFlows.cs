@@ -339,6 +339,12 @@ public sealed partial class MainWindow
             primaryText: "Add",
             closeText: "Skip this link",
             laterText: "Add, choose later");
+        if (answer.CouldNotOpen)
+        {
+            problems.Add($"{name}: wasn't added, because another dialog was open. Add this link again.");
+            return false;
+        }
+
         if (answer.Choice is null && !answer.Later) return false;
 
         var added = await _remote.AddAsync(new RemoteAddRequestDto

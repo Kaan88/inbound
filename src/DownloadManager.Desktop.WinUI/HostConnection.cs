@@ -16,6 +16,7 @@ public sealed class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<List<DownloadGroupDto>>? GroupsChanged;
+    public event Action<ArchiveChangedDto>? ArchiveChanged;
     public event Action<bool, string?>? ConnectionChanged;
     /// <summary>The Host announced a user-requested application exit.</summary>
     public event Action? HostExiting;
@@ -33,6 +34,13 @@ public sealed class HostConnection : IAsyncDisposable
             .ConfigureAwait(false);
         return reply.GetPayload<SnapshotDto>();
     }
+
+    public Task<IpcMessage> ListArchivesAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(ArchiveMessageTypes.List, new { }, TimeSpan.FromSeconds(30), cancellationToken);
+
+    /// <summary>The password goes only into this one message. An empty one clears what is on record.</summary>
+    public Task<IpcMessage> SetArchivePasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
+        => RequestAsync(ArchiveMessageTypes.SetPassword, request, TimeSpan.FromSeconds(30), cancellationToken);
 
     public Task<IpcMessage> GroupActionAsync(GroupActionRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.GroupAction, request, TimeSpan.FromMinutes(2), cancellationToken);
@@ -241,7 +249,7 @@ public sealed class HostConnection : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                ConnectionChanged?.Invoke(false, ex.Message);
+                ConnectionChanged?.Invoke(false, ex is TimeoutException && HostPipeBusyException.PipeExists() ? RemoteText.HostBusy : ex.Message);
             }
             finally
             {
@@ -291,6 +299,13 @@ public sealed class HostConnection : IAsyncDisposable
         if (message.Type == MessageTypes.GroupsChanged)
         {
             try { GroupsChanged?.Invoke(message.GetPayload<List<DownloadGroupDto>>() ?? new()); }
+            catch { /* ignore malformed events */ }
+            return;
+        }
+
+        if (message.Type == ArchiveMessageTypes.Changed)
+        {
+            try { ArchiveChanged?.Invoke(message.GetPayload<ArchiveChangedDto>()); }
             catch { /* ignore malformed events */ }
             return;
         }

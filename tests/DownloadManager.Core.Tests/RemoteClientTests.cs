@@ -9,6 +9,92 @@ public sealed class RemoteClientTests
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     [Fact]
+    public async Task AFullPipeIsNotReportedAsAHostThatIsDown()
+    {
+        var host = new FakeHost { Busy = true };
+        await using var client = host.NewClient(new UiQueue());
+
+        var slow = await client.GetItemsAsync(new RemoteItemRequest { Provider = "torbox", Kind = "torrents" });
+        var quick = await client.ListAsync();
+
+        Assert.Equal(RemoteText.HostBusy, slow.Error);
+        Assert.Equal(RemoteText.HostBusy, quick.Error);
+    }
+
+    [Fact]
+    public void ATimeoutAfterTheHostWasReachedIsNotReportedAsAHostThatIsDown()
+    {
+        Assert.Equal(RemoteText.HostTooSlow, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: true));
+        Assert.Equal(RemoteText.HostNotRunning, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: false));
+    }
+
+    [Fact]
+    public void ArchiveRepliesReadOnAnotherConnectionAnswerInWords()
+    {
+        var set = new ArchiveSetDto { Id = Guid.NewGuid(), Name = "archive", State = "downloaded" };
+
+        var listed = RemoteClient.ReadArchiveListReply(IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = [set] }));
+        var unknown = RemoteClient.ReadArchiveListReply(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }));
+        var saved = RemoteClient.ReadArchiveActionReply(IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Ok = true, Set = set }));
+        var refused = RemoteClient.ReadArchiveActionReply(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }));
+
+        Assert.True(listed.Ok);
+        Assert.Equal(set.Id, Assert.Single(listed.Sets).Id);
+        Assert.Equal(RemoteText.HostDoesNotOffer, unknown.Error);
+        Assert.True(saved.Ok);
+        Assert.Equal(set.Id, saved.Set?.Id);
+        Assert.False(refused.Ok);
+        Assert.Equal(RemoteText.HostDoesNotOffer, refused.Error);
+    }
+
+    [Fact]
+    public async Task SavingAKeySaysSoAfterTheAccountIsApplied()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        var heard = new List<string?>();
+        var accountsWhenHeard = -1;
+        client.State.KeySaved += provider =>
+        {
+            heard.Add(provider);
+            accountsWhenHeard = client.State.Accounts.Count;
+        };
+
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        await client.GetAccountsAsync("torbox");
+        await client.ValidateAsync("torbox");
+        ui.Flush();
+        Assert.Empty(heard);
+
+        await client.SetKeyAsync("typed", "torbox");
+        await ui.UntilAsync(() => heard.Count == 1);
+
+        Assert.Equal("torbox", heard[0]);
+        Assert.Equal(1, accountsWhenHeard);
+    }
+
+    [Fact]
+    public async Task AKeyTheHostRefusesToSaveSaysNothingOfTheKind()
+    {
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteAccountSetKey, MessageTypes.RemoteAccountResult, new RemoteAccountResult { Ok = false, Error = "No." });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        var heard = 0;
+        client.State.KeySaved += _ => heard++;
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        var result = await client.SetKeyAsync("typed", "torbox");
+        ui.Flush();
+
+        Assert.False(result.Ok);
+        Assert.Equal(0, heard);
+    }
+
+    [Fact]
     public async Task ConnectingReadsAccountsJobsAndArchiveSets()
     {
         var host = new FakeHost();
@@ -598,6 +684,7 @@ public sealed class RemoteClientTests
         public List<string> Capabilities { get; set; } = ["jobs", "settings", "remote"];
         public bool KnowsArchives { get; set; } = true;
         public bool Refuse { get; set; }
+        public bool Busy { get; set; }
         public List<FakePipe> Connections { get; } = [];
         public RemoteAccountDto Account { get; } = new() { Provider = "torbox", ProviderName = "TorBox", Capabilities = ["account"] };
         public RemoteJobDto Job { get; set; } = new() { Id = Guid.NewGuid(), Provider = "torbox", State = "waiting", Status = "Waiting for TorBox" };
@@ -650,6 +737,7 @@ public sealed class RemoteClientTests
         private Task<IRemotePipe> ConnectAsync(TimeSpan timeout, CancellationToken cancellationToken)
         {
             if (Refuse) throw new TimeoutException();
+            if (Busy) throw new HostPipeBusyException();
             var pipe = new FakePipe(this);
             lock (_sync) Connections.Add(pipe);
             pipe.Push(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto { ProtocolVersion = Protocol.Version, Capabilities = Capabilities }));

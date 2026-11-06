@@ -280,7 +280,7 @@ public sealed partial class MainWindow
         {
             window = new MyProviderWindow(_remote, account, new MyProviderContext(
                 () => _settings,
-                DownloadedLocationOf,
+                DownloadedPlacesOf,
                 LocalStatusOf,
                 OpenPackageWindow,
                 RememberFolder));
@@ -300,15 +300,11 @@ public sealed partial class MainWindow
     private string? LocalStatusOf(RemoteJobDto job)
         => RemoteText.LocalWords(LocalFilesOf(job).Select(file => file.Dto).OfType<JobDto>().ToList());
 
-    /// <summary>A downloaded file to show in its folder, or the folder given when there is none yet. Null when neither is on disk.</summary>
-    private string? DownloadedLocationOf(RemoteJobDto job)
+    /// <summary>Where this job's downloads should be. Only collects the paths: whether they are there is asked off the UI thread.</summary>
+    private DownloadedPlaces DownloadedPlacesOf(RemoteJobDto job)
     {
         var files = LocalFilesOf(job);
-        var done = files.Select(file => file.FinalFilePath).FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
-        if (done is not null) return done;
-        var folder = files.Select(file => file.Destination).Append(job.Destination)
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
-        return folder;
+        return new DownloadedPlaces(files.Select(file => file.FinalFilePath), files.Select(file => file.Destination).Append(job.Destination));
     }
 
     /// <summary>The same memory Add URL fills: <c>remote.add</c> leaves it alone, so a folder chosen for a provider's item is saved here.</summary>

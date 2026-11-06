@@ -163,6 +163,7 @@ internal sealed class AddLineSession : IDisposable
     private readonly Queue<AddLine> _queue = new();
     private readonly List<AddLine> _lines = [];
     private CancellationTokenSource? _pendingText;
+    private bool _textPending;
     private bool _working;
     private bool _skipListed = true;
     private bool _closed;
@@ -196,8 +197,8 @@ internal sealed class AddLineSession : IDisposable
         }
     }
 
-    /// <summary>At least one line goes somewhere, and none of those chosen is still unknown.</summary>
-    public bool CanAdd => _lines.Any(line => line.IsSelected && line.Route is AddRoute.Direct or AddRoute.Provider or AddRoute.FolderLink)
+    /// <summary>At least one line goes somewhere, none of those chosen is still unknown, and the lines are the ones in the box.</summary>
+    public bool CanAdd => !_textPending && _lines.Any(line => line.IsSelected && line.Route is AddRoute.Direct or AddRoute.Provider or AddRoute.FolderLink)
         && !_lines.Any(line => line.IsSelected && line.Route == AddRoute.Checking);
 
     public IReadOnlyList<AddLine> Chosen => _lines.Where(line => line.IsSelected && line.Route != AddRoute.Checking && line.Route != AddRoute.None).ToList();
@@ -207,6 +208,7 @@ internal sealed class AddLineSession : IDisposable
     {
         if (_closed) return;
         _pendingText?.Cancel();
+        _textPending = true;
         var pending = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token);
         _pendingText = pending;
         _ = ApplyAfterDebounceAsync(text, pending.Token);
@@ -219,7 +221,11 @@ internal sealed class AddLineSession : IDisposable
         ApplyInputs(LinkExtractor.Inputs(text));
     }
 
-    public void SetInputs(IEnumerable<string> inputs) => ApplyInputs(inputs.Distinct(StringComparer.Ordinal).ToList());
+    public void SetInputs(IEnumerable<string> inputs)
+    {
+        _pendingText?.Cancel();
+        ApplyInputs(inputs.Distinct(StringComparer.Ordinal).ToList());
+    }
 
     /// <summary>A line whose answer is already in hand, as from Add URL's own check.</summary>
     public void Seed(string input, RemoteClassifyResult result)
@@ -286,6 +292,8 @@ internal sealed class AddLineSession : IDisposable
     private void ApplyInputs(List<string> inputs)
     {
         if (_closed) return;
+        var wasPending = _textPending;
+        _textPending = false;
         var known = _lines.ToDictionary(line => line.Input, StringComparer.Ordinal);
         var next = new List<AddLine>(inputs.Count);
         var fresh = new List<AddLine>();
@@ -310,7 +318,9 @@ internal sealed class AddLineSession : IDisposable
         _lines.Clear();
         _lines.AddRange(next);
         Number();
-        if (!same) LinesChanged?.Invoke();
+
+        // Text that comes to the same lines still has to say so: Add waited for it.
+        if (!same || wasPending) LinesChanged?.Invoke();
         foreach (var line in fresh) Enqueue(line);
     }
 

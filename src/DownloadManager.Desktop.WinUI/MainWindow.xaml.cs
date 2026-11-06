@@ -4292,6 +4292,8 @@ public sealed partial class MainWindow : Window
             FfmpegPath = source.FfmpegPath,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
+            RecentUrls = new List<string>(source.RecentUrls),
+            LastUpdateCheck = source.LastUpdateCheck,
             PostDownloadCommand = source.PostDownloadCommand,
             UpdateManifestUrl = source.UpdateManifestUrl,
             UpdatePublicKey = source.UpdatePublicKey,

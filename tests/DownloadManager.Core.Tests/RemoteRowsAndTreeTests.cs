@@ -203,6 +203,26 @@ public sealed class RemoteFileTreeTests
 
 public sealed class RemoteRulesTests
 {
+    [Fact]
+    public void DownloadedPlacesPrefersAFileThatIsThereThenAFolderThatIsThere()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "places-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var file = Path.Combine(folder, "done.bin");
+            File.WriteAllBytes(file, [1]);
+            var missing = Path.Combine(folder, "missing");
+
+            Assert.Equal(file, new DownloadedPlaces([null, missing, file], [folder]).Find());
+            Assert.Equal(folder, new DownloadedPlaces([missing], ["", missing, folder]).Find());
+            Assert.Null(new DownloadedPlaces([missing], [null, missing]).Find());
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static RemoteJobDto Job(string state, string? stage = null, string? failureKind = null, bool approval = false) => new()
     {
         Id = Guid.NewGuid(),

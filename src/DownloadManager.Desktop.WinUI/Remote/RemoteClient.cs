@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using DownloadManager.Contracts;
 
@@ -51,6 +52,7 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private TaskCompletionSource<IRemotePipe> _control = NewControlSource();
     private Task? _loop;
+    private volatile bool _pipeBusy;
 
     /// <param name="post">Runs an action on the UI thread. State only ever changes through this.</param>
     public RemoteClient(
@@ -103,8 +105,12 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     /// <summary>The key goes only into this one message. Nothing keeps it.</summary>
     public async Task<RemoteAccountResult> SetKeyAsync(string key, string? provider = null, CancellationToken cancellationToken = default)
-        => Feed(await QuickAsync(MessageTypes.RemoteAccountSetKey, new RemoteSetKeyRequest { Provider = provider, Key = key },
+    {
+        var result = Feed(await QuickAsync(MessageTypes.RemoteAccountSetKey, new RemoteSetKeyRequest { Provider = provider, Key = key },
             MessageTypes.RemoteAccountResult, FailedAccount, cancellationToken).ConfigureAwait(false));
+        if (result.Ok) _post(() => State.RaiseKeySaved(provider));
+        return result;
+    }
 
     public async Task<RemoteAccountResult> ClearKeyAsync(string? provider = null, CancellationToken cancellationToken = default)
         => Feed(await QuickAsync(MessageTypes.RemoteAccountClearKey, new RemoteAccountRequest { Provider = provider },
@@ -201,6 +207,14 @@ internal sealed class RemoteClient : IAsyncDisposable
         foreach (var set in result.Sets) _post(() => State.ApplyArchiveReply(set));
         return result;
     }
+
+    /// <summary>For a window that sends <c>archive.list</c> on a connection it already has.</summary>
+    internal static ArchiveListReply ReadArchiveListReply(IpcMessage reply)
+        => Read(reply, ArchiveMessageTypes.ListResult, error => new ArchiveListReply(error), ReadArchiveList);
+
+    /// <summary>For a window that sends an archive action on a connection it already has.</summary>
+    internal static ArchiveActionResult ReadArchiveActionReply(IpcMessage reply)
+        => Read(reply, ArchiveMessageTypes.ActionResult, error => new ArchiveActionResult { Error = error }, raw => raw.GetPayload<ArchiveActionResult>());
 
     private static ArchiveListReply ReadArchiveList(IpcMessage reply) => reply.Type == ArchiveMessageTypes.ListResult
         ? new ArchiveListReply(null, reply.GetPayload<ArchiveListResult>().Sets)
@@ -342,13 +356,14 @@ internal sealed class RemoteClient : IAsyncDisposable
         }
     }
 
-    private static bool IsCommunicationFailure(Exception ex) => ex is
+    internal static bool IsCommunicationFailure(Exception ex) => ex is
         OperationCanceledException or TimeoutException or IOException or ObjectDisposedException or
         UnauthorizedAccessException or InvalidOperationException or JsonException or InvalidDataException;
 
-    private static string DescribeFailure(Exception ex, bool reachedHost) => ex switch
+    internal static string DescribeFailure(Exception ex, bool reachedHost) => ex switch
     {
-        OperationCanceledException when reachedHost => RemoteText.HostTooSlow,
+        HostPipeBusyException => RemoteText.HostBusy,
+        OperationCanceledException or TimeoutException when reachedHost => RemoteText.HostTooSlow,
         OperationCanceledException or TimeoutException => RemoteText.HostNotRunning,
         InvalidDataException or JsonException => RemoteText.HostUnreadable,
         _ => reachedHost ? RemoteText.HostLost : RemoteText.HostNotRunning,
@@ -357,7 +372,16 @@ internal sealed class RemoteClient : IAsyncDisposable
     private async Task<IpcMessage> RequestOnControlAsync<T>(string type, T payload, CancellationToken cancellationToken)
     {
         // A Host that is down gets said so soon, rather than after the whole time a reply may take.
-        var pipe = await ControlSource().Task.WaitAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+        IRemotePipe pipe;
+        try
+        {
+            pipe = await ControlSource().Task.WaitAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException) when (_pipeBusy)
+        {
+            throw new HostPipeBusyException();
+        }
+
         var request = IpcMessage.Create(type, payload);
         var completion = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.Id] = completion;
@@ -405,6 +429,7 @@ internal sealed class RemoteClient : IAsyncDisposable
             try
             {
                 pipe = await _connect(EventConnectTimeout, cancellationToken).ConfigureAwait(false);
+                _pipeBusy = false;
                 var hello = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
                 if (hello?.Type != MessageTypes.ServerHello || hello.V != Protocol.Version)
                 {
@@ -435,6 +460,7 @@ internal sealed class RemoteClient : IAsyncDisposable
             catch (Exception ex) when (IsCommunicationFailure(ex))
             {
                 // Comes back around. Whoever is waiting on a call hears about it below.
+                _pipeBusy = ex is HostPipeBusyException;
             }
             finally
             {
@@ -560,7 +586,16 @@ internal sealed class RemoteClient : IAsyncDisposable
     }
 
     private static async Task<IRemotePipe> ConnectToHostAsync(TimeSpan timeout, CancellationToken cancellationToken)
-        => new HostPipe(await IpcClient.ConnectAsync(timeout, cancellationToken).ConfigureAwait(false));
+    {
+        try
+        {
+            return new HostPipe(await IpcClient.ConnectAsync(timeout, cancellationToken).ConfigureAwait(false));
+        }
+        catch (TimeoutException) when (HostPipeBusyException.PipeExists())
+        {
+            throw new HostPipeBusyException();
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -664,6 +699,26 @@ internal sealed class RemoteClient : IAsyncDisposable
 
         public ValueTask DisposeAsync() => client.DisposeAsync();
     }
+}
+
+/// <summary>
+/// The Host is there, but every one of its pipe instances is taken. A connect times out the same way
+/// whether the Host is busy or gone, so what tells them apart is whether the pipe exists at all.
+/// </summary>
+internal sealed class HostPipeBusyException : TimeoutException
+{
+    private const int FileNotFound = 2;
+
+    /// <summary>Ends a wait at once, and takes no instance, so asking can't make the shortage any worse.</summary>
+    public static bool PipeExists()
+    {
+        if (WaitNamedPipe($@"\\.\pipe\{PipeNames.HostPipe()}", 1)) return true;
+        return Marshal.GetLastPInvokeError() != FileNotFound;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "WaitNamedPipeW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WaitNamedPipe(string name, uint timeoutMilliseconds);
 }
 
 /// <summary>Sorts one input after another on one connection of its own. Closing it cancels whatever it was asking.</summary>

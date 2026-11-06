@@ -19,7 +19,10 @@ internal sealed class PackageWindow : Window
 {
     private readonly Guid _packageId;
     private readonly HostConnection _connection = new();
-    private readonly RemoteClient _remote;
+
+    // Archive state comes over the connection above. The Host has eight pipe instances for every client on
+    // the machine, and each of these windows is a process of its own, so a second connection here adds up.
+    private readonly RemoteState _archives = new();
     private readonly Dictionary<Guid, JobDto> _jobs = [];
     private readonly Dictionary<Guid, Row> _rows = [];
     private List<Guid> _members = [];
@@ -27,6 +30,9 @@ internal sealed class PackageWindow : Window
     private bool _groupKnown;
     private bool _passwordSavedHere;
     private bool _showingSaved;
+    private bool _hostConnected;
+    private bool _archivesRead;
+    private int _archiveRead;
 
     private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
     private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -99,9 +105,14 @@ internal sealed class PackageWindow : Window
         _openFolder.Click += (_, _) => OpenFolder();
         _close.Click += (_, _) => Close();
 
-        _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
-        _remote.State.ArchiveSets.CollectionChanged += (_, _) => { if (!_closed) RenderArchives(); };
-        _remote.State.PropertyChanged += (_, _) => { if (!_closed) RenderArchives(); };
+        _archives.ArchiveSets.CollectionChanged += (_, _) => { if (!_closed) RenderArchives(); };
+        _archives.PropertyChanged += (_, _) => { if (!_closed) RenderArchives(); };
+        _connection.ArchiveChanged += change => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            _archives.ArchivesSupported = true;
+            _archives.Apply(change);
+        });
 
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
@@ -110,8 +121,14 @@ internal sealed class PackageWindow : Window
             _jobs.Clear();
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
+            _ = ReadArchivesAsync();
         });
-        _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() => { if (!_closed) SetMembers(groups); });
+        _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            SetMembers(groups);
+            if (!_archivesRead) _ = ReadArchivesAsync();
+        });
         _connection.JobChanged += (job, type) => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
@@ -122,6 +139,7 @@ internal sealed class PackageWindow : Window
         _connection.ConnectionChanged += (connected, error) => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
+            _hostConnected = connected;
             _notice.Text = connected ? string.Empty : $"Host disconnected. Reconnecting… {error}";
         });
         Closed += async (_, _) =>
@@ -129,14 +147,12 @@ internal sealed class PackageWindow : Window
             _closed = true;
             _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
-            await _remote.DisposeAsync();
         };
         _root.KeyboardAccelerators.Add(Escape());
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
         Render();
         _connection.Start();
-        _remote.Start();
     }
 
     public void ShowWindow()
@@ -214,14 +230,52 @@ internal sealed class PackageWindow : Window
         _clearPassword.Click += async (_, _) => await ClearArchivePasswordAsync();
     }
 
-    private List<ArchiveSetDto> PackageSets() => _remote.State.ArchiveSets
+    /// <summary>The list a connection starts from. Events on that connection keep it current after that.</summary>
+    private async Task ReadArchivesAsync()
+    {
+        var read = ++_archiveRead;
+        _archivesRead = false;
+        _archives.BeginArchiveList();
+        ArchiveListReply reply;
+        try
+        {
+            reply = RemoteClient.ReadArchiveListReply(await _connection.ListArchivesAsync());
+        }
+        catch (Exception ex) when (RemoteClient.IsCommunicationFailure(ex))
+        {
+            // A later change of the package's members, or the next connection, asks again.
+            return;
+        }
+
+        if (_closed || read != _archiveRead || !reply.Ok) return;
+        _archivesRead = true;
+        _archives.ArchivesSupported = true;
+        _archives.ApplyArchiveList(reply.Sets);
+    }
+
+    /// <summary>Answers in words either way. No exception's words reach a message, because a password passes through here.</summary>
+    private async Task<ArchiveActionResult> SendArchivePasswordAsync(string password)
+    {
+        try
+        {
+            var result = RemoteClient.ReadArchiveActionReply(await _connection.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = password }));
+            if (!_closed && result.Set is { } set) _archives.ApplyArchiveReply(set);
+            return result;
+        }
+        catch (Exception ex) when (RemoteClient.IsCommunicationFailure(ex))
+        {
+            return new ArchiveActionResult { Error = RemoteClient.DescribeFailure(ex, reachedHost: ex is IOException || _hostConnected) };
+        }
+    }
+
+    private List<ArchiveSetDto> PackageSets() => _archives.ArchiveSets
         .Where(set => set.PackageId == _packageId || set.JobIds.Any(_members.Contains))
         .OrderBy(set => set.Name, NaturalStringComparer.Instance)
         .ToList();
 
     private void RenderArchives()
     {
-        _archivePanel.Visibility = _remote.State.ArchivesSupported && _groupKnown ? Visibility.Visible : Visibility.Collapsed;
+        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown ? Visibility.Visible : Visibility.Collapsed;
         var sets = PackageSets();
 
         // The Host says whether a password is held only through a set, and a new package may have none yet.
@@ -256,7 +310,7 @@ internal sealed class PackageWindow : Window
         if (password.Length == 0) return;
         _showingSaved = false;
         _passwordStatus.Show("Saving the archive password…");
-        var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = password });
+        var result = await SendArchivePasswordAsync(password);
         password = string.Empty;
         if (_closed) return;
         if (result.Ok)
@@ -276,7 +330,7 @@ internal sealed class PackageWindow : Window
     {
         _showingSaved = false;
         _passwordStatus.Show("Clearing the archive password…");
-        var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = string.Empty });
+        var result = await SendArchivePasswordAsync(string.Empty);
         if (_closed) return;
         if (result.Ok)
         {

@@ -29,6 +29,11 @@ internal sealed class RemoteState : INotifyPropertyChanged
     /// <summary>The account with this provider id changed, by a reply or from the Host.</summary>
     public event Action<RemoteAccountDto>? AccountChanged;
 
+    /// <summary>A key was saved through this client, maybe another account's. Null when no provider was named.</summary>
+    public event Action<string?>? KeySaved;
+
+    internal void RaiseKeySaved(string? provider) => KeySaved?.Invoke(provider);
+
     public ObservableCollection<RemoteAccountDto> Accounts { get; } = [];
     public ObservableCollection<RemoteJobDto> Jobs { get; } = [];
     public ObservableCollection<ArchiveSetDto> ArchiveSets { get; } = [];

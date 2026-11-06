@@ -289,6 +289,52 @@ public sealed class AddLinesTests
     // ---- The session ------------------------------------------------------------------------------
 
     [Fact]
+    public async Task AddWaitsForTextThatHasNotReachedTheLinesYet()
+    {
+        var classifier = new FakeClassifier();
+        var session = NewSession(classifier, debounce: TimeSpan.FromMilliseconds(50));
+        session.SetTextNow("https://a.example/1");
+        await UntilAsync(() => session.CanAdd);
+
+        session.SetText("https://a.example/2");
+
+        Assert.False(session.CanAdd);
+        await UntilAsync(() => session.CanAdd && session.Lines is [{ Input: "https://a.example/2" }]);
+    }
+
+    [Fact]
+    public async Task TextThatComesToTheSameLinesStillSaysSoSoAddComesBack()
+    {
+        var classifier = new FakeClassifier();
+        var session = NewSession(classifier, debounce: TimeSpan.FromMilliseconds(20));
+        session.SetTextNow("https://a.example/1");
+        await UntilAsync(() => session.CanAdd);
+        var told = 0;
+        session.LinesChanged += () => told++;
+
+        session.SetText("https://a.example/1 ");
+
+        Assert.False(session.CanAdd);
+        await UntilAsync(() => told == 1);
+        Assert.True(session.CanAdd);
+    }
+
+    [Fact]
+    public async Task TextGivenAtOnceReplacesTextStillWaiting()
+    {
+        var classifier = new FakeClassifier();
+        var session = NewSession(classifier, debounce: TimeSpan.FromMilliseconds(20));
+
+        session.SetText("https://a.example/old");
+        session.SetTextNow("https://a.example/1");
+        await UntilAsync(() => session.CanAdd);
+        await Task.Delay(60);
+
+        Assert.True(session.CanAdd);
+        Assert.Equal("https://a.example/1", Assert.Single(session.Lines).Input);
+    }
+
+    [Fact]
     public async Task TextIsDebouncedAndEachLineAskedAboutOnce()
     {
         var classifier = new FakeClassifier();

@@ -60,6 +60,16 @@ internal sealed record RemoteItemView(
     string ToolTip,
     string AccessibleName);
 
+/// <summary>Where a job's downloads should be: the paths are collected on the UI thread, and <see cref="Find"/> runs off it.</summary>
+internal sealed class DownloadedPlaces(IEnumerable<string?> files, IEnumerable<string?> folders)
+{
+    private readonly List<string> _files = files.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
+    private readonly List<string> _folders = folders.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
+
+    /// <summary>A downloaded file, or the folder given when there is none yet. Null when neither is on disk. This can block for a long time on a slow or missing network share.</summary>
+    public string? Find() => _files.FirstOrDefault(File.Exists) ?? _folders.FirstOrDefault(Directory.Exists);
+}
+
 /// <summary>Which jobs get a row, which account gets which entry point, and what each state allows. Nothing here touches the UI.</summary>
 internal static class RemoteRules
 {

@@ -21,6 +21,7 @@ internal sealed record ProviderAccountView(
 internal static partial class RemoteText
 {
     public const string HostNotRunning = "The background Host isn't running, so this could not be done. Open Inbound again to start it.";
+    public const string HostBusy = "The background Host is running, but too many windows are connected to it right now. Close a progress window, then try again.";
     public const string HostLost = "The connection to the background Host was lost before it answered. Check the list before trying again, because this may have gone through.";
     public const string HostTooSlow = "The background Host didn't answer in time. Check the list before trying again, because this may have gone through.";
     public const string HostUnreadable = "The background Host sent an answer this window couldn't read.";

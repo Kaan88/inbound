@@ -13,13 +13,13 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>What the My provider window needs from the main window, which knows the local downloads and settings.</summary>
 /// <param name="Settings">The Host's settings as last seen, or null before the first snapshot.</param>
-/// <param name="DownloadedLocation">A local file or folder of this job's downloads, or null when there is none yet.</param>
+/// <param name="DownloadedPlaces">Where this job's local downloads should be. Asking whether they are there goes off the UI thread.</param>
 /// <param name="LocalStatus">How this job's local downloads are doing, or null when none are known.</param>
 /// <param name="OpenPackage">Opens a package's progress window.</param>
 /// <param name="RememberFolder">Records a folder as the last one used.</param>
 internal sealed record MyProviderContext(
     Func<SettingsDto?> Settings,
-    Func<RemoteJobDto, string?> DownloadedLocation,
+    Func<RemoteJobDto, DownloadedPlaces> DownloadedPlaces,
     Func<RemoteJobDto, string?> LocalStatus,
     Action<Guid> OpenPackage,
     Action<string> RememberFolder);
@@ -78,6 +78,7 @@ public sealed class RemoteItemRow : INotifyPropertyChanged
 internal sealed class MyProviderWindow : Window
 {
     private const int PageSize = 50;
+    private const long LocationCheckEveryMilliseconds = 1500;
 
     private const string ItemTemplate = """
         <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
@@ -111,6 +112,12 @@ internal sealed class MyProviderWindow : Window
         public bool Loaded { get; set; }
         public string? SelectedItemId { get; set; }
         public CancellationTokenSource? Load { get; set; }
+
+        /// <summary>The last load's failure, to show again on coming back to this page.</summary>
+        public string? LoadFailure { get; set; }
+
+        /// <summary>The key changed, so the next load must not be answered from what the old key read.</summary>
+        public bool ReadFresh { get; set; }
     }
 
     private readonly RemoteClient _client;
@@ -131,6 +138,10 @@ internal sealed class MyProviderWindow : Window
     private string _freeDestination = string.Empty;
     private RemoteItemRow? _treeRow;
     private string _filesProblem = string.Empty;
+    private Guid? _locationJob;
+    private bool _locationThere;
+    private bool _checkingLocation;
+    private long _locationCheckedAt;
     private readonly DispatcherTimer _localTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     private readonly Grid _root = new() { Padding = new Thickness(14), RowSpacing = 8 };
@@ -207,11 +218,12 @@ internal sealed class MyProviderWindow : Window
         _downloadSelected.Click += (_, _) => _ = DownloadAsync(all: false);
         _downloadAll.Click += (_, _) => _ = DownloadAsync(all: true);
         _showProgress.Click += (_, _) => ShowProgress();
-        _openLocation.Click += (_, _) => OpenLocation();
+        _openLocation.Click += (_, _) => _ = OpenLocationAsync();
         _delete.Click += (_, _) => _ = DeleteFromProviderAsync();
         _close.Click += (_, _) => Close();
 
         _client.State.AccountChanged += OnAccountChanged;
+        _client.State.KeySaved += OnKeySaved;
         _client.State.Jobs.CollectionChanged += OnJobsChanged;
         Closed += (_, _) => OnClosed();
 
@@ -398,8 +410,9 @@ internal sealed class MyProviderWindow : Window
         _list.SelectedItem = page.Rows.FirstOrDefault(row => row.Item.ItemId == page.SelectedItemId);
         OnItemSelected();
         UpdateEmptyState();
-        if (page.Loaded) _status.Show(Counted(page));
-        else _ = LoadAsync(page, fresh: false, more: false);
+        if (!page.Loaded) _ = LoadAsync(page, fresh: false, more: false);
+        else if (page.LoadFailure is { } failure) _status.Show(failure, isProblem: true);
+        else _status.Show(Counted(page));
     }
 
     private void RefreshPage()
@@ -423,23 +436,27 @@ internal sealed class MyProviderWindow : Window
                 Kind = page.Kind,
                 Offset = more ? page.NextOffset : 0,
                 Limit = PageSize,
-                Fresh = fresh,
+                Fresh = fresh || page.ReadFresh,
             }, load.Token);
             if (_closed || page.Load != load) return;
+            var onShow = ReferenceEquals(page, _page);
             if (!result.Ok)
             {
-                _status.Show(RemoteText.Failure(result.Error, result.FailureKind, _name), isProblem: true);
+                page.LoadFailure = RemoteText.Failure(result.Error, result.FailureKind, _name);
+                if (onShow) _status.Show(page.LoadFailure, isProblem: true);
                 UpdateEmptyState();
                 return;
             }
 
+            page.LoadFailure = null;
+            page.ReadFresh = false;
             page.Loaded = true;
             page.HasMore = result.HasMore;
             page.NextOffset = (more ? page.NextOffset : 0) + result.Items.Count;
             Apply(page, result.Items, more);
-            _status.Show(result.Items.Count == 0 && !more ? string.Empty : Counted(page));
+            if (onShow) _status.Show(result.Items.Count == 0 && !more ? string.Empty : Counted(page));
             UpdateEmptyState();
-            if (ReferenceEquals(page, _page) && !more && _selected is not null) RenderDetail(readFiles: true);
+            if (onShow && !more && _selected is not null) RenderDetail(readFiles: true);
         }
         catch (OperationCanceledException)
         {
@@ -700,7 +717,41 @@ internal sealed class MyProviderWindow : Window
         _delete.Visibility = RemoteRules.CanDeleteFromProvider(job) ? Visibility.Visible : Visibility.Collapsed;
         _delete.IsEnabled = free;
         _showProgress.Visibility = job is { State: "localStarted", PackageId: not null } ? Visibility.Visible : Visibility.Collapsed;
-        _openLocation.Visibility = job is { State: "localStarted" } && _context.DownloadedLocation(job) is not null ? Visibility.Visible : Visibility.Collapsed;
+        CheckLocation(job);
+        _openLocation.Visibility = _locationThere ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// This runs often, and the downloads can be on a slow or missing network share. So the button goes
+    /// by the last answer, and one check at a time asks again off the UI thread.
+    /// </summary>
+    private void CheckLocation(RemoteJobDto? job)
+    {
+        var id = job is { State: "localStarted" } ? job.Id : (Guid?)null;
+        if (id != _locationJob)
+        {
+            _locationJob = id;
+            _locationThere = false;
+            _locationCheckedAt = 0;
+        }
+
+        if (id is not { } current || _checkingLocation || Environment.TickCount64 - _locationCheckedAt < LocationCheckEveryMilliseconds) return;
+        _ = CheckLocationAsync(current, _context.DownloadedPlaces(job!));
+    }
+
+    private async Task CheckLocationAsync(Guid id, DownloadedPlaces places)
+    {
+        _checkingLocation = true;
+        var there = await Task.Run(() => places.Find() is not null);
+        _checkingLocation = false;
+        if (_closed) return;
+        if (_locationJob == id)
+        {
+            _locationThere = there;
+            _locationCheckedAt = Environment.TickCount64;
+        }
+
+        UpdateActions();
     }
 
     /// <summary>A job already on the list keeps its folder. Taking another one means removing it from the list first.</summary>
@@ -832,28 +883,30 @@ internal sealed class MyProviderWindow : Window
         if (_selected is { } row && RemoteRules.JobFor(_client.State.Jobs, row.Item) is { PackageId: { } package }) _context.OpenPackage(package);
     }
 
-    private void OpenLocation()
+    private async Task OpenLocationAsync()
     {
         if (_selected is not { } row || RemoteRules.JobFor(_client.State.Jobs, row.Item) is not { } job) return;
-        var path = _context.DownloadedLocation(job);
+        var places = _context.DownloadedPlaces(job);
+        _openLocation.IsEnabled = false;
+        var problem = await Task.Run(() => OpenPlace(places));
+        if (_closed) return;
+        _openLocation.IsEnabled = true;
+        if (problem is not null) _status.Show(problem, isProblem: true);
+    }
+
+    /// <summary>Off the UI thread: all of this can wait on a slow or missing network share.</summary>
+    private static string? OpenPlace(DownloadedPlaces places)
+    {
         try
         {
-            if (path is null)
-            {
-                _status.Show("The downloaded files weren't found.", isProblem: true);
-            }
-            else if (Directory.Exists(path))
-            {
-                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
-            }
-            else
-            {
-                Process.Start(ShellActions.RevealFile(path));
-            }
+            if (places.Find() is not { } path) return "The downloaded files weren't found.";
+            if (Directory.Exists(path)) Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            else Process.Start(ShellActions.RevealFile(path));
+            return null;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
         {
-            _status.Show("That folder couldn't be opened.", isProblem: true);
+            return "That folder couldn't be opened.";
         }
     }
 
@@ -951,10 +1004,41 @@ internal sealed class MyProviderWindow : Window
         UpdateEmptyState();
     }
 
+    /// <summary>
+    /// A saved key can be another account's, and that shows in nothing the account says. So everything
+    /// read with the old key goes: an old item id sent to the new account fails or finds something else.
+    /// </summary>
+    private void OnKeySaved(string? provider)
+    {
+        if (_closed || (provider is not null && !RemoteRules.SameProvider(provider, _provider))) return;
+        _detailLoad?.Cancel();
+        _list.SelectedItem = null;
+        foreach (var page in _pages)
+        {
+            page.Load?.Cancel();
+            page.Load = null;
+            page.Rows.Clear();
+            page.Loaded = false;
+            page.HasMore = false;
+            page.NextOffset = 0;
+            page.SelectedItemId = null;
+            page.LoadFailure = null;
+            page.ReadFresh = true;
+        }
+
+        _selected = null;
+        _treeRow = null;
+        RenderDetail();
+        _status.Show(string.Empty);
+        if (_hasKey && _page is { } shown) _ = LoadAsync(shown, fresh: true, more: false);
+        UpdateEmptyState();
+    }
+
     private void OnClosed()
     {
         _closed = true;
         _client.State.AccountChanged -= OnAccountChanged;
+        _client.State.KeySaved -= OnKeySaved;
         _client.State.Jobs.CollectionChanged -= OnJobsChanged;
         _localTimer.Stop();
         _closing.Cancel();
