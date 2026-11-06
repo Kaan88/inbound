@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $hostName = "com.kaank.downloadmanager"
-$extensionOrigin = "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/"
+# The Chrome Web Store listing, and the unpacked build that Setup and the update package carry.
+$extensionOrigins = @(
+    "chrome-extension://olhbcdbjdnfoiinllnlpandggadfabfm/",
+    "chrome-extension://pknddmneejadnnngffojnoecojhdfalc/"
+)
 $nativeExe = Join-Path $AppDir "DownloadManager.NativeHost.exe"
 if (-not (Test-Path $nativeExe)) {
     throw "Native host executable not found: $nativeExe. Run publish.ps1 first."
@@ -21,7 +25,7 @@ $manifest = [ordered]@{
     description = "Inbound Download Manager browser bridge"
     path = (Resolve-Path $nativeExe).Path
     type = "stdio"
-    allowed_origins = @($extensionOrigin)
+    allowed_origins = $extensionOrigins
 }
 $json = $manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText($manifestPath, $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -39,4 +43,4 @@ Set-Item -Path $key -Value $manifestPath
 Write-Host "Registered $hostName"
 Write-Host "  manifest: $manifestPath"
 Write-Host "  native:   $nativeExe"
-Write-Host "  origin:   $extensionOrigin"
+Write-Host "  origins:  $($extensionOrigins -join ', ')"

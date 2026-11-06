@@ -27,8 +27,10 @@ public static class NativeHostRegistration
                 return false;
             }
 
+            // A manifest written before the store ID existed would block the store extension,
+            // so it does not count as registered.
             return origins.EnumerateArray().Any(o =>
-                string.Equals(o.GetString(), BrowserBridge.ExtensionOrigin, StringComparison.OrdinalIgnoreCase));
+                string.Equals(o.GetString(), BrowserBridge.StoreExtensionOrigin, StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {

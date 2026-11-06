@@ -6,13 +6,14 @@ Build the zip with `scripts\package-extension-store.ps1`. Images are in `images\
 ## Do these in this order
 
 The store gives the extension a new ID, and the desktop app refuses any extension whose ID it does not
-know. So the app has to learn the ID before anyone can test the listing.
+know. So the app has to learn the ID before anyone can test the listing. The Item ID is
+`olhbcdbjdnfoiinllnlpandggadfabfm`, and the app accepts it from 0.4.0.
 
 1. Upload the zip as a new item. **Do not submit it yet.** The Item ID appears at the top of the item.
-2. Tell the app about that ID, and publish a desktop release that accepts it. The ID goes in
-   `BrowserBridge.cs` (read by `NativeHost\Program.cs` and `HostPipeServer.cs`, which both compare against
-   a single value today), `installer\DownloadManager.iss`, `scripts\register-native-host.ps1` and
-   `scripts\install.ps1`. Keep the old ID too, if unpacked builds should keep working.
+2. Tell the app about that ID, and publish a desktop release that accepts it. Done in 0.4.0: the IDs
+   are in `BrowserBridge.cs` (used by `NativeHost\Program.cs` and `HostPipeServer.cs`),
+   `installer\DownloadManager.iss` and `scripts\register-native-host.ps1`. The old ID stays, because
+   the unpacked build still uses it.
 3. Install that release and the extension together, and check they connect.
 4. Put the privacy policy online, and fill in the tabs below.
 5. Submit.
