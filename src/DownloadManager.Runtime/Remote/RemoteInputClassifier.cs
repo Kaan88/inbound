@@ -437,9 +437,12 @@ public static class RemoteInputClassifier
         };
     }
 
-    /// <summary>A path that names another computer, or a Windows device. Whatever it ends in, it isn't opened.</summary>
-    private static bool IsNetworkOrDevicePath(string input)
-        => input.Length >= 2 && input[0] is '\\' or '/' && input[1] is '\\' or '/';
+    /// <summary>
+    /// A path that names another computer, or a Windows device. Whatever it ends in, it isn't opened.
+    /// That includes the \\?\ and \??\ forms, the second of which counts as fully qualified and can name a share.
+    /// </summary>
+    public static bool IsNetworkOrDevicePath(string input)
+        => input.Length >= 2 && input[0] is '\\' or '/' && input[1] is '\\' or '/' or '?';
 
     /// <summary>A rooted Windows path. A one-letter scheme is a drive, so this comes before any look at it as an address.</summary>
     private static bool IsLocalPath(string input)

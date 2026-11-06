@@ -143,7 +143,11 @@ public sealed partial class RuntimeServiceTests
     [InlineData(4)]
     public async Task ScenarioF_ALinkLostMidTransferIsReplacedAndTheTransferResumes(int connections)
     {
-        await using var rig = await TorBoxRig.CreateAsync(_server, connections: connections);
+        var loaded = new List<DownloadCheckpoint?>();
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: connections, hooks: new ContextHooks
+        {
+            WrapCheckpoints = inner => new RecordingCheckpoints(inner, loaded),
+        });
         const int size = 8 * Mb;
         var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/sub/big.bin", size, seed: 901);
         var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
@@ -158,16 +162,124 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
         Assert.Equal(size, new FileInfo(completed.FinalFilePath).Length);
 
-        // A new link, and only what was still missing came through it.
         var links = rig.Mock.IssuedLinks;
         Assert.Equal(2, links.Count);
         Assert.Equal(2, rig.Mock.Calls("GET torrents/requestdl"));
-        Assert.InRange(links[1].BytesServed, 1, size - 1);
-        Assert.InRange(rig.Mock.PeakCdnConnections, 1, connections);
+
+        // A new link, and only what was still missing was asked of it. Asked, not served: a response whose range another
+        // connection has since taken half of keeps sending until it is closed, so under load what the server pushes
+        // into its sockets can add up to more than the file, while no byte the first link gave is ever requested again.
+        Assert.Equal(2, loaded.Count);
+        var saved = loaded[1];
+        Assert.NotNull(saved);
+        var requested = RequestedBytes(links[1].Ranges, size);
+        Assert.Equal(size - saved.CompletedBytes, requested);
+        Assert.True(links[1].BytesServed >= 1);
+
+        // The peak the server sees says nothing here: the old link's aborted answers can still be winding down on its
+        // side as the new link's start, though the client closed them first. TheProvidersConnectionLimit... tests the cap.
+        Assert.Equal(connections, completed.RequestedConnections);
 
         Assert.Equal(added.Url, completed.Url);
         Assert.Null(completed.FinalUrl);
         await rig.AssertNoLinkOrKeyLeakedAsync();
+    }
+
+    /// <summary>How many distinct bytes of the file these Range headers ask for, leaving out the 0-0 that only asks about the file.</summary>
+    private static long RequestedBytes(IEnumerable<string> ranges, long size)
+    {
+        var spans = ranges
+            .Where(range => range != "bytes=0-0")
+            .Select(range => range["bytes=".Length..].Split('-'))
+            .Select(parts => (Start: long.Parse(parts[0]), End: parts[1].Length == 0 ? size - 1 : long.Parse(parts[1])))
+            .OrderBy(span => span.Start);
+        long total = 0;
+        long reached = 0;
+        foreach (var (start, end) in spans)
+        {
+            var from = Math.Max(start, reached);
+            if (end >= from) total += end - from + 1;
+            reached = Math.Max(reached, end + 1);
+        }
+
+        return total;
+    }
+
+    /// <summary>Remembers what the service was given to continue from, at the moment it asked.</summary>
+    private sealed class RecordingCheckpoints(IDownloadCheckpointStore inner, List<DownloadCheckpoint?> loaded) : IDownloadCheckpointStore
+    {
+        public async Task<DownloadCheckpoint?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default)
+        {
+            var checkpoint = await inner.LoadAsync(jobId, cancellationToken);
+            lock (loaded) loaded.Add(checkpoint);
+            return checkpoint;
+        }
+
+        public Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default) => inner.SaveAsync(checkpoint, cancellationToken);
+
+        public Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default) => inner.DeleteAsync(jobId, cancellationToken);
+    }
+
+    /// <summary>
+    /// A scanner holding the checkpoint for a moment must not read as "there is no progress": without it, the part
+    /// file holds scattered ranges nothing can vouch for, so the engine would throw away every byte and start over.
+    /// </summary>
+    [Fact]
+    public async Task ACheckpointThatCantBeReadRightNowCostsNoBytes()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 4);
+        const int size = 8 * Mb;
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/held.bin", size, seed: 911);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
+        rig.Mock.CdnBytesPerSecond = 2 * Mb;
+
+        var added = await rig.AddAsync(item, file);
+        await rig.Ctx.WaitFor(added.Id, j => j.ReceivedBytes > Mb, TimeSpan.FromSeconds(30));
+        Assert.True((await rig.Ctx.Service.PauseAsync(added.Id)).Ok);
+        var saved = await SettledCheckpointAsync(rig.Ctx, added.Id);
+        Assert.True(saved.CompletedBytes > 0);
+        rig.Mock.CdnBytesPerSecond = null;
+        var part = rig.Ctx.Service.GetJob(added.Id)!.PartFilePath;
+
+        var checkpoint = Path.Combine(rig.Ctx.Paths.CheckpointsDirectory, $"{added.Id:N}.json");
+        using (new FileStream(checkpoint, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.True((await rig.Ctx.Service.ResumeAsync(added.Id)).Ok);
+            var failed = await rig.Ctx.WaitFor(added.Id, j => j.State is "failed" or "completed", TimeSpan.FromSeconds(30));
+            Assert.Equal("failed", failed.State);
+            Assert.True(failed.CanResume);
+            Assert.Contains("couldn't be read", failed.Failure!.Message);
+        }
+
+        Assert.Equal(size, new FileInfo(part).Length);
+        var issued = rig.Mock.IssuedLinks.Count;
+        Assert.True((await rig.Ctx.Service.ResumeAsync(added.Id)).Ok);
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+
+        AssertCompleted(completed);
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.True(rig.Mock.IssuedLinks.Count > issued);
+        Assert.Equal(size - saved.CompletedBytes, RequestedBytes(rig.Mock.IssuedLinks[^1].Ranges, size));
+    }
+
+    [Fact]
+    public async Task ASaveThatMeetsAFileHeldForAMomentStillLands()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server);
+        var store = new JsonCheckpointStore(rig.Ctx.Paths);
+        var id = Guid.NewGuid();
+        await store.SaveAsync(new DownloadCheckpoint { JobId = id, Url = "https://example.invalid/a", Segments = [] });
+        var path = Path.Combine(rig.Ctx.Paths.CheckpointsDirectory, $"{id:N}.json");
+
+        var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(60);
+            await held.DisposeAsync();
+        });
+        await store.SaveAsync(new DownloadCheckpoint { JobId = id, Url = "https://example.invalid/b", Segments = [] });
+
+        Assert.Equal("https://example.invalid/b", (await store.LoadAsync(id))!.Url);
     }
 
     [Fact]

@@ -753,7 +753,7 @@ public sealed class InterruptedExtractionTests(BigArchiveFixture fixture) : Extr
         }
 
         var leftover = Assert.Single(StagingArea.FindLeftovers(Space.Staging));
-        Assert.Equal(fixture.Archive, leftover.FirstVolume);
+        Assert.Equal(staging.Folder, leftover);
         Assert.NotEmpty(Directory.EnumerateFiles(staging.PayloadFolder));
         Space.AssertDestinationUntouched();
 

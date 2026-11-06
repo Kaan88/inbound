@@ -1,4 +1,3 @@
-using System.Text;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
@@ -13,7 +12,7 @@ namespace DownloadManager.Cli;
 internal static partial class Program
 {
     private static readonly string[] RemoteValueOptions =
-        ["--dest", "--queue", "--start", "--select", "--provider", "--offset", "--limit", "--item"];
+        ["--dest", "--queue", "--start", "--select", "--provider", "--offset", "--limit", "--item", "--add"];
 
     private static async Task<int> RemoteAsync(CliClient client, string[] args, bool json)
     {
@@ -88,7 +87,7 @@ internal static partial class Program
             {
                 if (words.Count != 2)
                 {
-                    return RemoteUsage("remote add <link> [--approve-uncached] [--dest DIR] [--queue ID] [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]\n" +
+                    return RemoteUsage("remote add <link> [--approve-uncached] [--dest DIR] [--queue ID] [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin] [--archive-password-stdin]\n" +
                                        "Use - for <link> to read it from standard input, which keeps it off the command line.");
                 }
 
@@ -110,7 +109,7 @@ internal static partial class Program
                 }
 
                 // Before anything looks at it: even asking whether it exists sends this Windows account's credentials to that host.
-                if (words[1].Length >= 2 && words[1][0] is '\\' or '/' && words[1][1] is '\\' or '/')
+                if (NamesAnotherComputer(words[1]))
                 {
                     Console.Error.WriteLine("Only .torrent files on a drive of this computer can be added, not ones on a network path.");
                     return 2;
@@ -242,8 +241,52 @@ internal static partial class Program
             case "browse":
                 return await RemoteBrowseAsync(client, args, words, json).ConfigureAwait(false);
 
+            case "archive-password":
+            {
+                if (args.Any(arg => arg.StartsWith("--password", StringComparison.OrdinalIgnoreCase)))
+                {
+                    Console.Error.WriteLine("The password is read from standard input only.");
+                    return 2;
+                }
+
+                if (await RemoteJobIdAsync(client, words, "remote archive-password <id>   (the password comes from standard input; empty clears it)").ConfigureAwait(false) is not { } id)
+                {
+                    return 2;
+                }
+
+                return PrintRemoteAction(await AskAsync<RemoteActionResultDto>(client, MessageTypes.RemoteArchivePassword,
+                    new RemoteArchivePasswordRequest { JobId = id, Password = ReadArchivePassword() }).ConfigureAwait(false), json);
+            }
+
+            case "container":
+                return await RemoteContainerAsync(client, args, words, json).ConfigureAwait(false);
+
+            case "container-send-jd":
+            {
+                if (words.Count != 2)
+                {
+                    return RemoteUsage("remote container-send-jd <file.dlc|file.ccf>\nHands the file to a JDownloader running on this computer. It asks you to confirm, and the links stay there.");
+                }
+
+                if (NamesAnotherComputer(words[1]))
+                {
+                    Console.Error.WriteLine("Only files on a drive of this computer can be sent, not ones on a network path.");
+                    return 2;
+                }
+
+                var sent = await AskAsync<RemoteContainerSendResult>(client, MessageTypes.RemoteContainerSendToJd,
+                    new RemoteContainerSendRequest { Path = Path.GetFullPath(words[1]) }).ConfigureAwait(false);
+                if (json)
+                {
+                    return PrintJsonResult(sent, sent.Ok);
+                }
+
+                if (sent.Ok) Console.WriteLine(Clean(sent.Message));
+                return PrintProblem(sent.Ok, sent.Message);
+            }
+
             default:
-                return RemoteUsage("remote status|key|classify|add|add-torrent|list|files|select|retry|check|remove|browse");
+                return RemoteUsage("remote status|key|classify|add|add-torrent|list|files|select|retry|check|remove|browse|archive-password|container|container-send-jd");
         }
     }
 
@@ -357,6 +400,11 @@ internal static partial class Program
             request.LinkPassword = ReadSecretLine("Link password: ");
         }
 
+        if (args.Contains("--archive-password-stdin", StringComparer.OrdinalIgnoreCase))
+        {
+            request.ArchivePassword = ReadArchivePassword();
+        }
+
         if (int.TryParse(GetOption(args, "--queue"), out var queue))
         {
             request.QueueId = queue;
@@ -394,6 +442,156 @@ internal static partial class Program
         if (result.Note is not null) Console.WriteLine($"note:     {Clean(result.Note)}");
         return PrintProblem(result.Ok, result.Error);
     }
+
+    private static async Task<int> RemoteContainerAsync(CliClient client, string[] args, List<string> words, bool json)
+    {
+        const string usage = "remote container <file> [--add ID,ID | --all] [--dest DIR] [--approve-uncached] [--queue ID] [--start startNow|queue|later]";
+        if (words.Count != 2)
+        {
+            return RemoteUsage(usage);
+        }
+
+        var all = args.Contains("--all", StringComparer.OrdinalIgnoreCase);
+        var addOption = GetOption(args, "--add");
+        if (all && addOption is not null)
+        {
+            return RemoteUsage(usage);
+        }
+
+        List<int>? chosen = null;
+        if (addOption is not null)
+        {
+            chosen = [];
+            foreach (var word in addOption.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!int.TryParse(word, out var id))
+                {
+                    return RemoteUsage(usage);
+                }
+
+                chosen.Add(id);
+            }
+
+            if (chosen.Count == 0)
+            {
+                return RemoteUsage(usage);
+            }
+        }
+
+        if (NamesAnotherComputer(words[1]))
+        {
+            Console.Error.WriteLine("Only files on a drive of this computer can be opened, not ones on a network path.");
+            return 2;
+        }
+
+        var preview = await AskAsync<RemoteContainerPreviewResult>(client, MessageTypes.RemoteContainerPreview,
+            new RemoteContainerPreviewRequest { Path = Path.GetFullPath(words[1]) }).ConfigureAwait(false);
+        if (!json)
+        {
+            PrintContainerPreview(preview);
+        }
+
+        if (!preview.Ok)
+        {
+            if (json)
+            {
+                return PrintJsonResult(preview, false);
+            }
+
+            if (preview.NotSupported && preview.CanSendToJd)
+            {
+                Console.Error.WriteLine("To send it to a JDownloader running on this computer: dm remote container-send-jd <file>");
+            }
+
+            return PrintProblem(false, preview.Error);
+        }
+
+        if (!all && chosen is null)
+        {
+            return json ? PrintJsonResult(preview, true) : 0;
+        }
+
+        chosen ??= preview.Entries.Where(entry => entry.CanAdd).Select(entry => entry.EntryId).ToList();
+        if (preview.PreviewId is not { } previewId || chosen.Count == 0)
+        {
+            Console.Error.WriteLine("Nothing in this file can be added.");
+            return 1;
+        }
+
+        var request = new RemoteContainerAddRequest
+        {
+            PreviewId = previewId,
+            EntryIds = chosen,
+            Destination = GetOption(args, "--dest") is { } dest ? Path.GetFullPath(dest) : null,
+            StartMode = GetOption(args, "--start") ?? "startNow",
+            ApproveUncached = args.Contains("--approve-uncached", StringComparer.OrdinalIgnoreCase),
+        };
+        if (int.TryParse(GetOption(args, "--queue"), out var queue))
+        {
+            request.QueueId = queue;
+            if (GetOption(args, "--start") is null)
+            {
+                request.StartMode = "queue";
+            }
+        }
+
+        var added = await AskAsync<RemoteContainerAddResult>(client, MessageTypes.RemoteContainerAdd, request).ConfigureAwait(false);
+        if (json)
+        {
+            PrintJson(new { Preview = preview, Added = added });
+            return added.Ok && added.Outcomes.All(outcome => outcome.Ok) ? 0 : 1;
+        }
+
+        foreach (var outcome in added.Outcomes)
+        {
+            if (outcome.Job is { } job)
+            {
+                Console.WriteLine($"{outcome.EntryId,5}  {(outcome.Existing ? "already on the list" : "added")}: {job.Id:N}  {Clean(job.Status)}");
+                if (job.ApprovalNeeded) Console.WriteLine($"       next: dm remote retry {job.Id:N} --approve-uncached");
+            }
+            else if (outcome.Ok)
+            {
+                Console.WriteLine($"{outcome.EntryId,5}  {(outcome.Existing ? "already on the list" : "added")}: {outcome.JobId:N}");
+            }
+            else
+            {
+                Console.Error.WriteLine($"{outcome.EntryId,5}  not added: {Clean(outcome.Error)}");
+            }
+
+            if (outcome.Note is not null) Console.WriteLine($"       note: {Clean(outcome.Note)}");
+        }
+
+        return PrintProblem(added.Ok && added.Outcomes.All(outcome => outcome.Ok), added.Error ?? "Not every entry was added.");
+    }
+
+    private static void PrintContainerPreview(RemoteContainerPreviewResult preview)
+    {
+        Console.WriteLine($"format:   {preview.Format}{(preview.FormatVersion is null ? string.Empty : $" {Clean(preview.FormatVersion)}")}");
+        if (preview.AccountProblem is not null) Console.WriteLine($"account:  {Clean(preview.AccountProblem)}");
+        foreach (var problem in preview.Problems) Console.WriteLine($"note:     {Clean(problem)}");
+        foreach (var package in preview.Packages)
+        {
+            var password = package.HasArchivePassword ? ", with an archive password" : string.Empty;
+            Console.WriteLine($"package {package.Index}: {Clean(package.Name ?? "(no name)")} ({package.EntryCount} {(package.EntryCount == 1 ? "link" : "links")}{password})");
+            if (package.Comment is not null) Console.WriteLine($"  comment: {Clean(package.Comment)}");
+        }
+
+        if (preview.Entries.Count == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine($"{"ID",5}  {"PKG",3}  {"KIND",-12}  {"HOST",-24}  NAME");
+        foreach (var entry in preview.Entries)
+        {
+            Console.WriteLine($"{entry.EntryId,5}  {(entry.PackageIndex is { } index ? index.ToString() : "-"),3}  {entry.Kind,-12}  {Clean(entry.DisplayHost ?? "-"),-24}  {Clean(entry.DisplayName ?? "(no name)")}");
+            if (entry.Reason is not null) Console.WriteLine($"       {Clean(entry.Reason)}");
+        }
+    }
+
+    /// <summary>Before anything looks at the path: even asking whether it exists sends this Windows account's credentials to the host it names.</summary>
+    private static bool NamesAnotherComputer(string path)
+        => path.Length >= 2 && path[0] is '\\' or '/' && path[1] is '\\' or '/' or '?';
 
     private static async Task<int> RemoteBrowseAsync(CliClient client, string[] args, List<string> words, bool json)
     {
@@ -497,35 +695,11 @@ internal static partial class Program
         return words;
     }
 
+    /// <summary>A password as typed: spaces can be part of one, so only the line's end comes off.</summary>
+    private static string ReadArchivePassword() => SecretInput.ReadLine("Archive password: ") ?? string.Empty;
+
     /// <summary>One line from standard input. Typed at a console, it isn't shown.</summary>
-    private static string? ReadSecretLine(string prompt)
-    {
-        if (Console.IsInputRedirected)
-        {
-            return Console.In.ReadLine()?.Trim();
-        }
-
-        Console.Error.Write(prompt);
-        var typed = new StringBuilder();
-        while (true)
-        {
-            var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Enter)
-            {
-                Console.Error.WriteLine();
-                return typed.ToString().Trim();
-            }
-
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                if (typed.Length > 0) typed.Length--;
-            }
-            else if (!char.IsControl(key.KeyChar))
-            {
-                typed.Append(key.KeyChar);
-            }
-        }
-    }
+    private static string? ReadSecretLine(string prompt) => SecretInput.ReadLine(prompt)?.Trim();
 
     /// <summary>
     /// For what goes to the screen. A provider's words can hold escape sequences, which a terminal would

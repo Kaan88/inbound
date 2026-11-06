@@ -51,6 +51,12 @@ public static class RemoteJobRules
         return wait < LongestRateLimitHold ? wait : LongestRateLimitHold;
     }
 
+    /// <summary>What is wrong with an archive password, without repeating any of it. Null when nothing is.</summary>
+    public static string? DescribeBadArchivePassword(string? password)
+        => password is not null && password.AsSpan().IndexOfAny('\r', '\n', '\0') >= 0
+            ? "An archive password cannot contain a line break."
+            : null;
+
     /// <summary>Whether the provider has said this site's daily allowance is used up. Zero means no limit.</summary>
     public static bool DailyLimitUsedUp(RemoteHoster hoster)
         => (hoster.DailyLinkLimit is > 0 and var links && hoster.DailyLinksUsed >= links) ||
@@ -187,6 +193,7 @@ public static class RemoteChildPlanner
         var notes = new List<string>();
         var chosen = record.SelectionMode == RemoteSelectionMode.Chosen ? record.SelectedFileIds.ToHashSet(StringComparer.Ordinal) : null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var onlyFile = item.Files.Select(file => file.FileId).Distinct(StringComparer.Ordinal).Count() == 1;
         foreach (var file in item.Files)
         {
             if (!seen.Add(file.FileId) || chosen?.Contains(file.FileId) == false)
@@ -213,6 +220,13 @@ public static class RemoteChildPlanner
                 continue;
             }
 
+            var placed = Placed(relative, record.Placement, onlyFile);
+            if (placed is null)
+            {
+                notes.Add($"Skipped {RemoteText.Clean(relative, LongestPathInNote)}: its path would be too long in this package's folder.");
+                continue;
+            }
+
             requests.Add(new RemoteJobRequest
             {
                 Source = new RemoteSource(
@@ -220,7 +234,7 @@ public static class RemoteChildPlanner
                     RemoteKinds.ToWord(item.Ref.Kind),
                     item.Ref.ItemId,
                     file.FileId,
-                    relative,
+                    placed,
                     record.Id.ToString("N")),
                 FileName = Path.GetFileName(relative),
                 DestinationRoot = destination,
@@ -250,5 +264,20 @@ public static class RemoteChildPlanner
         }
 
         return new Plan(requests, notes);
+    }
+
+    /// <summary>
+    /// Where a file goes when its job is one of a group. An item holding one file has no structure worth
+    /// keeping, and the folder a provider puts around it would keep it from the other parts of its set.
+    /// </summary>
+    private static string? Placed(string relative, RemoteJobPlacement? placement, bool onlyFile)
+    {
+        if (placement is null)
+        {
+            return relative;
+        }
+
+        var within = onlyFile ? Path.GetFileName(relative) : relative;
+        return placement.Subfolder is { } folder ? RemotePaths.ToSafeRelativePath(Path.Combine(folder, within)) : within;
     }
 }

@@ -1657,6 +1657,7 @@ internal static partial class Program
             var speed = job.BytesPerSecond is null ? "-" : $"{FormatUtil.Bytes((long)job.BytesPerSecond.Value)}/s";
             Console.WriteLine($"{job.State,-12} {size,12} {progress,9} {speed,12}  {job.FileName}");
             Console.WriteLine($"  {job.Id:N}  {job.Url}");
+            if (job.StatusNote is not null) Console.WriteLine($"  {job.StatusNote}");
         }
     }
 
@@ -1666,6 +1667,7 @@ internal static partial class Program
         Console.WriteLine($"file:     {job.FinalFilePath}");
         Console.WriteLine($"url:      {job.Url}");
         Console.WriteLine($"state:    {job.State}");
+        if (job.StatusNote is not null) Console.WriteLine($"note:     {job.StatusNote}");
         Console.WriteLine($"queue:    {job.QueueId}:{job.QueueName}");
         Console.WriteLine($"part:     {job.PartFilePath}");
         Console.WriteLine($"bytes:    {job.ReceivedBytes} / {job.TotalBytes?.ToString() ?? "unknown"}");
@@ -1797,6 +1799,7 @@ internal static partial class Program
               dm remote classify <link>
               dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
                           [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
+                          [--archive-password-stdin]
               dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
               dm remote list
               dm remote files <id>
@@ -1805,6 +1808,10 @@ internal static partial class Program
               dm remote check [<id>]
               dm remote remove <id> [--delete-from-provider --yes]
               dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
+              dm remote archive-password <id>   (from standard input; empty clears it)
+              dm remote container <file.rsdf|file.ccf|file.dlc> [--add ID,ID | --all] [--dest DIR]
+                          [--approve-uncached] [--queue ID] [--start startNow|queue|later]
+              dm remote container-send-jd <file.dlc|file.ccf>
               dm host status|open|shutdown
               dm doctor [--no-start]
 

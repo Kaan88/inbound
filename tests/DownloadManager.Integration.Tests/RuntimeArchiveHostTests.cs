@@ -188,7 +188,7 @@ internal sealed class ArchiveHost : IAsyncDisposable
     public async Task KillAsync()
     {
         _process!.Kill();
-        await _process.WaitForExitAsync();
+        await SandboxHost.WaitUntilGoneAsync(_process);
         await CloseClientAsync();
     }
 
@@ -309,6 +309,26 @@ public sealed class RuntimeArchiveHostTests
         var disk = host.EverythingOnDisk();
         Assert.Contains("Host stopped", disk);
         Assert.DoesNotContain(Secret, disk);
+    }
+
+    [ArchiveHostFact]
+    public async Task AHostWhoseArchivePartCanNotStartStillServesOrdinaryDownloads()
+    {
+        await using var host = new ArchiveHost();
+
+        // A folder where the settings file goes, so the first save fails. Any failure at that point looks the same.
+        Directory.CreateDirectory(Path.Combine(host.Data, "archive", "settings.json"));
+        await host.StartAsync();
+
+        var snapshot = await host.RequestAsync<SnapshotDto>(MessageTypes.JobsQuery, new { });
+        Assert.NotNull(snapshot.Settings);
+        var answer = await host.RequestAsync<HostActionResult>(ArchiveMessageTypes.List, new { });
+        Assert.False(answer.Ok);
+
+        await host.StopAsync();
+        var disk = host.EverythingOnDisk();
+        Assert.Contains("Archive extraction could not start", disk);
+        Assert.Contains("Host stopped", disk);
     }
 
     [ArchiveHostFact]

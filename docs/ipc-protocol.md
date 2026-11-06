@@ -32,6 +32,8 @@ should send these on a separate connection of their own and keep its main one fo
 - `remote.item.get`
 - `remote.files`
 - `remote.deleteRemote`
+- `remote.container.preview` and `remote.container.add` (the hoster list again)
+- `remote.container.sendToJd`, which waits for a person to answer another program's question, for up to five minutes
 
 If a client closes its connection during one of these, the call is cancelled. The rest of the
 `remote.*` messages only touch local state, and answer without waiting on the network.
@@ -77,6 +79,10 @@ registered. Kinds are `torrents`, `webdl` and `usenet`.
 | `remote.checkNow` | `jobId?`, `provider?` | `remote.actionResult` |
 | `remote.remove` | `jobId` | `remote.actionResult` |
 | `remote.deleteRemote` | `jobId`, `confirmed` | `remote.actionResult` |
+| `remote.archivePassword` | `jobId`, `password` | `remote.actionResult` |
+| `remote.container.preview` | `path` | `remote.container.previewResult` |
+| `remote.container.add` | `previewId`, `entryIds`, `destination?`, `queueId?`, `startMode?`, `approveUncached?` | `remote.container.addResult` |
+| `remote.container.sendToJd` | `path` | `remote.container.sendResult` |
 
 **`remote.account.*`** replies carry `accounts`: `provider`, `providerName`, `capabilities`, `itemKinds`,
 `hasKey`, `keyUnreadable`, `plan`, `premium`, `premiumUntil`, `cooldownUntil` and `checkedAt`. Without
@@ -101,7 +107,7 @@ and refuses a hoster link.
 **`remote.add`** takes either `input` (a folder link, magnet, hoster link or a full path to a local
 `.torrent` file) or `provider`, `itemKind` and `itemId` (an item from `remote.item.get`). Other fields:
 `destination` (full path), `queueId`, `startMode` (`startNow`, `queue`, `later`), `selection` (`ask`,
-`all`, `chosen`), `fileIds`, `approveUncached`, `linkPassword`. The input is stored encrypted and is
+`all`, `chosen`), `fileIds`, `approveUncached`, `linkPassword`, `archivePassword`. The input is stored encrypted and is
 never returned. With no `selection`, a hoster link takes `all` and starts by itself when ready, and
 anything else asks. The reply has `job`, `inputKind`, `note` when options given were not used, and
 `existing` when an active job already covers
@@ -111,7 +117,7 @@ intent, and the Host does the work afterwards, so watch `remote.changed`.
 **Jobs** (`remote.addResult`, `remote.listResult`, `remote.actionResult`, `remote.changed`) have `id`,
 `provider`, `providerName`, `kind`, `state`, `status` (words to show), `stage`, `rawState`, `progress`,
 `speedBytesPerSecond`, `etaSeconds`, `itemId`, `name`, `displayHost`, `cached`, `approvalNeeded`,
-`approvedUncached`, `hasLinkPassword`, `failureKind`, `failureMessage`, `nextCheckAt`, `destination`,
+`approvedUncached`, `hasLinkPassword`, `hasArchivePassword`, `failureKind`, `failureMessage`, `nextCheckAt`, `destination`,
 `queueId`, `startMode`, `selectionMode`, `selectedFileIds`, `packageId`, `notes`, `createdAt` and `updatedAt`.
 
 | `state` | Meaning |
@@ -146,6 +152,70 @@ the provider asked for still holds.
 **`remote.remove`** takes the job off this app's list and leaves the provider's item and any local
 downloads as they are. **`remote.deleteRemote`** deletes the item from the provider for good, and is
 refused unless `confirmed` is true.
+
+**`remote.archivePassword`** sets the password for a job's archives, before or after its downloads exist.
+It is not `linkPassword`: that is the source site's password for a link and goes to the provider, while this
+goes to the archive side and never leaves the computer. It is kept encrypted on the job until there is a
+package, and then handed to `archive.*`'s record for that package. A password can't hold a line break. An
+empty one clears it on both sides. Only `hasArchivePassword` ever comes back, and it stays true after the
+hand-over, because the password is still there. If a run has already started without it, the set runs again
+by itself.
+
+### Containers
+
+A container is a local `.rsdf`, `.ccf` or `.dlc` file. Reading one takes two steps, because a decrypted link
+is a secret and a client never gets to see it.
+
+**`remote.container.preview`** reads the file by its full path. A path has to start with a drive. Network and
+device paths are refused before anything looks at them, because even asking whether such a file exists
+sends this Windows account's credentials to the host it names. Files are limited to 16 MB and 5000 links. The
+reply has:
+
+- `ok`, `error`. A damaged file gets `ok: false` and a reason in words.
+- `format` (`rsdf`, `ccf`, `dlc` or `unknown`), `formatVersion`.
+- `notSupported` with `canSendToJd`, see below.
+- `previewId` and `expiresAt`. The Host holds the links in memory only, against this id, for 15 minutes, with at
+  most 8 previews at a time. Both are absent when nothing in the file can be added.
+- `accountProblem`, such as no API key being set. Each entry also says so in its `reason`.
+- `packages`: `index`, `name`, `comment`, `hasArchivePassword` and `entryCount`.
+- `entries`: `entryId`, `packageIndex`, `displayHost`, `displayName`, `size`, `kind`, `reason` and `canAdd`.
+  No entry holds its link, and names and comments have addresses, keys and the package's passwords taken out.
+- `problems`: what was wrong with parts of the file, or is worth saying about it as a whole.
+
+`kind` is `folderLink`, `magnet`, `hosterLink`, `undetermined` or `unsupported`, and a client should treat a
+value it doesn't know as `unsupported`. Each `unsupported` entry has a `reason`. An ordinary link is
+`unsupported` here, with a reason that says the provider won't take it and that it can be added as a normal
+download; nothing from a container is ever requested directly. A link naming a file on this computer is
+refused, and so is a direct link holding an account key.
+
+**`remote.container.add`** adds the chosen entries one at a time, each through the same path as `remote.add`.
+So the cache check, the approval of uncached items, the spacing between creations and the dedupe all apply,
+and adding only saves the intent. `outcomes` has one line per entry: `entryId`, `ok`, `error`, `note`,
+`existing`, `inputKind`, `jobId` and `job`. The reply's `ok` means at least one was added. An expired or unknown
+`previewId` gets `ok: false` and no outcomes. When so many entries were added that their full jobs wouldn't fit
+one frame, the reply has `jobsLeftOut: true` and every `job` is null. `ok`, each outcome and `jobId` still hold,
+the entries are saved, and `remote.list` has the jobs.
+
+The links of one container package share a local package, in a folder named after it under the destination.
+Links in no package share one too, and go in the destination itself. An item holding one file puts it straight
+in that folder, so the parts of a split archive that came through separate links meet in one place and are
+claimed as one set. An item with several files keeps its own folders. `status` on these jobs describes the
+whole local package.
+
+**Archive passwords from a container.** A CCF can state a password for a package's archives, and that value goes
+to the archive side for that package as an offer: it never replaces one the package already has, so what the
+user has said stands. A package can name several, in which case the first is used and `problems` says so. It is
+never sent to the provider, and it is never used as a link password.
+
+**DLC.** A DLC can't be opened here, because unlocking one depends on an online service this app has no
+permission to use. `remote.container.preview` gives `ok: false` with `notSupported` and the reason in `error`.
+
+**`remote.container.sendToJd`** is the separate, optional route for a `.dlc` or `.ccf`. It only happens when a
+client asks. It hands the file to a JDownloader running on this computer, on `127.0.0.1:9666`. JDownloader asks
+its user to confirm, and the links stay in JDownloader: they do not come back. The reply has `ok`, `status`
+(`sent`, `notRunning`, `rejected`, `timedOut`, `invalidInput` or `failed`), `jdAnswered` and `message`.
+`jdAnswered` is true only when JDownloader itself said yes or no. Nothing else in this app depends on JDownloader.
+This route has only been tried against a stand-in so far, not a real JDownloader.
 
 ### Event
 
@@ -206,8 +276,12 @@ does to the output of the first.
 | `downloaded` | The files are here, and nobody has asked for extraction |
 | `waiting` | Asked for; see `downloadingVolumes`, `failedVolumes` and `missingVolumes` for what it waits for |
 | `extracting` | Running. `phase` is `probing`, `extracting`, `verifying` or `finalizing`; `percent` comes from the tool |
-| `completed` | Every check passed and the files are in `destination` |
+| `completed` | Every check passed and the files are in `destination`. `volumes` is what the tool really read; `note` names any file with a matching name that it didn't, which was neither extracted nor deleted |
 | `failed` | `failureKind` says why, and the archives are kept |
+
+Deleting archives is opt-in, and only what the tool read can go, only once the output is flushed to the disk. Once
+a download's file has gone this way its job stays `completed`, with `fileRemovedAfterExtraction: true` and a
+`statusNote` that says so in words. There is no file to open for such a job.
 
 `failureKind` is one of `passwordRequired`, `wrongPassword`, `missingVolume`, `corrupted`,
 `unsupportedVersion`, `toolUnavailable`, `diskSpace`, `permission`, `unsafePath`, `cancelled` or

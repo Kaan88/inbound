@@ -35,8 +35,8 @@ public enum RemoteSelectionMode
 
 /// <summary>
 /// One remote job on disk. Provider state lives here and not in settings, because saving Options
-/// drops fields it doesn't know. The three protected fields only ever hold ciphertext, so a record
-/// is safe to write, copy and log; nothing else in it is a link or a password.
+/// drops fields it doesn't know. The protected fields only ever hold ciphertext, so a record is safe
+/// to write, copy and log; nothing else in it is a link or a password.
 /// </summary>
 public sealed record RemoteJobRecord
 {
@@ -50,6 +50,16 @@ public sealed record RemoteJobRecord
     public string? ProtectedInput { get; init; }
     public string? ProtectedTorrent { get; init; }
     public string? ProtectedLinkPassword { get; init; }
+    /// <summary>
+    /// For the archives this job brings, which is not the source site's password for the link. Held
+    /// here only until there is a package to give it to, and <see cref="ArchivePasswordHandedOver"/> says that happened.
+    /// </summary>
+    public string? ProtectedArchivePassword { get; init; }
+    public bool ArchivePasswordHandedOver { get; init; }
+    /// <summary>It came with the input, such as from a container, and nobody typed it. It never replaces one the package already has.</summary>
+    public bool ArchivePasswordOffered { get; init; }
+    /// <summary>Where local jobs go when this job is one of several that belong together. Null gives it a package of its own.</summary>
+    public RemoteJobPlacement? Placement { get; init; }
 
     /// <summary>What the provider knows the input by, worked out here, so it can be found after a lost answer.</summary>
     public string? PredictedHash { get; init; }
@@ -96,6 +106,16 @@ public sealed record RemoteJobRecord
     public DateTimeOffset? MissingSince { get; init; }
     public int Resubmits { get; init; }
 }
+
+/// <summary>
+/// Several remote jobs that came as one group, such as the links of a container's package. They share a
+/// local package, and an item holding one file puts it straight in the folder, without the item's own
+/// folder around it, so the parts of a split archive that came through separate links meet in one place.
+/// </summary>
+/// <param name="PackageKey">The local package's key, which starts with <c>remote:</c>.</param>
+/// <param name="PackageName">What the local package is called. Null lets the file names decide.</param>
+/// <param name="Subfolder">One safe folder name under the destination. Null means the destination itself.</param>
+public sealed record RemoteJobPlacement(string PackageKey, string? PackageName, string? Subfolder);
 
 /// <summary>An account's limits that have to outlast a restart.</summary>
 public sealed record RemoteAccountPacing

@@ -35,6 +35,10 @@ public sealed class JobDto
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>A completed download whose file was deleted on purpose after a verified extraction. Not a failure, and there is no file to open.</summary>
+    public bool FileRemovedAfterExtraction { get; set; }
+    /// <summary>Something to say about a job beside its state, in words for the user. Null when there is nothing.</summary>
+    public string? StatusNote { get; set; }
     public string? ContentType { get; set; }
     public string? ETag { get; set; }
     public string? LastModified { get; set; }

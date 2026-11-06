@@ -36,8 +36,22 @@ public sealed partial class RuntimeServiceTests
         return item.Job!;
     }
 
+    /// <summary>The service may be replacing this file right now, which holds it for a moment.</summary>
     private static async Task<string> JobJsonAsync(ServiceContext ctx, Guid id)
-        => await File.ReadAllTextAsync(Path.Combine(ctx.Paths.JobsDirectory, $"{id:N}.json"));
+    {
+        var path = Path.Combine(ctx.Paths.JobsDirectory, $"{id:N}.json");
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(path);
+            }
+            catch (IOException) when (attempt < 20)
+            {
+                await Task.Delay(25);
+            }
+        }
+    }
 
     /// <summary>Every state file, so a leak anywhere fails the test.</summary>
     private static async Task AssertSecretNotOnDiskAsync(ServiceContext ctx, string secret)

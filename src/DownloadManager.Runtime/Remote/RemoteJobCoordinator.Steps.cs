@@ -1018,7 +1018,11 @@ public sealed partial class RemoteJobCoordinator
         RemoteJobsResult result;
         try
         {
-            result = await _host.AddRemoteJobsAsync(plan.Requests, $"remote:{record.Id:N}", record.Name, cancellationToken).ConfigureAwait(false);
+            result = await _host.AddRemoteJobsAsync(
+                plan.Requests,
+                record.Placement?.PackageKey ?? $"remote:{record.Id:N}",
+                record.Placement is { } placement ? placement.PackageName : record.Name,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1081,6 +1085,11 @@ public sealed partial class RemoteJobCoordinator
         }
 
         var packageId = result.PackageId;
+        if (packageId is { } package && !await PassPasswordToPackageAsync(record.Id, package).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var at = _time.GetUtcNow();
         await UpdateAsync(record.Id, latest =>
         {
@@ -1105,6 +1114,32 @@ public sealed partial class RemoteJobCoordinator
                 }
                 : NothingToCreate(latest, record, notes);
         }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The package id is saved first, so everything after this can be repeated. The files may already be
+    /// downloading. The archive side copes with a password that arrives after a run has started without one.
+    /// </summary>
+    /// <returns>False when it couldn't be done, and the whole step is tried again later.</returns>
+    private async Task<bool> PassPasswordToPackageAsync(Guid id, Guid package)
+    {
+        RemoteJobRecord? current;
+        lock (_sync) _records.TryGetValue(id, out current);
+        if (current?.ProtectedArchivePassword is null || _options.PackagePasswords is null)
+        {
+            return true;
+        }
+
+        await UpdateAsync(id, latest => latest.State == RemoteJobState.Waiting && latest.PackageId != package
+            ? latest with { PackageId = package }
+            : null).ConfigureAwait(false);
+        if (await HandOverArchivePasswordAsync(id).ConfigureAwait(false) is not { } problem)
+        {
+            return true;
+        }
+
+        await ChildrenNotReadyAsync(id, problem).ConfigureAwait(false);
+        return false;
     }
 
     private static bool SameChoice(RemoteJobRecord one, RemoteJobRecord other)
@@ -1175,6 +1210,7 @@ public sealed partial class RemoteJobCoordinator
     [
         SecretProtector.UnprotectRemoteInput(record.ProtectedInput),
         SecretProtector.UnprotectRemoteLinkPassword(record.ProtectedLinkPassword),
+        SecretProtector.UnprotectRemoteArchivePassword(record.ProtectedArchivePassword),
     ];
 
     /// <summary>The real cause in plain words, safe for a saved record and for every client.</summary>

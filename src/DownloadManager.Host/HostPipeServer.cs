@@ -465,8 +465,9 @@ public sealed partial class HostPipeServer
                     break;
 
                 case MessageTypes.HostShutdown:
-                    await Reply(client, message, MessageTypes.HostActionResult,
-                        new HostActionResult { Ok = true, Message = "Shutting down." }).ConfigureAwait(false);
+                    // Written here and not queued: stopping ends the writer loop, and a reply still in its queue would be lost.
+                    await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostActionResult,
+                        new HostActionResult { Ok = true, Message = "Shutting down." }, message.Id), cancellationToken).ConfigureAwait(false);
                     await NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
                     _controller.RequestShutdown();
                     break;

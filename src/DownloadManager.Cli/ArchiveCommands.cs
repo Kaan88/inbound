@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using DownloadManager.Contracts;
 
@@ -274,30 +273,7 @@ internal static class ArchiveCommands
     /// <summary>One line from stdin, in UTF-8, with its line ending removed and its spaces kept. At a console it is not echoed.</summary>
     private static string ReadPassword()
     {
-        if (Console.IsInputRedirected)
-        {
-            using var reader = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true);
-            return reader.ReadLine() ?? string.Empty;
-        }
-
-        Console.Error.Write("Password: ");
-        var typed = new StringBuilder();
-        while (true)
-        {
-            var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Enter) break;
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                if (typed.Length > 0) typed.Length--;
-            }
-            else if (!char.IsControl(key.KeyChar))
-            {
-                typed.Append(key.KeyChar);
-            }
-        }
-
-        Console.Error.WriteLine();
-        return typed.ToString();
+        return SecretInput.ReadLine("Password: ") ?? string.Empty;
     }
 
     private static List<string> Positional(string[] args)

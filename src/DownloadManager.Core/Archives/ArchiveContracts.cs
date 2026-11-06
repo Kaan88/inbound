@@ -1,5 +1,17 @@
 namespace DownloadManager.Core.Archives;
 
+/// <summary>
+/// The name staging folders start with. Nothing from outside may use it: not an entry in an archive, not a
+/// package from a container, not a folder named after a download. Whatever wears this name inside a
+/// destination has to be either ours or refused, or a planted one could pass for a crashed extraction.
+/// </summary>
+public static class ArchiveWorkingFolders
+{
+    public const string Prefix = ".inbound-extract-";
+
+    public static bool IsReserved(string segment) => segment.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
+}
+
 public interface IArchiveExtractor
 {
     /// <summary>
@@ -14,6 +26,17 @@ public interface IArchiveExtractor
         ExtractionRequest request,
         IProgress<ExtractionProgress>? progress,
         CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Whoever looks after archive passwords, for whoever learned one before the downloads existed. It
+/// knows a package by id and nothing of where the password came from.
+/// </summary>
+public interface IPackagePasswordKeeper
+{
+    /// <summary>Keeps the password for the package's archives, and an empty one clears it. Returns why it couldn't, in words for the user, and never quotes the password.</summary>
+    /// <param name="keepExisting">It is only an offer: a password this package already has stays, because the user may have given it since.</param>
+    Task<string?> SetPackagePasswordAsync(Guid packageId, string? password, bool keepExisting = false, CancellationToken cancellationToken = default);
 }
 
 public enum ExtractionFailureKind
@@ -86,6 +109,15 @@ public sealed record ArchiveProbe
     /// <summary>The listing held a line the parser could not account for, which is how a name with a line break shows up.</summary>
     public bool ListingHasUnknownLines { get; init; }
 
+    /// <summary>The same name came up twice other than as one file continuing into the next volume, so one would overwrite the other.</summary>
+    public bool ListingHasRepeatedNames { get; init; }
+
+    /// <summary>The archive stores NTFS data streams, which an ordinary listing doesn't show and the tool restores regardless.</summary>
+    public bool HoldsDataStreams { get; init; }
+
+    /// <summary>The volumes the tool went through, by full path, in order. Empty when it could not list them, as for encrypted headers without a password.</summary>
+    public IReadOnlyList<string> VolumesRead { get; init; } = [];
+
     public long TotalListedSize => Entries.Where(entry => entry.Kind == ArchiveEntryKind.File).Sum(entry => entry.Size);
 }
 
@@ -112,6 +144,12 @@ public sealed class ExtractionRequest
     /// land on one is renamed instead.
     /// </summary>
     public IReadOnlyCollection<string>? KeepFiles { get; init; }
+
+    /// <summary>
+    /// The result has to survive a power cut before <see cref="Committed"/> runs, because the caller
+    /// means to delete the archives right after. Costs a flush per file, so only then.
+    /// </summary>
+    public bool MakeDurable { get; init; }
 
     /// <summary>
     /// Runs once every file is in place and before the staging folder goes, and is the caller's
@@ -149,7 +187,17 @@ public enum ExtractedFileOutcome
 /// <param name="FinalPath">Where the file is now. For a skipped file, the existing file that was kept.</param>
 public sealed record ExtractedFile(string EntryPath, string FinalPath, ExtractedFileOutcome Outcome);
 
-public sealed record ExtractionResult(string Destination, IReadOnlyList<ExtractedFile> Files);
+public sealed record ExtractionResult(string Destination, IReadOnlyList<ExtractedFile> Files)
+{
+    /// <summary>
+    /// The volumes the tool really read, by full path. Only these can be said to be extracted, whatever their
+    /// names suggest. Null when the extractor can't say, and then none of them may be treated as used up.
+    /// </summary>
+    public IReadOnlyList<string>? VolumesRead { get; init; }
+
+    /// <summary>Every file and folder was flushed to the disk, as <see cref="ExtractionRequest.MakeDurable"/> asks. Without this the archives are the only safe copy.</summary>
+    public bool FlushedToDisk { get; init; }
+}
 
 public sealed class ExtractionException : Exception
 {

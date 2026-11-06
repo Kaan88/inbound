@@ -8,16 +8,24 @@ namespace DownloadManager.Persistence;
 /// <c>archive/packages/&lt;id&gt;.json</c>, each written atomically. An unreadable document is moved
 /// aside, as a job's is, and treated as absent.
 /// </summary>
-public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = null) : IArchiveStore
+public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = null, ArchiveStoreOptions? options = null) : IArchiveStore
 {
     private readonly string _settingsFile = Path.Combine(paths.Root, "archive", "settings.json");
     private readonly string _setsDirectory = Path.Combine(paths.Root, "archive", "sets");
     private readonly string _packagesDirectory = Path.Combine(paths.Root, "archive", "packages");
+    private readonly ArchiveStoreOptions _options = options ?? new ArchiveStoreOptions();
+    private IReadOnlyCollection<Guid> _unreadableSets = [];
+
+    public IReadOnlyCollection<Guid> UnreadableSets => _unreadableSets;
 
     public async Task<ArchiveSettings?> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_settingsFile)) return null;
-        var settings = await ReadAsync<ArchiveSettings>(_settingsFile, cancellationToken).ConfigureAwait(false);
+
+        // Unlike a set, nothing can stand in for these. Carrying on as if none were saved would overwrite the user's choices.
+        var read = await ReadAsync<ArchiveSettings>(_settingsFile, cancellationToken).ConfigureAwait(false);
+        if (read.HeldOpen) throw new IOException("The archive settings can't be read right now.");
+        var settings = read.Value;
         if (settings is not null && settings.SchemaVersion > ArchiveSettings.CurrentSchemaVersion)
         {
             Quarantine(_settingsFile, $"schema {settings.SchemaVersion} is newer than this version");
@@ -33,12 +41,15 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
     public async Task<IReadOnlyList<ArchiveSetRecord>> LoadSetsAsync(CancellationToken cancellationToken = default)
     {
         var sets = new List<ArchiveSetRecord>();
+        var unreadable = new List<Guid>();
+        _unreadableSets = unreadable;
         if (!Directory.Exists(_setsDirectory)) return sets;
         foreach (var file in Directory.EnumerateFiles(_setsDirectory, "*.json"))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var set = await ReadAsync<ArchiveSetRecord>(file, cancellationToken).ConfigureAwait(false);
-            if (set is null) continue;
+            var read = await ReadAsync<ArchiveSetRecord>(file, cancellationToken).ConfigureAwait(false);
+            if (read.HeldOpen && Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var heldId)) unreadable.Add(heldId);
+            if (read.Value is not { } set) continue;
             if (set.SchemaVersion > ArchiveSetRecord.CurrentSchemaVersion || set.Id == Guid.Empty || string.IsNullOrWhiteSpace(set.Key))
             {
                 Quarantine(file, "the document is not one this version can use");
@@ -64,7 +75,7 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
         foreach (var file in Directory.EnumerateFiles(_packagesDirectory, "*.json"))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (await ReadAsync<ArchivePackagePassword>(file, cancellationToken).ConfigureAwait(false) is { } password)
+            if ((await ReadAsync<ArchivePackagePassword>(file, cancellationToken).ConfigureAwait(false)).Value is { } password)
             {
                 passwords.Add(password);
             }
@@ -88,17 +99,38 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
         return Task.CompletedTask;
     }
 
-    private async Task<T?> ReadAsync<T>(string path, CancellationToken cancellationToken) where T : class
+    /// <summary>
+    /// Only what was read and turned out to be bad is moved aside. A file that can't be opened right now, because a
+    /// scanner has it, says nothing about what is in it, and losing a finished set's record would run it all again.
+    /// </summary>
+    private async Task<(T? Value, bool HeldOpen)> ReadAsync<T>(string path, CancellationToken cancellationToken) where T : class
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(json, PersistenceJson.Options) ?? throw new InvalidDataException("The document was empty.");
-        }
-        catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException)
-        {
-            Quarantine(path, exception.GetType().Name);
-            return null;
+            try
+            {
+                var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+                return (JsonSerializer.Deserialize<T>(json, PersistenceJson.Options) ?? throw new InvalidDataException("The document was empty."), false);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidDataException)
+            {
+                Quarantine(path, exception.GetType().Name);
+                return (null, false);
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return (null, false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt >= _options.ReadAttempts)
+                {
+                    log?.Invoke($"Could not read archive document '{Path.GetFileName(path)}', so it is left as it is: {exception.GetType().Name}.");
+                    return (null, true);
+                }
+
+                await Task.Delay(_options.ReadRetryDelay * attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -115,4 +147,13 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
             log?.Invoke($"Could not set aside '{Path.GetFileName(path)}': {exception.GetType().Name}.");
         }
     }
+}
+
+public sealed record ArchiveStoreOptions
+{
+    /// <summary>Tries at a document that can't be opened, counting the first.</summary>
+    public int ReadAttempts { get; init; } = 4;
+
+    /// <summary>The wait before the second try, and it grows by this much each time.</summary>
+    public TimeSpan ReadRetryDelay { get; init; } = TimeSpan.FromMilliseconds(100);
 }

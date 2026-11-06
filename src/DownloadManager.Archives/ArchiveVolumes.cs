@@ -39,7 +39,11 @@ public static partial class ArchiveVolumes
     // archives than a set missing 122 volumes, so a three-digit run needs to be nearly whole.
     private const int MaxThreeDigitGaps = 8;
 
-    public static IReadOnlyList<ArchiveVolumeSet> Group(IEnumerable<string> fileNames)
+    /// <param name="isWholeArchive">
+    /// Says that a name's own header calls it a whole archive, so a numbered name doesn't make it part of a
+    /// set. Null goes by names alone. Old-style names are left to the names: a lone .r00 has no header of its own to go by.
+    /// </param>
+    public static IReadOnlyList<ArchiveVolumeSet> Group(IEnumerable<string> fileNames, Func<string, bool>? isWholeArchive = null)
     {
         var names = fileNames
             .Select(Path.GetFileName)
@@ -79,6 +83,10 @@ public static partial class ArchiveVolumes
             {
                 Add(oldStyle, stem, (0, name));
             }
+            else if (isWholeArchive?.Invoke(name) == true)
+            {
+                singles.Add(name);
+            }
             else if (PartVolume().Match(name) is { Success: true } part && part.Groups["number"].Value.Any(digit => digit != '0'))
             {
                 Add(parts, part.Groups["base"].Value, (part.Groups["number"].Value, name));
@@ -107,8 +115,8 @@ public static partial class ArchiveVolumes
     }
 
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
-    public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName) =>
-        Group(fileNames).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
+    public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName, Func<string, bool>? isWholeArchive = null) =>
+        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
 
     private static ArchiveVolumeSet BuildOldStyle(string baseName, List<(int Index, string Name)> members)
     {

@@ -209,10 +209,21 @@ internal sealed partial class SandboxHost : IAsyncDisposable
     {
         var process = _process!;
         process.Kill(entireProcessTree: true);
-        await process.WaitForExitAsync();
+        await WaitUntilGoneAsync(process);
         process.Dispose();
         _process = null;
         await CloseConnectionsAsync();
+    }
+
+    /// <summary>
+    /// Until its handles are closed too. WaitForExit can return as soon as the exit code is set, which comes earlier: a
+    /// next start in that moment still finds the old Host's mutex, takes itself for a second copy and exits with 0.
+    /// </summary>
+    public static async Task WaitUntilGoneAsync(Process process)
+    {
+        await process.WaitForExitAsync();
+        using var gone = new ManualResetEvent(false) { SafeWaitHandle = new Microsoft.Win32.SafeHandles.SafeWaitHandle(process.Handle, ownsHandle: false) };
+        await Task.Run(() => gone.WaitOne(TimeSpan.FromSeconds(30)));
     }
 
     public Task RestartAsync() => LaunchAsync();
@@ -272,6 +283,7 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         info.RedirectStandardError = true;
         info.StandardOutputEncoding = Encoding.UTF8;
         info.StandardErrorEncoding = Encoding.UTF8;
+        info.StandardInputEncoding = new UTF8Encoding(false);
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         info.ArgumentList.Add("--no-start");
 

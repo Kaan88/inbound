@@ -179,7 +179,7 @@ public sealed partial class DownloadManagerService
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { errors++; continue; }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException) { errors++; continue; }
             var comparable = false;
-            var changed = !File.Exists(original.FinalFilePath);
+            var changed = !File.Exists(original.FinalFilePath) && !original.FileRemovedAfterExtraction;
             if (metadata.ETag is not null && original.ETag is not null)
             { comparable = true; changed |= metadata.ETag != original.ETag; }
             if (metadata.LastModified is not null && original.LastModified is not null)

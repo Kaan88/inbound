@@ -130,6 +130,39 @@ public class JDownloaderBridgeTests
         Assert.EndsWith("my%20links.CCF", url, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(@"C:\x%41.ccf", "file:/C:/x%2541.ccf")]
+    [InlineData(@"C:\a b%20c.ccf", "file:/C:/a%20b%2520c.ccf")]
+    [InlineData(@"C:\dir\sub dir\links.ccf", "file:/C:/dir/sub%20dir/links.ccf")]
+    [InlineData(@"C:\caf#é?.ccf", "file:/C:/caf%23%C3%A9%3F.ccf")]
+    public void A_file_url_leads_back_to_exactly_the_file_chosen(string path, string url)
+    {
+        Assert.Equal(url, JDownloaderBridge.ToFileUrl(path));
+        Assert.Equal(path, new Uri(url).LocalPath);
+    }
+
+    [Theory]
+    [InlineData(@"\\server\share\links.ccf")]
+    [InlineData("links.ccf")]
+    public void A_path_that_is_not_on_a_drive_gets_no_file_url(string path)
+    {
+        Assert.Null(JDownloaderBridge.ToFileUrl(path));
+    }
+
+    [Fact]
+    public async Task A_percent_sign_in_a_file_name_reaches_jdownloader_as_that_file()
+    {
+        var fake = new FakeJDownloader();
+        using var bridge = Bridge(fake);
+        var path = WorkFile("x%41.ccf", CcfLegacy(CryptLoadXml()));
+
+        Assert.Equal(JDownloaderBridgeStatus.Sent, (await bridge.SendFileAsync(path)).Status);
+
+        var url = fake.Requests.Single(r => r.Method == HttpMethod.Post).Form["urls"];
+        Assert.EndsWith("x%2541.ccf", url, StringComparison.Ordinal);
+        Assert.Equal(path, new Uri(url).LocalPath);
+    }
+
     [Fact]
     public async Task Jd_saying_failed_is_a_rejection()
     {

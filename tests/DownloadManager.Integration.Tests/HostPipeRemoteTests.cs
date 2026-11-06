@@ -861,6 +861,26 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TheCliReadsALinkAndAPasswordFromOnePipeAsUtf8WithSpacesKept()
+    {
+        await using var host = await StartHostAsync();
+        await using var connection = await WithKeyAsync(host);
+        var link = Mock.HosterUrl("file/stdin-order");
+        const string password = "  pä55ß жд 日本 ";
+
+        // Both lines arrive in one write, so a second reader on the pipe would find its line already gone.
+        var added = await host.RunCliAsync($"{link}\n{password}", "remote", "add", "-", "--archive-password-stdin", "--dest", host.Destination);
+        Assert.True(added.ExitCode == 0, added.Error);
+        Assert.DoesNotContain("pä55ß", added.All);
+
+        var saved = Directory.EnumerateFiles(Path.Combine(host.DataDirectory, "remote", "jobs"), "*.json").Single();
+        using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(saved));
+        var sealedPassword = document.RootElement.EnumerateObject()
+            .First(property => property.Name.Equals("protectedArchivePassword", StringComparison.OrdinalIgnoreCase)).Value.GetString();
+        Assert.Equal(password, DownloadManager.Persistence.SecretProtector.UnprotectRemoteArchivePassword(sealedPassword));
+    }
+
+    [Fact]
     public async Task WithNoListOfSitesDmAddAsksAndRemoteAddGivesTheRealCause()
     {
         await using var host = await StartHostAsync();

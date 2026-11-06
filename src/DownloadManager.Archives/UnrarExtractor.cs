@@ -24,6 +24,9 @@ public sealed record UnrarExtractorOptions
     public Func<string, long?>? AvailableBytes { get; init; }
 
     internal Action<Process>? ToolStarted { get; init; }
+
+    /// <summary>Stands in for flushing a path to the disk. Tests use it to make a flush fail.</summary>
+    internal Action<string>? FlushOverride { get; init; }
 }
 
 /// <summary>
@@ -33,6 +36,8 @@ public sealed record UnrarExtractorOptions
 /// </summary>
 public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null) : IArchiveExtractor
 {
+    private const string DataStreamEntry = "Type: NTFS alternate data stream";
+
     private readonly UnrarExtractorOptions _options = options ?? new UnrarExtractorOptions();
 
     public async Task<ArchiveProbe> ProbeAsync(string firstVolume, string? password, CancellationToken cancellationToken)
@@ -83,10 +88,24 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
             progress?.Report(new ExtractionProgress(ExtractionPhase.Verifying));
             var content = ExtractionSafety.WalkStaging(staging.PayloadFolder, probe, limits);
 
+            // The files first, so no rename can ever put data in the destination that isn't on the disk yet.
+            var flushed = !request.MakeDurable || FlushAll(content.Files.Select(file => Path.Combine(staging.PayloadFolder, file)), FlushFile, cancellationToken);
+
             var files = ExtractionFinalizer.MoveIntoDestination(
                 staging, content, destination, request.ConflictPolicy, request.PreserveFolders, progress, cancellationToken, request.KeepFiles);
 
-            var result = new ExtractionResult(destination, files);
+            if (request.MakeDurable)
+            {
+                var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(StringComparer.OrdinalIgnoreCase);
+                flushed &= FlushAll(folders, FlushDirectory, cancellationToken);
+            }
+
+            var result = new ExtractionResult(destination, files)
+            {
+                VolumesRead = VolumesInFolderOf(firstVolume, probe.VolumesRead),
+                FlushedToDisk = request.MakeDurable && flushed,
+            };
+
             if (request.Committed is { } committed)
             {
                 try
@@ -97,7 +116,7 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
                 {
                     // Success could not be recorded, so these files must not stand: the next
                     // attempt would find them and, under Rename, write everything a second time.
-                    await StagingArea.RecoverAndRemoveAsync(staging.Folder);
+                    await staging.UndoAsync();
                     staging = null;
                     throw;
                 }
@@ -117,6 +136,59 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
             if (staging is not null) await staging.RemoveAsync();
             throw;
         }
+    }
+
+    private void FlushFile(string path)
+    {
+        if (_options.FlushOverride is { } flush) flush(path);
+        else ExtractionDurability.FlushFile(path);
+    }
+
+    private void FlushDirectory(string path)
+    {
+        if (_options.FlushOverride is { } flush) flush(path);
+        else ExtractionDurability.FlushDirectory(path);
+    }
+
+    /// <summary>False if any flush failed. The output stands either way, and only deleting the archives depends on this.</summary>
+    private static bool FlushAll(IEnumerable<string> paths, Action<string> flush, CancellationToken cancellationToken)
+    {
+        var all = true;
+        foreach (var path in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                flush(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            {
+                all = false;
+            }
+        }
+
+        return all;
+    }
+
+    /// <summary>UnRAR only follows a set within its first volume's folder, so a name anywhere else is not one it read.</summary>
+    private static IReadOnlyList<string> VolumesInFolderOf(string firstVolume, IReadOnlyList<string> listed)
+    {
+        var folder = Path.GetDirectoryName(firstVolume);
+        var read = new List<string> { firstVolume };
+        foreach (var path in listed)
+        {
+            try
+            {
+                var full = Path.GetFullPath(path, folder!);
+                if (string.Equals(Path.GetDirectoryName(full), folder, StringComparison.OrdinalIgnoreCase) && !read.Contains(full, StringComparer.OrdinalIgnoreCase)) read.Add(full);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Not a path, so not a volume.
+            }
+        }
+
+        return read;
     }
 
     private string FindTool() =>
@@ -155,7 +227,10 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
     {
         var folder = Path.GetDirectoryName(firstVolume);
         if (folder is null || !Directory.Exists(folder)) return null;
-        return ArchiveVolumes.FindSet(Directory.EnumerateFiles(folder).Select(file => Path.GetFileName(file)), firstVolume);
+        return ArchiveVolumes.FindSet(
+            Directory.EnumerateFiles(folder).Select(file => Path.GetFileName(file)),
+            firstVolume,
+            name => RarVolumeHeader.Read(Path.Combine(folder, name)) == RarVolumeHeaderKind.NotAVolume);
     }
 
     private async Task<(ArchiveProbe Probe, UnrarListing Listing)> ProbeCoreAsync(string tool, string firstVolume, UnrarPassword secret, CancellationToken cancellationToken)
@@ -210,6 +285,11 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
         var full = await ListAsync(tool, firstVolume, useSecret ? secret : UnrarPassword.None, allVolumes: true, cancellationToken);
         var fullListing = UnrarListing.Parse(full.Output);
 
+        // lt leaves NTFS streams out, and UnRAR restores them whatever switch it is given, past every limit here.
+        // Only lta shows them. The rest of what it lists isn't needed, so its output is only looked at for this.
+        var withServices = await ListAsync(tool, firstVolume, useSecret ? secret : UnrarPassword.None, allVolumes: true, cancellationToken, command: "lta");
+        var holdsStreams = withServices.Output.Contains(DataStreamEntry, StringComparison.Ordinal);
+
         var missing = new List<string>();
         bool allPresent;
         switch (full.ExitCode)
@@ -255,6 +335,9 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
             AllVolumesPresent = allPresent,
             MissingVolumes = missing,
             ListingHasUnknownLines = fullListing.HasUnknownLines,
+            ListingHasRepeatedNames = fullListing.HasRepeatedNames,
+            HoldsDataStreams = holdsStreams,
+            VolumesRead = fullListing.Archives,
         }, listing);
     }
 
@@ -278,9 +361,9 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
         }
     }
 
-    private Task<ToolRun> ListAsync(string tool, string firstVolume, UnrarPassword secret, bool allVolumes, CancellationToken cancellationToken)
+    private Task<ToolRun> ListAsync(string tool, string firstVolume, UnrarPassword secret, bool allVolumes, CancellationToken cancellationToken, string command = "lt")
     {
-        var arguments = new List<string> { "lt" };
+        var arguments = new List<string> { command };
         if (allVolumes) arguments.Add("-v");
         arguments.AddRange([secret.SwitchArgument, "-scfr", "-idc", "-cfg-", "-c-", firstVolume]);
 

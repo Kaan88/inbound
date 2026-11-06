@@ -143,7 +143,7 @@ internal static class AtomicFile
                 stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temp, path, overwrite: true);
+            await ReplaceAsync(temp, path).ConfigureAwait(false);
         }
         finally
         {
@@ -157,6 +157,24 @@ internal static class AtomicFile
             catch (IOException)
             {
                 // best effort
+            }
+        }
+    }
+
+    /// <summary>A scanner or indexer can hold the old file for a moment, and that shouldn't cost a save.</summary>
+    private static async Task ReplaceAsync(string temp, string path)
+    {
+        const int MostAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < MostAttempts)
+            {
+                await Task.Delay(20 << attempt, CancellationToken.None).ConfigureAwait(false);
             }
         }
     }
@@ -444,6 +462,8 @@ public sealed class JsonJobStore : IJobStore
 
 public sealed class JsonCheckpointStore : IDownloadCheckpointStore
 {
+    private const int LoadAttempts = 4;
+
     private readonly StoragePaths _paths;
 
     public JsonCheckpointStore(StoragePaths paths)
@@ -459,21 +479,32 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
             return null;
         }
 
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            var checkpoint = JsonSerializer.Deserialize<DownloadCheckpoint>(json, PersistenceJson.Options);
-            if (checkpoint is null || checkpoint.JobId != jobId ||
-                checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+            try
+            {
+                var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+                var checkpoint = JsonSerializer.Deserialize<DownloadCheckpoint>(json, PersistenceJson.Options);
+                if (checkpoint is null || checkpoint.JobId != jobId ||
+                    checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+                {
+                    return null;
+                }
+
+                return checkpoint;
+            }
+            catch (JsonException)
             {
                 return null;
             }
-
-            return checkpoint;
-        }
-        catch (Exception ex) when (ex is JsonException or IOException)
-        {
-            return null;
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < LoadAttempts)
+            {
+                await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 

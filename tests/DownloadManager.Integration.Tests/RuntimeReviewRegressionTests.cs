@@ -33,13 +33,14 @@ public sealed partial class RuntimeServiceTests
         private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Guid BlockJob { get; set; }
+        public DownloadState? BlockAnyJobIn { get; set; }
         public Task Entered => _entered.Task;
 
         public void Release() => _release.Set();
 
         public Task SaveAsync(DownloadJob job, CancellationToken cancellationToken = default)
         {
-            if (job.Id == BlockJob && job.State == DownloadState.Connecting)
+            if ((job.Id == BlockJob && job.State == DownloadState.Connecting) || job.State == BlockAnyJobIn)
             {
                 _entered.TrySetResult();
                 _release.Wait(TimeSpan.FromSeconds(30));
@@ -326,6 +327,39 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("cancelled", cancelled.State);
         Assert.Null(cancelled.StartedAt);
         Assert.False(File.Exists(cancelled.FinalFilePath));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AFailureAClientCanSeeCanBeActedOnWhileItsRunIsStillSavingIt(bool refresh)
+    {
+        BlockingJobStore? jobs = null;
+        await using var ctx = await ServiceContext.CreateAsync(_server, hooks: new ContextHooks
+        {
+            WrapJobs = inner => jobs = new BlockingJobStore(inner),
+        });
+        jobs!.BlockAnyJobIn = DownloadState.Failed;
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/no-such-route/window.bin",
+            DestinationDirectory = ctx.Destination,
+            Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+
+        await jobs.Entered.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal("failed", ctx.Service.GetJob(added.Job!.Id)!.State);
+
+        var acting = refresh
+            ? ctx.Service.RefreshUrlAsync(added.Job.Id, $"{_server.BaseAddress}/file/window.bin?size=4096&seed=71")
+            : ctx.Service.ResumeAsync(added.Job.Id);
+        await Task.Delay(150);
+        Assert.False(acting.IsCompleted);
+        jobs.Release();
+
+        var answer = await acting;
+        Assert.True(answer.Ok, answer.Error);
     }
 
     [Fact]

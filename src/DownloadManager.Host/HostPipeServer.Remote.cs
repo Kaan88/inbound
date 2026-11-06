@@ -12,7 +12,8 @@ public sealed partial class HostPipeServer
     /// </summary>
     private static bool WaitsOnProvider(string type) => type is
         MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or
-        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote;
+        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or
+        MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd;
 
     private async Task<bool> TryDispatchRemoteAsync(ClientConnection client, IpcMessage message, CancellationToken cancellationToken)
     {
@@ -31,7 +32,10 @@ public sealed partial class HostPipeServer
             MessageTypes.RemoteItemGet => MessageTypes.RemoteItemResult,
             MessageTypes.RemoteFiles => MessageTypes.RemoteFilesResult,
             MessageTypes.RemoteSelect or MessageTypes.RemoteRetry or MessageTypes.RemoteCheckNow or
-            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote => MessageTypes.RemoteActionResult,
+            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteArchivePassword => MessageTypes.RemoteActionResult,
+            MessageTypes.RemoteContainerPreview => MessageTypes.RemoteContainerPreviewResult,
+            MessageTypes.RemoteContainerAdd => MessageTypes.RemoteContainerAddResult,
+            MessageTypes.RemoteContainerSendToJd => MessageTypes.RemoteContainerSendResult,
             _ => null,
         };
         if (replyType is null)
@@ -56,6 +60,10 @@ public sealed partial class HostPipeServer
                 MessageTypes.RemoteRetry => await remote.RetryAsync(message.GetPayload<RemoteRetryRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteCheckNow => await remote.CheckNowAsync(Payload<RemoteCheckNowRequest>(message), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteRemove => await remote.RemoveAsync(message.GetPayload<RemoteJobIdRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteArchivePassword => await remote.SetArchivePasswordAsync(message.GetPayload<RemoteArchivePasswordRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteContainerPreview => await remote.ContainerPreviewAsync(message.GetPayload<RemoteContainerPreviewRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteContainerAdd => await remote.ContainerAddAsync(message.GetPayload<RemoteContainerAddRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteContainerSendToJd => await remote.ContainerSendToJdAsync(message.GetPayload<RemoteContainerSendRequest>(), cancellationToken).ConfigureAwait(false),
                 _ => await remote.DeleteRemoteAsync(message.GetPayload<RemoteDeleteRequest>(), cancellationToken).ConfigureAwait(false),
             };
 

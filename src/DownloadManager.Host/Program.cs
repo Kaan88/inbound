@@ -133,10 +133,22 @@ internal static class Program
 
             // Attaches to the service, so it must exist before anything can finish.
             var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
-            var remoteJobs = remote.CreateCoordinator(paths, service, log.Info);
+            var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
             service.InitializeAsync().GetAwaiter().GetResult();
-            archives.InitializeAsync().GetAwaiter().GetResult();
+
+            // Ordinary downloads don't depend on this. Clients just don't get the archive commands this time.
+            var archivesStarted = false;
+            try
+            {
+                archives.InitializeAsync().GetAwaiter().GetResult();
+                archivesStarted = true;
+            }
+            catch (Exception ex)
+            {
+                log.Error($"Archive extraction could not start: {ex.GetType().Name}");
+                archives.ShutdownAsync().GetAwaiter().GetResult();
+            }
 
             // After the service, because reconciling can create local jobs straight away. A job left
             // Submitting by a crash becomes SubmissionUnknown here, and the provider's list decides.
@@ -158,7 +170,7 @@ internal static class Program
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = new ArchiveIpcDispatcher(archives) };
+            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null };
             archives.Changed += (_, change) => pipe.BroadcastArchiveChanged(change);
             void ExitApplication() => _ = Task.Run(async () =>
             {
@@ -293,7 +305,8 @@ internal static class Program
                 controller.OpenUi();
             }
 
-            Application.Run(tray);
+            // A client can ask for an exit as soon as the pipe is open, before there is a loop to end.
+            if (!controller.ExitWasRequested) Application.Run(tray);
 
             log.Info("UI loop exited; shutting down.");
             try
