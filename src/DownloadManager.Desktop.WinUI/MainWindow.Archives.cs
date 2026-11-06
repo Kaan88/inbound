@@ -388,7 +388,7 @@ public sealed partial class MainWindow
         }
 
         if (problems.Count > 0) await ShowMessageAsync("Extract", string.Join(Environment.NewLine, problems.Take(5)));
-        else if (words.Count > 0) StatusText.Text = string.Join(" ", words);
+        else if (words.Count > 0) ShowPassingStatus(string.Join(" ", words));
     }
 
     private async Task ExtractFromDiskAsync()
@@ -427,7 +427,7 @@ public sealed partial class MainWindow
 
         var summary = ArchiveText.ExtractSummary(result);
         if (result.Ignored.Count > 0) await ShowMessageAsync("Extract archive", summary);
-        else StatusText.Text = summary;
+        else ShowPassingStatus(summary);
     }
 
     /// <summary>Only ever opened by the user: the row, the notice or the menu asks, and this answers.</summary>
@@ -479,9 +479,9 @@ public sealed partial class MainWindow
         var cleared = password.Length == 0;
         password = string.Empty;
         if (!result.Ok) await ShowMessageAsync("Archive password", RemoteText.Failure(result.Error));
-        else if (cleared) StatusText.Text = $"The saved archive password for \"{target.Name}\" is gone.";
-        else if (target.Needed) StatusText.Text = $"Trying to extract \"{target.Name}\" with this password…";
-        else StatusText.Text = $"Archive password saved for \"{target.Name}\".";
+        else if (cleared) ShowPassingStatus($"The saved archive password for \"{target.Name}\" is gone.");
+        else if (target.Needed) ShowPassingStatus($"Trying to extract \"{target.Name}\" with this password…");
+        else ShowPassingStatus($"Archive password saved for \"{target.Name}\".");
     }
 
     private async Task RetryArchivesAsync(IReadOnlyList<ArchiveSetDto> sets)

@@ -1064,7 +1064,7 @@ public sealed partial class MainWindow : Window
         if (files.Count > 0) await RunBulkActionAsync(files, fileAction!, label);
         else await RefreshAsync();
         if (problems.Count > 0) await ShowMessageAsync($"{label} incomplete", string.Join(Environment.NewLine, problems.Take(5)));
-        else if (notes.Count > 0) StatusText.Text = string.Join("  ", notes.Take(2));
+        else if (notes.Count > 0) ShowPassingStatus(string.Join("  ", notes.Take(2)));
     }
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
