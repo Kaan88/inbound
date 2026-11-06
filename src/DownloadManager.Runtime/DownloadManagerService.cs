@@ -793,9 +793,7 @@ public sealed partial class DownloadManagerService
 
         if (deleteFile)
         {
-            DeleteFileQuietly(runtime.Job.FinalFilePath);
-            DeleteFileQuietly(runtime.Job.PartFilePath);
-            await _checkpointStore.DeleteAsync(id, CancellationToken.None).ConfigureAwait(false);
+            await DeletePayloadAsync(runtime.Job, includeFinal: true, CancellationToken.None).ConfigureAwait(false);
         }
 
         await _persistGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -981,7 +979,6 @@ public sealed partial class DownloadManagerService
             LaunchAtStartup = settings.LaunchAtStartup,
             ClipboardMonitoring = settings.ClipboardMonitoring,
             BrowserIntegrationEnabled = settings.BrowserIntegrationEnabled,
-            BrowserAutoIntercept = settings.BrowserAutoIntercept,
             NotifyOnCompletion = settings.NotifyOnCompletion,
             PlayCompletionSound = settings.PlayCompletionSound,
             EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),
@@ -3689,7 +3686,6 @@ public sealed partial class DownloadManagerService
             LaunchAtStartup = settings.LaunchAtStartup,
             ClipboardMonitoring = settings.ClipboardMonitoring,
             BrowserIntegrationEnabled = settings.BrowserIntegrationEnabled,
-            BrowserAutoIntercept = settings.BrowserAutoIntercept,
             NotifyOnCompletion = settings.NotifyOnCompletion,
             PlayCompletionSound = settings.PlayCompletionSound,
             EventSoundFiles = new Dictionary<string, string>(settings.EventSoundFiles ?? new(), StringComparer.OrdinalIgnoreCase),

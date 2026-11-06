@@ -3,7 +3,6 @@ import { connectionProblem } from "./connection-problem";
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
-  mediaDetectionEnabled: boolean;
   startMode: "now" | "later";
   interceptedExtensions: string[];
   excludedExtensions: string[];
@@ -14,7 +13,6 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   autoIntercept: false,
-  mediaDetectionEnabled: false,
   startMode: "now",
   interceptedExtensions: [],
   excludedExtensions: [],
@@ -36,7 +34,6 @@ function splitList(value: string): string[] {
 function fill(settings: Settings): void {
   byId<HTMLInputElement>("enabled").checked = settings.enabled;
   byId<HTMLInputElement>("autoIntercept").checked = settings.autoIntercept;
-  byId<HTMLInputElement>("mediaDetectionEnabled").checked = settings.mediaDetectionEnabled;
   byId<HTMLInputElement>("notifications").checked = settings.notifications;
   byId<HTMLSelectElement>("startMode").value = settings.startMode;
   byId<HTMLTextAreaElement>("interceptedExtensions").value = settings.interceptedExtensions.join(", ");
@@ -48,7 +45,6 @@ function collect(): Settings {
   return {
     enabled: byId<HTMLInputElement>("enabled").checked,
     autoIntercept: byId<HTMLInputElement>("autoIntercept").checked,
-    mediaDetectionEnabled: byId<HTMLInputElement>("mediaDetectionEnabled").checked,
     notifications: byId<HTMLInputElement>("notifications").checked,
     startMode: byId<HTMLSelectElement>("startMode").value === "later" ? "later" : "now",
     interceptedExtensions: splitList(byId<HTMLTextAreaElement>("interceptedExtensions").value),
@@ -113,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ok?: boolean;
         error?: string;
       };
-      result.textContent = response?.ok ? "Connected to the desktop app." : connectionProblem(response?.error);
+      result.textContent = response?.ok ? "Connected to the desktop app." : (response?.error || connectionProblem(undefined));
       byId<HTMLAnchorElement>("getApp").classList.toggle("hidden", response?.ok === true);
     } catch (error) {
       result.textContent = connectionProblem(error instanceof Error ? error.message : String(error));

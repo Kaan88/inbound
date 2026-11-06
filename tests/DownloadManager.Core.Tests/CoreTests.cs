@@ -169,7 +169,7 @@ public sealed class UpdateManifestVerifierTests
 public sealed class AppSettingsDefaultsTests
 {
     [Fact]
-    public void DefaultsMatchObservedIdmBaseline()
+    public void DefaultsMatchExpectedBaseline()
     {
         var settings = new AppSettings();
         Assert.Equal(8, settings.DefaultConnections);

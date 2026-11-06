@@ -12,7 +12,7 @@ release file was downloaded, and that count includes update checks.
 
 It sends downloads from Chrome to the Inbound Download Manager desktop app for Windows, on the same
 computer, using Chrome's native messaging. The app must be installed separately. Without it, downloads
-stay in Chrome.
+stay in Chrome. The extension makes no network requests of its own: the app does the downloading.
 
 ## What it reads, and when
 
@@ -36,7 +36,6 @@ of these ways:
   At the click, the extension notes which cookie store and top-level site the link belongs to, so it can
   read the right cookies when you confirm.
 - **From Download All**, for the links left ticked.
-- **From the media list**, for an item you choose, if you have turned on media detection.
 
 **Downloads you do not send:** while automatic sending is on and not paused, the extension looks at each
 new Chrome download's address, final address, referrer, file name and type to apply your rules.
@@ -44,18 +43,12 @@ Downloads that do not match stay in Chrome. This is not kept or sent to the app,
 for them. To find out whether you held Delete, the extension first asks its script in each open tab about
 the download's address; the script compares it with the link you clicked and keeps nothing.
 
-**Links on a page:** when you open Download All, the extension reads the current page's links, image and
-media addresses, and their labels. They stay in that window. Links that point to files start out ticked,
-and you can untick any of them. Only the addresses left ticked go to the app, each with the details listed
-above, including your cookies for that address's site, which may not be the site of the page you are on.
-If you send two or more, the page's title becomes the name of the package.
-
-**Media detection** is off unless you turn it on. When on, the extension looks for video and audio
-addresses on each page you visit, and keeps them in memory until the page is closed or reloaded. It sends
-one to the app only if you choose to download it. To list a stream's qualities, opening the toolbar popup
-may request the stream's playlist from the site hosting it, with your cookies only if that is the site you
-are on and the request is not redirected. The list of qualities stays in memory for up to five minutes,
-and goes to the app only if you choose one to download.
+**Links on a page:** when you open Download All, the extension reads the addresses of the current page's
+links, images, video and audio, and their labels. It does not look at them until you open it. They stay in
+that window. Links that point to files start out ticked, and you can untick any of them. Only the addresses
+left ticked go to the app, each with the details listed above, including your cookies for that address's
+site, which may not be the site of the page you are on. If you send two or more, the page's title becomes
+the name of the package.
 
 **The Delete key:** while automatic sending is on, the extension's script on http and https pages checks
 each key press only to see whether it is Delete, and notes the link if you click one while Delete is held.
@@ -65,10 +58,10 @@ next click or until the page closes, and goes nowhere else. While automatic send
 listen for keys or clicks at all.
 
 **Settings:** the extension stores your settings, including any sites you exclude, in Chrome's local
-storage on this computer. A download sent from the right-click menu or the media list is kept in Chrome's
-session storage until the app accepts it: its address, page address, referrer, user agent, file name and
-which cookie store to use, but no cookie values. If you cancel, it stays there until you close Chrome.
-Chrome's sync storage is not used.
+storage on this computer. A download sent from the right-click menu is kept in Chrome's session storage
+until the app accepts it: its address, page address, referrer, user agent, file name and which cookie store
+to use, but no cookie values. If you cancel, it stays there until you close Chrome. Chrome's sync storage is
+not used.
 
 **What the app gives the extension:** to show recent downloads in the toolbar popup, the app sends the
 extension its download list, including downloads you did not send from Chrome: addresses, page addresses,
@@ -133,10 +126,9 @@ including the Limited Use requirements.
 ## Your choices
 
 In the extension's Settings you can turn automatic sending on or off, limit it to certain file types (a file
-whose name has no extension is still sent, unless it is a web page), exclude sites, and turn media detection
-on or off. You can pause catching for five minutes from the toolbar popup. Removing the extension stops it
-reading or sending anything. Downloads already in the app stay there, keep running, and keep their saved
-cookies until you remove them.
+whose name has no extension is still sent, unless it is a web page), and exclude sites. You can pause catching
+for five minutes from the toolbar popup. Removing the extension stops it reading or sending anything. Downloads
+already in the app stay there, keep running, and keep their saved cookies until you remove them.
 
 ## Changes and contact
 

@@ -17,9 +17,9 @@ Owner workflow: batch remaining implementation, then consolidated verification; 
 
 0.1.5 source: persistent custom categories, Add URL selection/creation, extension rules, category folders/remember, sidebar and Options editing implemented. Focused7/7 and Core79/79 pass; full integration82/82 passes (artifacts/integration-categories.log); live GUI acceptance pending. Metadata preview/server-suggested names and category deletion remain open (PROGRESS.md).
 
-Owner file-icon requirement (2026-11-05): verified actual Windows Shell icon calls in pinned reference app binary; replace generic file glyphs with Windows file-type and completed-file/application icons. Investigation: `notes/file-icons-2026-11-05.md`. Source implementation now covers main/queue rows and progress/completion headers; native checks2/2 and clean WinUI build pass. Live visual/DPI acceptance remains pending; see PROGRESS.md.
+Owner file-icon requirement (2026-11-05): replace generic file glyphs with Windows file-type and completed-file/application icons. Source implementation now covers main/queue rows and progress/completion headers; native checks2/2 and clean WinUI build pass. Live visual/DPI acceptance remains pending; see PROGRESS.md.
 
-Post-0.1.4: manual HTTP Basic authentication and DPAPI-protected job headers implemented in source; integration 76/76 and redirect-boundary tests pass. Owner's testfile.org right-click 403 was investigated: automatic capture has a browser-resolved CDN URL, right-click does not. Frame/profile/partition cookie handling corrected; extension 34/34 plus typecheck/build pass. Live reference check: reference app itself returns403 for right-click on the same testfile link. Direct handoff remains the normal path; browser-assisted preparation is an optional improvement, not a confirmed parity defect. Broader live acceptance remains open (PROGRESS.md).
+Post-0.1.4: manual HTTP Basic authentication and DPAPI-protected job headers implemented in source; integration 76/76 and redirect-boundary tests pass. Owner's testfile.org right-click 403 was investigated: automatic capture has a browser-resolved CDN URL, right-click does not. Frame/profile/partition cookie handling corrected; extension 34/34 plus typecheck/build pass. Direct handoff remains the normal path; browser-assisted preparation is an optional improvement, not a confirmed defect. Broader live acceptance remains open (PROGRESS.md).
 
 Post-0.1.4 source increment: persisted queue file ordering and Queues → Files editor added. Focused actual-dispatch/restart/stale-list coverage passes, Core 79/79, clean Runtime/WinUI builds. Full integration 74/74 passes (artifacts/integration-queue-file-order.log); live editor acceptance remains open. This is separate from grouped independent child downloads, which remain planned.
 
@@ -63,36 +63,35 @@ Dial Up/VPN is explicitly out of scope by owner decision (2026-11-04).
 
 Branding follow-up (owner, 2026-11-05): develop a creative product name and a
 better original icon. Present cohesive options after the current updater/browser
-fixes; keep this separate from functional acceptance and avoid copying reference app assets.
+fixes; keep this separate from functional acceptance.
 
 Current implementation increment: progress/completion controls and live HTTP
-speed limits (PARITY E97/E98). Backend tests and representative live controls /
+speed limits. Backend tests and representative live controls /
 hash checks pass. The elevated installed-Host access blocker is cleared;
 progress/completion height clipping is fixed. Owner approval, dark/DPI variants
 and external shell handoff checks remain open.
 
 | ID | Task | Status | Acceptance |
 | --- | --- | --- | --- |
-| UI.R1 | Complete reference app functional/interaction/visual review and WinUI reorganization | in_progress; owner acceptance blocker | Owner supplied 36 screenshots, cataloged in `reference-screens/INDEX.md`; source comparison and missing/adjusted behavior are in `notes/screenshot-review-2026-11-04.md`. Cover functionality, workflow, settings/defaults, hierarchy, density and appearance. Implement and verify the recorded gaps with original assets, then obtain owner acceptance. Current UI is not accepted. |
-| UI.R2 | Investigate Edge downloads flyout opening when a download starts | partial; fix implemented, owner Edge check pending | Cause: interception ran in `downloads.onCreated`, after Chromium had already added the download to its UI. reference app 6.43.1 MV3 extension holds `downloads.onDeterminingFilename` instead; ours now does the same (b56ae50, docs/browser-integration.md). Accept only after the owner confirms no flyout flash in Edge for accepted downloads and a normal flyout for downloads left to the browser. |
+| UI.R1 | Complete functional/interaction/visual review and WinUI reorganization | in_progress; owner acceptance blocker | Cover functionality, workflow, settings/defaults, hierarchy, density and appearance. Implement and verify the recorded gaps with original assets, then obtain owner acceptance. Current UI is not accepted. |
+| UI.R2 | Investigate Edge downloads flyout opening when a download starts | partial; fix implemented, owner Edge check pending | Cause: interception ran in `downloads.onCreated`, after Chromium had already added the download to its UI. The extension now holds `downloads.onDeterminingFilename` instead (b56ae50, docs/browser-integration.md). Accept only after the owner confirms no flyout flash in Edge for accepted downloads and a normal flyout for downloads left to the browser. |
 | EXT.S1 | Publish the extension as a hidden Edge Add-ons listing | parked (owner, 2026-11-06) | Store zip built at `artifacts\edge-store\inbound-bridge-0.2.0-edge.zip` (0.2.0, `key` removed). Partner Center sign-up stalled on the generic Home page with no Edge program. On resume: finish enrollment, submit hidden listing, then add the store ID to native-host `allowed_origins` and register the host for Edge in the installer. |
-| EXT.S2 | Publish the extension on the Chrome Web Store | ready for the owner's upload | Zip: `scripts\package-extension-store.ps1`. All dashboard text and images: `docs/chrome-store/`. Privacy policy: `docs/chrome-extension-privacy.md`, which must be online before submitting. Order matters: upload as a draft to get the Item ID, add that ID to the native side (`BrowserBridge.cs`, `NativeHost\Program.cs`, `installer\DownloadManager.iss`, `scripts\register-native-host.ps1`, `scripts\install.ps1`) and release the app, then submit. A narrower design is possible if review stalls: drop the all-pages content script by injecting on demand with `activeTab` and `scripting`, and register the media scan only after opt-in. |
+| EXT.S2 | Publish the extension on the Chrome Web Store | ready for the owner's upload | Zip: `scripts\package-extension-store.ps1`. All dashboard text and images: `docs/chrome-store/`. Privacy policy: `docs/chrome-extension-privacy.md`, which must be online before submitting. Order matters: upload as a draft to get the Item ID, add that ID to the native side (`BrowserBridge.cs`, `NativeHost\Program.cs`, `installer\DownloadManager.iss`, `scripts\register-native-host.ps1`, `scripts\install.ps1`) and release the app, then submit. The extension has no media panel. |
 | UI.R3 | Use the default folder for each new Chrome-extension download | pending; owner requirement | Each new extension download starts with the configured default download folder, rather than the destination selected for the previous download. A one-download folder choice must not change the next download's initial destination. Verify consecutive downloads with different destinations and after extension/browser restart. |
 | UI.R4 | Fit Chrome-extension windows and their controls to the available screen | pending; owner requirement | Review the handoff and other extension windows at supported screen sizes/scaling. Size and lay out windows so all items and primary actions are accessible without clipping; use scrolling where available space cannot accommodate the full content. Include this in the owner visual review. |
-| UI.R5 | Hold Delete to leave a download in the browser | pending; owner-reported reference app behavior and requested parity | Verify reference app's exact key/gesture behavior, then support holding Delete while initiating a Chrome download to bypass manager capture for that download. Chrome must retain/download the file normally, with no manager job or duplicate transfer. Verify capture resumes for subsequent downloads after key release. Reuse the existing bypass flow where appropriate; exact key timing and browser limitations remain unverified. |
+| UI.R5 | Hold Delete to leave a download in the browser | pending; owner requirement | Support holding Delete while initiating a Chrome download to bypass manager capture for that download. Chrome must retain/download the file normally, with no manager job or duplicate transfer. Verify capture resumes for subsequent downloads after key release. Reuse the existing bypass flow where appropriate; exact key timing and browser limitations remain unverified. |
 
 - User-test follow-up: filename fallback and resolved-URL replay fixed (E95);
   independent per-job progress/completion frontend added (E96, partial).
   Tray/settings activation and theme changes compile but still need live
-  acceptance. Fresh reference app completion capture remains pending. Do not infer
+  acceptance. Do not infer
   installer lifecycle acceptance from the rebuilt package.
 
-- Phase 0: complete (build, test server, pinned reference, parity inventory,
-  browser strategy). UI inventory is useful but not exhaustive.
+- Phase 0: complete (build, test server, feature inventory, browser strategy).
 - Phase 1: complete (engine tests + CLI hash evidence).
 - Phase 2: in progress (resume, validators, changed content, and Host
   process-kill matrix verified in E94; independent review remains pending).
-- Phase 3: complete (host/tray/IPC, reference app-shaped UI, hide-on-close, single-instance
+- Phase 3: complete (host/tray/IPC, the shell, hide-on-close, single-instance
   activation).
 - Phase 4: in progress (automatic, context-menu, and authenticated handoff
   verified with hashes; failure-path recovery, disabled integration, and
@@ -107,7 +106,7 @@ and external shell handoff checks remain open.
 - Phase 8: complete (named queues, caps, start/stop, reassignment, schedules,
   quotas, completion actions, Download Later, sleep prevention, and DST tests
   verified).
-- Phase 9: complete (direct media detection, popup/in-page resource list, HLS
+- Phase 9: complete (HLS
   and DASH assembly including SegmentTemplate/Timeline/SegmentList/SegmentBase
   byte ranges, DASH and HLS alternate-audio muxing via FFmpeg, fragment
   recovery, expiring-token refresh, explicit live exclusion, DRM detection, HLS
@@ -121,26 +120,22 @@ and external shell handoff checks remain open.
   grabber G2–G4 removed by owner decision and out of scope.
 - Phase 11: in progress (FTP auth/resume, hooks, CLI, profiles, settings
   transfer, repair, upgrade/uninstall, and the installer-only updater including
-  notifications/gating verified; final UI parity remains. Other browsers are
+  notifications/gating verified; final UI audit remains. Other browsers are
   explicitly out of scope (C3).
-- Phases 6, 12: in progress/pending as tracked in `reference notes`; see
-  `PROGRESS.md` for the handoff.
+- Phases 6, 12: in progress/pending; see `PROGRESS.md` for the handoff.
 
 ## Phase 0 — Baseline and setup (done)
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P0.1 | Pin reference app version, hashes, architecture, native-host registration | done | — | `notes/reference-version.md` has hashes and version evidence |
-| P0.2 | Verify dev environment: .NET, WinUI runtime, Node, GitHub, disassembler | done | — | Tool versions/status recorded in `PROGRESS.md`; disassembler returns program info |
+| P0.2 | Verify dev environment: .NET, WinUI runtime, Node, GitHub | done | — | Tool versions/status recorded in `PROGRESS.md` |
 | P0.3 | Create private GitHub repo `download-manager` and push baseline | in_progress | — | Repo visibility `PRIVATE`, baseline commit pushed |
-| P0.4 | Inventory reference app windows, menus, options, tray, extension behavior | done (inventory in `notes/ui-inventory.md` and `ui-parity-checklist.md`; E85) | P0.1 | `notes/inventory.md` with observed evidence |
-| P0.5 | Analyze reference extension + native host protocol | done (`docs/browser-integration.md`; E3-E5) | P0.1 | `notes/browser-integration.md` documents observed frames, limits, and handoff strategy |
 | P0.6 | Establish solution structure, build scripts, diagnostics | done (`DownloadManager.slnx`, `scripts/build.ps1`, file logger) | P0.3 | `dotnet build` succeeds; `scripts/build.ps1` documented |
 | P0.7 | Implement controlled local HTTP test server | done (`tools/TestServer` fault-injection endpoints; used by every suite) | P0.6 | Fault-injection endpoints + health check tested |
-| P0.8 | Seed reference notes and tracking files | in_progress | P0.1 | Every known feature has a row or explicit deferral |
-| P0.9 | Decide browser interception/replay strategy | done (`docs/browser-integration-scope.md`) | P0.5 | `docs/browser-integration.md` states supported/rejected request cases |
+| P0.8 | Seed tracking files | in_progress | — | Every known feature has a row or explicit deferral |
+| P0.9 | Decide browser interception/replay strategy | done (`docs/browser-integration-scope.md`) | — | `docs/browser-integration.md` states supported/rejected request cases |
 
-**Exit gate:** buildable solution, initial parity inventory, concrete browser
+**Exit gate:** buildable solution, initial feature inventory, concrete browser
 handoff strategy.
 
 ## Phase 1 — Correct single-stream downloading (done)
@@ -153,7 +148,7 @@ handoff strategy.
 | P1.4 | Unknown length, empty file, unexpected HTML handling | done | P1.2 | Truncated/error bodies fail; legitimate HTML succeeds and error pages are rejected (E64) |
 | P1.5 | Cancellation and temp-file cleanup | done | P1.2 | Pause keeps the part, cancel deletes it, no success state (E63) |
 | P1.6 | CLI add/list/status/cancel | done | P1.2 | CLI end-to-end and JSON status verified (E6/E44) |
-| P1.7 | Phase 1 verification report | done | P1.6 | Hashes and failure cases recorded in PARITY/PROGRESS (E1/E3/E60-E64) |
+| P1.7 | Phase 1 verification report | done | P1.6 | Hashes and failure cases recorded in PROGRESS (E1/E3/E60-E64) |
 
 **Exit gate:** controlled downloads hash correctly; partial/truncated transfers
 never appear successful.
@@ -192,7 +187,7 @@ kill engine.
 
 | ID | Task | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| P4.1 | Extension scaffold with own manifest key/ID | done | P0.6 | Loads unpacked; ID stable; no reference app assets |
+| P4.1 | Extension scaffold with own manifest key/ID | done | P0.6 | Loads unpacked; ID stable |
 | P4.2 | Native host + registration scripts | done | P3.1 | Chrome launches bridge; bridge starts host |
 | P4.3 | Handoff contract + durable dedupe | done | P3.3 | Same request ID twice → one job |
 | P4.4 | Context-menu “Download with Download Manager” | done | P4.1/P4.2 | Selected link creates job while UI closed |
@@ -214,14 +209,13 @@ is in tray; failed handoffs never silently lose downloads.
 | P5.2 | Concurrent segment writer + checkpoints | done | P5.1 | Assembly hash matches; crash-safe |
 | P5.3 | Per-host/global limits, fallback | done | P5.2 | Cross-job host cap and global job cap measured; single-stream fallback works (E82) |
 | P5.4 | Speed limits + estimator | done | P5.2 | Per-download/global 128 KiB/s limits measured (E69); stable speed/ETA samples verified (A8/E83) |
-| P5.5 | Benchmarks vs single stream/reference app | done | P5.4 | 64 MiB 1/4/8-connection and reference app run recorded with throughput/CPU/memory/write bytes (E84) |
+| P5.5 | Benchmarks vs single stream | done | P5.4 | 64 MiB 1/4/8-connection run recorded with throughput/CPU/memory/write bytes (E84) |
 | P5.6 | Segmented interruption verification | partial (E94 main-session matrix; independent review pending) | P5.2 | Main-session Host process-kill matrix passes at 20/50/80%; independent review/reproduction still required |
 | P5.7 | **Destination-local payload (no fixed temp)** | done | P5.2 | The part file is created next to the final file on the chosen destination volume; segments are written at final offsets into that one file; completion is a same-volume atomic rename with no cross-volume copy. Verified by `PartialPayloadLivesOnDestinationVolume`. |
 | P5.8 | Destination free-space preflight | done | P5.7 | Known-length jobs check destination free space with a 1 MiB reserve and fail `diskFull` before writing (E70). |
 | P5.9 | Stale destination part cleanup | done | P5.7 | Unattached `.part` files are reported (E71) and can be quarantined to `.dm-orphans` or deleted via `dm host clean-orphans [--delete]` (E90). No WinUI button yet. |
 
-**Payload placement decision (2026-11-04):** unlike reference app's fixed temporary
-directory plus post-download stitching, our engine writes every range directly
+**Payload placement decision (2026-11-04):** our engine writes every range directly
 into a single random-access part file in the destination directory. The part
 file consumes space on the drive the user chose; when all ranges complete the
 file is renamed in place. This removes the cross-volume copy that makes large
@@ -265,11 +259,10 @@ overnight DST stops are verified (E23). CLI management exists as
 `dm schedule list|add|remove|enable|disable` and
 `dm queue quota <id> <MB> <hours>|off`.
 
-## Phase 9 - Media detection and downloading (done)
+## Phase 9 - Media downloading (done)
 
-Direct media detection is implemented: a content script scans video/audio/source
-elements and HLS/DASH links, the extension popup lists distinct resources, and
-selection uses the handoff flow (V1 done, V2 partial; E24). Unencrypted HLS
+The extension's media panel was removed in 0.4.0 at the owner's decision. The app
+still downloads stream addresses it is given. Unencrypted HLS
 master/media playlists download segments into a playable TS output (V3 done;
 E25). Static DASH `SegmentTemplate` manifests assemble init/media segments into
 a playable fMP4 (V4 done; E26). Separate DASH video/audio tracks are muxed via an
@@ -278,9 +271,7 @@ media checkpoints resume HLS/DASH at completed fragment boundaries
 (V6 done; E28). Expiring HLS/DASH segment tokens trigger a safe manifest refresh
 and checkpoint resume (V7 done; E29). Live HLS/DASH is explicitly excluded with
 a `liveStream` failure, and DRM-protected HLS/DASH is identified with a
-`drmProtected` failure without any bypass (V8/V9 done; E30). An in-page
-shadow-DOM media panel and HLS quality-variant selection are verified (V2 done;
-E32). HLS AES-128 with single and rotating keys is verified (V10 done; E55).
+`drmProtected` failure without any bypass (V8/V9 done; E30). HLS AES-128 with single and rotating keys is verified (V10 done; E55).
 HLS alternate audio groups are selected and muxed with video (V11 done; E57).
 DASH SegmentTimeline and full-URL SegmentList are verified (E58), and
 SegmentBase/SIDX plus SegmentList `mediaRange` byte ranges are verified (E59).
@@ -300,7 +291,7 @@ out of scope; its earlier evidence is historical, not current functionality.
 Coarse: FTP/resume, command-line integration, other browsers, AV/post hooks,
 connection profiles, accessibility/DPI/theming/localization, settings
 import/export, installer repair/native-host repair, upgrade/uninstall, legacy
-behavior. Anything out of scope is explicitly deferred in reference notes.
+behavior. Anything out of scope is explicitly deferred.
 
 ### Installer-only update check and auto-update (new, pending)
 
@@ -324,16 +315,15 @@ version A, publish version B, check, download, verify, upgrade, and confirm jobs
 and settings survive. Portable/dev builds are tested to confirm they are
 excluded.
 
-## Phase 12 - Final parity audit (in progress)
+## Phase 12 - Final audit (in progress)
 
-U1/U2 are closed by the live UI Automation dump and
-`notes/ui-parity-checklist.md` (E85); U4 is closed by the
+U1/U2 are closed by the live UI Automation dump (E85); U4 is closed by the
 keyboard/focus/modality check (E86), U5 by the tray check (E87), and U7 by the
 accessibility/DPI/localization audit (E88). Clean-Windows acceptance remains.
 
 Coarse: window/dialog layout, menus/context menus, columns/layout persistence,
 keyboard/focus/modality, tray/notifications, settings defaults, progress/error
-presentation. Side-by-side scenario matrix and independent review.
+presentation. Scenario matrix and independent review.
 
 Done in the live audit: list views (including Active/Queued/Failed and the queue
 manager), numeric sort and multiselect bulk actions, delete-list-vs-file choice,
@@ -345,7 +335,7 @@ the independent visual review.
 
 ## Side quest — Account-based file storage providers, unrar, Docker/Linux web UI (queued)
 
-Requested after the reference app parity work. Starts with TorBox
+Starts with TorBox
 (https://api-docs.torbox.app/) behind a provider abstraction so other
 account-based storage services can be added without host changes. Test
 credentials are supplied by the user and must never be committed, logged, or
@@ -370,7 +360,7 @@ searching the account.
 | ID | Task | Status | Acceptance |
 | --- | --- | --- | --- |
 | X.1 | Keep `CLAUDE.md` current for agents | in_progress | Reflects structure, commands, status, traps |
-| X.2 | Keep reference notes evidence current | in_progress | No status without evidence |
+| X.2 | Keep feature evidence current | in_progress | No status without evidence |
 | X.3 | Keep PROGRESS.md handoff current | in_progress | Next action + commit + commands |
 | X.4 | Commit coherent increments | in_progress | Each milestone increment pushed |
 | X.5 | Independent verification of critical recovery/handoff | pending | E94 records main-session recovery results; independent review/reproduction of recovery and handoff remains outstanding |

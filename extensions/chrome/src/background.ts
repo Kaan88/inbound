@@ -11,7 +11,6 @@ type StartMode = "now" | "later";
 interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
-  mediaDetectionEnabled: boolean;
   startMode: StartMode;
   interceptedExtensions: string[];
   excludedExtensions: string[];
@@ -45,25 +44,6 @@ interface JobSummary {
   finalFilePath?: string;
 }
 
-interface MediaVariant {
-  url: string;
-  label: string;
-  bandwidth?: number;
-}
-
-interface MediaItem {
-  url: string;
-  kind: string;
-  label: string;
-  variants?: MediaVariant[];
-}
-
-interface TabMedia {
-  pageUrl: string;
-  items: MediaItem[];
-  updatedAt: number;
-}
-
 interface NativeEnvelope {
   v: number;
   type: string;
@@ -76,7 +56,6 @@ const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   // Off until the user turns it on in Settings, next to the explanation of what it shares.
   autoIntercept: false,
-  mediaDetectionEnabled: false,
   startMode: "now",
   interceptedExtensions: [
     "3gp", "7z", "aac", "ace", "aif", "apk", "arj", "asf", "avi", "bin", "bz2",
@@ -92,7 +71,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 // Content scripts run alongside pages this extension does not trust, so they get only what they
 // need. Everything else, cookies and settings above all, is for the extension's own pages.
-const CONTENT_SCRIPT_MESSAGES = new Set(["dm.getMediaDetectionEnabled", "dm.mediaDetected", "dm.queueMedia"]);
+const CONTENT_SCRIPT_MESSAGES = new Set(["dm.getAutoSend"]);
 const NATIVE_HOST = "com.kaank.downloadmanager";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 let settings: Settings = DEFAULT_SETTINGS;
@@ -112,9 +91,7 @@ const pendingRequests = new Map<
 >();
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
-const mediaByTab = new Map<number, TabMedia>();
-const variantCache = new Map<string, { expires: number; variants: MediaVariant[] }>();
-let mediaSyncQueue: Promise<void> = Promise.resolve();
+let autoSendSyncQueue: Promise<void> = Promise.resolve();
 async function hasDeleteGesture(url: string): Promise<boolean> {
   // DownloadItem has no tab id. Ask page scripts for the exact initiating link
   // before pausing Chrome, rather than racing a fire-and-forget click message
@@ -161,15 +138,6 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     .catch(() => answer());
   return true;
 });
-chrome.tabs.onRemoved.addListener((tabId) => {
-  mediaByTab.delete(tabId);
-});
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading") {
-    mediaByTab.delete(tabId);
-    void updateBadge(tabId, 0);
-  }
-});
 chrome.runtime.onInstalled.addListener((details) => {
   void installMenus();
   if (details.reason === "install") {
@@ -179,7 +147,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 chrome.runtime.onStartup.addListener(() => {
-  void loadSettings().then(syncMediaDetectionWithTabs);
+  void loadSettings().then(syncAutoSendWithTabs);
 });
 
 void initialize();
@@ -220,38 +188,24 @@ async function keepCatchingAfterUpgrade(previousVersion: string | undefined): Pr
   if (stored.settings) return;
   settings = { ...settings, autoIntercept: true };
   await chrome.storage.local.set({ settings });
-  await syncMediaDetectionWithTabs();
-}
-
-function mediaDetectionActive(): boolean {
-  return settings.enabled && settings.mediaDetectionEnabled === true;
+  await syncAutoSendWithTabs();
 }
 
 function automaticSendingActive(): boolean {
   return settings.enabled && settings.autoIntercept;
 }
 
-function syncMediaDetectionWithTabs(): Promise<void> {
-  const sync = mediaSyncQueue.then(async () => {
-    const enabled = mediaDetectionActive();
+function syncAutoSendWithTabs(): Promise<void> {
+  const sync = autoSendSyncQueue.then(async () => {
     const autoSend = automaticSendingActive();
     try {
       const tabs = await chrome.tabs.query({});
-      // A newer Options save may have happened during the query. Its queued sync
-      // will publish the latest value; this stale pass must not clear/broadcast.
-      if (enabled !== (mediaDetectionActive())) return;
-      if (!enabled) {
-        mediaByTab.clear();
-        await Promise.all(tabs
-          .filter(tab => typeof tab.id === "number")
-          .map(tab => updateBadge(tab.id!, 0)));
-      }
       for (const tab of tabs) {
-        if (enabled !== (mediaDetectionActive())) return;
+        // A newer Options save has queued its own pass with the latest value; this stale one stops.
+        if (autoSend !== automaticSendingActive()) return;
         if (typeof tab.id !== "number") continue;
         try {
-          await chrome.tabs.sendMessage(
-            tab.id, { type: "dm.mediaDetectionChanged", enabled, autoSend }, { frameId: 0 });
+          await chrome.tabs.sendMessage(tab.id, { type: "dm.autoSendChanged", autoSend }, { frameId: 0 });
         } catch {
           // The tab may be restricted or may not have loaded the content script yet.
         }
@@ -260,8 +214,8 @@ function syncMediaDetectionWithTabs(): Promise<void> {
       // Tab synchronization is best effort; each content script also requests the setting on load.
     }
   });
-  mediaSyncQueue = sync.catch(() => undefined);
-  return mediaSyncQueue;
+  autoSendSyncQueue = sync.catch(() => undefined);
+  return autoSendSyncQueue;
 }
 
 async function installMenus(): Promise<void> {
@@ -297,7 +251,7 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     pageUrl: info.pageUrl ?? tab?.url,
     referrer: info.frameUrl ?? info.pageUrl ?? tab?.url,
     userAgent: navigator.userAgent,
-    suggestedFileName: inferFileName(url, info.linkUrl ? "link" : "media"),
+    suggestedFileName: inferFileName(url, info.linkUrl ? "link" : "file"),
     isAutoIntercept: false,
     createdAt: Date.now(),
     cookieContext: await cookieContextForFrame(tab?.id, info.frameId ?? 0),
@@ -590,7 +544,6 @@ function handleNativeMessage(message: NativeEnvelope): void {
           lastJobs.delete(oldest);
         }
       }
-      void chrome.runtime.sendMessage({ type: "dm.jobEvent", job: event.job }).catch(() => undefined);
     }
   }
 }
@@ -661,129 +614,12 @@ function extensionOf(value: string): string {
   return match ? match[1]!.toLowerCase() : "";
 }
 
-function inferFileName(url: string, kind: "link" | "media"): string {
+function inferFileName(url: string, kind: "link" | "file"): string {
   const name = baseName(url);
   if (name && name !== "download" && /\./i.test(name)) {
     return name;
   }
   return `${kind}-${Date.now()}`;
-}
-
-function parseHlsVariants(text: string, baseUrl: string): MediaVariant[] {
-  const lines = text.split(/\r?\n/);
-  const variants: MediaVariant[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = (lines[i] ?? "").trim();
-    if (!line.startsWith("#EXT-X-STREAM-INF:")) {
-      continue;
-    }
-
-    let bandwidth = 0;
-    let resolution = "";
-    let name = "";
-    for (const attribute of line.slice("#EXT-X-STREAM-INF:".length).split(",")) {
-      const separator = attribute.indexOf("=");
-      if (separator < 0) {
-        continue;
-      }
-
-      const key = attribute.slice(0, separator).trim().toUpperCase();
-      const value = attribute.slice(separator + 1).trim().replace(/^"|"$/g, "");
-      if (key === "BANDWIDTH") {
-        bandwidth = Number(value) || 0;
-      } else if (key === "RESOLUTION") {
-        resolution = value;
-      } else if (key === "NAME") {
-        name = value;
-      }
-    }
-
-    let uri = "";
-    for (let j = i + 1; j < lines.length; j++) {
-      const candidate = (lines[j] ?? "").trim();
-      if (!candidate || candidate.startsWith("#")) {
-        continue;
-      }
-
-      uri = candidate;
-      break;
-    }
-
-    if (!uri) {
-      continue;
-    }
-
-    try {
-      const url = new URL(uri, baseUrl).href;
-      const height = Number((resolution.split("x")[1] ?? "").replace("p", ""));
-      const label = name || (height > 0
-        ? `${height}p`
-        : bandwidth > 0 ? `${Math.round(bandwidth / 1000)} kbps` : "variant");
-      variants.push({ url, label, bandwidth });
-    } catch {
-      // ignore malformed variant entries
-    }
-  }
-
-  return variants.sort((a, b) => (b.bandwidth ?? 0) - (a.bandwidth ?? 0));
-}
-
-async function enrichMediaItem(item: MediaItem, pageUrl: string): Promise<MediaItem> {
-  const isHls = item.kind === "hls" || /\.m3u8(\?|#|$)/i.test(item.url);
-  if (!isHls) {
-    return item;
-  }
-
-  const sameSite = hostOf(item.url) !== null && hostOf(item.url) === hostOf(pageUrl);
-  const cacheKey = `${sameSite ? "include" : "omit"}|${item.url}`;
-  const cached = variantCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) {
-    return { ...item, variants: cached.variants.length ? cached.variants : undefined };
-  }
-
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    let response: Response;
-    try {
-      // The address comes from the page, which could name any site. The user's cookies go only to
-      // the site the page itself is on; a playlist elsewhere just lists no qualities if it needs them.
-      // Fetch would carry them through a redirect, so a redirected playlist is asked for without them.
-      response = await fetch(item.url, {
-        credentials: sameSite ? "include" : "omit",
-        redirect: sameSite ? "manual" : "follow",
-        signal: controller.signal,
-      });
-      if (response.type === "opaqueredirect") {
-        response = await fetch(item.url, { credentials: "omit", signal: controller.signal });
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!response.ok) {
-      return item;
-    }
-
-    const variants = parseHlsVariants(await response.text(), response.url || item.url)
-      .filter((variant) => !isUnsupportedUrl(variant.url));
-    variantCache.set(cacheKey, { expires: Date.now() + 5 * 60_000, variants });
-    setTimeout(() => variantCache.delete(cacheKey), 5 * 60_000);
-    return { ...item, variants: variants.length ? variants : undefined };
-  } catch {
-    return item;
-  }
-}
-
-async function updateBadge(tabId: number, count: number): Promise<void> {
-  try {
-    await chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : "" });
-    if (count > 0) {
-      await chrome.action.setBadgeBackgroundColor({ tabId, color: "#4F8CFF" });
-    }
-  } catch {
-    // The tab may have closed.
-  }
 }
 
 function notify(title: string, message: string, always = false): void {
@@ -818,107 +654,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
   }
 
   switch (message?.type) {
-    case "dm.getMediaDetectionEnabled":
-      return { ok: true, enabled: mediaDetectionActive(), autoSend: automaticSendingActive() };
-
-    case "dm.mediaDetected": {
-      const tabId = sender?.tab?.id;
-      if (typeof tabId !== "number") {
-        return { ok: false, error: "No sender tab." };
-      }
-      if (!mediaDetectionActive()) {
-        mediaByTab.delete(tabId);
-        await updateBadge(tabId, 0);
-        return { ok: true, count: 0, disabled: true };
-      }
-
-      const items = (Array.isArray(message.items) ? message.items : [])
-        .filter((item: any) => typeof item?.url === "string" && isHttpUrl(item.url) && !isUnsupportedUrl(item.url))
-        .slice(0, 40)
-        .map((item: any) => ({
-          url: item.url,
-          kind: typeof item.kind === "string" ? item.kind : "media",
-          label: typeof item.label === "string" ? item.label.slice(0, 200) : "media",
-        })) as MediaItem[];
-      mediaByTab.set(tabId, {
-        pageUrl: typeof message.pageUrl === "string" ? message.pageUrl : sender?.tab?.url ?? "",
-        items,
-        updatedAt: Date.now(),
-      });
-      await updateBadge(tabId, items.length);
-      return { ok: true, count: items.length };
-    }
-
-    case "dm.rescan": {
-      if (!mediaDetectionActive()) return { ok: true, disabled: true };
-      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      const tabId = tabs[0]?.id;
-      if (typeof tabId === "number") {
-        try {
-          await chrome.tabs.sendMessage(tabId, { type: "dm.scan" });
-        } catch {
-          // Pages without a content script (chrome://, store, etc.).
-        }
-      }
-      return { ok: true };
-    }
-
-    case "dm.media": {
-      let tabId: number | undefined = typeof message.tabId === "number" ? message.tabId : undefined;
-      if (tabId === undefined) {
-        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        tabId = tabs[0]?.id;
-      }
-
-      if (!mediaDetectionActive()) {
-        return { ok: true, tabId, pageUrl: "", items: [] };
-      }
-
-      const media = typeof tabId === "number" ? mediaByTab.get(tabId) : undefined;
-      const items = await Promise.all((media?.items ?? []).map(item => enrichMediaItem(item, media?.pageUrl ?? "")));
-      return {
-        ok: true,
-        tabId,
-        pageUrl: media?.pageUrl ?? "",
-        items,
-      };
-    }
-
-    case "dm.queueMedia": {
-      if (!mediaDetectionActive()) {
-        return { ok: false, error: "Media detection is disabled in extension settings." };
-      }
-      const url = String(message.url ?? "");
-      if (!isHttpUrl(url)) {
-        return { ok: false, error: "This media URL cannot be downloaded." };
-      }
-      if ([url, message.pageUrl].some(isUnsupportedUrl)) {
-        return { ok: false, error: UNSUPPORTED_SITE_MESSAGE };
-      }
-
-      const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
-      const id = crypto.randomUUID();
-      const pending: PendingHandoff = {
-        id,
-        url,
-        pageUrl,
-        referrer: pageUrl,
-        userAgent: navigator.userAgent,
-        suggestedFileName: inferFileName(url, "media"),
-        mimeType: typeof message.mimeType === "string" ? message.mimeType : undefined,
-        isAutoIntercept: false,
-        createdAt: Date.now(),
-      };
-      pendingHandoffs.set(id, pending);
-      await chrome.storage.session.set({ [`handoff.${id}`]: pending });
-      await chrome.windows.create({
-        url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
-        type: "popup",
-        width: 560,
-        height: 680,
-      });
-      return { ok: true, id };
-    }
+    case "dm.getAutoSend":
+      return { ok: true, autoSend: automaticSendingActive() };
 
     case "dm.openBatch": {
       const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -1156,7 +893,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       };
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;
-      await syncMediaDetectionWithTabs();
+      await syncAutoSendWithTabs();
       return { ok: true, settings };
     }
 

@@ -1895,9 +1895,7 @@ public sealed partial class MainWindow : Window
         await ShowMessageAsync("Inbound Download Manager",
             $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
             "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
-            "and a Chrome Manifest V3 bridge.\n\n" +
-            "Reference behavior studied from another download manager 6.43.12.3. This project is not affiliated " +
-            "with the vendor and does not include reference app code, assets, or licensing.");
+            "and a Chrome Manifest V3 bridge.");
     }
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -3458,11 +3456,6 @@ public sealed partial class MainWindow : Window
             var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Capture downloads from Chrome", IsChecked = settings.BrowserIntegrationEnabled };
-            var autoIntercept = new CheckBox { Content = "Take over eligible Chrome downloads automatically", IsChecked = settings.BrowserAutoIntercept,
-                Margin = new Thickness(28, 0, 0, 0) };
-            autoIntercept.IsEnabled = integration.IsChecked == true;
-            integration.Checked += (_, _) => autoIntercept.IsEnabled = true;
-            integration.Unchecked += (_, _) => autoIntercept.IsEnabled = false;
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
@@ -3641,7 +3634,7 @@ public sealed partial class MainWindow : Window
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
-                SettingsWindow.Section("Capturing downloads"), integration, autoIntercept, clipboard);
+                SettingsWindow.Section("Capturing downloads"), integration, clipboard);
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"),
                 SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder.") };
             saveTo.AddRange(categoryRows);
@@ -3740,7 +3733,6 @@ public sealed partial class MainWindow : Window
                 settings.LaunchAtStartup = launch.IsChecked == true;
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
-                settings.BrowserAutoIntercept = autoIntercept.IsChecked == true;
                 settings.NotifyOnCompletion = notify.IsChecked == true;
                 settings.PlayCompletionSound = sound.IsChecked == true;
                 settings.ShowCompletionDialog = completionDialog.IsChecked == true;
@@ -3979,7 +3971,6 @@ public sealed partial class MainWindow : Window
             LaunchAtStartup = source.LaunchAtStartup,
             ClipboardMonitoring = source.ClipboardMonitoring,
             BrowserIntegrationEnabled = source.BrowserIntegrationEnabled,
-            BrowserAutoIntercept = source.BrowserAutoIntercept,
             NotifyOnCompletion = source.NotifyOnCompletion,
             PlayCompletionSound = source.PlayCompletionSound,
             EventSoundFiles = new Dictionary<string, string>(source.EventSoundFiles, StringComparer.OrdinalIgnoreCase),
@@ -4080,19 +4071,20 @@ public sealed partial class MainWindow : Window
 
         var deleteFiles = new CheckBox
         {
-            Content = "Also delete the downloaded file from disk",
+            Content = "Also delete the downloaded files and any partial data from disk",
             IsChecked = true,
         };
+        // Unfinished downloads only have partial data, which is removed anyway.
+        var anyCompleted = selection.Any(job => job.State == "completed");
+        var question = selection.Count == 1
+            ? $"Remove '{selection[0].FileName}' from the list?"
+            : $"Remove {selection.Count} downloads from the list?";
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
-            Text = selection.Count == 1
-                ? $"Remove '{selection[0].FileName}' from the list? Partial data is always removed."
-                : $"Remove {selection.Count} downloads from the list? Partial data is always removed.",
+            Text = anyCompleted ? question : question + " Partial data is always removed.",
             TextWrapping = TextWrapping.Wrap,
         });
-        // Unfinished downloads only have partial data, which is removed anyway.
-        var anyCompleted = selection.Any(job => job.State == "completed");
         if (anyCompleted) panel.Children.Add(deleteFiles);
         else deleteFiles.IsChecked = true;
 

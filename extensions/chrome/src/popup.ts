@@ -31,35 +31,11 @@ interface Status {
   jobs?: JobSummary[];
 }
 
-interface MediaVariant {
-  url: string;
-  label: string;
-  bandwidth?: number;
-}
-
-interface MediaItem {
-  url: string;
-  kind: string;
-  label: string;
-  variants?: MediaVariant[];
-}
-
-interface MediaResponse {
-  ok?: boolean;
-  tabId?: number;
-  pageUrl?: string;
-  items?: MediaItem[];
-  error?: string;
-}
-
-const pageTabId = Number(new URLSearchParams(location.search).get("tabId") ?? "");
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const statusDot = document.getElementById("statusDot") as HTMLSpanElement;
 const statusLabel = document.getElementById("statusLabel") as HTMLSpanElement;
 const statusDetail = document.getElementById("statusDetail") as HTMLSpanElement;
 const jobsList = document.getElementById("jobs") as HTMLUListElement;
-const mediaCard = document.getElementById("mediaCard") as HTMLElement;
-const mediaList = document.getElementById("media") as HTMLUListElement;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const getApp = document.getElementById("getApp") as HTMLAnchorElement;
 
@@ -216,85 +192,6 @@ function renderJobs(jobs: JobSummary[]): void {
   }
 }
 
-function mediaButton(url: string, pageUrl: string): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "link-button";
-  button.textContent = "Download";
-  button.addEventListener("click", async () => {
-    clearError();
-    button.disabled = true;
-    try {
-      const result = (await chrome.runtime.sendMessage({
-        type: "dm.queueMedia",
-        url,
-        pageUrl,
-      })) as { ok?: boolean; error?: string };
-      if (!result?.ok) {
-        showError(result?.error || "Could not queue this media.");
-      }
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    } finally {
-      button.disabled = false;
-    }
-  });
-  return button;
-}
-
-function renderMedia(items: MediaItem[], pageUrl: string): void {
-  mediaList.replaceChildren();
-  if (!items.length) {
-    mediaCard.classList.add("hidden");
-    return;
-  }
-
-  mediaCard.classList.remove("hidden");
-  for (const item of items) {
-    const row = document.createElement("li");
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = item.label || item.kind;
-    name.title = item.url;
-
-    const kind = document.createElement("span");
-    kind.className = "state";
-    kind.textContent = item.kind === "hls" || item.kind === "dash" ? "stream" : item.kind;
-
-    row.append(name, kind, mediaButton(item.url, pageUrl));
-    mediaList.append(row);
-
-    for (const variant of item.variants ?? []) {
-      const variantRow = document.createElement("li");
-      variantRow.className = "variant";
-
-      const variantName = document.createElement("span");
-      variantName.className = "name";
-      variantName.textContent = variant.label;
-      variantName.title = variant.url;
-
-      const variantKind = document.createElement("span");
-      variantKind.className = "state";
-      variantKind.textContent = "quality";
-
-      variantRow.append(variantName, variantKind, mediaButton(variant.url, pageUrl));
-      mediaList.append(variantRow);
-    }
-  }
-}
-
-async function refreshMedia(): Promise<void> {
-  try {
-    const media = (await chrome.runtime.sendMessage({
-      type: "dm.media",
-      tabId: Number.isFinite(pageTabId) && pageTabId > 0 ? pageTabId : undefined,
-    })) as MediaResponse;
-    renderMedia(media?.items ?? [], media?.pageUrl ?? "");
-  } catch {
-    renderMedia([], "");
-  }
-}
-
 async function refresh(): Promise<void> {
   clearError();
   try {
@@ -308,8 +205,8 @@ async function refresh(): Promise<void> {
     statusDot.className = "dot";
     if (!enabled) {
       statusDot.classList.add("warn");
-      statusLabel.textContent = "Automatic sending and media detection are off";
-      statusDetail.textContent = "Right-click a link to send it, or turn them on in Settings.";
+      statusLabel.textContent = "Automatic sending is off";
+      statusDetail.textContent = "Right-click a link to send it, or turn it on in Settings.";
       statusText.textContent = "Automatic off";
     } else if (connected) {
       statusDot.classList.add("ok");
@@ -338,7 +235,6 @@ async function refresh(): Promise<void> {
       : "Let the browser handle downloads for the next 5 minutes.";
 
     renderJobs(status.jobs ?? []);
-    await refreshMedia();
   } catch (error) {
     statusDot.className = "dot bad";
     statusLabel.textContent = "Extension not ready";
@@ -368,16 +264,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   (document.getElementById("refresh") as HTMLButtonElement).addEventListener("click", () => {
     void refresh();
-  });
-
-  (document.getElementById("refreshMedia") as HTMLButtonElement).addEventListener("click", async () => {
-    try {
-      await chrome.runtime.sendMessage({ type: "dm.rescan" });
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      await refreshMedia();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    }
   });
 
   (document.getElementById("openApp") as HTMLButtonElement).addEventListener("click", async () => {
@@ -426,6 +312,5 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Job events are reflected by the 1 s jobs poll above; a full refresh per
-  // event would refetch media playlists on every progress tick.
+  // Job events are reflected by the 1 s jobs poll above, not by a full refresh per event.
 });

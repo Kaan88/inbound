@@ -44,12 +44,7 @@ secrets/
 *.key
 !extensions/chrome/src/**/*.key.pub
 
-# Reverse-engineering artifacts that must not be committed
-notes/artifacts/
-notes/binaries/
-notes/captures/
-reference-screens/*.png
-notes/disassembler/
+# Binaries
 *.exe
 *.dll
 *.sys
@@ -65,3 +60,6 @@ desktop.ini
 
 # local secrets, never commit
 credentials.txt
+credentials*.txt
+*.keep.txt
+credentials*.bak

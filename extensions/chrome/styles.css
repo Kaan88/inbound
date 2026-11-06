@@ -156,8 +156,6 @@ h2 {
 .job-list .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-list .meta { color: var(--muted); font-size: 11px; grid-column: 1 / -1; font-variant-numeric: tabular-nums; }
 .job-list .empty { color: var(--muted); border: 0; display: block; }
-.job-list li.variant { padding-left: 18px; border-top-style: dashed; }
-.job-list li.variant .name { font-weight: 500; color: var(--muted); }
 
 .progress {
   height: 5px;

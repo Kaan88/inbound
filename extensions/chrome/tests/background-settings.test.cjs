@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const Module = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
@@ -22,7 +23,6 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
   const contextMenuClicked = event();
   const downloadsCreated = event();
   const pausedDownloads = [];
-  const badgeUpdates = [];
   const tabMessages = [];
   let pageMessageCount = 0;
   const runtime = {
@@ -72,8 +72,6 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
       async pause(id) { pausedDownloads.push(id); throw new Error('mock pause'); },
     },
     tabs: {
-      onRemoved: event(),
-      onUpdated: event(),
       async query() { return [...pages.keys()].map(id => ({ id })); },
       async sendMessage(id, message) {
         pageMessageCount++;
@@ -85,15 +83,11 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
     },
     windows: { async create() {} },
     notifications: { create() {} },
-    action: {
-      async setBadgeText(update) { badgeUpdates.push(update); },
-      async setBadgeBackgroundColor() {},
-    },
     cookies: { async getAll() { return []; } },
   };
   return {
     chrome, values, session, runtimeOnMessage, nativeOnMessage, nativeMessages, nativePorts, contextMenuClicked,
-    downloadsCreated, pausedDownloads, badgeUpdates, tabMessages,
+    downloadsCreated, pausedDownloads, tabMessages,
     get pageMessageCount() { return pageMessageCount; },
   };
 }
@@ -270,23 +264,13 @@ test('folder picker rejects page senders and forwards extension requests to the 
   }
 });
 
-test('media detection defaults off and can be enabled then disabled', async () => {
-  const settings = {
-    enabled: true,
-    autoIntercept: true,
-    startMode: 'now',
-    interceptedExtensions: [],
-    excludedExtensions: [],
-    excludedHosts: [],
-    notifications: false,
-  };
-  let pageMediaEnabled = null;
+test('page scripts are told whenever automatic sending changes', async () => {
+  const settings = { enabled: true, autoIntercept: false, startMode: 'now',
+    interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false };
+  let pageAutoSend = null;
   const page = message => {
-    if (message?.type === 'dm.mediaDetectionChanged') {
-      pageMediaEnabled = message.enabled;
-      return { ok: true, enabled: pageMediaEnabled };
-    }
-    return undefined;
+    if (message?.type === 'dm.autoSendChanged') pageAutoSend = message.autoSend;
+    return { ok: true };
   };
   const harness = makeChrome(settings, {
     id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0,
@@ -295,70 +279,39 @@ test('media detection defaults off and can be enabled then disabled', async () =
   global.chrome = harness.chrome;
   try {
     await startBackground(path.join(__dirname, '..', 'src', 'background.ts'));
-    const status = await sendRuntimeMessage(harness, { type: 'dm.status' });
-    assert.equal(status.settings.mediaDetectionEnabled, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.status' })).settings.autoIntercept, false);
 
-    const stale = await sendRuntimeMessage(harness, {
-      type: 'dm.mediaDetected', pageUrl: 'https://example.test/',
-      items: [{ url: 'https://example.test/video.mp4', kind: 'video', label: 'video' }],
-    });
-    assert.equal(stale.disabled, true);
-    assert.equal(stale.count, 0);
-    assert.deepEqual((await sendRuntimeMessage(harness, { type: 'dm.media' })).items, []);
+    await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...settings, autoIntercept: true } });
+    assert.equal(pageAutoSend, true);
 
-    const enabled = await sendRuntimeMessage(harness, {
-      type: 'dm.saveSettings', settings: { ...settings, mediaDetectionEnabled: true },
-    });
-    assert.equal(enabled.settings.mediaDetectionEnabled, true);
-    assert.equal(pageMediaEnabled, true);
+    await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...settings, autoIntercept: false } });
+    assert.equal(pageAutoSend, false);
 
-    const detected = await sendRuntimeMessage(harness, {
-      type: 'dm.mediaDetected', pageUrl: 'https://example.test/',
-      items: [{ url: 'https://example.test/video.mp4', kind: 'video', label: 'video' }],
-    });
-    assert.equal(detected.count, 1);
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.media' })).items.length, 1);
-
-    const disabled = await sendRuntimeMessage(harness, {
-      type: 'dm.saveSettings', settings: { ...settings, mediaDetectionEnabled: false },
-    });
-    assert.equal(disabled.settings.mediaDetectionEnabled, false);
-    assert.equal(pageMediaEnabled, false);
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.media' })).items.length, 0);
-    const finalBadge = harness.badgeUpdates.at(-1);
-    assert.equal(finalBadge.tabId, 4);
-    assert.equal(finalBadge.text, '');
-
-    const rejected = await sendRuntimeMessage(harness, {
-      type: 'dm.mediaDetected', pageUrl: 'https://example.test/',
-      items: [{ url: 'https://example.test/late.mp4', kind: 'video', label: 'late' }],
-    });
-    assert.equal(rejected.disabled, true);
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.media' })).items.length, 0);
+    await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...settings, autoIntercept: true } });
+    assert.equal(pageAutoSend, true);
+    await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...settings, enabled: false, autoIntercept: true } });
+    assert.equal(pageAutoSend, false);
   } finally {
     global.chrome = oldChrome;
   }
 });
 
-test('latest media option wins when tab synchronization overlaps', async () => {
-  const settings = {
-    enabled: true, autoIntercept: true, startMode: 'now',
-    interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false,
-    mediaDetectionEnabled: false,
-  };
-  let pageMediaEnabled = false;
+test('latest automatic sending choice wins when tab synchronization overlaps', async () => {
+  const settings = { enabled: true, autoIntercept: false, startMode: 'now',
+    interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false };
+  let pageAutoSend = false;
   let releaseEnable;
   let markEnableStarted;
   const enableGate = new Promise(resolve => { releaseEnable = resolve; });
   const enableStarted = new Promise(resolve => { markEnableStarted = resolve; });
   const page = async message => {
-    if (message?.type !== 'dm.mediaDetectionChanged') return undefined;
-    if (message.enabled === true) {
+    if (message?.type !== 'dm.autoSendChanged') return undefined;
+    if (message.autoSend === true) {
       markEnableStarted();
       await enableGate;
     }
-    pageMediaEnabled = message.enabled === true;
-    return { ok: true, enabled: pageMediaEnabled };
+    pageAutoSend = message.autoSend === true;
+    return { ok: true };
   };
   const harness = makeChrome(settings, {
     id: 'unused', url: '', userAgent: '', isAutoIntercept: false, createdAt: 0,
@@ -368,20 +321,20 @@ test('latest media option wins when tab synchronization overlaps', async () => {
   try {
     await startBackground(path.join(__dirname, '..', 'src', 'background.ts'));
     const enabling = sendRuntimeMessage(harness, {
-      type: 'dm.saveSettings', settings: { ...settings, mediaDetectionEnabled: true },
+      type: 'dm.saveSettings', settings: { ...settings, autoIntercept: true },
     });
     await enableStarted;
 
     const disabling = sendRuntimeMessage(harness, {
-      type: 'dm.saveSettings', settings: { ...settings, mediaDetectionEnabled: false },
+      type: 'dm.saveSettings', settings: { ...settings, autoIntercept: false },
     });
-    while (harness.values.settings.mediaDetectionEnabled !== false)
+    while (harness.values.settings.autoIntercept !== false)
       await new Promise(resolve => setImmediate(resolve));
 
     releaseEnable();
     await Promise.all([enabling, disabling]);
-    assert.equal(harness.values.settings.mediaDetectionEnabled, false);
-    assert.equal(pageMediaEnabled, false);
+    assert.equal(harness.values.settings.autoIntercept, false);
+    assert.equal(pageAutoSend, false);
   } finally {
     releaseEnable();
     global.chrome = oldChrome;
@@ -583,7 +536,7 @@ test('YouTube stays out of every way of sending a download', async () => {
     { url: 'https://i.ytimg.com/vi/1/hq.jpg', text: 'thumbnail' },
     { url: 'https://file.test/a.zip', text: 'archive' },
   ] })]]);
-  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' }, pages);
+  const harness = makeChrome(ruleSettings, { id: 'seed' }, pages);
   let windowsOpened = 0;
   harness.chrome.windows.create = async () => { windowsOpened++; };
   await withBackground(harness, async () => {
@@ -600,16 +553,11 @@ test('YouTube stays out of every way of sending a download', async () => {
 
     const links = await sendRuntimeMessage(harness, { type: 'dm.pageLinks', tabId: 4 });
     assert.deepEqual(links.links.map(link => link.url), ['https://file.test/a.zip']);
-
-    const media = await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://page.test/', items: [
-      { url: 'https://www.youtube.com/watch?v=1', kind: 'video' }, { url: 'https://file.test/a.mp4', kind: 'video' },
-    ] });
-    assert.equal(media.count, 1);
   });
 });
 
 test('pages can reach only what the content script needs', async () => {
-  const harness = makeChrome({ ...ruleSettings, autoIntercept: false, mediaDetectionEnabled: true }, { id: 'seed' });
+  const harness = makeChrome({ ...ruleSettings, autoIntercept: false }, { id: 'seed' });
   const page = { tab: { id: 4 }, frameId: 0, url: 'https://evil.test/' };
   await withBackground(harness, async () => {
     for (const message of [
@@ -622,50 +570,13 @@ test('pages can reach only what the content script needs', async () => {
     }
     assert.equal(harness.values.settings.autoIntercept, false);
 
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' }, page)).enabled, true);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getAutoSend' }, page)).autoSend, false);
 
     const saved = await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...ruleSettings } },
-      { url: 'chrome-extension://test/options.html' });
+      { id: 'test-extension', url: 'chrome-extension://test/options.html' });
     assert.equal(saved.ok, true);
     assert.equal(harness.values.settings.autoIntercept, true);
   });
-});
-
-test('a playlist on another site is requested without the user\'s cookies', async () => {
-  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' });
-  const oldFetch = global.fetch;
-  const requests = new Map();
-  global.fetch = async (url, options) => { requests.set(url, options.credentials); return new Response('#EXTM3U'); };
-  try {
-    await withBackground(harness, async () => {
-      await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://video.test/watch', items: [
-        { url: 'https://video.test/own.m3u8', kind: 'hls' }, { url: 'https://bank.test/x.m3u8', kind: 'hls' },
-      ] });
-      await sendRuntimeMessage(harness, { type: 'dm.media', tabId: 4 });
-      assert.equal(requests.get('https://video.test/own.m3u8'), 'include');
-      assert.equal(requests.get('https://bank.test/x.m3u8'), 'omit');
-    });
-  } finally { global.fetch = oldFetch; }
-});
-
-test('a playlist on the page\'s own site loses the cookies if it redirects', async () => {
-  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' });
-  const oldFetch = global.fetch;
-  const requests = [];
-  global.fetch = async (url, options) => {
-    requests.push({ credentials: options.credentials, redirect: options.redirect });
-    return options.redirect === 'manual'
-      ? { type: 'opaqueredirect', ok: false, status: 0 }
-      : new Response('#EXTM3U');
-  };
-  try {
-    await withBackground(harness, async () => {
-      await sendRuntimeMessage(harness, { type: 'dm.mediaDetected', pageUrl: 'https://video.test/watch',
-        items: [{ url: 'https://video.test/moved.m3u8', kind: 'hls' }] });
-      await sendRuntimeMessage(harness, { type: 'dm.media', tabId: 4 });
-      assert.deepEqual(requests, [{ credentials: 'include', redirect: 'manual' }, { credentials: 'omit', redirect: undefined }]);
-    });
-  } finally { global.fetch = oldFetch; }
 });
 
 test('an excluded site stays out however the download got there', async () => {
@@ -680,15 +591,13 @@ test('an excluded site stays out however the download got there', async () => {
   });
 });
 
-test('Download All on a YouTube page lists nothing, and the panel cannot send its media', async () => {
+test('Download All on a YouTube page lists nothing', async () => {
   const pages = new Map([[4, () => ({ ok: true, pageUrl: 'https://www.youtube.com/watch?v=1', links: [
     { url: 'https://file.test/a.zip', text: 'archive' },
   ] })]]);
-  const harness = makeChrome({ ...ruleSettings, mediaDetectionEnabled: true }, { id: 'seed' }, pages);
+  const harness = makeChrome(ruleSettings, { id: 'seed' }, pages);
   await withBackground(harness, async () => {
     assert.deepEqual((await sendRuntimeMessage(harness, { type: 'dm.pageLinks', tabId: 4 })).links, []);
-    const queued = await sendRuntimeMessage(harness, { type: 'dm.queueMedia', url: 'https://rr1.googlevideo.com/x', pageUrl: 'https://page.test/' });
-    assert.equal(queued.ok, false);
   });
 });
 
@@ -696,7 +605,7 @@ test('page scripts learn whether automatic sending is on, and a sender with no a
   const harness = makeChrome({ ...ruleSettings, autoIntercept: false }, { id: 'seed' });
   await withBackground(harness, async () => {
     const page = { id: 'test-extension', tab: { id: 4 }, url: 'https://page.test/' };
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' }, page)).autoSend, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getAutoSend' }, page)).autoSend, false);
     assert.equal((await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: {} }, { tab: { id: 4 } })).ok, false);
   });
 });
@@ -712,9 +621,27 @@ test('a missing desktop app is explained in plain words wherever it shows', asyn
   });
 });
 
-test('turning the connection off also turns off media detection', async () => {
-  const harness = makeChrome({ ...ruleSettings, enabled: false, mediaDetectionEnabled: true }, { id: 'seed' });
+test('turning the connection off also turns off automatic sending', async () => {
+  const harness = makeChrome({ ...ruleSettings, enabled: false }, { id: 'seed' });
   await withBackground(harness, async () => {
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getMediaDetectionEnabled' })).enabled, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.getAutoSend' })).autoSend, false);
   });
+});
+
+test('a media setting stored by an older copy is ignored, and the media requests are gone', async () => {
+  const harness = makeChrome({ ...ruleSettings, autoIntercept: false, mediaDetectionEnabled: true }, { id: 'seed' });
+  await withBackground(harness, async () => {
+    assert.deepEqual(await sendRuntimeMessage(harness, { type: 'dm.getAutoSend' }), { ok: true, autoSend: false });
+    for (const type of ['dm.getMediaDetectionEnabled', 'dm.mediaDetected', 'dm.media', 'dm.queueMedia', 'dm.rescan']) {
+      assert.deepEqual(await sendRuntimeMessage(harness, { type }), { ok: false, error: 'Unknown message.' }, type);
+    }
+  });
+});
+
+test('the extension makes no network requests of its own', () => {
+  const sourceDir = path.join(__dirname, '..', 'src');
+  for (const name of fs.readdirSync(sourceDir)) {
+    assert.doesNotMatch(fs.readFileSync(path.join(sourceDir, name), 'utf8'),
+      /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/, name);
+  }
 });

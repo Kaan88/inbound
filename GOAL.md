@@ -1,6 +1,6 @@
-# Goal — Build a private Windows download manager (reference app as reference)
+# Goal — Build a private Windows download manager
 
-Owner direction (2026-11-05): reference app 6.43.12.3 is now a reference for suggestions, not a parity requirement. The owner prefers the current Inbound design over reference app's; keep our own design and behavior, and use reference app only as a source of ideas to propose. Rows below are reference notes. A row's status describes our feature, and `implemented` still needs linked acceptance evidence.
+Owner direction (2026-11-05): the owner prefers the current Inbound design; keep our own design and behavior. `implemented` still needs linked acceptance evidence.
 
 
 
@@ -20,9 +20,9 @@ Owner workflow: batch remaining implementation, then consolidated verification; 
 
 0.1.5 source: persistent custom categories, Add URL selection/creation, extension rules, category folders/remember, sidebar and Options editing implemented. Focused7/7 and Core79/79 pass; full integration82/82 passes (artifacts/integration-categories.log); live GUI acceptance pending. Metadata preview/server-suggested names and category deletion remain open (PROGRESS.md).
 
-Owner file-icon requirement (2026-11-05): verified actual Windows Shell icon calls in pinned reference app binary; replace generic file glyphs with Windows file-type and completed-file/application icons. Investigation: `notes/file-icons-2026-11-05.md`. Source implementation now covers main/queue rows and progress/completion headers; native checks2/2 and clean WinUI build pass. Live visual/DPI acceptance remains pending; see PROGRESS.md.
+Owner file-icon requirement (2026-11-05): replace generic file glyphs with Windows file-type and completed-file/application icons. Source implementation now covers main/queue rows and progress/completion headers; native checks2/2 and clean WinUI build pass. Live visual/DPI acceptance remains pending; see PROGRESS.md.
 
-Post-0.1.4: manual HTTP Basic authentication and DPAPI-protected job headers implemented in source; integration 76/76 and redirect-boundary tests pass. Owner's testfile.org right-click 403 was investigated: automatic capture has a browser-resolved CDN URL, right-click does not. Frame/profile/partition cookie handling corrected; extension 34/34 plus typecheck/build pass. Live reference check: reference app itself returns403 for right-click on the same testfile link. Direct handoff remains the normal path; browser-assisted preparation is an optional improvement, not a confirmed parity defect. Broader live acceptance remains open (PROGRESS.md).
+Post-0.1.4: manual HTTP Basic authentication and DPAPI-protected job headers implemented in source; integration 76/76 and redirect-boundary tests pass. Owner's testfile.org right-click 403 was investigated: automatic capture has a browser-resolved CDN URL, right-click does not. Frame/profile/partition cookie handling corrected; extension 34/34 plus typecheck/build pass. Direct handoff remains the normal path; browser-assisted preparation is an optional improvement, not a confirmed defect. Broader live acceptance remains open (PROGRESS.md).
 
 Post-0.1.4 source increment: persisted queue file ordering and Queues → Files editor added. Focused actual-dispatch/restart/stale-list coverage passes, Core 79/79, clean Runtime/WinUI builds. Full integration 74/74 passes (artifacts/integration-queue-file-order.log); live editor acceptance remains open. This is separate from grouped independent child downloads, which remain planned.
 
@@ -35,7 +35,7 @@ Updater repair checkpoint (2026-11-05): owner upgrade exposed stale 0.1.2 binari
 Owner added GitHub build publication and installer-only automatic updates.
 Releases and source: public `Kaan88/inbound` (owner, 2026-11-06; the builds-only
 repository `Kaan88/download-manager-builds` is retired). 0.1.3 installer/update assets are published, and an older-version test installer is available;
-owner upgrade acceptance and remaining parity work are still open.
+owner upgrade acceptance and remaining work are still open.
 
 **Scope decision (owner, 2026-11-04): Dial Up/VPN is out of scope.**
 
@@ -44,20 +44,18 @@ compiles cleanly; focused restart/preservation test passes. Live GUI acceptance,
 queue deletion/file ordering and scheduler editing remain pending.
 
 Current increment: per-job live HTTP speed caps, progress controls and compact
-completion actions (PARITY E97). Core 78/78, engine 47/47, integration 69/69;
-the Host access blocker is cleared and representative live window checks passed
-(PARITY E98). Owner approval and broader visual variants remain open. Queue/scheduler and the other
-screenshot-review gaps remain on the roadmap.
+completion actions. Core 78/78, engine 47/47, integration 69/69;
+the Host access blocker is cleared and representative live window checks passed.
+Owner approval and broader visual variants remain open. Queue/scheduler and the other
+review gaps remain on the roadmap.
 
 **Owner acceptance blocker (2026-11-04):** the current WinUI is considered basic
 and disorganized. When the owner has time, perform a complete live review of
-reference app's appearance and interaction flows, then reorganize the WinUI to match the
-reference's structure, density, hierarchy and behavior using our own assets.
+its appearance and interaction flows, then reorganize its structure, density,
+hierarchy and behavior using our own assets.
 The owner resumed work and authorized the live review on 2026-11-04.
 The review includes missing functionality and behavior needing adjustment,
-not only appearance. The owner supplied 36 screenshots, cataloged in
-`reference-screens/INDEX.md`; the source comparison and functional gaps are in
-`notes/screenshot-review-2026-11-04.md`.
+not only appearance.
 Existing functional evidence does not establish visual acceptance. See
 ROADMAP UI.R1/UI.R2 and PROGRESS.md for the deferred review and Edge flyout note.
 
@@ -65,20 +63,18 @@ Latest increment (2026-11-04): browser-resolved final URLs are used with
 original-origin credential boundaries and target validation (E95). Separate
 automatic per-job progress/completion windows replace the main-window modal
 flow (E96, partial acceptance). Core 78/78, engine 41/41, integration 66/66;
-extension 7/7 plus typecheck/build. Light/tray visual acceptance and a fresh reference app
-completion reference capture remain pending; full parity is not complete.
+extension 7/7 plus typecheck/build. Light/tray visual acceptance remains pending.
 
 > **Tracking fallback note (2026-11-04).** This OpenCode 2.2.5 environment has no
 > Goal or Todo tool (verified through the tool catalog, the OpenCode V2 docs, and
 > the local API OpenAPI document). Per the task instructions, `GOAL.md`,
-> `ROADMAP.md`, `reference notes`, and `PROGRESS.md` are the authoritative tracking
+> `ROADMAP.md`, and `PROGRESS.md` are the authoritative tracking
 > records. They are maintained as if they were the Goal/Todo features. Do not
 > duplicate them into another system.
 
 ## Objective
 
-Build a private-use Windows download manager with verified functional parity
-against the installed another download manager. The application must:
+Build a private-use Windows download manager with verified functionality. The application must:
 
 - run as a per-user background host with a notification-area presence;
 - keep downloading when the main window is closed or the frontend exits;
@@ -88,25 +84,7 @@ against the installed another download manager. The application must:
 - survive restarts, interruptions, changed remote content, and browser
   disconnects without corrupting partial data;
 - be reproducible, installable, upgradable, and cleanly uninstallable;
-- document every parity claim with evidence, and label every gap.
-
-## Pinned reference
-
-| Item | Value |
-| --- | --- |
-| Product | another download manager (reference app) |
-| Version | **6.43.12.3** (`v6.43b12 Full`) |
-| Vendor | the vendor Inc. / the vendor FZE |
-| Architecture | 32-bit x86 PE |
-| `reference app.exe` SHA-256 | `B601350AF954D23DFD989295F9FB398AFCD972FEEC4F300A7CF1284CBB2B2C93` |
-| `reference app.exe` MD5 | `c96a570117b034cfe83f90f3214ebc90` |
-| `IDMMsgHost.exe` SHA-256 | `DBA25A49ADB88F675DB26D2DC7A0FA9D4A5DB2326858CB9D2515F6F34B8E0B65` |
-| `IDMGCExt.crx` SHA-256 | `1D2297CCBDBBF06E9E2546BB9F9B9985433EB7C02D75F09BBCBC9784ECE583F7` |
-| Chrome extension | reference app Integration Module 6.43.1, ID `ngpampappnmepgilojfohadhhmbhlaek` |
-| Native host | `com.the vendor.reference app` → `IDMMsgHost.exe` |
-| Registry version marker | `HKCU\Software\DownloadManager` → `idmvers = v6.43b12 Full` |
-
-Details and evidence: `notes/reference-version.md`.
+- document every feature claim with evidence, and label every gap.
 
 ## Architecture constraints
 
@@ -135,7 +113,7 @@ SDK, or presentation types.
 
 | # | Milestone | Status | Exit gate |
 | --- | --- | --- | --- |
-| 0 | Baseline, reference inventory, repo, browser strategy | done | Buildable solution, initial parity inventory, concrete handoff strategy |
+| 0 | Baseline, feature inventory, repo, browser strategy | done | Buildable solution, initial feature inventory, concrete handoff strategy |
 | 1 | Correct single-stream engine + CLI | done | Controlled downloads hash correctly; failures never look successful |
 | 2 | Persistence, resume, crash recovery | in progress | Kill/restart matrix passed for single and segmented downloads at 20/50/80% (E94); independent review remains |
 | 3 | Tray + minimal WinUI frontend | done | Downloads continue with window closed; reopen restores state |
@@ -144,10 +122,10 @@ SDK, or presentation types.
 | 6 | Everyday download management | done | Clipboard monitoring, completion dialog/notification/sound, batch URLs, editable descriptions, duplicate policies, category destinations, last-folder and recent-URL memory, list export/import, category/state views, numeric sort, multiselect bulk actions, delete-file choice, shell open/reveal, and progress details verified (E33–E54/E56) |
 | 7 | Authentication + refresh address | in progress | Cookie/referrer/UA, authenticated HTTP/HTTPS proxy, SOCKS5 auth, DPAPI site logins, redirect credential boundary, and expired-URL refresh with partial resume verified; SOCKS4/4a and proxy-password hardening remain |
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
-| 9 | Media detection/downloading | done | Detection, in-page/quality panel, HLS/DASH assembly (SegmentTemplate, Timeline, SegmentList, SegmentBase byte ranges), A/V muxing (DASH and HLS alternate audio), fragment recovery, token refresh, live exclusion, DRM detection, and HLS AES-128 key rotation verified (E24-E32/E55/E57-E59); dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain excluded |
-| 10 | Download All; site grabber removed | done / scoped | Download All collection/filter/handoff is done (G1/E31); site grabber G2–G4 was removed by owner decision and is out of scope (see reference notes) |
-| 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI parity remains; Edge/Firefox out of scope (C3) |
-| 12 | Final visual/behavioral parity audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (side-by-side checklist/live UIA dump), U3, U4, U5, U6 and U7 (accessibility/contrast/DPI simulation/localization audit); clean-Windows acceptance remains (E52–E54/E85–E88) |
+| 9 | Media downloading | done | HLS/DASH assembly (SegmentTemplate, Timeline, SegmentList, SegmentBase byte ranges), A/V muxing (DASH and HLS alternate audio), fragment recovery, token refresh, live exclusion, DRM detection, and HLS AES-128 key rotation verified (E24-E32/E55/E57-E59); dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain excluded |
+| 10 | Download All; site grabber removed | done / scoped | Download All collection/filter/handoff is done (G1/E31); site grabber G2–G4 was removed by owner decision and is out of scope |
+| 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI audit remains; Edge/Firefox out of scope (C3) |
+| 12 | Final visual/behavioral audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (checklist/live UIA dump), U3, U4, U5, U6 and U7 (accessibility/contrast/DPI simulation/localization audit); clean-Windows acceptance remains (E52–E54/E85–E88) |
 
 ## Major decisions
 
@@ -158,19 +136,14 @@ SDK, or presentation types.
    frontend replaceability.
 2. **IPC:** per-user named pipes with a current-user-only ACL; JSON envelopes
    carrying `protocolVersion`; snapshot + event stream; reconnect by snapshot.
-3. **Browser protocol:** our own JSON protocol over Native Messaging. No binary
-   compatibility with `com.the vendor.reference app` is required or attempted.
+3. **Browser protocol:** our own JSON protocol over Native Messaging.
 4. **Persistence:** per-job JSON documents with atomic temp-file replace plus a
    compact index, avoiding a native SQLite dependency for the first milestone.
    Migration layer included.
 5. **Own extension identity:** our extension is named **Download Manager
    Bridge**, uses its own manifest key/ID, and registers only our native host.
-6. **No licensing bypass:** reference app activation/licensing code is out of scope. Only
-   functional behavior is studied.
-7. **Reference binaries stay out of git.** Hashes, addresses, and analysis notes
-   are committed; executables and captures are not.
-8. **Destination-local payload.** Unlike reference app's fixed temp directory plus
-   post-download stitching, every job's single random-access part file lives in
+6. **Destination-local payload.** There is no fixed temp directory or
+   post-download stitching: every job's single random-access part file lives in
    the chosen destination directory. Segments are written at their final offsets
    into that file and completion is a same-volume atomic rename. The state drive
    is never used for payload bytes, so choosing another drive actually uses that
@@ -178,8 +151,8 @@ SDK, or presentation types.
 
 ## Completion criteria
 
-The goal is complete only when every in-scope row in `reference notes` has passing
+The goal is complete only when every in-scope feature has passing
 acceptance evidence, interrupted transfers and browser handoff are reliable,
 installation/upgrade/uninstall are reproducible, every deviation is documented,
-and Goal/Todo-equivalent tracking, parity records, progress notes, and the
+and Goal/Todo-equivalent tracking, progress notes, and the
 repository agree. Until then the goal remains active.

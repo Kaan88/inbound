@@ -1,8 +1,5 @@
 # Browser integration strategy
 
-Reference: reference app Integration Module 6.43.1 (MV3) + `com.the vendor.reference app` native host.
-Analysis notes: `notes/browser-integration.md`.
-
 ## What Chrome actually permits (MV3)
 
 These constraints drive the design; they must be verified against the installed
@@ -19,8 +16,7 @@ Chrome version during Phase 4.
    and asks the Host. After a durable ACK the download is cancelled and erased
    without ever answering, so no bubble opens. When the browser keeps the
    download (filtered, bypassed, rejected, Host unreachable), the listener calls
-   `suggest()` once and resumes. reference app's own MV3 extension uses the same hook;
-   `downloads.setUiOptions` is not needed and is not used.
+   `suggest()` once and resumes. `downloads.setUiOptions` is not needed and is not used.
 3. **`webRequest` is observational in MV3.** Blocking requires a
    policy-installed extension, so the extension does not use it and does not
    request the permission.
@@ -93,8 +89,7 @@ silently lose a download.
 
 ## Our protocol
 
-Our extension and host use a versioned JSON protocol (not reference app's `MSG#` text
-protocol). Native Messaging frames are 4-byte little-endian length + UTF-8 JSON.
+Our extension and host use a versioned JSON protocol. Native Messaging frames are 4-byte little-endian length + UTF-8 JSON.
 The native host wraps messages in:
 
 ```json
@@ -104,7 +99,7 @@ The native host wraps messages in:
 The host replies with `handoff.ack` / `handoff.error`, then streams
 `job.event` messages on the same port. The extension may re-query with
 `jobs.snapshot` after reconnecting. Full schema lives in
-`src/DownloadManager.Contracts` and `docs/ipc-protocol.md`.
+`src/DownloadManager.Contracts`.
 
 ## Permissions requested by our extension
 
@@ -123,9 +118,7 @@ first install and explains beside the checkbox what it shares.
 - The native host accepts only our extension origin (validated by Chrome's
   invocation and by `allowed_origins`).
 - Inside the extension, content scripts can send only the messages they need
-  (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages. A stream
-  playlist named by a page is requested with the user's cookies only from the site
-  the page itself is on.
+  (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.
 - The host validates every field and enforces size/depth limits.
 - The extension may not request arbitrary local file destinations; the host
   applies its own destination policy and shows the resolved path in the UI.

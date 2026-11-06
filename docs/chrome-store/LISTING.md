@@ -44,8 +44,9 @@ Sends browser downloads to the Inbound Download Manager desktop app for Windows,
 
 **Small promo tile:** `images\promo-small-440x280.png`. The marquee image is optional and not included.
 
-**Homepage and support URLs:** see the question about the public repository in the handover note.
-`https://github.com/Kaan88/inbound/issues` works for support.
+**Homepage URL:** `https://github.com/Kaan88/inbound`
+
+**Support URL:** `https://github.com/Kaan88/inbound/issues`
 
 **Description:**
 
@@ -59,8 +60,9 @@ WHAT IT DOES
 - Right-click a link, image, video or audio file and choose "Download with Inbound Download Manager". You can name the file and choose a folder first.
 - "Download all links" lists the links on the current page, so you can filter them and send the ones you pick.
 - Automatic sending, which you turn on in Settings: downloads that match your rules stop in Chrome and start again in the app, and they leave Chrome's download list. If the app is not installed or cannot be reached, or it refuses a download, the download stays in Chrome. Once the app has accepted one, Chrome's copy is gone, so a file from a submitted form or a link that works only once can fail in the app. Pause catching from the toolbar popup before downloading those.
-- Media detection, which you can turn on in Settings: lists video and audio on the page you are visiting, with a small in-page panel, and sends the one you choose to the app. YouTube is not supported, and the app refuses live streams and streams it detects as DRM-protected. Download only what you have the right to.
 - Rules for which file types and sites to catch. Hold Delete while clicking an ordinary link to keep that one download in Chrome, or pause catching for five minutes from the toolbar popup. Use the pause for buttons and for links inside embedded frames, where holding Delete does not work.
+
+YouTube is not supported.
 
 WHAT IT SHARES WITH THE APP
 For each download you send, the extension gives the desktop app, on the same computer:
@@ -78,7 +80,7 @@ The first time you install it, Settings opens so you can decide whether to turn 
 **Single purpose:**
 
 ```text
-Sends downloads from Chrome to the Inbound Download Manager desktop app installed on the same computer. It can catch matching downloads automatically once the user turns this on, and it lets the user send an item from the right-click menu, links chosen from the current page, or, if the user turns it on, video and audio found on the page. Without the desktop app, downloads stay in Chrome.
+Sends downloads from Chrome to the Inbound Download Manager desktop app installed on the same computer. It can catch matching downloads automatically once the user turns this on, and it lets the user send an item from the right-click menu or links chosen from the current page. Without the desktop app, downloads stay in Chrome.
 ```
 
 **Permission justifications:**
@@ -87,12 +89,12 @@ Sends downloads from Chrome to the Inbound Download Manager desktop app installe
 |---|---|
 | `downloads` | Detects when Chrome starts a download and reads its address, file name, type and size to apply the user's rules. If the user has turned on automatic sending, a matching download is paused while the desktop app is asked to take it. Chrome's copy is cancelled and removed from Chrome's list only after the app accepts; otherwise the download resumes in Chrome. |
 | `contextMenus` | Adds one command, "Download with Inbound Download Manager", to the right-click menu on links, images, video and audio, so the user can send that item to the desktop app and choose its name and folder first. |
-| `storage` | Saves the user's settings and the temporary "pause catching" timer on this device. Keeps a right-click or media download waiting for confirmation (its address, page address, referrer, browser user agent and file name) in session storage, because the background worker can stop in between. Sync storage is not used and cookie values are not kept here. |
+| `storage` | Saves the user's settings and the temporary "pause catching" timer on this device. Keeps a right-click download waiting for confirmation (its address, page address, referrer, browser user agent and file name) in session storage, because the background worker can stop in between. Sync storage is not used and cookie values are not kept here. |
 | `cookies` | Many downloads work only with the user's login for that site. When a download is sent, the extension reads the cookies for that download's address and passes them through native messaging to the desktop app on the same computer, so the app can make the request as the user. The extension has no server and sends them nowhere else. The app stores them encrypted on the device with that download and sends them only to that download's own site. |
 | `nativeMessaging` | The only channel to the Inbound Download Manager desktop app on the same computer, which the user installs separately. Used to send downloads, check the connection, show recent downloads, open the app and show a folder picker. Connecting starts the app's background process if it is not already running. |
 | `notifications` | Shows a desktop notification with the result of a download being sent (sent to the app, already in the app, rejected, or app unavailable) and says why a right-clicked link cannot be sent. Without it, a caught download would disappear from Chrome with no explanation. The user can turn these off in Settings, apart from the one saying a site is not supported. |
-| Host permission (`http://*/*`, `https://*/*`) | Downloads can start from any website, so the sites cannot be listed in advance. Access is used to read the cookies for an address being sent, to read a tab's address and title for the source page and package name, and, only if the user turns on media detection, to request a stream's playlist so the popup can list its qualities. Page contents are not collected through this permission and nothing is sent to the developer. |
-| Content script (all http and https pages, top frame) | Lists the page's links when the user opens Download All. Only while automatic sending is on, checks whether the Delete key is held during a click, so that one download can stay in Chrome; it keeps no record of keystrokes. Only if the user turns on media detection, finds video and audio on the page and shows a small download panel. Page data goes only to the extension and, for downloads the user picks, to the desktop app. |
+| Host permission (`http://*/*`, `https://*/*`) | Downloads can start from any website, so the sites cannot be listed in advance. Access is used to read the cookies for an address being sent, and to read a tab's address and title for the source page and package name. The extension makes no network requests of its own. Page contents are not collected through this permission and nothing is sent to the developer. |
+| Content script (all http and https pages, top frame) | Lists the addresses of the page's links, images, video and audio when the user opens Download All. Only while automatic sending is on, checks whether the Delete key is held during a click, so that one download can stay in Chrome; it keeps no record of keystrokes. It adds nothing to the page. Page data goes only to the extension and, for downloads the user picks, to the desktop app. |
 
 **Are you using remote code?** No.
 
@@ -103,7 +105,7 @@ Sends downloads from Chrome to the Inbound Download Manager desktop app installe
 | Authentication information | Yes | Cookies for the download's address, which can include sign-in cookies. |
 | Web history | Yes | Addresses of downloads and the pages they came from. |
 | User activity | Yes | While automatic sending is on: watches new browser downloads, and whether Delete is held during a click. |
-| Website content | Yes | Link and media addresses and labels on a page, when the user asks. |
+| Website content | Yes | Link addresses and labels on a page, when the user opens Download All. |
 | Personally identifiable information | No | Nothing targets it. It could appear only by accident inside an address or file name. |
 | Health, financial, personal communications, location | No | Nothing reads these. |
 
@@ -146,5 +148,5 @@ Then:
 
 Without the desktop app: the popup says the app is required and links to it, and downloads stay in Chrome. That is the expected behaviour, not a fault.
 
-Media detection is off by default. Turn it on in Settings to see the in-page panel on a page with an ordinary video file. YouTube is deliberately not supported.
+YouTube is deliberately not supported.
 ```

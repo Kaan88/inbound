@@ -20,7 +20,7 @@
       <h2>Integration</h2>
       <label class="check">
         <input id="enabled" type="checkbox" />
-        <span>Allow automatic sending and media detection (right-click and Download all links work either way)</span>
+        <span>Allow automatic sending (right-click and Download all links work either way)</span>
       </label>
       <label class="check">
         <input id="autoIntercept" type="checkbox" />
@@ -29,18 +29,6 @@
       <p class="consent small">
         When this is on, downloads that match your rules stop in Chrome and start again in the desktop app, and they leave Chrome's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. Nothing is sent to the developer.
         <a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a>
-      </p>
-      <label class="check">
-        <input id="mediaDetectionEnabled" type="checkbox" />
-        <span>Detect media on pages and show the in-page download panel</span>
-      </label>
-      <p class="consent small">
-        Off unless you turn it on. It looks for video and audio addresses on each page you visit, keeps them
-        in memory until the page is closed or reloaded, and sends one to the desktop app only when you choose
-        to download it. To list a stream's qualities, opening the toolbar popup may request its playlist from
-        the site hosting it, with your cookies only if that is the site you are on. YouTube is not supported,
-        and the app refuses live streams and streams it detects as DRM-protected. Download only what you have
-        the right to.
       </p>
       <label class="check">
         <input id="notifications" type="checkbox" />

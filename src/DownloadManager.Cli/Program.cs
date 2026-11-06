@@ -1568,7 +1568,6 @@ internal static class Program
             }
         }
         Console.WriteLine($"browser integration: {settings.BrowserIntegrationEnabled}");
-        Console.WriteLine($"auto intercept:    {settings.BrowserAutoIntercept}");
         Console.WriteLine($"auto-resume:       {settings.AutoResumeUnfinishedOnStartup}");
         Console.WriteLine($"system actions:    {settings.AllowSystemCompletionActions}");
         Console.WriteLine($"prevent sleep:     {settings.PreventSleepWhileDownloading}");

@@ -158,7 +158,6 @@ public sealed class SettingsDto
     public bool LaunchAtStartup { get; set; }
     public bool ClipboardMonitoring { get; set; }
     public bool BrowserIntegrationEnabled { get; set; } = true;
-    public bool BrowserAutoIntercept { get; set; } = true;
     public bool NotifyOnCompletion { get; set; } = true;
     public bool PlayCompletionSound { get; set; } = true;
     public Dictionary<string, string> EventSoundFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);

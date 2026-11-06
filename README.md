@@ -1,19 +1,49 @@
 # Inbound Download Manager
 
+A download manager for Windows, in three parts:
+
+- a WinUI 3 desktop app;
+- a background service that owns the downloads and keeps them running from the notification area when the window is closed;
+- a Chrome extension that can send browser downloads to the app.
+
+It splits downloads into segments, resumes them after interruptions and restarts, and supports queues, schedules, proxies and site logins.
+
+## Install
+
+Download the installer from the [latest release](https://github.com/Kaan88/inbound/releases/latest) and run it.
+
 Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; settings, the download list and logs live in `%LOCALAPPDATA%\Inbound Download Manager`. 0.3.0 is a fresh start: it does not read state or settings from earlier builds.
 
-A private-use Windows download manager built around a durable background engine,
-a replaceable WinUI 3 frontend, and a Manifest V3 Chrome bridge. It implements
-observed another download manager behavior without using reference app code, assets, or
-licensing.
+## Chrome extension
 
-Reference: **another download manager 6.43.12.3** (see
-`notes/reference-version.md`).
+The extension needs the desktop app, which it reaches through a per-user native-messaging host. Automatic sending is off until you turn it on in the extension's Settings.
 
-> Status: Windows installer package is built and ready for user installation
-> testing; actual install lifecycle and sign-in behavior remain unverified.
-> Parity claims are tracked honestly in
-> `reference notes`; unimplemented features are labelled.
+To load it from source, build it (see below), open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `extensions\chrome\dist`. The extension ID is pinned by the manifest key.
+
+What the extension does with data is in its [privacy policy](docs/chrome-extension-privacy.md).
+
+## Build
+
+Prerequisites:
+
+- Windows 11 x64
+- .NET SDK 10
+- Node.js 20+ (for the extension)
+- Google Chrome
+- Windows App SDK runtime (the installer can bootstrap/self-contain it)
+
+```powershell
+dotnet build DownloadManager.slnx -c Release
+cd extensions\chrome; npm ci; npm run build
+```
+
+Run the tests with `scripts\test.ps1`. To publish and install a development build:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+This publishes to `%LOCALAPPDATA%\Programs\Inbound Download Manager`, registers the per-user Chrome native-messaging host, and optionally enables launch at sign-in.
 
 ## Repository layout
 
@@ -23,61 +53,27 @@ src/
   DownloadManager.Contracts/       versioned IPC contracts
   DownloadManager.Engine/          HTTP engine, resume, segmentation
   DownloadManager.Persistence/     durable jobs/settings/history
+  DownloadManager.Runtime/         job orchestration, scheduling, dedupe
   DownloadManager.Host/            background host + tray + IPC
   DownloadManager.Tray/            notification-area library
   DownloadManager.Desktop.WinUI/   WinUI 3 frontend
   DownloadManager.NativeHost/      Chrome native-messaging bridge
   DownloadManager.Cli/             headless control
 extensions/chrome/                 our MV3 TypeScript extension
+installer/                         installer definition
+assets/                            app icon sources
 tools/TestServer/                  fault-injection HTTP server
 tests/                             unit/integration/fault tests
-notes/               analysis notes and evidence
 scripts/                           build/test/install/package scripts
 docs/                              architecture and operation docs
 ```
 
-## Prerequisites
-
-- Windows 11 x64
-- .NET SDK 10
-- Node.js 20+ (for the extension)
-- Google Chrome
-- Windows App SDK runtime (installer can bootstrap/self-contain)
-
-## Build
-
-```powershell
-dotnet build DownloadManager.slnx -c Debug
-cd extensions\chrome; npm install; npm run build
-```
-
-## Install
-
-The current packaged installer is
-`artifacts\installer\DownloadManagerSetup-0.1.0.exe` (71.9 MB; SHA-256
-`A3D5ABCADE836177371CA8D3F5FD1981DE83CA47C8956D138C1C8920260D8363`). Publish
-checks verified all staged extension files and hashes, including icons, with no
-nested `dist`. The package is ready for user installation testing; actual
-install/upgrade/uninstall lifecycle and sign-in behavior have not yet been
-verified.
-
-## Install (development)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-```
-
-The installer publishes to `%LOCALAPPDATA%\Programs\Inbound Download Manager`, registers the
-per-user Chrome native-messaging host, and optionally enables launch at sign-in.
-Then load `extensions\chrome\dist` as an unpacked extension in
-`chrome://extensions`. The extension ID is pinned by the manifest key.
-
 ## Documentation
 
-- `GOAL.md` — objective, pinned reference, milestones, completion criteria
+- `GOAL.md` — objective, milestones, completion criteria
 - `ROADMAP.md` — executable work and acceptance conditions
-- `reference notes` — feature inventory with evidence and status
 - `PROGRESS.md` — session handoff and current state
 - `CLAUDE.md` — agent onboarding
 - `docs/architecture.md` — process boundaries and IPC
 - `docs/browser-integration.md` — handoff constraints and protocol
+- `docs/chrome-extension-privacy.md` — extension privacy policy

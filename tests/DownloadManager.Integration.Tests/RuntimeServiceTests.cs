@@ -2498,7 +2498,7 @@ public sealed partial class RuntimeServiceTests
         });
         Assert.True(response.Accepted, response.Error);
         var id = response.Job!.Id;
-        var jobFile = Path.Combine(ctx.Paths.JobsDirectory, $"{id:D}.json");
+        var jobFile = Path.Combine(ctx.Paths.JobsDirectory, $"{id:N}.json");
         async Task PauseAsync()
         {
             await ctx.WaitFor(id, job => job.ReceivedBytes > 0);
@@ -2506,11 +2506,25 @@ public sealed partial class RuntimeServiceTests
             await ctx.WaitFor(id, job => job.State == "paused");
         }
 
+        // A refresh is refused until the paused transfer has fully stopped.
+        async Task RefreshAsync(string url)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            var refreshed = await ctx.Service.RefreshUrlAsync(id, url);
+            while (!refreshed.Ok && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+                refreshed = await ctx.Service.RefreshUrlAsync(id, url);
+            }
+
+            Assert.True(refreshed.Ok, refreshed.Error);
+        }
+
         await PauseAsync();
         Assert.Contains("Cookie", await File.ReadAllTextAsync(jobFile));
 
         // The same site: a fresh link to the same file keeps the login.
-        Assert.True((await ctx.Service.RefreshUrlAsync(id, $"{_server.BaseAddress}{path}&fresh=1")).Ok);
+        await RefreshAsync($"{_server.BaseAddress}{path}&fresh=1");
         await PauseAsync();
         var kept = await File.ReadAllTextAsync(jobFile);
         Assert.Contains("Cookie", kept);
@@ -2519,7 +2533,7 @@ public sealed partial class RuntimeServiceTests
         // Another site, here the same server under another name: nothing of the login goes with it.
         var elsewhere = _server.BaseAddress.ToString().Replace("127.0.0.1", "localhost");
         Assert.NotEqual(_server.BaseAddress.ToString(), elsewhere);
-        Assert.True((await ctx.Service.RefreshUrlAsync(id, $"{elsewhere}{path}&fresh=2")).Ok);
+        await RefreshAsync($"{elsewhere}{path}&fresh=2");
         await PauseAsync();
         var moved = await File.ReadAllTextAsync(jobFile);
         Assert.DoesNotContain("Cookie", moved);

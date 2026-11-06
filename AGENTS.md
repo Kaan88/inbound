@@ -1,8 +1,8 @@
 # Agent instructions
 
 Read `CLAUDE.md` first and follow its project conventions, safety constraints,
-and documentation guidance. `GOAL.md`, `ROADMAP.md`, `reference notes`, and
-`PROGRESS.md` are the authoritative project tracking documents.
+and documentation guidance. `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md` are the
+authoritative project tracking documents.
 
 ## Model selection and delegation
 

@@ -1,36 +1,29 @@
 # CLAUDE.md — agent onboarding
 
-Read this first, then `GOAL.md`, `ROADMAP.md`, `reference notes`, and `PROGRESS.md`.
+Read this first, then `GOAL.md`, `ROADMAP.md`, and `PROGRESS.md`.
 `GOAL.md` and `ROADMAP.md` are the fallback for the unavailable Goal/Todo tools;
 treat them as authoritative tracking. Update them after every meaningful
 increment.
 
 ## What this project is
 
-A private-use Windows download manager, **Inbound Download Manager**. The
-installed **another download manager 6.43.12.3** (`v6.43b12 Full`) is a
-*reference for suggestions*, not a parity target (owner decision, 2026-11-05):
-the owner prefers the current design. Propose reference app-inspired ideas; do not
-reshape existing behavior or UI to match reference app unless asked. It is a
+A private-use Windows download manager, **Inbound Download Manager**. It is a
 new C#/.NET application with a WinUI 3 frontend, a separate background host and
 download engine, and our own Manifest V3 Chrome extension + Native Messaging
-host. It is **not** a patch, crack, or license bypass of reference app, and it does not
-copy reference app assets or code.
+host.
 
-Pinned reference details and hashes: `notes/reference-version.md`.
-Never commit reference app binaries, cookies, credentials, browser profiles, or captures
-containing secrets.
+Never commit cookies, credentials, browser profiles, or captures containing
+secrets.
 
 ## Current status (2026-11-04)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
-recovery, tray/host/IPC/CLI, reference app-shaped WinUI shell, segmented transfers, and
+recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
 Chrome automatic + context-menu handoff, including authenticated cookie,
 referrer and user-agent transfer. Phase 8 (queues/scheduler) is complete,
 including completion actions, quotas, sleep prevention, and DST behavior.
 Payload bytes are written directly into a destination-local part file and renamed in place, with
-no fixed temp directory or cross-volume stitching. `PROGRESS.md` is authoritative for status;
-`reference notes` holds reference app reference notes. Remaining
+no fixed temp directory or cross-volume stitching. `PROGRESS.md` is authoritative for status. Remaining
 verification includes clean-environment install/upgrade and independent
 interruption/restart checks. Clipboard
 URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
@@ -44,7 +37,6 @@ scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
 Edge/Firefox integration is explicitly out of scope (C3);
-direct media detection, in-page panel with HLS quality variants, popup resources,
 HLS master/media assembly including AES-128 (single and rotating keys) and
 alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
 byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
@@ -52,7 +44,7 @@ expiring segment-token refresh,
 explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
 VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
-credential boundaries, and expired-URL refresh are verified (PARITY S2–S7).
+credential boundaries, and expired-URL refresh are verified.
 TorBox/account-provider work, unrar, and Linux/Docker/web UI are explicitly
 deferred (ROADMAP A1–A5/D1–D4). The installer package is built, but install
 smoke testing, sign-in behavior, and clean-environment install/upgrade acceptance
@@ -136,12 +128,6 @@ npm run build
 # chrome://extensions -> Developer mode -> Load unpacked -> dist
 ```
 
-disassembler MCP is a headless server on `http://127.0.0.1:8081/mcp`, project
-`reference_project`. Start it with
-`C:\Users\kaank\tools\disassembler-mcp\start-reference app-headless.cmd`; only one session may
-hold the project. Call `get_program_info` before trusting addresses. The loaded
-program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
-
 ## Conventions
 
 - Nullable enabled, implicit usings, file-scoped namespaces, async APIs with
@@ -158,7 +144,7 @@ program is 32-bit x86, image base `0x00400000`, SHA-256 pinned above.
 - Never mark a feature `implemented` without linked acceptance evidence.
   Use `partial`, `blocked`, or `unverified` otherwise.
 - Do not add unlabelled stubs or settings that do nothing.
-- Own branding/assets only; do not copy reference app icons, strings, or binaries.
+- Own branding/assets only.
 - Keep `PROGRESS.md` current at each checkpoint; commit coherent increments.
 
 ## Review delegation (user requirement, 2026-11-04)
@@ -167,7 +153,7 @@ For Claude-led sessions, delegate simple work and reviews to
 `claude-agent/haiku`; for OpenAI/GPT-led sessions, use `openai/gpt-6-luna`.
 Generally, every main agent should delegate routine/simple work to a cheaper
 capable available model. Simple work includes small changes, diff/commit
-reviews, documentation/encoding checks, parity/evidence wording, and coverage
+reviews, documentation/encoding checks, evidence wording, and coverage
 spot checks. Discover exact model IDs; do not guess. Verify delegated outputs.
 If the preferred model is unavailable, disclose that and use an available
 cheaper capable equivalent, or ask if none is available. Keep complex work
@@ -194,8 +180,6 @@ not as acceptance evidence.
   exe. `scripts\publish.ps1` copies it and fails loudly if missing. A startup
   `XamlParseException` in `MainWindow.InitializeComponent` while the bin build
   runs is the symptom of a missing/stale `.pri`.
-- disassembler project lock: one headless server only. MCP config points at the HTTP
-  server, not stdio, to avoid duplicate process locks.
 - Native-host registration is per user and must point at an absolute
   `DownloadManager.NativeHost.exe`; `scripts\register-native-host.ps1` does this.
 - Never dump registry values containing cookies into committed files; redact.
@@ -203,6 +187,6 @@ not as acceptance evidence.
   built here inherits it, and Windows runs Low-labelled exes at Low integrity. That is the real cause
   of "harness can't write LocalAppData/Downloads" and of the local installer failing with
   "unable to create the directory %TEMP%\is-*.tmp, Error 5" unless run as admin.
-  `scriptsuild-installer.ps1` now relabels the setup Medium; check with `icacls <file>`.
+  `scripts\build-installer.ps1` now relabels the setup Medium; check with `icacls <file>`.
 - TestServer and UI executables lock their output during builds; stop them or use
   `scripts\publish.ps1`, which handles this.

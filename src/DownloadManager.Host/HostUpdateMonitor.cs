@@ -56,10 +56,16 @@ internal sealed class HostUpdateMonitor : IDisposable
         {
             if (_disposed) return;
             var wasEnabled = _autoCheck;
+            var oldHours = _intervalHours;
             _autoCheck = settings.AutoCheckUpdates && InstalledBuild.TryLoad() is not null;
             _intervalHours = Math.Clamp(settings.UpdateCheckIntervalHours, 1, 168);
-            var interval = _autoCheck ? TimeSpan.FromHours(_intervalHours) : Timeout.InfiniteTimeSpan;
-            _timer.Change(interval, interval);
+            // Settings change for many reasons, such as adding a download; only re-arm when the schedule did.
+            if (_autoCheck != wasEnabled || _intervalHours != oldHours)
+            {
+                var interval = _autoCheck ? TimeSpan.FromHours(_intervalHours) : Timeout.InfiniteTimeSpan;
+                _timer.Change(interval, interval);
+            }
+
             if (!_autoCheck) _retryTimer.Change(Timeout.Infinite, Timeout.Infinite);
             startCheck = _autoCheck && !wasEnabled;
         }

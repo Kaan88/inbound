@@ -1,8 +1,7 @@
 # UI design guidelines
 
-How the WinUI frontend should look and behave. The goal is a dense, reference app-style
-utility (reference captures in `reference-screens/`) that looks the same in dark
-and light mode. Follow these rules when adding windows or controls.
+How the WinUI frontend should look and behave. The goal is a dense
+utility that looks the same in dark and light mode. Follow these rules when adding windows or controls.
 
 ## 1. One palette, defined once
 
@@ -59,7 +58,7 @@ Color only the status text. Don't tint whole rows.
   column. Show it only while a job is active or paused with progress above 0.
 - The progress dialog has one main bar, `SegmentMapBar` (14px, radius 2). It
   draws every segment's completed bytes at its real offset, with a divider at
-  each segment start, as reference app does. The plain indeterminate bar appears only
+  each segment start. The plain indeterminate bar appears only
   while the size is unknown. Don't add a second overall bar.
 - The segment table has the columns N. | Progress (6px bar) | Downloaded |
   Speed | Info. Its values come from the live stream position
@@ -137,7 +136,6 @@ Color only the status text. Don't tint whole rows.
    `/slow/name.iso?size=80000000&bps=400000`. Add a failing URL and a small
    file that completes so every status color is on screen.
 4. Capture both themes. To switch, set `"DarkMode": false|true` in
-   `artifacts\uiqa\data\ui-state.json` and restart the UI. Compare against
-   `reference-screens/`.
+   `artifacts\uiqa\data\ui-state.json` and restart the UI.
 5. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
    user's Downloads folder during harness runs.

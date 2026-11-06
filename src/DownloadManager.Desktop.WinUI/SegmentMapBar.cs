@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Shapes;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
-/// reference app-style file map: one track for the whole file, with each saved segment's completed bytes drawn at
+/// Segment file map: one track for the whole file, with each saved segment's completed bytes drawn at
 /// its real byte offset and a divider at every segment start. Falls back to a single fill when only an
 /// overall fraction is known.
 /// </summary>
