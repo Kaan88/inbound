@@ -710,9 +710,11 @@ internal sealed class HostPipeBusyException : TimeoutException
     private const int FileNotFound = 2;
 
     /// <summary>Ends a wait at once, and takes no instance, so asking can't make the shortage any worse.</summary>
-    public static bool PipeExists()
+    public static bool PipeExists() => PipeExists(PipeNames.HostPipe());
+
+    internal static bool PipeExists(string name)
     {
-        if (WaitNamedPipe($@"\\.\pipe\{PipeNames.HostPipe()}", 1)) return true;
+        if (WaitNamedPipe($@"\\.\pipe\{name}", 1)) return true;
         return Marshal.GetLastPInvokeError() != FileNotFound;
     }
 

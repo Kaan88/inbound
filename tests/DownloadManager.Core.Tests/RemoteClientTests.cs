@@ -22,6 +22,21 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task APipeWithEveryInstanceTakenStillExistsAndOneNobodyMadeDoesNot()
+    {
+        var name = "inbound-test-" + Guid.NewGuid().ToString("N");
+        Assert.False(HostPipeBusyException.PipeExists(name));
+
+        await using var server = new System.IO.Pipes.NamedPipeServerStream(name, System.IO.Pipes.PipeDirection.InOut, 1, System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous);
+        var accepted = server.WaitForConnectionAsync();
+        await using var client = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+        await accepted;
+
+        Assert.True(HostPipeBusyException.PipeExists(name));
+    }
+
+    [Fact]
     public void ATimeoutAfterTheHostWasReachedIsNotReportedAsAHostThatIsDown()
     {
         Assert.Equal(RemoteText.HostTooSlow, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: true));
