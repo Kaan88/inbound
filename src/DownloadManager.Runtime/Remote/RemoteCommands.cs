@@ -610,6 +610,7 @@ public sealed class RemoteCommands : IDisposable
         DisplayHost = Safe(view.DisplayHost),
         Cached = view.Cached,
         ApprovalNeeded = view.ApprovalNeeded,
+        HeldForApproval = view.HeldForApproval,
         ApprovedUncached = view.ApprovedUncached,
         HasLinkPassword = view.HasLinkPassword,
         HasArchivePassword = view.HasArchivePassword,

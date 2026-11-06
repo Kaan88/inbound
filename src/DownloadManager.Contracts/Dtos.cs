@@ -362,6 +362,8 @@ public sealed class JobRefreshUrlRequest
 {
     public Guid JobId { get; set; }
     public string Url { get; set; } = string.Empty;
+    /// <summary>The user chose a direct request for an address nobody could classify. It doesn't excuse a known hoster link or folder link.</summary>
+    public bool ExplicitDirect { get; set; }
 }
 
 public sealed class JobUpdateRequest

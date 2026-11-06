@@ -92,7 +92,8 @@ internal static class RemoteRules
            account.Capabilities.Contains("catalog", StringComparer.OrdinalIgnoreCase);
 
     public static RemoteRowActions Actions(RemoteJobDto job) => new(
-        CheckNow: job.State is "intended" or "submissionUnknown" or "waiting" or "blocked" or "awaitingSelection",
+        // A look at a held copied link could submit it, so the Host refuses, and there is nothing to offer.
+        CheckNow: !job.HeldForApproval && job.State is "intended" or "submissionUnknown" or "waiting" or "blocked" or "awaitingSelection",
         SelectFiles: job.State == "awaitingSelection",
         Approve: job.ApprovalNeeded && job.State == "intended",
         EnterLinkPassword: job.State == "failed" && job.FailureKind == "linkPasswordRequired",
@@ -176,7 +177,7 @@ internal static partial class RemoteText
         var cause = FailureCause(job);
         if (cause.Length > 0) parts.Add(cause);
         if (ProviderProgress(job.Progress, job.SpeedBytesPerSecond, job.EtaSeconds, provider, job.State == "waiting") is { Length: > 0 } progress) parts.Add(progress);
-        if (job.ApprovalNeeded && job.State == "intended") parts.Add($"Approve it to have {provider} fetch it.");
+        if (job.ApprovalNeeded && job.State == "intended") parts.Add(job.HeldForApproval ? "Copied from the clipboard. Approve it to go ahead." : $"Approve it to have {provider} fetch it.");
         if (job.State == "awaitingSelection") parts.Add("Choose the files.");
         if (NextCheck(job, now, format) is { Length: > 0 } next) parts.Add(next);
         var detail = string.Join(Separator, parts);
@@ -213,6 +214,7 @@ internal static partial class RemoteText
         "failed" => job.FailureKind == "linkPasswordRequired" ? "Needs the link's password" : $"Failed on {provider}",
         "blocked" => $"{provider} account busy",
         "awaitingSelection" => "Ready to download",
+        "intended" when job.HeldForApproval => "Waiting for approval",
         "intended" when job.ApprovalNeeded => $"Not cached on {provider}",
         "intended" when job.Cached => $"Cached on {provider}",
         "intended" => $"Checking {provider}…",
@@ -382,6 +384,8 @@ internal static partial class RemoteText
     public static string ApproveQuestion(RemoteJobDto job)
     {
         var provider = ProviderName(job);
+        if (job.HeldForApproval)
+            return $"'{JobName(job)}' was copied from the clipboard, and nothing has been sent to {provider}. Approving hands it to {provider}, which may count against your {provider} limits. Downloading to this computer starts only when {provider} has it.";
         return $"'{JobName(job)}' isn't cached on {provider}. Approving starts work on {provider}: it fetches this on your account, which may count against your {provider} limits. Downloading to this computer starts only when {provider} has it.";
     }
 

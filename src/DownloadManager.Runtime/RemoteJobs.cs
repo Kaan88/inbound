@@ -33,6 +33,14 @@ public sealed record RemoteJobsResult
     public IReadOnlyList<string> Notes { get; init; } = [];
 }
 
+/// <summary>Says whether a job may be moved onto an address, for whoever knows which addresses belong to a provider.</summary>
+public interface IDirectAddressPolicy
+{
+    /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify. It excuses nothing else.</param>
+    /// <returns>Why not, in words for the user. Null when it may.</returns>
+    Task<string?> WhyNotDirectAsync(string address, bool explicitDirect, CancellationToken cancellationToken = default);
+}
+
 public sealed partial class DownloadManagerService : IRemoteJobHost
 {
     private const string RemoteOwnerPrefix = "provider:";
@@ -438,6 +446,42 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
 
     private string? MaskIfProviderLink(string? url)
         => HoldsProviderSecret(url) ? MaskProviderSecret(url!) : url;
+
+    /// <summary>
+    /// Asks whether a job may be moved onto an address. Set when the Host has provider accounts,
+    /// after the service exists, because what answers it is built on the service.
+    /// </summary>
+    public IDirectAddressPolicy? DirectAddresses { get; set; }
+
+    /// <summary>
+    /// A server's name for a file, or null if it gives away a secret. With no name of its own the engine
+    /// takes the last part of the address it ended up at, and in a direct link that can be the key.
+    /// </summary>
+    private string? ServerNameWithoutSecret(string? name, params string?[] addresses)
+        => string.IsNullOrWhiteSpace(name) || _linkSecrets?.Holds(name) == true || addresses.Any(address => NameIsSecretOfAddress(name, address))
+            ? null
+            : name;
+
+    /// <summary>
+    /// The name is this address's last part, and that part is a secret. Compared before cleaning, which
+    /// can change a key's characters so it no longer reads as one. A provider's link with a token its
+    /// account here doesn't know gives that token away by repeating it.
+    /// </summary>
+    private bool NameIsSecretOfAddress(string name, string? address)
+    {
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) ||
+            FileNameResolver.Resolve(null, uri) != name ||
+            FileNameResolver.FromUrl(uri) is not { } lastPart)
+        {
+            return false;
+        }
+
+        return _linkSecrets?.Holds(lastPart) == true ||
+               (lastPart.Length >= ShortestTokenInAddress && ProviderLinks.IsProviderLink(address) &&
+                Uri.UnescapeDataString(uri.Query).Contains(lastPart, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private const int ShortestTokenInAddress = 8;
 
     /// <summary>
     /// Takes the account key out of a job saved before its address was recognised as a provider

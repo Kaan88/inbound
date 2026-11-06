@@ -342,7 +342,7 @@ public sealed partial class HostPipeServer
                 case MessageTypes.JobRefreshUrl:
                     var refreshUrl = message.GetPayload<JobRefreshUrlRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, cancellationToken)
+                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;

@@ -22,7 +22,8 @@ public sealed partial class MainWindow
         Provider,
     }
 
-    private sealed record CheckedAddress(AddressWay Way, string Input, RemoteClassifyResult? Result);
+    /// <param name="ChosenDirect">The Host couldn't tell what it is, and the user asked for a direct request anyway.</param>
+    private sealed record CheckedAddress(AddressWay Way, string Input, RemoteClassifyResult? Result, bool ChosenDirect = false);
 
     /// <summary>
     /// The dialogs follow what the Host says about each input only when an account could take one. With
@@ -65,7 +66,7 @@ public sealed partial class MainWindow
             switch (await AskAsync(title, words, "Try again", "Download directly"))
             {
                 case ContentDialogResult.Secondary:
-                    return new CheckedAddress(AddressWay.Direct, input, result);
+                    return new CheckedAddress(AddressWay.Direct, input, result, ChosenDirect: true);
                 case ContentDialogResult.None:
                     return new CheckedAddress(AddressWay.Cancelled, input, result);
             }

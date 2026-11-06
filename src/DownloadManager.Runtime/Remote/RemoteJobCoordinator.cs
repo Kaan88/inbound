@@ -57,6 +57,8 @@ public sealed record RemoteAddRequest
     public IReadOnlyList<string>? FileIds { get; init; }
     /// <summary>The user agreed to have the provider start work on this if it isn't cached.</summary>
     public bool ApprovedUncached { get; init; }
+    /// <summary>Nobody asked for this yet, so it waits for the user's go-ahead before anything is sent or asked. See <see cref="RemoteJobRecord.HeldForApproval"/>.</summary>
+    public bool HoldForApproval { get; init; }
     public string? LinkPassword { get; init; }
     /// <summary>For the archives this brings. Never sent to the provider, and not the same thing as <see cref="LinkPassword"/>.</summary>
     public string? ArchivePassword { get; init; }
@@ -93,6 +95,7 @@ public sealed record RemoteJobView
     public string? DisplayHost { get; init; }
     public bool Cached { get; init; }
     public bool ApprovalNeeded { get; init; }
+    public bool HeldForApproval { get; init; }
     public bool ApprovedUncached { get; init; }
     public bool HasLinkPassword { get; init; }
     public bool HasArchivePassword { get; init; }
@@ -410,6 +413,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             DisplayHost = record.DisplayHost,
             Cached = record.Cached,
             ApprovalNeeded = record.ApprovalNeeded,
+            HeldForApproval = record.HeldForApproval,
             ApprovedUncached = record.ApprovedUncached,
             HasLinkPassword = record.ProtectedLinkPassword is not null,
             HasArchivePassword = record.ProtectedArchivePassword is not null || record.ArchivePasswordHandedOver,
@@ -516,6 +520,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return new RemoteAddResult { Error = built.Error, Kind = built.Kind };
         }
 
+        if (request.HoldForApproval)
+        {
+            record = record with { State = RemoteJobState.Intended, ApprovalNeeded = true, HeldForApproval = true, NextCheckAt = null };
+        }
+
         RemoteJobRecord saved;
         var existing = false;
         string? note = null;
@@ -527,8 +536,15 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 existing = true;
                 saved = twin;
                 note = WhatATwinIgnores(request, twin);
+                if (twin.HeldForApproval && !request.HoldForApproval)
+                {
+                    // Someone asked for it now, so it is no longer only a copied link. Their approval, or lack of one, is what counts.
+                    saved = ReleasedFromHold(twin, request.ApprovedUncached, record.CreatedAt);
+                    await _store.SaveAsync(saved, CancellationToken.None).ConfigureAwait(false);
+                    lock (_sync) _records[saved.Id] = saved;
+                }
                 // Also before anything has looked at it: an approval given now must still count then.
-                if (request.ApprovedUncached && twin.State == RemoteJobState.Intended && !twin.ApprovedUncached)
+                else if (request.ApprovedUncached && twin.State == RemoteJobState.Intended && !twin.ApprovedUncached)
                 {
                     saved = twin with
                     {
@@ -736,8 +752,21 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// <summary>The user agrees to have the provider start work on this if it isn't cached.</summary>
     public Task<RemoteActionResult> ApproveUncachedAsync(Guid id, CancellationToken cancellationToken = default)
         => ActAsync(id, record => record.State == RemoteJobState.Intended
-            ? record with { ApprovedUncached = true, ApprovalNeeded = false, NextCheckAt = _time.GetUtcNow() }
+            ? record.HeldForApproval
+                ? ReleasedFromHold(record, approved: true, _time.GetUtcNow())
+                : record with { ApprovedUncached = true, ApprovalNeeded = false, NextCheckAt = _time.GetUtcNow() }
             : null, "This item has already been sent.", cancellationToken);
+
+    /// <summary>What a held job would have been from the start. A folder link has nothing to submit: its item is on the account already.</summary>
+    private static RemoteJobRecord ReleasedFromHold(RemoteJobRecord record, bool approved, DateTimeOffset now) => record with
+    {
+        State = record is { PredictedHash: null, ItemId: not null } ? RemoteJobState.Waiting : RemoteJobState.Intended,
+        HeldForApproval = false,
+        ApprovalNeeded = false,
+        ApprovedUncached = approved || record.ApprovedUncached,
+        NextCheckAt = now,
+        UpdatedAt = now,
+    };
 
     /// <summary>
     /// Sets which files get local jobs, then checks the item once more before creating them. Files
@@ -1011,6 +1040,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private RemoteJobRecord? CheckedNow(RemoteJobRecord record)
     {
+        // A look at a held job could submit it if it is cached, and nobody has agreed to that.
+        if (record.HeldForApproval)
+        {
+            return null;
+        }
+
         var now = _time.GetUtcNow();
         if (record.State == RemoteJobState.AwaitingSelection)
         {

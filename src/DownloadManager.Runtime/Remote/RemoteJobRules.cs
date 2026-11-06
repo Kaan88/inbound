@@ -150,6 +150,8 @@ public static class RemoteJobRules
     /// <summary>The words for a job. Up to the local jobs these are about the provider's side, not local progress; after that, the package's state.</summary>
     public static string StatusText(RemoteJobRecord record, string providerName, RemoteLocalSummary? local = null) => record.State switch
     {
+        RemoteJobState.Intended when record.HeldForApproval =>
+            $"Copied from the clipboard. Nothing has been sent to {providerName}. Approve it to go ahead.",
         RemoteJobState.Intended when record.ApprovalNeeded =>
             $"Not cached on {providerName}. Approve it to have {providerName} fetch it.",
         RemoteJobState.Intended when record.FailureMessage is { } problem => problem,

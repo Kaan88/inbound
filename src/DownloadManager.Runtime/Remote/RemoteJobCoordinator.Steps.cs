@@ -184,7 +184,7 @@ public sealed partial class RemoteJobCoordinator
         lock (_sync)
         {
             return _records.Values
-                .Where(record => record.Provider == providerId && RemoteJobRules.IsPolled(record.State) && record.NextCheckAt is { } at && at <= now)
+                .Where(record => record.Provider == providerId && !record.HeldForApproval && RemoteJobRules.IsPolled(record.State) && record.NextCheckAt is { } at && at <= now)
                 .OrderBy(record => record.CreatedAt)
                 .ToList();
         }

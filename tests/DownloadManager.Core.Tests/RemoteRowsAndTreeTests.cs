@@ -274,6 +274,28 @@ public sealed class RemoteRulesTests
     }
 
     [Fact]
+    public void AHeldCopiedLinkOffersApprovalAndDoesNotClaimToKnowItIsUncached()
+    {
+        var job = Job("intended", approval: true);
+        job.HeldForApproval = true;
+        job.ItemId = null;
+        job.Name = "copied.bin";
+
+        var actions = RemoteRules.Actions(job);
+        Assert.Equal(RemoteRowAction.Approve, actions.Primary);
+        Assert.False(actions.CheckNow);
+
+        var row = RemoteText.JobRow(job, DateTimeOffset.UtcNow);
+        Assert.Equal("Waiting for approval", row.Status);
+        Assert.DoesNotContain("cached", row.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cached", RemoteText.ApproveQuestion(job), StringComparison.OrdinalIgnoreCase);
+
+        job.HeldForApproval = false;
+        Assert.Contains("Not cached", RemoteText.JobRow(job, DateTimeOffset.UtcNow).Status);
+        Assert.Contains("isn't cached", RemoteText.ApproveQuestion(job));
+    }
+
+    [Fact]
     public void ApprovingAndThePasswordAreOnlyOfferedWhenAsked()
     {
         Assert.False(RemoteRules.Actions(Job("waiting", approval: false)).Approve);

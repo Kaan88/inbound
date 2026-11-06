@@ -1395,6 +1395,7 @@ public sealed partial class MainWindow : Window
 
         // The address it already has stays usable: refusing that would strand a retry of a direct download.
         var newAddress = input.Text.Trim();
+        var chosenDirect = false;
         if (newAddress != job.Url && LinkExtractor.IsWebLink(newAddress) && await ProviderAddAppliesAsync())
         {
             var address = await CheckGivenAddressAsync("Refresh download address", newAddress);
@@ -1404,9 +1405,13 @@ public sealed partial class MainWindow : Window
                 await ShowMessageAsync("Refresh download address", RemoteText.RefreshRefused(ProviderNameFor(address.Result)));
                 return;
             }
+
+            chosenDirect = address.ChosenDirect;
         }
 
-        await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, newAddress));
+        await RunActionAsync(() => newAddress == job.Url
+            ? _connection.RefreshUrlAsync(job.Id, newAddress)
+            : _connection.RefreshChangedUrlAsync(job.Id, newAddress, chosenDirect));
     }
 
     private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)

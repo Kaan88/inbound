@@ -135,6 +135,7 @@ internal static class Program
             var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
             var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
+            service.DirectAddresses = remoteJobs;
             service.InitializeAsync().GetAwaiter().GetResult();
 
             // Ordinary downloads don't depend on this. Clients just don't get the archive commands this time.
@@ -225,9 +226,11 @@ internal static class Program
                 controller.UiContext = context;
             }
 
+            var copiedLinks = new CopiedLinks(service, remoteJobs);
             using var clipboardMonitor = new HostClipboardMonitor(
                 () => currentSettings.ClipboardMonitoring,
-                url => _ = AddClipboardDownloadAsync(service, tray, url, log),
+                url => _ = AddClipboardDownloadAsync(copiedLinks, tray, url, log),
+                copiedLinks.DescribeForLog,
                 log.Info);
             clipboardMonitor.Start();
 
@@ -378,27 +381,22 @@ internal static class Program
     }
 
     private static async Task AddClipboardDownloadAsync(
-        DownloadManagerService service,
+        CopiedLinks copiedLinks,
         TrayApplicationContext tray,
         string url,
         FileLogger log)
     {
         try
         {
-            var result = await service.AddJobAsync(new AddJobRequest
+            var outcome = await copiedLinks.AddAsync(url).ConfigureAwait(false);
+            if (outcome.Title is { } title)
             {
-                Url = url,
-                Source = "clipboardMonitor",
-                StartMode = "now",
-            }).ConfigureAwait(false);
-
-            if (result.Accepted && !result.Duplicate)
-            {
-                tray.Notify("Clipboard download added", result.Job?.FileName ?? UrlRedactor.Redact(url));
+                tray.Notify(title, outcome.Words ?? string.Empty);
             }
-            else if (!result.Accepted)
+
+            if (outcome.Problem is { } problem)
             {
-                log.Warn($"Clipboard URL rejected ({UrlRedactor.Redact(url)}): {result.Error}");
+                log.Warn(problem);
             }
         }
         catch (Exception ex)

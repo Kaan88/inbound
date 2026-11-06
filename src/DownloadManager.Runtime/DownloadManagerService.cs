@@ -256,7 +256,7 @@ public sealed partial class DownloadManagerService
         {
             var metadata = await reader.ReadMetadataAsync(new DownloadJob { Url = uri.AbsoluteUri, RequestHeaders = headers,
                 UserAgent = request.UserAgent, Referrer = request.Referrer }, timeout.Token).ConfigureAwait(false);
-            return new FileMetadataResult { Ok = true, FileName = metadata.FileName, TotalBytes = metadata.TotalBytes,
+            return new FileMetadataResult { Ok = true, FileName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl), TotalBytes = metadata.TotalBytes,
                 ContentType = metadata.ContentType, FinalUrl = MaskIfProviderLink(metadata.FinalUrl) };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -317,9 +317,9 @@ public sealed partial class DownloadManagerService
                 UserAgent = request.UserAgent,
                 Referrer = request.Referrer,
             }, timeout.Token).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(metadata.FileName) &&
-                !string.Equals(metadata.FileName, "download", StringComparison.OrdinalIgnoreCase))
-                request.FileName = metadata.FileName;
+            var serverName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl);
+            if (serverName is not null && !string.Equals(serverName, "download", StringComparison.OrdinalIgnoreCase))
+                request.FileName = serverName;
         }
         // Any probe failure (timeout, HTTP error, refused range) falls back to the URL name.
         catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
@@ -416,7 +416,7 @@ public sealed partial class DownloadManagerService
             ? FileNameResolver.Resolve(null, uri)
             : FileNameResolver.Sanitize(request.FileName);
         // A name taken from the address would carry the key into the path, the list and every client.
-        if (_linkSecrets?.Holds(fileName) == true) fileName = "download";
+        if (_linkSecrets?.Holds(fileName) == true || NameIsSecretOfAddress(fileName, request.Url)) fileName = "download";
         var browserDownload = source is DownloadSource.ChromeAuto or DownloadSource.ChromeContextMenu;
         var categoryId = request.CategoryId;
         if (Guid.TryParseExact(categoryId, "N", out var requestedCategoryGuid)) categoryId = requestedCategoryGuid.ToString("N");
@@ -2423,9 +2423,11 @@ public sealed partial class DownloadManagerService
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
 
+    /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify.</param>
     public async Task<JobActionResponse> RefreshUrlAsync(
         Guid id,
         string newUrl,
+        bool explicitDirect = false,
         CancellationToken cancellationToken = default)
     {
         if (!TryValidateUrl(newUrl, out var uri, out var urlError))
@@ -2435,88 +2437,118 @@ public sealed partial class DownloadManagerService
 
         await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
 
-        JobRuntime? runtime;
-        lock (_sync)
+        // Asking may wait on the network, so never under the lock, and the job may have moved on
+        // meanwhile. So everything is looked at again afterwards, with this answer kept.
+        var addressAllowed = false;
+        while (true)
         {
-            if (!_jobs.TryGetValue(id, out runtime))
+            JobRuntime? runtime;
+            var askFirst = false;
+            lock (_sync)
             {
-                return new JobActionResponse { Ok = false, Error = "Job not found." };
-            }
-
-            if (runtime.Job.RemoteSource is not null)
-            {
-                return new JobActionResponse
+                if (!_jobs.TryGetValue(id, out runtime))
                 {
-                    Ok = false,
-                    Error = "This download gets its address from its provider, so it cannot be changed here.",
-                    Job = Map(runtime.Job),
-                };
-            }
+                    return new JobActionResponse { Ok = false, Error = "Job not found." };
+                }
 
-            // The refresh dialog starts from the masked address. Accepting it unchanged
-            // keeps the real one; any other masked address has nothing real behind it.
-            var keepProtected = runtime.Job.ProtectedUrl is not null && newUrl == runtime.Job.Url;
-            if (!keepProtected && ProviderLinks.IsMasked(newUrl))
-            {
-                return new JobActionResponse
+                if (runtime.Job.RemoteSource is not null)
                 {
-                    Ok = false,
-                    Error = "This address has its key hidden, so it cannot download anything. Paste the original link.",
-                    Job = Map(runtime.Job),
-                };
-            }
+                    return new JobActionResponse
+                    {
+                        Ok = false,
+                        Error = "This download gets its address from its provider, so it cannot be changed here.",
+                        Job = Map(runtime.Job),
+                    };
+                }
 
-            if (runtime.Job.State == DownloadState.Completed)
-            {
-                return new JobActionResponse { Ok = false, Error = "Job is already complete.", Job = Map(runtime.Job) };
-            }
-
-            if (runtime.Starting || runtime.Runner is { IsCompleted: false })
-            {
-                return new JobActionResponse
+                // The refresh dialog starts from the masked address. Accepting it unchanged
+                // keeps the real one; any other masked address has nothing real behind it.
+                var keepProtected = runtime.Job.ProtectedUrl is not null && newUrl == runtime.Job.Url;
+                if (!keepProtected && ProviderLinks.IsMasked(newUrl))
                 {
-                    Ok = false,
-                    Error = "Pause or stop the download before refreshing its address.",
-                    Job = Map(runtime.Job),
-                };
+                    return new JobActionResponse
+                    {
+                        Ok = false,
+                        Error = "This address has its key hidden, so it cannot download anything. Paste the original link.",
+                        Job = Map(runtime.Job),
+                    };
+                }
+
+                if (runtime.Job.State == DownloadState.Completed)
+                {
+                    return new JobActionResponse { Ok = false, Error = "Job is already complete.", Job = Map(runtime.Job) };
+                }
+
+                if (runtime.Starting || runtime.Runner is { IsCompleted: false })
+                {
+                    return new JobActionResponse
+                    {
+                        Ok = false,
+                        Error = "Pause or stop the download before refreshing its address.",
+                        Job = Map(runtime.Job),
+                    };
+                }
+
+                // The address it already has stays usable, whatever it is: refusing that would strand a retry.
+                if (!addressAllowed && DirectAddresses is not null && !keepProtected && !IsSameAddress(runtime.Job.Url, uri))
+                {
+                    askFirst = true;
+                }
+                else
+                {
+                    runtime.PauseRequested = false;
+                    runtime.CancelRequested = false;
+                    runtime.CancelledForRemoval = false;
+                    // The saved login belongs to the site it came from, and the engine trusts whatever site
+                    // the job now points at. A move to another site must leave it behind.
+                    if (!Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var previous) ||
+                        previous.GetLeftPart(UriPartial.Authority) != uri.GetLeftPart(UriPartial.Authority))
+                    {
+                        runtime.Job.RequestHeaders.Remove("Cookie");
+                        runtime.Job.RequestHeaders.Remove("Authorization");
+                        runtime.Job.RequestHeaders.Remove("Proxy-Authorization");
+                        runtime.Job.Referrer = null;
+                    }
+
+                    if (!keepProtected)
+                    {
+                        var (jobUrl, _, protectedUrl) = SplitOffProviderLink(uri.AbsoluteUri, null);
+                        runtime.Job.Url = jobUrl;
+                        runtime.Job.ProtectedUrl = protectedUrl;
+                    }
+
+                    runtime.Job.ResolvedUrl = null;
+                    runtime.Job.FinalUrl = null;
+                    runtime.Job.State = DownloadState.Queued;
+                    runtime.Job.StartMode = StartMode.StartNow;
+                    runtime.Job.Failure = null;
+                    runtime.Job.CompletedAt = null;
+                    runtime.Job.AutoResumeAfterRestart = true;
+                    runtime.Job.Touch();
+                }
             }
 
-            runtime.PauseRequested = false;
-            runtime.CancelRequested = false;
-            runtime.CancelledForRemoval = false;
-            // The saved login belongs to the site it came from, and the engine trusts whatever site
-            // the job now points at. A move to another site must leave it behind.
-            if (!Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var previous) ||
-                previous.GetLeftPart(UriPartial.Authority) != uri.GetLeftPart(UriPartial.Authority))
+            if (askFirst)
             {
-                runtime.Job.RequestHeaders.Remove("Cookie");
-                runtime.Job.RequestHeaders.Remove("Authorization");
-                runtime.Job.RequestHeaders.Remove("Proxy-Authorization");
-                runtime.Job.Referrer = null;
+                if (await DirectAddresses!.WhyNotDirectAsync(newUrl, explicitDirect, cancellationToken).ConfigureAwait(false) is { } refusal)
+                {
+                    return new JobActionResponse { Ok = false, Error = refusal, Job = GetJob(id) };
+                }
+
+                addressAllowed = true;
+                continue;
             }
 
-            if (!keepProtected)
-            {
-                var (jobUrl, _, protectedUrl) = SplitOffProviderLink(uri.AbsoluteUri, null);
-                runtime.Job.Url = jobUrl;
-                runtime.Job.ProtectedUrl = protectedUrl;
-            }
-
-            runtime.Job.ResolvedUrl = null;
-            runtime.Job.FinalUrl = null;
-            runtime.Job.State = DownloadState.Queued;
-            runtime.Job.StartMode = StartMode.StartNow;
-            runtime.Job.Failure = null;
-            runtime.Job.CompletedAt = null;
-            runtime.Job.AutoResumeAfterRestart = true;
-            runtime.Job.Touch();
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "refreshed");
+            Schedule();
+            return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
         }
-
-        await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
-        Raise(runtime, "refreshed");
-        Schedule();
-        return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
+
+    private static bool IsSameAddress(string current, Uri next)
+        => current == next.OriginalString || current == next.AbsoluteUri ||
+           (Uri.TryCreate(current, UriKind.Absolute, out var parsed) && parsed.AbsoluteUri == next.AbsoluteUri);
 
     /// <summary>
     /// Evaluates the configured one-time/daily queue schedules against a local

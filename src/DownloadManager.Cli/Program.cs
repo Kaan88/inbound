@@ -393,12 +393,17 @@ internal static partial class Program
             {
                 if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var refreshId))
                 {
-                    Console.Error.WriteLine("usage: refresh <job-id> <new-url>");
+                    Console.Error.WriteLine("usage: refresh <job-id> <new-url> [--direct]");
                     return 2;
                 }
 
                 var reply = await client.RequestAsync(MessageTypes.JobRefreshUrl,
-                    new JobRefreshUrlRequest { JobId = refreshId, Url = optionArgs[1] }).ConfigureAwait(false);
+                    new JobRefreshUrlRequest
+                    {
+                        JobId = refreshId,
+                        Url = optionArgs[1],
+                        ExplicitDirect = args.Contains("--direct", StringComparer.OrdinalIgnoreCase),
+                    }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
             case "cancel":
@@ -1783,7 +1788,7 @@ internal static partial class Program
                           [--destination next|subfolder|folder] [--folder PATH]
                           [--preserve-folders on|off] [--conflict rename|overwrite|skip]
                           [--archives keep|delete]
-              dm refresh <job-id> <new-url>
+              dm refresh <job-id> <new-url> [--direct]
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move|quota

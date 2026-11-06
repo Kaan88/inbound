@@ -93,6 +93,11 @@ public sealed record RemoteJobRecord
     public bool ApprovedUncached { get; init; }
     /// <summary>It isn't cached and nobody has agreed to start work on the provider yet, so nothing was sent.</summary>
     public bool ApprovalNeeded { get; init; }
+    /// <summary>
+    /// A copied link nobody has asked for yet. <see cref="ApprovalNeeded"/> is set too, but nothing is known about
+    /// whether it is cached, because nothing is sent or even asked until the user agrees.
+    /// </summary>
+    public bool HeldForApproval { get; init; }
 
     public Guid? PackageId { get; init; }
     /// <summary>What was left out and why, in words for the user.</summary>

@@ -34,6 +34,7 @@ should send these on a separate connection of their own and keep its main one fo
 - `remote.deleteRemote`
 - `remote.container.preview` and `remote.container.add` (the hoster list again)
 - `remote.container.sendToJd`, which waits for a person to answer another program's question, for up to five minutes
+- `job.refreshUrl` with an address that differs from the job's (the hoster list again). With the job's own address it answers at once
 
 If a client closes its connection during one of these, the call is cancelled. The rest of the
 `remote.*` messages only touch local state, and answer without waiting on the network.
@@ -104,6 +105,23 @@ value of `kind` should treat it as they would `unsupported`.
 those. A frontend with a hoster link has to route it through `remote.add`; `dm add` does so by itself
 and refuses a hoster link.
 
+**`job.refreshUrl`** does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
+the optional `explicitDirect`. While a usable key exists, a changed http or https address that is a
+`hosterLink` or `folderLink` gets `ok: false` with words pointing to Add Links, with or without the flag.
+So does an `unsupported` one. An `undetermined` one, or one that couldn't be classified at all, gets
+`ok: false` unless `explicitDirect` is true, which a client sends only when the user chose a direct
+request for it. The job's current address and any `ftp` address are always accepted, and with no usable
+key nothing is classified. `dm refresh <id> <url> --direct` sets the flag.
+
+The clipboard monitor classifies too, while a usable key exists. An ordinary or provider direct link
+is added directly. A hoster or folder link becomes a job with `state: intended`, `approvalNeeded` and
+`heldForApproval` set, and the tray says so without the address. Anything else isn't added, and the tray
+says to use Add Links. `heldForApproval` means nothing has been sent or asked about it, not even whether it is
+cached, and a job holding it stays where it is across a restart, a changed key and `remote.checkNow`,
+which refuses it. `remote.retry` with `approveUncached` releases it, as does a `remote.add` of the same input
+from someone asking for it, which then needs its own `approveUncached` as usual. With no usable key the
+monitor adds every link directly, as it always has.
+
 **`remote.add`** takes either `input` (a folder link, magnet, hoster link or a full path to a local
 `.torrent` file) or `provider`, `itemKind` and `itemId` (an item from `remote.item.get`). Other fields:
 `destination` (full path), `queueId`, `startMode` (`startNow`, `queue`, `later`), `selection` (`ask`,
@@ -117,7 +135,7 @@ intent, and the Host does the work afterwards, so watch `remote.changed`.
 **Jobs** (`remote.addResult`, `remote.listResult`, `remote.actionResult`, `remote.changed`) have `id`,
 `provider`, `providerName`, `kind`, `state`, `status` (words to show), `stage`, `rawState`, `progress`,
 `speedBytesPerSecond`, `etaSeconds`, `itemId`, `name`, `displayHost`, `cached`, `approvalNeeded`,
-`approvedUncached`, `hasLinkPassword`, `hasArchivePassword`, `failureKind`, `failureMessage`, `nextCheckAt`, `destination`,
+`heldForApproval`, `approvedUncached`, `hasLinkPassword`, `hasArchivePassword`, `failureKind`, `failureMessage`, `nextCheckAt`, `destination`,
 `queueId`, `startMode`, `selectionMode`, `selectedFileIds`, `packageId`, `notes`, `createdAt` and `updatedAt`.
 
 | `state` | Meaning |

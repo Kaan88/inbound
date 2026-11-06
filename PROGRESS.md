@@ -18,6 +18,7 @@
   - Should this feature ship in a public release at all?
   - The extractor is not bundled: the app uses an UnRAR that is already on the machine.
   - Rotate the TorBox API key after testing.
+  - A browser handoff of a hoster link still goes direct while a key exists: `handoff.request` calls `AddJobAsync`, which never classifies. The docs allow this as an explicit direct request, while the brief says not to fall back to direct hoster downloading. Should a handoff with a usable key be refused back to Chrome, or held as the clipboard does?
 - **TorBox, behaviour to check you are happy with:**
   - Empty files in a provider item are skipped.
   - An archive set does not follow a download that was moved.
@@ -26,6 +27,13 @@
   - Add Links still makes one `job.add` per link.
   - Re-adding a duplicate regroups a job that had been detached from its package.
   - The owner's magnet is already cached, so the uncached torrent case needs another input.
+
+### TorBox: three routing gaps on the Host (2026-11-07, branch `torbox-winui`)
+
+- **Clipboard:** with a usable key a copied link is classified off the tray thread. Ordinary and direct links are added as before. A hoster or folder link becomes a job held for approval (`heldForApproval`), with no call to the provider until the user approves, across Check Now, a key change and a restart. Anything else isn't added, and the tray says to use Add Links. With no key the path is what it was, and the log line about a copied address names only the site when there is a key. The logic is `CopiedLinks` in Runtime, so it can be tested without the Host.
+- **Refresh:** `job.refreshUrl` refuses a changed hoster or folder link, and refuses an undetermined or unclassifiable one unless `explicitDirect` is set (`dm refresh --direct`, the WinUI's "Download directly"). The WinUI sends a changed address on a connection of its own.
+- **Names:** `ServerNameWithoutSecret` keeps the key out of file metadata names and of names an add takes from the server, also after a redirect or when cleaning has disguised it. The WinUI's `ServerNameToShow` stays: it also hides a meaningless name in a direct link, such as `1`, which isn't a secret and which the Host keeps.
+- Evidence: `RuntimeRemoteRoutingTests`; each fix undone once and its tests failed. Not run: the tests that start a real Host (`HostPipe*`, `RuntimeArchiveHostTests`), and so the Host's tray and monitor wiring and `dm refresh --direct` are unverified. Not checked on screen.
 
 ### Checkpoint: paused by the owner (2026-11-06, about 15:50)
 

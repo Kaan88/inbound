@@ -113,6 +113,33 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url },
             TimeSpan.FromSeconds(10), cancellationToken);
 
+    /// <summary>
+    /// For an address that differs from the job's. The Host has to find out whether the address belongs to a
+    /// provider, which can wait on the network, so this gets a connection of its own like every such call.
+    /// </summary>
+    public async Task<IpcMessage> RefreshChangedUrlAsync(Guid jobId, string url, bool explicitDirect, CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        try
+        {
+            await using var client = await IpcClient.ConnectAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+            var request = IpcMessage.Create(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url, ExplicitDirect = explicitDirect });
+            await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            while (await client.ReadAsync(timeout.Token).ConfigureAwait(false) is { } reply)
+            {
+                if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
+                if (reply.ReplyTo == request.Id) return reply;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return IpcMessage.Create(MessageTypes.JobActionResult, new JobActionResponse { Error = "Checking this address took too long, so it wasn't changed. Try again." });
+        }
+
+        throw new IOException("The Host disconnected while changing the address.");
+    }
+
     public Task<IpcMessage> CleanOrphansAsync(bool delete, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.HostCleanOrphans, new CleanOrphansRequest { Delete = delete },
             TimeSpan.FromSeconds(30), cancellationToken);

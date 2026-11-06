@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using DownloadManager.Core;
-using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Host;
 
@@ -13,16 +12,19 @@ internal sealed class HostClipboardMonitor : IDisposable
 {
     private readonly Func<bool> _enabled;
     private readonly Action<string> _onUrl;
+    private readonly Func<string, string> _describe;
     private readonly Action<string> _log;
     private readonly System.Windows.Forms.Timer _timer;
     private string? _lastText;
     private string? _lastUrl;
     private DateTimeOffset _lastUrlAt;
 
-    public HostClipboardMonitor(Func<bool> enabled, Action<string> onUrl, Action<string> log)
+    /// <param name="describe">What the log may say about a copied address.</param>
+    public HostClipboardMonitor(Func<bool> enabled, Action<string> onUrl, Func<string, string> describe, Action<string> log)
     {
         _enabled = enabled;
         _onUrl = onUrl;
+        _describe = describe;
         _log = log;
         _timer = new System.Windows.Forms.Timer { Interval = 600 };
         _timer.Tick += (_, _) => Poll();
@@ -72,7 +74,7 @@ internal sealed class HostClipboardMonitor : IDisposable
 
             _lastUrl = url;
             _lastUrlAt = now;
-            _log($"Clipboard URL detected: {UrlRedactor.Redact(url)}");
+            _log($"Clipboard URL detected: {_describe(url)}");
             _onUrl(url);
         }
         catch (ExternalException ex)

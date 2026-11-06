@@ -135,6 +135,8 @@ public sealed class RemoteJobDto
     public bool Cached { get; set; }
     /// <summary>It isn't cached and nothing was sent. <c>remote.retry</c> with approveUncached lets it go ahead.</summary>
     public bool ApprovalNeeded { get; set; }
+    /// <summary>A copied link waiting for the go-ahead, with <see cref="ApprovalNeeded"/> set too. Nothing was asked about it, so it isn't known to be uncached.</summary>
+    public bool HeldForApproval { get; set; }
     public bool ApprovedUncached { get; set; }
     public bool HasLinkPassword { get; set; }
     /// <summary>An archive password is on record for what this job brings. Nothing else about it can be read.</summary>

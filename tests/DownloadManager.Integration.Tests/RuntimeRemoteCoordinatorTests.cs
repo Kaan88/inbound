@@ -176,16 +176,22 @@ public sealed partial class RuntimeServiceTests
             return rig;
         }
 
-        private RemoteJobCoordinator NewCoordinator(bool loops) => new(
-            Box.Registry,
-            Store,
-            Host,
-            Options with { RunLoops = loops, Jitter = () => 0.5 },
-            Time,
-            line =>
-            {
-                lock (Log) Log.Add(line);
-            });
+        private RemoteJobCoordinator NewCoordinator(bool loops)
+        {
+            var jobs = new RemoteJobCoordinator(
+                Box.Registry,
+                Store,
+                Host,
+                Options with { RunLoops = loops, Jitter = () => 0.5 },
+                Time,
+                line =>
+                {
+                    lock (Log) Log.Add(line);
+                });
+            // As the Host does.
+            Ctx.Service.DirectAddresses = jobs;
+            return jobs;
+        }
 
         /// <summary>
         /// The process is gone: nothing more gets written, the coordinator is dropped where it stands,
