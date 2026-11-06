@@ -43,20 +43,39 @@ Chrome version during Phase 4.
 
 Edge is a supported browser (owner decision 2026-11-06). It runs the same extension and the same native host.
 
-- **Install route.** Edge users install the extension from the Chrome Web Store (Edge asks once to allow
-  extensions from other stores). The ID is therefore the store's, `olhbcdbjdnfoiinllnlpandggadfabfm`, and
+- **Install route.** Edge users install the extension from the Chrome Web Store. Edge may ask to allow
+  extensions from other stores; that prompt has not been checked in Edge. The ID is therefore the store's, `olhbcdbjdnfoiinllnlpandggadfabfm`, and
   needs no new `allowed_origins` entry. A separate Edge Add-ons listing is parked (ROADMAP EXT.S1) because
   the owner cannot enroll in the Edge program.
 - **Registration.** Edge looks the native host up under its own key,
   `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager`, beside Chrome's under
   `Google\Chrome`. Setup and `register-native-host.ps1` (used by install, repair and the in-app updater) write
   the same manifest path under both, whether or not the browser is installed, so installing Edge later
-  works. Uninstall removes both. The paths are constants in `BrowserBridge`.
-- **Registered state.** The Host reports the bridge as registered when the Chrome key or the Edge key points
-  at a manifest that lists the store origin, so Chrome without Edge is not shown as broken. An install from
-  0.4.0 has only the Chrome key; the Host adds the Edge key at start, best effort and once per start. It logs
-  a failure rather than showing one, skips isolated-data runs, and never replaces an Edge registration whose
-  manifest exists.
+  works. Edge's key is optional: failing to write it gives a warning (Setup: no error) and does not stop an
+  install, repair or update, while failing to write Chrome's still does. The in-app updater also replaces the
+  `repair.ps1` and `register-native-host.ps1` that Setup put beside `app\`. The paths are constants in
+  `BrowserBridge`.
+- **Uninstall.** Setup's uninstaller and `uninstall.ps1` follow one rule: a key is removed only when it points
+  at this install's manifest or at a file that no longer exists, so another program's working registration
+  stays. Writing is not guarded this way: Setup, install, repair and the updater replace what is there. An
+  uninstall log already written by 0.4.0 cannot change, which leaves two exceptions:
+  - An install made by 0.4.0 Setup and then updated in the app keeps the 0.4.0 uninstaller, which knows only
+    Chrome's key. Uninstalling it leaves Edge's key behind, pointing at a deleted manifest (the same after an
+    update rolled back to 0.4.0). `register-native-host.ps1` does not treat such a key as a conflict and the
+    Host replaces it. Setup rewrites the uninstaller, so a first Edge version installed through Setup does not
+    have this leftover.
+  - A 0.4.0 install upgraded through a later Setup is expected to keep its old log entry for Chrome's key, which
+    removes that key without the check.
+- **Registered state.** Each key is absent, usable or broken. Usable means it points at a manifest that lists
+  the store origin and names a program that exists. The bridge is registered when either key is usable, and
+  the status (tray, status bar, CLI `status` and `doctor`) names a browser that cannot reach the host:
+  `connected; not registered for Chrome`, `connected; Chrome registration is broken`,
+  `connected; Edge registration is broken`. Chrome with no Edge key stays plain `connected`, because Edge may
+  not be installed and an install from 0.4.0 has no Edge key until the Host adds it.
+- **Repair at Host start.** Once per start, best effort, when one key is usable and the other is missing or
+  points at a file that is gone, the Host writes the working key's value into the other one. It logs a failure
+  rather than showing one, skips isolated-data runs, and never replaces a registration whose manifest exists,
+  so a broken one that still has its file stays named in the status until `repair.ps1` runs.
 - Evidence and what is still unverified are in `PROGRESS.md`.
 
 ## Handoff flow (durable)
