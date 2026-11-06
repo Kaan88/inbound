@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DownloadManager.Cli/DownloadManager.Cli.csproj" />
+    <Project Path="src/DownloadManager.Containers/DownloadManager.Containers.csproj" />
     <Project Path="src/DownloadManager.Contracts/DownloadManager.Contracts.csproj" />
     <Project Path="src/DownloadManager.Core/DownloadManager.Core.csproj" />
     <Project Path="src/DownloadManager.Desktop.WinUI/DownloadManager.Desktop.WinUI.csproj">
@@ -15,6 +16,7 @@
     <Project Path="src/DownloadManager.Tray/DownloadManager.Tray.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DownloadManager.Containers.Tests/DownloadManager.Containers.Tests.csproj" />
     <Project Path="tests/DownloadManager.Core.Tests/DownloadManager.Core.Tests.csproj" />
     <Project Path="tests/DownloadManager.Engine.Tests/DownloadManager.Engine.Tests.csproj" />
     <Project Path="tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj" />
