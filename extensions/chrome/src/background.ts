@@ -358,13 +358,13 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       notify(
         browserEntryRemoved
           ? ack.duplicate ? "Already in Inbound" : "Sent to Inbound"
-          : "Sent to Inbound, but still listed in Chrome",
-        browserEntryRemoved ? fileName : "Chrome's copy could not be removed. Check Chrome's download list.",
+          : "Sent to Inbound, but still listed in your browser",
+        browserEntryRemoved ? fileName : "The browser's copy could not be removed. Check the browser's download list.",
       );
       return true;
     } else {
       await chrome.downloads.resume(item.id).catch(() => undefined);
-      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} This download stays in Chrome.`);
+      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} This download stays in your browser.`);
       lastNativeError = ack.error ?? "handoff rejected";
     }
   } catch (error) {
@@ -378,7 +378,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
     lastNativeError = message;
-    notify("Inbound unavailable", `${readableError(message)} This download stays in Chrome.`);
+    notify("Inbound unavailable", `${readableError(message)} This download stays in your browser.`);
   }
   return false;
 }

@@ -214,7 +214,7 @@ async function refresh(): Promise<void> {
       statusDetail.textContent = !status.settings?.autoIntercept
         ? "Automatic sending is off. Right-click a link to send it, or turn it on in Settings."
         : status.pauseUntil && status.pauseUntil > Date.now()
-          ? "Catching is paused. Downloads stay in Chrome."
+          ? "Catching is paused. Downloads stay in your browser."
           : "Downloads that match your rules are sent automatically";
       statusText.textContent = "Connected";
     } else {

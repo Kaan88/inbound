@@ -4,7 +4,7 @@
 ;
 ; Layout matches scripts\install.ps1 so the in-app updater and repair script keep working:
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\app\           program files (replaced on upgrade)
-;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked Chrome extension
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked browser extension
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\native-host\   browser bridge manifest
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\install.json   installed version/channel
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
@@ -80,15 +80,17 @@ Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters:
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; IconFilename: "{app}\app\{#HostExe}"; Tasks: desktopicon
 
 [Registry]
-; Chrome native messaging host (the browser bridge).
+; Native messaging host (the browser bridge), registered for Chrome and for Edge. Both keys point at
+; the same manifest and are written whether or not the browser is installed.
 Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"; Flags: uninsdeletekey
 ; Launch at sign-in is owned by the app's Options setting (the Host writes this value from it);
 ; setup configures the setting independently of the optional launch. Uninstall removes the value.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "DownloadManagerHost"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\INSTALL.txt"; Description: "Show how to add the Chrome extension"; Flags: postinstall shellexec skipifsilent unchecked
+Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
@@ -186,7 +188,10 @@ begin
   SaveStringToFile(Root + '\INSTALL.txt',
     '{#AppName} {#AppVersion} is installed in:' + #13#10 +
     '  ' + Root + '\app' + #13#10 + #13#10 +
-    'Add the Chrome extension (one time):' + #13#10 +
+    'Add the extension to your browser (one time).' + #13#10 + #13#10 +
+    'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store.' + #13#10 +
+    'Edge asks you to allow extensions from other stores the first time.' + #13#10 + #13#10 +
+    'Or, in Chrome, load the unpacked copy that came with this install:' + #13#10 +
     '  1. Open chrome://extensions' + #13#10 +
     '  2. Turn on Developer mode (top right)' + #13#10 +
     '  3. Click "Load unpacked" and select:' + #13#10 +

@@ -12,10 +12,25 @@ Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction Sil
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
-$nativeKey = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager"
-if (Test-Path $nativeKey) {
+# Chrome and Edge each have a key; keep in step with BrowserBridge.NativeHostKeyPaths.
+# A key is removed only when it points at this install's manifest, so another program's
+# registration under the same name is left alone.
+$hostName = "com.kaank.downloadmanager"
+$ownManifest = Join-Path $installRoot "native-host\$hostName.json"
+$nativeKeys = [ordered]@{
+    "Chrome" = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+    "Edge"   = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+}
+foreach ($browser in $nativeKeys.Keys) {
+    $nativeKey = $nativeKeys[$browser]
+    if (-not (Test-Path $nativeKey)) { continue }
+    $registered = (Get-Item $nativeKey).GetValue("")
+    if ($registered -and ($registered -ne $ownManifest)) {
+        Write-Warning "Left the $browser native-host registration alone: it points at $registered, not at this install."
+        continue
+    }
     Remove-Item $nativeKey -Recurse -Force
-    Write-Host "Removed Chrome native-host registration."
+    Write-Host "Removed $browser native-host registration."
 }
 
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"

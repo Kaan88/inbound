@@ -112,15 +112,18 @@ $instructions = @"
 Inbound Download Manager installed at:
   $appDir
 
-Chrome extension:
+Browser extension:
+  Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store.
+  Or, in Chrome, load the unpacked copy:
   1. Open chrome://extensions
   2. Enable Developer mode
   3. Choose "Load unpacked"
   4. Select: $extensionTarget
   5. Confirm the extension ID is $extensionId
 
-Native host registration:
+Native host registration (same manifest for both):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager
+  HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager
 
 The host lives in the notification area. Closing the main window hides it;
 downloads and browser handoff continue. Use the tray Exit action to stop it.

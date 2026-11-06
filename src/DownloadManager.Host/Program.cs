@@ -123,6 +123,7 @@ internal static class Program
             var currentSettings = service.GetSnapshot().Settings;
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
+            TryRepairEdgeRegistration(log);
             service.SettingsChanged += (_, next) =>
             {
                 currentSettings = service.GetSnapshot().Settings;
@@ -353,6 +354,21 @@ internal static class Program
         catch (Exception ex)
         {
             log.Warn($"Could not update sign-in startup: {ex.Message}");
+        }
+    }
+
+    private static void TryRepairEdgeRegistration(FileLogger log)
+    {
+        // Isolated test/portable state must not write the installed user's browser registration.
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA")))
+        {
+            return;
+        }
+
+        var failure = NativeHostRegistration.TryRepairEdgeKey();
+        if (failure is not null)
+        {
+            log.Warn($"Could not register the browser bridge for Edge: {failure}");
         }
     }
 
