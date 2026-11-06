@@ -3,9 +3,8 @@
 
 ### Open for the owner (recorded 2026-11-06, for later)
 
-- **Chrome Web Store:** upload `artifacts\chrome-store\inbound-bridge-0.4.0-chrome.zip` as a draft and send the Item ID. The app then accepts that ID, 0.3.3 is built and published on request, and the listing is submitted only after 0.3.3 is out. See ROADMAP EXT.S2.
-- **0.3.3 is not released.** The auto-update fix, the slim speed bar and the clean-up are on `main` but in no release yet.
-- **The owner's installed app is still broken:** `app\` is empty. Run Setup 0.3.2 or wait for 0.3.3, with RustDesk and WinRAR closed.
+- **Chrome Web Store:** the draft is uploaded (Item ID `olhbcdbjdnfoiinllnlpandggadfabfm`) and 0.4.0 accepts that ID. Fill in the listing and test instructions, choose visibility, then submit. See ROADMAP EXT.S2.
+- **The owner's installed app is still broken:** `app\` is empty. Run Setup 0.4.0, with RustDesk and WinRAR closed.
 - **Old commits on GitHub:** history is rewritten, but GitHub can keep serving old commits by direct link until its support purges them. A purge request is the owner's to send.
 - **Settings has two similar checkboxes** now the media option is gone: "Allow automatic sending" and "Automatically send downloads to the desktop app". Consider merging them.
 - **Store review fallback:** if review stalls over all-site access, removing the all-pages content script is an option. That script holds the Delete-key gesture and Download All's link collection, so both would need another route.
@@ -21,6 +20,14 @@
 - Reference material moved out of the repository and kept on the owner's PC. History rewritten to match.
 - Evidence: Release build, Core, Engine, Integration and extension suites; store images re-rendered from the current build; the zip's contents loaded in real Edge.
 - Not verified on screen: the About text, Options page and delete dialog changes were built and tested, but not looked at in the running app.
+
+### Release 0.4.0 and the store ID (2026-11-06)
+
+- App 0.4.0, the version after 0.3.2; there is no 0.3.3. It carries the auto-update fix, the slim speed bar and the clean-up, and trusts two extension IDs: the store's and the unpacked build's. Built from `main` in its own worktree, without TorBox.
+- Evidence: extension 50/50, Core 107/107, Engine 57/57, Integration 134/134 (these include the new `BrowserBridgeTests`). The built native host exits 2 for an unknown origin and runs for both trusted ones. The update zip's registration script lists both.
+- Not verified: a real connection under the store ID, which needs a store install; Setup 0.4.0 run on a machine; auto-update from an installed 0.3.2 to 0.4.0.
+- `NativeHostRegistration.IsRegistered` now needs the store origin, so a manifest from before 0.4.0 reads as not registered until Setup or an update rewrites it.
+- Trap: running `DownloadManager.NativeHost.exe` directly starts a Host if none is running. Stop it afterwards, and clear `artifacts\app\data` before packaging.
 
 ### Chrome Web Store package and listing (2026-11-06)
 
