@@ -84,6 +84,9 @@ and external shell handoff checks remain open.
 | UI.R3 | Use the default folder for each new Chrome-extension download | pending; owner requirement | Each new extension download starts with the configured default download folder, rather than the destination selected for the previous download. A one-download folder choice must not change the next download's initial destination. Verify consecutive downloads with different destinations and after extension/browser restart. |
 | UI.R4 | Fit Chrome-extension windows and their controls to the available screen | pending; owner requirement | Review the handoff and other extension windows at supported screen sizes/scaling. Size and lay out windows so all items and primary actions are accessible without clipping; use scrolling where available space cannot accommodate the full content. Include this in the owner visual review. |
 | UI.R5 | Hold Delete to leave a download in the browser | pending; owner requirement | Support holding Delete while initiating a Chrome download to bypass manager capture for that download. Chrome must retain/download the file normally, with no manager job or duplicate transfer. Verify capture resumes for subsequent downloads after key release. Reuse the existing bypass flow where appropriate; exact key timing and browser limitations remain unverified. |
+| UI.R6 | Keep moving numbers from shifting in the segment details | pending; owner request, 2026-11-07; approach undecided | Counters such as download size jump sideways as their digits change, because the font's digits differ in width. The owner suggested monospace and does not know how other apps handle it, so compare monospace with same-width digits (tabular figures) in the current font first. Accept when live counters hold still in both themes at normal and high DPI. |
+| UI.R7 | Hover info on the speed graph | pending; owner request, 2026-11-07 | Hovering over the graph shows the details of the point under the pointer. At least the speed and time; the rest to be settled when built. Must work in both themes and at every graph period, and stay readable near the graph's edges. |
+| UI.R8 | Smooth the speed graph, maybe scrolling too | maybe; owner, 2026-11-07, not committed | Optional. If taken up: smoother drawing of the line, and possibly a graph that scrolls continuously. Must not hide real drops or spikes, or add noticeable CPU use while the window is idle. |
 
 - User-test follow-up: filename fallback and resolved-URL replay fixed (E95);
   independent per-job progress/completion frontend added (E96, partial).
@@ -359,6 +362,7 @@ searching the account.
 | D2 | Web UI | deferred | D1 | Local web app covering downloads, queues, schedules, settings, and provider accounts; authenticated remote access; no WinUI dependency |
 | D3 | Docker packaging | deferred | D1/D2 | Dockerfile + compose with state/download volumes, non-root user, healthcheck, host and web UI deployed together |
 | D4 | End-to-end provider/Docker test | deferred | A4/D3 | TorBox link/list → queue → download → unrar through the Linux container and web UI, including expiring-link refresh; image/logs contain no token |
+| D5 | Linux port | far goal; owner, 2026-11-07 | D1 | Run the app on Linux. D1 to D4 cover a headless host, web UI and Docker. WinUI 3 and the tray are Windows-only, so whether a port also needs a native Linux desktop frontend is undecided |
 
 ## Cross-cutting tasks
 
