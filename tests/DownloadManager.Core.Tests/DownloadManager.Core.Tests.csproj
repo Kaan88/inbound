@@ -28,4 +28,13 @@
     <ProjectReference Include="..\..\src\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- The WinUI project can't be referenced from here, so its UI-free parts are compiled in. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.cs" Link="WinUI\RemoteClient.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteState.cs" Link="WinUI\RemoteState.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="WinUI\RemoteText.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="WinUI\ArchiveForm.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CrashLogText.cs" Link="WinUI\CrashLogText.cs" />
+  </ItemGroup>
+
 </Project>

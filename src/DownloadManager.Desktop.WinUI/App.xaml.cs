@@ -58,7 +58,7 @@ public partial class App : Application
         try
         {
             var path = Path.Combine(AppContext.BaseDirectory, "ui-crash.log");
-            File.AppendAllText(path, $"{DateTimeOffset.Now:O}{Environment.NewLine}{exception}{Environment.NewLine}");
+            File.AppendAllText(path, CrashLogText.Entry(DateTimeOffset.Now, exception));
         }
         catch (Exception)
         {

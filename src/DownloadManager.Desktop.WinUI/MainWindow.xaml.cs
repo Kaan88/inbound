@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<JobViewModel> _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
+    private readonly RemoteClient _remote;
     private MenuFlyoutSubItem? _addToQueueMenu;
     private List<DownloadGroupDto> _groups = new();
     private readonly Dictionary<Guid, JobViewModel> _packageRows = new();
@@ -108,6 +109,10 @@ public sealed partial class MainWindow : Window
         });
         _connection.Start();
         UiTrace.Write("MainWindow connection started");
+
+        // On connections of its own: nothing it waits for can hold up the one above.
+        _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        _remote.Start();
 
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.N,
@@ -3566,6 +3571,8 @@ public sealed partial class MainWindow : Window
         window.Closed += (_, _) => _settingsWindow = null;
         try
         {
+            // Which remote and extraction pages exist depends on what the Host said it can do.
+            if (!_remote.State.IsReady) await _remote.WaitUntilReadyAsync(TimeSpan.FromSeconds(1.5));
             var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
             var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
@@ -3788,10 +3795,43 @@ public sealed partial class MainWindow : Window
             var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, window);
             window.AddPage("Sounds", "\uE767", soundEditor.Content);
 
+            var nextPage = SoundsPage + 1;
+            var accountPages = new List<(ProviderAccountPage Page, int Index)>();
+            if (_remote.State.RemoteSupported)
+            {
+                foreach (var account in _remote.State.Accounts.Where(account => account.Capabilities.Contains("account", StringComparer.OrdinalIgnoreCase)))
+                {
+                    var page = new ProviderAccountPage(_remote, account);
+                    window.AddPage(page.Title, "\uE77B", page.Controls);
+                    accountPages.Add((page, nextPage++));
+                }
+            }
+
+            ExtractionOptionsPage? extraction = null;
+            var extractionPageIndex = nextPage;
+            if (_remote.State.ArchivesSupported)
+            {
+                extraction = new ExtractionOptionsPage(_remote, window);
+                window.AddPage("Extraction", "\uE7B8", extraction.Controls);
+            }
+
+            window.Closed += (_, _) =>
+            {
+                foreach (var (page, _) in accountPages) page.Close();
+                extraction?.Close();
+            };
+
             static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
 
             window.Save = async () =>
             {
+                foreach (var (page, index) in accountPages)
+                {
+                    if (page.HasUnsavedKey)
+                        return ($"The {page.ProviderName} API key you typed isn't saved. Select Save key, or empty the box.", index);
+                }
+                if (extraction?.Validate() is { } extractionProblem)
+                    return (extractionProblem, extractionPageIndex);
                 if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
                     return (soundError ?? "Invalid sound choice.", SoundsPage);
                 foreach (var row in loginRows)
@@ -3893,8 +3933,9 @@ public sealed partial class MainWindow : Window
                     return (update.Error ?? "The host rejected the settings.", -1);
 
                 _settings = update.Settings;
+                var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
                 await RefreshAsync();
-                return (null, 0);
+                return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
             window.Activate();
