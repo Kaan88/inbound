@@ -93,6 +93,40 @@ The Host stays the only owner of provider state, secrets and scheduling. The eng
 
 **Pausing or cancelling locally never touches the remote item.** Remote delete is a separate action with its own confirmation.
 
+## Design decisions (after research, 2026-11-06)
+
+These are binding. Research notes are in `notes-local/` (`torbox-code-audit.md`, `torbox-research-jd-plugins.md`, `torbox-research-api.md`, `torbox-research-containers-extraction.md`).
+
+**TorBox facts that shape the code.** Ready means `download_present` and (`cached` or `download_finished`). Failed means a non-empty `error` or a state starting `failed`. Web hash = md5 of the exact original URL; torrent hash = btih. The CDN sends no ETag, and `md5` is usually null, so identity is size, then Last-Modified, then md5 when present. Space web download creation about 65 s per account, reserved before the POST. Poll at `eta` clamped to 15 to 60 s, otherwise 30 s. Before calling an item gone, check `mylist`, then `queued/getqueued` by hash, then allow 1 minute of grace. `Retry-After` counts only on a 429.
+
+**Local jobs.**
+- `DownloadJob.Url` = `remote://torbox/<torrents|webdl|usenet>/<itemId>/<fileId>`. It is the durable identity and holds nothing secret.
+- New persisted fields: `RemoteSource` (provider, kind, item id, file id, relative path, remote job id), `ExpectedTotalBytes`, `ExpectedMd5`.
+- New memory-only field: `[JsonIgnore] ResolvedUrl`. `Clone` copies it, serialization and `JobDto` never see it. `FinalUrl` is never set for these jobs.
+- The engine stays provider-free: it validates and requests the effective URL (`ResolvedUrl ?? FinalUrl ?? Url`), and uses the effective host for its limiter. `originalOrigin` stays on `Url`, so cookies, logins and referrers never reach the CDN.
+- Public `job.add` keeps rejecting `remote://`. Provider jobs enter through an in-process method, with a provider connection cap added to the `Math.Min` at creation and re-clamped at each run.
+- Dedupe: owner `provider:torbox`, request id `<remote job id>/<file id>`.
+- Link resolution happens in `RunJobAsync`, once per run, through an optional `IRemoteLinkBroker` on the service. Re-run with a fresh link when the engine reports `ExpiredUrl`, `Unauthorized`, `Forbidden` or `NotFound`, at most twice per run. Temporary API failures retry with backoff inside the run (cancellable), then fail as resumable. The broker checks the item is still there and the file's size and md5 still match. If not, it deletes the part and checkpoint and restarts from zero, or fails with the real reason.
+
+**Pasted CDN links** (`*.tb-cdn.*` or any URL whose query holds the account key): `Url` becomes a display form with the token masked, the real address goes into a new DPAPI-protected persisted field `ProtectedUrl`, loaded into `ResolvedUrl` at run start. Capped at 4 connections. Never added to `RecentUrls`. Applied in `AddJobCoreAsync`, so it covers every entry path.
+
+**Log safety.** Add `UrlRedactor` in Core. Use it in clipboard logs, tray text, and exception logs. API errors are sanitized before reaching `ex.Message` paths.
+
+**Remote jobs.** `RemoteJobCoordinator` in `Runtime/Remote`, with its own gate and store (`remote/jobs/<id>.json`, not in `AppSettings`). It calls the service in-process and never calls the network under a gate.
+- States: `Intended`, `Submitting`, `SubmissionUnknown`, `Waiting`, `AwaitingSelection`, `LocalStarted`, `Failed`, `Blocked`, `Removed`. A restart turns `Submitting` into `SubmissionUnknown`.
+- Record: id, provider, kind, protected input (magnet or link), protected `.torrent` bytes, protected link password, predicted hash, item id, name, display host (no path or key), stage, raw state, progress, speed, eta, failure kind and message, next check, consecutive failures, destination, queue, start mode, file selection (`All`, a list of ids, or ask when ready), approved-uncached flag, package id.
+- Order: write intent, then reconcile by hash against `mylist` (fresh, paged, bounded) and queued, then POST. On a lost answer, reconcile. Resubmit only when confirmed absent after grace. A failed status check never leads to a resubmit.
+- `Blocked` (`AccountBusy`) retries by itself with backoff. `Failed` (`Rejected`, `AccountLimit`, not found) is terminal until the user retries. `LinkPasswordRequired` is a failed state that asks for the password.
+- Polling: one loop, jittered backoff up to 15 minutes on failures, **Check Now** wakes it.
+- Ready: create local children idempotently in a package with key `remote:<id>`, under validated relative paths (`RemotePaths`, then a final check that the full path stays under the destination). Infected files are skipped with a note. Empty files are skipped with a note. No automatic progress windows for `Source = "remote"`.
+- Pausing, cancelling or removing locally never touches the remote item.
+
+**Input classification** (Host): folder link, magnet, `.torrent`, hoster link (provider regex with a 100 ms match timeout, hoster list cached for 1 hour, real availability shown), provider direct link, ordinary link, unsupported with a reason. With no key set, hoster links stay ordinary links; there is no fallback once TorBox has refused one.
+
+**IPC.** Protocol version stays 1. Add new message types only: `remote.*` and `archive.*`. No DTO carries the key, a direct link, a magnet or a hoster link. The key is write-only, with `HasKey` as the only read. The native host gets an allowlist: `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`, `jobs.query`, and does not forward `remote.*` or `archive.*` events to the browser. Slow calls use a separate connection from the frontend.
+
+**API proxy.** The API client uses the same proxy settings as downloads.
+
 ## Phases
 
 Work in this order. Each phase ends with a build, its tests, a commit and a `PROGRESS.md` entry.
