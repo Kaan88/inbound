@@ -502,7 +502,7 @@ public sealed partial class HostPipeServer
             return;
         }
 
-        if (!string.Equals(handoff.ExtensionId, BrowserBridge.ExtensionId, StringComparison.Ordinal))
+        if (!BrowserBridge.IsTrustedExtensionId(handoff.ExtensionId))
         {
             await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck
             {

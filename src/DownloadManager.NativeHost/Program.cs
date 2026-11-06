@@ -22,7 +22,7 @@ internal static class Program
         log($"Native host started. Origin='{origin ?? "(none)"}' PID={Environment.ProcessId}");
 
         if (!string.IsNullOrWhiteSpace(origin) &&
-            !origin.TrimEnd('/').Equals(BrowserBridge.ExtensionOrigin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            !BrowserBridge.IsTrustedOrigin(origin))
         {
             log($"Rejected unexpected origin '{origin}'.");
             return 2;

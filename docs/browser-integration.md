@@ -35,8 +35,9 @@ Chrome version during Phase 4.
 8. **Extension identity is fixed by the manifest `key`.** The native-host
    manifest must list exactly our extension origins. The Chrome Web Store refuses
    a first upload that has a `key` and assigns its own ID, so the store zip
-   (`scripts\package-extension-store.ps1`) has none, and that ID must be added to
-   the native side before the listing can work. See `docs/chrome-store/LISTING.md`.
+   (`scripts\package-extension-store.ps1`) has none. The native side trusts two IDs:
+   the store's (`olhbcdbjdnfoiinllnlpandggadfabfm`) and the unpacked build's (`pknddmneejadnnngffojnoecojhdfalc`).
+   See `docs/chrome-store/LISTING.md`.
 
 ## Handoff flow (durable)
 
@@ -115,7 +116,7 @@ first install and explains beside the checkbox what it shares.
 ## Security boundaries
 
 - Cookies and Authorization values are never written to diagnostic logs.
-- The native host accepts only our extension origin (validated by Chrome's
+- The native host accepts only our two extension origins (store and unpacked) (validated by Chrome's
   invocation and by `allowed_origins`).
 - Inside the extension, content scripts can send only the messages they need
   (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.

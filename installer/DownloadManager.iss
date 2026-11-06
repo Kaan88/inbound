@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.3.2"
+  #define AppVersion "0.4.0"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -21,6 +21,7 @@
 #define UiExe "DownloadManager.Desktop.WinUI.exe"
 #define NativeHostName "com.kaank.downloadmanager"
 #define ExtensionId "pknddmneejadnnngffojnoecojhdfalc"
+#define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
 
 [Setup]
 AppId={{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}
@@ -179,7 +180,7 @@ begin
     '  "description": "{#AppName} browser bridge",' + #13#10 +
     '  "path": "' + JsonEscape(Root + '\app\DownloadManager.NativeHost.exe') + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
-    '  "allowed_origins": [ "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
+    '  "allowed_origins": [ "chrome-extension://{#StoreExtensionId}/", "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
     '}');
 
   SaveStringToFile(Root + '\INSTALL.txt',
