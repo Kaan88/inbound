@@ -84,11 +84,28 @@ public sealed partial class UnrarExtractor(UnrarExtractorOptions? options = null
             var content = ExtractionSafety.WalkStaging(staging.PayloadFolder, probe, limits);
 
             var files = ExtractionFinalizer.MoveIntoDestination(
-                staging, content, destination, request.ConflictPolicy, request.PreserveFolders, progress, cancellationToken);
+                staging, content, destination, request.ConflictPolicy, request.PreserveFolders, progress, cancellationToken, request.KeepFiles);
+
+            var result = new ExtractionResult(destination, files);
+            if (request.Committed is { } committed)
+            {
+                try
+                {
+                    await committed(result);
+                }
+                catch
+                {
+                    // Success could not be recorded, so these files must not stand: the next
+                    // attempt would find them and, under Rename, write everything a second time.
+                    await StagingArea.RecoverAndRemoveAsync(staging.Folder);
+                    staging = null;
+                    throw;
+                }
+            }
 
             await staging.RemoveAsync();
             staging = null;
-            return new ExtractionResult(destination, files);
+            return result;
         }
         catch (Exception exception) when (Translate(exception, request.Password) is { } translated)
         {

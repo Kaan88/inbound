@@ -19,6 +19,7 @@ public sealed class StagingArea
     private const string MarkerName = "attempt.json";
     private const string PayloadName = "payload";
     private const string DisplacedName = "displaced";
+    private const string PlacementLogName = "placed.log";
 
     private StagingArea(string folder)
     {
@@ -78,13 +79,17 @@ public sealed class StagingArea
     }
 
     /// <summary>
-    /// Puts back any original file that a crash left in the displaced folder, then deletes the
-    /// staging folder. Returns false when it could not all be removed.
+    /// Undoes an attempt a crash interrupted: removes the files it had already moved into the
+    /// destination and puts back any original it had displaced, then deletes the staging folder.
+    /// Without this the next attempt would meet its own earlier output as a conflict, and under
+    /// Rename would write everything twice. Returns false when it could not all be undone.
     /// </summary>
     public static async Task<bool> RecoverAndRemoveAsync(string folder)
     {
         var displaced = Path.Combine(folder, DisplacedName);
         var marker = ReadMarker(folder);
+        if (marker?.Destination is { } placedInto && !UndoPlacements(folder, placedInto)) return false;
+
         if (Directory.Exists(displaced) && marker?.Destination is { } destination)
         {
             var unrestored = false;
@@ -109,10 +114,60 @@ public sealed class StagingArea
         return await DeleteTreeAsync(folder);
     }
 
+    /// <summary>
+    /// Deletes a staging folder without undoing anything, for an attempt the caller has recorded
+    /// as finished: its files are the result now. Returns false when it could not all be removed.
+    /// </summary>
+    public static Task<bool> DiscardFinishedAsync(string folder) => DeleteTreeAsync(folder);
+
     /// <summary>Removes this attempt's staging. A failure leaves a folder the next attempt will find.</summary>
     internal async Task RemoveAsync()
     {
         if (!KeepForRecovery) await DeleteTreeAsync(Folder);
+    }
+
+    internal PlacementLog OpenPlacementLog() => new(Path.Combine(Folder, PlacementLogName));
+
+    /// <summary>
+    /// A move is a rename on one volume, so a source no longer in the payload proves this attempt
+    /// moved it, which makes the log exact even for the entry being written when a crash came.
+    /// </summary>
+    private static bool UndoPlacements(string folder, string destination)
+    {
+        var logFile = Path.Combine(folder, PlacementLogName);
+        if (!File.Exists(logFile)) return true;
+
+        var root = Path.TrimEndingDirectorySeparator(destination) + Path.DirectorySeparatorChar;
+        var undone = true;
+        try
+        {
+            foreach (var entry in PlacementLog.Read(logFile).Reverse())
+            {
+                var target = Path.GetFullPath(entry.Target);
+                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+                if (File.Exists(Path.Combine(folder, PayloadName, entry.Source)) || !File.Exists(target)) continue;
+
+                // An overwrite whose original is no longer displaced was already rolled back, so
+                // what stands at the target now is that original.
+                if (entry.DisplacedAs is { } displacedAs && !File.Exists(Path.Combine(folder, DisplacedName, displacedAs))) continue;
+
+                try
+                {
+                    File.SetAttributes(target, FileAttributes.Normal);
+                    File.Delete(target);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    undone = false;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return undone;
     }
 
     private static async Task<bool> DeleteTreeAsync(string folder)
@@ -165,4 +220,53 @@ public sealed class StagingArea
     }
 
     private sealed record Marker(string FirstVolume, string Destination);
+}
+
+/// <param name="Source">Relative to the payload folder.</param>
+/// <param name="Target">The full path the file is moved to.</param>
+/// <param name="DisplacedAs">Relative to the displaced folder, when this replaced an existing file.</param>
+internal sealed record PlacementEntry(string Source, string Target, string? DisplacedAs);
+
+/// <summary>
+/// Written ahead of each move into the destination and flushed to the disk, so a crash at any
+/// point leaves a record of everything the attempt may have placed. One flush per file is a small
+/// price beside the cost of extracting it.
+/// </summary>
+internal sealed class PlacementLog : IDisposable
+{
+    private readonly string _path;
+    private FileStream? _stream;
+
+    public PlacementLog(string path)
+    {
+        _path = path;
+    }
+
+    public void Record(PlacementEntry entry)
+    {
+        _stream ??= new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
+        _stream.Write(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry) + "\n"));
+        _stream.Flush(flushToDisk: true);
+    }
+
+    public void Dispose() => _stream?.Dispose();
+
+    /// <summary>A line a crash cut short never reached its move, so it is skipped.</summary>
+    public static IReadOnlyList<PlacementEntry> Read(string path)
+    {
+        var entries = new List<PlacementEntry>();
+        foreach (var line in File.ReadAllLines(path, Encoding.UTF8))
+        {
+            try
+            {
+                if (JsonSerializer.Deserialize<PlacementEntry>(line) is { } entry) entries.Add(entry);
+            }
+            catch (JsonException)
+            {
+                // The torn last line.
+            }
+        }
+
+        return entries;
+    }
 }

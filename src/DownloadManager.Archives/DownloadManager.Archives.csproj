@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DownloadManager.Archives.Tests" />
+    <InternalsVisibleTo Include="DownloadManager.Integration.Tests" />
   </ItemGroup>
 
   <ItemGroup>
