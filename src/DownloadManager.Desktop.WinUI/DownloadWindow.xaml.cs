@@ -202,8 +202,8 @@ public sealed partial class DownloadWindow : Window
             false => "No",
             null => "Unknown",
         };
-        var completionText = complete
-            ? "The file has been saved. Choose an action below."
+        var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
+            : complete ? "The file has been saved. Choose an action below."
             : job.State == "paused" ? "The download is paused. Resume it or close this window."
             : "Closing this window will not stop the download.";
         if (_connected) Notice.Text = job.Failure?.Message ?? completionText;
@@ -253,7 +253,7 @@ public sealed partial class DownloadWindow : Window
         DeleteButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
         DeleteButton.IsEnabled = _connected && _job is not null;
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility =
-            complete ? Visibility.Visible : Visibility.Collapsed;
+            complete && _job?.FileRemovedAfterExtraction != true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async Task LoadSegmentsAsync()
@@ -483,7 +483,9 @@ public sealed partial class DownloadWindow : Window
             XamlRoot = Root.XamlRoot,
             RequestedTheme = Root.ActualTheme,
             Title = "Delete download?",
-            Content = $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
+            Content = _job.FileRemovedAfterExtraction
+                ? $"Remove {name} from the list? {JobNotes.NothingToDelete(1)}"
+                : $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -491,7 +493,7 @@ public sealed partial class DownloadWindow : Window
         if (await confirm.ShowAsync() != ContentDialogResult.Primary || _closed || _job is null) return;
         try
         {
-            var reply = await _connection.RemoveAsync(_jobId, deleteFile: true);
+            var reply = await _connection.RemoveAsync(_jobId, deleteFile: !_job.FileRemovedAfterExtraction);
             if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
             {
                 Notice.Text = result.Error ?? "The host could not delete this download.";
@@ -634,7 +636,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPath(bool folder)
     {
-        if (_job?.State != "completed") return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
         try
         {
             if (folder)
@@ -648,7 +650,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPathWith()
     {
-        if (_job?.State != "completed") return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
         try
         {
             if (File.Exists(_job.FinalFilePath))

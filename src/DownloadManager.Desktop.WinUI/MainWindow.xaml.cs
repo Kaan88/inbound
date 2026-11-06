@@ -436,10 +436,10 @@ public sealed partial class MainWindow : Window
     /// <summary>A command with nothing to act on is dimmed and says why in its own words, like Extract.</summary>
     private void SyncFileMenu(int sideRows, int removableSideRows)
     {
-        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows);
-        Apply(FileOpenItem, "Open", plan.FileReason);
-        Apply(FileOpenFolderItem, "Open Folder", plan.FileReason);
-        Apply(FileMoveRenameItem, "Move/Rename…", plan.FileReason);
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true);
+        Apply(FileOpenItem, "Open", plan.OpenReason);
+        Apply(FileOpenFolderItem, "Open Folder", plan.OpenReason);
+        Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         Apply(FileDownloadNowItem, "Download Now", plan.LocalReason);
         Apply(FileStopItem, "Stop Download", plan.LocalReason);
@@ -886,9 +886,9 @@ public sealed partial class MainWindow : Window
     {
         var flyout = new MenuFlyout();
         flyout.Opening += JobsContextMenu_Opening;
-        flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
-        flyout.Items.Add(CreateContextItem("Open With…", MenuOpenWith_Click));
-        flyout.Items.Add(CreateContextItem("Open Folder", MenuOpenFolder_Click));
+        flyout.Items.Add(_menuOpen = CreateContextItem("Open", MenuOpen_Click));
+        flyout.Items.Add(_menuOpenWith = CreateContextItem("Open With…", MenuOpenWith_Click));
+        flyout.Items.Add(_menuOpenFolder = CreateContextItem("Open Folder", MenuOpenFolder_Click));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
@@ -901,7 +901,7 @@ public sealed partial class MainWindow : Window
         moveShortcut.Invoked += (_, args) =>
         {
             args.Handled = true;
-            if (SelectedJob?.State == "completed") MenuMoveRename_Click(moveRename, new RoutedEventArgs());
+            if (SelectedJob is { State: "completed", FileRemovedAfterExtraction: false }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
         };
         JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);
@@ -944,6 +944,9 @@ public sealed partial class MainWindow : Window
         return item;
     }
 
+    private MenuFlyoutItem? _menuOpen;
+    private MenuFlyoutItem? _menuOpenWith;
+    private MenuFlyoutItem? _menuOpenFolder;
     private MenuFlyoutItem? _menuMoveRename;
     private MenuFlyoutItem? _menuGroup;
     private MenuFlyoutItem? _menuUngroup;
@@ -958,7 +961,12 @@ public sealed partial class MainWindow : Window
         // Offer only what applies to the current selection.
         var selection = SelectedJobs;
         ShowContextItemsForSelection();
-        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed";
+        var removedReason = SelectedJob?.FileRemovedAfterExtraction == true ? FileMenuRules.FileRemovedReason : null;
+        SayIfNoFile(_menuOpen, "Open", removedReason);
+        SayIfNoFile(_menuOpenWith, "Open With…", removedReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", removedReason);
+        SayIfNoFile(_menuMoveRename, "Move/Rename…", removedReason);
+        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && removedReason is null;
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
         if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
         if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
@@ -1002,6 +1010,13 @@ public sealed partial class MainWindow : Window
             item.Click += MenuAddToQueue_Click;
             _addToQueueMenu.Items.Add(item);
         }
+    }
+
+    private static void SayIfNoFile(MenuFlyoutItem? item, string text, string? reason)
+    {
+        if (item is null) return;
+        item.Text = FileMenuRules.Label(text, reason);
+        item.IsEnabled = reason is null;
     }
 
     private async void MenuOpen_Click(object sender, RoutedEventArgs e)
@@ -1106,6 +1121,12 @@ public sealed partial class MainWindow : Window
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
     {
+        if (SelectedJob is { FileRemovedAfterExtraction: true } removed)
+        {
+            ShowPassingStatus(JobNotes.NoFile(removed.StatusNote));
+            return;
+        }
+
         if (SelectedJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
             !File.Exists(job.FinalFilePath))
         {
@@ -1127,6 +1148,12 @@ public sealed partial class MainWindow : Window
     {
         if (SelectedJob is not { } job)
         {
+            return;
+        }
+
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
             return;
         }
 
@@ -1565,7 +1592,7 @@ public sealed partial class MainWindow : Window
         var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid);
         foreach (var (label, value) in new[]
         {
-            ("File", job.FileName), ("Status", job.StateText), ("Size", job.SizeText),
+            ("File", job.FileName), ("Status", job.StateText), ("Note", job.StatusNote), ("Size", job.SizeText),
             ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName),
             ("Source", job.IsProviderFile ? ProviderDisplayName(job.Dto?.RemoteProvider) : job.SourceText),
             ("Package", job.IsProviderFile ? _groups.FirstOrDefault(group => group.JobIds.Contains(job.Id))?.Name : null),
@@ -4492,18 +4519,21 @@ public sealed partial class MainWindow : Window
             IsChecked = true,
         };
         // Unfinished downloads only have partial data, which is removed anyway.
-        var anyCompleted = selection.Any(job => job.State == "completed");
+        var anyCompleted = selection.Any(job => job.State == "completed" && !job.FileRemovedAfterExtraction);
+
+        // Their files went on purpose after extraction. A box offering to delete them would do nothing, and a new file by that name isn't theirs.
+        var noFilesLeft = selection.All(job => job.FileRemovedAfterExtraction);
         var question = selection.Count == 1
             ? $"Remove '{selection[0].FileName}' from the list?"
             : $"Remove {selection.Count} downloads from the list?";
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
-            Text = anyCompleted ? question : question + " Partial data is always removed.",
+            Text = noFilesLeft ? question + " " + JobNotes.NothingToDelete(selection.Count) : anyCompleted ? question : question + " Partial data is always removed.",
             TextWrapping = TextWrapping.Wrap,
         });
         if (anyCompleted) panel.Children.Add(deleteFiles);
-        else deleteFiles.IsChecked = true;
+        else deleteFiles.IsChecked = !noFilesLeft;
 
         var dialog = new ContentDialog
         {
@@ -4613,6 +4643,12 @@ public sealed partial class MainWindow : Window
 
     private async Task OpenJobAsync(JobViewModel job)
     {
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(job.FinalFilePath) && File.Exists(job.FinalFilePath))
         {
             try
@@ -4632,6 +4668,12 @@ public sealed partial class MainWindow : Window
 
     private void OpenContainingFolder(JobViewModel job)
     {
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
+            return;
+        }
+
         try
         {
             var path = !string.IsNullOrWhiteSpace(job.FinalFilePath)

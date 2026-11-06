@@ -61,7 +61,9 @@ the provider, Direct provider link, Ordinary link, Unsupported, Can't tell. A li
 only its host and its position in the list, never its address. A hoster link has no control that sends it
 anywhere but the provider. A link nobody could classify gets a retry, and a direct download only by a box
 ticked for that line. Whether something is cached is known only after it is added, so the approval that uses
-the account's quota comes in a second step, unticked, and closing that step loses nothing.
+the account's quota comes in a second step, unticked, and closing that step loses nothing. Import JD Container
+follows the same rules with the same words. Its list is virtualized, because a container can hold 5000 links, so a
+link password is entered from the download list rather than from a row.
 
 Extraction has its own Extraction column beside Status, with the same status colors on its text and no bar,
 so a failed extraction never reads as a failed download and never lands in the Failed view. The cell is short

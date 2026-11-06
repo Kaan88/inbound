@@ -103,6 +103,40 @@ public sealed class ArchiveRowsTests
     }
 
     [Fact]
+    public void A_sets_note_is_in_its_tooltip_and_its_accessible_name()
+    {
+        const string Note = "The archives were kept because 2 files were skipped.";
+        const string Words = @"Extraction completed: 3 files in D:\out";
+        var set = Set("completed", stateText: Words, change: s => s.Note = Note);
+        var view = ArchiveText.Set(set);
+
+        Assert.Contains(Note, view.ToolTip, StringComparison.Ordinal);
+        Assert.Contains(Note, view.AccessibleText, StringComparison.Ordinal);
+        Assert.Equal("Extraction completed", view.Text);
+        Assert.Equal($"{Words}. {Note}", ArchiveText.FullWithNote(set));
+    }
+
+    [Fact]
+    public void A_package_of_several_sets_keeps_each_sets_note()
+    {
+        const string Note = "UnRAR did not read b.rar: not part of this archive, so not extracted, and it is still there.";
+        var view = ArchiveText.Package([Set("completed", change: s => s.Note = Note), Set("completed")])!;
+
+        Assert.Contains(Note, view.ToolTip, StringComparison.Ordinal);
+        Assert.Contains(Note, view.AccessibleText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_note_is_never_shown_with_an_address_and_no_note_adds_nothing()
+    {
+        var set = Set("completed", stateText: "Done.", change: s => s.Note = "See https://example.invalid/x?token=invented");
+
+        Assert.DoesNotContain("invented", ArchiveText.FullWithNote(set));
+        Assert.DoesNotContain("invented", ArchiveText.Set(set).AccessibleText);
+        Assert.Equal("Done.", ArchiveText.FullWithNote(Set("completed", stateText: "Done.")));
+    }
+
+    [Fact]
     public void Volumes_still_coming_with_nobody_asking_leave_the_cell_to_the_Status_column()
     {
         var coming = Set("downloading", stateText: "Downloading: a.rar", change: s => s.DownloadingVolumes = ["a.rar"]);

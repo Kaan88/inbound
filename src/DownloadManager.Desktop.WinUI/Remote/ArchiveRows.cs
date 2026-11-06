@@ -29,7 +29,8 @@ internal static partial class ArchiveText
     public static ArchiveRowView Set(ArchiveSetDto set)
     {
         var (text, tone) = Label(set);
-        return new ArchiveRowView(text, ToolTip(set), tone, set.NeedsPassword, text.Length == 0 ? string.Empty : $"Extraction: {Full(set)}");
+        var spoken = text.Length == 0 && string.IsNullOrWhiteSpace(set.Note) ? string.Empty : $"Extraction: {FullWithNote(set)}";
+        return new ArchiveRowView(text, ToolTip(set), tone, set.NeedsPassword, spoken);
     }
 
     /// <summary>A package: one set says what that set says, several say what most needs attention.</summary>
@@ -39,7 +40,7 @@ internal static partial class ArchiveText
         if (sets.Count == 1) return Set(sets[0]);
 
         var (text, tone) = PackageLabel(sets);
-        var lines = sets.Take(MostNamesInText).Select(set => $"{set.Name}: {Full(set)}").ToList();
+        var lines = sets.Take(MostNamesInText).Select(set => $"{set.Name}: {FullWithNote(set)}").ToList();
         if (sets.Count > MostNamesInText) lines.Add($"and {sets.Count - MostNamesInText} more");
         var tip = string.Join(Environment.NewLine, lines);
         return new ArchiveRowView(text, tip, tone, sets.Any(set => set.NeedsPassword), text.Length == 0 ? string.Empty : $"Extraction: {text}. {string.Join(". ", lines)}");
@@ -47,6 +48,15 @@ internal static partial class ArchiveText
 
     /// <summary>The Host's whole sentence for a set, with any address taken out.</summary>
     public static string Full(ArchiveSetDto set) => WithoutRepeatedLabel(UrlRedactor.HideAddresses(set.StateText));
+
+    /// <summary>That sentence and what the Host notes about the set, such as files kept because the tool didn't read them.</summary>
+    public static string FullWithNote(ArchiveSetDto set)
+    {
+        var full = Full(set);
+        var note = UrlRedactor.HideAddresses(set.Note);
+        if (string.IsNullOrWhiteSpace(note)) return full;
+        return full.Length == 0 ? note : full.EndsWith('.') ? $"{full} {note}" : $"{full}. {note}";
+    }
 
     /// <summary>The Host puts its label in front of a reason that can start with the same label. Once is enough.</summary>
     internal static string WithoutRepeatedLabel(string text)

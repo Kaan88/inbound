@@ -700,6 +700,187 @@ public sealed class RemoteClientTests
         Assert.DoesNotContain(key, seen);
     }
 
+    // ---- remote.container.* ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task AContainerIsReadOnAConnectionOfItsOwnWhichClosingEnds()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        host.Hold(MessageTypes.RemoteContainerPreview);
+        using var closing = new CancellationTokenSource();
+
+        var read = client.PreviewContainerAsync(@"D:\files\invented.ccf", closing.Token);
+        await host.UntilAsync(() => host.Received(MessageTypes.RemoteContainerPreview) == 1);
+
+        Assert.NotSame(host.Connections[0], host.ConnectionOf(MessageTypes.RemoteContainerPreview));
+        Assert.False(host.ConnectionOf(MessageTypes.RemoteContainerPreview).Disposed);
+
+        // The main connection isn't held up by it.
+        Assert.True((await client.ListAsync().WaitAsync(Patience)).Ok);
+
+        closing.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(Patience));
+        await host.UntilAsync(() => host.ConnectionOf(MessageTypes.RemoteContainerPreview).Disposed);
+        Assert.False(host.Connections[0].Disposed);
+    }
+
+    [Fact]
+    public async Task ANetworkPathGoesToTheHostUntouchedAndItsRefusalComesBackInWords()
+    {
+        const string Path = @"\\files.invalid\share\invented.ccf";
+        const string Refusal = "Only files on a drive of this computer can be opened, not ones on a network path.";
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteContainerPreview, MessageTypes.RemoteContainerPreviewResult, new RemoteContainerPreviewResult { Error = Refusal });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        var result = await client.PreviewContainerAsync(Path).WaitAsync(Patience);
+        var view = RemoteText.ContainerRead(result, "invented.ccf");
+
+        Assert.Equal(Path, host.LastPayload(MessageTypes.RemoteContainerPreview)!.Value.GetProperty("path").GetString());
+        Assert.False(result.Ok);
+        Assert.Equal(Refusal, view.Status);
+        Assert.True(view.IsProblem);
+        Assert.False(view.CanSendToJd);
+        Assert.False(view.CanReadAgain);
+    }
+
+    [Fact]
+    public async Task ALostReadSaysNothingWasAddedAndOffersToTryAgain()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui, slowTimeout: TimeSpan.FromMilliseconds(100));
+        host.Hold(MessageTypes.RemoteContainerPreview);
+
+        var result = await client.PreviewContainerAsync(@"D:\invented.rsdf").WaitAsync(Patience);
+
+        Assert.Equal(RemoteText.ContainerReadLost, result.Error);
+        Assert.True(RemoteText.ContainerRead(result, "invented.rsdf").CanReadAgain);
+    }
+
+    [Fact]
+    public async Task AddingAContainerOutlastsTheOrdinarySlowLimitBecauseRunningOutWouldCancelTheRest()
+    {
+        var job = new RemoteJobDto { Id = Guid.NewGuid(), Provider = "torbox", State = "intended", ApprovalNeeded = true };
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteContainerAdd, MessageTypes.RemoteContainerAddResult, new RemoteContainerAddResult
+        {
+            Ok = true,
+            Outcomes = [new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job }],
+        });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui, slowTimeout: TimeSpan.FromMilliseconds(50));
+        var answer = host.Hold(MessageTypes.RemoteContainerAdd);
+
+        var adding = client.AddFromContainerAsync(new RemoteContainerAddRequest { PreviewId = Guid.NewGuid(), EntryIds = [1] });
+        await Task.Delay(300);
+        Assert.False(adding.IsCompleted);
+        answer();
+        var result = await adding.WaitAsync(Patience);
+
+        Assert.True(result.Ok);
+        await ui.UntilAsync(() => client.State.Jobs.Any(known => known.Id == job.Id));
+    }
+
+    [Fact]
+    public async Task JobsLeftOutOfAnAddAreReadFromTheListAndNotTreatedAsFailures()
+    {
+        var host = new FakeHost();
+        var id = host.Job.Id;
+        host.Answer(MessageTypes.RemoteContainerAdd, MessageTypes.RemoteContainerAddResult, new RemoteContainerAddResult
+        {
+            Ok = true,
+            JobsLeftOut = true,
+            Outcomes = [new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = id }],
+        });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        var listsBefore = host.Received(MessageTypes.RemoteList);
+
+        var result = await client.AddFromContainerAsync(new RemoteContainerAddRequest { PreviewId = Guid.NewGuid(), EntryIds = [1] }).WaitAsync(Patience);
+
+        Assert.True(result.Ok);
+        Assert.True(result.JobsLeftOut);
+        Assert.Equal(listsBefore + 1, host.Received(MessageTypes.RemoteList));
+        ui.Flush();
+        Assert.Contains(client.State.Jobs, job => job.Id == id);
+    }
+
+    [Fact]
+    public async Task AWholeAnswerOfJobsDoesNotReadTheListAgain()
+    {
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteContainerAdd, MessageTypes.RemoteContainerAddResult, new RemoteContainerAddResult { Ok = true, Outcomes = [new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = host.Job.Id, Job = host.Job }] });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        var listsBefore = host.Received(MessageTypes.RemoteList);
+
+        await client.AddFromContainerAsync(new RemoteContainerAddRequest { PreviewId = Guid.NewGuid(), EntryIds = [1] }).WaitAsync(Patience);
+
+        Assert.Equal(listsBefore, host.Received(MessageTypes.RemoteList));
+    }
+
+    [Fact]
+    public async Task TheHandOverWaitsLongerThanJDownloadersFiveMinutes()
+    {
+        Assert.True(RemoteClient.SendToJdTimeout > TimeSpan.FromMinutes(5));
+
+        var host = new FakeHost();
+        host.Answer(MessageTypes.RemoteContainerSendToJd, MessageTypes.RemoteContainerSendResult, new RemoteContainerSendResult { Ok = true, Status = "sent", JdAnswered = true, Message = "Sent to JDownloader." });
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui, slowTimeout: TimeSpan.FromMilliseconds(50));
+        var answer = host.Hold(MessageTypes.RemoteContainerSendToJd);
+
+        var sending = client.SendContainerToJdAsync(@"D:\invented.dlc");
+        await Task.Delay(300);
+        Assert.False(sending.IsCompleted);
+        answer();
+
+        Assert.Equal("sent", (await sending.WaitAsync(Patience)).Status);
+    }
+
+    [Fact]
+    public async Task CancellingTheHandOverClosesItsConnection()
+    {
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        host.Hold(MessageTypes.RemoteContainerSendToJd);
+        using var stop = new CancellationTokenSource();
+
+        var sending = client.SendContainerToJdAsync(@"D:\invented.dlc", stop.Token);
+        await host.UntilAsync(() => host.Received(MessageTypes.RemoteContainerSendToJd) == 1);
+        stop.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sending.WaitAsync(Patience));
+        await host.UntilAsync(() => host.ConnectionOf(MessageTypes.RemoteContainerSendToJd).Disposed);
+    }
+
+    [Fact]
+    public async Task AHostThatDoesntKnowContainersGetsSaidInWords()
+    {
+        var host = new FakeHost();
+        host.AnswerRaw(MessageTypes.RemoteContainerPreview, request => IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }, request.Id));
+        host.AnswerRaw(MessageTypes.RemoteContainerSendToJd, request => IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }, request.Id));
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+
+        Assert.Equal(RemoteText.HostDoesNotOffer, (await client.PreviewContainerAsync(@"D:\invented.ccf").WaitAsync(Patience)).Error);
+        var sent = await client.SendContainerToJdAsync(@"D:\invented.ccf").WaitAsync(Patience);
+        Assert.False(sent.Ok);
+        Assert.Equal("failed", sent.Status);
+        Assert.Equal(RemoteText.HostDoesNotOffer, sent.Message);
+    }
+
     /// <summary>What a window's dispatcher queue does: nothing runs until the UI thread gets to it.</summary>
     private sealed class UiQueue
     {

@@ -28,6 +28,14 @@
   - Re-adding a duplicate regroups a job that had been detached from its package.
   - The owner's magnet is already cached, so the uncached torrent case needs another input.
 
+### TorBox: WinUI container import and archive notes (2026-11-07, branch `torbox-winui`)
+
+- **Import JD Container** is on the Tasks menu while a key is usable. It reads the file on a connection of its own, shows packages and entries in words, and adds what is ticked. Approval of anything uncached comes afterwards, unticked, in the same words as Add Links. The path only ever goes to the Host, so a network path gets the Host's refusal and this side never asks about it. The hand-over to JDownloader is a separate button, offered only when nothing in the file can be added here, such as a DLC.
+- **A removed archive** (`fileRemovedAfterExtraction`) shows its note in Description, the row's tooltip and accessible name, and Properties. Open, Open With, Open Folder and Move/Rename say why they are off, its progress window has no open buttons, and Delete doesn't ask to delete a file that isn't there.
+- **An archive set's note** is in its tooltip, its accessible name and the package window's extraction status.
+- Evidence: `ContainerImportTests`, additions to `RemoteClientTests`, `SelectionCommandsTests`, `ArchiveRowsTests`. Not checked on screen, in either theme, and never run against a real Host: unverified.
+- Host-side finding, not changed: a mixed delete of removed and other downloads sends one `deleteFile` for all of them, and `job.remove` doesn't look at `FileRemovedAfterExtraction`, so a new file at a removed archive's old path would be deleted with it.
+
 ### TorBox: three routing gaps on the Host (2026-11-07, branch `torbox-winui`)
 
 - **Clipboard:** with a usable key a copied link is classified off the tray thread. Ordinary and direct links are added as before. A hoster or folder link becomes a job held for approval (`heldForApproval`), with no call to the provider until the user approves, across Check Now, a key change and a restart. Anything else isn't added, and the tray says to use Add Links. With no key the path is what it was, and the log line about a copied address names only the site when there is a key. The logic is `CopiedLinks` in Runtime, so it can be tested without the Host.

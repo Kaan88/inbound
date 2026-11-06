@@ -97,7 +97,7 @@ internal sealed class AddLinksDialog
 
     public async Task<AddLinksChoice?> ShowAsync(XamlRoot root, ElementTheme theme, string? initialText)
     {
-        var (destinationRow, destination, destinationError) = DestinationRow();
+        var (destinationRow, destination, destinationError) = DestinationRow(_settings.DefaultDownloadDirectory, _windowHandle);
         var startMode = new ComboBox { Header = "Start", HorizontalAlignment = HorizontalAlignment.Stretch };
         startMode.Items.Add("Start now");
         startMode.Items.Add("Download later");
@@ -258,7 +258,7 @@ internal sealed class AddLinksDialog
         });
     }
 
-    private static bool IsFullPath(string folder)
+    internal static bool IsFullPath(string folder)
     {
         try
         {
@@ -270,9 +270,10 @@ internal sealed class AddLinksDialog
         }
     }
 
-    private (Grid Row, TextBox Box, StatusLine Error) DestinationRow()
+    /// <summary>A folder box with Browse and the line that says what is wrong with it. Used wherever a provider's work gets a destination.</summary>
+    internal static (Grid Row, TextBox Box, StatusLine Error) DestinationRow(string initial, IntPtr windowHandle)
     {
-        var box = new TextBox { Header = "Destination folder", Text = _settings.DefaultDownloadDirectory };
+        var box = new TextBox { Header = "Destination folder", Text = initial };
         AutomationProperties.SetName(box, "Destination folder");
         var error = new StatusLine("Destination status");
         var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
@@ -289,7 +290,7 @@ internal sealed class AddLinksDialog
                     SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
                 };
                 picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, _windowHandle);
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
                 if (await picker.PickSingleFolderAsync() is { } folder) box.Text = folder.Path;
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)

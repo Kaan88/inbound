@@ -262,6 +262,8 @@ public sealed partial class MainWindow
             Add($"Browse My {RemoteText.ProviderName(account)}…", "B", (_, _) => OpenProviderWindow(account.Provider));
         }
 
+        Add("Import JD Container…", "J", async (_, _) => await ImportJdContainerAsync());
+
         // Dimmed with nothing waiting, because then there is nothing for it to do.
         Add("Check Remote Status Now", "C", async (_, _) => await CheckRemoteStatusNowAsync(), canCheck);
     }

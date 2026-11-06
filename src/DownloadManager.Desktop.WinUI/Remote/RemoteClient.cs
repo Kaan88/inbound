@@ -36,6 +36,12 @@ internal sealed class RemoteClient : IAsyncDisposable
     private static readonly TimeSpan DefaultQuickTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DefaultSlowTimeout = TimeSpan.FromSeconds(90);
 
+    /// <summary>Entries are saved one at a time, up to 5000 of them, and running out of time here would cancel the rest.</summary>
+    internal static readonly TimeSpan ContainerAddTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>JDownloader's user gets five minutes to answer, and this has to outlast that, or the Host's own answer is never heard.</summary>
+    internal static readonly TimeSpan SendToJdTimeout = TimeSpan.FromMinutes(5.5);
+
     private readonly Action<Action> _post;
     private readonly Func<TimeSpan, CancellationToken, Task<IRemotePipe>> _connect;
     private readonly TimeSpan _reconnectDelay;
@@ -183,6 +189,31 @@ internal sealed class RemoteClient : IAsyncDisposable
         => Feed(await SlowAsync(MessageTypes.RemoteDeleteRemote, new RemoteDeleteRequest { JobId = jobId, Confirmed = confirmed },
             MessageTypes.RemoteActionResult, FailedAction, cancellationToken).ConfigureAwait(false));
 
+    // ---- remote.container.* --------------------------------------------------------------------
+
+    /// <summary>The path goes to the Host untouched. Nothing here looks at it: even asking whether a file on a network path exists sends this Windows account's credentials there, and the Host is the one that refuses those.</summary>
+    public Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
+        => SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = path }, MessageTypes.RemoteContainerPreviewResult,
+            error => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(error) }, cancellationToken);
+
+    /// <summary>
+    /// Adds the chosen entries. A reply with <see cref="RemoteContainerAddResult.JobsLeftOut"/> has the entries saved and the
+    /// full jobs left out, so those are read from <c>remote.list</c>, and that read happens whatever became of the caller's wait.
+    /// </summary>
+    public async Task<RemoteContainerAddResult> AddFromContainerAsync(RemoteContainerAddRequest request, CancellationToken cancellationToken = default)
+    {
+        var result = await SlowAsync(MessageTypes.RemoteContainerAdd, request, MessageTypes.RemoteContainerAddResult,
+            error => new RemoteContainerAddResult { Error = error }, cancellationToken, ContainerAddTimeout).ConfigureAwait(false);
+        foreach (var outcome in result.Outcomes) Feed(outcome.Job);
+        if (result.JobsLeftOut) await ListAsync(CancellationToken.None).ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>Waits for a person to answer in JDownloader. Cancelling stops waiting here, and JDownloader may still be asking.</summary>
+    public Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
+        => SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = path }, MessageTypes.RemoteContainerSendResult,
+            error => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(error) }, cancellationToken, SendToJdTimeout);
+
     // ---- archive.* ----------------------------------------------------------------------------
 
     public Task<ArchiveSettingsResult> GetArchiveSettingsAsync(CancellationToken cancellationToken = default)
@@ -298,10 +329,10 @@ internal sealed class RemoteClient : IAsyncDisposable
         }
     }
 
-    private async Task<TResult> SlowAsync<TRequest, TResult>(string type, TRequest request, string replyType, Func<string, TResult> failed, CancellationToken cancellationToken)
+    private async Task<TResult> SlowAsync<TRequest, TResult>(string type, TRequest request, string replyType, Func<string, TResult> failed, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
-        deadline.CancelAfter(_slowTimeout);
+        deadline.CancelAfter(timeout ?? _slowTimeout);
         var connected = false;
         var holdsTurn = false;
         try

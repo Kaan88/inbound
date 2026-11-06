@@ -55,6 +55,56 @@ public sealed class SelectionCommandsTests
     }
 
     [Fact]
+    public void A_file_whose_archive_was_removed_offers_nothing_on_the_missing_file_and_says_why()
+    {
+        var plan = FileMenuRules.Plan(singleFile: true, package: false, sideRows: 0, removableSideRows: 0, fileRemoved: true);
+
+        Assert.Equal("Open (archive removed after extraction)", FileMenuRules.Label("Open", plan.OpenReason));
+        Assert.Equal("Open Folder (archive removed after extraction)", FileMenuRules.Label("Open Folder", plan.OpenReason));
+
+        // It is not a broken job: what doesn't need the file stays on.
+        Assert.Null(plan.FileReason);
+        Assert.Null(plan.LocalReason);
+        Assert.Null(plan.RemoveReason);
+    }
+
+    [Fact]
+    public void Open_keeps_the_ordinary_reason_when_there_is_no_file_row_at_all()
+    {
+        Assert.Equal("select a file, not a package", FileMenuRules.Plan(false, true, 0, 0).OpenReason);
+        Assert.Equal("select a download first", FileMenuRules.Plan(false, false, 0, 0).OpenReason);
+        Assert.Null(FileMenuRules.Plan(true, false, 0, 0).OpenReason);
+    }
+
+    [Fact]
+    public void The_Hosts_note_goes_ahead_of_the_rows_own_description()
+    {
+        var job = new DownloadManager.Contracts.JobDto { State = "completed", FileRemovedAfterExtraction = true, StatusNote = "Archive removed after extraction" };
+        var note = JobNotes.Note(job);
+
+        Assert.Equal("Archive removed after extraction", note);
+        Assert.Equal("Archive removed after extraction", JobNotes.Description(note, null));
+        Assert.Equal("Archive removed after extraction · my words", JobNotes.Description(note, "my words"));
+        Assert.Equal("my words", JobNotes.Description(null, "my words"));
+        Assert.Empty(JobNotes.Description(null, null));
+        Assert.Equal("Archive removed after extraction, so there is no file to open.", JobNotes.NoFile(note));
+        Assert.StartsWith("Its archive", JobNotes.NothingToDelete(1), StringComparison.Ordinal);
+        Assert.StartsWith("Their archives", JobNotes.NothingToDelete(2), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_job_with_no_note_says_nothing_and_a_note_is_never_shown_with_an_address()
+    {
+        Assert.Null(JobNotes.Note(new DownloadManager.Contracts.JobDto { State = "completed" }));
+
+        // The flag alone still says why, for a Host that left the words out.
+        Assert.Equal("Archive removed after extraction", JobNotes.Note(new DownloadManager.Contracts.JobDto { FileRemovedAfterExtraction = true }));
+
+        var withAddress = JobNotes.Note(new DownloadManager.Contracts.JobDto { StatusNote = "Moved from https://example.invalid/dl/abc?token=invented" });
+        Assert.DoesNotContain("invented", withAddress);
+    }
+
+    [Fact]
     public void Records_left_behind_are_named_only_when_there_are_any()
     {
         Assert.Null(ArchiveText.LeftExtracting(0));

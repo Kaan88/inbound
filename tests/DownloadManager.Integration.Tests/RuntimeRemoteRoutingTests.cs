@@ -92,7 +92,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(1, rig.Mock.Calls(CreateWeb));
         Assert.False(rig.View(job.Id).HeldForApproval);
         Assert.Equal(0, rig.Mock.HosterRequests);
-        Assert.Empty(rig.Ctx.Service.GetSnapshot().Jobs.Where(local => local.Source == "clipboardMonitor"));
+        Assert.DoesNotContain(rig.Ctx.Service.GetSnapshot().Jobs, local => local.Source == "clipboardMonitor");
         await rig.AssertNothingLeakedAsync("invented-fragment-copied");
     }
 

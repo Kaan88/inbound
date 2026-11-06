@@ -309,6 +309,60 @@ public sealed partial class MainWindow
         if (files.Count > 0) await ShowProviderAddAsync(AddFocus.TorrentFiles, files.Select(file => file.Path).ToList());
     }
 
+    /// <summary>
+    /// A picker, then the import dialog, then what became of each entry. The file's path only ever goes to the
+    /// Host: nothing here looks at it, because even asking about a file on a network path sends this Windows
+    /// account's credentials there. The Host refuses those, and the dialog says so.
+    /// </summary>
+    private async Task ImportJdContainerAsync()
+    {
+        if (_settings is null) return;
+        string path;
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker
+            {
+                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
+            };
+            foreach (var type in ContainerFiles.Types) picker.FileTypeFilter.Add(type);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            if (await picker.PickSingleFileAsync() is not { } file) return;
+            path = file.Path;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
+        {
+            await ShowMessageAsync("Import JD Container", "The file picker couldn't open.");
+            return;
+        }
+
+        // A file from a cloud or phone location has no path a program could read.
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            await ShowMessageAsync("Import JD Container", ContainerFiles.NoPathWords);
+            return;
+        }
+
+        var provider = ProviderWordForAdding();
+        var dialog = new ContainerImportDialog(_remote, _settings, provider, path, RootGrid, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var answer = await dialog.ShowAsync(Content.XamlRoot, RootGrid.ActualTheme);
+        if (answer.CouldNotOpen)
+        {
+            ShowPassingStatus("Import JD Container couldn't open, because another dialog is open.");
+            return;
+        }
+
+        if (answer.Stopped)
+        {
+            await _remote.ListAsync();
+            ShowPassingStatus(ContainerFiles.StoppedWords);
+        }
+
+        if (answer.Outcomes is not { } outcomes) return;
+        if (outcomes.AddedCount > 0 && answer.Folder is { } folder) RememberFolder(folder);
+        await ContainerImportDialog.ShowOutcomesAsync(Content.XamlRoot, RootGrid.ActualTheme, _remote, outcomes, provider, RootGrid, LocalStatusOf);
+    }
+
     private sealed record RemoteAdded(string Name, RemoteAddResultDto Result);
 
     private async Task RunAddChoiceAsync(AddLinksChoice choice)

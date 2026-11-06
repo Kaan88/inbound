@@ -198,7 +198,9 @@ public sealed partial class MainWindow
 
     private ArchivePlan CurrentArchivePlan()
     {
+        // An archive that is gone and has no record left is nothing to extract or set a password for.
         var files = SelectedJobs
+            .Where(job => !job.FileRemovedAfterExtraction || _setByJob.ContainsKey(job.Id))
             .Select(job => new ArchiveSelectedFile(job.Id, job.FileName, job.FinalFilePath, _setByJob.GetValueOrDefault(job.Id)))
             .ToList();
         var packages = SelectedPackageRows;

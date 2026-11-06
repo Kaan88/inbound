@@ -118,7 +118,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Destination = job.DestinationDirectory;
         FinalFilePath = job.FinalFilePath;
         FileGlyph = GlyphFor(FileName);
-        var completedPath = job.State == "completed" ? job.FinalFilePath : null;
+        StatusNote = JobNotes.Note(job);
+        RowToolTip = StatusNote;
+
+        // With no file there, the type's icon is all there is to show.
+        var completedPath = job.State == "completed" && !job.FileRemovedAfterExtraction ? job.FinalFilePath : null;
         var iconKey = completedPath is null ? "type:" + Path.GetExtension(job.FileName)
             : $"file:{job.Id}:{completedPath}:{job.CompletedAt:O}";
         if (_iconKey != iconKey)
@@ -137,7 +141,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
         RawDescription = job.Description ?? string.Empty;
-        Description = job.Description ?? job.PageUrl ?? string.Empty;
+        Description = JobNotes.Description(StatusNote, job.Description ?? job.PageUrl);
         ProgressVisibility = (job.State is "downloading" or "connecting" or "retryWaiting" or "verifying" or "paused") &&
                              ProgressPercent > 0
             ? Visibility.Visible
@@ -190,6 +194,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
     {
         Id = group.Id;
         IsPackage = true;
+        StatusNote = null;
         IsExpanded = expanded;
         Children = children;
         var dtos = children.Where(child => child.Dto is not null).Select(child => child.Dto!).ToList();
@@ -245,6 +250,12 @@ public sealed class JobViewModel : INotifyPropertyChanged
 
     /// <summary>The last remote job applied to this row; null for any other row.</summary>
     public RemoteJobDto? RemoteJob { get; private set; }
+
+    /// <summary>What the Host says about this download beyond its state; null for any other row.</summary>
+    public string? StatusNote { get; private set; }
+
+    /// <summary>Finished, and its archive went on purpose after extraction. Nothing is wrong with it, and there is no file to act on.</summary>
+    public bool FileRemovedAfterExtraction => !IsSideRow && !IsPackage && Dto?.FileRemovedAfterExtraction == true;
 
     /// <summary>A local file a provider supplies. Its address is a reference, not something to edit or send again.</summary>
     public bool IsProviderFile => !IsRemoteRow && (Dto?.IsRemote == true || Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase));
@@ -356,14 +367,14 @@ public sealed class JobViewModel : INotifyPropertyChanged
     /// <summary>Says which account a provider's file came from, when its row has nothing else to say.</summary>
     public void ShowProviderSource(string words)
     {
-        if (RawDescription.Length == 0) Description = words;
+        if (RawDescription.Length == 0) Description = JobNotes.Description(StatusNote, words);
     }
 
     /// <summary>What a screen reader says for this row.</summary>
     public override string ToString()
     {
         if (_accessibleName is not null) return _accessibleName;
-        var parts = new[] { FileName, StateText, SizeText, EtaText.Length > 0 ? $"{EtaText} left" : string.Empty, SpeedText, _archiveAccessibleText ?? string.Empty };
+        var parts = new[] { FileName, StateText, SizeText, EtaText.Length > 0 ? $"{EtaText} left" : string.Empty, SpeedText, StatusNote ?? string.Empty, _archiveAccessibleText ?? string.Empty };
         return string.Join(", ", parts.Where(part => part.Length > 0));
     }
 

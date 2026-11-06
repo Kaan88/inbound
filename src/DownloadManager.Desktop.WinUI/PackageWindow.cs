@@ -281,7 +281,7 @@ internal sealed class PackageWindow : Window
         // The Host says whether a password is held only through a set, and a new package may have none yet.
         _clearPassword.IsEnabled = _passwordSavedHere || sets.Count == 0 || sets.Any(set => set.HasPassword);
 
-        var lines = sets.Take(6).Select(set => $"{set.Name}: {ArchiveText.Full(set)}").ToList();
+        var lines = sets.Take(6).Select(set => $"{set.Name}: {ArchiveText.FullWithNote(set)}").ToList();
         if (sets.Count > 6) lines.Add($"and {sets.Count - 6} more");
         var asking = sets.Where(set => set.NeedsPassword).ToList();
         if (asking.Count > 0)
