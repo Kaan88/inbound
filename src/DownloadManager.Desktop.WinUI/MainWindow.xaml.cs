@@ -461,6 +461,9 @@ public sealed partial class MainWindow : Window
         _passingStatusUntil = DateTimeOffset.UtcNow + PassingStatusTime;
         StatusText.Text = words;
         StatusAnnouncer.Text = words;
+
+        // A set name replaces the text for a screen reader, so the words have to be the name.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(StatusAnnouncer, words);
         LiveRegion.Announce(StatusAnnouncer);
         var timer = DispatcherQueue.CreateTimer();
         timer.IsRepeating = false;
@@ -1821,7 +1824,10 @@ public sealed partial class MainWindow : Window
 
         await RefreshAsync();
         await ShowMessageAsync("Import download list", RemoteText.ImportSummary(accepted, entries.Count, failed, firstError, toReview.Count));
-        if (toReview.Count > 0) await ShowProviderAddAsync(AddFocus.ImportedLinks, answered: toReview);
+        if (toReview.Count > 0 && !await ShowProviderAddAsync(AddFocus.ImportedLinks, answered: toReview))
+        {
+            ShowPassingStatus(RemoteText.ImportReviewNotOpened(accepted, entries.Count, failed, toReview.Count));
+        }
     }
 
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);
@@ -2524,11 +2530,12 @@ public sealed partial class MainWindow : Window
                 if (metadataClosed || generation != metadataGeneration) return;
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
-                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}\nServer name: {metadata.FileName}";
-                if (!nameEdited && !string.IsNullOrWhiteSpace(metadata.FileName))
+                var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
+                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}" + (serverName is null ? string.Empty : $"\nServer name: {serverName}");
+                if (!nameEdited && serverName is not null)
                 {
                     assigningServerName = true;
-                    nameBox.Text = metadata.FileName;
+                    nameBox.Text = serverName;
                     assigningServerName = false;
                 }
             }

@@ -92,6 +92,9 @@ internal sealed class AddLinksDialog
         AutomationProperties.SetName(_archivePassword, "Archive password for this package");
     }
 
+    /// <summary>Set when <see cref="ShowAsync"/> gave no choice because the dialog never showed, rather than because it was cancelled.</summary>
+    public bool CouldNotOpen { get; private set; }
+
     public async Task<AddLinksChoice?> ShowAsync(XamlRoot root, ElementTheme theme, string? initialText)
     {
         var (destinationRow, destination, destinationError) = DestinationRow();
@@ -125,7 +128,12 @@ internal sealed class AddLinksDialog
         _directOptions.Children.Add(_keepPackage);
         _directOptions.Children.Add(_archivePanel);
 
-        _selectAll.Click += (_, _) => _session.SelectAll(_selectAll.IsChecked == true);
+        // By the time this runs the box has moved on by itself, and from mixed it goes to off. The lines decide instead.
+        _selectAll.Click += (_, _) =>
+        {
+            _session.ToggleAll();
+            Refresh();
+        };
         var panel = new StackPanel { Spacing = 10, MinWidth = 640, Padding = new Thickness(0, 0, 14, 0) };
         if (_focus is AddFocus.Links or AddFocus.Magnet) panel.Children.Add(_paste);
         panel.Children.Add(_status.Text);
@@ -207,6 +215,7 @@ internal sealed class AddLinksDialog
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
             // Another dialog is already open over this window.
+            CouldNotOpen = true;
             ClearPasswords();
             return null;
         }

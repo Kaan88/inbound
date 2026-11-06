@@ -263,6 +263,9 @@ internal sealed class AddLineSession : IDisposable
         foreach (var line in _lines) Select(line, selected);
     }
 
+    /// <summary>What a click on Select all does: everything goes off only when everything is on. From mixed, it all goes on.</summary>
+    public void ToggleAll() => SelectAll(SelectAllState(_lines) != true);
+
     /// <summary>The explicit choice for a link that can't be told apart from one a provider handles.</summary>
     public void ChooseDirect(AddLine line, bool direct)
     {
@@ -619,6 +622,22 @@ internal static partial class RemoteText
         return ProviderLinks.IsProviderLink(url) ? ProviderLinks.MaskToken(url) : url;
     }
 
+    /// <summary>
+    /// The name a server gave, for showing and for the name box. Without a name of its own the engine uses the
+    /// address's last part, and in a direct link that can be the key, so a name found in the address is left for
+    /// the Host to settle. Only letters and digits are compared, because the engine cleans a name before giving it.
+    /// </summary>
+    public static string? ServerNameToShow(string? name, string url, RemoteClassifyResult? result)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        if (result?.Kind != "providerDirectLink" && !ProviderLinks.IsProviderLink(url)) return name;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        var address = LettersAndDigits(Uri.UnescapeDataString(uri.PathAndQuery));
+        return address.Contains(LettersAndDigits(name), StringComparison.OrdinalIgnoreCase) ? null : name;
+
+        static string LettersAndDigits(string text) => string.Concat(text.Where(char.IsLetterOrDigit));
+    }
+
     /// <summary>Why an ordinary add dialog opened although a key is saved. Null when that isn't why.</summary>
     public static string? UnreadableKeyNotice(IEnumerable<RemoteAccountDto> accounts)
     {
@@ -636,6 +655,15 @@ internal static partial class RemoteText
         var entries = toReview == 1 ? "1 entry isn't" : $"{toReview} entries aren't";
         var them = toReview == 1 ? "it" : "them";
         return $"{outcome} {entries} added yet: the next dialog shows what can be done with {them}. Saved names, folders and checksums from the file don't carry over to {them}.";
+    }
+
+    /// <summary>The import's outcome when the dialog for its remaining entries couldn't open, so nothing promises that dialog.</summary>
+    public static string ImportReviewNotOpened(int accepted, int total, int failed, int toReview)
+    {
+        var added = $"Added {accepted} of {total} downloads directly{(failed > 0 ? $"; {failed} failed" : string.Empty)}.";
+        var entries = toReview == 1 ? "1 entry wasn't" : $"{toReview} entries weren't";
+        var them = toReview == 1 ? "it" : "them";
+        return $"{added} {entries} added, because another dialog was open. Add {them} with Add Links.";
     }
 
     public static string ProviderOffer(string provider)

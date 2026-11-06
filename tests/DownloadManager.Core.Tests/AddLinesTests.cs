@@ -117,6 +117,29 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    public void ClickingSelectAllFromMixedSelectsEverything()
+    {
+        using var session = NewSession(new FakeClassifier());
+        session.Seed("https://example.com/a.zip", Kind("ordinaryLink"));
+        session.Seed("https://example.com/b.zip", Kind("ordinaryLink"));
+        session.Seed("https://unknown.example/f", Kind("undetermined"));
+        var lines = session.Lines;
+
+        session.SelectAll(true);
+        session.Select(lines[0], false);
+        Assert.Null(AddLineSession.SelectAllState(lines));
+
+        session.ToggleAll();
+        Assert.Equal<bool?>(true, AddLineSession.SelectAllState(lines));
+
+        session.ToggleAll();
+        Assert.Equal<bool?>(false, AddLineSession.SelectAllState(lines));
+
+        session.ToggleAll();
+        Assert.Equal<bool?>(true, AddLineSession.SelectAllState(lines));
+    }
+
+    [Fact]
     public void ALinkNobodyCouldClassifyIsDirectOnlyByExplicitChoice()
     {
         var line = Line("https://unknown.example/f", Kind("undetermined"));
@@ -793,6 +816,40 @@ public sealed class AddLinesTests
 
         Assert.Equal("example.com", RemoteText.AddressToShow(link, Kind("providerDirectLink", result => result.DisplayHost = "example.com")));
         Assert.Equal("example.com", RemoteText.AddressToShow(link, Kind("providerDirectLink")));
+    }
+
+    [Fact]
+    public void ADirectLinksLastPartIsNotOfferedAsTheServersName()
+    {
+        const string key = "aaaa-bbbb-cccc";
+        var direct = Kind("providerDirectLink");
+
+        Assert.Null(RemoteText.ServerNameToShow(key, $"https://example.com/dl/{key}", direct));
+        Assert.Null(RemoteText.ServerNameToShow(key, $"https://example.com/dl/{key}?x=1", direct));
+        Assert.Null(RemoteText.ServerNameToShow(key.ToUpperInvariant(), $"https://example.com/dl/{key}", direct));
+        Assert.Null(RemoteText.ServerNameToShow("  ", $"https://example.com/dl/{key}", direct));
+
+        // The engine replaces characters a file name can't hold, and the address may be percent-encoded.
+        Assert.Null(RemoteText.ServerNameToShow("aaaa_bbbb", "https://example.com/dl/aaaa:bbbb", direct));
+        Assert.Null(RemoteText.ServerNameToShow("aaaa bbbb", "https://example.com/dl/aaaa%20bbbb", direct));
+        Assert.Null(RemoteText.ServerNameToShow("1", "https://cdn1.tb-cdn.io/dl/1?token=aaaa-bbbb-cccc", null));
+
+        // A name the server really sent is different from the address, and is shown.
+        Assert.Equal("movie.mkv", RemoteText.ServerNameToShow("movie.mkv", $"https://example.com/dl/{key}", direct));
+    }
+
+    [Fact]
+    public void AnOrdinaryLinksServerNameIsShownEvenWhenItComesFromTheAddress()
+        => Assert.Equal("a.zip", RemoteText.ServerNameToShow("a.zip", "https://example.com/a.zip", Kind("ordinaryLink")));
+
+    [Fact]
+    public void AnImportWhoseDialogCouldNotOpenSaysWhatWasLeftOutAndPromisesNoDialog()
+    {
+        var one = RemoteText.ImportReviewNotOpened(2, 3, 0, 1);
+        Assert.Equal("Added 2 of 3 downloads directly. 1 entry wasn't added, because another dialog was open. Add it with Add Links.", one);
+
+        var some = RemoteText.ImportReviewNotOpened(1, 5, 1, 3);
+        Assert.Equal("Added 1 of 5 downloads directly; 1 failed. 3 entries weren't added, because another dialog was open. Add them with Add Links.", some);
     }
 
     [Fact]

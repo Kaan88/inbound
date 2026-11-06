@@ -232,11 +232,12 @@ public sealed partial class MainWindow
         return outcome;
     }
 
-    /// <summary>The add dialog for this way in, and everything that follows from what it was told.</summary>
-    private async Task ShowProviderAddAsync(AddFocus focus, IReadOnlyList<string>? inputs = null, RemoteClassifyResult? known = null, IReadOnlyList<(string Input, RemoteClassifyResult Result)>? answered = null)
+    /// <summary>The add dialog for this way in, and everything that follows from what it was told. False when it could not open.</summary>
+    private async Task<bool> ShowProviderAddAsync(AddFocus focus, IReadOnlyList<string>? inputs = null, RemoteClassifyResult? known = null, IReadOnlyList<(string Input, RemoteClassifyResult Result)>? answered = null)
     {
-        if (_settings is null) return;
+        if (_settings is null) return false;
         AddLinksChoice? choice;
+        bool couldNotOpen;
 
         // Closing it closes its connection: nothing is still being asked while the next steps run.
         using (var session = new AddLineSession(
@@ -259,9 +260,11 @@ public sealed partial class MainWindow
                 RootGrid,
                 WinRT.Interop.WindowNative.GetWindowHandle(this));
             choice = await dialog.ShowAsync(Content.XamlRoot, RootGrid.ActualTheme, initial);
+            couldNotOpen = dialog.CouldNotOpen;
         }
 
         if (choice is not null) await RunAddChoiceAsync(choice);
+        return !couldNotOpen;
     }
 
     /// <summary>Like Add Links today: starts from the clipboard when it holds something that could be added.</summary>
