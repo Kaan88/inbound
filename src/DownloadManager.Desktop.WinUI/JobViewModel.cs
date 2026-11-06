@@ -290,6 +290,67 @@ public sealed class JobViewModel : INotifyPropertyChanged
         _ => NeutralStatus,
     };
 
+    // ---- The Extraction column, and rows for archive records with no download on the list ----
+
+    private string _archiveText = string.Empty;
+    private string? _archiveToolTip;
+    private string? _archiveAccessibleText;
+    private Microsoft.UI.Xaml.Media.Brush _archiveBrush = NeutralStatus;
+    private Visibility _archivePasswordVisibility = Visibility.Collapsed;
+
+    /// <summary>Whether the Host answers <c>archive.*</c>. With no extraction to speak of, the column takes no room.</summary>
+    internal static bool ShowExtractionColumn { get; set; }
+
+    public Visibility ExtractionColumnVisibility => ShowExtractionColumn ? Visibility.Visible : Visibility.Collapsed;
+
+    internal void NotifyExtractionColumn() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ExtractionColumnVisibility)));
+
+    /// <summary>The state of this file's or package's archive, kept apart from <see cref="StateText"/>: a failed extraction is no failed download.</summary>
+    public string ArchiveText { get => _archiveText; private set => Set(ref _archiveText, value); }
+
+    public string? ArchiveToolTip { get => _archiveToolTip; private set => Set(ref _archiveToolTip, value); }
+
+    public Microsoft.UI.Xaml.Media.Brush ArchiveBrush { get => _archiveBrush; private set => Set(ref _archiveBrush, value); }
+
+    /// <summary>The row's own action when its archive waits for a password.</summary>
+    public Visibility ArchivePasswordVisibility { get => _archivePasswordVisibility; private set => Set(ref _archivePasswordVisibility, value); }
+
+    /// <summary>A row for an archive record whose files aren't on the list, such as one picked from disk.</summary>
+    public bool IsArchiveRow { get; private set; }
+
+    /// <summary>The set behind an archive record's own row; null for any other row.</summary>
+    public ArchiveSetDto? ArchiveSet { get; private set; }
+
+    /// <summary>A row with no local download behind it. It never counts as one, and download commands skip it.</summary>
+    public bool IsSideRow => IsRemoteRow || IsArchiveRow;
+
+    internal void ShowArchive(ArchiveRowView? view)
+    {
+        ArchiveText = view?.Text ?? string.Empty;
+        ArchiveToolTip = view?.ToolTip;
+        ArchiveBrush = ToneBrush(view?.Tone ?? RemoteRowTone.Neutral);
+        ArchivePasswordVisibility = view?.NeedsPassword == true ? Visibility.Visible : Visibility.Collapsed;
+        _archiveAccessibleText = view?.AccessibleText;
+    }
+
+    /// <summary>Status stays blank: nothing is being downloaded, and the Extraction column says the rest.</summary>
+    internal void UpdateArchiveRow(ArchiveSetDto set, ArchiveRowView view)
+    {
+        IsArchiveRow = true;
+        ArchiveSet = set;
+        Id = set.Id;
+        FileName = set.Name;
+        State = "archive";
+        DetailText = view.ToolTip;
+        Description = DownloadManager.Desktop.WinUI.ArchiveText.Full(set);
+        Destination = set.Directory;
+        FileGlyph = "";
+        CreatedAt = set.CreatedAt;
+        LastUpdated = set.UpdatedAt;
+        LastTryText = set.UpdatedAt.LocalDateTime.ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
+        ShowArchive(view);
+    }
+
     /// <summary>Says which account a provider's file came from, when its row has nothing else to say.</summary>
     public void ShowProviderSource(string words)
     {
@@ -300,7 +361,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public override string ToString()
     {
         if (_accessibleName is not null) return _accessibleName;
-        var parts = new[] { FileName, StateText, SizeText, EtaText.Length > 0 ? $"{EtaText} left" : string.Empty, SpeedText };
+        var parts = new[] { FileName, StateText, SizeText, EtaText.Length > 0 ? $"{EtaText} left" : string.Empty, SpeedText, _archiveAccessibleText ?? string.Empty };
         return string.Join(", ", parts.Where(part => part.Length > 0));
     }
 

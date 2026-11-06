@@ -34,6 +34,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -67,7 +68,7 @@
                 <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="Downloads">
+            <MenuBarItem x:Name="DownloadsMenu" Title="Downloads">
                 <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
@@ -223,7 +224,24 @@
             </ScrollViewer>
         </Border>
 
-        <Grid Grid.Row="2">
+        <!-- What extraction wants the user to know. It sits above the list and waits; nothing opens by itself. -->
+        <Border x:Name="ArchiveNoticeBar" Grid.Row="2" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="ArchiveNoticeText" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Extraction notice" AutomationProperties.LiveSetting="Polite" />
+                <Button x:Name="ArchiveNoticeAction" Grid.Column="1" FontSize="12" Padding="10,2" Click="ArchiveNoticeAction_Click" />
+                <Button x:Name="ArchiveNoticeDismiss" Grid.Column="2" Content="Dismiss" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Dismiss this extraction notice" Click="ArchiveNoticeDismiss_Click" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="CategoryColumn" Width="192" />
                 <ColumnDefinition Width="*" />
@@ -332,7 +350,7 @@
             <ScrollViewer x:Name="DownloadListViewport" Grid.Column="1"
                           HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-            <Grid Background="{ThemeResource InboundSurfaceBrush}" RowSpacing="0"
+            <Grid x:Name="DownloadListGrid" Background="{ThemeResource InboundSurfaceBrush}" RowSpacing="0"
                   MinWidth="1040" Width="{Binding ViewportWidth, ElementName=DownloadListViewport}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="27" />
@@ -347,6 +365,7 @@
                             <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="78" />
                             <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="78" />
                             <ColumnDefinition Width="86" />
                             <ColumnDefinition Width="116" />
@@ -357,10 +376,11 @@
                         <TextBlock Grid.Column="2" Text="Q" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
                         <TextBlock Grid.Column="3" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" />
                         <TextBlock Grid.Column="4" Text="Status" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="5" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="6" Text="Transfer rate" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="7" Text="Last Try Date" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="8" Text="Description" Style="{StaticResource InboundHeaderTextStyle}" />
+                        <TextBlock x:Name="ExtractionHeader" Grid.Column="5" Width="140" Text="Extraction" Visibility="Collapsed" Style="{StaticResource InboundHeaderTextStyle}" />
+                        <TextBlock Grid.Column="6" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
+                        <TextBlock Grid.Column="7" Text="Transfer rate" Style="{StaticResource InboundHeaderTextStyle}" />
+                        <TextBlock Grid.Column="8" Text="Last Try Date" Style="{StaticResource InboundHeaderTextStyle}" />
+                        <TextBlock Grid.Column="9" Text="Description" Style="{StaticResource InboundHeaderTextStyle}" />
                     </Grid>
                 </Border>
 
@@ -397,6 +417,7 @@
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="86" />
                                         <ColumnDefinition Width="116" />
@@ -433,13 +454,29 @@
                                         <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
                                     </StackPanel>
-                                    <TextBlock Grid.Column="5" Text="{Binding EtaText}" FontSize="11"
+                                    <Grid Grid.Column="5" Width="140" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
+                                          Background="Transparent" ToolTipService.ToolTip="{Binding ArchiveToolTip}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding ArchiveText}" FontSize="11" Foreground="{Binding ArchiveBrush}"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="1" Width="22" Height="20" Padding="0" MinWidth="0" MinHeight="0" BorderThickness="0"
+                                                Background="Transparent" VerticalAlignment="Center"
+                                                Visibility="{Binding ArchivePasswordVisibility}" Click="ArchiveRowPassword_Click"
+                                                ToolTipService.ToolTip="Enter the archive's password"
+                                                AutomationProperties.Name="Enter the archive's password">
+                                            <FontIcon Glyph="&#xE8D7;" FontSize="12" Foreground="{ThemeResource InboundIconPauseBrush}" />
+                                        </Button>
+                                    </Grid>
+                                    <TextBlock Grid.Column="6" Text="{Binding EtaText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                    <TextBlock Grid.Column="6" Text="{Binding SpeedText}" FontSize="11"
+                                    <TextBlock Grid.Column="7" Text="{Binding SpeedText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="7" Text="{Binding LastTryText}" FontSize="11"
+                                    <TextBlock Grid.Column="8" Text="{Binding LastTryText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="8" Text="{Binding Description}" FontSize="11"
+                                    <TextBlock Grid.Column="9" Text="{Binding Description}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -469,9 +506,9 @@
             </Grid>
         </Grid>
 
-        <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="3" />
+        <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="4" />
 
-        <Border Grid.Row="4" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="5" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
             <Grid Padding="8,0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>

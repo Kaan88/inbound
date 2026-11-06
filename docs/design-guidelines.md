@@ -62,6 +62,14 @@ anywhere but the provider. A link nobody could classify gets a retry, and a dire
 ticked for that line. Whether something is cached is known only after it is added, so the approval that uses
 the account's quota comes in a second step, unticked, and closing that step loses nothing.
 
+Extraction has its own Extraction column beside Status, with the same status colors on its text and no bar,
+so a failed extraction never reads as a failed download and never lands in the Failed view. The cell is short
+and its tooltip has the Host's whole sentence, including every missing volume. An archive with no file on the
+list gets a row of its own, above the local rows on All Downloads and in the Extractions view; Status stays
+blank on it. Nothing about extraction opens by itself: a set that needs a password gets a key button on its
+row and one line in a notice bar above the list, and the password dialog opens only when asked for. The column
+and every extraction command hide when the Host doesn't answer `archive.*`.
+
 ## 3. Progress bars
 
 - Every `ProgressBar` uses `InboundProgressBarStyle`: 6px tall, rounded,

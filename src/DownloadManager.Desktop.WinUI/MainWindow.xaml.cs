@@ -113,6 +113,7 @@ public sealed partial class MainWindow : Window
         // On connections of its own: nothing it waits for can hold up the one above.
         _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
         InitializeRemoteUi();
+        InitializeArchiveUi();
         _remote.Start();
 
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
@@ -166,7 +167,7 @@ public sealed partial class MainWindow : Window
             {
                 _category = _uiState.Category; // Restored once Host category definitions arrive.
             }
-            else if (_uiState.Category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal))
+            else if (_uiState.Category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) || _uiState.Category == ArchiveSetsTag)
             {
                 _pendingRemoteCategory = _uiState.Category; // Restored once the Host says what it has.
             }
@@ -277,6 +278,9 @@ public sealed partial class MainWindow : Window
             {
                 _visibleJobs.Remove(removed);
                 if (removed.PackageId is not null) RebuildVisible();
+
+                // A record whose last file left the list now needs a row of its own.
+                if (_setByJob.ContainsKey(job.Id)) QueueArchiveSync();
             }
         }
         else if (PackageOf(job.Id) is { } package)
@@ -289,6 +293,7 @@ public sealed partial class MainWindow : Window
 
             member.Update(job);
             ShowProviderSource(member);
+            ShowArchiveState(member);
             var row = _packageRows.GetValueOrDefault(package.Id);
             var shouldShow = row is not null && row.IsExpanded && Matches(member);
             if (row is null || member.PackageId != package.Id || shouldShow != _visibleJobs.Contains(member))
@@ -306,6 +311,7 @@ public sealed partial class MainWindow : Window
 
             vm.Update(job);
             ShowProviderSource(vm);
+            ShowArchiveState(vm);
             if (vm.PackageId is not null)
             {
                 // It just left its package.
@@ -321,7 +327,7 @@ public sealed partial class MainWindow : Window
                 if (!isVisible)
                 {
                     // Under the remote rows, which stay on top.
-                    _visibleJobs.Insert(_visibleJobs.TakeWhile(row => row.IsRemoteRow).Count(), vm);
+                    _visibleJobs.Insert(_visibleJobs.TakeWhile(row => row.IsSideRow).Count(), vm);
                 }
             }
             else if (isVisible)
@@ -356,16 +362,16 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>What single-item commands act on. A remote row is never it: those have commands of their own.</summary>
-    private JobViewModel? FirstLocalRow => JobsList.SelectedItem is JobViewModel { IsRemoteRow: false } row
+    private JobViewModel? FirstLocalRow => JobsList.SelectedItem is JobViewModel { IsSideRow: false } row
         ? row
-        : JobsList.SelectedItems.OfType<JobViewModel>().FirstOrDefault(candidate => !candidate.IsRemoteRow);
+        : JobsList.SelectedItems.OfType<JobViewModel>().FirstOrDefault(candidate => !candidate.IsSideRow);
 
     private JobViewModel? SelectedJob => FirstLocalRow is { IsPackage: false } job ? job : null;
 
     /// <summary>Selected files; a selected package row contributes all of its files.</summary>
     private List<JobViewModel> SelectedJobs =>
         JobsList.SelectedItems.OfType<JobViewModel>()
-            .Where(row => !row.IsRemoteRow)
+            .Where(row => !row.IsSideRow)
             .SelectMany(row => row.IsPackage ? row.Children : [row])
             .Distinct().ToList();
 
@@ -381,7 +387,7 @@ public sealed partial class MainWindow : Window
         {
             var packages = SelectedPackageRows.Select(row => row.Id).ToHashSet();
             return JobsList.SelectedItems.OfType<JobViewModel>()
-                .Where(row => !row.IsRemoteRow && !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
+                .Where(row => !row.IsSideRow && !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
                 .ToList();
         }
     }
@@ -409,6 +415,7 @@ public sealed partial class MainWindow : Window
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
         StartQueueButton.IsEnabled = connected && _settings is not null;
         StopQueueButton.IsEnabled = connected && _settings is not null;
+        SyncArchiveMenus();
     }
 
     private void UpdateStatusText()
@@ -444,7 +451,8 @@ public sealed partial class MainWindow : Window
             if (job.FileName.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
                 job.Url.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
                 job.Description.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
-                job.DetailText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0)
+                job.DetailText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
+                job.ArchiveText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0)
             {
                 return false;
             }
@@ -460,6 +468,7 @@ public sealed partial class MainWindow : Window
             "failed" => job.State == "failed",
             "compressed" or "documents" or "music" or "programs" or "video" or "other" => job.CategoryId == _category,
             _ when _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) => false,
+            ArchiveSetsTag => false,
             _ when _category.StartsWith("category:", StringComparison.Ordinal) => job.CategoryId == _category[9..],
             _ => true,
         };
@@ -486,6 +495,7 @@ public sealed partial class MainWindow : Window
             if (!members.Any(Matches)) continue;
             if (!_packageRows.TryGetValue(group.Id, out var row)) _packageRows[group.Id] = row = new JobViewModel();
             row.UpdatePackage(group, members, _uiState.ExpandedPackages.Contains(group.Id));
+            ShowPackageArchiveState(row);
             liveRows.Add(group.Id);
             top.Add(row);
         }
@@ -493,6 +503,7 @@ public sealed partial class MainWindow : Window
         foreach (var job in _jobsById.Values)
         {
             ShowProviderSource(job);
+            ShowArchiveState(job);
             if (packaged.Contains(job.Id)) continue;
             job.PackageId = null;
             if (Matches(job)) top.Add(job);
@@ -510,6 +521,7 @@ public sealed partial class MainWindow : Window
 
         // On top and in their own order: a sort is about local files, and these have no size or rate.
         target.AddRange(RemoteRowsInView());
+        target.AddRange(ArchiveRowsInView());
 
         foreach (var row in ordered)
         {
@@ -778,6 +790,11 @@ public sealed partial class MainWindow : Window
             await RunRemotePrimaryAsync(remote);
             return;
         }
+        if (FirstLocalRow is null && SelectedArchiveRows is [{ ArchiveSet: { } set }])
+        {
+            await RunArchivePrimaryAsync(set);
+            return;
+        }
         if (SelectedJob is { } job)
         {
             // Finished files open; anything still in progress shows its progress window.
@@ -894,6 +911,7 @@ public sealed partial class MainWindow : Window
         }
 
         HideLocalContextItemsIfRemoteOnly();
+        ShowArchiveContextItems();
 
         if (_priorityMenu is not null)
         {

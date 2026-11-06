@@ -3,6 +3,7 @@ using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -18,10 +19,13 @@ internal sealed class PackageWindow : Window
 {
     private readonly Guid _packageId;
     private readonly HostConnection _connection = new();
+    private readonly RemoteClient _remote;
     private readonly Dictionary<Guid, JobDto> _jobs = [];
     private readonly Dictionary<Guid, Row> _rows = [];
     private List<Guid> _members = [];
     private bool _closed;
+    private bool _groupKnown;
+    private bool _passwordSavedHere;
 
     private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
     private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -35,6 +39,12 @@ internal sealed class PackageWindow : Window
     private readonly Button _cancel = new() { Content = "Cancel package", MinWidth = 100 };
     private readonly Button _openFolder = new() { Content = "Open folder", MinWidth = 100, Visibility = Visibility.Collapsed };
     private readonly Button _close = new() { Content = "Hide", MinWidth = 92 };
+    private readonly StackPanel _archivePanel = new() { Spacing = 6, Visibility = Visibility.Collapsed };
+    private readonly PasswordBox _archivePassword = new() { Header = "Archive password", PasswordRevealMode = PasswordRevealMode.Hidden };
+    private readonly Button _savePassword = new() { Content = "Save Password", MinWidth = 100, IsEnabled = false, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Button _clearPassword = new() { Content = "Clear Password", MinWidth = 100, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly StatusLine _passwordStatus = new("Archive password status");
+    private readonly StatusLine _extractionStatus = new("Extraction");
 
     private sealed record Row(Grid Grid, TextBlock Name, TextBlock Status, ProgressBar Bar, TextBlock Size);
 
@@ -44,12 +54,12 @@ internal sealed class PackageWindow : Window
         var theme = UiStateStore.Load().DarkMode;
         _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
         Title = "Package status — Inbound Download Manager";
-        WindowLayout.ResizeForDpi(this, 720, 520);
+        WindowLayout.ResizeForDpi(this, 720, 640);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
-        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
+        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
             _root.RowDefinitions.Add(new RowDefinition { Height = height });
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(_title);
@@ -60,6 +70,8 @@ internal sealed class PackageWindow : Window
         var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(4),
             Child = new ScrollViewer { Content = _list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
         Add(listFrame, 3);
+        BuildArchivePanel();
+        Add(_archivePanel, 4);
         var footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < 5; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -70,7 +82,7 @@ internal sealed class PackageWindow : Window
             Grid.SetColumn(button, column++);
             footer.Children.Add(button);
         }
-        Add(footer, 4);
+        Add(footer, 5);
 
         void ApplyColors()
         {
@@ -85,6 +97,10 @@ internal sealed class PackageWindow : Window
         _cancel.Click += async (_, _) => await ConfirmCancelAsync();
         _openFolder.Click += (_, _) => OpenFolder();
         _close.Click += (_, _) => Close();
+
+        _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        _remote.State.ArchiveSets.CollectionChanged += (_, _) => { if (!_closed) RenderArchives(); };
+        _remote.State.PropertyChanged += (_, _) => { if (!_closed) RenderArchives(); };
 
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
@@ -110,13 +126,16 @@ internal sealed class PackageWindow : Window
         Closed += async (_, _) =>
         {
             _closed = true;
+            _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
+            await _remote.DisposeAsync();
         };
         _root.KeyboardAccelerators.Add(Escape());
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
         Render();
         _connection.Start();
+        _remote.Start();
     }
 
     public void ShowWindow()
@@ -146,15 +165,119 @@ internal sealed class PackageWindow : Window
         if (group is null)
         {
             _members = [];
+            _groupKnown = false;
             _title.Text = "Package removed";
             _notice.Text = "This package no longer exists. Its files are listed individually in the main window.";
         }
         else
         {
             _title.Text = group.Name;
+            _groupKnown = true;
             _members = [.. group.JobIds];
         }
         Render();
+        RenderArchives();
+    }
+
+    // ---- Archives: the password for what this package brings, and how far extraction has got ----
+
+    private void BuildArchivePanel()
+    {
+        var hint = new TextBlock { Text = ArchiveText.PackagePasswordHint, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
+        AutomationProperties.SetName(hint, hint.Text);
+        AutomationProperties.SetName(_archivePassword, "Archive password for this package. It isn't for the download.");
+        AutomationProperties.SetName(_savePassword, "Save the archive password");
+        AutomationProperties.SetName(_clearPassword, "Clear the saved archive password");
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(_archivePassword);
+        Grid.SetColumn(_savePassword, 1);
+        Grid.SetColumn(_clearPassword, 2);
+        row.Children.Add(_savePassword);
+        row.Children.Add(_clearPassword);
+        _archivePanel.Children.Add(row);
+        _archivePanel.Children.Add(hint);
+        _archivePanel.Children.Add(_passwordStatus.Text);
+        _archivePanel.Children.Add(_extractionStatus.Text);
+
+        _archivePassword.PasswordChanged += (_, _) => _savePassword.IsEnabled = _archivePassword.Password.Length > 0;
+        _archivePassword.KeyDown += async (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Enter || _archivePassword.Password.Length == 0) return;
+            args.Handled = true;
+            await SaveArchivePasswordAsync();
+        };
+        _savePassword.Click += async (_, _) => await SaveArchivePasswordAsync();
+        _clearPassword.Click += async (_, _) => await ClearArchivePasswordAsync();
+    }
+
+    private List<ArchiveSetDto> PackageSets() => _remote.State.ArchiveSets
+        .Where(set => set.PackageId == _packageId || set.JobIds.Any(_members.Contains))
+        .ToList();
+
+    private void RenderArchives()
+    {
+        _archivePanel.Visibility = _remote.State.ArchivesSupported && _groupKnown ? Visibility.Visible : Visibility.Collapsed;
+        var sets = PackageSets();
+
+        // The Host says whether a password is held only through a set, and a new package may have none yet.
+        _clearPassword.IsEnabled = _passwordSavedHere || sets.Count == 0 || sets.Any(set => set.HasPassword);
+
+        var lines = sets.Take(6).Select(set => $"{set.Name}: {ArchiveText.Full(set)}").ToList();
+        if (sets.Count > 6) lines.Add($"and {sets.Count - 6} more");
+        var asking = sets.Where(set => set.NeedsPassword).ToList();
+        if (asking.Count > 0)
+        {
+            lines.Insert(0, asking.Any(set => set.FailureKind == "wrongPassword")
+                ? "That password was wrong. The downloads are fine. Enter the right one above, and extraction runs again."
+                : "An archive here needs its password. The downloads are fine. Enter it above, and extraction runs.");
+        }
+
+        _extractionStatus.Show(string.Join(Environment.NewLine, lines), asking.Any(set => set.FailureKind == "wrongPassword"));
+    }
+
+    private async Task SaveArchivePasswordAsync()
+    {
+        var password = _archivePassword.Password;
+
+        // Out of the box before anything is sent, whatever the answer turns out to be.
+        _archivePassword.Password = string.Empty;
+        if (password.Length == 0) return;
+        _passwordStatus.Show("Saving the archive password…");
+        var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = password });
+        password = string.Empty;
+        if (_closed) return;
+        if (result.Ok)
+        {
+            _passwordSavedHere = true;
+            _passwordStatus.Show("Archive password saved. It is used when this package's archives are extracted.");
+        }
+        else
+        {
+            _passwordStatus.Show($"The archive password wasn't saved. {RemoteText.Failure(result.Error)}", isProblem: true);
+        }
+
+        RenderArchives();
+    }
+
+    private async Task ClearArchivePasswordAsync()
+    {
+        _passwordStatus.Show("Clearing the archive password…");
+        var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = string.Empty });
+        if (_closed) return;
+        if (result.Ok)
+        {
+            _passwordSavedHere = false;
+            _passwordStatus.Show("Any archive password saved for this package is gone.");
+        }
+        else
+        {
+            _passwordStatus.Show($"The archive password wasn't cleared. {RemoteText.Failure(result.Error)}", isProblem: true);
+        }
+
+        RenderArchives();
     }
 
     private void Render()

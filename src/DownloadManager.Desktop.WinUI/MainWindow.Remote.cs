@@ -46,6 +46,7 @@ public sealed partial class MainWindow
 
     private void OnRemoteStateChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(RemoteState.ArchivesSupported) or nameof(RemoteState.IsConnected) or nameof(RemoteState.IsReady)) SyncArchiveEntryPoints();
         if (e.PropertyName is nameof(RemoteState.RemoteSupported) or nameof(RemoteState.IsReady))
         {
             SyncRemoteRows();
@@ -103,12 +104,14 @@ public sealed partial class MainWindow
     private bool MatchesSearch(JobViewModel row) => _search.Length == 0 ||
         row.FileName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
         row.StateText.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+        row.ArchiveText.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
         row.Description.Contains(_search, StringComparison.OrdinalIgnoreCase);
 
     private void UpdateEmptyText()
     {
         EmptyText.Text = _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal)
             ? $"Nothing is waiting for {ProviderDisplayName(_category[RemoteWaitingTag.Length..])}.\nItems show here until their files start downloading."
+            : _category == ArchiveSetsTag ? ArchiveSetsEmptyText
             : DefaultEmptyText;
     }
 
@@ -367,7 +370,7 @@ public sealed partial class MainWindow
     /// <summary>Runs last. A selection of remote rows alone has nothing for the local items to act on.</summary>
     private void HideLocalContextItemsIfRemoteOnly()
     {
-        if (FirstLocalRow is not null || SelectedRemoteRows.Count == 0) return;
+        if (FirstLocalRow is not null || (SelectedRemoteRows.Count == 0 && SelectedArchiveRows.Count == 0)) return;
         foreach (var item in _localContextItems) item.Visibility = Visibility.Collapsed;
     }
 
@@ -377,6 +380,7 @@ public sealed partial class MainWindow
     /// </summary>
     private void JobsList_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (HandleArchiveRowKey(e)) return;
         var jobs = SelectedRemoteJobs;
         if (jobs.Count == 0) return;
         switch (e.Key)
