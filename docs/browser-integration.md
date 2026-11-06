@@ -39,6 +39,26 @@ Chrome version during Phase 4.
    the store's (`olhbcdbjdnfoiinllnlpandggadfabfm`) and the unpacked build's (`pknddmneejadnnngffojnoecojhdfalc`).
    See `docs/chrome-store/LISTING.md`.
 
+## Edge
+
+Edge is a supported browser (owner decision 2026-11-06). It runs the same extension and the same native host.
+
+- **Install route.** Edge users install the extension from the Chrome Web Store (Edge asks once to allow
+  extensions from other stores). The ID is therefore the store's, `olhbcdbjdnfoiinllnlpandggadfabfm`, and
+  needs no new `allowed_origins` entry. A separate Edge Add-ons listing is parked (ROADMAP EXT.S1) because
+  the owner cannot enroll in the Edge program.
+- **Registration.** Edge looks the native host up under its own key,
+  `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager`, beside Chrome's under
+  `Google\Chrome`. Setup and `register-native-host.ps1` (used by install, repair and the in-app updater) write
+  the same manifest path under both, whether or not the browser is installed, so installing Edge later
+  works. Uninstall removes both. The paths are constants in `BrowserBridge`.
+- **Registered state.** The Host reports the bridge as registered when the Chrome key or the Edge key points
+  at a manifest that lists the store origin, so Chrome without Edge is not shown as broken. An install from
+  0.4.0 has only the Chrome key; the Host adds the Edge key at start, best effort and once per start. It logs
+  a failure rather than showing one, skips isolated-data runs, and never replaces an Edge registration whose
+  manifest exists.
+- Evidence and what is still unverified are in `PROGRESS.md`.
+
 ## Handoff flow (durable)
 
 ```
