@@ -18,7 +18,7 @@ internal sealed record ProviderAccountView(
 /// The words the remote screens show. Provider names come from the Host. Nothing here is a local
 /// progress figure, and no address gets through: the Host scrubs what it sends, and this does it again.
 /// </summary>
-internal static class RemoteText
+internal static partial class RemoteText
 {
     public const string HostNotRunning = "The background Host isn't running, so this could not be done. Open Inbound again to start it.";
     public const string HostLost = "The connection to the background Host was lost before it answered. Check the list before trying again, because this may have gone through.";
