@@ -2103,6 +2103,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var providerAdd = await ProviderAddAppliesAsync();
         var urlBox = new ComboBox
         {
             Header = "URL",
@@ -2122,7 +2123,8 @@ public sealed partial class MainWindow : Window
             {
                 var text = (await clip.GetTextAsync()).Trim();
                 if (text.Length < 4096 && Uri.TryCreate(text, UriKind.Absolute, out var clipUri) &&
-                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp))
+                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp ||
+                     (providerAdd && LinkExtractor.IsMagnet(text))))
                     urlBox.Text = text;
             }
         }
@@ -2145,20 +2147,43 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        addressDialog.PrimaryButtonClick += (_, args) =>
+        string url;
+        var showMasked = false;
+        string? addressNote = null;
+        if (providerAdd)
         {
-            if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
-                candidate.Scheme is not ("http" or "https"))
+            var checkedAddress = await CheckAddressAsync(addressDialog, urlBox, addressError, addressPanel);
+            switch (checkedAddress.Way)
             {
-                addressError.Text = "Enter an absolute http or https URL.";
-                addressError.Visibility = Visibility.Visible;
-                args.Cancel = true;
+                case AddressWay.Cancelled:
+                    return;
+                case AddressWay.Provider:
+                    await ShowProviderAddAsync(AddFocus.OneAddress, [checkedAddress.Input], checkedAddress.Result);
+                    return;
             }
-        };
-        if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var url = urlBox.Text.Trim();
 
-        var urlDisplay = new TextBox { Header = "URL", Text = url, IsReadOnly = true };
+            url = checkedAddress.Input;
+            showMasked = checkedAddress.Result?.Kind == "providerDirectLink" || DownloadManager.Core.Providers.ProviderLinks.IsProviderLink(url);
+            addressNote = checkedAddress.Result?.Note;
+        }
+        else
+        {
+            addressDialog.PrimaryButtonClick += (_, args) =>
+            {
+                if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
+                    candidate.Scheme is not ("http" or "https"))
+                {
+                    addressError.Text = "Enter an absolute http or https URL.";
+                    addressError.Visibility = Visibility.Visible;
+                    args.Cancel = true;
+                }
+            };
+            if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
+            url = urlBox.Text.Trim();
+        }
+
+        // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
+        var urlDisplay = new TextBox { Header = "URL", Text = showMasked ? DownloadManager.Core.Providers.ProviderLinks.MaskToken(url) : url, IsReadOnly = true };
         var nameBox = new TextBox
         {
             Header = "File name (optional)",
@@ -2404,6 +2429,11 @@ public sealed partial class MainWindow : Window
 
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(urlDisplay);
+        if (!string.IsNullOrWhiteSpace(addressNote))
+        {
+            panel.Children.Add(new TextBlock { Text = DownloadManager.Core.Providers.UrlRedactor.HideAddresses(addressNote), TextWrapping = TextWrapping.Wrap });
+        }
+
         panel.Children.Add(metadataText);
         panel.Children.Add(metadataActions);
         panel.Children.Add(nameBox);
@@ -2542,6 +2572,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (await ProviderAddAppliesAsync())
+        {
+            await ShowProviderAddAsync(AddFocus.Links);
+            return;
+        }
+
         var pasteBox = new TextBox
         {
             Header = "Paste links or any text containing links",
@@ -2557,7 +2593,7 @@ public sealed partial class MainWindow : Window
             if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
             {
                 var text = await clip.GetTextAsync();
-                if (ExtractLinks(text).Count > 0) pasteBox.Text = text;
+                if (LinkExtractor.HttpLinks(text).Count > 0) pasteBox.Text = text;
             }
         }
         catch (Exception)
@@ -2622,7 +2658,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var found = ExtractLinks(pasteBox.Text);
+        var found = LinkExtractor.HttpLinks(pasteBox.Text);
         if (found.Count == 0)
         {
             await ShowMessageAsync("Add links", "No http or https links were found in the pasted text.");
@@ -2684,9 +2720,30 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var queueId = _settings.Queues.OrderBy(q => q.Order)
+            .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId;
+        var destination = string.IsNullOrWhiteSpace(destinationBox.Text)
+            ? null
+            : destinationBox.Text.Trim();
+        var added = await AddOrdinaryLinksAsync(urls, keepPackage.IsChecked == true, destination, startMode.SelectedIndex == 1 ? "later" : "now", queueId, conflictBox.SelectedIndex);
+        await RefreshAsync();
+        await ShowMessageAsync("Add links", added.Summary);
+    }
+
+    /// <summary>What came of adding ordinary links. The first job is how the package they went into gets found.</summary>
+    private sealed record OrdinaryAddResult(int Requested, int Accepted, int Duplicates, int Failed, string? FirstError, Guid? FirstJobId)
+    {
+        public string Summary => $"Added {Accepted} of {Requested} downloads" +
+            (Duplicates > 0 ? $" ({Duplicates} already queued)" : string.Empty) +
+            (Failed > 0 ? $"; {Failed} failed. {FirstError}" : ".");
+    }
+
+    /// <summary>One <c>job.add</c> per link, in a package of their own when asked. Only for links nothing says should go through a provider.</summary>
+    private async Task<OrdinaryAddResult> AddOrdinaryLinksAsync(IReadOnlyList<string> urls, bool keepPackage, string? destination, string start, int queueId, int conflictIndex)
+    {
         string? packageKey = null;
         string? packageName = null;
-        if (keepPackage.IsChecked == true && urls.Count >= 2)
+        if (keepPackage && urls.Count >= 2)
         {
             packageKey = Guid.NewGuid().ToString("N");
             // Name a package of split-archive parts after the archive.
@@ -2700,24 +2757,18 @@ public sealed partial class MainWindow : Window
             packageName = bases is [{ } archive] ? archive : null;
         }
 
-        var queueId = _settings.Queues.OrderBy(q => q.Order)
-            .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId;
-        var destination = string.IsNullOrWhiteSpace(destinationBox.Text)
-            ? null
-            : destinationBox.Text.Trim();
-        var start = startMode.SelectedIndex == 1 ? "later" : "now";
         var accepted = 0;
         var duplicates = 0;
-        var skipped = 0;
         var failed = 0;
         string? firstError = null;
+        Guid? firstJob = null;
 
         foreach (var url in urls)
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             {
                 failed++;
-                firstError ??= $"Invalid URL: {url}";
+                firstError ??= "That isn't an http or https address.";
                 continue;
             }
 
@@ -2728,7 +2779,7 @@ public sealed partial class MainWindow : Window
                     Url = url,
                     DestinationDirectory = destination,
                     StartMode = start,
-                    ConflictPolicy = conflictBox.SelectedIndex switch
+                    ConflictPolicy = conflictIndex switch
                     {
                         1 => "overwrite",
                         2 => "fail",
@@ -2743,6 +2794,7 @@ public sealed partial class MainWindow : Window
                 if (add.Accepted)
                 {
                     accepted++;
+                    firstJob ??= add.Job?.Id;
                     if (add.Duplicate)
                     {
                         duplicates++;
@@ -2761,24 +2813,7 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        await RefreshAsync();
-        var summary = $"Added {accepted} of {urls.Count} downloads" +
-                      (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
-                      (skipped > 0 ? $"; {skipped} skipped as already listed" : string.Empty) +
-                      (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
-        await ShowMessageAsync("Add links", summary);
-    }
-
-    /// <summary>Finds distinct http/https links in free text (one per line, in HTML, in prose).</summary>
-    private static List<string> ExtractLinks(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return [];
-        return System.Text.RegularExpressions.Regex.Matches(text, @"https?://[^\s""'<>`]+",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-            .Select(match => match.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!', '?'))
-            .Where(link => Uri.TryCreate(link, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return new OrdinaryAddResult(urls.Count, accepted, duplicates, failed, firstError, firstJob);
     }
 
     private async Task ShowQueuesAsync()

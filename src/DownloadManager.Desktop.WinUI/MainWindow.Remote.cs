@@ -225,41 +225,49 @@ public sealed partial class MainWindow
 
     private void SyncRemoteTasksMenu(List<RemoteAccountDto> accounts)
     {
-        var browsable = accounts.Where(RemoteRules.CanBrowse).ToList();
-        bool CanCheck(RemoteAccountDto account) => _remote.State.Jobs.Any(job => RemoteRules.SameProvider(job.Provider, account.Provider) && RemoteRules.Actions(job).CheckNow);
+        var usable = accounts.Where(RemoteRules.HasUsableKey).ToList();
+        var browsable = usable.Where(RemoteRules.CanBrowse).ToList();
+        var torrents = usable.Any(account => account.Capabilities.Contains("torrents", StringComparer.OrdinalIgnoreCase));
+        var canCheck = _remote.State.Jobs.Any(job => RemoteRules.Actions(job).CheckNow);
 
         // This runs on every job change, and the menu may be open. It only changes when what it offers does.
-        var offers = string.Join('|', browsable.Select(account => $"{RemoteText.ProviderName(account)}:{CanCheck(account)}"));
+        var offers = $"{torrents}|{usable.Count}|{canCheck}|{string.Join('|', browsable.Select(account => RemoteText.ProviderName(account)))}";
         if (offers == _remoteTasksOffers) return;
         _remoteTasksOffers = offers;
         foreach (var old in _remoteTasksItems) TasksMenu.Items.Remove(old);
         _remoteTasksItems.Clear();
-        if (browsable.Count == 0) return;
+        if (usable.Count == 0) return;
 
         // After Add Links, before the export group.
         var at = 2;
+        void Add(string text, RoutedEventHandler click, bool enabled = true)
+        {
+            var item = new MenuFlyoutItem { Text = text, IsEnabled = enabled };
+            item.Click += click;
+            TasksMenu.Items.Insert(at++, item);
+            _remoteTasksItems.Add(item);
+        }
+
+        if (torrents)
+        {
+            Add("Add Magnet…", async (_, _) => await ShowProviderAddAsync(AddFocus.Magnet));
+            Add("Import Torrent File…", async (_, _) => await ImportTorrentFilesAsync());
+        }
+
         foreach (var account in browsable)
         {
-            var name = RemoteText.ProviderName(account);
-            var browse = new MenuFlyoutItem { Text = $"My {name}…", Tag = account.Provider };
-            browse.Click += (_, _) => OpenProviderWindow(account.Provider);
-            TasksMenu.Items.Insert(at++, browse);
-            _remoteTasksItems.Add(browse);
-
-            // With nothing waiting, this would do nothing, so it isn't there.
-            if (CanCheck(account))
-            {
-                var check = new MenuFlyoutItem { Text = $"Check {name} Now", Tag = account.Provider };
-                check.Click += async (_, _) =>
-                {
-                    var result = await _remote.CheckNowAsync(provider: account.Provider);
-                    if (!result.Ok) await ShowMessageAsync($"Check {name} now", RemoteText.Failure(result.Error, null, name));
-                    else StatusText.Text = $"Checking {name} now…";
-                };
-                TasksMenu.Items.Insert(at++, check);
-                _remoteTasksItems.Add(check);
-            }
+            Add($"Browse My {RemoteText.ProviderName(account)}…", (_, _) => OpenProviderWindow(account.Provider));
         }
+
+        // Dimmed with nothing waiting, because then there is nothing for it to do.
+        Add("Check Remote Status Now", async (_, _) => await CheckRemoteStatusNowAsync(), canCheck);
+    }
+
+    private async Task CheckRemoteStatusNowAsync()
+    {
+        var result = await _remote.CheckNowAsync();
+        if (!result.Ok) await ShowMessageAsync("Check remote status now", RemoteText.Failure(result.Error));
+        else StatusText.Text = "Checking remote status now…";
     }
 
     private void OpenProviderWindow(string provider)

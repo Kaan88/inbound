@@ -55,6 +55,13 @@ the last one. Their stage is words and never a bar. Size, Time left and Transfer
 those columns are about bytes reaching this computer. A provider's own progress goes in Description,
 labelled as the provider's.
 
+In the add dialogs, each line says what it is in a word: Folder link, Magnet, Torrent file, Hoster through
+the provider, Direct provider link, Ordinary link, Unsupported, Can't tell. A line that can hold a secret shows
+only its host and its position in the list, never its address. A hoster link has no control that sends it
+anywhere but the provider. A link nobody could classify gets a retry, and a direct download only by a box
+ticked for that line. Whether something is cached is known only after it is added, so the approval that uses
+the account's quota comes in a second step, unticked, and closing that step loses nothing.
+
 ## 3. Progress bars
 
 - Every `ProgressBar` uses `InboundProgressBarStyle`: 6px tall, rounded,
