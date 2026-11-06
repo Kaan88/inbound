@@ -68,8 +68,6 @@ Color only the status text. Don't tint whole rows.
   refreshes. Per-segment speeds are smoothed (EMA 0.25) because raw per-stream rates sawtooth.
 - Normal text cells keep the inherited foreground. Never assign a `null`
   Foreground in code; it renders the text invisible.
-- The bottom Expander (speed graph) uses `ExpandDirection="Up"`, so its header
-  stays at the bottom edge and the panel opens upward.
 - Keep the defaults: no gradients, no animated stripes, no percentage text
   drawn over the bar.
 
@@ -83,8 +81,12 @@ Color only the status text. Don't tint whole rows.
   Use "—" for missing live values in summaries.
 - Units: binary multiples labelled `KB`/`MB`/`GB` (1024-based), the same in the
   list, the dialogs and the speed graph. Don't mix in `KiB`/`MiB`.
-- The speed graph is secondary: 130px, collapsible, and it must never take more
-  space than the list.
+- The speed graph is secondary and must never take more space than the list: a
+  23px bar styled like the status bar, holding the figures and the period, with
+  an 85px plot that opens upward from it, so the bar stays where it was clicked.
+- It opens by animating the panel's real height, so the list moves with it and
+  nothing is left blank. Don't use `Expander` for bottom panels: it reserves the
+  full height first and slides the content in afterwards, leaving a gap.
 
 ## 5. Toolbar
 

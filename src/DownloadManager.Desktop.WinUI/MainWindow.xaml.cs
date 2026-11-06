@@ -46,9 +46,10 @@ public sealed partial class MainWindow : Window
         RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
             ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
             : ElementTheme.Default;
-        SpeedGraphPanel.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
+        SpeedGraph.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
         ShowSpeedGraphMenuItem.IsChecked = _uiState.ShowSpeedGraph;
-        SpeedGraphPanel.IsExpanded = _uiState.SpeedGraphExpanded;
+        SpeedGraph.IsExpanded = _uiState.SpeedGraphExpanded;
+        SpeedGraph.ExpandedChanged += (_, _) => SaveUiState();
         _speedHistoryTimer.Tick += (_, _) =>
         {
             var now = DateTimeOffset.UtcNow;
@@ -211,20 +212,18 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            // One state object: TogglePackage saves it too, so neither can undo the other's changes.
             var size = (window ?? AppWindow).Size;
-            UiStateStore.Save(new UiState
-            {
-                WindowWidth = size.Width,
-                WindowHeight = size.Height,
-                Category = _category,
-                SortKey = _sortKey,
-                SortAscending = _sortAscending,
-                ToolbarLarge = _toolbarLarge,
-                HideCategories = _hideCategories,
-                ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked,
-                SpeedGraphExpanded = SpeedGraphPanel.IsExpanded,
-                DarkMode = _uiState.DarkMode,
-            });
+            _uiState.WindowWidth = size.Width;
+            _uiState.WindowHeight = size.Height;
+            _uiState.Category = _category;
+            _uiState.SortKey = _sortKey;
+            _uiState.SortAscending = _sortAscending;
+            _uiState.ToolbarLarge = _toolbarLarge;
+            _uiState.HideCategories = _hideCategories;
+            _uiState.ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked;
+            _uiState.SpeedGraphExpanded = SpeedGraph.IsExpanded;
+            UiStateStore.Save(_uiState);
         }
         catch (Exception ex)
         {
@@ -1150,7 +1149,7 @@ public sealed partial class MainWindow : Window
 
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
     {
-        SpeedGraphPanel.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+        SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
         SaveUiState();
     }
 

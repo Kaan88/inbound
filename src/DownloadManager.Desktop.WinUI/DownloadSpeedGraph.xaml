@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DownloadManager.Desktop.WinUI.DownloadSpeedGraph"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="23" />
+        </Grid.RowDefinitions>
+
+        <!-- This panel's real height is what animates, so the list moves with it and no space is
+             ever left blank. The plot keeps its size and is clipped, so it is not redrawn per frame. -->
+        <Grid x:Name="PlotPanel" Height="85" Background="{ThemeResource InboundSurfaceBrush}"
+              BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+            <Canvas x:Name="Plot" Height="84" Margin="8,0" VerticalAlignment="Top"
+                    AutomationProperties.Name="Download speed history for this session" />
+        </Grid>
+
+        <Grid Grid.Row="1" Background="{ThemeResource InboundChromeBrush}"
+              BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
+            <Grid.Resources>
+                <!-- Flat like the toolbar. -->
+                <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+            </Grid.Resources>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="ToggleButton" Click="ToggleButton_Click"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                    MinHeight="0" Padding="8,0" BorderThickness="0" CornerRadius="0">
+                <Grid ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE70D;" FontSize="9" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"
+                              Foreground="{ThemeResource InboundSecondaryTextBrush}">
+                        <FontIcon.RenderTransform>
+                            <RotateTransform x:Name="ChevronRotation" />
+                        </FontIcon.RenderTransform>
+                    </FontIcon>
+                    <TextBlock Grid.Column="1" Text="Download speed" FontSize="11" VerticalAlignment="Center" />
+                    <TextBlock x:Name="Summary" Grid.Column="2" Margin="6,0,0,0" FontSize="11" VerticalAlignment="Center"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </Button>
+
+            <Button x:Name="PeriodButton" Grid.Column="1" VerticalAlignment="Stretch" MinHeight="0" Padding="8,0"
+                    BorderThickness="0" CornerRadius="0"
+                    ToolTipService.ToolTip="How much history the graph, average and peak cover">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <TextBlock x:Name="PeriodText" FontSize="11" VerticalAlignment="Center"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    <FontIcon Glyph="&#xE70E;" FontSize="8" VerticalAlignment="Center"
+                              Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                </StackPanel>
+                <Button.Flyout>
+                    <MenuFlyout x:Name="PeriodMenu" Placement="TopEdgeAlignedRight" />
+                </Button.Flyout>
+            </Button>
+        </Grid>
+    </Grid>
+</UserControl>

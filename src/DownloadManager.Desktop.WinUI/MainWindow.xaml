@@ -458,10 +458,7 @@
             </Grid>
         </Grid>
 
-        <Expander x:Name="SpeedGraphPanel" Grid.Row="3" ExpandDirection="Up" Header="Download speed · session history" IsExpanded="True"
-                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-            <local:DownloadSpeedGraph x:Name="SpeedGraph" />
-        </Expander>
+        <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="3" />
 
         <Border Grid.Row="4" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
