@@ -20,10 +20,13 @@
   - Store CRX's code under the store ID (key added): `connected: true`, `dm.ping` ok, "Connected to the desktop app."
   - The CRX and the zip unpacked unchanged: IDs `eahiead…` and `dpjlmpm…`, `Access to the specified native messaging host is forbidden.`
   - The CRX's three signatures verify, and it differs from the uploaded zip only by `update_url` and `_metadata`.
-- Not found: the word "signature". It is in neither Chrome's extension status nor its log for these copies, nor in any bridge code. The only such text in the app is the updater's. The owner's exact wording is an open question, so this cause is inferred from the reported steps.
+- Owner's detail: the error appears in the Inbound notification, only when a download is triggered; Setup's own extension works and only Google's package does not. Reproduced with a real download and automatic sending on: the raw CRX shows "Inbound unavailable: Update the Inbound Download Manager desktop app. The installed version does not recognise this extension. This download stays in Chrome."
+- Real download under the store ID, against a separate app instance (`DOWNLOADMANAGER_INSTANCE` + `DOWNLOADMANAGER_DATA`): "Sent to Inbound", Chrome's copy removed, job completed with all bytes.
+- Not found: the word "signature". It is in no notification reproduced here, nor Chrome's extension status or log, nor any bridge code. The owner's exact wording has not been seen, so matching it to the "does not recognise" notification is an inference.
 - Fix: the extension now names the refused ID and what to do, and still says to update the app when an accepted ID is refused. `scripts\make-store-id-test.ps1` makes a folder that runs the uploaded package under the store ID. New tests tie the store key, manifest key, `.iss`, registration script and extension to `BrowserBridge`.
-- Fix evidence: extension 56/56, typecheck, Integration 139/139. In the same browser, the uploaded zip through the new script runs as `olhbcdb…` and shows "Connected to the desktop app."; a keyless build of this source shows the new message with its ID.
-- Not verified: a real store install (the listing is not public); a real handoff under the store ID, skipped so as not to add a job to the owner's list. The new message is not in the package under review. **Bump the extension version before the next store upload**, since this source differs from the uploaded 0.4.0.
+- Fix evidence: extension 56/56, typecheck, Integration 139/139. In the same browser, the uploaded zip through the new script runs as `olhbcdb…` and shows "Connected to the desktop app."; a keyless build of this source shows the new message with its ID, in Settings and in the notification on a real download.
+- Trap: Chrome for Testing saves downloads the extension leaves in Chrome to the user's real Downloads folder, and a separate instance also opens its own window and tray icon.
+- Not verified: a real store install (the listing is not public). The new message is not in the package under review. **Bump the extension version before the next store upload**, since this source differs from the uploaded 0.4.0.
 
 ### Repository clean-up and media panel removal (2026-11-06)
 
