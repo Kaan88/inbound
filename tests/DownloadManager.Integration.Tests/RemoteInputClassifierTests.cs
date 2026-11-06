@@ -351,6 +351,21 @@ public sealed class RemoteInputClassifierTests : IDisposable
         var result = Classify("https://x.invalid/" + text, Provider(hosters: [slow]));
         Assert.Equal(RemoteInputKind.OrdinaryLink, result.Kind);
         Assert.Contains("couldn't check", result.Note);
+        Assert.True(result.CheckIncomplete);
+    }
+
+    [Fact]
+    public void AnUncheckedSiteIsSaidEvenWhenTheListIsAlsoStale()
+    {
+        var slow = Matcher("Slow", @"^(a+)+$");
+        var text = new string('a', 40) + "!";
+        Assert.False(slow.Matches(text, "x.invalid"));
+
+        var result = Classify("https://x.invalid/" + text, Provider(hosters: [slow], listProblem: "Couldn't refresh."));
+
+        Assert.Equal(RemoteInputKind.OrdinaryLink, result.Kind);
+        Assert.Contains("couldn't check", result.Note);
+        Assert.True(result.CheckIncomplete);
     }
 
     [Fact]
@@ -361,6 +376,7 @@ public sealed class RemoteInputClassifierTests : IDisposable
         var result = Classify("https://x.invalid/" + new string('a', 40), Provider(hosters: slow));
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"Took {clock.Elapsed}.");
         Assert.Contains("couldn't check", result.Note);
+        Assert.True(result.CheckIncomplete);
     }
 
     [Fact]
@@ -370,6 +386,7 @@ public sealed class RemoteInputClassifierTests : IDisposable
         var result = Classify("https://example.invalid/file.zip", Provider(hosters: [known], listProblem: "Couldn't refresh."));
         Assert.Equal(RemoteInputKind.OrdinaryLink, result.Kind);
         Assert.Equal("Couldn't refresh.", result.Note);
+        Assert.False(result.CheckIncomplete);
     }
 
     [Theory]

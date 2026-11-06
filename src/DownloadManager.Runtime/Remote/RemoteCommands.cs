@@ -242,6 +242,7 @@ public sealed class RemoteCommands : IDisposable
             HosterLargestFile = classified.HosterLargestFile,
             Reason = Safe(classified.Reason),
             Note = Safe(classified.Note),
+            CheckIncomplete = classified.CheckIncomplete,
         };
     }
 

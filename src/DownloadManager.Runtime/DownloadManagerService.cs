@@ -268,14 +268,28 @@ public sealed partial class DownloadManagerService
 
     public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
     {
-        // A provider's package counts its files and drives what follows them, so no client may join one.
-        if (request.PackageKey?.Trim().StartsWith(RemotePackagePrefix, StringComparison.OrdinalIgnoreCase) == true)
-        {
-            return new AddJobResponse { Accepted = false, Error = "That package key is reserved.", ErrorCode = "invalid_package" };
-        }
+        if (RefuseReservedPackage(request) is { } reserved) return reserved;
 
         // Outside the settings gate: the probe is network-bound and must not block other adds.
         await ResolveServerFileNameAsync(request, cancellationToken).ConfigureAwait(false);
+        return await AddWithNameSettledAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The same add, with no request to the address's server for a name. For a link that mustn't be contacted
+    /// until the user says so: with <see cref="StartMode.Later"/>, nothing goes out until it is started.
+    /// </summary>
+    public async Task<AddJobResponse> AddJobWithoutAskingServerAsync(AddJobRequest request, CancellationToken cancellationToken = default)
+        => RefuseReservedPackage(request) ?? await AddWithNameSettledAsync(request, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>A provider's package counts its files and drives what follows them, so no client may join one.</summary>
+    private static AddJobResponse? RefuseReservedPackage(AddJobRequest request)
+        => request.PackageKey?.Trim().StartsWith(RemotePackagePrefix, StringComparison.OrdinalIgnoreCase) == true
+            ? new AddJobResponse { Accepted = false, Error = "That package key is reserved.", ErrorCode = "invalid_package" }
+            : null;
+
+    private async Task<AddJobResponse> AddWithNameSettledAsync(AddJobRequest request, CancellationToken cancellationToken)
+    {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

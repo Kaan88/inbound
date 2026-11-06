@@ -294,31 +294,44 @@ internal static partial class Program
     /// <c>dm add</c> means a direct request. With a provider account set up, a hoster link never gets
     /// one, so it is sent where it belongs, and <c>--direct</c> doesn't change that. It only answers the
     /// question when nobody can tell what a link is. A Host that can't answer has nothing to say about
-    /// it, and ordinary downloads go on as ever.
+    /// it, and ordinary downloads go on as ever. The same goes for each address of a batch or an import.
     /// </summary>
-    /// <returns>The exit code when refused.</returns>
-    private static async Task<int?> RefuseIfForProviderAsync(CliClient client, string url, bool direct)
+    private sealed class DirectAddCheck(CliClient client, string[] args)
     {
-        RemoteClassifyResult result;
-        try
-        {
-            result = await AskAsync<RemoteClassifyResult>(client, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = url }).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not HostUnavailableException)
-        {
-            return null;
-        }
+        private readonly bool _direct = args.Contains("--direct", StringComparer.OrdinalIgnoreCase);
+        private bool _saidIncomplete;
 
-        switch (result.Kind)
+        /// <returns>Why this address can't be added directly. Null when it can.</returns>
+        public async Task<string?> WhyNotAsync(string url)
         {
-            case "hosterLink":
-                Console.Error.WriteLine($"{Clean(result.HosterName ?? "This site")} goes through {Clean(result.ProviderName ?? "your provider")}, not by a direct request. Use: dm remote add - (and paste the link).");
-                return 2;
-            case "undetermined" when !direct:
-                Console.Error.WriteLine($"{Clean(result.Reason ?? "It couldn't be checked whether this link goes through your provider.")} To request it directly anyway, add --direct.");
-                return 2;
-            default:
+            RemoteClassifyResult result;
+            try
+            {
+                result = await AskAsync<RemoteClassifyResult>(client, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = url }).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not HostUnavailableException)
+            {
                 return null;
+            }
+
+            switch (result.Kind)
+            {
+                case "hosterLink":
+                    return $"{Clean(result.HosterName ?? "This site")} goes through {Clean(result.ProviderName ?? "your provider")}, not by a direct request. Use: dm remote add - (and paste the link).";
+                case "folderLink":
+                    return $"This link is to an item on your {Clean(result.ProviderName ?? "provider")} account, not a direct download. Use: dm remote add - (and paste the link).";
+                case "undetermined" when !_direct:
+                    return $"{Clean(result.Reason ?? "It couldn't be checked whether this link goes through your provider.")} To request it directly anyway, add --direct.";
+            }
+
+            // Once per run: the same list is behind every address, and a script shouldn't stop for it.
+            if (result.CheckIncomplete && !_direct && !_saidIncomplete)
+            {
+                _saidIncomplete = true;
+                Console.Error.WriteLine(Clean(result.Note ?? "A listed site couldn't be checked against this link."));
+            }
+
+            return null;
         }
     }
 

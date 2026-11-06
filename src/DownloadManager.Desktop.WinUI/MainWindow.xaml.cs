@@ -901,7 +901,8 @@ public sealed partial class MainWindow : Window
         moveShortcut.Invoked += (_, args) =>
         {
             args.Handled = true;
-            if (SelectedJob is { State: "completed", FileRemovedAfterExtraction: false }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
+            // A removed archive gets its reason from there, in the status bar.
+            if (SelectedJob is { State: "completed" }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
         };
         JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);

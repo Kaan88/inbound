@@ -83,6 +83,8 @@ public sealed class RemoteClassifyResult
     public string? Reason { get; set; }
     /// <summary>Worth showing with an input that can be used.</summary>
     public string? Note { get; set; }
+    /// <summary>An ordinaryLink only: a listed site couldn't be checked against it, so it may be one the provider handles. The note says so.</summary>
+    public bool CheckIncomplete { get; set; }
 }
 
 public sealed class RemoteAddRequestDto

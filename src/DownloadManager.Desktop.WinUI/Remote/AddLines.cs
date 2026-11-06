@@ -120,6 +120,9 @@ internal sealed class AddLine(string input)
     /// <summary>The Host didn't answer, or said it can't tell. The link could be one a provider handles.</summary>
     public bool CantTell => Result is { Ok: false } or { Kind: "undetermined" };
 
+    /// <summary>Called ordinary, with a listed site left unchecked. It can still go directly, and the note says what is at stake.</summary>
+    public bool CheckIncomplete => Result is { Ok: true, Kind: "ordinaryLink", CheckIncomplete: true };
+
     public AddRoute Route
     {
         get
@@ -518,6 +521,14 @@ internal static partial class RemoteText
 
     /// <summary>A lost classify call changed nothing, so the words about having possibly gone through don't apply.</summary>
     public static string ClassifyFailure(string error) => error is HostLost or HostTooSlow ? ClassifyLost : error;
+
+    /// <summary>For a command that goes straight to a direct request, where the note would otherwise never be seen.</summary>
+    public static string CheckIncompleteWords(RemoteClassifyResult result, string provider)
+    {
+        var note = UrlRedactor.HideAddresses(result.Note);
+        if (string.IsNullOrWhiteSpace(note)) note = $"This app couldn't fully check whether {provider} handles this link.";
+        return $"{note} Download it directly only if you know it isn't one of those sites.";
+    }
 
     /// <param name="fallbackProvider">The account's name, for a line the Host named no provider for.</param>
     public static AddLineView AddLineWords(AddLine line, string fallbackProvider)

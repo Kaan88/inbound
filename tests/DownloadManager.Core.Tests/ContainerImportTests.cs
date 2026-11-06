@@ -421,6 +421,81 @@ public sealed class ContainerImportTests
     }
 
     [Fact]
+    public void What_a_package_s_local_files_say_is_asked_once_however_many_of_its_jobs_are_listed()
+    {
+        var package = Guid.NewGuid();
+        var jobs = Enumerable.Range(0, 50).Select(_ => Job("localStarted", change: job => job.PackageId = package)).ToList();
+        var loner = Job("localStarted");
+        var outcomes = Outcomes(false, [.. jobs.Append(loner).Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
+        var asked = 0;
+
+        outcomes.Refresh([.. jobs, loner], Now, _ =>
+        {
+            asked++;
+            return "Downloading here";
+        });
+        Assert.Equal(2, asked);
+
+        // Once per reading, because the answer changes with what the files are doing.
+        outcomes.Refresh([.. jobs, loner], Now, _ =>
+        {
+            asked++;
+            return "Done here";
+        });
+        Assert.Equal(4, asked);
+    }
+
+    [Fact]
+    public async Task Stopping_approvals_leaves_the_rest_unsent()
+    {
+        var waiting = Enumerable.Range(0, 5).Select(_ => Job("intended", approval: true)).ToList();
+        var outcomes = Outcomes(false, [.. waiting.Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
+        outcomes.Refresh(waiting, Now);
+        outcomes.SetAllApproved(true);
+        using var closing = new CancellationTokenSource();
+        var asked = new List<Guid>();
+        var progress = new List<int>();
+
+        await outcomes.ApproveChosenAsync(
+            (id, _) =>
+            {
+                asked.Add(id);
+                if (asked.Count == 2) closing.Cancel();
+                return Task.FromResult<string?>(null);
+            },
+            progress.Add,
+            closing.Token);
+
+        Assert.Equal(2, asked.Count);
+        Assert.Equal([1, 2], progress);
+    }
+
+    [Fact]
+    public async Task Approvals_all_go_and_a_refusal_shows_on_its_own_line_and_a_call_cut_off_by_closing_is_no_failure()
+    {
+        var waiting = Enumerable.Range(0, 3).Select(_ => Job("intended", approval: true)).ToList();
+        var outcomes = Outcomes(false, [.. waiting.Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
+        outcomes.Refresh(waiting, Now);
+        outcomes.SetAllApproved(true);
+        var sent = 0;
+
+        await outcomes.ApproveChosenAsync((id, _) => Task.FromResult(id == waiting[1].Id ? "Refused here." : null), count => sent = count, CancellationToken.None);
+
+        Assert.Equal(3, sent);
+        Assert.Single(outcomes.Views(), view => view.Detail.Contains("Refused here.", StringComparison.Ordinal));
+
+        using var closing = new CancellationTokenSource();
+        closing.CancelAfter(TimeSpan.FromMilliseconds(50));
+        sent = 0;
+        await outcomes.ApproveChosenAsync(async (_, token) =>
+        {
+            await Task.Delay(Timeout.Infinite, token);
+            return null;
+        }, count => sent = count, closing.Token);
+        Assert.Equal(0, sent);
+    }
+
+    [Fact]
     public void An_entry_that_wasnt_added_says_why_comes_first_and_cant_be_approved()
     {
         var job = Job();

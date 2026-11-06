@@ -10,6 +10,8 @@ public sealed record CopiedLinkOutcome(string? Title = null, string? Words = nul
 /// What copying a link does. With no usable provider key that is a direct add, and nothing else happens.
 /// With one, a hoster link never gets a direct request, so it waits on the list for the user's go-ahead:
 /// copying something must not spend the account's quota by itself. A link nobody can classify isn't added.
+/// A link called ordinary with a listed site left unchecked is added but not started: nothing asks its server
+/// until the user starts it. Refusing it would refuse every copied link for as long as that list lasts.
 /// </summary>
 public sealed class CopiedLinks(DownloadManagerService service, RemoteJobCoordinator jobs)
 {
@@ -43,6 +45,9 @@ public sealed class CopiedLinks(DownloadManagerService service, RemoteJobCoordin
 
         switch (classified.Kind)
         {
+            case RemoteInputKind.OrdinaryLink when classified.CheckIncomplete:
+                return await AddNotStartedAsync(url, classified).ConfigureAwait(false);
+
             case RemoteInputKind.OrdinaryLink or RemoteInputKind.ProviderDirectLink:
                 return await AddDirectlyAsync(url).ConfigureAwait(false);
 
@@ -91,6 +96,21 @@ public sealed class CopiedLinks(DownloadManagerService service, RemoteJobCoordin
         => new(NotAddedTitle, $"It couldn't be settled whether {provider} handles this link, so nothing was added. Use Add Links to add it.",
             $"Clipboard link not added: {why}.");
 
+    private async Task<CopiedLinkOutcome> AddNotStartedAsync(string url, RemoteInputClassification classified)
+    {
+        var result = await service.AddJobWithoutAskingServerAsync(new AddJobRequest
+        {
+            Url = url,
+            Source = "clipboardMonitor",
+            StartMode = "later",
+        }).ConfigureAwait(false);
+
+        if (!result.Accepted) return Rejected(url, result);
+        return result.Duplicate
+            ? new CopiedLinkOutcome()
+            : new CopiedLinkOutcome("Copied link not started", $"{classified.Note} It is on the list, and nothing has been sent. Start it to request it directly.");
+    }
+
     /// <summary>What copying a link has always done. The add itself failing is the caller's to report.</summary>
     private async Task<CopiedLinkOutcome> AddDirectlyAsync(string url)
     {
@@ -103,11 +123,12 @@ public sealed class CopiedLinks(DownloadManagerService service, RemoteJobCoordin
 
         if (result.Accepted && !result.Duplicate)
         {
-            return new CopiedLinkOutcome("Clipboard download added", result.Job?.FileName ?? UrlRedactor.Redact(url));
+            return new CopiedLinkOutcome("Clipboard download added", result.Job?.FileName ?? DescribeForLog(url));
         }
 
-        return result.Accepted
-            ? new CopiedLinkOutcome()
-            : new CopiedLinkOutcome(Problem: $"Clipboard URL rejected ({UrlRedactor.Redact(url)}): {result.Error}");
+        return result.Accepted ? new CopiedLinkOutcome() : Rejected(url, result);
     }
+
+    private CopiedLinkOutcome Rejected(string url, AddJobResponse result)
+        => new(Problem: $"Clipboard URL rejected ({DescribeForLog(url)}): {result.Error}");
 }

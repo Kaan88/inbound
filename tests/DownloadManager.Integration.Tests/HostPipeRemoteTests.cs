@@ -590,6 +590,37 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ARefreshWhoseClientGaveUpLeavesTheAddressAsItWas()
+    {
+        await using var host = await StartHostAsync();
+        await using var connection = await WithKeyAsync(host);
+        var before = $"{_server.BaseAddress}/file/before.bin?size=1024&seed=51";
+        var added = await connection.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest
+        {
+            Url = before,
+            FileName = "before.bin",
+            DestinationDirectory = host.Destination,
+            StartMode = "later",
+            Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+
+        // Checking the new address needs the hoster list, which is slow to come. The client stops waiting first.
+        Mock.Fail("GET webdl/hosters", MockFault.Delay(TimeSpan.FromSeconds(4)), times: 1);
+        var gone = await host.ConnectAsync();
+        var request = new JobRefreshUrlRequest { JobId = added.Job!.Id, Url = $"{_server.BaseAddress}/file/after.bin?size=1024&seed=52" };
+        _ = gone.AskAsync<JobActionResponse>(MessageTypes.JobRefreshUrl, request).ContinueWith(task => task.Exception, TaskScheduler.Default);
+        await Task.Delay(500);
+        await gone.DisposeAsync();
+
+        // It would have been applied by now, if it were still going.
+        await Task.Delay(TimeSpan.FromSeconds(6));
+        var job = (await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs.Single(candidate => candidate.Id == added.Job.Id);
+        Assert.Equal(before, job.Url);
+        Assert.Equal("later", job.StartMode);
+    }
+
+    [Fact]
     public async Task BadRequestsGetPlainAnswersAndTheOldRulesStillHold()
     {
         await using var host = await StartHostAsync();
@@ -827,6 +858,23 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         // An explicit option doesn't get round that, for something known to be a hoster.
         Assert.Equal(2, (await host.RunCliAsync(null, "add", link, "--direct", "--dest", host.Destination)).ExitCode);
         Assert.Equal(0, Mock.HosterRequests);
+
+        // Nor does asking for several at once, or by a list. Each counts as failed, in the same words.
+        var batch = await host.RunCliAsync(null, "add-batch", Mock.HosterUrl("file/cli-batch[1-2].bin"), "--direct", "--dest", host.Destination);
+        Assert.Equal(1, batch.ExitCode);
+        Assert.Contains("dm remote add", batch.Error);
+        var listFile = Path.Combine(host.Root, "list.json");
+        await File.WriteAllTextAsync(listFile, JobListFile.Serialize([new JobDto { Url = link }]));
+        var imported = await host.RunCliAsync(null, "import", listFile, "--direct");
+        Assert.Equal(1, imported.ExitCode);
+        Assert.Contains("dm remote add", imported.Output);
+
+        // A link to an item on the account is no more a direct download than a hoster's.
+        var folder = await host.RunCliAsync(null, "add", "https://torbox.app/download?id=5&type=torrents", "--direct");
+        Assert.Equal(2, folder.ExitCode);
+        Assert.Contains("dm remote add", folder.Error);
+        Assert.Equal(0, Mock.HosterRequests);
+        Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
 
         // Other options of other commands aren't taken silently.
         var odd = await host.RunCliAsync(link, "remote", "add", "-", "--item", "5");

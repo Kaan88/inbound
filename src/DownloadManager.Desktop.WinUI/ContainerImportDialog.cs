@@ -394,14 +394,18 @@ internal sealed class ContainerImportDialog
         dialog.PrimaryButtonText = _mustReadAgain ? "Read the file again" : _picks is { PreviewId: not null } ? "Add" : string.Empty;
         dialog.IsPrimaryButtonEnabled = canAdd || canRead;
 
-        // Enter takes the default button, so it only means the action while the action can run.
-        dialog.DefaultButton = canAdd || canRead ? ContentDialogButton.Primary : ContentDialogButton.Close;
+        // Enter takes the default button, so it only means the action while the action can run. While something
+        // is under way the close button stops it, which takes a deliberate press or Esc rather than a second Enter.
+        dialog.DefaultButton = _isAdding || _isSending
+            ? ContentDialogButton.None
+            : canAdd || canRead ? ContentDialogButton.Primary : ContentDialogButton.Close;
         dialog.CloseButtonText = _isAdding ? "Stop adding" : _isSending ? "Stop and close" : "Cancel";
     }
 
     /// <summary>
     /// What became of each entry, live, with the approval anything uncached needs before work starts on it, in
-    /// the same words as Add Links' second step. Closing this loses nothing: the same jobs are on the main list.
+    /// the same words as Add Links' second step. Closing this loses nothing: the same jobs are on the main list,
+    /// and approvals not yet sent aren't sent, so those jobs stay waiting there.
     /// </summary>
     public static async Task ShowOutcomesAsync(
         XamlRoot root,
@@ -433,12 +437,16 @@ internal sealed class ContainerImportDialog
         };
         dialog.Resources["ContentDialogMaxWidth"] = 760d;
 
+        using var closing = new CancellationTokenSource();
+        Task? approving = null;
         var sending = false;
+        var sent = 0;
+        var toSend = 0;
         void Refresh()
         {
             outcomes.Refresh(state.Jobs, DateTimeOffset.Now, localStatus);
             rows.Apply(outcomes.Views());
-            status.Show(outcomes.Summary(provider));
+            status.Show(sending ? RemoteText.ApprovalsSending(sent, toSend) : outcomes.Summary(provider));
             var waiting = outcomes.WaitingCount;
             explanation.Visibility = waiting > 0 ? Visibility.Visible : Visibility.Collapsed;
             approveAll.Visibility = waiting >= 2 ? Visibility.Visible : Visibility.Collapsed;
@@ -447,7 +455,14 @@ internal sealed class ContainerImportDialog
             // Stays off the screen until there is something it could approve.
             dialog.PrimaryButtonText = waiting > 0 ? "Approve selected" : string.Empty;
             dialog.IsPrimaryButtonEnabled = !sending && outcomes.ApprovedCount > 0;
-            dialog.DefaultButton = dialog.IsPrimaryButtonEnabled ? ContentDialogButton.Primary : ContentDialogButton.Close;
+            dialog.CloseButtonText = sending ? "Stop approving" : "Close";
+            rows.IsLocked = sending;
+            approveAll.IsEnabled = !sending;
+
+            // Stopping takes a deliberate press or Esc, not a second Enter.
+            dialog.DefaultButton = sending
+                ? ContentDialogButton.None
+                : dialog.IsPrimaryButtonEnabled ? ContentDialogButton.Primary : ContentDialogButton.Close;
         }
 
         rows.RowToggled += (index, approved) =>
@@ -466,19 +481,25 @@ internal sealed class ContainerImportDialog
             args.Cancel = true;
             if (sending) return;
             sending = true;
-            dialog.IsPrimaryButtonEnabled = false;
-            _ = SendAsync();
+            sent = 0;
+            toSend = outcomes.ToApprove.Count;
+            Refresh();
+            approving = SendAsync();
 
             async Task SendAsync()
             {
-                foreach (var jobId in outcomes.ToApprove)
-                {
-                    var result = await remote.RetryAsync(new RemoteRetryRequest { JobId = jobId, ApproveUncached = true });
-                    outcomes.ShowProblem(jobId, result.Ok ? null : RemoteText.Failure(result.Error, null, provider));
-                }
+                // The timer shows how far it got: a long list goes faster than anyone could read or hear it.
+                await outcomes.ApproveChosenAsync(
+                    async (jobId, token) =>
+                    {
+                        var result = await remote.RetryAsync(new RemoteRetryRequest { JobId = jobId, ApproveUncached = true }, token);
+                        return result.Ok ? null : RemoteText.Failure(result.Error, null, provider);
+                    },
+                    count => sent = count,
+                    closing.Token);
 
                 sending = false;
-                Refresh();
+                if (!closing.IsCancellationRequested) Refresh();
             }
         };
 
@@ -502,6 +523,8 @@ internal sealed class ContainerImportDialog
         finally
         {
             watch.Stop();
+            closing.Cancel();
+            if (approving is { } stopping) await stopping;
         }
     }
 }

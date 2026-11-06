@@ -401,7 +401,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            log.Error($"Clipboard download failed ({UrlRedactor.Redact(url)}): {UrlRedactor.RedactText(ex.ToString())}");
+            log.Error($"Clipboard download failed ({copiedLinks.DescribeForLog(url)}): {UrlRedactor.RedactText(ex.ToString())}");
         }
     }
 

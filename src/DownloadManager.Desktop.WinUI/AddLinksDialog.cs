@@ -278,8 +278,13 @@ internal sealed class AddLinksDialog
         var error = new StatusLine("Destination status");
         var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
         AutomationProperties.SetName(browse, "Browse for the destination folder");
+
+        // Browse follows the box, so a caller that has settled on a folder only has one thing to turn off.
+        var picking = false;
+        box.IsEnabledChanged += (_, _) => browse.IsEnabled = box.IsEnabled && !picking;
         browse.Click += async (_, _) =>
         {
+            picking = true;
             browse.IsEnabled = false;
             error.Show(string.Empty);
             try
@@ -291,7 +296,7 @@ internal sealed class AddLinksDialog
                 };
                 picker.FileTypeFilter.Add("*");
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
-                if (await picker.PickSingleFolderAsync() is { } folder) box.Text = folder.Path;
+                if (await picker.PickSingleFolderAsync() is { } folder && box.IsEnabled) box.Text = folder.Path;
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
             {
@@ -299,7 +304,8 @@ internal sealed class AddLinksDialog
             }
             finally
             {
-                browse.IsEnabled = true;
+                picking = false;
+                browse.IsEnabled = box.IsEnabled;
             }
         };
         box.TextChanged += (_, _) => error.Show(string.Empty);

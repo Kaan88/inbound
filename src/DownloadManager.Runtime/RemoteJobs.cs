@@ -36,7 +36,7 @@ public sealed record RemoteJobsResult
 /// <summary>Says whether a job may be moved onto an address, for whoever knows which addresses belong to a provider.</summary>
 public interface IDirectAddressPolicy
 {
-    /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify. It excuses nothing else.</param>
+    /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify, or fully check. It excuses nothing else.</param>
     /// <returns>Why not, in words for the user. Null when it may.</returns>
     Task<string?> WhyNotDirectAsync(string address, bool explicitDirect, CancellationToken cancellationToken = default);
 }

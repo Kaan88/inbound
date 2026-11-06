@@ -764,6 +764,31 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public void AReadThatNeverReachedTheHostOffersToTryAgainInItsOwnWords()
+    {
+        foreach (var words in new[] { RemoteText.HostBusy, RemoteText.HostNotRunning })
+        {
+            var view = RemoteText.ContainerRead(new RemoteContainerPreviewResult { Error = words }, "invented.rsdf");
+            Assert.True(view.CanReadAgain);
+            Assert.Equal(words, view.Status);
+        }
+    }
+
+    [Fact]
+    public void OnlyAnUncheckedSiteStopsAnOrdinaryLinkGoingStraightToADirectRequest()
+    {
+        const string Note = "Fetcher lists a site this app couldn't check this link against, so this link may be one it can handle.";
+        var uncheckedLine = new AddLine("https://site.invalid/a") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink", Note = Note, CheckIncomplete = true } };
+        var staleLine = new AddLine("https://site.invalid/a") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink", Note = "The list is old." } };
+
+        Assert.True(uncheckedLine.CheckIncomplete);
+        Assert.Equal(AddRoute.Direct, uncheckedLine.Route);
+        Assert.False(staleLine.CheckIncomplete);
+        Assert.StartsWith(Note, RemoteText.CheckIncompleteWords(uncheckedLine.Result!, "Fetcher"), StringComparison.Ordinal);
+        Assert.Contains("Fetcher", RemoteText.CheckIncompleteWords(new RemoteClassifyResult(), "Fetcher"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AddingAContainerOutlastsTheOrdinarySlowLimitBecauseRunningOutWouldCancelTheRest()
     {
         var job = new RemoteJobDto { Id = Guid.NewGuid(), Provider = "torbox", State = "intended", ApprovalNeeded = true };

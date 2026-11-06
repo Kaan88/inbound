@@ -44,6 +44,8 @@ public sealed partial class RemoteJobCoordinator : IDirectAddressPolicy
                 return $"This link is to an item on your {provider} account, so it can't be a download's direct address. Add it with Add Links.";
             case RemoteInputKind.Undetermined when !explicitDirect:
                 return $"{UrlRedactor.HideAddresses(classified.Reason)} To use this address anyway, ask for a direct request.";
+            case RemoteInputKind.OrdinaryLink when classified.CheckIncomplete && !explicitDirect:
+                return $"{UrlRedactor.HideAddresses(classified.Note)} To use this address anyway, ask for a direct request.";
             case RemoteInputKind.Unsupported:
                 return UrlRedactor.HideAddresses(classified.Reason);
             default:

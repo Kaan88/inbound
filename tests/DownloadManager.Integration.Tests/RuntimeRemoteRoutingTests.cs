@@ -42,6 +42,17 @@ public sealed partial class RuntimeServiceTests
         return added.Job!;
     }
 
+    /// <summary>
+    /// A listed site with a pattern too slow to finish on this address, so the link can't be fully checked.
+    /// With no name either, because the provider's mapping would otherwise go by the name as a domain.
+    /// </summary>
+    private string LinkWithAListedSiteUnchecked(RemoteRig rig)
+    {
+        rig.Mock.AddHoster(string.Empty, [], @"(a+)+d$");
+        var disposition = Uri.EscapeDataString("attachment; filename=\"named-by-its-server.bin\"");
+        return $"{_server.BaseAddress}/filename/{new string('a', 40)}?disposition={disposition}";
+    }
+
     private static void AssertSaysNothingOfTheAddress(CopiedLinkOutcome outcome, string link)
     {
         var host = new Uri(link).Host;
@@ -196,6 +207,56 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task ACopiedLinkWithAListedSiteUncheckedWaitsOnTheListAndItsServerHearsNothingUntilItIsStarted()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var links = await CopiedLinksFor(rig);
+        var link = LinkWithAListedSiteUnchecked(rig);
+
+        var outcome = await links.AddAsync(link);
+
+        Assert.Equal("Copied link not started", outcome.Title);
+        Assert.Contains("couldn't check", outcome.Words);
+        Assert.Contains("TorBox", outcome.Words);
+        Assert.Null(outcome.Problem);
+        AssertSaysNothingOfTheAddress(outcome, link);
+        Assert.Empty(rig.Jobs.List());
+        var job = Assert.Single(rig.Ctx.Service.GetSnapshot().Jobs);
+        Assert.Equal("later", job.StartMode);
+        Assert.NotEqual("named-by-its-server.bin", job.FileName);
+        await Task.Delay(300);
+        Assert.NotEqual("completed", rig.Ctx.Service.GetJob(job.Id)!.State);
+
+        // Every other ordinary link can still be copied, for as long as that list lasts.
+        var another = $"{_server.BaseAddress}/file/copied-after-{new string('a', 40)}.bin?size=1024&seed=811";
+        Assert.Equal("Copied link not started", (await links.AddAsync(another)).Title);
+
+        // The user's start is what asks.
+        Assert.True((await rig.Ctx.Service.ResumeAsync(job.Id)).Ok);
+        Assert.Equal("completed", (await rig.Ctx.WaitFor(job.Id, candidate => candidate.State is "completed" or "failed", TimeSpan.FromSeconds(30))).State);
+    }
+
+    [Fact]
+    public async Task ACopiedLinkThatCantBeAddedLeavesOnlyItsSiteInTheLog()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var links = await CopiedLinksFor(rig);
+        var settings = rig.Ctx.Service.GetSnapshot().Settings;
+        var blocked = Path.Combine(rig.Destination, "goes-away");
+        settings.DefaultDownloadDirectory = blocked;
+        Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Directory.Delete(blocked);
+        await File.WriteAllTextAsync(blocked, "not a folder any more");
+        var link = $"{_server.BaseAddress}/file/invented-token-in-the-path.bin?size=1024&seed=812";
+
+        var outcome = await links.AddAsync(link);
+
+        Assert.NotNull(outcome.Problem);
+        Assert.DoesNotContain("invented-token-in-the-path", outcome.Problem);
+        Assert.Contains(new Uri(link).Host, outcome.Problem);
+    }
+
+    [Fact]
     public async Task ACopiedLinkOfNoUseIsNotAddedDirectly()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
@@ -284,6 +345,49 @@ public sealed partial class RuntimeServiceTests
         Assert.Contains("Not cached", asked.Status);
     }
 
+    [Fact]
+    public async Task AddingAHeldLinkOnPurposeUsesWhatTheUserAskedFor()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var links = await CopiedLinksFor(rig);
+        var (link, _, _) = rig.ScriptHoster("copied-then-chosen", MockTorBoxState.Ready);
+        await links.AddAsync(link);
+        var held = Assert.Single(rig.Jobs.List());
+        Assert.Equal("startNow", held.StartMode);
+        var folder = Path.Combine(rig.Destination, "chosen");
+
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest
+        {
+            Input = link,
+            Destination = folder,
+            QueueId = 7,
+            StartMode = "later",
+            Selection = RemoteSelectionMode.AskWhenReady,
+            LinkPassword = "invented-link-password",
+            ArchivePassword = "invented-archive-password",
+        });
+
+        Assert.True(added.Existing);
+        Assert.Null(added.Note);
+        Assert.Equal(held.Id, added.Job!.Id);
+        Assert.Equal(held.CreatedAt, added.Job.CreatedAt);
+        Assert.False(added.Job.HeldForApproval);
+        Assert.False(added.Job.ApprovedUncached);
+        Assert.Equal(folder, added.Job.Destination);
+        Assert.Equal(7, added.Job.QueueId);
+        Assert.Equal("later", added.Job.StartMode);
+        Assert.Equal(RemoteSelectionMode.AskWhenReady, added.Job.SelectionMode);
+        Assert.True(added.Job.HasLinkPassword);
+        Assert.True(added.Job.HasArchivePassword);
+        await rig.AssertNothingLeakedAsync("invented-link-password", "invented-archive-password");
+
+        // Only a job still being held changes: after that, the first choice stands and the reply says so.
+        var again = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = link, Destination = Path.Combine(rig.Destination, "other") });
+        Assert.True(again.Existing);
+        Assert.Contains("destination", again.Note);
+        Assert.Equal(folder, again.Job!.Destination);
+    }
+
     // ---- Refreshing an address -----------------------------------------------------------------
 
     [Fact]
@@ -370,6 +474,24 @@ public sealed partial class RuntimeServiceTests
 
         var refused = await rig.Ctx.Service.RefreshUrlAsync(job.Id, address);
         Assert.False(refused.Ok);
+        Assert.Contains("direct request", refused.Error);
+        Assert.Equal(job.Url, rig.Ctx.Service.GetJob(job.Id)!.Url);
+
+        var taken = await rig.Ctx.Service.RefreshUrlAsync(job.Id, address, explicitDirect: true);
+        Assert.True(taken.Ok, taken.Error);
+        Assert.Equal(address, taken.Job!.Url);
+    }
+
+    [Fact]
+    public async Task RefreshTakesAnAddressWithAListedSiteUncheckedOnlyWithTheDirectFlag()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var job = await StoppedJob(rig);
+        var address = LinkWithAListedSiteUnchecked(rig);
+
+        var refused = await rig.Ctx.Service.RefreshUrlAsync(job.Id, address);
+        Assert.False(refused.Ok);
+        Assert.Contains("couldn't check", refused.Error);
         Assert.Contains("direct request", refused.Error);
         Assert.Equal(job.Url, rig.Ctx.Service.GetJob(job.Id)!.Url);
 

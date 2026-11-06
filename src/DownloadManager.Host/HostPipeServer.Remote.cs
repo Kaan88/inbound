@@ -13,7 +13,9 @@ public sealed partial class HostPipeServer
     private static bool WaitsOnProvider(string type) => type is
         MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or
         MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or
-        MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd;
+        MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd or
+        // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
+        MessageTypes.JobRefreshUrl;
 
     private async Task<bool> TryDispatchRemoteAsync(ClientConnection client, IpcMessage message, CancellationToken cancellationToken)
     {

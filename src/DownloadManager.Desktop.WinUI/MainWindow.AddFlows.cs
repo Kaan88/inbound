@@ -22,7 +22,7 @@ public sealed partial class MainWindow
         Provider,
     }
 
-    /// <param name="ChosenDirect">The Host couldn't tell what it is, and the user asked for a direct request anyway.</param>
+    /// <param name="ChosenDirect">The Host couldn't tell what it is, or couldn't fully check it, and the user asked for a direct request anyway.</param>
     private sealed record CheckedAddress(AddressWay Way, string Input, RemoteClassifyResult? Result, bool ChosenDirect = false);
 
     /// <summary>
@@ -39,7 +39,8 @@ public sealed partial class MainWindow
 
     /// <summary>
     /// For an address a command already has, with no dialog of its own to stay open in. Something the
-    /// Host can't classify gets a retry and an explicit way past, and something it can't use is said here.
+    /// Host can't classify, or couldn't fully check, gets a retry and an explicit way past, and something it
+    /// can't use is said here.
     /// </summary>
     private async Task<CheckedAddress> CheckGivenAddressAsync(string title, string input)
     {
@@ -50,14 +51,16 @@ public sealed partial class MainWindow
             var line = new AddLine(input) { Result = result };
             switch (line.Route)
             {
-                case AddRoute.Direct:
+                case AddRoute.Direct when !line.CheckIncomplete:
                     return new CheckedAddress(AddressWay.Direct, input, result);
                 case AddRoute.Provider or AddRoute.FolderLink:
                     return new CheckedAddress(AddressWay.Provider, input, result);
             }
 
-            var words = RemoteText.AddLineWords(line, ProviderNameFor(result)).Detail;
-            if (!line.CantTell)
+            var words = line.CheckIncomplete
+                ? RemoteText.CheckIncompleteWords(result, ProviderNameFor(result))
+                : RemoteText.AddLineWords(line, ProviderNameFor(result)).Detail;
+            if (!line.CantTell && !line.CheckIncomplete)
             {
                 await ShowMessageAsync(title, words);
                 return new CheckedAddress(AddressWay.Cancelled, input, result);

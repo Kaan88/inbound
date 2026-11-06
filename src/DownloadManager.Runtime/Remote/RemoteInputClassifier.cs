@@ -51,6 +51,13 @@ public sealed record RemoteInputClassification
     public string? Reason { get; init; }
     /// <summary>Something worth saying about an input that can be used.</summary>
     public string? Note { get; init; }
+    /// <summary>
+    /// Called ordinary, but a listed site couldn't be checked against this link, and <see cref="Note"/> says so.
+    /// That goes on for as long as the list does and says nothing about this address in particular, so each
+    /// way of adding decides for itself. It isn't <see cref="RemoteInputKind.Undetermined"/>, which would stop
+    /// every ordinary link. A stale list only leaves the note, because it is still a good guide.
+    /// </summary>
+    public bool CheckIncomplete { get; init; }
 }
 
 /// <summary>What the classifier needs to know about one provider, all of it already fetched.</summary>
@@ -381,6 +388,7 @@ public static class RemoteInputClassifier
         }
 
         string? listProblem = null;
+        string? notChecked = null;
         var onPatterns = Stopwatch.StartNew();
         foreach (var provider in providers.Where(provider => provider.CanTake(RemoteCapabilities.WebDownloads)))
         {
@@ -409,7 +417,7 @@ public static class RemoteInputClassifier
 
                 if (matcher.CantBeChecked || (!mayRunPattern && matcher.Hoster.Domains.Count == 0))
                 {
-                    listProblem ??= $"{provider.DisplayName} lists a site this app couldn't check this link against, so this link may be one it can handle.";
+                    notChecked ??= $"{provider.DisplayName} lists a site this app couldn't check this link against, so this link may be one it can handle.";
                 }
             }
         }
@@ -433,7 +441,8 @@ public static class RemoteInputClassifier
         {
             Kind = RemoteInputKind.OrdinaryLink,
             DisplayHost = host,
-            Note = listProblem,
+            Note = notChecked ?? listProblem,
+            CheckIncomplete = notChecked is not null,
         };
     }
 

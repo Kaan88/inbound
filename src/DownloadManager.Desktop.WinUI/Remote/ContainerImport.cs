@@ -273,12 +273,48 @@ internal sealed class ContainerOutcomes
 
     public IReadOnlyList<Guid> ToApprove => _lines.Where(line => line is { JobId: not null, Approved: true } && line.Current.NeedsApproval).Select(line => line.JobId!.Value).ToList();
 
-    /// <summary>Reads the jobs again. What a job's local files say is asked for only when it has any.</summary>
+    /// <summary>
+    /// Reads the jobs again. What a job's local files say is asked for only when it has any, and once per
+    /// package: every job of a package has the same answer, and a container's links can share one.
+    /// </summary>
     public void Refresh(IEnumerable<RemoteJobDto> jobs, DateTimeOffset now, Func<RemoteJobDto, string?>? localStatus = null, IFormatProvider? culture = null)
     {
         var byId = new Dictionary<Guid, RemoteJobDto>();
         foreach (var job in jobs) byId[job.Id] = job;
-        foreach (var line in _lines) line.Refresh(byId, now, localStatus, culture);
+
+        var byPackage = new Dictionary<Guid, string?>();
+        Func<RemoteJobDto, string?>? onePerPackage = localStatus is null ? null : job =>
+        {
+            if (job.PackageId is not { } package) return localStatus(job);
+            if (!byPackage.TryGetValue(package, out var words)) byPackage[package] = words = localStatus(job);
+            return words;
+        };
+        foreach (var line in _lines) line.Refresh(byId, now, onePerPackage, culture);
+    }
+
+    /// <summary>
+    /// Sends the ticked approvals one at a time. Once <paramref name="cancellationToken"/> is cancelled nothing
+    /// more goes, so what hasn't been sent stays waiting on the list.
+    /// </summary>
+    /// <param name="approve">Sends one. Returns what went wrong, or null.</param>
+    /// <param name="sent">How many have gone so far.</param>
+    public async Task ApproveChosenAsync(Func<Guid, CancellationToken, Task<string?>> approve, Action<int> sent, CancellationToken cancellationToken)
+    {
+        var count = 0;
+        foreach (var jobId in ToApprove)
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+            try
+            {
+                ShowProblem(jobId, await approve(jobId, cancellationToken));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            sent(++count);
+        }
     }
 
     public IReadOnlyList<ContainerRowView> Views() => _lines.Select(line => line.View()).ToList();
@@ -385,6 +421,8 @@ internal static partial class RemoteText
 
     public static string ContainerSendFailure(string error) => error is HostLost or HostTooSlow ? ContainerSendLost : error;
 
+    public static string ApprovalsSending(int sent, int total) => $"Approving: {sent} of {total} sent. Stopping leaves the rest waiting on the download list.";
+
     /// <param name="fileName">Only the file's name. Nothing looks at the file on this side.</param>
     public static ContainerReadView ContainerRead(RemoteContainerPreviewResult preview, string fileName, IFormatProvider? culture = null)
     {
@@ -400,7 +438,7 @@ internal static partial class RemoteText
                 notes,
                 false,
                 preview.CanSendToJd,
-                preview.Error == ContainerReadLost);
+                preview.Error is ContainerReadLost or HostBusy or HostNotRunning);
         }
 
         var links = preview.Entries.Count == 1 ? "1 link" : $"{preview.Entries.Count} links";

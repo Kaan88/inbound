@@ -535,26 +535,30 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             {
                 existing = true;
                 saved = twin;
-                note = WhatATwinIgnores(request, twin);
                 if (twin.HeldForApproval && !request.HoldForApproval)
                 {
                     // Someone asked for it now, so it is no longer only a copied link. Their approval, or lack of one, is what counts.
-                    saved = ReleasedFromHold(twin, request.ApprovedUncached, record.CreatedAt);
+                    saved = ReleasedOnRequest(twin, record, request.ApprovedUncached);
                     await _store.SaveAsync(saved, CancellationToken.None).ConfigureAwait(false);
                     lock (_sync) _records[saved.Id] = saved;
                 }
-                // Also before anything has looked at it: an approval given now must still count then.
-                else if (request.ApprovedUncached && twin.State == RemoteJobState.Intended && !twin.ApprovedUncached)
+                else
                 {
-                    saved = twin with
+                    note = WhatATwinIgnores(request, twin);
+
+                    // Also before anything has looked at it: an approval given now must still count then.
+                    if (request.ApprovedUncached && twin.State == RemoteJobState.Intended && !twin.ApprovedUncached)
                     {
-                        ApprovedUncached = true,
-                        ApprovalNeeded = false,
-                        NextCheckAt = twin.ApprovalNeeded ? record.CreatedAt : twin.NextCheckAt,
-                        UpdatedAt = record.CreatedAt,
-                    };
-                    await _store.SaveAsync(saved, CancellationToken.None).ConfigureAwait(false);
-                    lock (_sync) _records[saved.Id] = saved;
+                        saved = twin with
+                        {
+                            ApprovedUncached = true,
+                            ApprovalNeeded = false,
+                            NextCheckAt = twin.ApprovalNeeded ? record.CreatedAt : twin.NextCheckAt,
+                            UpdatedAt = record.CreatedAt,
+                        };
+                        await _store.SaveAsync(saved, CancellationToken.None).ConfigureAwait(false);
+                        lock (_sync) _records[saved.Id] = saved;
+                    }
                 }
             }
             else
@@ -758,6 +762,24 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             : null, "This item has already been sent.", cancellationToken);
 
     /// <summary>What a held job would have been from the start. A folder link has nothing to submit: its item is on the account already.</summary>
+    /// <summary>
+    /// A held job came from the clipboard with every option at its default and nothing has been sent, so what
+    /// the user asks for now replaces those defaults. It stays the same job, on the same input. An archive
+    /// password isn't taken here: <see cref="AddAsync"/> hands it over after this, as for any job already listed.
+    /// </summary>
+    private static RemoteJobRecord ReleasedOnRequest(RemoteJobRecord twin, RemoteJobRecord asked, bool approved)
+        => ReleasedFromHold(twin, approved, asked.CreatedAt) with
+        {
+            Destination = asked.Destination,
+            QueueId = asked.QueueId,
+            StartMode = asked.StartMode,
+            SelectionMode = asked.SelectionMode,
+            SelectedFileIds = asked.SelectedFileIds,
+            ProtectedLinkPassword = asked.ProtectedLinkPassword,
+            Placement = asked.Placement,
+            Name = asked.Name ?? twin.Name,
+        };
+
     private static RemoteJobRecord ReleasedFromHold(RemoteJobRecord record, bool approved, DateTimeOffset now) => record with
     {
         State = record is { PredictedHash: null, ItemId: not null } ? RemoteJobState.Waiting : RemoteJobState.Intended,

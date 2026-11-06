@@ -69,9 +69,10 @@ internal static partial class Program
                     return 2;
                 }
 
-                if (await RefuseIfForProviderAsync(client, optionArgs[0], args.Contains("--direct", StringComparer.OrdinalIgnoreCase)).ConfigureAwait(false) is { } refused)
+                if (await new DirectAddCheck(client, args).WhyNotAsync(optionArgs[0]).ConfigureAwait(false) is { } refused)
                 {
-                    return refused;
+                    Console.Error.WriteLine(refused);
+                    return 2;
                 }
 
                 var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
@@ -225,7 +226,7 @@ internal static partial class Program
             {
                 if (optionArgs.Length < 1)
                 {
-                    Console.Error.WriteLine("usage: import <file.json> [--start now|later] [--yes]");
+                    Console.Error.WriteLine("usage: import <file.json> [--start now|later] [--direct] [--yes]");
                     return 2;
                 }
 
@@ -255,6 +256,7 @@ internal static partial class Program
                 }
 
                 var startOverride = GetOption(args, "--start");
+                var check = new DirectAddCheck(client, args);
                 var accepted = 0;
                 var duplicates = 0;
                 var failed = 0;
@@ -271,6 +273,13 @@ internal static partial class Program
 
                     try
                     {
+                        if (await check.WhyNotAsync(entry.Url).ConfigureAwait(false) is { } refused)
+                        {
+                            failed++;
+                            firstError ??= refused;
+                            continue;
+                        }
+
                         var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
                         {
                             Url = entry.Url,
@@ -1097,7 +1106,7 @@ internal static partial class Program
     {
         if (positional.Length == 0)
         {
-            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--priority high|normal|low] [--wait] [--yes]");
+            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--priority high|normal|low] [--direct] [--wait] [--yes]");
             return 2;
         }
 
@@ -1154,10 +1163,22 @@ internal static partial class Program
         }
 
         var results = new List<(string Url, AddJobResponse Result)>();
+        var check = new DirectAddCheck(client, args);
         foreach (var url in urls)
         {
             try
             {
+                if (await check.WhyNotAsync(url).ConfigureAwait(false) is { } refused)
+                {
+                    results.Add((url, new AddJobResponse { Accepted = false, Error = refused }));
+                    if (!json)
+                    {
+                        Console.Error.WriteLine($"Failed: {url}: {refused}");
+                    }
+
+                    continue;
+                }
+
                 var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
                 {
                     Url = url,
@@ -1760,10 +1781,10 @@ internal static partial class Program
             Download Manager CLI
 
             Usage:
-              dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]
+              dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--direct] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
                           [--conflict rename|overwrite|fail] [--priority high|normal|low]
-              dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
+              dm add-batch <pattern> [--dest DIR] [--start now|later] [--direct] [--wait] [--yes]
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
                           [--priority high|normal|low]
               dm list [--json]
@@ -1773,7 +1794,7 @@ internal static partial class Program
               dm profile list|add|remove
               dm update check|download|install
               dm export <file.json>
-              dm import <file.json> [--start now|later] [--yes]
+              dm import <file.json> [--start now|later] [--direct] [--yes]
               dm pause|resume|retry <job-id>
               dm priority <job-id> high|normal|low
               dm package list

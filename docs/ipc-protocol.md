@@ -96,30 +96,38 @@ can't be decrypted on this Windows account, so it has to be entered again.
 `unsupported`, with a `reason` for the last two. `undetermined` means an account could take the link
 and there is no list of supported sites to tell whether it does, so it must not be treated as
 ordinary: offer a retry, or an explicit choice to request it directly. Show `note` when there is one:
-it can say a stale list couldn't be refreshed, or that a site couldn't be checked. A `hosterLink` also
+it can say a stale list couldn't be refreshed, or that a site couldn't be checked. An `ordinaryLink` with
+`checkIncomplete` true is the second of those: a listed site couldn't be checked against it, so it may be
+one the provider handles. A stale list leaves the flag false. Don't request such a link directly without
+saying so. A `hosterLink` also
 carries what the provider last said about that site, each null when it sets no limit:
 `hosterDailyLinksLeft`, `hosterDailyBytesLeft` and `hosterLargestFile`. Clients that don't know a
 value of `kind` should treat it as they would `unsupported`.
 
 `job.add` never classifies. It stays an explicit direct request, because a browser handoff is made of
-those. A frontend with a hoster link has to route it through `remote.add`; `dm add` does so by itself
-and refuses a hoster link.
+those. A frontend with a hoster link has to route it through `remote.add`. `dm add`, `dm add-batch` and
+`dm import` classify each address first: a hoster or folder link is refused, and in a batch or an import it
+counts as failed. An `undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
+prints the note, because it can go on for hours and a script shouldn't stop for it.
 
 **`job.refreshUrl`** does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
 the optional `explicitDirect`. While a usable key exists, a changed http or https address that is a
 `hosterLink` or `folderLink` gets `ok: false` with words pointing to Add Links, with or without the flag.
 So does an `unsupported` one. An `undetermined` one, or one that couldn't be classified at all, gets
 `ok: false` unless `explicitDirect` is true, which a client sends only when the user chose a direct
-request for it. The job's current address and any `ftp` address are always accepted, and with no usable
+request for it. The same goes for an `ordinaryLink` with `checkIncomplete`. The job's current address and any `ftp` address are always accepted, and with no usable
 key nothing is classified. `dm refresh <id> <url> --direct` sets the flag.
 
 The clipboard monitor classifies too, while a usable key exists. An ordinary or provider direct link
-is added directly. A hoster or folder link becomes a job with `state: intended`, `approvalNeeded` and
-`heldForApproval` set, and the tray says so without the address. Anything else isn't added, and the tray
-says to use Add Links. `heldForApproval` means nothing has been sent or asked about it, not even whether it is
-cached, and a job holding it stays where it is across a restart, a changed key and `remote.checkNow`,
-which refuses it. `remote.retry` with `approveUncached` releases it, as does a `remote.add` of the same input
-from someone asking for it, which then needs its own `approveUncached` as usual. With no usable key the
+is added directly. An `ordinaryLink` with `checkIncomplete` is added with `startMode: later` and no request
+to its server, not even for its name, and the tray says so. A hoster or folder link becomes a job with
+`state: intended`, `approvalNeeded` and `heldForApproval` set, and the tray says so without the address.
+Anything else isn't added, and the tray says to use Add Links. `heldForApproval` means nothing has been sent
+or asked about it, not even whether it is cached, and a job holding it stays where it is across a restart, a
+changed key and `remote.checkNow`, which refuses it. `remote.retry` with `approveUncached` releases it, as does
+a `remote.add` of the same input from someone asking for it, which then needs its own `approveUncached` as
+usual. That `remote.add` is answered with the same job and `existing` true, and its options replace the
+clipboard's defaults: `destination`, `queueId`, `startMode`, `selection`, `fileIds` and `linkPassword`. With no usable key the
 monitor adds every link directly, as it always has.
 
 **`remote.add`** takes either `input` (a folder link, magnet, hoster link or a full path to a local

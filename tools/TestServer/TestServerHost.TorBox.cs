@@ -348,7 +348,7 @@ public sealed partial class MockTorBox
                 ["id"] = _hosters.Count + 1,
                 ["name"] = name,
                 ["domains"] = new JsonArray(domains.Select(domain => (JsonNode?)domain).ToArray()),
-                ["url"] = $"https://{domains[0]}",
+                ["url"] = domains.Length > 0 ? $"https://{domains[0]}" : "https://no-domains.invalid",
                 ["icon"] = null,
                 ["status"] = available,
                 ["type"] = "hoster",
