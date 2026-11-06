@@ -99,8 +99,18 @@ public sealed class ArchiveRowsTests
         Assert.Equal("Extraction completed", ArchiveText.Set(Set("completed")).Text);
         Assert.Equal("Downloaded", ArchiveText.Set(Set("downloaded")).Text);
         Assert.Equal("Downloaded, part2 missing", ArchiveText.Set(Set("downloaded", change: s => s.MissingVolumes = ["a.part2.rar"])).Text);
-        Assert.Equal("Downloading", ArchiveText.Set(Set("downloading", change: s => s.DownloadingVolumes = ["a.rar"])).Text);
         Assert.Equal("Not downloaded yet", ArchiveText.Set(Set("downloading")).Text);
+    }
+
+    [Fact]
+    public void Volumes_still_coming_with_nobody_asking_leave_the_cell_to_the_Status_column()
+    {
+        var coming = Set("downloading", stateText: "Downloading: a.rar", change: s => s.DownloadingVolumes = ["a.rar"]);
+        var view = ArchiveText.Set(coming);
+        Assert.Empty(view.Text);
+        Assert.Empty(view.AccessibleText);
+        Assert.Contains("Downloading: a.rar", view.ToolTip, StringComparison.Ordinal);
+        Assert.Empty(ArchiveText.Package([coming, Set("downloading", change: s => s.DownloadingVolumes = ["b.rar"])])!.Text);
     }
 
     [Fact]
@@ -143,8 +153,9 @@ public sealed class ArchiveRowsTests
         Assert.Equal("Extracting 7%", ArchiveText.Package([Set("failed", "corrupted"), Set("extracting", change: s => s.Percent = 7)])!.Text);
 
         var asking = ArchiveText.Package([Set("extracting"), Set("failed", "passwordRequired")])!;
-        Assert.Equal("1 of 2 need a password", asking.Text);
+        Assert.Equal("1 needs a password", asking.Text);
         Assert.True(asking.NeedsPassword);
+        Assert.Equal("2 need a password", ArchiveText.Package([Set("failed", "wrongPassword"), Set("failed", "passwordRequired")])!.Text);
     }
 
     [Fact]
@@ -260,6 +271,27 @@ public sealed class ArchiveRowsTests
         Assert.True(target.WasWrong);
 
         Assert.Null(ArchiveRules.Plan([File("a.rar", Set("downloaded")), File("b.rar", Set("downloaded"))], [], null, true).Password);
+    }
+
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("extracting")]
+    public void A_set_with_no_use_for_a_password_is_not_offered_one(string state)
+        => Assert.Null(ArchiveRules.Plan([File("a.rar", Set(state))], [], null, true).Password);
+
+    [Fact]
+    public void A_notice_asks_for_the_package_when_several_of_its_sets_ask()
+    {
+        var one = Set("failed", "wrongPassword", change: s => s.PackageId = PackageId);
+        var two = Set("failed", "wrongPassword", change: s => s.PackageId = PackageId);
+        var done = Set("completed", change: s => s.PackageId = PackageId);
+
+        var both = ArchiveRules.NoticeTarget(one, [one, two, done], "My package");
+        Assert.Equal(PackageId, both.PackageId);
+        Assert.True(both.Needed);
+
+        Assert.Equal(one.Id, ArchiveRules.NoticeTarget(one, [one, done], "My package").SetId);
+        Assert.Equal(one.Id, ArchiveRules.NoticeTarget(one, [one, two], null).SetId);
     }
 
     [Fact]

@@ -47,7 +47,7 @@ public sealed partial class MainWindow
         public MenuFlyoutItemBase[] All => [Extract, ExtractFile, Password, Retry, Cancel, OpenFolder, Remove, Separator];
 
         /// <summary>Null hides everything. Only Extract stays when it can't run, to say why.</summary>
-        public void Apply(ArchivePlan? plan)
+        public void Apply(ArchivePlan? plan, bool connected)
         {
             static void Show(MenuFlyoutItemBase item, bool on)
             {
@@ -67,6 +67,7 @@ public sealed partial class MainWindow
 
             if (Extract.Text != plan.ExtractText) Extract.Text = plan.ExtractText;
             if (Extract.IsEnabled != plan.CanExtract) Extract.IsEnabled = plan.CanExtract;
+            if (ExtractFile.IsEnabled != connected) ExtractFile.IsEnabled = connected;
 
             var passwordText = plan.Password?.Needed == true ? "Enter Archive Password…" : "Archive Password…";
             if (Password.Text != passwordText) Password.Text = passwordText;
@@ -151,7 +152,7 @@ public sealed partial class MainWindow
             }
 
             const string Text = "Extractions";
-            var added = new ListBoxItem { Tag = ArchiveSetsTag, Padding = new Thickness(14, 2, 8, 2), Content = SidebarContent(Text, "&#xE7C3;") };
+            var added = new ListBoxItem { Tag = ArchiveSetsTag, Padding = new Thickness(14, 2, 8, 2), Content = SidebarContent(Text, "&#xF012;") };
             AutomationProperties.SetName(added, Text);
             var at = CategoryList.Items.OfType<ListBoxItem>().ToList().FindIndex(existing => existing.Tag is "queues");
             CategoryList.Items.Insert(Math.Max(at, 0), added);
@@ -165,14 +166,14 @@ public sealed partial class MainWindow
     private void SyncArchiveMenus()
     {
         if (_downloadsArchiveMenu is null) return;
-        _downloadsArchiveMenu.Apply(_remote.State.ArchivesSupported ? CurrentArchivePlan() : null);
+        _downloadsArchiveMenu.Apply(_remote.State.ArchivesSupported ? CurrentArchivePlan() : null, _remote.State.IsConnected);
     }
 
     /// <summary>Runs last when the context menu opens. A selection of remote rows alone has nothing here to act on.</summary>
     private void ShowArchiveContextItems()
     {
         var remoteOnly = FirstLocalRow is null && SelectedRemoteRows.Count > 0 && SelectedArchiveRows.Count == 0;
-        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null);
+        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected);
     }
 
     private List<JobViewModel> SelectedArchiveRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsArchiveRow).ToList();
@@ -327,7 +328,7 @@ public sealed partial class MainWindow
         if (set is null) return;
         if (notice.Kind == ArchiveNoticeKind.Password)
         {
-            await EnterArchivePasswordAsync(ArchiveRules.Target(set));
+            await EnterArchivePasswordAsync(ArchiveRules.NoticeTarget(set, sets, _groups.FirstOrDefault(group => group.Id == set.PackageId)?.Name));
             return;
         }
 
@@ -498,33 +499,23 @@ public sealed partial class MainWindow
         if (problems.Count > 0) await ShowMessageAsync(title, string.Join(Environment.NewLine, problems.Take(5)));
     }
 
-    /// <summary>Off the UI thread, because a destination can be a slow or missing network share.</summary>
+    /// <summary>Asking whether a folder is there stays off the UI thread, because it can be a slow or missing network share.</summary>
     private async Task OpenExtractedFoldersAsync(IReadOnlyList<string> folders)
     {
-        var missing = await Task.Run(() =>
+        var there = await Task.Run(() => folders.Where(folder => Path.IsPathFullyQualified(folder) && Directory.Exists(folder)).ToList());
+        var problems = folders.Except(there, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var folder in there.Take(5))
         {
-            var notThere = new List<string>();
-            foreach (var folder in folders.Take(5))
+            try
             {
-                try
-                {
-                    if (Path.IsPathFullyQualified(folder) && Directory.Exists(folder))
-                    {
-                        using var _ = Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
-                    }
-                    else
-                    {
-                        notThere.Add(folder);
-                    }
-                }
-                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
-                {
-                    notThere.Add(folder);
-                }
+                using var _ = Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
             }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+            {
+                problems.Add(folder);
+            }
+        }
 
-            return notThere;
-        });
-        if (missing.Count > 0) await ShowMessageAsync("Open extracted folder", $"This folder could not be opened: {string.Join(", ", missing)}");
+        if (problems.Count > 0) await ShowMessageAsync("Open extracted folder", $"This folder could not be opened: {string.Join(", ", problems)}");
     }
 }

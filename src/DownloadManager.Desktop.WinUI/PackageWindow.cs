@@ -26,6 +26,7 @@ internal sealed class PackageWindow : Window
     private bool _closed;
     private bool _groupKnown;
     private bool _passwordSavedHere;
+    private bool _showingSaved;
 
     private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
     private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -215,6 +216,7 @@ internal sealed class PackageWindow : Window
 
     private List<ArchiveSetDto> PackageSets() => _remote.State.ArchiveSets
         .Where(set => set.PackageId == _packageId || set.JobIds.Any(_members.Contains))
+        .OrderBy(set => set.Name, NaturalStringComparer.Instance)
         .ToList();
 
     private void RenderArchives()
@@ -230,6 +232,13 @@ internal sealed class PackageWindow : Window
         var asking = sets.Where(set => set.NeedsPassword).ToList();
         if (asking.Count > 0)
         {
+            // What was just saved has been tried and has failed, so it no longer gets the last word.
+            if (_showingSaved)
+            {
+                _showingSaved = false;
+                _passwordStatus.Show(string.Empty);
+            }
+
             lines.Insert(0, asking.Any(set => set.FailureKind == "wrongPassword")
                 ? "That password was wrong. The downloads are fine. Enter the right one above, and extraction runs again."
                 : "An archive here needs its password. The downloads are fine. Enter it above, and extraction runs.");
@@ -245,6 +254,7 @@ internal sealed class PackageWindow : Window
         // Out of the box before anything is sent, whatever the answer turns out to be.
         _archivePassword.Password = string.Empty;
         if (password.Length == 0) return;
+        _showingSaved = false;
         _passwordStatus.Show("Saving the archive password…");
         var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = password });
         password = string.Empty;
@@ -253,17 +263,18 @@ internal sealed class PackageWindow : Window
         {
             _passwordSavedHere = true;
             _passwordStatus.Show("Archive password saved. It is used when this package's archives are extracted.");
-        }
-        else
-        {
-            _passwordStatus.Show($"The archive password wasn't saved. {RemoteText.Failure(result.Error)}", isProblem: true);
+            RenderArchives();
+            _showingSaved = true;
+            return;
         }
 
+        _passwordStatus.Show($"The archive password wasn't saved. {RemoteText.Failure(result.Error)}", isProblem: true);
         RenderArchives();
     }
 
     private async Task ClearArchivePasswordAsync()
     {
+        _showingSaved = false;
         _passwordStatus.Show("Clearing the archive password…");
         var result = await _remote.SetArchivePasswordAsync(new ArchiveSetPasswordRequest { PackageId = _packageId, Password = string.Empty });
         if (_closed) return;

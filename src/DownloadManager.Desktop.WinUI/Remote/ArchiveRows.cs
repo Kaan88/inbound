@@ -7,7 +7,8 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>
 /// What the Extraction column shows for one archive set or a package of them. It sits beside the
 /// download's own status and never replaces it, because a failed extraction says nothing against the
-/// download. <see cref="Text"/> is short enough for a list cell; the rest says it in full.
+/// download. <see cref="Text"/> is short enough for a list cell; the rest says it in full. It is blank
+/// while a set's volumes are still coming and nobody has asked for extraction: Status says all there is.
 /// </summary>
 internal sealed record ArchiveRowView(
     string Text,
@@ -28,7 +29,7 @@ internal static partial class ArchiveText
     public static ArchiveRowView Set(ArchiveSetDto set)
     {
         var (text, tone) = Label(set);
-        return new ArchiveRowView(text, ToolTip(set), tone, set.NeedsPassword, $"Extraction: {Full(set)}");
+        return new ArchiveRowView(text, ToolTip(set), tone, set.NeedsPassword, text.Length == 0 ? string.Empty : $"Extraction: {Full(set)}");
     }
 
     /// <summary>A package: one set says what that set says, several say what most needs attention.</summary>
@@ -41,7 +42,7 @@ internal static partial class ArchiveText
         var lines = sets.Take(MostNamesInText).Select(set => $"{set.Name}: {Full(set)}").ToList();
         if (sets.Count > MostNamesInText) lines.Add($"and {sets.Count - MostNamesInText} more");
         var tip = string.Join(Environment.NewLine, lines);
-        return new ArchiveRowView(text, tip, tone, sets.Any(set => set.NeedsPassword), $"Extraction: {text}. {string.Join(". ", lines)}");
+        return new ArchiveRowView(text, tip, tone, sets.Any(set => set.NeedsPassword), text.Length == 0 ? string.Empty : $"Extraction: {text}. {string.Join(". ", lines)}");
     }
 
     /// <summary>The Host's whole sentence for a set, with any address taken out.</summary>
@@ -50,7 +51,7 @@ internal static partial class ArchiveText
     private static (string Text, RemoteRowTone Tone) PackageLabel(IReadOnlyList<ArchiveSetDto> sets)
     {
         var asking = sets.Count(set => set.NeedsPassword);
-        if (asking > 0) return ($"{asking} of {sets.Count} need a password", RemoteRowTone.Waiting);
+        if (asking > 0) return (asking == 1 ? "1 needs a password" : $"{asking} need a password", RemoteRowTone.Waiting);
 
         var running = sets.FirstOrDefault(set => set.State == "extracting");
         if (running is not null) return (Label(running).Text, RemoteRowTone.Active);
@@ -63,7 +64,7 @@ internal static partial class ArchiveText
         if (sets.Any(set => set.State == "waiting")) return ("Waiting for extraction", RemoteRowTone.Waiting);
         if (done > 0) return ($"Extracted {done} of {sets.Count}", RemoteRowTone.Neutral);
         if (sets.All(set => set.State == "downloaded")) return ("Downloaded", RemoteRowTone.Neutral);
-        return ("Downloading", RemoteRowTone.Neutral);
+        return (string.Empty, RemoteRowTone.Neutral);
     }
 
     private static (string Text, RemoteRowTone Tone) Label(ArchiveSetDto set)
@@ -71,7 +72,7 @@ internal static partial class ArchiveText
         switch (set.State)
         {
             case "downloading":
-                if (set.DownloadingVolumes.Count > 0) return ("Downloading", RemoteRowTone.Neutral);
+                if (set.DownloadingVolumes.Count > 0) return (string.Empty, RemoteRowTone.Neutral);
                 return set.FailedVolumes.Count > 0
                     ? ($"{Parts(set.FailedVolumes)} didn't download", RemoteRowTone.Waiting)
                     : ("Not downloaded yet", RemoteRowTone.Neutral);
@@ -272,6 +273,14 @@ internal static partial class ArchiveRules
     public static ArchivePasswordTarget Target(ArchiveSetDto set)
         => new(set.Id, null, null, set.Name, set.NeedsPassword, set.FailureKind == "wrongPassword", set.HasPassword);
 
+    /// <summary>What a notice asks a password for. When several sets of one package ask at once, one answer can serve them all.</summary>
+    public static ArchivePasswordTarget NoticeTarget(ArchiveSetDto set, IReadOnlyList<ArchiveSetDto> sets, string? packageName)
+    {
+        if (set.PackageId is not { } package || packageName is null) return Target(set);
+        var members = sets.Where(candidate => candidate.PackageId == package).ToList();
+        return members.Count(candidate => candidate.NeedsPassword) > 1 ? PackageTarget(package, packageName, members) : Target(set);
+    }
+
     /// <summary>A package's password also serves the archives it hasn't got yet.</summary>
     public static ArchivePasswordTarget PackageTarget(Guid packageId, string name, IReadOnlyList<ArchiveSetDto> sets)
     {
@@ -293,7 +302,11 @@ internal static partial class ArchiveRules
     {
         if (packageAlone is { } package) return PackageTarget(package.Id, package.Name, sets);
 
-        if (sets is [var one] && rarFiles.All(file => file.Set?.Id == one.Id)) return Target(one);
+        // A run has its password already, and a finished set has no more use for one.
+        if (sets is [var one] && rarFiles.All(file => file.Set?.Id == one.Id))
+        {
+            return one.State is "completed" or "extracting" ? null : Target(one);
+        }
 
         // A download with no record yet can still get a password in advance, by its file's path.
         if (sets.Count == 0 && rarFiles is [{ FilePath.Length: > 0 } file] && Path.IsPathFullyQualified(file.FilePath))
