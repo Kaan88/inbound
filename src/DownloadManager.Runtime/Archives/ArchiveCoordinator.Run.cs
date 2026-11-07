@@ -339,11 +339,9 @@ public sealed partial class ArchiveCoordinator
     }
 
     private IArchiveExtractor CreateExtractor(ArchiveSettings settings) =>
-        _options.ExtractorFactory?.Invoke(settings) ?? new UnrarExtractor(new UnrarExtractorOptions
+        _options.ExtractorFactory?.Invoke(settings) ?? new SevenZipExtractor(new SevenZipExtractorOptions
         {
-            ToolPath = settings.UnrarPath,
-            ProgramFilesDirectories = _options.ProgramFilesDirectories,
-            PathVariable = _options.PathVariable,
+            ToolPath = _options.SevenZipPath,
             Limits = _options.Limits,
             AvailableBytes = _options.AvailableBytes,
         });
@@ -407,7 +405,7 @@ public sealed partial class ArchiveCoordinator
             {
                 var names = Names(use.Unread);
                 var were = use.Unread.Count == 1 ? "is" : "are";
-                next.Note = $"{next.Note} UnRAR did not read {names}: not part of this archive, so not extracted, and {were} still there.".TrimStart();
+                next.Note = $"{next.Note} 7-Zip did not read {names}: not part of this archive, so not extracted, and {were} still there.".TrimStart();
             }
 
             await SaveLockedAsync(next).ConfigureAwait(false);

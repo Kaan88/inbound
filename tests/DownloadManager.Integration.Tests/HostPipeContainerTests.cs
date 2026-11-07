@@ -13,7 +13,7 @@ namespace DownloadManager.Integration.Tests;
 
 /// <summary>
 /// Scenarios G, H and I the whole way: the real Host process over its real pipe, the real engine against
-/// the mock's CDN over real HTTP, the real ArchiveCoordinator and real UnRAR on real RAR files built by
+/// the mock's CDN over real HTTP, the real ArchiveCoordinator and real 7-Zip on real RAR files built by
 /// Rar.exe, in the same Host. Containers come from the test helpers, because no real sample was
 /// available. Every value is invented, and nothing reaches the real provider.
 /// </summary>

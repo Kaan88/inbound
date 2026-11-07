@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DownloadManager.Integration.Tests;
 
-/// <summary>Both classes run UnRAR, and one counts what is left running, so they do not overlap.</summary>
+/// <summary>Both classes run 7-Zip, and one counts what is left running, so they do not overlap.</summary>
 [CollectionDefinition("runtime-archive")]
 public sealed class RuntimeArchiveCollection : ICollectionFixture<ArchiveFileServer>;
 
@@ -53,14 +53,15 @@ internal static class ArchiveTools
 {
     private const string WinRarFolder = @"C:\Program Files\WinRAR";
 
-    public static string UnrarPath => Path.Combine(WinRarFolder, "UnRAR.exe");
+    /// <summary>The 7-Zip the build copies next to the tests, as it does next to the app.</summary>
+    public static string SevenZipPath => DownloadManager.Archives.SevenZipTool.BundledPath;
 
     public static string RarPath => Path.Combine(WinRarFolder, "Rar.exe");
 
-    public static string? UnrarMissing => File.Exists(UnrarPath) ? null : $"UnRAR.exe is not installed at {UnrarPath}, so extraction cannot run here.";
+    public static string? SevenZipMissing => DownloadManager.Archives.SevenZipTool.Find() is not null ? null : $"The bundled 7-Zip is not at {SevenZipPath}, so extraction cannot run here.";
 
     public static string? RarMissing =>
-        !File.Exists(UnrarPath) ? UnrarMissing
+        SevenZipMissing is { } missing ? missing
         : File.Exists(RarPath) ? null
         : $"Rar.exe is not installed at {RarPath}, so real RAR5 fixtures cannot be generated here.";
 
@@ -119,9 +120,9 @@ internal static class ArchiveTools
     }
 }
 
-public sealed class UnrarFactAttribute : FactAttribute
+public sealed class SevenZipFactAttribute : FactAttribute
 {
-    public UnrarFactAttribute() => Skip = ArchiveTools.UnrarMissing;
+    public SevenZipFactAttribute() => Skip = ArchiveTools.SevenZipMissing;
 }
 
 public sealed class RarFactAttribute : FactAttribute
@@ -129,9 +130,9 @@ public sealed class RarFactAttribute : FactAttribute
     public RarFactAttribute() => Skip = ArchiveTools.RarMissing;
 }
 
-public sealed class UnrarTheoryAttribute : TheoryAttribute
+public sealed class SevenZipTheoryAttribute : TheoryAttribute
 {
-    public UnrarTheoryAttribute() => Skip = ArchiveTools.UnrarMissing;
+    public SevenZipTheoryAttribute() => Skip = ArchiveTools.SevenZipMissing;
 }
 
 public sealed class RarTheoryAttribute : TheoryAttribute
@@ -247,9 +248,9 @@ internal sealed class ArchiveHarness : IAsyncDisposable
         await Archives.InitializeAsync();
     }
 
-    private UnrarExtractor CountingTool(ArchiveCoordinatorOptions options) => new(new UnrarExtractorOptions
+    private SevenZipExtractor CountingTool(ArchiveCoordinatorOptions options) => new(new SevenZipExtractorOptions
     {
-        ToolPath = ArchiveTools.UnrarPath,
+        ToolPath = ArchiveTools.SevenZipPath,
         Limits = options.Limits,
         AvailableBytes = options.AvailableBytes,
         ToolStarted = process =>

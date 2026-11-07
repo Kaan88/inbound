@@ -23,7 +23,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Assert.Contains("working folders", ExtractionSafety.DescribeUnsafePath(path));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AnArchiveHoldingAWorkingFolderIsRefusedBeforeAnythingLands()
     {
         var archive = Space.WriteArchive("evil.rar", RarBuilder.Rar5(
@@ -61,7 +61,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
     // ----- Names Windows can't keep apart -----
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task EntriesDifferingOnlyByCaseAreRefusedRatherThanOneOverwritingTheOther()
     {
         var archive = Space.WriteArchive("cases.rar", RarBuilder.Rar5(("a.txt", Text), ("A.TXT", Other)));
@@ -69,21 +69,21 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Assert.True(File.Exists(archive));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AFileAndAFolderThatCollapseToOneNameAreRefused()
     {
         var archive = Space.WriteArchive("mixed.rar", RarBuilder.Rar5(("thing", Text), ("THING/inner.txt", Other)));
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task TheSameNameTwiceInOneVolumeIsRefusedRatherThanMerged()
     {
         var archive = Space.WriteArchive("twice.rar", RarBuilder.Rar5(("a.txt", Text), ("a.txt", Other)));
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task FoldersDifferingOnlyByCaseAreOneFolderAndAreFine()
     {
         var archive = Space.WriteArchive("folders.rar", RarBuilder.Rar5(("Dir/a.txt", Text), ("DIR/b.txt", Other)));
@@ -182,7 +182,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
     private byte[] TwoReadOnlyFiles() => RarBuilder.Rar5Raw(RarBuilder.Rar5File("a.txt", Text, attributes: 0x21), RarBuilder.Rar5File("b.txt", Text, attributes: 0x21));
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ARollbackRemovesReadOnlyFilesToo()
     {
         var archive = Space.WriteArchive("ro.rar", TwoReadOnlyFiles());
@@ -199,7 +199,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Space.AssertNoStagingLeft();
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AFileARollbackCouldNotRemoveIsFinishedByTheNextAttempt()
     {
         var archive = Space.WriteArchive("ro.rar", TwoReadOnlyFiles());
@@ -229,7 +229,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
     // ----- A file somebody changed after a crash -----
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AFileEditedAfterTheCrashSurvivesRecovery()
     {
         var archive = Space.WriteArchive("three.rar", RarBuilder.Rar5(("a.txt", Text), ("b.txt", Text), ("c.txt", Text)));
@@ -275,7 +275,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     }
 
     /// <summary>A real drive root, by way of a substituted drive letter that points at this test's own folder.</summary>
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ExtractionAndItsCrashUndoWorkAtADriveRoot()
     {
         var used = DriveInfo.GetDrives().Select(drive => char.ToUpperInvariant(drive.Name[0])).ToHashSet();
@@ -325,54 +325,48 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     // ----- Hidden data streams -----
 
     [RequiresRarFact]
-    public async Task AHiddenStreamInAnArchiveIsRefused()
+    public async Task AHiddenStreamInAnArchiveStaysBehind()
     {
         var file = Space.WriteSource("s.txt", "visible");
         File.WriteAllText(file + ":hidden", "not in any listing");
         var archive = await Space.BuildAsync("streams.rar", "-os");
 
-        var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor().ExtractAsync(Request(archive), null, CancellationToken.None));
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
-        Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
-        Assert.Contains("hidden data stream", failure.Message);
-        Assert.Contains("hidden", failure.Message);
-        Space.AssertDestinationUntouched();
+        var extracted = Path.Combine(Space.Destination, "s.txt");
+        Assert.Equal("visible", File.ReadAllText(extracted));
+        Assert.False(File.Exists(extracted + ":hidden"));
         Space.AssertNoStagingLeft();
     }
 
     [RequiresRarFact]
-    public async Task AZoneMarkAnUnmarkedArchiveBringsWithItIsRefused()
+    public async Task AZoneMarkStoredInAnUnmarkedArchiveStaysBehind()
     {
         var file = Space.WriteSource("s.txt", "visible");
         File.WriteAllText(file + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=2\r\n");
         var archive = await Space.BuildAsync("zone.rar", "-os");
 
-        var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor().ExtractAsync(Request(archive), null, CancellationToken.None));
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
-        Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
+        Assert.False(File.Exists(Path.Combine(Space.Destination, "s.txt") + ":Zone.Identifier"));
     }
 
     [RequiresRarFact]
-    public async Task AnArchiveHoldingStreamsIsRefusedBeforeAnythingIsWrittenEvenIfItIsMarkedItself()
+    public async Task AMarkedArchiveMarksItsFilesWithItsOwnZoneAndNotTheStoredOne()
     {
         var file = Space.WriteSource("s.txt", "visible");
         File.WriteAllText(file + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=2\r\n");
         var archive = await Space.BuildAsync("zone.rar", "-os");
-        File.WriteAllText(archive + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+        File.WriteAllText(archive + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/zone.rar\r\n");
 
-        var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
-        Assert.True(probe.HoldsDataStreams);
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
-        var ran = false;
-        var options = new UnrarExtractorOptions
-        {
-            ToolStarted = process => ran |= process.StartInfo.ArgumentList[0] == "x",
-        };
-        await Assert.ThrowsAsync<ExtractionException>(() => Extractor(options).ExtractAsync(Request(archive), null, CancellationToken.None));
-        Assert.False(ran);
+        var mark = File.ReadAllText(Path.Combine(Space.Destination, "s.txt") + ":Zone.Identifier");
+        Assert.Contains("ZoneId=3", mark);
+        Assert.DoesNotContain("example.invalid", mark);
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AnOrdinaryArchiveIsNotTakenForOneHoldingStreams()
     {
         var archive = Space.WriteArchive("plain.rar", RarBuilder.Rar5(("a.txt", Text)));
@@ -421,7 +415,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
     // ----- Durable before the archives can go -----
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AskingForDurabilityFlushesEveryFileAndKeepsReadOnlyFilesReadOnly()
     {
         var archive = Space.WriteArchive("ro.rar", TwoReadOnlyFiles());
@@ -434,12 +428,12 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AFlushThatFailsLeavesTheOutputButSaysSo()
     {
         var archive = Space.WriteArchive("one.rar", RarBuilder.Rar5(("a.txt", Text)));
         var request = new ExtractionRequest { FirstVolume = archive, Destination = Space.Destination, StagingRoot = Space.Staging, MakeDurable = true };
-        var options = new UnrarExtractorOptions { FlushOverride = _ => throw new IOException("the disk said no") };
+        var options = new SevenZipExtractorOptions { FlushOverride = _ => throw new IOException("the disk said no") };
 
         var result = await Extractor(options).ExtractAsync(request, null, CancellationToken.None);
 
@@ -447,12 +441,12 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task NoFlushIsSpentWhenNobodyIsGoingToDeleteAnything()
     {
         var archive = Space.WriteArchive("one.rar", RarBuilder.Rar5(("a.txt", Text)));
         var flushes = 0;
-        var options = new UnrarExtractorOptions { FlushOverride = _ => Interlocked.Increment(ref flushes) };
+        var options = new SevenZipExtractorOptions { FlushOverride = _ => Interlocked.Increment(ref flushes) };
 
         var result = await Extractor(options).ExtractAsync(Request(archive), null, CancellationToken.None);
 

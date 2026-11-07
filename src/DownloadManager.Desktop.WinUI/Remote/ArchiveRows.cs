@@ -128,7 +128,7 @@ internal static partial class ArchiveText
                     "missingVolume" => ("Missing volume", RemoteRowTone.Failed),
                     "corrupted" => ("Corrupted archive", RemoteRowTone.Failed),
                     "unsupportedVersion" => ("Unsupported archive version", RemoteRowTone.Failed),
-                    "toolUnavailable" => ("UnRAR unavailable", RemoteRowTone.Failed),
+                    "toolUnavailable" => ("7-Zip missing", RemoteRowTone.Failed),
                     "diskSpace" => ("Not enough disk space", RemoteRowTone.Failed),
                     "permission" => ("Permission refused", RemoteRowTone.Failed),
                     "unsafePath" => ("Unsafe archive", RemoteRowTone.Failed),

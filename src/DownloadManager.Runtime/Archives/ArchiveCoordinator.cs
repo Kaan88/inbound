@@ -12,14 +12,11 @@ public sealed record ArchiveCoordinatorOptions
     /// <summary>One at a time is the default: extraction is heavy on the disk, and nothing else in the Host waits for it.</summary>
     public int MaxConcurrentExtractions { get; init; } = 1;
 
-    /// <summary>Null extracts with UnRAR, found through the settings' path and then the machine.</summary>
+    /// <summary>Null extracts with the bundled 7-Zip.</summary>
     public Func<ArchiveSettings, IArchiveExtractor>? ExtractorFactory { get; init; }
 
-    /// <summary>Null for the machine's own. Empty skips looking in Program Files.</summary>
-    public IReadOnlyList<string>? ProgramFilesDirectories { get; init; }
-
-    /// <summary>Null for this process's PATH. Empty skips looking on PATH.</summary>
-    public string? PathVariable { get; init; }
+    /// <summary>Null for the 7-Zip bundled with the app. Tests point it elsewhere.</summary>
+    public string? SevenZipPath { get; init; }
 
     public ExtractionLimits Limits { get; init; } = new();
 

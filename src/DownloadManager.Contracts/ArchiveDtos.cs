@@ -113,18 +113,12 @@ public sealed class ArchiveToolStatusDto
     /// <summary>The executable an extraction would run right now.</summary>
     public string? Path { get; set; }
 
-    public string? ConfiguredPath { get; set; }
-
-    /// <summary>False when a path was configured and is not there, so another copy or none is in use.</summary>
-    public bool ConfiguredPathFound { get; set; }
-
     public string Message { get; set; } = string.Empty;
 }
 
 public sealed class ArchiveSettingsDto
 {
     public bool AutoExtract { get; set; }
-    public string? UnrarPath { get; set; }
 
     /// <summary><c>nextToArchive</c>, <c>subfolder</c> or <c>folder</c>.</summary>
     public string Destination { get; set; } = "nextToArchive";
@@ -142,8 +136,6 @@ public sealed class ArchiveSettingsDto
 public sealed class ArchiveSettingsUpdate
 {
     public bool? AutoExtract { get; set; }
-    public string? UnrarPath { get; set; }
-    public bool ClearUnrarPath { get; set; }
     public string? Destination { get; set; }
     public string? Folder { get; set; }
     public bool? PreserveFolders { get; set; }

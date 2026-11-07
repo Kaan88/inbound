@@ -34,7 +34,7 @@ public sealed class ArchiveRowsTests
     [InlineData("missingVolume", "Missing volume")]
     [InlineData("corrupted", "Corrupted archive")]
     [InlineData("unsupportedVersion", "Unsupported archive version")]
-    [InlineData("toolUnavailable", "UnRAR unavailable")]
+    [InlineData("toolUnavailable", "7-Zip missing")]
     [InlineData("diskSpace", "Not enough disk space")]
     [InlineData("permission", "Permission refused")]
     [InlineData("unsafePath", "Unsafe archive")]
@@ -156,7 +156,7 @@ public sealed class ArchiveRowsTests
     [Fact]
     public void A_package_of_several_sets_keeps_each_sets_note()
     {
-        const string Note = "UnRAR did not read b.rar: not part of this archive, so not extracted, and it is still there.";
+        const string Note = "7-Zip did not read b.rar: not part of this archive, so not extracted, and it is still there.";
         var view = ArchiveText.Package([Set("completed", change: s => s.Note = Note), Set("completed")])!;
 
         Assert.Contains(Note, view.ToolTip, StringComparison.Ordinal);

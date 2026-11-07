@@ -63,3 +63,7 @@ credentials.txt
 credentials*.txt
 *.keep.txt
 credentials*.bak
+
+# Bundled 7-Zip (LGPL); see third_party/7-Zip/SOURCE.md
+!third_party/7-Zip/7z.exe
+!third_party/7-Zip/7z.dll

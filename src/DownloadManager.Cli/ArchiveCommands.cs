@@ -11,7 +11,7 @@ internal static class ArchiveCommands
                archive extract <path> | --job ID [--job ID ...] | --package ID  [--password-stdin]
                archive password <set-id> | --package ID | --file PATH   (the password comes from stdin; empty clears it)
                archive retry | cancel | remove <set-id>
-               archive settings [--auto-extract on|off] [--unrar-path PATH | --unrar-path-default]
+               archive settings [--auto-extract on|off]
                                 [--destination next|subfolder|folder] [--folder PATH]
                                 [--preserve-folders on|off] [--conflict rename|overwrite|skip]
                                 [--archives keep|delete]
@@ -21,7 +21,7 @@ internal static class ArchiveCommands
 
     private static readonly string[] ValueOptions =
     [
-        "--job", "--package", "--file", "--unrar-path", "--destination", "--folder", "--preserve-folders", "--conflict", "--archives", "--auto-extract",
+        "--job", "--package", "--file", "--destination", "--folder", "--preserve-folders", "--conflict", "--archives", "--auto-extract",
     ];
 
     public static async Task<int> RunAsync(CliClient client, string[] args, bool json)
@@ -186,8 +186,6 @@ internal static class ArchiveCommands
     {
         var update = new ArchiveSettingsUpdate
         {
-            UnrarPath = Option(args, "--unrar-path"),
-            ClearUnrarPath = HasFlag(args, "--unrar-path-default"),
             Folder = Option(args, "--folder"),
             ConflictPolicy = Option(args, "--conflict"),
         };
@@ -216,7 +214,7 @@ internal static class ArchiveCommands
                 return 2;
         }
 
-        var changes = update.UnrarPath is not null || update.ClearUnrarPath || update.Folder is not null || update.ConflictPolicy is not null ||
+        var changes = update.Folder is not null || update.ConflictPolicy is not null ||
             update.Destination is not null || update.AutoExtract is not null || update.PreserveFolders is not null || update.DeleteArchives is not null;
         var reply = changes
             ? await client.RequestAsync(ArchiveMessageTypes.SettingsSet, update).ConfigureAwait(false)
@@ -237,7 +235,7 @@ internal static class ArchiveCommands
 
     private static void PrintSettings(ArchiveSettingsResult result)
     {
-        Console.WriteLine($"UnRAR: {result.Tool.Message}");
+        Console.WriteLine($"extractor: {result.Tool.Message}");
         Console.WriteLine($"auto-extract: {(result.Settings.AutoExtract ? "on" : "off")}");
         var folder = result.Settings.Destination == "folder" ? $" ({result.Settings.Folder})" : string.Empty;
         Console.WriteLine($"destination: {result.Settings.Destination}{folder}");

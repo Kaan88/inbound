@@ -292,11 +292,10 @@ a client's main connection.
 
 **`archive.settings.result`**: `{ ok, error?, settings, tool }`.
 
-- `settings`: `autoExtract`, `unrarPath`, `destination` (`nextToArchive`, `subfolder` or `folder`),
+- `settings`: `autoExtract`, `destination` (`nextToArchive`, `subfolder` or `folder`),
   `folder`, `preserveFolders`, `conflictPolicy` (`rename`, `overwrite` or `skip`), `deleteArchives`.
-- `tool`: `found`, `path` (what an extraction would run now), `configuredPath`, `configuredPathFound`,
-  `message`.
-- `archive.settings.set` also takes `clearUnrarPath` to go back to looking for UnRAR on the machine.
+- `tool`: `found`, `path` (the bundled 7-Zip an extraction would run), `message`. An older client's
+  `unrarPath` or `clearUnrarPath` is ignored.
 
 **`archive.extract`** takes `filePath` (absolute, a volume of the set), `jobIds`, or `packageId`, and an
 optional `password`. With `packageId` the password is kept for the package, otherwise for each set. Its

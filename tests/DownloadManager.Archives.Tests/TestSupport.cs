@@ -4,21 +4,21 @@ using System.Text;
 
 namespace DownloadManager.Archives.Tests;
 
-/// <summary>The only things these tests use from outside the test process: WinRAR's two console tools.</summary>
+/// <summary>Rar.exe from WinRAR makes the RAR fixtures. Extraction uses the 7-Zip the build copies next to the tests.</summary>
 internal static class RarTools
 {
     private const string WinRarFolder = @"C:\Program Files\WinRAR";
 
     public const string Password = "Test-Pw_123";
 
-    public static string UnrarPath => Path.Combine(WinRarFolder, "UnRAR.exe");
+    public static string SevenZipPath => SevenZipTool.BundledPath;
 
     public static string RarPath => Path.Combine(WinRarFolder, "Rar.exe");
 
-    public static string? UnrarMissing => File.Exists(UnrarPath) ? null : $"UnRAR.exe is not installed at {UnrarPath}, so extraction cannot run here.";
+    public static string? SevenZipMissing => SevenZipTool.Find() is not null ? null : $"The bundled 7-Zip is not at {SevenZipPath}, so extraction cannot run here.";
 
     public static string? RarMissing =>
-        !File.Exists(UnrarPath) ? UnrarMissing
+        SevenZipMissing is { } missing ? missing
         : File.Exists(RarPath) ? null
         : $"Rar.exe is not installed at {RarPath}, so real RAR5 fixtures cannot be generated here.";
 
@@ -49,16 +49,16 @@ internal static class RarTools
     }
 }
 
-/// <summary>A fact needing UnRAR, skipped with the reason when it is not installed.</summary>
-public sealed class RequiresUnrarFactAttribute : FactAttribute
+/// <summary>A fact needing the bundled 7-Zip, skipped with the reason when it is not installed.</summary>
+public sealed class RequiresSevenZipFactAttribute : FactAttribute
 {
-    public RequiresUnrarFactAttribute()
+    public RequiresSevenZipFactAttribute()
     {
-        Skip = RarTools.UnrarMissing;
+        Skip = RarTools.SevenZipMissing;
     }
 }
 
-/// <summary>A fact needing UnRAR and Rar, skipped with the reason when either is not installed.</summary>
+/// <summary>A fact needing 7-Zip and Rar, skipped with the reason when either is not installed.</summary>
 public sealed class RequiresRarFactAttribute : FactAttribute
 {
     public RequiresRarFactAttribute()
@@ -67,11 +67,11 @@ public sealed class RequiresRarFactAttribute : FactAttribute
     }
 }
 
-public sealed class RequiresUnrarTheoryAttribute : TheoryAttribute
+public sealed class RequiresSevenZipTheoryAttribute : TheoryAttribute
 {
-    public RequiresUnrarTheoryAttribute()
+    public RequiresSevenZipTheoryAttribute()
     {
-        Skip = RarTools.UnrarMissing;
+        Skip = RarTools.SevenZipMissing;
     }
 }
 
@@ -189,4 +189,13 @@ public sealed class Workspace : IDisposable
 public sealed class ImmediateProgress<T>(Action<T> report) : IProgress<T>
 {
     public void Report(T value) => report(value);
+}
+
+/// <summary>A theory needing 7-Zip and Rar, skipped with the reason when either is not installed.</summary>
+public sealed class RequiresRarTheoryAttribute : TheoryAttribute
+{
+    public RequiresRarTheoryAttribute()
+    {
+        Skip = RarTools.RarMissing;
+    }
 }

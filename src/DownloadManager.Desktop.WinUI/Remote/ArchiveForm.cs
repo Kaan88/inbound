@@ -5,7 +5,6 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>What the Extraction page holds, as plain values.</summary>
 internal sealed record ArchiveFormValues(
     bool AutoExtract,
-    string UnrarPath,
     int DestinationIndex,
     string Folder,
     bool PreserveFolders,
@@ -38,7 +37,6 @@ internal static class ArchiveForm
 
     public static ArchiveFormValues FromSettings(ArchiveSettingsDto settings) => new(
         settings.AutoExtract,
-        settings.UnrarPath ?? string.Empty,
         Index(Destinations, settings.Destination),
         settings.Folder ?? string.Empty,
         settings.PreserveFolders,
@@ -52,18 +50,10 @@ internal static class ArchiveForm
     public static ArchiveSettingsUpdate? Changes(ArchiveSettingsDto saved, ArchiveFormValues form, out string? error)
     {
         error = null;
-        var path = form.UnrarPath.Trim();
         var folder = form.Folder.Trim();
         var destination = Destinations[Math.Clamp(form.DestinationIndex, 0, Destinations.Length - 1)];
         var conflict = Conflicts[Math.Clamp(form.ConflictIndex, 0, Conflicts.Length - 1)];
-        var savedPath = saved.UnrarPath?.Trim() ?? string.Empty;
         var savedFolder = saved.Folder?.Trim() ?? string.Empty;
-
-        if (path.Length > 0 && (!Path.IsPathFullyQualified(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
-        {
-            error = "The UnRAR path must be the full path of an .exe file, such as UnRAR.exe in the WinRAR folder.";
-            return null;
-        }
 
         if (form.DestinationIndex == DestinationFolderIndex)
         {
@@ -85,13 +75,6 @@ internal static class ArchiveForm
         if (form.AutoExtract != saved.AutoExtract)
         {
             update.AutoExtract = form.AutoExtract;
-            changed = true;
-        }
-
-        if (!string.Equals(path, savedPath, StringComparison.OrdinalIgnoreCase))
-        {
-            if (path.Length == 0) update.ClearUnrarPath = true;
-            else update.UnrarPath = path;
             changed = true;
         }
 

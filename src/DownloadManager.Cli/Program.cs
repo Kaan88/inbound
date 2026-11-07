@@ -1887,7 +1887,7 @@ internal static partial class Program
               dm archive extract <path> | --job ID | --package ID [--password-stdin]
               dm archive password <set-id> | --package ID | --file PATH  (password from stdin)
               dm archive retry|cancel|remove <set-id>
-              dm archive settings [--auto-extract on|off] [--unrar-path PATH | --unrar-path-default]
+              dm archive settings [--auto-extract on|off]
                           [--destination next|subfolder|folder] [--folder PATH]
                           [--preserve-folders on|off] [--conflict rename|overwrite|skip]
                           [--archives keep|delete]

@@ -42,7 +42,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
 
     // ----- Finding 1: a name only suggests a set -----
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [InlineData("report.001.rar", "report.002.rar")]
     [InlineData("lecture.part1.rar", "lecture.part2.rar")]
     public async Task SeparateArchivesWithNumberedNamesAreEachExtractedAndNeitherIsLost(string one, string two)
@@ -61,7 +61,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.Equal(Other, File.ReadAllBytes(run.PathOf("two.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task WithoutDeletingTheSecondArchiveIsStillNotCalledExtracted()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -358,7 +358,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
 
     // ----- Finding 9: a file held open is not a corrupt file -----
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ARecordHeldOpenAtTheNextStartIsNotLostAndTheSetDoesNotRunAgain()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -429,7 +429,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         return await run.WaitForStateAsync("completed");
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AFolderNoSetAccountsForIsLeftAloneHoweverItLooksInside()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -454,7 +454,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.Contains(run.Log, line => line.Contains("Left a folder alone", StringComparison.Ordinal));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task EvenAtTheExactNameABadLogCanNotStopAStartOrReachOutside()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -487,12 +487,12 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
 
     // ----- Finding 8: durable before deleted -----
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task IfTheOutputCantBeFlushedTheArchivesStay()
     {
-        var extractor = new UnrarExtractor(new UnrarExtractorOptions
+        var extractor = new SevenZipExtractor(new SevenZipExtractorOptions
         {
-            ToolPath = ArchiveTools.UnrarPath,
+            ToolPath = ArchiveTools.SevenZipPath,
             FlushOverride = _ => throw new IOException("the disk said no"),
         });
         await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => extractor });
@@ -519,7 +519,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         return (job, set);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ADownloadWhoseArchiveWasRemovedAfterExtractionStaysCompletedAcrossARestart()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -546,7 +546,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.DoesNotContain("missing from its destination", string.Join("|", run.Service.GetSnapshot().Jobs.Select(item => item.Failure?.Message)));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TheMarkIsSavedWithTheJob()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -575,7 +575,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.Equal("completed", run.Service.GetJob(job.Id)!.State);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AnArchiveThatCouldNotBeDeletedIsNotMarkedAndFailsNothingLater()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);

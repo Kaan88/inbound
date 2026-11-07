@@ -10,8 +10,8 @@ public abstract class ExtractionTestBase : IDisposable
 {
     protected Workspace Space { get; } = new();
 
-    protected static UnrarExtractor Extractor(UnrarExtractorOptions? options = null) =>
-        new((options ?? new UnrarExtractorOptions()) with { ToolPath = RarTools.UnrarPath });
+    protected static SevenZipExtractor Extractor(SevenZipExtractorOptions? options = null) =>
+        new((options ?? new SevenZipExtractorOptions()) with { ToolPath = RarTools.SevenZipPath });
 
     protected ExtractionRequest Request(string firstVolume, string? password = null, ExtractionConflictPolicy policy = ExtractionConflictPolicy.Rename, bool preserve = true) => new()
     {
@@ -23,7 +23,7 @@ public abstract class ExtractionTestBase : IDisposable
         PreserveFolders = preserve,
     };
 
-    protected async Task<ExtractionFailureKind> FailureOf(ExtractionRequest request, UnrarExtractorOptions? options = null)
+    protected async Task<ExtractionFailureKind> FailureOf(ExtractionRequest request, SevenZipExtractorOptions? options = null)
     {
         var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor(options).ExtractAsync(request, null, CancellationToken.None));
         if (!string.IsNullOrEmpty(request.Password)) Assert.DoesNotContain(request.Password, failure.Message);
@@ -68,7 +68,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.False(probe.HeadersEncrypted);
         Assert.False(probe.IsVolume);
         Assert.True(probe.AllVolumesPresent);
-        Assert.Equal("5", probe.Version);
+        Assert.Equal("Rar5", probe.Version);
         Assert.False(probe.ListingHasUnknownLines);
         Assert.Contains(probe.Entries, entry => entry.Path == @"sub\big.bin" && entry.Size == 600 * 1024 && !entry.IsLink);
         Assert.Contains(probe.Entries, entry => entry.Path == "sub" && entry.Kind == ArchiveEntryKind.Directory);
@@ -126,14 +126,15 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Space.WriteStandardSource();
         var archive = await Space.BuildAsync("pw.rar", "-p" + RarTools.Password);
         var commandLines = new List<string>();
-        var options = new UnrarExtractorOptions { ToolStarted = process => commandLines.Add(string.Join(' ', process.StartInfo.ArgumentList)) };
+        var options = new SevenZipExtractorOptions { ToolStarted = process => commandLines.Add(string.Join(' ', process.StartInfo.ArgumentList)) };
 
         await Extractor(options).ExtractAsync(Request(archive, RarTools.Password), null, CancellationToken.None);
 
         Space.AssertSameAsSource();
         Assert.NotEmpty(commandLines);
         Assert.All(commandLines, line => Assert.DoesNotContain(RarTools.Password, line));
-        Assert.Contains(commandLines, line => line.StartsWith("x -p ", StringComparison.Ordinal));
+        Assert.Contains(commandLines, line => line.StartsWith("x ", StringComparison.Ordinal));
+        Assert.DoesNotContain(commandLines, line => line.Split(' ').Any(argument => argument.StartsWith("-p", StringComparison.Ordinal)));
     }
 
     [RequiresRarFact]
@@ -239,7 +240,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Space.WriteStandardSource();
         var archive = await Space.BuildAsync("pw.rar", "-p" + RarTools.Password);
         var extractions = 0;
-        var options = new UnrarExtractorOptions
+        var options = new SevenZipExtractorOptions
         {
             ToolStarted = process => { if (process.StartInfo.ArgumentList[0] == "x") Interlocked.Increment(ref extractions); },
         };
@@ -261,27 +262,23 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
     }
 
     [RequiresRarFact]
-    public async Task PasswordInTheAnsiCodePageWorksOverStdin()
+    public async Task AnAccentedPasswordWorksOverStdin()
     {
         Space.WriteStandardSource();
         const string Password = "pä55ß and space ";
         var archive = await Space.BuildAsync("cp.rar", "-p" + Password);
         var commandLines = new List<string>();
-        var options = new UnrarExtractorOptions { ToolStarted = process => commandLines.Add(string.Join(' ', process.StartInfo.ArgumentList)) };
+        var options = new SevenZipExtractorOptions { ToolStarted = process => commandLines.Add(string.Join(' ', process.StartInfo.ArgumentList)) };
 
         await Extractor(options).ExtractAsync(Request(archive, Password), null, CancellationToken.None);
 
         Space.AssertSameAsSource();
 
-        // On a system whose ANSI code page lacks these letters the fallback is the right outcome.
-        if (UnrarPassword.From(Password).CopyStdinBytes() is not null)
-        {
-            Assert.All(commandLines, line => Assert.DoesNotContain(Password, line));
-        }
+        Assert.All(commandLines, line => Assert.DoesNotContain(Password, line));
     }
 
     [RequiresRarFact]
-    public async Task PasswordOutsideTheCodePageUsesTheFallbackAndWorks()
+    public async Task APasswordInAnyScriptWorksOverStdin()
     {
         Space.WriteStandardSource();
         const string Password = "日本語パスワード";
@@ -300,11 +297,13 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.WrongPassword, await FailureOf(Request(archive, "違うパスワード")));
     }
 
-    [RequiresRarFact]
-    public async Task VeryLongPasswordUsesTheFallbackAndWorks()
+    [RequiresRarTheory]
+    [InlineData(127, "")]
+    [InlineData(200, "")]
+    public async Task ALongPasswordOrOneWithQuotesWorks(int length, string tail)
     {
         Space.WriteStandardSource();
-        var password = new string('k', 120) + "tail \"quoted\" end\\";
+        var password = new string('k', length) + tail;
         var archive = await Space.BuildAsync("long.rar", "-p" + password);
 
         await Extractor().ExtractAsync(Request(archive, password), null, CancellationToken.None);
@@ -580,7 +579,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         var file = Space.WriteSource("locked.txt", "ro");
         File.SetAttributes(file, FileAttributes.ReadOnly);
         var archive = await Space.BuildAsync("ro.rar");
-        var extractor = Extractor(new UnrarExtractorOptions { AvailableBytes = _ => 0 });
+        var extractor = Extractor(new SevenZipExtractorOptions { AvailableBytes = _ => 0 });
 
         await Assert.ThrowsAsync<ExtractionException>(() => extractor.ExtractAsync(Request(archive), null, CancellationToken.None));
         await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
@@ -594,7 +593,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
     {
         Space.WriteStandardSource();
         var archive = await Space.BuildAsync("a.rar");
-        var options = new UnrarExtractorOptions { AvailableBytes = _ => 1000 };
+        var options = new SevenZipExtractorOptions { AvailableBytes = _ => 1000 };
         Assert.Equal(ExtractionFailureKind.DiskSpace, await FailureOf(Request(archive), options));
     }
 
@@ -603,7 +602,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
     {
         Space.WriteStandardSource();
         var archive = await Space.BuildAsync("a.rar");
-        var options = new UnrarExtractorOptions { Limits = new ExtractionLimits { MaxTotalBytes = 1000 } };
+        var options = new SevenZipExtractorOptions { Limits = new ExtractionLimits { MaxTotalBytes = 1000 } };
         Assert.Equal(ExtractionFailureKind.DiskSpace, await FailureOf(Request(archive), options));
     }
 
@@ -612,7 +611,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
     {
         Space.WriteStandardSource();
         var archive = await Space.BuildAsync("a.rar");
-        var options = new UnrarExtractorOptions { Limits = new ExtractionLimits { MaxEntries = 2 } };
+        var options = new SevenZipExtractorOptions { Limits = new ExtractionLimits { MaxEntries = 2 } };
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive), options));
     }
 
@@ -627,7 +626,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task NotAnArchiveIsCorrupted()
     {
         var archive = Space.WriteArchive("fake.rar", Encoding.ASCII.GetBytes("this is no archive"));
@@ -635,25 +634,25 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.Corrupted, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task EmptyFileIsCorrupted()
     {
         var archive = Space.WriteArchive("empty.rar", []);
         Assert.Equal(ExtractionFailureKind.Corrupted, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ArchiveThatIsNotThereIsMissingVolume()
     {
         Assert.Equal(ExtractionFailureKind.MissingVolume, await FailureOf(Request(Space.Archive("nope.rar"))));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AlreadyCancelledNeverStartsTheTool()
     {
         var archive = Space.WriteArchive("a.rar", RarBuilder.Rar5(("a.txt", [1])));
         var starts = 0;
-        var extractor = Extractor(new UnrarExtractorOptions { ToolStarted = _ => Interlocked.Increment(ref starts) });
+        var extractor = Extractor(new SevenZipExtractorOptions { ToolStarted = _ => Interlocked.Increment(ref starts) });
 
         var failure = await Assert.ThrowsAsync<ExtractionException>(() => extractor.ExtractAsync(Request(archive), null, new CancellationToken(canceled: true)));
 
@@ -662,16 +661,19 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
     }
 }
 
-/// <summary>A stored archive big enough to catch UnRAR mid-write, built once for the tests that interrupt it.</summary>
+/// <summary>
+/// An archive slow enough to catch 7-Zip mid-write, built once for the tests that interrupt it. 7-Zip reports progress
+/// about every 200 ms, and a stored file would be out in a fraction of that, so this one is compressed text.
+/// </summary>
 public sealed class BigArchiveFixture : IDisposable
 {
     public BigArchiveFixture()
     {
         Space = new Workspace();
         if (RarTools.RarMissing is not null) return;
-        Space.WriteSource("big.bin", Workspace.RandomBytes(256 * 1024 * 1024, 7));
+        Space.WriteSource("big.bin", System.Text.Encoding.ASCII.GetBytes(Convert.ToBase64String(Workspace.RandomBytes(192 * 1024 * 1024, 7))));
         Space.WriteSource("small.txt", "small");
-        Archive = Space.BuildAsync("big.rar").GetAwaiter().GetResult();
+        Archive = Space.BuildAsync("big.rar", "-m3").GetAwaiter().GetResult();
     }
 
     public Workspace Space { get; }
@@ -688,7 +690,7 @@ public sealed class InterruptedExtractionTests(BigArchiveFixture fixture) : Extr
     {
         using var cancellation = new CancellationTokenSource();
         var toolId = 0;
-        var extractor = Extractor(new UnrarExtractorOptions { ToolStarted = process => toolId = process.Id });
+        var extractor = Extractor(new SevenZipExtractorOptions { ToolStarted = process => toolId = process.Id });
         var cancelledAt = -1;
         var progress = new ImmediateProgress<ExtractionProgress>(report =>
         {
@@ -713,7 +715,7 @@ public sealed class InterruptedExtractionTests(BigArchiveFixture fixture) : Extr
     {
         var killed = 0;
         Process? tool = null;
-        var options = new UnrarExtractorOptions { ToolStarted = process => tool = process };
+        var options = new SevenZipExtractorOptions { ToolStarted = process => tool = process };
         var progress = new ImmediateProgress<ExtractionProgress>(report =>
         {
             if (report is { Phase: ExtractionPhase.Extracting, Percent: > 0 } && Interlocked.Exchange(ref killed, 1) == 0)
@@ -740,8 +742,8 @@ public sealed class InterruptedExtractionTests(BigArchiveFixture fixture) : Extr
     public async Task CrashLeavesOnlyDetectableStagingAndTheNextAttemptStartsClean()
     {
         var staging = await StagingArea.PrepareAsync(Space.Staging, fixture.Archive, Space.Destination, CancellationToken.None);
-        var info = new ProcessStartInfo(RarTools.UnrarPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var argument in new[] { "x", "-p-", "-y", "-o+", "-ol-", "-idcn", "-cfg-", "-scfr", fixture.Archive, staging.PayloadFolder + "\\" }) info.ArgumentList.Add(argument);
+        var info = new ProcessStartInfo(RarTools.SevenZipPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in new[] { "x", "-y", "-aoa", "-bsp1", "-o" + staging.PayloadFolder, fixture.Archive }) info.ArgumentList.Add(argument);
         using (var process = Process.Start(info)!)
         {
             process.StandardInput.Close();
@@ -765,19 +767,19 @@ public sealed class InterruptedExtractionTests(BigArchiveFixture fixture) : Extr
     }
 }
 
-/// <summary>Hand-built archives, needing only UnRAR.</summary>
+/// <summary>Hand-built archives, needing only 7-Zip.</summary>
 public sealed class HandBuiltExtractionTests : ExtractionTestBase
 {
     private static readonly byte[] Text = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("hello a\n", 100)));
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task StoredRar4Extracts()
     {
         var archive = Space.WriteArchive("r4.rar", RarBuilder.Rar4(("a.txt", Text), (@"sub\b.txt", Text)));
 
         var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
         Assert.False(probe.IsEncrypted);
-        Assert.StartsWith("1", probe.Version);
+        Assert.Equal("Rar", probe.Version);
 
         await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
@@ -785,7 +787,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(Text, File.ReadAllBytes(Space.Output(@"sub\b.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4OldStyleVolumesExtract()
     {
         var data = Workspace.RandomBytes(300 * 1024, 3);
@@ -803,7 +805,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(data, File.ReadAllBytes(Space.Output("big4.bin")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4PartVolumesExtract()
     {
         var data = Workspace.RandomBytes(300 * 1024, 4);
@@ -817,7 +819,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(data, File.ReadAllBytes(Space.Output("big4.bin")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4MissingOldStyleVolumeIsNamed()
     {
         var volumes = RarBuilder.Rar4Volumes("big4.bin", Workspace.RandomBytes(300 * 1024, 5), 3, newNumbering: false);
@@ -830,7 +832,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Contains("v.r00", failure.MissingVolumes);
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4LaterVolumeIsRefusedThoughItHasNoNumber()
     {
         var volumes = RarBuilder.Rar4Volumes("big4.bin", Workspace.RandomBytes(300 * 1024, 6), 3, newNumbering: true);
@@ -841,14 +843,14 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.MissingVolume, await FailureOf(Request(second)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4BadChecksumIsCorrupted()
     {
         var archive = Space.WriteArchive("crc.rar", RarBuilder.Rar4WithBadCrc("a.txt", Text));
         Assert.Equal(ExtractionFailureKind.Corrupted, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4PasswordRightWrongAndMissing()
     {
         var archive = Space.WriteArchive("pw.rar", RarBuilder.Rar4Encrypted("a.txt", Text, RarTools.Password));
@@ -860,7 +862,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task Rar4HeaderPasswordRightWrongAndMissing()
     {
         var archive = Space.WriteArchive("hp.rar", RarBuilder.Rar4HeaderEncrypted("a.txt", Text, RarTools.Password));
@@ -875,7 +877,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarTheory]
+    [RequiresSevenZipTheory]
     [InlineData("../up.txt")]
     [InlineData("../../up2.txt")]
     [InlineData("sub/../../../up3.txt")]
@@ -887,7 +889,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
     {
         var archive = Space.WriteArchive("hostile.rar", RarBuilder.Rar5(("ok.txt", Text), (name, Text)));
         var starts = new List<string>();
-        var options = new UnrarExtractorOptions { ToolStarted = process => starts.Add(process.StartInfo.ArgumentList[0]) };
+        var options = new SevenZipExtractorOptions { ToolStarted = process => starts.Add(process.StartInfo.ArgumentList[0]) };
 
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive), options));
 
@@ -895,7 +897,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Empty(Directory.EnumerateFiles(Space.Root, "up*.txt", SearchOption.AllDirectories));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task HostileRar4TraversalIsRefused()
     {
         var archive = Space.WriteArchive("hostile.rar", RarBuilder.Rar4((@"..\..\evil.txt", Text), ("ok.txt", Text)));
@@ -904,7 +906,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Empty(Directory.EnumerateFiles(Space.Root, "evil.txt", SearchOption.AllDirectories));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task NameWithALineBreakCannotHideFromTheChecks()
     {
         var spoof = "a\r\n        Name: spoof.txt\r\n        Type: File\r\n.txt";
@@ -913,7 +915,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task NameWithATabIsRefused()
     {
         var archive = Space.WriteArchive("tab.rar", RarBuilder.Rar5(("tab\there.txt", Text)));
@@ -921,17 +923,16 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
-    public async Task StreamNameThatUnrarRewritesIsAPlainFile()
+    [RequiresSevenZipFact]
+    public async Task ANameWithAColonIsRefused()
     {
         var archive = Space.WriteArchive("ads.rar", RarBuilder.Rar5(("a.txt:evil", Text)));
 
-        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
-
-        Assert.Equal(["a.txt_evil"], Directory.GetFiles(Space.Destination).Select(file => Path.GetFileName(file)));
+        Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
+        Space.AssertDestinationUntouched();
     }
 
-    [RequiresUnrarTheory]
+    [RequiresSevenZipTheory]
     [InlineData(2, @"..\..\..\outside")]
     [InlineData(2, "ok.txt")]
     [InlineData(3, @"\??\C:\Windows")]
@@ -949,7 +950,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task RightToLeftNameExtractsButIsNeutralisedInMessages()
     {
         var plain = Space.WriteArchive("rtl.rar", RarBuilder.Rar5(("cod\u202Etxt.exe", Text)));
@@ -964,7 +965,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         Assert.False(failure.Message.Contains('\u202E'));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task UnknownCompressionIsUnsupportedVersion()
     {
         const ulong FutureAlgorithm = 62 | (3 << 7);

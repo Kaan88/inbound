@@ -6,6 +6,14 @@ The owner said the features work. They reported two layout faults (UI.R11, UI.R1
 
 UI.R13 is built. `remote.hosters` returns the first account's cached host list with when it was read. The window shows each host's icon (https only), up or down, today's links and bandwidth against the limits, the per-file limit and notes, with search and a "Down only" filter. A pipe test checks that a second open inside the hour makes no provider call. Not seen on screen yet: the owner tests it.
 
+A4.B is in. The owner said to drop UnRAR and its program-path setting, then asked for "the best possible extractor for most popular files". The bundled 7-Zip 26.04 does that: RAR4 and RAR5, 7z, zip, tar, gz, bz2, xz, zstd, iso and cab, with passwords and split sets. libarchive is weaker on RAR5 and can't open encrypted RAR. Checked by hand on 7-Zip 26.04:
+- A password goes on stdin, and with `-sccUTF-8` 7-Zip reads it as UTF-8, so no password needs the command line any more.
+- A wrong password gives "Wrong password" only for RAR5. 7z, zip and RAR4 say "Data Error in encrypted file. Wrong password?", which can also mean damage.
+- `-sns-` keeps an archive's NTFS streams from being written, so archives carrying streams now extract (without them) instead of being refused.
+- 7-Zip has no switch for the mark of the web, so the download's zone is written onto the extracted files.
+
+Tests: Archives 291, Core 811 (the UnRAR-path tests are gone), 149 archive integration tests through a real Host. Next: A4.C, so 7z, zip and split .001 downloads are recognised as archives.
+
 ### UI.R9, UI.R10: favorite folders and free space (2026-11-07, branch `torbox-addflow`)
 
 Built; the owner tests it on screen and asked that no live or screen checks be run here.

@@ -31,7 +31,7 @@ public sealed partial class ArchiveCoordinator
     {
         ArchiveSettings settings;
         lock (_sync) settings = _settings;
-        return new ArchiveSettingsResult { Ok = true, Settings = MapSettings(settings), Tool = ToolStatus(settings) };
+        return new ArchiveSettingsResult { Ok = true, Settings = MapSettings(settings), Tool = ToolStatus() };
     }
 
     public async Task<ArchiveSettingsResult> UpdateSettingsAsync(ArchiveSettingsUpdate update, CancellationToken cancellationToken = default)
@@ -57,7 +57,7 @@ public sealed partial class ArchiveCoordinator
         }
 
         // The tool's status reads the disk, which can be a share, so it waits for the gate to be free.
-        return new ArchiveSettingsResult { Ok = error is null, Error = error, Settings = MapSettings(settings), Tool = ToolStatus(settings) };
+        return new ArchiveSettingsResult { Ok = error is null, Error = error, Settings = MapSettings(settings), Tool = ToolStatus() };
     }
 
     /// <summary>Returns what is wrong with the update, or null once it is applied.</summary>
@@ -67,20 +67,6 @@ public sealed partial class ArchiveCoordinator
         {
             if (auto && !next.AutoExtract) next.AutoExtractSince = _time.GetUtcNow();
             next.AutoExtract = auto;
-        }
-
-        if (update.ClearUnrarPath)
-        {
-            next.UnrarPath = null;
-        }
-        else if (update.UnrarPath is { } tool)
-        {
-            if (!Path.IsPathFullyQualified(tool) || !tool.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            {
-                return "The UnRAR path must be the full path of an .exe file.";
-            }
-
-            next.UnrarPath = tool;
         }
 
         if (update.Folder is { } folder)
@@ -545,46 +531,22 @@ public sealed partial class ArchiveCoordinator
 
     /// <summary>Says what is wrong with a password without repeating any of it.</summary>
     private static string? DescribeBadPassword(string? password) =>
-        password is not null && password.AsSpan().IndexOfAny('\r', '\n', '\0') >= 0 ? "A RAR password cannot contain a line break." : null;
+        password is not null && password.AsSpan().IndexOfAny('\r', '\n', '\0') >= 0 ? "An archive password cannot contain a line break." : null;
 
-    private ArchiveToolStatusDto ToolStatus(ArchiveSettings settings)
+    private ArchiveToolStatusDto ToolStatus()
     {
-        var found = UnrarToolLocator.Find(settings.UnrarPath, _options.ProgramFilesDirectories, _options.PathVariable);
-        var configuredFound = !string.IsNullOrWhiteSpace(settings.UnrarPath) && File.Exists(settings.UnrarPath);
-        string message;
-        if (found is null)
-        {
-            message = string.IsNullOrWhiteSpace(settings.UnrarPath)
-                ? "UnRAR was not found. Install WinRAR or set the path to UnRAR.exe."
-                : "The chosen UnRAR path does not exist, and no other UnRAR was found.";
-        }
-        else if (configuredFound)
-        {
-            message = $"Using the chosen UnRAR at {found}.";
-        }
-        else if (!string.IsNullOrWhiteSpace(settings.UnrarPath))
-        {
-            message = $"The chosen UnRAR path does not exist, so the UnRAR at {found} is used instead.";
-        }
-        else
-        {
-            message = $"Using the UnRAR found at {found}.";
-        }
-
+        var found = SevenZipTool.Find(_options.SevenZipPath);
         return new ArchiveToolStatusDto
         {
             Found = found is not null,
             Path = found,
-            ConfiguredPath = settings.UnrarPath,
-            ConfiguredPathFound = configuredFound,
-            Message = message,
+            Message = found is null ? "The bundled 7-Zip is missing. Repair or reinstall Inbound." : "Extraction uses the 7-Zip that comes with Inbound.",
         };
     }
 
     private static ArchiveSettingsDto MapSettings(ArchiveSettings settings) => new()
     {
         AutoExtract = settings.AutoExtract,
-        UnrarPath = settings.UnrarPath,
         Destination = settings.DestinationMode switch
         {
             ArchiveDestinationMode.NamedSubfolder => "subfolder",
@@ -728,7 +690,7 @@ public sealed partial class ArchiveCoordinator
                     ExtractionFailureKind.MissingVolume => "Missing volume",
                     ExtractionFailureKind.Corrupted => "Corrupted archive",
                     ExtractionFailureKind.UnsupportedVersion => "Unsupported archive version",
-                    ExtractionFailureKind.ToolUnavailable => "UnRAR unavailable",
+                    ExtractionFailureKind.ToolUnavailable => "7-Zip missing",
                     ExtractionFailureKind.DiskSpace => "Not enough disk space",
                     ExtractionFailureKind.Permission => "Permission refused",
                     ExtractionFailureKind.UnsafePath => "Unsafe archive",
