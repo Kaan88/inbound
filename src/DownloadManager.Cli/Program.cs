@@ -1,13 +1,15 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Cli;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly JsonSerializerOptions PrettyJson = new(IpcJson.Options) { WriteIndented = true };
 
@@ -65,7 +67,13 @@ internal static class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--package KEY] [--package-name NAME] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR | --to FAVORITE] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--direct] [--wait]");
+                    return 2;
+                }
+
+                if (await new DirectAddCheck(client, args).WhyNotAsync(optionArgs[0]).ConfigureAwait(false) is { } refused)
+                {
+                    Console.Error.WriteLine(refused);
                     return 2;
                 }
 
@@ -76,10 +84,17 @@ internal static class Program
                     return 2;
                 }
 
+                var (dest, destError) = await DestinationAsync(client, args).ConfigureAwait(false);
+                if (destError is not null)
+                {
+                    Console.Error.WriteLine(destError);
+                    return 2;
+                }
+
                 var request = new AddJobRequest
                 {
                     Url = optionArgs[0],
-                    DestinationDirectory = GetOption(args, "--dest"),
+                    DestinationDirectory = dest,
                     FileName = GetOption(args, "--name"),
                     CategoryId = GetOption(args, "--category"),
                     StartMode = GetOption(args, "--start") ?? "now",
@@ -93,6 +108,17 @@ internal static class Program
                     PackageName = GetOption(args, "--package-name"),
                     Source = "cli",
                 };
+                if (GetOption(args, "--priority") is { } priorityText)
+                {
+                    if (!JobPriorities.TryParse(priorityText, out var priority))
+                    {
+                        Console.Error.WriteLine("--priority expects high, normal, or low.");
+                        return 2;
+                    }
+
+                    request.Priority = priority;
+                }
+
                 if (int.TryParse(GetOption(args, "--connections"), out var connections))
                 {
                     request.Connections = connections;
@@ -209,7 +235,7 @@ internal static class Program
             {
                 if (optionArgs.Length < 1)
                 {
-                    Console.Error.WriteLine("usage: import <file.json> [--start now|later] [--yes]");
+                    Console.Error.WriteLine("usage: import <file.json> [--start now|later] [--direct] [--yes]");
                     return 2;
                 }
 
@@ -239,6 +265,7 @@ internal static class Program
                 }
 
                 var startOverride = GetOption(args, "--start");
+                var check = new DirectAddCheck(client, args);
                 var accepted = 0;
                 var duplicates = 0;
                 var failed = 0;
@@ -255,6 +282,13 @@ internal static class Program
 
                     try
                     {
+                        if (await check.WhyNotAsync(entry.Url).ConfigureAwait(false) is { } refused)
+                        {
+                            failed++;
+                            firstError ??= refused;
+                            continue;
+                        }
+
                         var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
                         {
                             Url = entry.Url,
@@ -348,6 +382,26 @@ internal static class Program
                 return PrintAction(reply, json);
             }
 
+            case "priority":
+            {
+                if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var priorityId) ||
+                    !JobPriorities.TryParse(optionArgs[1], out var priority))
+                {
+                    Console.Error.WriteLine("usage: priority <job-id> high|normal|low");
+                    return 2;
+                }
+
+                var reply = await client.RequestAsync(MessageTypes.JobUpdate,
+                    new JobUpdateRequest { JobId = priorityId, Priority = priority }).ConfigureAwait(false);
+                return PrintAction(reply, json);
+            }
+
+            case "archive":
+                return await ArchiveCommands.RunAsync(client, args.Skip(1).ToArray(), json).ConfigureAwait(false);
+
+            case "package":
+                return await PackageAsync(client, optionArgs, json).ConfigureAwait(false);
+
             case "pause":
                 return await SimpleJobActionAsync(client, optionArgs, MessageTypes.JobPause, json).ConfigureAwait(false);
             case "resume":
@@ -357,12 +411,17 @@ internal static class Program
             {
                 if (optionArgs.Length < 2 || !Guid.TryParse(optionArgs[0], out var refreshId))
                 {
-                    Console.Error.WriteLine("usage: refresh <job-id> <new-url>");
+                    Console.Error.WriteLine("usage: refresh <job-id> <new-url> [--direct]");
                     return 2;
                 }
 
                 var reply = await client.RequestAsync(MessageTypes.JobRefreshUrl,
-                    new JobRefreshUrlRequest { JobId = refreshId, Url = optionArgs[1] }).ConfigureAwait(false);
+                    new JobRefreshUrlRequest
+                    {
+                        JobId = refreshId,
+                        Url = optionArgs[1],
+                        ExplicitDirect = args.Contains("--direct", StringComparer.OrdinalIgnoreCase),
+                    }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
             case "cancel":
@@ -404,6 +463,8 @@ internal static class Program
                 var reply = await client.RequestAsync(MessageTypes.JobsResumeAll, new { }).ConfigureAwait(false);
                 return PrintAction(reply, json);
             }
+            case "remote":
+                return await RemoteAsync(client, args, json).ConfigureAwait(false);
             case "queue":
                 return await QueueAsync(client, args, json).ConfigureAwait(false);
             case "schedule":
@@ -412,6 +473,8 @@ internal static class Program
                 return await SiteAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
+            case "folders":
+                return await FoldersAsync(client, json).ConfigureAwait(false);
             case "host":
             {
                 var sub = optionArgs.FirstOrDefault()?.ToLowerInvariant();
@@ -501,6 +564,93 @@ internal static class Program
                 PrintHelp();
                 return 2;
         }
+    }
+
+    private static async Task<int> PackageAsync(CliClient client, string[] positional, bool json)
+    {
+        const string usage = "usage: package list | package pause|resume|cancel|unqueue <package-id> | " +
+                             "package queue <package-id> <queue-id> | package priority <package-id> high|normal|low";
+        var action = positional.FirstOrDefault()?.ToLowerInvariant();
+        if (action == "list")
+        {
+            var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
+            if (json)
+            {
+                PrintJson(snapshot.Settings.DownloadGroups);
+                return 0;
+            }
+
+            if (snapshot.Settings.DownloadGroups.Count == 0)
+            {
+                Console.WriteLine("No packages.");
+            }
+
+            foreach (var group in snapshot.Settings.DownloadGroups)
+            {
+                var children = group.JobIds.Select(id => snapshot.Jobs.FirstOrDefault(job => job.Id == id))
+                    .Where(job => job is not null).Select(job => job!).ToList();
+                var summary = DownloadGroupSummary.Create(children);
+                var queue = PackageRules.QueueText(children);
+                Console.WriteLine($"{group.Id:N}  {summary.State,-10} {summary.CompletedCount}/{summary.MemberCount}  queue {(queue.Length == 0 ? "-" : queue)}  {group.Name}");
+            }
+
+            return 0;
+        }
+
+        if (action is not ("pause" or "resume" or "cancel" or "queue" or "unqueue" or "priority") ||
+            !Guid.TryParse(positional.ElementAtOrDefault(1), out var packageId))
+        {
+            Console.Error.WriteLine(usage);
+            return 2;
+        }
+
+        var request = new GroupActionRequest { GroupId = packageId, Action = action };
+        if (action == "queue")
+        {
+            if (!int.TryParse(positional.ElementAtOrDefault(2), out var queueId))
+            {
+                Console.Error.WriteLine(usage);
+                return 2;
+            }
+
+            request.QueueId = queueId;
+        }
+        else if (action == "priority")
+        {
+            if (!JobPriorities.TryParse(positional.ElementAtOrDefault(2), out var priority))
+            {
+                Console.Error.WriteLine(usage);
+                return 2;
+            }
+
+            request.Priority = priority;
+        }
+
+        var reply = await client.RequestAsync(MessageTypes.GroupAction, request).ConfigureAwait(false);
+        var result = reply.GetPayload<GroupActionResult>();
+        if (json)
+        {
+            PrintJson(result);
+        }
+        else
+        {
+            Console.WriteLine($"changed {result.Changed} file(s)");
+            if (result.LeftCancelled > 0)
+            {
+                Console.WriteLine($"{result.LeftCancelled} cancelled file(s) stayed cancelled; resume them one by one.");
+            }
+
+            if (!result.Ok)
+            {
+                Console.Error.WriteLine($"failed: {result.Error}");
+                foreach (var (id, error) in result.FailedJobs)
+                {
+                    Console.Error.WriteLine($"  {id:N}: {error}");
+                }
+            }
+        }
+
+        return result.Ok ? 0 : 1;
     }
 
     private static async Task<int> SimpleJobActionAsync(CliClient client, string[] positional, string type, bool json)
@@ -967,7 +1117,7 @@ internal static class Program
     {
         if (positional.Length == 0)
         {
-            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--wait] [--yes]");
+            Console.Error.WriteLine("usage: add-batch <pattern> [--dest DIR] [--start now|later] [--connections N] [--queue ID] [--priority high|normal|low] [--direct] [--wait] [--yes]");
             return 2;
         }
 
@@ -1003,7 +1153,13 @@ internal static class Program
         int? queueId = int.TryParse(GetOption(args, "--queue"), out var parsedQueue)
             ? parsedQueue
             : null;
-        var destination = GetOption(args, "--dest");
+        var (destination, destinationError) = await DestinationAsync(client, args).ConfigureAwait(false);
+        if (destinationError is not null)
+        {
+            Console.Error.WriteLine(destinationError);
+            return 2;
+        }
+
         var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
         if (conflict is not null && conflict is not ("rename" or "overwrite" or "fail"))
         {
@@ -1011,11 +1167,35 @@ internal static class Program
             return 2;
         }
 
+        int? priority = null;
+        if (GetOption(args, "--priority") is { } priorityText)
+        {
+            if (!JobPriorities.TryParse(priorityText, out var parsedPriority))
+            {
+                Console.Error.WriteLine("--priority expects high, normal, or low.");
+                return 2;
+            }
+
+            priority = parsedPriority;
+        }
+
         var results = new List<(string Url, AddJobResponse Result)>();
+        var check = new DirectAddCheck(client, args);
         foreach (var url in urls)
         {
             try
             {
+                if (await check.WhyNotAsync(url).ConfigureAwait(false) is { } refused)
+                {
+                    results.Add((url, new AddJobResponse { Accepted = false, Error = refused }));
+                    if (!json)
+                    {
+                        Console.Error.WriteLine($"Failed: {url}: {refused}");
+                    }
+
+                    continue;
+                }
+
                 var reply = await client.RequestAsync(MessageTypes.JobAdd, new AddJobRequest
                 {
                     Url = url,
@@ -1025,6 +1205,7 @@ internal static class Program
                     Source = "batch",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
+                    Priority = priority,
                 }).ConfigureAwait(false);
                 var result = reply.GetPayload<AddJobResponse>();
                 results.Add((url, result));
@@ -1226,6 +1407,70 @@ internal static class Program
         }
 
         return result.Ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// <c>--dest DIR</c>, or <c>--to NAME</c> for a favorite folder by its name. Neither leaves the folder to the Host.
+    /// </summary>
+    private static async Task<(string? Folder, string? Error)> DestinationAsync(CliClient client, string[] args)
+    {
+        var dest = GetOption(args, "--dest");
+        var to = GetOption(args, "--to");
+        if (to is null) return (dest, null);
+        if (dest is not null) return (null, "Use --dest or --to, not both.");
+        var favorites = (await client.SnapshotAsync().ConfigureAwait(false)).Settings.FavoriteFolders;
+        var match = favorites.FirstOrDefault(favorite => string.Equals(favorite.Name, to.Trim(), StringComparison.OrdinalIgnoreCase));
+        return match is not null
+            ? (match.Path, null)
+            : (null, favorites.Count == 0
+                ? $"No favorite folder is named \"{to}\". There are no favorites yet; add them in Options or with the star beside a folder box."
+                : $"No favorite folder is named \"{to}\". Favorites: {string.Join(", ", favorites.Select(favorite => favorite.Name))}.");
+    }
+
+    /// <summary>Favorite, default and recent folders, each with the free space the Host measures for it.</summary>
+    private static async Task<int> FoldersAsync(CliClient client, bool json)
+    {
+        var settings = (await client.SnapshotAsync().ConfigureAwait(false)).Settings;
+        var rows = new List<(string Kind, string Name, string Path)>();
+        foreach (var favorite in settings.FavoriteFolders) rows.Add(("favorite", favorite.Name, favorite.Path));
+        if (!string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory)) rows.Add(("default", "", settings.DefaultDownloadDirectory));
+        foreach (var recent in settings.RecentDestinationDirectories) rows.Add(("recent", "", recent));
+        var reply = await client.RequestAsync(MessageTypes.FolderSpace, new FolderSpaceRequest { Paths = rows.Select(row => row.Path).ToList() })
+            .ConfigureAwait(false);
+        var measured = reply.Type == MessageTypes.FolderSpaceResult ? reply.GetPayload<FolderSpaceResult>().Folders : new List<FolderSpaceDto>();
+        FolderSpaceDto? SpaceOf(string path) => measured.FirstOrDefault(folder => string.Equals(folder.Path, path.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (json)
+        {
+            PrintJson(rows.Select(row => new
+            {
+                kind = row.Kind,
+                name = row.Name.Length == 0 ? null : row.Name,
+                path = row.Path,
+                freeBytes = SpaceOf(row.Path)?.FreeBytes,
+                totalBytes = SpaceOf(row.Path)?.TotalBytes,
+                insideContainer = SpaceOf(row.Path)?.InsideContainer ?? false,
+            }));
+            return 0;
+        }
+
+        foreach (var row in rows)
+        {
+            var space = SpaceOf(row.Path);
+            var free = space?.FreeBytes is { } bytes
+                ? $"{SizeText(bytes)} free" + (space.TotalBytes is { } total ? $" of {SizeText(total)}" : "")
+                : "space unknown";
+            if (space?.InsideContainer == true) free += "  (not on a mounted volume)";
+            var label = row.Name.Length > 0 ? $"{row.Kind} \"{row.Name}\"" : row.Kind;
+            Console.WriteLine($"{label,-24} {row.Path}  {free}");
+        }
+
+        return 0;
+    }
+
+    private static string SizeText(long bytes)
+    {
+        const double Kb = 1024, Mb = Kb * 1024, Gb = Mb * 1024, Tb = Gb * 1024;
+        return bytes >= Tb ? $"{bytes / Tb:N1} TB" : bytes >= Gb ? $"{bytes / Gb:N1} GB" : bytes >= Mb ? $"{bytes / Mb:N0} MB" : $"{bytes / Kb:N0} KB";
     }
 
     private static async Task<int> SettingsAsync(CliClient client, string[] args, bool json)
@@ -1518,7 +1763,8 @@ internal static class Program
             var size = job.TotalBytes is null ? FormatUtil.Bytes(job.ReceivedBytes) : FormatUtil.Bytes(job.TotalBytes.Value);
             var speed = job.BytesPerSecond is null ? "-" : $"{FormatUtil.Bytes((long)job.BytesPerSecond.Value)}/s";
             Console.WriteLine($"{job.State,-12} {size,12} {progress,9} {speed,12}  {job.FileName}");
-            Console.WriteLine($"  {job.Id:N}  {job.Url}");
+            Console.WriteLine($"  {job.Id:N}  {ShownAddress.For(job.Url, job.AddressHidden)}");
+            if (job.StatusNote is not null) Console.WriteLine($"  {job.StatusNote}");
         }
     }
 
@@ -1526,8 +1772,9 @@ internal static class Program
     {
         Console.WriteLine($"id:       {job.Id:N}");
         Console.WriteLine($"file:     {job.FinalFilePath}");
-        Console.WriteLine($"url:      {job.Url}");
+        Console.WriteLine($"{(ShownAddress.IsHidden(job.Url, job.AddressHidden) ? "site:" : "url:"),-10}{ShownAddress.For(job.Url, job.AddressHidden)}");
         Console.WriteLine($"state:    {job.State}");
+        if (job.StatusNote is not null) Console.WriteLine($"note:     {job.StatusNote}");
         Console.WriteLine($"queue:    {job.QueueId}:{job.QueueName}");
         Console.WriteLine($"part:     {job.PartFilePath}");
         Console.WriteLine($"bytes:    {job.ReceivedBytes} / {job.TotalBytes?.ToString() ?? "unknown"}");
@@ -1615,11 +1862,13 @@ internal static class Program
             Download Manager CLI
 
             Usage:
-              dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--wait]
+              dm add <url> [--dest DIR | --to FAVORITE] [--name NAME] [--category ID] [--start now|later] [--direct] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
-                          [--conflict rename|overwrite|fail]
-              dm add-batch <pattern> [--dest DIR] [--start now|later] [--wait] [--yes]
+                          [--conflict rename|overwrite|fail] [--priority high|normal|low]
+              dm folders [--json]   favorite, default and recent folders with free space
+              dm add-batch <pattern> [--dest DIR | --to FAVORITE] [--start now|later] [--direct] [--wait] [--yes]
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
+                          [--priority high|normal|low]
               dm list [--json]
               dm status <job-id> [--json]
               dm open|reveal <job-id>
@@ -1627,9 +1876,22 @@ internal static class Program
               dm profile list|add|remove
               dm update check|download|install
               dm export <file.json>
-              dm import <file.json> [--start now|later] [--yes]
+              dm import <file.json> [--start now|later] [--direct] [--yes]
               dm pause|resume|retry <job-id>
-              dm refresh <job-id> <new-url>
+              dm priority <job-id> high|normal|low
+              dm package list
+              dm package pause|resume|cancel|unqueue <package-id>
+              dm package queue <package-id> <queue-id>
+              dm package priority <package-id> high|normal|low
+              dm archive status|list
+              dm archive extract <path> | --job ID | --package ID [--password-stdin]
+              dm archive password <set-id> | --package ID | --file PATH  (password from stdin)
+              dm archive retry|cancel|remove <set-id>
+              dm archive settings [--auto-extract on|off]
+                          [--destination next|subfolder|folder] [--folder PATH]
+                          [--preserve-folders on|off] [--conflict rename|overwrite|skip]
+                          [--archives keep|delete]
+              dm refresh <job-id> <new-url> [--direct]
               dm cancel|remove <job-id> [--keep-file]
               dm pause-all | resume-all
               dm queue list|add|start|stop|max|move|quota
@@ -1639,6 +1901,25 @@ internal static class Program
               dm site list|add|remove
               dm settings [get] | settings set <key> <value>
               | settings export <file.json> | settings import <file.json>
+              dm remote status
+              dm remote key set        (reads the key from standard input, never from the command line)
+              dm remote key clear
+              dm remote classify <link>
+              dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
+                          [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
+                          [--archive-password-stdin]
+              dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
+              dm remote list
+              dm remote files <id>
+              dm remote select <id> all|<file-id>...
+              dm remote retry <id> [--approve-uncached] [--link-password-stdin]
+              dm remote check [<id>]
+              dm remote remove <id> [--delete-from-provider --yes]
+              dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
+              dm remote archive-password <id>   (from standard input; empty clears it)
+              dm remote container <file.rsdf|file.ccf|file.dlc> [--add ID,ID | --all] [--dest DIR]
+                          [--approve-uncached] [--queue ID] [--start startNow|queue|later]
+              dm remote container-send-jd <file.dlc|file.ccf>
               dm host status|open|shutdown
               dm doctor [--no-start]
 
@@ -1653,7 +1934,25 @@ internal sealed class HostUnavailableException(string message) : Exception(messa
 
 internal sealed class CliClient : IAsyncDisposable
 {
+    private const uint HandleFlagInherit = 1;
+
     private readonly IpcClient _client;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int which);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+    /// <summary>Input, output and error. Nothing to do when one isn't there or can't be changed, as for a console's own.</summary>
+    private static void KeepStandardHandlesFromChildren()
+    {
+        foreach (var which in new[] { -10, -11, -12 })
+        {
+            SetHandleInformation(GetStdHandle(which), HandleFlagInherit, 0);
+        }
+    }
 
     private CliClient(IpcClient client)
     {
@@ -1692,6 +1991,10 @@ internal sealed class CliClient : IAsyncDisposable
                    ?? throw new HostUnavailableException("Could not find DownloadManager.Host.exe. Build or install the host first.");
         try
         {
+            // The Host would otherwise inherit this process's standard handles and hold a script's pipe open
+            // for as long as it runs, so `dm list | findstr` would never end. Not through the shell: that can
+            // put a security warning on the desktop and wait for it.
+            KeepStandardHandlesFromChildren();
             Process.Start(new ProcessStartInfo
             {
                 FileName = host,

@@ -12,9 +12,10 @@ namespace DownloadManager.Desktop.WinUI;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly ObservableCollection<JobViewModel> _visibleJobs = new();
+    private ObservableCollection<JobViewModel> _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
+    private readonly RemoteClient _remote;
     private MenuFlyoutSubItem? _addToQueueMenu;
     private List<DownloadGroupDto> _groups = new();
     private readonly Dictionary<Guid, JobViewModel> _packageRows = new();
@@ -26,6 +27,7 @@ public sealed partial class MainWindow : Window
     private bool _pendingSettingsOpen;
     private string _category = "all";
     private string _search = string.Empty;
+    private readonly PassingLine _passing;
     private string _sortKey = "added";
     private bool _sortAscending;
     private bool _toolbarLarge = true;
@@ -43,6 +45,13 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+
+        // Its one timer is kept with it for the window's life. See PassingLine for why that matters.
+        _passing = new PassingLine(tick => new DispatcherOneShot(DispatcherQueue, PassingLine.Time, tick));
+        _passing.Ended += UpdateStatusText;
+        FolderChooser.Measure = paths => _connection.GetFolderSpaceAsync(paths);
+        FolderChooser.Settings = () => _settings;
+        FolderChooser.SaveFavorites = SaveFavoritesAsync;
         RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
             ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
             : ElementTheme.Default;
@@ -67,8 +76,12 @@ public sealed partial class MainWindow : Window
         {
             DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
             ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
+            StatusBrushes.UseTheme(RootGrid.ActualTheme);
+            // They share the status colors, so they can't be left on the other theme.
+            foreach (var window in _providerWindows.Values) window.UseTheme(RootGrid.RequestedTheme);
         };
         DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
+        StatusBrushes.UseTheme(RootGrid.ActualTheme);
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
         UiTrace.Write("MainWindow collections initialized");
@@ -77,7 +90,10 @@ public sealed partial class MainWindow : Window
         {
             var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
             var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
-            AppWindow.Resize(new SizeInt32(width, height));
+
+            // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
+            if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
+            else AppWindow.Resize(new SizeInt32(width, height));
             WindowPlacement.Track(this, "main");
             var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
             if (File.Exists(icon))
@@ -109,6 +125,16 @@ public sealed partial class MainWindow : Window
         _connection.Start();
         UiTrace.Write("MainWindow connection started");
 
+        InitializeListHeader();
+
+        // On connections of its own: nothing it waits for can hold up the one above.
+        _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        InitializeRemoteUi();
+        InitializeArchiveUi();
+        _remote.Start();
+
+        // Otherwise WinUI floats a shortcut's name over the window whenever the pointer rests on the root.
+        RootGrid.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.N,
             Windows.System.VirtualKeyModifiers.Control,
@@ -128,17 +154,11 @@ public sealed partial class MainWindow : Window
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () =>
-            {
-                _sortKey = "size";
-                _sortAscending = false;
-                RebuildVisible();
-            }));
+            () => ApplySort("size", ascending: false)));
 
-        _sortKey = _uiState.SortKey is "added" or "name" or "size" or "status" or "rate" or "lastTry"
-            ? _uiState.SortKey
-            : "added";
+        _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
         _sortAscending = _uiState.SortAscending;
+        _jobsHeader.ShowSort(_sortKey, _sortAscending);
         _toolbarLarge = _uiState.ToolbarLarge;
         _hideCategories = _uiState.HideCategories;
         HideCategoriesMenuItem.IsChecked = _hideCategories;
@@ -159,6 +179,10 @@ public sealed partial class MainWindow : Window
             else if (_uiState.Category.StartsWith("category:", StringComparison.Ordinal))
             {
                 _category = _uiState.Category; // Restored once Host category definitions arrive.
+            }
+            else if (_uiState.Category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) || _uiState.Category == ArchiveSetsTag)
+            {
+                _pendingRemoteCategory = _uiState.Category; // Restored once the Host says what it has.
             }
         }
 
@@ -267,6 +291,9 @@ public sealed partial class MainWindow : Window
             {
                 _visibleJobs.Remove(removed);
                 if (removed.PackageId is not null) RebuildVisible();
+
+                // A record whose last file left the list now needs a row of its own.
+                if (_setByJob.ContainsKey(job.Id)) QueueArchiveSync();
             }
         }
         else if (PackageOf(job.Id) is { } package)
@@ -278,6 +305,8 @@ public sealed partial class MainWindow : Window
             }
 
             member.Update(job);
+            ShowProviderSource(member);
+            ShowArchiveState(member);
             var row = _packageRows.GetValueOrDefault(package.Id);
             var shouldShow = row is not null && row.IsExpanded && Matches(member);
             if (row is null || member.PackageId != package.Id || shouldShow != _visibleJobs.Contains(member))
@@ -294,6 +323,8 @@ public sealed partial class MainWindow : Window
             }
 
             vm.Update(job);
+            ShowProviderSource(vm);
+            ShowArchiveState(vm);
             if (vm.PackageId is not null)
             {
                 // It just left its package.
@@ -308,7 +339,8 @@ public sealed partial class MainWindow : Window
             {
                 if (!isVisible)
                 {
-                    _visibleJobs.Insert(0, vm);
+                    // Under the remote rows, which stay on top.
+                    _visibleJobs.Insert(_visibleJobs.TakeWhile(row => row.IsSideRow).Count(), vm);
                 }
             }
             else if (isVisible)
@@ -323,7 +355,11 @@ public sealed partial class MainWindow : Window
 
         // Preserve notifications for headless jobs when the main UI is already open.
         if (changeType == "completed" && job.Source == "cli" && (job.ShowCompletionDialog ?? _settings?.ShowCompletionDialog) == true)
-            OpenDownloadWindow(job.Id);
+        {
+            // A package opens one window, when its last file is done, as the Host does for the other sources.
+            if (PackageOf(job.Id) is not { } package) OpenDownloadWindow(job.Id);
+            else if (PackageMembers(package).All(member => member.State == "completed")) OpenPackageWindow(package.Id);
+        }
     }
 
     private void ApplyConnection(bool connected, string? error)
@@ -334,23 +370,42 @@ public sealed partial class MainWindow : Window
             ? "Host connected"
             : $"Host unavailable{(error is null ? string.Empty : $": {error}")}";
         if (connected) UpdateStatusText();
-        if (!connected)
-        {
-            EmptyText.Visibility = Visibility.Visible;
-        }
 
+        // The rows stay on the list while the Host is away, so it isn't empty.
+        EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
 
-    private JobViewModel? SelectedJob => JobsList.SelectedItem as JobViewModel is { IsPackage: false } job ? job : null;
+    /// <summary>What single-item commands act on. A remote row is never it: those have commands of their own.</summary>
+    private JobViewModel? FirstLocalRow => JobsList.SelectedItem is JobViewModel { IsSideRow: false } row
+        ? row
+        : JobsList.SelectedItems.OfType<JobViewModel>().FirstOrDefault(candidate => !candidate.IsSideRow);
+
+    private JobViewModel? SelectedJob => FirstLocalRow is { IsPackage: false } job ? job : null;
 
     /// <summary>Selected files; a selected package row contributes all of its files.</summary>
     private List<JobViewModel> SelectedJobs =>
         JobsList.SelectedItems.OfType<JobViewModel>()
+            .Where(row => !row.IsSideRow)
             .SelectMany(row => row.IsPackage ? row.Children : [row])
             .Distinct().ToList();
 
-    private JobViewModel? SelectedPackage => JobsList.SelectedItem as JobViewModel is { IsPackage: true } row ? row : null;
+    private JobViewModel? SelectedPackage => FirstLocalRow is { IsPackage: true } row ? row : null;
+
+    /// <summary>Selected package rows. The Host acts on each as one unit.</summary>
+    private List<JobViewModel> SelectedPackageRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsPackage).ToList();
+
+    /// <summary>Selected file rows that a selected package row does not already cover.</summary>
+    private List<JobViewModel> SelectedLooseFiles
+    {
+        get
+        {
+            var packages = SelectedPackageRows.Select(row => row.Id).ToHashSet();
+            return JobsList.SelectedItems.OfType<JobViewModel>()
+                .Where(row => !row.IsSideRow && !row.IsPackage && (row.PackageId is not { } package || !packages.Contains(package)))
+                .ToList();
+        }
+    }
 
     /// <summary>The package a job is shown in; only packages with at least two listed files count.</summary>
     private DownloadGroupDto? PackageOf(Guid jobId) =>
@@ -364,14 +419,67 @@ public sealed partial class MainWindow : Window
     {
         var connected = _connection?.IsConnected ?? false;
         var selection = SelectedJobs;
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
         AddButton.IsEnabled = connected;
-        PauseButton.IsEnabled = connected && selection.Any(job => job.CanPause);
-        ResumeButton.IsEnabled = connected && selection.Any(job => job.CanResume);
-        DeleteButton.IsEnabled = connected && selection.Count > 0;
+        PauseButton.IsEnabled = connected && rows.Any(row => row.CanPause);
+        ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
+        CancelPackageButton.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
+        CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
+        var sideRows = rows.Count(row => row.IsSideRow);
+        var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
+        DeleteButton.IsEnabled = connected && (selection.Count > 0 || removableSideRows > 0);
+        var deleteToolTip = FirstLocalRow is null && sideRows > 0 ? "Remove the selected rows from the list" : "Delete the selected download and its partial data";
+        if (deleteToolTip != _deleteToolTip) ToolTipService.SetToolTip(DeleteButton, _deleteToolTip = deleteToolTip);
+        SyncFileMenu(sideRows, removableSideRows);
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
         StartQueueButton.IsEnabled = connected && _settings is not null;
         StopQueueButton.IsEnabled = connected && _settings is not null;
+        SyncArchiveMenus();
+    }
+
+    private string _deleteToolTip = string.Empty;
+
+    /// <summary>A command with nothing to act on is dimmed and says why in its own words, like Extract.</summary>
+    private void SyncFileMenu(int sideRows, int removableSideRows)
+    {
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true);
+        Apply(FileOpenItem, "Open", plan.OpenReason);
+        Apply(FileOpenFolderItem, "Open Folder", plan.OpenReason);
+        Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
+        Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+        Apply(FileDownloadNowItem, "Download Now", plan.LocalReason, rows.Any(row => row.CanResume));
+        Apply(FileStopItem, "Stop Download", plan.LocalReason, rows.Any(row => row.CanPause));
+        Apply(FileRedownloadItem, "Redownload", plan.FileReason);
+        Apply(FileRemoveItem, "Remove", plan.RemoveReason);
+
+        static void Apply(MenuFlyoutItem item, string text, string? reason, bool canAct = true)
+        {
+            var label = FileMenuRules.Label(text, reason);
+            if (item.Text != label) item.Text = label;
+            var on = reason is null && canAct;
+            if (item.IsEnabled != on) item.IsEnabled = on;
+        }
+    }
+
+    /// <summary>A message about something just done. The usual counts come back by themselves.</summary>
+    private void ShowPassingStatus(string words)
+    {
+        _passing.Show(words);
+        StatusText.Text = words;
+        StatusAnnouncer.Text = words;
+
+        // A set name replaces the text for a screen reader, so the words have to be the name.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(StatusAnnouncer, words);
+        LiveRegion.Announce(StatusAnnouncer);
+    }
+
+    /// <summary>Puts the counts back now, rather than when a passing line's time is up.</summary>
+    private void EndPassingStatus()
+    {
+        _passing.End();
+        UpdateStatusText();
     }
 
     private void UpdateStatusText()
@@ -393,6 +501,14 @@ public sealed partial class MainWindow : Window
             StatusText.Text += $"  ({selected} selected)";
         }
 
+        // One selected row with no local file: what is known about it, which the Description column may have off screen.
+        if (FirstLocalRow is null && JobsList.SelectedItems.Count == 1 && JobsList.SelectedItem is JobViewModel { IsSideRow: true } side && side.Description.Length > 0)
+        {
+            StatusText.Text = $"{side.FileName}: {side.Description}";
+        }
+
+        if (_passing.Words is { } passing) StatusText.Text = passing;
+
         if (_status?.StateDirectory is { } stateDirectory)
         {
             ToolTipService.SetToolTip(StatusText, stateDirectory);
@@ -407,7 +523,8 @@ public sealed partial class MainWindow : Window
             if (job.FileName.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
                 job.Url.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
                 job.Description.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
-                job.DetailText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0)
+                job.DetailText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0 &&
+                job.ArchiveText.IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0)
             {
                 return false;
             }
@@ -422,12 +539,15 @@ public sealed partial class MainWindow : Window
             "queued" => job.State is "queued" or "paused",
             "failed" => job.State == "failed",
             "compressed" or "documents" or "music" or "programs" or "video" or "other" => job.CategoryId == _category,
+            _ when _category.StartsWith(RemoteWaitingTag, StringComparison.Ordinal) => false,
+            ArchiveSetsTag => false,
             _ when _category.StartsWith("category:", StringComparison.Ordinal) => job.CategoryId == _category[9..],
             _ => true,
         };
     }
 
-    private void RebuildVisible(Guid? selectedId = null)
+    /// <param name="sorting">The rows are being put in a new order, and the caller then shows where the list should be.</param>
+    private void RebuildVisible(Guid? selectedId = null, bool sorting = false)
     {
         // Keep the whole (multi-)selection by id. Clearing the collection can leave the
         // ListView selecting row 0, so the selection is always rebuilt explicitly below.
@@ -448,36 +568,42 @@ public sealed partial class MainWindow : Window
             if (!members.Any(Matches)) continue;
             if (!_packageRows.TryGetValue(group.Id, out var row)) _packageRows[group.Id] = row = new JobViewModel();
             row.UpdatePackage(group, members, _uiState.ExpandedPackages.Contains(group.Id));
+            ShowPackageArchiveState(row);
             liveRows.Add(group.Id);
             top.Add(row);
         }
         foreach (var stale in _packageRows.Keys.Where(id => !liveRows.Contains(id)).ToList()) _packageRows.Remove(stale);
         foreach (var job in _jobsById.Values)
         {
+            ShowProviderSource(job);
+            ShowArchiveState(job);
             if (packaged.Contains(job.Id)) continue;
             job.PackageId = null;
             if (Matches(job)) top.Add(job);
         }
 
-        var ordered = _sortKey switch
-        {
-            "name" => _sortAscending ? top.OrderBy(j => j.FileName, NaturalStringComparer.Instance) : top.OrderByDescending(j => j.FileName, NaturalStringComparer.Instance),
-            "size" => _sortAscending ? top.OrderBy(j => j.TotalSize) : top.OrderByDescending(j => j.TotalSize),
-            "status" => _sortAscending ? top.OrderBy(j => j.State) : top.OrderByDescending(j => j.State),
-            "rate" => _sortAscending ? top.OrderBy(j => j.BytesPerSecond) : top.OrderByDescending(j => j.BytesPerSecond),
-            "lastTry" => _sortAscending ? top.OrderBy(j => j.LastUpdated) : top.OrderByDescending(j => j.LastUpdated),
-            _ => _sortAscending ? top.OrderBy(j => j.CreatedAt) : top.OrderByDescending(j => j.CreatedAt),
-        };
+        var ordered = Sorted(top);
+
+        // On top and in their own order: a sort is about local files, and these have no size or rate.
+        target.AddRange(RemoteRowsInView());
+        target.AddRange(ArchiveRowsInView());
 
         foreach (var row in ordered)
         {
             target.Add(row);
             if (row.IsPackage && row.IsExpanded)
-                foreach (var child in row.Children.Where(Matches)) target.Add(child);
+                foreach (var child in _sortKey == "added" ? row.Children.Where(Matches) : Sorted(row.Children.Where(Matches))) target.Add(child);
         }
 
         // Sync in place instead of Clear + Add: rows that stay keep their containers, so
         // progress bars do not replay from another row's value and nothing jumps.
+        // A sort can put most of a long list out of place, and one move at a time would crawl.
+        if (ListSort.ReplacesWholeList(sorting, _visibleJobs, target))
+        {
+            _visibleJobs = new ObservableCollection<JobViewModel>(target);
+            JobsList.ItemsSource = _visibleJobs;
+        }
+
         for (var i = 0; i < target.Count; i++)
         {
             if (i < _visibleJobs.Count && ReferenceEquals(_visibleJobs[i], target[i])) continue;
@@ -503,6 +629,7 @@ public sealed partial class MainWindow : Window
         var added = target.Where(row => row.PackageId is not null && !before.Contains(row)).ToList();
         if (added.Count > 0 && before.Count > 0) FadeIn(added);
 
+        UpdateEmptyText();
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -658,21 +785,18 @@ public sealed partial class MainWindow : Window
 
     private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        // One box can change many rows. It says so itself as it goes, and when it ends.
+        if (_regionKeep is not null) return;
         UpdateButtons();
         UpdateStatusText();
     }
 
-    private async void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void JobsList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Delete && SelectedJobs.Count > 0)
         {
             e.Handled = true;
             DeleteButton_Click(sender, e);
-        }
-        else if (e.Key == Windows.System.VirtualKey.Enter && SelectedJob is { } job)
-        {
-            e.Handled = true;
-            await OpenJobAsync(job);
         }
     }
 
@@ -684,6 +808,13 @@ public sealed partial class MainWindow : Window
             if (tag == "queues")
             {
                 _ = ShowQueuesAsync();
+                return;
+            }
+
+            if (tag.StartsWith(RemoteBrowseTag, StringComparison.Ordinal))
+            {
+                OpenProviderWindow(tag[RemoteBrowseTag.Length..]);
+                RestoreCategorySelection();
                 return;
             }
 
@@ -716,11 +847,24 @@ public sealed partial class MainWindow : Window
         finally { _refreshingCategories = false; }
     }
 
-    private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    private async void JobsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e) => await RunRowPrimaryAsync();
+
+    /// <summary>What double-clicking a row does. Enter does the same.</summary>
+    private async Task RunRowPrimaryAsync()
     {
         if (SelectedPackage is { } package)
         {
             TogglePackage(package);
+            return;
+        }
+        if (FirstLocalRow is null && SelectedRemoteRows is [{ RemoteJob: { } remote }])
+        {
+            await RunRemotePrimaryAsync(remote);
+            return;
+        }
+        if (FirstLocalRow is null && SelectedArchiveRows is [{ ArchiveSet: { } set }])
+        {
+            await RunArchivePrimaryAsync(set);
             return;
         }
         if (SelectedJob is { } job)
@@ -750,9 +894,10 @@ public sealed partial class MainWindow : Window
     {
         var flyout = new MenuFlyout();
         flyout.Opening += JobsContextMenu_Opening;
-        flyout.Items.Add(CreateContextItem("Open", MenuOpen_Click));
-        flyout.Items.Add(CreateContextItem("Open With…", MenuOpenWith_Click));
-        flyout.Items.Add(CreateContextItem("Open Folder", MenuOpenFolder_Click));
+        flyout.Items.Add(_menuOpen = CreateContextItem("Open", MenuOpen_Click));
+        flyout.Items.Add(_menuOpenWith = CreateContextItem("Open With…", MenuOpenWith_Click));
+        flyout.Items.Add(_menuOpenFolder = CreateContextItem("Open Folder", MenuOpenFolder_Click));
+        flyout.Items.Add(_menuShowDownload = CreateContextItem("Show Download", (_, _) => ShowDownloadsOfSelectedRecords()));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
@@ -765,29 +910,43 @@ public sealed partial class MainWindow : Window
         moveShortcut.Invoked += (_, args) =>
         {
             args.Handled = true;
-            if (SelectedJob?.State == "completed") MenuMoveRename_Click(moveRename, new RoutedEventArgs());
+            // A removed archive gets its reason from there, in the status bar.
+            if (SelectedJob is { State: "completed" }) MenuMoveRename_Click(moveRename, new RoutedEventArgs());
         };
         JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);
         _menuMoveRename = moveRename;
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
-        flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
-        flyout.Items.Add(CreateContextItem("Redownload", MenuRedownload_Click));
-        flyout.Items.Add(CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
+        flyout.Items.Add(_separatorAfterOpen = new MenuFlyoutSeparator());
+        flyout.Items.Add(_menuResume = CreateContextItem("Resume", MenuResume_Click));
+        flyout.Items.Add(_menuStop = CreateContextItem("Stop", MenuPause_Click));
+        flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
+        flyout.Items.Add(_menuRedownload = CreateContextItem("Redownload", MenuRedownload_Click));
+        flyout.Items.Add(_menuRefreshUrl = CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to Queue" };
         flyout.Items.Add(_addToQueueMenu);
-        flyout.Items.Add(CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
+        flyout.Items.Add(_menuUnqueue = CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
+        _priorityMenu = new MenuFlyoutSubItem { Text = "Priority" };
+        foreach (var priority in new[] { JobPriorities.High, JobPriorities.Normal, JobPriorities.Low })
+        {
+            var item = new ToggleMenuFlyoutItem { Text = JobPriorities.Name(priority), Tag = priority };
+            item.Click += MenuPriority_Click;
+            _priorityMenu.Items.Add(item);
+        }
+        flyout.Items.Add(_priorityMenu);
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Progress Details…", MenuProgressDetails_Click));
+        flyout.Items.Add(_menuRemove = CreateContextItem("Remove", MenuContextRemove_Click));
+        var separatorAfterRemove = new MenuFlyoutSeparator();
+        flyout.Items.Add(separatorAfterRemove);
+        var progressDetails = CreateContextItem("Progress Details…", MenuProgressDetails_Click);
+        flyout.Items.Add(progressDetails);
         flyout.Items.Add(_menuGroup = CreateContextItem("Group into Package…", MenuGroupSelected_Click));
         flyout.Items.Add(_menuUngroup = CreateContextItem("Remove from Package", MenuUngroup_Click));
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
-        flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
+        flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
+        _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuRemove, separatorAfterRemove, progressDetails, _menuProperties]);
+        AddRemoteContextItems(flyout);
         JobsList.ContextFlyout = flyout;
     }
 
@@ -798,20 +957,73 @@ public sealed partial class MainWindow : Window
         return item;
     }
 
+    private MenuFlyoutItem? _menuOpen;
+    private MenuFlyoutItem? _menuOpenWith;
+    private MenuFlyoutItem? _menuOpenFolder;
+    private MenuFlyoutItem? _menuShowDownload;
+    private MenuFlyoutItem? _menuRemove;
+    private MenuFlyoutSeparator? _separatorAfterOpen;
+
+    /// <summary>What a record's own row keeps for the one download behind it.</summary>
+    private readonly List<MenuFlyoutItemBase> _recordFileItems = [];
     private MenuFlyoutItem? _menuMoveRename;
     private MenuFlyoutItem? _menuGroup;
     private MenuFlyoutItem? _menuUngroup;
     private MenuFlyoutItem? _menuRenamePackage;
+    private MenuFlyoutItem? _menuCancelPackage;
+    private MenuFlyoutItem? _menuRedownload;
+    private MenuFlyoutItem? _menuRefreshUrl;
+    private MenuFlyoutItem? _menuResume;
+    private MenuFlyoutItem? _menuStop;
+    private MenuFlyoutItem? _menuUnqueue;
+    private MenuFlyoutItem? _menuProperties;
+    private MenuFlyoutSubItem? _priorityMenu;
 
     private void JobsContextMenu_Opening(object? sender, object e)
     {
         // Offer only what applies to the current selection.
         var selection = SelectedJobs;
-        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed";
+        ShowContextItemsForSelection();
+
+        // The same words as the File menu: a package row has no one file for these to act on.
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true);
+        SayIfNoFile(_menuOpen, "Open", plan.OpenReason);
+        SayIfNoFile(_menuOpenWith, "Open With…", plan.OpenReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.OpenReason);
+        SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
+        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
+        SayIfNoFile(_menuRedownload, "Redownload", plan.FileReason);
+        SayIfNoFile(_menuRefreshUrl, "Refresh Download Address…", plan.FileReason);
+        SayIfNoFile(_menuProperties, "Properties", plan.FileReason);
+        if (_menuResume is not null) _menuResume.IsEnabled = rows.Any(row => row.CanResume);
+        if (_menuStop is not null) _menuStop.IsEnabled = rows.Any(row => row.CanPause);
+        if (_menuUnqueue is not null) _menuUnqueue.IsEnabled = selection.Any(job => !string.IsNullOrEmpty(job.QueueText));
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
-        if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
+        if (_menuGroup is not null) _menuGroup.Visibility = Show(FileMenuRules.CanGroup(selection.Count, rows.Count(row => !row.IsSideRow)));
         if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
+        // A provider's file has no address of its own to edit or send again.
+        var providerFile = selection.Any(job => job.IsProviderFile);
+        if (_menuRedownload is not null) _menuRedownload.Visibility = Show(!providerFile);
+        if (_menuRefreshUrl is not null) _menuRefreshUrl.Visibility = Show(!providerFile);
+        if (_menuCancelPackage is not null)
+        {
+            var packages = SelectedPackageRows;
+            _menuCancelPackage.Visibility = Show(packages.Count > 0);
+            _menuCancelPackage.IsEnabled = packages.Any(row => row.CanCancelPackage);
+        }
+
+        HideLocalContextItemsIfRemoteOnly();
+        ShowArchiveContextItems();
+
+        if (_priorityMenu is not null)
+        {
+            var unfinished = selection.Where(job => job.State != "completed").ToList();
+            _priorityMenu.IsEnabled = unfinished.Count > 0;
+            foreach (var item in _priorityMenu.Items.OfType<ToggleMenuFlyoutItem>())
+                item.IsChecked = item.Tag is int priority && unfinished.Count > 0 && unfinished.All(job => job.Priority == priority);
+        }
 
         if (_addToQueueMenu is null)
         {
@@ -832,9 +1044,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static void SayIfNoFile(MenuFlyoutItem? item, string text, string? reason)
+    {
+        if (item is null) return;
+        item.Text = FileMenuRules.Label(text, reason);
+        item.IsEnabled = reason is null;
+    }
+
     private async void MenuOpen_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        if (CommandJob is { } job)
         {
             await OpenJobAsync(job);
         }
@@ -842,7 +1061,7 @@ public sealed partial class MainWindow : Window
 
     private void MenuOpenFolder_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        if (CommandJob is { } job)
         {
             OpenContainingFolder(job);
         }
@@ -850,23 +1069,97 @@ public sealed partial class MainWindow : Window
 
     private async void MenuAddToQueue_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job && sender is MenuFlyoutItem { Tag: int queueId })
+        if (sender is MenuFlyoutItem { Tag: int queueId })
         {
-            await RunActionAsync(() => _connection.MoveToQueueAsync(job.Id, queueId));
+            await RunOnSelectionAsync("Add to Queue", new GroupActionRequest { Action = "queue", QueueId = queueId },
+                _ => true, id => _connection.MoveToQueueAsync(id, queueId));
         }
     }
 
     private async void MenuDeleteFromQueue_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job && _settings is { } settings)
+        await RunOnSelectionAsync("Remove from Queue", new GroupActionRequest { Action = "unqueue" },
+            _ => true, id => _connection.DetachFromQueueAsync(id));
+    }
+
+    private async void MenuPriority_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleMenuFlyoutItem { Tag: int priority })
         {
-            await RunActionAsync(() => _connection.DetachFromQueueAsync(job.Id));
+            await RunOnSelectionAsync("Priority", new GroupActionRequest { Action = "priority", Priority = priority },
+                job => job.State != "completed", id => _connection.SetPriorityAsync(id, priority));
         }
+    }
+
+    private async void MenuCancelPackage_Click(object sender, RoutedEventArgs e)
+    {
+        var packages = SelectedPackageRows.Where(row => row.CanCancelPackage).ToList();
+        if (packages.Count == 0) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = packages.Count == 1 ? "Cancel package?" : $"Cancel {packages.Count} packages?",
+            Content = new TextBlock
+            {
+                Text = (packages.Count == 1 ? $"Cancel the unfinished files in '{packages[0].FileName}'?" : "Cancel the unfinished files in these packages?") +
+                       " Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Cancel Package",
+            CloseButtonText = "Keep Downloading",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        await RunOnSelectionAsync("Cancel Package", new GroupActionRequest { Action = "cancel" });
+    }
+
+    /// <summary>
+    /// Applies one action to the selection: each package row as one Host action, so the Host's
+    /// rules for mixed files hold, and any other selected file by itself.
+    /// </summary>
+    private async Task RunOnSelectionAsync(
+        string label,
+        GroupActionRequest packageAction,
+        Func<JobViewModel, bool>? fileEligible = null,
+        Func<Guid, Task<IpcMessage>>? fileAction = null)
+    {
+        var problems = new List<string>();
+        var notes = new List<string>();
+        var files = fileEligible is null ? [] : SelectedLooseFiles.Where(fileEligible).ToList();
+        foreach (var package in SelectedPackageRows)
+        {
+            try
+            {
+                var result = (await _connection.GroupActionAsync(new GroupActionRequest
+                {
+                    GroupId = package.Id,
+                    Action = packageAction.Action,
+                    QueueId = packageAction.QueueId,
+                    Priority = packageAction.Priority,
+                })).GetPayload<GroupActionResult>();
+                if (!result.Ok) problems.Add($"{package.FileName}: {result.Error ?? "The package could not be changed."}");
+                if (result.LeftCancelled > 0)
+                    notes.Add($"{package.FileName}: {result.LeftCancelled} cancelled file(s) stayed cancelled. Resume them one by one to bring them back.");
+            }
+            catch (Exception ex) { problems.Add($"{package.FileName}: {ex.Message}"); }
+        }
+
+        if (files.Count > 0) await RunBulkActionAsync(files, fileAction!, label);
+        else await RefreshAsync();
+        if (problems.Count > 0) await ShowMessageAsync($"{label} incomplete", string.Join(Environment.NewLine, problems.Take(5)));
+        else if (notes.Count > 0) ShowPassingStatus(string.Join("  ", notes.Take(2)));
     }
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
+        if (CommandJob is { FileRemovedAfterExtraction: true } removed)
+        {
+            ShowPassingStatus(JobNotes.NoFile(removed.StatusNote));
+            return;
+        }
+
+        if (CommandJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
             !File.Exists(job.FinalFilePath))
         {
             await ShowMessageAsync("Open with", "The completed file was not found.");
@@ -890,6 +1183,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
+            return;
+        }
+
         if (job.State != "completed")
         {
             await ShowMessageAsync("Move/Rename", "Move/Rename is available after the download completes.");
@@ -903,14 +1202,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker
-                {
-                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-                };
-                picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-                if (await picker.PickSingleFolderAsync() is { } folder) folderBox.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder) folderBox.Text = folder;
             }
             catch (Exception)
             {
@@ -986,6 +1278,37 @@ public sealed partial class MainWindow : Window
         {
             await ShowMessageAsync("Redownload", "Stop the current download before redownloading.");
             return;
+        }
+
+        // The list holds no real address for these, and sending what it does hold could only fail.
+        if (job.Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowMessageAsync("Redownload", "This file comes from a provider account, so it can't be redownloaded from here. Add it again from the account.");
+            return;
+        }
+
+        if (DownloadManager.Core.Providers.ProviderLinks.IsMasked(job.Url))
+        {
+            await ShowMessageAsync("Redownload", "This address has its key hidden, so it can't be sent again. Paste the original link to download the file again.");
+            return;
+        }
+
+        // Only a web link can be a provider's. The job may be a direct choice made on purpose, so that stays on offer.
+        if (LinkExtractor.IsWebLink(job.Url) && await ProviderAddAppliesAsync())
+        {
+            var address = await CheckGivenAddressAsync("Redownload", job.Url);
+            if (address.Way == AddressWay.Cancelled) return;
+            if (address.Way == AddressWay.Provider)
+            {
+                var provider = ProviderNameFor(address.Result);
+                var answer = await AskAsync("Redownload", RemoteText.ProviderOffer(provider), $"Add through {provider}", "Download directly");
+                if (answer == ContentDialogResult.None) return;
+                if (answer == ContentDialogResult.Primary)
+                {
+                    await ShowProviderAddAsync(AddFocus.OneAddress, [job.Url], address.Result);
+                    return;
+                }
+            }
         }
 
         try
@@ -1093,10 +1416,18 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (job.IsProviderFile)
+        {
+            await ShowMessageAsync("Refresh download address", "This file comes from a provider account, which supplies a new address by itself whenever one is needed.");
+            return;
+        }
+
+        var hidden = job.Dto is { } dto && JobAddress.IsHidden(dto);
         var input = new TextBox
         {
-            Text = job.Url,
+            Text = job.Dto is { } current ? JobAddress.RefreshStart(current) : job.Url,
             Header = "New download address",
+            PlaceholderText = hidden ? "Paste the new link, or leave empty to try the saved one" : string.Empty,
             AcceptsReturn = false,
         };
         var dialog = new ContentDialog
@@ -1111,23 +1442,49 @@ public sealed partial class MainWindow : Window
         };
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
-            string.IsNullOrWhiteSpace(input.Text))
+            (string.IsNullOrWhiteSpace(input.Text) && !hidden))
         {
             return;
         }
 
-        await RunActionAsync(() => _connection.RefreshUrlAsync(job.Id, input.Text.Trim()));
+        // The address it already has stays usable: refusing that would strand a retry of a direct download.
+        // A hidden one isn't in the box, so an empty box asks for the same.
+        var newAddress = string.IsNullOrWhiteSpace(input.Text) ? job.Url : input.Text.Trim();
+        var chosenDirect = false;
+        if (newAddress != job.Url && LinkExtractor.IsWebLink(newAddress) && await ProviderAddAppliesAsync())
+        {
+            var address = await CheckGivenAddressAsync("Refresh download address", newAddress);
+            if (address.Way == AddressWay.Cancelled) return;
+            if (address.Way == AddressWay.Provider)
+            {
+                await ShowMessageAsync("Refresh download address", RemoteText.RefreshRefused(ProviderNameFor(address.Result)));
+                return;
+            }
+
+            chosenDirect = address.ChosenDirect;
+        }
+
+        await RunActionAsync(() => newAddress == job.Url
+            ? _connection.RefreshUrlAsync(job.Id, newAddress)
+            : _connection.RefreshChangedUrlAsync(job.Id, newAddress, chosenDirect));
     }
 
     private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedPackage is { } package) { OpenPackageWindow(package.Id); return; }
-        if (SelectedJob is not { } job) return;
+        if (CommandJob is not { } job) return;
         OpenDownloadWindow(job.Id);
     }
 
     private void OpenPackageWindow(Guid packageId)
     {
+        // A package of one is an ordinary row on the list, so it gets an ordinary file's window.
+        if (ProgressDetailRules.OnlyFile(_groups.FirstOrDefault(group => group.Id == packageId), _jobsById.ContainsKey) is { } only)
+        {
+            OpenDownloadWindow(only);
+            return;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--package {packageId:D}") { UseShellExecute = false });
@@ -1258,7 +1615,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuProperties_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job || _settings is null)
+        if (CommandJob is not { } job || _settings is null)
         {
             return;
         }
@@ -1270,9 +1627,12 @@ public sealed partial class MainWindow : Window
         var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid);
         foreach (var (label, value) in new[]
         {
-            ("File", job.FileName), ("Status", job.StateText), ("Size", job.SizeText),
-            ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName), ("Source", job.SourceText),
-            ("Address", job.Url), ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
+            ("File", job.FileName), ("Status", job.StateText), ("Note", job.StatusNote), ("Size", job.SizeText),
+            ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName),
+            ("Source", job.IsProviderFile ? ProviderDisplayName(job.Dto?.RemoteProvider) : job.SourceText),
+            ("Package", job.IsProviderFile ? _groups.FirstOrDefault(group => group.JobIds.Contains(job.Id))?.Name : null),
+            (job.Dto is { } shown ? JobAddress.Label(shown) : "Address", job.IsProviderFile || job.Dto is null ? null : JobAddress.Shown(job.Dto)),
+            ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
         })
         {
             if (string.IsNullOrWhiteSpace(value)) continue;
@@ -1317,7 +1677,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Download properties",
-            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -1447,7 +1807,8 @@ public sealed partial class MainWindow : Window
             Title = "Import downloads?",
             Content = new TextBlock
             {
-                Text = $"Add {entries.Count} downloads from this file?",
+                Text = $"Add {entries.Count} downloads from this file?" +
+                    (RemoteText.UnreadableKeyNotice(_remote.State.Accounts) is { } keyNotice ? $" {keyNotice}" : string.Empty),
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Add",
@@ -1459,9 +1820,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        Dictionary<string, RemoteClassifyResult>? answers = null;
+        if (await ProviderAddAppliesAsync())
+        {
+            ShowPassingStatus($"Checking {entries.Count} addresses…");
+            answers = await ImportRouting.ClassifyAllAsync(entries.Select(entry => entry.Url).Where(LinkExtractor.IsWebLink), () => _remote.OpenClassifier());
+        }
+
         var accepted = 0;
         var failed = 0;
         string? firstError = null;
+        var toReview = new List<(string Input, RemoteClassifyResult Result)>();
         foreach (var entry in entries)
         {
             if (!Uri.TryCreate(entry.Url, UriKind.Absolute, out var uri) ||
@@ -1469,6 +1838,21 @@ public sealed partial class MainWindow : Window
             {
                 failed++;
                 firstError ??= $"Invalid URL: {entry.Url}";
+                continue;
+            }
+
+            var answer = answers?.GetValueOrDefault(entry.Url);
+            var way = ImportRouting.WayFor(entry.Url, answer);
+            if (way == ImportWay.Refused)
+            {
+                failed++;
+                firstError ??= RemoteText.AddLineWords(new AddLine(entry.Url) { Result = answer }, ProviderNameFor(answer)).Detail;
+                continue;
+            }
+
+            if (way == ImportWay.Review)
+            {
+                if (toReview.All(line => line.Input != entry.Url)) toReview.Add((entry.Url, answer!));
                 continue;
             }
 
@@ -1507,9 +1891,11 @@ public sealed partial class MainWindow : Window
         }
 
         await RefreshAsync();
-        await ShowMessageAsync("Import download list",
-            $"Added {accepted} of {entries.Count} downloads" +
-            (failed > 0 ? $"; {failed} failed. {firstError}" : "."));
+        await ShowMessageAsync("Import download list", RemoteText.ImportSummary(accepted, entries.Count, failed, firstError, toReview.Count));
+        if (toReview.Count > 0 && !await ShowProviderAddAsync(AddFocus.ImportedLinks, answered: toReview))
+        {
+            ShowPassingStatus(RemoteText.ImportReviewNotOpened(accepted, entries.Count, failed, toReview.Count));
+        }
     }
 
     private void MenuAdd_Click(object sender, RoutedEventArgs e) => AddButton_Click(sender, e);
@@ -1530,11 +1916,20 @@ public sealed partial class MainWindow : Window
 
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);
     private void MenuResume_Click(object sender, RoutedEventArgs e) => ResumeButton_Click(sender, e);
+
+    /// <summary>On a record's row this is the download behind it. The record has a line of its own, and goes with its download.</summary>
+    private async void MenuContextRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (RecordDownload is { } job) await RunBulkActionAsync([job], id => _connection.RemoveAsync(id, deleteFile: false), "Remove");
+        else MenuRemove_Click(sender, e);
+    }
+
     private async void MenuRemove_Click(object sender, RoutedEventArgs e)
     {
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
+            if (FirstLocalRow is null) await RemoveSideRowsAsync();
             return;
         }
 
@@ -1625,6 +2020,7 @@ public sealed partial class MainWindow : Window
             Title = "Clean up leftover partial files",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 MaxHeight = 320,
                 Content = new TextBlock
                 {
@@ -1715,17 +2111,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (_sortKey == key)
-        {
-            _sortAscending = !_sortAscending;
-        }
-        else
-        {
-            _sortKey = key;
-            _sortAscending = key is "name" or "status";
-        }
-
-        RebuildVisible();
+        var (next, ascending) = ListSort.Next(_sortKey, _sortAscending, key);
+        ApplySort(next, ascending);
     }
 
     private void MenuLargeToolbar_Click(object sender, RoutedEventArgs e) => SetToolbarScale(large: true);
@@ -1924,6 +2311,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var providerAdd = await ProviderAddAppliesAsync();
         var urlBox = new ComboBox
         {
             Header = "URL",
@@ -1935,6 +2323,8 @@ public sealed partial class MainWindow : Window
         {
             urlBox.Items.Add(recent);
         }
+        // With no recent addresses the list would open as an empty strip over the dialog.
+        urlBox.DropDownOpened += (_, _) => { if (urlBox.Items.Count == 0) urlBox.IsDropDownOpen = false; };
         // Like other download managers, start from a link already on the clipboard.
         try
         {
@@ -1943,7 +2333,8 @@ public sealed partial class MainWindow : Window
             {
                 var text = (await clip.GetTextAsync()).Trim();
                 if (text.Length < 4096 && Uri.TryCreate(text, UriKind.Absolute, out var clipUri) &&
-                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp))
+                    (clipUri.Scheme == Uri.UriSchemeHttp || clipUri.Scheme == Uri.UriSchemeHttps || clipUri.Scheme == Uri.UriSchemeFtp ||
+                     (providerAdd && LinkExtractor.IsMagnet(text))))
                     urlBox.Text = text;
             }
         }
@@ -1951,11 +2342,11 @@ public sealed partial class MainWindow : Window
         {
             // Clipboard access is best-effort.
         }
-        var addressError = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
-            Foreground = InboundTheme.Brush("InboundErrorTextBrush", RootGrid) };
+        var addressError = new StatusLine("Address error");
         var addressPanel = new StackPanel { Spacing = 8, MinWidth = 460 };
         addressPanel.Children.Add(urlBox);
-        addressPanel.Children.Add(addressError);
+        addressPanel.Children.Add(addressError.Text);
+        if (!providerAdd) AddUnreadableKeyNotice(addressPanel);
         var addressDialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -1966,20 +2357,50 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        addressDialog.PrimaryButtonClick += (_, args) =>
-        {
-            if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
-                candidate.Scheme is not ("http" or "https"))
-            {
-                addressError.Text = "Enter an absolute http or https URL.";
-                addressError.Visibility = Visibility.Visible;
-                args.Cancel = true;
-            }
-        };
-        if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var url = urlBox.Text.Trim();
 
-        var urlDisplay = new TextBox { Header = "URL", Text = url, IsReadOnly = true };
+        // An editable ComboBox keeps Escape for itself, even with its list closed.
+        urlBox.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Escape || urlBox.IsDropDownOpen) return;
+            args.Handled = true;
+            addressDialog.Hide();
+        };
+        string url;
+        RemoteClassifyResult? addressResult = null;
+        string? addressNote = null;
+        if (providerAdd)
+        {
+            var checkedAddress = await CheckAddressAsync(addressDialog, urlBox, addressError, addressPanel);
+            switch (checkedAddress.Way)
+            {
+                case AddressWay.Cancelled:
+                    return;
+                case AddressWay.Provider:
+                    await ShowProviderAddAsync(AddFocus.OneAddress, [checkedAddress.Input], checkedAddress.Result);
+                    return;
+            }
+
+            url = checkedAddress.Input;
+            addressResult = checkedAddress.Result;
+            addressNote = checkedAddress.Result?.Note;
+        }
+        else
+        {
+            addressDialog.PrimaryButtonClick += (_, args) =>
+            {
+                if (!Uri.TryCreate(urlBox.Text.Trim(), UriKind.Absolute, out var candidate) ||
+                    candidate.Scheme is not ("http" or "https"))
+                {
+                    addressError.Say("Enter an absolute http or https URL.", isProblem: true);
+                    args.Cancel = true;
+                }
+            };
+            if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
+            url = urlBox.Text.Trim();
+        }
+
+        // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
+        var urlDisplay = new TextBox { Header = addressResult?.Kind == "providerDirectLink" ? "Site" : "URL", Text = RemoteText.AddressToShow(url, addressResult), IsReadOnly = true };
         var nameBox = new TextBox
         {
             Header = "File name (optional)",
@@ -2008,17 +2429,8 @@ public sealed partial class MainWindow : Window
             destinationPickerError.Visibility = Visibility.Collapsed;
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker
-                {
-                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-                };
-                picker.FileTypeFilter.Add("*");
-                var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder is not null)
-                    destinationBox.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder)
+                    destinationBox.Text = folder;
             }
             catch (Exception ex)
             {
@@ -2036,6 +2448,8 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(browseDestination, 1);
         destinationRow.Children.Add(destinationBox);
         destinationRow.Children.Add(browseDestination);
+        long? knownSize = null;
+        var destinationField = FolderChooser.Attach(destinationRow, destinationBox, () => knownSize, out var refreshSpace);
         var descriptionBox = new TextBox { Header = "Description (optional)" };
         var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
         categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (from file type)" });
@@ -2179,11 +2593,14 @@ public sealed partial class MainWindow : Window
                 if (metadataClosed || generation != metadataGeneration) return;
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
-                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}\nServer name: {metadata.FileName}";
-                if (!nameEdited && !string.IsNullOrWhiteSpace(metadata.FileName))
+                knownSize = metadata.TotalBytes;
+                refreshSpace();
+                var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
+                metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}" + (serverName is null ? string.Empty : $"\nServer name: {serverName}");
+                if (!nameEdited && serverName is not null)
                 {
                     assigningServerName = true;
-                    nameBox.Text = metadata.FileName;
+                    nameBox.Text = serverName;
                     assigningServerName = false;
                 }
             }
@@ -2225,12 +2642,17 @@ public sealed partial class MainWindow : Window
 
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(urlDisplay);
+        if (!string.IsNullOrWhiteSpace(addressNote))
+        {
+            panel.Children.Add(new TextBlock { Text = DownloadManager.Core.Providers.UrlRedactor.HideAddresses(addressNote), TextWrapping = TextWrapping.Wrap });
+        }
+
         panel.Children.Add(metadataText);
         panel.Children.Add(metadataActions);
         panel.Children.Add(nameBox);
         panel.Children.Add(categoryBox);
         panel.Children.Add(new TextBlock { Text = "Destination folder" });
-        panel.Children.Add(destinationRow);
+        panel.Children.Add(destinationField);
         panel.Children.Add(destinationPickerError);
         panel.Children.Add(rememberFolder);
         panel.Children.Add(new Expander { Header = "Create a category", Content = categoryPanel, HorizontalAlignment = HorizontalAlignment.Stretch });
@@ -2247,7 +2669,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Download file info",
-            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
             SecondaryButtonText = "Download later",
             CloseButtonText = "Cancel",
@@ -2363,6 +2785,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (await ProviderAddAppliesAsync())
+        {
+            await ShowProviderAddAsync(AddFocus.Links);
+            return;
+        }
+
         var pasteBox = new TextBox
         {
             Header = "Paste links or any text containing links",
@@ -2378,7 +2806,7 @@ public sealed partial class MainWindow : Window
             if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
             {
                 var text = await clip.GetTextAsync();
-                if (ExtractLinks(text).Count > 0) pasteBox.Text = text;
+                if (LinkExtractor.HttpLinks(text).Count > 0) pasteBox.Text = text;
             }
         }
         catch (Exception)
@@ -2419,8 +2847,12 @@ public sealed partial class MainWindow : Window
         };
 
         var panel = new StackPanel { Spacing = 10 };
+        AddUnreadableKeyNotice(panel);
         panel.Children.Add(pasteBox);
-        panel.Children.Add(destinationBox);
+        var batchDestinationRow = new Grid { ColumnSpacing = 8 };
+        batchDestinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        batchDestinationRow.Children.Add(destinationBox);
+        panel.Children.Add(FolderChooser.Attach(batchDestinationRow, destinationBox));
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
         panel.Children.Add(conflictBox);
@@ -2432,7 +2864,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Add links",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 560 },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = 560 },
             PrimaryButtonText = "Review",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -2443,7 +2875,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var found = ExtractLinks(pasteBox.Text);
+        var found = LinkExtractor.HttpLinks(pasteBox.Text);
         if (found.Count == 0)
         {
             await ShowMessageAsync("Add links", "No http or https links were found in the pasted text.");
@@ -2474,7 +2906,7 @@ public sealed partial class MainWindow : Window
                     },
                 },
             };
-            ToolTipService.SetToolTip(box, link);
+            ToolTipService.SetToolTip(box, RemoteText.AddressToShow(link, null));
             checks.Add((box, link));
             list.Children.Add(box);
         }
@@ -2505,9 +2937,45 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var queueId = _settings.Queues.OrderBy(q => q.Order)
+            .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId;
+        var destination = string.IsNullOrWhiteSpace(destinationBox.Text)
+            ? null
+            : destinationBox.Text.Trim();
+        var added = await AddOrdinaryLinksAsync(urls, keepPackage.IsChecked == true, destination, startMode.SelectedIndex == 1 ? "later" : "now", queueId, conflictBox.SelectedIndex);
+        await RefreshAsync();
+
+        // The new rows say a clean add. Only one that failed or was already queued needs an OK.
+        if (added.NeedsSaying) await ShowMessageAsync("Add links", added.Summary);
+        else if (RemoteText.AddedWords(added.Accepted, 0, string.Empty) is { Length: > 0 } words) ShowPassingStatus(words);
+    }
+
+    /// <summary>Says why this ordinary dialog opened when the reason is a saved key that can't be read.</summary>
+    private void AddUnreadableKeyNotice(Panel panel)
+    {
+        if (RemoteText.UnreadableKeyNotice(_remote.State.Accounts) is not { } words) return;
+        var notice = new StatusLine("Provider key");
+        notice.Show(words, isProblem: true);
+        panel.Children.Add(notice.Text);
+    }
+
+    /// <summary>What came of adding ordinary links. The first job is how the package they went into gets found.</summary>
+    private sealed record OrdinaryAddResult(int Requested, int Accepted, int Duplicates, int Failed, string? FirstError, Guid? FirstJobId)
+    {
+        public string Summary => $"Added {Accepted} of {Requested} downloads" +
+            (Duplicates > 0 ? $" ({Duplicates} already queued)" : string.Empty) +
+            (Failed > 0 ? $"; {Failed} failed. {FirstError}" : ".");
+
+        /// <summary>A link failed or was already queued. Anything else the new rows say for themselves.</summary>
+        public bool NeedsSaying => Failed > 0 || Duplicates > 0;
+    }
+
+    /// <summary>One <c>job.add</c> per link, in a package of their own when asked. Only for links nothing says should go through a provider.</summary>
+    private async Task<OrdinaryAddResult> AddOrdinaryLinksAsync(IReadOnlyList<string> urls, bool keepPackage, string? destination, string start, int queueId, int conflictIndex)
+    {
         string? packageKey = null;
         string? packageName = null;
-        if (keepPackage.IsChecked == true && urls.Count >= 2)
+        if (keepPackage && urls.Count >= 2)
         {
             packageKey = Guid.NewGuid().ToString("N");
             // Name a package of split-archive parts after the archive.
@@ -2521,24 +2989,18 @@ public sealed partial class MainWindow : Window
             packageName = bases is [{ } archive] ? archive : null;
         }
 
-        var queueId = _settings.Queues.OrderBy(q => q.Order)
-            .ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId;
-        var destination = string.IsNullOrWhiteSpace(destinationBox.Text)
-            ? null
-            : destinationBox.Text.Trim();
-        var start = startMode.SelectedIndex == 1 ? "later" : "now";
         var accepted = 0;
         var duplicates = 0;
-        var skipped = 0;
         var failed = 0;
         string? firstError = null;
+        Guid? firstJob = null;
 
         foreach (var url in urls)
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             {
                 failed++;
-                firstError ??= $"Invalid URL: {url}";
+                firstError ??= "That isn't an http or https address.";
                 continue;
             }
 
@@ -2549,7 +3011,7 @@ public sealed partial class MainWindow : Window
                     Url = url,
                     DestinationDirectory = destination,
                     StartMode = start,
-                    ConflictPolicy = conflictBox.SelectedIndex switch
+                    ConflictPolicy = conflictIndex switch
                     {
                         1 => "overwrite",
                         2 => "fail",
@@ -2564,6 +3026,7 @@ public sealed partial class MainWindow : Window
                 if (add.Accepted)
                 {
                     accepted++;
+                    firstJob ??= add.Job?.Id;
                     if (add.Duplicate)
                     {
                         duplicates++;
@@ -2582,24 +3045,7 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        await RefreshAsync();
-        var summary = $"Added {accepted} of {urls.Count} downloads" +
-                      (duplicates > 0 ? $" ({duplicates} already queued)" : string.Empty) +
-                      (skipped > 0 ? $"; {skipped} skipped as already listed" : string.Empty) +
-                      (failed > 0 ? $"; {failed} failed. {firstError}" : ".");
-        await ShowMessageAsync("Add links", summary);
-    }
-
-    /// <summary>Finds distinct http/https links in free text (one per line, in HTML, in prose).</summary>
-    private static List<string> ExtractLinks(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return [];
-        return System.Text.RegularExpressions.Regex.Matches(text, @"https?://[^\s""'<>`]+",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-            .Select(match => match.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!', '?'))
-            .Where(link => Uri.TryCreate(link, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return new OrdinaryAddResult(urls.Count, accepted, duplicates, failed, firstError, firstJob);
     }
 
     private async Task ShowQueuesAsync()
@@ -2616,6 +3062,7 @@ public sealed partial class MainWindow : Window
             Title = "Queues",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -2871,6 +3318,7 @@ public sealed partial class MainWindow : Window
             Title = existing is null ? "New queue" : "Edit queue",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3007,6 +3455,7 @@ public sealed partial class MainWindow : Window
             Title = "Scheduler",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(240, Math.Min(540, RootGrid.ActualHeight - 220)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3283,6 +3732,7 @@ public sealed partial class MainWindow : Window
             Title = existing is null ? "Add schedule" : "Edit schedule",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(240, Math.Min(600, RootGrid.ActualHeight - 200)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3417,9 +3867,15 @@ public sealed partial class MainWindow : Window
     }
 
     private JobViewModel? FindExistingJob(string url)
-        => _jobsById.Values.FirstOrDefault(job =>
-            string.Equals(job.Url, url, StringComparison.OrdinalIgnoreCase) &&
+    {
+        // The Host stores a provider link with its key masked, so that is what the list holds.
+        var listed = DownloadManager.Core.Providers.ProviderLinks.IsProviderLink(url)
+            ? DownloadManager.Core.Providers.ProviderLinks.MaskToken(url)
+            : url;
+        return _jobsById.Values.FirstOrDefault(job =>
+            string.Equals(job.Url, listed, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
+    }
 
     private async Task ShowSettingsDialogAsync()
     {
@@ -3436,6 +3892,8 @@ public sealed partial class MainWindow : Window
         window.Closed += (_, _) => _settingsWindow = null;
         try
         {
+            // Which remote and extraction pages exist depends on what the Host said it can do.
+            if (!_remote.State.IsReady) await _remote.WaitUntilReadyAsync(TimeSpan.FromSeconds(1.5));
             var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
             var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
@@ -3597,6 +4055,55 @@ public sealed partial class MainWindow : Window
                 categoryRows.Add(row);
             }
 
+            // Favorite folders: name and folder per row, in order. The star beside a folder box saves at once, so OK
+            // keeps any saved meanwhile and drops only the rows removed here.
+            var favoritesAtOpen = settings.FavoriteFolders.Select(favorite => favorite.Path).ToList();
+            var favoriteRows = new List<(TextBox Name, TextBox Folder, UIElement Row)>();
+            var favoritesPanel = new StackPanel { Spacing = 8 };
+            void ShowFavoriteRows()
+            {
+                favoritesPanel.Children.Clear();
+                foreach (var entry in favoriteRows) favoritesPanel.Children.Add(entry.Row);
+                if (favoriteRows.Count == 0) favoritesPanel.Children.Add(SettingsWindow.Hint("No favorites yet."));
+            }
+            void AddFavoriteRow(string name, string path)
+            {
+                var nameBox = new TextBox { Header = "Name", Text = name, Width = 160, VerticalAlignment = VerticalAlignment.Bottom };
+                var (folderRow, folderBox) = window.FolderField("Folder", path, favorites: false);
+                var up = new Button { Content = new FontIcon { Glyph = "\uE70E", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                var down = new Button { Content = new FontIcon { Glyph = "\uE70D", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                var remove = new Button { Content = new FontIcon { Glyph = "\uE74D", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(up, "Move up");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(down, "Move down");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove favorite");
+                ToolTipService.SetToolTip(up, "Move up");
+                ToolTipService.SetToolTip(down, "Move down");
+                ToolTipService.SetToolTip(remove, "Remove");
+                var line = new Grid { ColumnSpacing = 8 };
+                foreach (var width in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto, GridLength.Auto })
+                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+                var cells = new UIElement[] { nameBox, folderRow, up, down, remove };
+                for (var i = 0; i < cells.Length; i++) { Grid.SetColumn((FrameworkElement)cells[i], i); line.Children.Add(cells[i]); }
+                var entry = (nameBox, folderBox, (UIElement)line);
+                void Move(int by)
+                {
+                    var at = favoriteRows.IndexOf(entry);
+                    var to = at + by;
+                    if (at < 0 || to < 0 || to >= favoriteRows.Count) return;
+                    favoriteRows.RemoveAt(at);
+                    favoriteRows.Insert(to, entry);
+                    ShowFavoriteRows();
+                }
+                up.Click += (_, _) => Move(-1);
+                down.Click += (_, _) => Move(1);
+                remove.Click += (_, _) => { favoriteRows.Remove(entry); ShowFavoriteRows(); };
+                favoriteRows.Add(entry);
+            }
+            foreach (var favorite in settings.FavoriteFolders) AddFavoriteRow(favorite.Name, favorite.Path);
+            ShowFavoriteRows();
+            var addFavorite = new Button { Content = "Add favorite" };
+            addFavorite.Click += (_, _) => { AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
+
             var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
             var customCategoryControls = new List<UIElement>();
             var stagedCategoryRemovals = new HashSet<string>(StringComparer.Ordinal);
@@ -3643,6 +4150,10 @@ public sealed partial class MainWindow : Window
                 saveTo.Add(SettingsWindow.Section("Custom categories"));
                 saveTo.AddRange(customCategoryControls);
             }
+            saveTo.Add(SettingsWindow.Section("Favorite folders"));
+            saveTo.Add(SettingsWindow.Hint("Named folders offered first by the star button beside every folder box. A name left empty becomes the folder's own name."));
+            saveTo.Add(favoritesPanel);
+            saveTo.Add(addFavorite);
             window.AddPage("Save to", "\uE8B7", saveTo.ToArray());
             window.AddPage("Downloads", "\uE896",
                 SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload);
@@ -3658,10 +4169,44 @@ public sealed partial class MainWindow : Window
             var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, window);
             window.AddPage("Sounds", "\uE767", soundEditor.Content);
 
+            var nextPage = SoundsPage + 1;
+            var accountPages = new List<(ProviderAccountPage Page, int Index)>();
+            if (_remote.State.RemoteSupported)
+            {
+                foreach (var account in _remote.State.Accounts.Where(account => account.Capabilities.Contains("account", StringComparer.OrdinalIgnoreCase)))
+                {
+                    var page = new ProviderAccountPage(_remote, account);
+                    page.KeyBoxEmptied += window.ClearMessage;
+                    window.AddPage(page.Title, "\uE77B", page.Controls);
+                    accountPages.Add((page, nextPage++));
+                }
+            }
+
+            ExtractionOptionsPage? extraction = null;
+            var extractionPageIndex = nextPage;
+            if (_remote.State.ArchivesSupported)
+            {
+                extraction = new ExtractionOptionsPage(_remote, window);
+                window.AddPage("Extraction", "\uE7B8", extraction.Controls);
+            }
+
+            window.Closed += (_, _) =>
+            {
+                foreach (var (page, _) in accountPages) page.Close();
+                extraction?.Close();
+            };
+
             static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
 
             window.Save = async () =>
             {
+                foreach (var (page, index) in accountPages)
+                {
+                    if (page.HasUnsavedKey)
+                        return ($"The {page.ProviderName} API key you typed isn't saved. Select Save key, or empty the box.", index);
+                }
+                if (extraction?.Validate() is { } extractionProblem)
+                    return (extractionProblem, extractionPageIndex);
                 if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
                     return (soundError ?? "Invalid sound choice.", SoundsPage);
                 foreach (var row in loginRows)
@@ -3743,6 +4288,12 @@ public sealed partial class MainWindow : Window
                 settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text) ? "stable" : updateChannel.Text.Trim();
                 settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
                 settings.UpdateCheckIntervalHours = checkInterval;
+                var edited = favoriteRows.Where(entry => !string.IsNullOrWhiteSpace(entry.Folder.Text))
+                    .Select(entry => new FavoriteFolderDto { Name = entry.Name.Text.Trim(), Path = entry.Folder.Text.Trim() }).ToList();
+                var savedMeanwhile = (_settings?.FavoriteFolders ?? new()).Where(favorite =>
+                    !favoritesAtOpen.Contains(favorite.Path, StringComparer.OrdinalIgnoreCase) &&
+                    !edited.Any(row => string.Equals(row.Path, favorite.Path, StringComparison.OrdinalIgnoreCase)));
+                settings.FavoriteFolders = edited.Concat(savedMeanwhile).ToList();
                 settings.CategoryFolders = categoryBoxes
                     .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                     .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -3763,8 +4314,9 @@ public sealed partial class MainWindow : Window
                     return (update.Error ?? "The host rejected the settings.", -1);
 
                 _settings = update.Settings;
+                var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
                 await RefreshAsync();
-                return (null, 0);
+                return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
             window.Activate();
@@ -3907,6 +4459,18 @@ public sealed partial class MainWindow : Window
             await ShowMessageAsync("Queue file order", result.Error ?? "Could not save the file order.");
     }
 
+    /// <summary>Saves the favorites list onto the Host's latest settings, so nothing else a client changed is undone.</summary>
+    private async Task<string?> SaveFavoritesAsync(List<FavoriteFolderDto> favorites)
+    {
+        var current = await _connection.RefreshAsync();
+        var updated = CloneSettings(current.Settings);
+        updated.FavoriteFolders = favorites;
+        var result = (await _connection.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
+        if (!result.Ok) return result.Error ?? "Couldn't save the favorites.";
+        _settings = result.Settings;
+        return null;
+    }
+
     private static SettingsDto CloneSettings(SettingsDto source)
         => new()
         {
@@ -3982,6 +4546,10 @@ public sealed partial class MainWindow : Window
             FfmpegPath = source.FfmpegPath,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
+            RecentDestinationDirectories = new List<string>(source.RecentDestinationDirectories),
+            FavoriteFolders = source.FavoriteFolders.Select(favorite => new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path }).ToList(),
+            RecentUrls = new List<string>(source.RecentUrls),
+            LastUpdateCheck = source.LastUpdateCheck,
             PostDownloadCommand = source.PostDownloadCommand,
             UpdateManifestUrl = source.UpdateManifestUrl,
             UpdatePublicKey = source.UpdatePublicKey,
@@ -4019,7 +4587,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var queueId = SelectedJob?.QueueId ?? _settings.DefaultQueueId;
+        var queueId = SelectedJob?.QueueId ?? SelectedPackage?.SharedQueueId ?? _settings.DefaultQueueId;
         try
         {
             var reply = await _connection.QueueActionAsync(new QueueActionRequest
@@ -4045,20 +4613,14 @@ public sealed partial class MainWindow : Window
 
     private async void PauseButton_Click(object sender, RoutedEventArgs e)
     {
-        var selection = SelectedJobs.Where(job => job.CanPause).ToList();
-        if (selection.Count > 0)
-        {
-            await RunBulkActionAsync(selection, id => _connection.PauseAsync(id), "Stop");
-        }
+        await RunOnSelectionAsync("Stop", new GroupActionRequest { Action = "pause" },
+            job => job.CanPause, id => _connection.PauseAsync(id));
     }
 
     private async void ResumeButton_Click(object sender, RoutedEventArgs e)
     {
-        var selection = SelectedJobs.Where(job => job.CanResume).ToList();
-        if (selection.Count > 0)
-        {
-            await RunBulkActionAsync(selection, id => _connection.ResumeAsync(id), "Resume");
-        }
+        await RunOnSelectionAsync("Resume", new GroupActionRequest { Action = "resume" },
+            job => job.CanResume, id => _connection.ResumeAsync(id));
     }
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e)
@@ -4066,6 +4628,7 @@ public sealed partial class MainWindow : Window
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
+            if (FirstLocalRow is null) await RemoveSideRowsAsync();
             return;
         }
 
@@ -4075,18 +4638,21 @@ public sealed partial class MainWindow : Window
             IsChecked = true,
         };
         // Unfinished downloads only have partial data, which is removed anyway.
-        var anyCompleted = selection.Any(job => job.State == "completed");
+        var anyCompleted = selection.Any(job => job.State == "completed" && !job.FileRemovedAfterExtraction);
+
+        // Their files went on purpose after extraction. A box offering to delete them would do nothing, and a new file by that name isn't theirs.
+        var noFilesLeft = selection.All(job => job.FileRemovedAfterExtraction);
         var question = selection.Count == 1
             ? $"Remove '{selection[0].FileName}' from the list?"
             : $"Remove {selection.Count} downloads from the list?";
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
-            Text = anyCompleted ? question : question + " Partial data is always removed.",
+            Text = noFilesLeft ? question + " " + JobNotes.NothingToDelete(selection.Count) : anyCompleted ? question : question + " Partial data is always removed.",
             TextWrapping = TextWrapping.Wrap,
         });
         if (anyCompleted) panel.Children.Add(deleteFiles);
-        else deleteFiles.IsChecked = true;
+        else deleteFiles.IsChecked = !noFilesLeft;
 
         var dialog = new ContentDialog
         {
@@ -4196,6 +4762,12 @@ public sealed partial class MainWindow : Window
 
     private async Task OpenJobAsync(JobViewModel job)
     {
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(job.FinalFilePath) && File.Exists(job.FinalFilePath))
         {
             try
@@ -4215,6 +4787,12 @@ public sealed partial class MainWindow : Window
 
     private void OpenContainingFolder(JobViewModel job)
     {
+        if (job.FileRemovedAfterExtraction)
+        {
+            ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
+            return;
+        }
+
         try
         {
             var path = !string.IsNullOrWhiteSpace(job.FinalFilePath)
@@ -4231,6 +4809,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>A message that may be a long list, such as every link an add refused, so it scrolls rather than being cut off.</summary>
     private async Task ShowMessageAsync(string title, string message)
     {
         var dialog = new ContentDialog
@@ -4238,7 +4817,14 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = title,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            Content = new ScrollViewer
+            {
+                Padding = InboundTheme.DialogScrollPadding,
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+                MaxHeight = Math.Max(160, Math.Min(480, RootGrid.ActualHeight - 240)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
             CloseButtonText = "OK",
         };
 
@@ -4248,7 +4834,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception)
         {
-            StatusText.Text = $"{title}: {message}";
+            ShowPassingStatus($"{title}: {message}");
         }
     }
 }

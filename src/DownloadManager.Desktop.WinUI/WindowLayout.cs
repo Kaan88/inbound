@@ -7,14 +7,25 @@ namespace DownloadManager.Desktop.WinUI;
 
 internal static class WindowLayout
 {
-    public static void ResizeForDpi(Window window, int width, int height)
+    public static void ResizeForDpi(Window window, int width, int height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
+
+    /// <summary>How small the user can drag the window, and how small a remembered size can come back. Set it before restoring one.</summary>
+    public static void SetMinimumSize(Window window, int width, int height)
+    {
+        if (window.AppWindow.Presenter is not OverlappedPresenter presenter) return;
+        var size = ScaledToFit(window, width, height);
+        presenter.PreferredMinimumWidth = size.Width;
+        presenter.PreferredMinimumHeight = size.Height;
+    }
+
+    private static SizeInt32 ScaledToFit(Window window, int width, int height)
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96d;
         var area = DisplayArea.GetFromWindowId(window.AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        window.AppWindow.Resize(new SizeInt32(
+        return new SizeInt32(
             Math.Min((int)Math.Ceiling(width * scale), Math.Max(200, area.Width - 24)),
-            Math.Min((int)Math.Ceiling(height * scale), Math.Max(200, area.Height - 24))));
+            Math.Min((int)Math.Ceiling(height * scale), Math.Max(200, area.Height - 24)));
     }
 
     /// <summary>

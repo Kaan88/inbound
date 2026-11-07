@@ -4,11 +4,25 @@ namespace DownloadManager.Desktop.WinUI;
 
 internal sealed class UiState
 {
-    public int WindowWidth { get; set; } = 1180;
-    public int WindowHeight { get; set; } = 760;
+    /// <summary>In device-independent pixels until the window is first closed, and in real pixels after that.</summary>
+    public const int FirstWindowWidth = 1400;
+    public const int FirstWindowHeight = 760;
+
+    public int WindowWidth { get; set; } = FirstWindowWidth;
+    public int WindowHeight { get; set; } = FirstWindowHeight;
     public string Category { get; set; } = "all";
     public string SortKey { get; set; } = "added";
     public bool SortAscending { get; set; }
+
+    /// <summary>Widths the download list's columns were dragged to, by column. A column left out has its usual width.</summary>
+    public Dictionary<string, double> ColumnWidths { get; set; } = new();
+
+    /// <summary>The same for My provider's lists, which share one set of columns.</summary>
+    public Dictionary<string, double> ProviderColumnWidths { get; set; } = new();
+
+    /// <summary>Null keeps the order the provider answers in.</summary>
+    public string? ProviderSortKey { get; set; }
+    public bool ProviderSortAscending { get; set; }
     public bool ToolbarLarge { get; set; } = true;
     public bool HideCategories { get; set; }
     public bool ShowSpeedGraph { get; set; } = true;

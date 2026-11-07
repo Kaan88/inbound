@@ -1,5 +1,6 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using TestServer;
@@ -1486,7 +1487,8 @@ public sealed partial class RuntimeServiceTests
             TimeSpan.FromSeconds(30));
         Assert.True((await ctx.Service.CancelAsync(response.Job.Id, deleteFile: true)).Ok);
         var cancelled = await ctx.WaitFor(response.Job.Id, j => j.State == "cancelled");
-        Assert.False(File.Exists(cancelled.PartFilePath));
+        // The state changes at once, and the transfer still holds the file until it winds down.
+        await WaitUntil(() => !File.Exists(cancelled.PartFilePath), "the partial file to go");
         Assert.False(File.Exists(cancelled.FinalFilePath));
     }
 
@@ -3882,6 +3884,16 @@ public sealed partial class RuntimeServiceTests
         }
     }
 
+    private sealed record ContextHooks
+    {
+        public Action<string>? Log { get; init; }
+        public Func<ISettingsStore, ISettingsStore>? WrapSettings { get; init; }
+        public Func<IJobStore, IJobStore>? WrapJobs { get; init; }
+        public Func<IDownloadCheckpointStore, IDownloadCheckpointStore>? WrapCheckpoints { get; init; }
+        /// <summary>For what happens during startup, which a test can't subscribe to afterwards.</summary>
+        public Action<DownloadManagerService>? BeforeInitialize { get; init; }
+    }
+
     private sealed class ServiceContext : IAsyncDisposable
     {
         private readonly HttpDownloadEngine _engine;
@@ -3913,7 +3925,11 @@ public sealed partial class RuntimeServiceTests
             int maxConcurrent = 2,
             ICompletionActionExecutor? completionActions = null,
             ISleepPrevention? sleepPrevention = null,
-            IPostDownloadHook? postDownloadHook = null)
+            IPostDownloadHook? postDownloadHook = null,
+            IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
+            HttpMessageHandler? handler = null,
+            ContextHooks? hooks = null)
         {
             var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));
             var paths = new StoragePaths(Path.Combine(root, "state"));
@@ -3921,7 +3937,7 @@ public sealed partial class RuntimeServiceTests
             Directory.CreateDirectory(destination);
             paths.EnsureCreated();
             return BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: true,
-                completionActions, sleepPrevention, postDownloadHook);
+                completionActions, sleepPrevention, postDownloadHook, linkBroker, linkSecrets, handler, hooks);
         }
 
         public static Task<ServiceContext> CreateAsync(
@@ -3931,9 +3947,14 @@ public sealed partial class RuntimeServiceTests
             bool autoResume = true,
             ICompletionActionExecutor? completionActions = null,
             ISleepPrevention? sleepPrevention = null,
-            IPostDownloadHook? postDownloadHook = null)
-            => BuildAsync(server, paths, destination, autoResume, 2, ownsPaths: false,
-                completionActions, sleepPrevention, postDownloadHook);
+            IPostDownloadHook? postDownloadHook = null,
+            IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
+            HttpMessageHandler? handler = null,
+            ContextHooks? hooks = null,
+            int maxConcurrent = 2)
+            => BuildAsync(server, paths, destination, autoResume, maxConcurrent, ownsPaths: false,
+                completionActions, sleepPrevention, postDownloadHook, linkBroker, linkSecrets, handler, hooks);
 
         private static async Task<ServiceContext> BuildAsync(
             TestServerHost server,
@@ -3944,12 +3965,19 @@ public sealed partial class RuntimeServiceTests
             bool ownsPaths,
             ICompletionActionExecutor? completionActions = null,
             ISleepPrevention? sleepPrevention = null,
-            IPostDownloadHook? postDownloadHook = null)
+            IPostDownloadHook? postDownloadHook = null,
+            IRemoteLinkBroker? linkBroker = null,
+            IRemoteSecretMatcher? linkSecrets = null,
+            HttpMessageHandler? handler = null,
+            ContextHooks? hooks = null)
         {
-            var checkpoints = new JsonCheckpointStore(paths);
+            IDownloadCheckpointStore checkpoints = new JsonCheckpointStore(paths);
+            if (hooks?.WrapCheckpoints is { } wrapCheckpoints) checkpoints = wrapCheckpoints(checkpoints);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
-            var store = new JsonJobStore(paths);
-            var settingsStore = new JsonSettingsStore(paths);
+            IJobStore store = new JsonJobStore(paths);
+            if (hooks?.WrapJobs is { } wrapJobs) store = wrapJobs(store);
+            ISettingsStore settingsStore = new JsonSettingsStore(paths);
+            if (hooks?.WrapSettings is { } wrapSettings) settingsStore = wrapSettings(settingsStore);
             var engine = new HttpDownloadEngine(
                 new EngineOptions
                 {
@@ -3959,6 +3987,7 @@ public sealed partial class RuntimeServiceTests
                     ReadTimeout = TimeSpan.FromSeconds(15),
                     AllowLocalNetwork = true,
                 },
+                handler: handler,
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
             var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
@@ -3968,12 +3997,18 @@ public sealed partial class RuntimeServiceTests
                 checkpoints,
                 settingsStore,
                 engine,
+                log: hooks?.Log,
                 enableSchedulerTimer: false,
                 completionActions: completionActions,
                 sleepPrevention: sleepPrevention,
                 mediaCheckpoints: mediaCheckpoints,
                 ftpEngine: ftpEngine,
-                postDownloadHook: postDownloadHook);
+                postDownloadHook: postDownloadHook,
+                linkBroker: linkBroker,
+                linkSecrets: linkSecrets);
+            // Most tests have nothing to wait for; the ones about the quiet period set their own.
+            service.PackageSettleDelay = TimeSpan.Zero;
+            hooks?.BeforeInitialize?.Invoke(service);
             await service.InitializeAsync();
 
             var settings = service.GetSnapshot().Settings;

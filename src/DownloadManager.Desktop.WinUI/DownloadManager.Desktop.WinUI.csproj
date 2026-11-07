@@ -27,6 +27,13 @@
     <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
   </ItemGroup>
 
+  <!-- The list shows masked provider links: comparing a pasted one needs the Host's exact masking, and showing one the shared rule. -->
+  <ItemGroup>
+    <Compile Include="..\DownloadManager.Core\Providers\ProviderLinks.cs" Link="Providers\ProviderLinks.cs" />
+    <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
+    <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="..\..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -34,91 +34,92 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <MenuBar Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
-            <MenuBarItem Title="Tasks">
-                <MenuFlyoutItem Text="Add New Download…" Click="MenuAdd_Click">
+            <MenuBarItem x:Name="TasksMenu" Title="Tasks" AccessKey="T">
+                <MenuFlyoutItem Text="Add New Download…" AccessKey="N" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Add Links…" Click="MenuAddBatch_Click" />
+                <MenuFlyoutItem Text="Add Links…" AccessKey="L" Click="MenuAddBatch_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Export Download List…" Click="MenuExport_Click" />
-                <MenuFlyoutItem Text="Import Download List…" Click="MenuImport_Click" />
+                <MenuFlyoutItem Text="Export Download List…" AccessKey="E" Click="MenuExport_Click" />
+                <MenuFlyoutItem Text="Import Download List…" AccessKey="I" Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Exit" Click="MenuExit_Click" />
+                <MenuFlyoutItem Text="Exit" AccessKey="X" Click="MenuExit_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="File">
-                <MenuFlyoutItem Text="Open" Click="MenuOpen_Click" />
-                <MenuFlyoutItem Text="Open Folder" Click="MenuOpenFolder_Click" />
-                <MenuFlyoutItem Text="Move/Rename…" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
+            <MenuBarItem Title="File" AccessKey="F">
+                <MenuFlyoutItem x:Name="FileOpenItem" Text="Open" AccessKey="O" Click="MenuOpen_Click" />
+                <MenuFlyoutItem x:Name="FileOpenFolderItem" Text="Open Folder" AccessKey="F" Click="MenuOpenFolder_Click" />
+                <MenuFlyoutItem x:Name="FileMoveRenameItem" Text="Move/Rename…" AccessKey="M" AutomationProperties.AcceleratorKey="Ctrl+M" Click="MenuMoveRename_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Progress Details…" Click="MenuProgressDetails_Click" />
-                <MenuFlyoutItem Text="Download Now" Click="MenuResume_Click" />
-                <MenuFlyoutItem Text="Stop Download" Click="MenuPause_Click" />
-                <MenuFlyoutItem Text="Redownload" Click="MenuRedownload_Click" />
+                <MenuFlyoutItem x:Name="FileProgressItem" Text="Progress Details…" AccessKey="P" Click="MenuProgressDetails_Click" />
+                <MenuFlyoutItem x:Name="FileDownloadNowItem" Text="Download Now" AccessKey="D" Click="MenuResume_Click" />
+                <MenuFlyoutItem x:Name="FileStopItem" Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
+                <MenuFlyoutItem x:Name="FileRedownloadItem" Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Remove" Click="MenuRemove_Click" />
+                <MenuFlyoutItem x:Name="FileRemoveItem" Text="Remove" AccessKey="V" Click="MenuRemove_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="Downloads">
-                <MenuFlyoutItem Text="Stop All" Click="MenuStopAll_Click" />
+            <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
+                <MenuFlyoutItem Text="Stop All" AccessKey="S" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Delete All Completed" Click="MenuDeleteCompleted_Click" />
-                <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" Click="MenuCleanOrphans_Click" />
+                <MenuFlyoutItem Text="Delete All Completed" AccessKey="D" Click="MenuDeleteCompleted_Click" />
+                <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" AccessKey="L" Click="MenuCleanOrphans_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Find…" Click="MenuFind_Click">
+                <MenuFlyoutItem Text="Find…" AccessKey="F" Click="MenuFind_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Find Next" Click="MenuFindNext_Click">
+                <MenuFlyoutItem Text="Find Next" AccessKey="N" Click="MenuFindNext_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="F3" />
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" />
-                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" />
+                <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" AccessKey="Q" />
+                <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" AccessKey="U" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Scheduler…" Click="MenuScheduler_Click" />
-                <MenuFlyoutItem Text="Options…" Click="MenuOptions_Click" />
+                <MenuFlyoutItem Text="Scheduler…" AccessKey="H" Click="MenuScheduler_Click" />
+                <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="View">
-                <MenuFlyoutItem Text="Statistics…" Click="MenuStatistics_Click" />
-                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" IsChecked="True" Click="MenuSpeedGraph_Click" />
-                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" Click="MenuHideCategories_Click" />
-                <MenuFlyoutSubItem Text="Arrange Files">
-                    <MenuFlyoutItem Text="By Order of Addition" Tag="added" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By File Name" Tag="name" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Size" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
+            <MenuBarItem Title="View" AccessKey="V">
+                <MenuFlyoutItem Text="Statistics…" AccessKey="S" Click="MenuStatistics_Click" />
+                <ToggleMenuFlyoutItem x:Name="ShowSpeedGraphMenuItem" Text="Download Speed Graph" AccessKey="G" IsChecked="True" Click="MenuSpeedGraph_Click" />
+                <ToggleMenuFlyoutItem x:Name="HideCategoriesMenuItem" Text="Hide Categories" AccessKey="C" Click="MenuHideCategories_Click" />
+                <MenuFlyoutSubItem Text="Arrange Files" AccessKey="A">
+                    <MenuFlyoutItem Text="By Order of Addition" AccessKey="A" Tag="added" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By File Name" AccessKey="N" Tag="name" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Size" AccessKey="S" AutomationProperties.AcceleratorKey="Ctrl+Shift+S" Tag="size" Click="MenuSort_Click">
                         <MenuFlyoutItem.KeyboardAccelerators>
                             <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
                         </MenuFlyoutItem.KeyboardAccelerators>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem Text="By Status" Tag="status" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Transfer Rate" Tag="rate" Click="MenuSort_Click" />
-                    <MenuFlyoutItem Text="By Last Try Date" Tag="lastTry" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Status" AccessKey="T" Tag="status" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Transfer Rate" AccessKey="R" Tag="rate" Click="MenuSort_Click" />
+                    <MenuFlyoutItem Text="By Last Try Date" AccessKey="L" Tag="lastTry" Click="MenuSort_Click" />
                 </MenuFlyoutSubItem>
-                <MenuFlyoutSubItem Text="Toolbar">
-                    <MenuFlyoutItem Text="Large Buttons" Click="MenuLargeToolbar_Click" />
-                    <MenuFlyoutItem Text="Small Buttons" Click="MenuSmallToolbar_Click" />
+                <MenuFlyoutSubItem Text="Toolbar" AccessKey="T">
+                    <MenuFlyoutItem Text="Large Buttons" AccessKey="L" Click="MenuLargeToolbar_Click" />
+                    <MenuFlyoutItem Text="Small Buttons" AccessKey="S" Click="MenuSmallToolbar_Click" />
                 </MenuFlyoutSubItem>
-                <ToggleMenuFlyoutItem x:Name="DarkModeMenuItem" Text="Dark Mode" IsChecked="True" Click="MenuDarkMode_Click" />
+                <ToggleMenuFlyoutItem x:Name="DarkModeMenuItem" Text="Dark Mode" AccessKey="D" IsChecked="True" Click="MenuDarkMode_Click" />
             </MenuBarItem>
 
-            <MenuBarItem Title="Help">
-                <MenuFlyoutItem Text="Check for Updates…" Click="MenuUpdate_Click" />
+            <MenuBarItem Title="Help" AccessKey="H">
+                <MenuFlyoutItem Text="Check for Updates…" AccessKey="U" Click="MenuUpdate_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="About Inbound Download Manager" Click="MenuAbout_Click" />
-                <MenuFlyoutItem Text="Open Diagnostics Folder" Click="MenuDiagnostics_Click" />
+                <MenuFlyoutItem Text="About Inbound Download Manager" AccessKey="A" Click="MenuAbout_Click" />
+                <MenuFlyoutItem Text="Open Diagnostics Folder" AccessKey="D" Click="MenuDiagnostics_Click" />
             </MenuBarItem>
         </MenuBar>
 
@@ -160,6 +161,14 @@
                         <StackPanel>
                             <FontIcon Glyph="&#xE71A;" FontSize="25" Foreground="{ThemeResource InboundIconPauseBrush}" />
                             <TextBlock Text="Stop All" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
+                            Visibility="Collapsed"
+                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
@@ -215,7 +224,24 @@
             </ScrollViewer>
         </Border>
 
-        <Grid Grid.Row="2">
+        <!-- What extraction wants the user to know. It sits above the list and waits; nothing opens by itself. -->
+        <Border x:Name="ArchiveNoticeBar" Grid.Row="2" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="ArchiveNoticeText" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Extraction notice" AutomationProperties.LiveSetting="Polite" />
+                <Button x:Name="ArchiveNoticeAction" Grid.Column="1" FontSize="12" Padding="10,2" Click="ArchiveNoticeAction_Click" />
+                <Button x:Name="ArchiveNoticeDismiss" Grid.Column="2" Content="Dismiss" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Dismiss this extraction notice" Click="ArchiveNoticeDismiss_Click" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="CategoryColumn" Width="192" />
                 <ColumnDefinition Width="*" />
@@ -238,80 +264,80 @@
                                 <Setter Property="Foreground" Value="{ThemeResource SystemControlForegroundBaseHighBrush}" />
                             </Style>
                         </ListBox.Resources>
-                        <ListBoxItem Tag="all" Padding="24,2,8,2">
+                        <ListBoxItem Tag="all" AutomationProperties.Name="All Downloads" Padding="24,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="All Downloads" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="compressed" Padding="38,2,8,2">
+                        <ListBoxItem Tag="compressed" AutomationProperties.Name="Compressed" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Compressed" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="documents" Padding="38,2,8,2">
+                        <ListBoxItem Tag="documents" AutomationProperties.Name="Documents" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8A5;" FontSize="14" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Documents" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="music" Padding="38,2,8,2">
+                        <ListBoxItem Tag="music" AutomationProperties.Name="Music" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource InboundIconMediaBrush}" />
                                 <TextBlock Text="Music" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="programs" Padding="38,2,8,2">
+                        <ListBoxItem Tag="programs" AutomationProperties.Name="Programs" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Programs" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="video" Padding="38,2,8,2">
+                        <ListBoxItem Tag="video" AutomationProperties.Name="Video" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE714;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Video" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="other" Padding="38,2,8,2">
+                        <ListBoxItem Tag="other" AutomationProperties.Name="Other" Padding="38,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Other" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" />
-                        <ListBoxItem Tag="unfinished" Padding="14,2,8,2">
+                        <ListBoxItem Content=" " IsEnabled="False" MinHeight="8" Padding="0" AutomationProperties.AccessibilityView="Raw" />
+                        <ListBoxItem Tag="unfinished" AutomationProperties.Name="Unfinished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Unfinished" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="active" Padding="30,2,8,2">
+                        <ListBoxItem Tag="active" AutomationProperties.Name="Active" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE895;" FontSize="13" Foreground="{ThemeResource InboundIconInfoBrush}" />
                                 <TextBlock Text="Active" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="queued" Padding="30,2,8,2">
+                        <ListBoxItem Tag="queued" AutomationProperties.Name="Queued" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE823;" FontSize="13" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                 <TextBlock Text="Queued" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="failed" Padding="30,2,8,2">
+                        <ListBoxItem Tag="failed" AutomationProperties.Name="Failed" Padding="30,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE783;" FontSize="13" Foreground="{ThemeResource InboundIconDangerBrush}" />
                                 <TextBlock Text="Failed" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="finished" Padding="14,2,8,2">
+                        <ListBoxItem Tag="finished" AutomationProperties.Name="Finished" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource InboundIconStartBrush}" />
                                 <TextBlock Text="Finished" />
                             </StackPanel>
                         </ListBoxItem>
-                        <ListBoxItem Tag="queues" Padding="14,2,8,2">
+                        <ListBoxItem Tag="queues" AutomationProperties.Name="Queues" Padding="14,2,8,2">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE8FD;" FontSize="14" Foreground="{ThemeResource InboundIconNeutralBrush}" />
                                 <TextBlock Text="Queues" />
@@ -324,7 +350,7 @@
             <ScrollViewer x:Name="DownloadListViewport" Grid.Column="1"
                           HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-            <Grid Background="{ThemeResource InboundSurfaceBrush}" RowSpacing="0"
+            <Grid x:Name="DownloadListGrid" Background="{ThemeResource InboundSurfaceBrush}" RowSpacing="0"
                   MinWidth="1040" Width="{Binding ViewportWidth, ElementName=DownloadListViewport}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="27" />
@@ -332,28 +358,8 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
-                    <Grid Padding="4,0" ColumnSpacing="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="30" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="30" />
-                            <ColumnDefinition Width="78" />
-                            <ColumnDefinition Width="140" />
-                            <ColumnDefinition Width="78" />
-                            <ColumnDefinition Width="86" />
-                            <ColumnDefinition Width="116" />
-                            <ColumnDefinition Width="210" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="" />
-                        <TextBlock Grid.Column="1" Text="File Name" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="2" Text="Q" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="4" Text="Status" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="5" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="6" Text="Transfer rate" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="7" Text="Last Try Date" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="8" Text="Description" Style="{StaticResource InboundHeaderTextStyle}" />
-                    </Grid>
+                    <!-- Built in ColumnHeaderRow: a button that sorts and a grip that resizes, per column. -->
+                    <Grid x:Name="JobsHeader" Padding="4,0" ColumnSpacing="0" />
                 </Border>
 
                 <Grid Grid.Row="1">
@@ -366,6 +372,7 @@
                               ItemContainerStyle="{StaticResource InboundListRowStyle}"
                               SelectionChanged="JobsList_SelectionChanged"
                               KeyDown="JobsList_KeyDown"
+                              PreviewKeyDown="JobsList_PreviewKeyDown"
                               DoubleTapped="JobsList_DoubleTapped"
                               RightTapped="JobsList_RightTapped"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -379,26 +386,29 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="27" Padding="{Binding RowPadding}" ColumnSpacing="0" Background="Transparent">
+                                <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent"
+                                      BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="{Binding RowBorder}"
+                                      ToolTipService.ToolTip="{Binding RowToolTip}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="78" />
                                         <ColumnDefinition Width="86" />
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
-                                    <Grid Visibility="{Binding FileIconAreaVisibility}">
+                                    <Grid Grid.ColumnSpan="2" Width="30" HorizontalAlignment="Left" Margin="{Binding IconIndent}" Visibility="{Binding FileIconAreaVisibility}">
                                         <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconInfoBrush}"
                                                   Visibility="{Binding FileGlyphVisibility}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                         <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
                                                Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Grid>
-                                    <Border Width="22" Height="22" CornerRadius="4" Background="Transparent"
+                                    <Border Tag="RowAction" Width="22" Height="22" CornerRadius="4" Background="Transparent"
                                             Visibility="{Binding ChevronVisibility}"
                                             VerticalAlignment="Center" HorizontalAlignment="Center"
                                             Tapped="PackageChevron_Tapped" DoubleTapped="PackageChevron_DoubleTapped"
@@ -410,7 +420,7 @@
                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}"
+                                    <TextBlock Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"
@@ -422,13 +432,29 @@
                                         <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
                                     </StackPanel>
-                                    <TextBlock Grid.Column="5" Text="{Binding EtaText}" FontSize="11"
+                                    <Grid Grid.Column="5" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
+                                          Background="Transparent" ToolTipService.ToolTip="{Binding ArchiveToolTip}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding ArchiveText}" FontSize="11" Foreground="{Binding ArchiveBrush}"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="1" Width="22" Height="20" Padding="0" MinWidth="0" MinHeight="0" BorderThickness="0"
+                                                Background="Transparent" VerticalAlignment="Center"
+                                                Visibility="{Binding ArchivePasswordVisibility}" Click="ArchiveRowPassword_Click"
+                                                ToolTipService.ToolTip="Enter the archive's password"
+                                                AutomationProperties.Name="Enter the archive's password">
+                                            <FontIcon Glyph="&#xE8D7;" FontSize="12" Foreground="{ThemeResource InboundIconPauseBrush}" />
+                                        </Button>
+                                    </Grid>
+                                    <TextBlock Grid.Column="6" Text="{Binding EtaText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                    <TextBlock Grid.Column="6" Text="{Binding SpeedText}" FontSize="11"
+                                    <TextBlock Grid.Column="7" Text="{Binding SpeedText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="7" Text="{Binding LastTryText}" FontSize="11"
+                                    <TextBlock Grid.Column="8" Text="{Binding LastTryText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="8" Text="{Binding Description}" FontSize="11"
+                                    <TextBlock Grid.Column="9" Text="{Binding Description}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -438,6 +464,7 @@
                                Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                 TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    <Canvas x:Name="JobsRegionLayer" IsHitTestVisible="False" />
                 </Grid>
             </Grid>
             </ScrollViewer>
@@ -458,18 +485,21 @@
             </Grid>
         </Grid>
 
-        <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="3" />
+        <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="4" />
 
-        <Border Grid.Row="4" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="5" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
             <Grid Padding="8,0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" AutomationProperties.Name="Status" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                <TextBlock x:Name="StatusText" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="ConnectionText" AutomationProperties.Name="Host connection" Grid.Column="1" Text="Connecting…" FontSize="11"
+                <!-- Passing messages are announced here. StatusText changes on its own as counts move, so it isn't a live region. -->
+                <TextBlock x:Name="StatusAnnouncer" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
+                           AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
+                <TextBlock x:Name="ConnectionText" Grid.Column="1" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Border>

@@ -13,8 +13,10 @@
              ever left blank. The plot keeps its size and is clipped, so it is not redrawn per frame. -->
         <Grid x:Name="PlotPanel" Height="85" Background="{ThemeResource InboundSurfaceBrush}"
               BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
-            <Canvas x:Name="Plot" Height="84" Margin="8,0" VerticalAlignment="Top"
+            <Canvas x:Name="Plot" Height="84" Margin="8,0" VerticalAlignment="Top" Background="Transparent"
                     AutomationProperties.Name="Download speed history for this session" />
+            <!-- Redrawn on its own as the pointer moves, so the plot isn't. -->
+            <Canvas x:Name="Hover" Height="84" Margin="8,0" VerticalAlignment="Top" IsHitTestVisible="False" />
         </Grid>
 
         <Grid Grid.Row="1" Background="{ThemeResource InboundChromeBrush}"

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DownloadManager.Desktop.WinUI.JobDetailsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Spacing="8">
+        <Grid ColumnSpacing="12" RowSpacing="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="Status" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="StatusValue" Grid.Column="1" Text="Connecting…" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Row="1" Text="File size" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="SizeValue" Grid.Row="1" Grid.Column="1" Text="Unknown" />
+
+            <TextBlock Grid.Row="2" Text="Downloaded" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="DownloadedValue" Grid.Row="2" Grid.Column="1" Text="0 B" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="3" Text="Transfer rate" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="RateValue" Grid.Row="3" Grid.Column="1" Text="—" />
+
+            <TextBlock Grid.Row="4" Text="Time left" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="TimeLeftValue" Grid.Row="4" Grid.Column="1" Text="—" />
+            <TextBlock Grid.Row="5" Text="Resume capability" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" />
+            <TextBlock x:Name="SavePathLabel" Grid.Row="6" Text="Save to" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="SavePathValue" Grid.Row="6" Grid.Column="1" Visibility="Collapsed" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+        </Grid>
+        <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="False" HorizontalContentAlignment="Stretch"
+                  HorizontalAlignment="Stretch">
+            <StackPanel Spacing="7">
+                <StackPanel x:Name="Segments" Spacing="2" HorizontalAlignment="Stretch" />
+            </StackPanel>
+        </Expander>
+    </StackPanel>
+</UserControl>

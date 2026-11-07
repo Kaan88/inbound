@@ -24,6 +24,10 @@ public interface IJobStore
 
 public interface IDownloadCheckpointStore
 {
+    /// <summary>
+    /// Null means there is no usable checkpoint, and a transfer that hears this starts over, deleting what it has. So a
+    /// file that exists but can't be read right now throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> instead.
+    /// </summary>
     Task<DownloadCheckpoint?> LoadAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task SaveAsync(DownloadCheckpoint checkpoint, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid jobId, CancellationToken cancellationToken = default);

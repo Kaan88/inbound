@@ -36,18 +36,44 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 ## 2. Status colors
 
-Download states use fixed mid-tone colors (`JobViewModel.StatusBrush`) that stay
-readable on both list surfaces:
+Download states use the `InboundStatus*Brush` tokens, at least 4.5:1 on the list surface and on a selected row in
+each theme (a test in `SelectionCommandsTests` checks this). Rows bind to the shared brushes in `StatusBrushes`, not
+to a resource lookup, and those change color when the main window's theme changes.
 
-| State | Color |
-|---|---|
-| downloading / connecting / verifying | blue `#3D8FE0` |
-| completed | green `#389E4C` |
-| failed | red `#DE4E4E` |
-| paused / queued / retry waiting | amber `#C98C20` |
-| anything else | gray `#8A8A8A` |
+| State | Token | Dark | Light |
+|---|---|---|---|
+| downloading / connecting / verifying | `InboundStatusActiveBrush` | `#6DB3F2` | `#1B65B4` |
+| completed | `InboundStatusDoneBrush` | `#5DC879` | `#1B7130` |
+| failed | `InboundStatusFailedBrush` | `#F58B8B` | `#B3261E` |
+| paused / queued / retry waiting | `InboundStatusWaitingBrush` | `#E0A93E` | `#8A5A00` |
+| anything else | `InboundStatusNeutralBrush` | `#A3A3A3` | `#5F5F5F` |
 
 Color only the status text. Don't tint whole rows.
+
+Remote rows, for work on a provider's side with no local download yet, sit above the local rows in All
+Downloads and in their own Waiting view. They show a cloud glyph and an italic name, with a divider under
+the last one. Their stage is words and never a bar. Size, Time left and Transfer rate stay blank, because
+those columns are about bytes reaching this computer. A provider's own progress goes in Description,
+labelled as the provider's.
+
+In the add dialogs, each line says what it is in a word: Folder link, Magnet, Torrent file, Hoster through
+the provider, Direct provider link, Ordinary link, Unsupported, Can't tell. A line that can hold a secret shows
+only its host and its position in the list, never its address. A hoster link has no control that sends it
+anywhere but the provider. A link nobody could classify gets a retry, and a direct download only by a box
+ticked for that line. Whether something is cached is known only after it is added, so the approval to fetch
+what isn't cached comes in a second step, unticked, and closing that step loses nothing. Import JD Container
+follows the same rules with the same words. Its list is virtualized, because a container can hold 5000 links, so a
+link password is entered from the download list rather than from a row.
+
+Extraction has its own Extraction column beside Status, with the same status colors on its text and no bar,
+so a failed extraction never reads as a failed download and never lands in the Failed view. The cell is short
+and its tooltip has the Host's whole sentence, including every missing volume. An archive with no file on the
+list gets a row of its own, above the local rows on All Downloads and in the Extractions view; Status stays
+blank on it. Nothing about extraction opens by itself: a set that needs a password gets a key button on its
+row and one line in a notice bar above the list, and the password dialog opens only when asked for. The column
+and every extraction command hide when the Host doesn't answer `archive.*`. The column also stays away until there is an
+archive to talk about, so the Description column, where a provider's words and a remote failure's cause go, fits at the
+default window width. With one remote or archive row selected, the status bar says what Description says.
 
 ## 3. Progress bars
 
@@ -69,13 +95,30 @@ Color only the status text. Don't tint whole rows.
   Foreground in code; it renders the text invisible.
 - Keep the defaults: no gradients, no animated stripes, no percentage text
   drawn over the bar.
+- A file's figures, segment map and segment table are one control, `JobDetailsPanel`. A file's own window and
+  a package's window both use it, for that file or the selected one, so a file reads the same in both. A
+  package's window adds what is about the package: overall progress, the file list and the archive password.
+  A package of one file opens the file's own window, as it is an ordinary row on the list.
 
 ## 4. Layout and density
 
 - List rows are 27px with 11–12px text. Column headers are 12px SemiBold on
   `InboundChromeBrush`, with a 1px bottom divider.
-- Header and row column widths must match exactly. Change both definitions in
-  `MainWindow.xaml` together.
+- Header and row column widths always match, because `ColumnHeaderRow` sets both from one
+  `ListColumnLayout`. A new column goes in `ListColumnSets` and in the row template, at the same position.
+- A list with a header sorts by a click on it, with a small chevron for the direction, and a second click
+  reverses. Blank cells stay at the end either way. Remote and archive rows stay on top of the download
+  list whatever the order. Dragging a header's right edge resizes its column and a double-click on that
+  edge puts it back. Shift with Left or Right does the same from the keyboard, and the header is one Tab stop
+  that the arrow keys move along.
+- Until a column is resized, the name column takes the room left. The first resize fixes it, and the last
+  column takes the room left from then on, so a column's right edge follows the pointer. A package's file
+  is indented inside its icon and name cells, never with the row's padding, or its columns would leave
+  their headers.
+- Dragging a box with the mouse selects the rows it touches in the download list, and ticks them in a file
+  tree, where a box replaces what is there and Ctrl adds to it. A tree's open folder row is passed over,
+  since its files have rows of their own; a closed one stands for everything in it. The box is
+  `InboundProgressFillBrush` around `InboundHighlightBrush`. A row's own buttons and checkboxes never start one.
 - Leave unknown values blank: no "0 B" for an unknown size and no empty speeds.
   Use "—" for missing live values in summaries.
 - Units: binary multiples labelled `KB`/`MB`/`GB` (1024-based), the same in the
@@ -111,7 +154,7 @@ Color only the status text. Don't tint whole rows.
   scrolling page with `Section`/`Hint` headings on the right, and
   OK / Cancel / Apply in a footer. Validation errors appear inline in the footer
   and select the offending page; the window never closes on invalid input.
-- Smaller multi-page windows (Scheduler) use a `SelectorBar` above the page.
+- Smaller multi-page windows (Scheduler, My provider) use a `SelectorBar` above the page.
 - Use the right control for the value: `NumberBox` for numbers,
   `FolderField` (text box with Browse…) for folders, `TimeField`/`DaysField`/
   `DateField` (`FormFields.cs`) for schedule times, weekdays and dates,
@@ -137,5 +180,8 @@ Color only the status text. Don't tint whole rows.
    file that completes so every status color is on screen.
 4. Capture both themes. To switch, set `"DarkMode": false|true` in
    `artifacts\uiqa\data\ui-state.json` and restart the UI.
-5. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
+5. Capture a window with `PrintWindow` and flag 2 (`PW_RENDERFULLCONTENT`). It needs no focus and takes in nothing
+   else on the desktop, while a copy of the screen can come out black. A menu or flyout is a window of its own, with
+   class `Microsoft.UI.Content.PopupWindowSiteBridge` or `Xaml_WindowedPopupClass`, so capture it by itself.
+6. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
    user's Downloads folder during harness runs.

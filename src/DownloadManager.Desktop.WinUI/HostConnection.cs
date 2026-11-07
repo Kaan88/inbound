@@ -16,6 +16,7 @@ public sealed class HostConnection : IAsyncDisposable
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
     public event Action<JobDto, string>? JobChanged;
     public event Action<List<DownloadGroupDto>>? GroupsChanged;
+    public event Action<ArchiveChangedDto>? ArchiveChanged;
     public event Action<bool, string?>? ConnectionChanged;
     /// <summary>The Host announced a user-requested application exit.</summary>
     public event Action? HostExiting;
@@ -33,6 +34,13 @@ public sealed class HostConnection : IAsyncDisposable
             .ConfigureAwait(false);
         return reply.GetPayload<SnapshotDto>();
     }
+
+    public Task<IpcMessage> ListArchivesAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(ArchiveMessageTypes.List, new { }, TimeSpan.FromSeconds(30), cancellationToken);
+
+    /// <summary>The password goes only into this one message. An empty one clears what is on record.</summary>
+    public Task<IpcMessage> SetArchivePasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
+        => RequestAsync(ArchiveMessageTypes.SetPassword, request, TimeSpan.FromSeconds(30), cancellationToken);
 
     public Task<IpcMessage> GroupActionAsync(GroupActionRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.GroupAction, request, TimeSpan.FromMinutes(2), cancellationToken);
@@ -87,6 +95,14 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRemove, new JobActionRequest { JobIds = ids.ToList(), DeleteFile = deleteFile },
             TimeSpan.FromSeconds(30 + 2 * ids.Count), cancellationToken);
 
+    /// <summary>Free space at these folders, measured by the Host. Each folder answers within about two seconds.</summary>
+    public async Task<FolderSpaceResult?> GetFolderSpaceAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(MessageTypes.FolderSpace, new FolderSpaceRequest { Paths = paths.ToList() },
+            TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        return reply.Type == MessageTypes.FolderSpaceResult ? reply.GetPayload<FolderSpaceResult>() : null;
+    }
+
     public Task<IpcMessage> UpdateSettingsAsync(SettingsDto settings, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings },
             TimeSpan.FromSeconds(10), cancellationToken);
@@ -104,6 +120,33 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> RefreshUrlAsync(Guid jobId, string url, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url },
             TimeSpan.FromSeconds(10), cancellationToken);
+
+    /// <summary>
+    /// For an address that differs from the job's. The Host has to find out whether the address belongs to a
+    /// provider, which can wait on the network, so this gets a connection of its own like every such call.
+    /// </summary>
+    public async Task<IpcMessage> RefreshChangedUrlAsync(Guid jobId, string url, bool explicitDirect, CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        try
+        {
+            await using var client = await IpcClient.ConnectAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+            var request = IpcMessage.Create(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url, ExplicitDirect = explicitDirect });
+            await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            while (await client.ReadAsync(timeout.Token).ConfigureAwait(false) is { } reply)
+            {
+                if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
+                if (reply.ReplyTo == request.Id) return reply;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return IpcMessage.Create(MessageTypes.JobActionResult, new JobActionResponse { Error = "Checking this address took too long, so it wasn't changed. Try again." });
+        }
+
+        throw new IOException("The Host disconnected while changing the address.");
+    }
 
     public Task<IpcMessage> CleanOrphansAsync(bool delete, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.HostCleanOrphans, new CleanOrphansRequest { Delete = delete },
@@ -139,6 +182,10 @@ public sealed class HostConnection : IAsyncDisposable
             SpeedLimitBytesPerSecond = speedLimitBytesPerSecond,
             ShowCompletionDialog = showCompletionDialog,
         }, TimeSpan.FromSeconds(10), cancellationToken);
+
+    public Task<IpcMessage> SetPriorityAsync(Guid jobId, int priority, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, Priority = priority },
+            TimeSpan.FromSeconds(10), cancellationToken);
 
     public Task<IpcMessage> MoveJobAsync(Guid jobId, string newFilePath, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobUpdate, new JobUpdateRequest { JobId = jobId, NewFilePath = newFilePath },
@@ -237,7 +284,7 @@ public sealed class HostConnection : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                ConnectionChanged?.Invoke(false, ex.Message);
+                ConnectionChanged?.Invoke(false, ex is TimeoutException && HostPipeBusyException.PipeExists() ? RemoteText.HostBusy : ex.Message);
             }
             finally
             {
@@ -287,6 +334,13 @@ public sealed class HostConnection : IAsyncDisposable
         if (message.Type == MessageTypes.GroupsChanged)
         {
             try { GroupsChanged?.Invoke(message.GetPayload<List<DownloadGroupDto>>() ?? new()); }
+            catch { /* ignore malformed events */ }
+            return;
+        }
+
+        if (message.Type == ArchiveMessageTypes.Changed)
+        {
+            try { ArchiveChanged?.Invoke(message.GetPayload<ArchiveChangedDto>()); }
             catch { /* ignore malformed events */ }
             return;
         }

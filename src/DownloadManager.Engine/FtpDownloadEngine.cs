@@ -177,7 +177,7 @@ public sealed class FtpDownloadEngine : IDownloadEngine
             if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
             {
                 return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                    FailureKind.InvalidContent,
+                    FailureKind.VerificationFailed,
                     $"The FTP output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
                     false,
                     false,

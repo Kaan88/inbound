@@ -128,6 +128,18 @@ npm run build
 # chrome://extensions -> Developer mode -> Load unpacked -> dist
 ```
 
+TorBox live tests call the real API, so they are opt-in. The project builds with the solution, but
+`dotnet test` finds nothing in it without `-p:RunLiveTests=true`, `scripts\test.ps1` doesn't list it,
+and without the key each test skips and says why. Set the key for this one shell, and never echo it.
+Output carries no key, link or name.
+
+```powershell
+# Reads only.
+dotnet test tests\DownloadManager.TorBox.LiveTests\DownloadManager.TorBox.LiveTests.csproj -c Release -p:RunLiveTests=true --filter Category=TorBoxLive --logger "console;verbosity=detailed"
+# Sends only-if-cached requests for invented content, which create nothing. Also needs TORBOX_LIVE_SUBMIT=1.
+dotnet test tests\DownloadManager.TorBox.LiveTests\DownloadManager.TorBox.LiveTests.csproj -c Release -p:RunLiveTests=true --filter Category=TorBoxLiveSubmit --logger "console;verbosity=detailed"
+```
+
 ## Conventions
 
 - Nullable enabled, implicit usings, file-scoped namespaces, async APIs with

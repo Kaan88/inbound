@@ -61,22 +61,36 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
     private HttpClient CreateDefaultClient()
     {
-        var sockets = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            AutomaticDecompression = DecompressionMethods.None,
-            ConnectTimeout = _options.ConnectTimeout,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            MaxConnectionsPerServer = 64,
-            Proxy = new ConfigurableProxy(_options.Proxy),
-            UseProxy = true,
-            UseCookies = false,
-        };
+        var sockets = CreateProxiedHandler(_options.Proxy, _options.ConnectTimeout);
+        sockets.AutomaticDecompression = DecompressionMethods.None;
+        sockets.PooledConnectionLifetime = TimeSpan.FromMinutes(10);
+        sockets.MaxConnectionsPerServer = 64;
 
         var client = new HttpClient(sockets, disposeHandler: true);
         ConfigureClient(client);
         return client;
     }
+
+    /// <summary>
+    /// A handler for other HTTP clients in the app, such as a provider's API client, so their
+    /// traffic takes the same route as downloads. It reads the engine's live proxy settings,
+    /// so a change applies to new connections.
+    /// </summary>
+    public SocketsHttpHandler CreateProxiedHandler() => CreateProxiedHandler(_options.Proxy, _options.ConnectTimeout);
+
+    /// <summary>Follows no redirects and keeps no cookies; callers change what they need.</summary>
+    public static SocketsHttpHandler CreateProxiedHandler(ProxySettings proxy, TimeSpan connectTimeout)
+        => new()
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.All,
+            ConnectTimeout = connectTimeout,
+            // Short, because an open connection keeps the proxy it was opened through.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            Proxy = new ConfigurableProxy(proxy),
+            UseProxy = true,
+            UseCookies = false,
+        };
 
     private static void ConfigureClient(HttpClient client)
     {
@@ -112,6 +126,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>The proxy settings changed. <see cref="CreateProxiedHandler()"/> handlers made before this keep their open connections.</summary>
+    public event Action? ProxyChanged;
+
     public void UpdateProxy(ProxySettings settings)
     {
         var changed = !string.Equals(_options.Proxy.Mode, settings.Mode, StringComparison.OrdinalIgnoreCase) ||
@@ -127,6 +144,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         _options.Proxy.Address = settings.Address;
         _options.Proxy.Username = settings.Username;
         _options.Proxy.Password = settings.Password;
+        ProxyChanged?.Invoke();
 
         if (!_ownsClient)
         {
@@ -151,7 +169,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
-        if (!TryCreateUri(job.Url, out var uri, out var uriError))
+        if (!TryCreateUri(job.EffectiveUrl, out var uri, out var uriError))
         {
             return DownloadResult.Fail(DownloadState.Failed,
                 new JobFailure(FailureKind.InvalidContent, uriError, false, false, DateTimeOffset.UtcNow));
@@ -198,8 +216,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 () => ExecuteDashAsync(job, progress, cancellationToken)).ConfigureAwait(false);
         }
 
-        if (job.RequestedConnections > 1 &&
-            (checkpoint is null || checkpoint.Segments.Count > 1))
+        // All this says is that an earlier first request failed: no bytes rest on it, and it
+        // must not stop the next run, perhaps with a fresh link, from using segments.
+        if (checkpoint is { Segments.Count: <= 1, CompletedBytes: 0 } &&
+            (!File.Exists(job.PartFilePath) || new FileInfo(job.PartFilePath).Length == 0))
+        {
+            checkpoint = null;
+        }
+
+        // Segmented progress sits at scattered offsets in a preallocated file, so only the
+        // segmented path can continue it, even if the job is now limited to one connection.
+        if (checkpoint is { Segments.Count: > 1 } ||
+            (checkpoint is null && job.RequestedConnections > 1))
         {
             var segmented = await TryExecuteSegmentedAsync(job, checkpoint, progress, cancellationToken)
                 .ConfigureAwait(false);
@@ -247,20 +275,29 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                 if (result.Complete)
                 {
+                    // Finalizing can fail on a locked file or an existing destination. The retry
+                    // has to know these bytes are all there, or it throws away a whole good file.
+                    await SaveCheckpointAsync(job, state, CancellationToken.None).ConfigureAwait(false);
                     return await FinalizeAsync(job, state, reporter, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                await SaveCheckpointAsync(job, state, CancellationToken.None).ConfigureAwait(false);
+                await SaveStoppedCheckpointAsync(job, state).ConfigureAwait(false);
                 return DownloadResult.Fail(DownloadState.Cancelled,
                     new JobFailure(FailureKind.Cancelled, "The download was cancelled.", false, true, DateTimeOffset.UtcNow),
                     state.Bytes, state.Total);
             }
             catch (DownloadEngineException ex)
             {
-                await SaveCheckpointAsync(job, state, CancellationToken.None).ConfigureAwait(false);
+                if (ex.DiscardLocalData)
+                {
+                    await DiscardLocalDataAsync(job).ConfigureAwait(false);
+                    return DownloadResult.Fail(DownloadState.Failed, ex.Failure);
+                }
+
+                await SaveStoppedCheckpointAsync(job, state).ConfigureAwait(false);
 
                 if (!ex.IsRetryable || attempt >= _options.MaxAttempts)
                 {
@@ -273,7 +310,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     attempt = 1;
                 }
 
-                var delay = RetryPolicy.Delay(attempt, _options);
+                var delay = RetryPolicy.Delay(attempt, _options, ex.RetryAfter);
                 reporter.Report(force: true,
                     $"Retrying in {Math.Max(1, Math.Ceiling(delay.TotalSeconds))}s");
                 try
@@ -290,7 +327,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 var failure = MapException(ex, out var retryable);
-                await SaveCheckpointAsync(job, state, CancellationToken.None).ConfigureAwait(false);
+                await SaveStoppedCheckpointAsync(job, state).ConfigureAwait(false);
                 return DownloadResult.Fail(DownloadState.Failed, failure with { IsRetryable = retryable },
                     state.Bytes, state.Total);
             }
@@ -319,24 +356,31 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         if (status is 408 or 425 or 429 || status >= 500)
         {
-            var retryAfter = response.Headers.RetryAfter?.Delta;
             throw new DownloadEngineException(
-                new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", true, true, DateTimeOffset.UtcNow),
+                new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", true, true, DateTimeOffset.UtcNow, status),
                 isRetryable: true,
-                retryAfter);
+                RetryAfterOf(response));
         }
 
-        if (status is < 200 or >= 300)
+        // Some servers say "nothing past the end" with a 206 and no range, rather than a 416.
+        if (status == 416 || (status == 206 && response.Content.Headers.ContentRange is { HasRange: false, HasLength: true }))
         {
-            throw new DownloadEngineException(
-                new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", false, false, DateTimeOffset.UtcNow),
-                isRetryable: false);
-        }
-
-        if (status == 416)
-        {
-            if (state.Total is > 0 && state.Bytes == state.Total)
+            // The bytes are all here only if the checkpoint recorded them and the server's
+            // own size agrees; the part file's length alone proves nothing.
+            var serverTotal = response.Content.Headers.ContentRange?.Length;
+            if (state.Total is > 0 && state.Bytes == state.Total && state.RecordedBytes == state.Total &&
+                (serverTotal is null || serverTotal == state.Total))
             {
+                return new AttemptResult(Complete: true, RestartFromZero: false);
+            }
+
+            // A range from zero of an empty file has no byte to send, and the server says its total is 0.
+            // A provider's file is always asked for that way, so restarting would only ask the same again.
+            if (state.Bytes == 0 && serverTotal == 0 && state.Total is null or 0 && job.ExpectedTotalBytes is null or 0)
+            {
+                await using (new FileStream(state.PartPath, FileMode.Create, FileAccess.Write, FileShare.Read)) { }
+                state.Total = 0;
+                state.RecordedBytes = 0;
                 return new AttemptResult(Complete: true, RestartFromZero: false);
             }
 
@@ -348,8 +392,27 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             throw new DownloadEngineException(
                 new JobFailure(FailureKind.RangeUnsupported,
                     "The server rejected the resume range and restarting did not help.",
-                    false, false, DateTimeOffset.UtcNow),
+                    false, false, DateTimeOffset.UtcNow, status),
                 isRetryable: false);
+        }
+
+        if (status is < 200 or >= 300)
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", false, false, DateTimeOffset.UtcNow, status),
+                isRetryable: false);
+        }
+
+        // Before anything below can restart the transfer: an error page says nothing about
+        // whether the file changed, so it must not cost the bytes already downloaded.
+        if (LooksLikeErrorBody(job, response) is { } errorBody)
+        {
+            throw new DownloadEngineException(errorBody, isRetryable: false);
+        }
+
+        if (NotThePromisedFile(job, response, hasLocalData: state.Bytes > 0) is { } notThePromisedFile)
+        {
+            throw new DownloadEngineException(notThePromisedFile, isRetryable: false);
         }
 
         if (status == 200 && state.Bytes > 0)
@@ -403,6 +466,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             responseTotal = response.Content.Headers.ContentLength;
         }
 
+        if (job.ExpectedTotalBytes is > 0 && responseTotal is > 0 && responseTotal != job.ExpectedTotalBytes)
+        {
+            // A range from zero stands in for asking for the whole file, with nothing saved to judge
+            // it against, so it gets the same answer as a whole file of the wrong size: a fresh link.
+            if (status == 206 && state.Bytes == 0)
+            {
+                throw new DownloadEngineException(LinkAnsweredAnotherSize(job, responseTotal, status), isRetryable: false);
+            }
+
+            throw new DownloadEngineException(ExpectedSizeMismatch(job, responseTotal.Value), isRetryable: false, discardLocalData: true);
+        }
+
         EnsureFreeSpace(job, responseTotal, state.Bytes);
 
         if (state.Total is > 0 && responseTotal is > 0 && state.Total != responseTotal)
@@ -435,21 +510,11 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 isRetryable: false);
         }
 
-        if (IsHtmlErrorPage(job, response.Content.Headers.ContentType?.MediaType))
-        {
-            throw new DownloadEngineException(
-                new JobFailure(
-                    FailureKind.InvalidContent,
-                    "The server returned an HTML page instead of the requested file. " +
-                    "Rename the target to .html to save it as a page.",
-                    false, false, DateTimeOffset.UtcNow),
-                isRetryable: false);
-        }
-
         state.Total = responseTotal ?? state.Total;
         state.ETag = responseEtag ?? state.ETag;
         state.LastModified = responseLastModified ?? state.LastModified;
         state.ContentType = response.Content.Headers.ContentType?.ToString();
+        if (state.Bytes == 0) AdoptServerName(job, response);
         if (status == 206 || response.Headers.AcceptRanges.Contains("bytes")) job.ResumeSupported = true;
         else if (response.Headers.AcceptRanges.Contains("none")) job.ResumeSupported = false;
         await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
@@ -500,6 +565,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         new JobFailure(FailureKind.Timeout, "The connection stalled while reading.", true, true, DateTimeOffset.UtcNow),
                         isRetryable: true, inner: ex);
                 }
+                catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // This only reads the network, so it can't be a disk problem. The bytes so far
+                    // are good, and the next attempt asks for the rest.
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Network, "The connection was lost while reading.", true, true, DateTimeOffset.UtcNow),
+                        isRetryable: true, inner: ex);
+                }
 
                 if (read == 0)
                 {
@@ -514,16 +587,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 reporter.Report(force: false, "Downloading");
 
                 var now = DateTimeOffset.UtcNow;
-                if (now - lastCheckpointAt >= TimeSpan.FromSeconds(1) || Math.Abs(state.Bytes - checkpointBytes) >= 8 * 1024 * 1024)
+                if (now - lastCheckpointAt >= _options.CheckpointInterval || Math.Abs(state.Bytes - checkpointBytes) >= CheckpointEveryBytes)
                 {
+                    await FlushToDiskAsync(file, cancellationToken).ConfigureAwait(false);
                     await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
                     lastCheckpointAt = now;
                     checkpointBytes = state.Bytes;
                 }
             }
 
-            await file.FlushAsync(cancellationToken).ConfigureAwait(false);
-            file.Flush(flushToDisk: false);
+            await FlushToDiskAsync(file, cancellationToken).ConfigureAwait(false);
         }
 
         if (contentLength is > 0 && bytesThisResponse < contentLength)
@@ -557,6 +630,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
 
         return new AttemptResult(Complete: true, RestartFromZero: false);
+    }
+
+    private const long CheckpointEveryBytes = 256 * 1024 * 1024;
+
+    private static async Task FlushToDiskAsync(FileStream file, CancellationToken cancellationToken)
+    {
+        await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await Task.Run(() => file.Flush(flushToDisk: true), cancellationToken).ConfigureAwait(false);
     }
 
     private SiteLoginCredential? MatchSiteLogin(Uri uri)
@@ -640,6 +721,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         return result;
     }
 
+    /// <summary>A masked or provider reference in Url cannot fetch a playlist; the resolved address can.</summary>
+    private static Uri MediaEntryUri(DownloadJob job)
+        => new(string.IsNullOrWhiteSpace(job.ResolvedUrl) ? job.Url : job.ResolvedUrl, UriKind.Absolute);
+
     private static bool IsHlsPlaylist(DownloadJob job)
     {
         if (Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
@@ -660,7 +745,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     {
         try
         {
-            var playlistUri = new Uri(job.Url, UriKind.Absolute);
+            var playlistUri = MediaEntryUri(job);
             var playlist = await FetchHlsTextAsync(job, playlistUri, cancellationToken).ConfigureAwait(false);
             if (playlist.Text.Contains("#EXT-X-STREAM-INF", StringComparison.OrdinalIgnoreCase))
             {
@@ -1121,7 +1206,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
+                        FailureKind.VerificationFailed,
                         $"The muxed output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
                         false, true, DateTimeOffset.UtcNow), received, received);
                 }
@@ -1266,7 +1351,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
+                        FailureKind.VerificationFailed,
                         $"The media output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
                         false, true, DateTimeOffset.UtcNow), received, received);
                 }
@@ -1659,7 +1744,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     {
         try
         {
-            var manifestUri = new Uri(job.Url, UriKind.Absolute);
+            var manifestUri = MediaEntryUri(job);
             var manifest = await FetchHlsTextAsync(job, manifestUri, cancellationToken).ConfigureAwait(false);
             var document = XDocument.Parse(manifest.Text);
             var root = document.Root ?? throw new InvalidDataException("The DASH manifest is empty.");
@@ -2316,7 +2401,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
-                        FailureKind.InvalidContent,
+                        FailureKind.VerificationFailed,
                         $"The muxed output SHA-256 did not match (expected {job.ExpectedSha256}, got {actual}).",
                         false, true, DateTimeOffset.UtcNow), received, received);
                 }
@@ -2650,6 +2735,29 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         finally { response.Dispose(); }
     }
 
+    /// <summary>
+    /// The add asks the server for a name before the job exists. When that went unanswered the job has its
+    /// address's last part, which for a CDN link is only an id. The transfer's own first answer can still say
+    /// the real name, as a browser would take it. Asked once: a name the user gives later is theirs.
+    /// </summary>
+    private static void AdoptServerName(DownloadJob job, HttpResponseMessage response)
+    {
+        if (!job.NameFromAddress) return;
+        job.NameFromAddress = false;
+        var disposition = response.Content.Headers.TryGetValues("Content-Disposition", out var values) ? values.FirstOrDefault() : null;
+        if (FileNameResolver.FromContentDisposition(disposition) is not { } given) return;
+        var name = FileNameResolver.Sanitize(given);
+
+        // A name that repeats part of the query is no name: on a direct link, that is where the key is.
+        var query = Uri.TryCreate(job.EffectiveUrl, UriKind.Absolute, out var address) ? Uri.UnescapeDataString(address.Query) : string.Empty;
+        if (name == "download" || name == job.FileName || (name.Length >= 8 && query.Contains(name, StringComparison.OrdinalIgnoreCase))) return;
+
+        job.FileName = name;
+        var directory = Path.GetDirectoryName(job.FinalFilePath);
+        // The part file keeps its own name; the finished file takes this one, and a clash is settled when it lands.
+        job.FinalFilePath = string.IsNullOrEmpty(directory) ? string.Empty : Path.Combine(directory, name);
+    }
+
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
@@ -2660,8 +2768,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         // Browser handoff can already have resolved a landing page to a CDN URL.
         // Keep credentials bound to the original origin even when skipping that page.
         var originalOrigin = new Uri(job.Url, UriKind.Absolute).GetLeftPart(UriPartial.Authority);
-        var target = string.IsNullOrWhiteSpace(job.FinalUrl) ? job.Url : job.FinalUrl;
-        if (!TryCreateUri(target, out var currentUri, out var targetError))
+        if (!TryCreateUri(job.EffectiveUrl, out var currentUri, out var targetError))
         {
             throw new DownloadEngineException(
                 new JobFailure(FailureKind.InvalidContent, targetError, false, false, DateTimeOffset.UtcNow),
@@ -2717,6 +2824,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 {
                     throw new DownloadEngineException(
                         new JobFailure(FailureKind.Forbidden, "The redirect target uses an unsupported scheme.", false, false, DateTimeOffset.UtcNow),
+                        isRetryable: false);
+                }
+
+                // A resolved link holds an account key, which a plain http request would send in the open.
+                if (job.ResolvedUrl is not null && currentUri.Scheme == Uri.UriSchemeHttps && next.Scheme == Uri.UriSchemeHttp && !next.IsLoopback)
+                {
+                    throw new DownloadEngineException(
+                        new JobFailure(FailureKind.Http,
+                            "The download server redirected to an unencrypted address. The link holds your account key, so it wasn't followed. Anything already downloaded was kept.",
+                            false, true, DateTimeOffset.UtcNow),
                         isRetryable: false);
                 }
 
@@ -2784,7 +2901,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             request.Headers.Referrer = referrer;
         }
 
-        if (offset > 0 || rangeEnd is not null)
+        // A provider vouches for exact bytes, and a whole-file answer can arrive rewritten: TorBox's CDN
+        // adds to an HTML file sent whole, and sends the same file untouched as a range, even a range from zero.
+        var wantsExactBytes = !string.IsNullOrWhiteSpace(job.ResolvedUrl) || job.ExpectedTotalBytes is > 0;
+        if (offset == 0 && rangeEnd is null && wantsExactBytes)
+        {
+            request.Headers.Range = new RangeHeaderValue(0, null);
+        }
+        else if (offset > 0 || rangeEnd is not null)
         {
             request.Headers.Range = new RangeHeaderValue(offset, rangeEnd);
             if (includeValidators)
@@ -2810,22 +2934,32 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         IProgress<TransferProgress>? progress,
         CancellationToken cancellationToken)
     {
-        SegmentedPlan? plan;
-        try
+        var probe = await ProbeSegmentedAsync(job, checkpoint, progress, cancellationToken).ConfigureAwait(false);
+        if (probe.Failure is { } probeFailure)
         {
-            plan = await ProbeSegmentedAsync(job, cancellationToken).ConfigureAwait(false);
+            // A failed probe says nothing about the file, so saved progress stays exactly as it
+            // is for the next attempt. With none saved, the single-stream path reports the
+            // failure itself, except an error page, which it would only fetch a second time.
+            return checkpoint is not null || probe.IsErrorBody
+                ? DownloadResult.Fail(DownloadState.Failed, probeFailure, checkpoint?.CompletedBytes ?? 0, checkpoint?.TotalBytes)
+                : null;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+        var plan = probe.Plan;
+        if (plan is not null && job.ExpectedTotalBytes is > 0 && plan.Total != job.ExpectedTotalBytes)
         {
-            throw;
-        }
-        catch (Exception)
-        {
-            return null;
+            await DiscardLocalDataAsync(job).ConfigureAwait(false);
+            return DownloadResult.Fail(DownloadState.Failed, ExpectedSizeMismatch(job, plan.Total));
         }
 
         if (plan is null || plan.Total < 1024 * 1024)
         {
+            // The server now answers in a way these segments cannot continue from.
+            if (checkpoint is not null)
+            {
+                await ResetSegmentedAsync(job).ConfigureAwait(false);
+            }
+
             return null;
         }
 
@@ -2954,6 +3088,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 // The first failure is already captured above.
             }
 
+            // No worker is writing now, and the saves below come after the handle is gone.
+            run.FileDurable = TryFlushToDisk(file);
+            run.FileClosed = true;
             await file.DisposeAsync().ConfigureAwait(false);
         }
 
@@ -2987,6 +3124,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 run.AggregateBytes, plan.Total);
         }
 
+        // A failed verification keeps the bytes, and a retry should find every range complete.
+        await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
         var finalState = new TransferState(job, null)
         {
             PartPath = job.PartFilePath,
@@ -3001,30 +3140,111 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         return await FinalizeAsync(job, finalState, finalReporter, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<SegmentedPlan?> ProbeSegmentedAsync(DownloadJob job, CancellationToken cancellationToken)
+    private async Task<SegmentedProbe> ProbeSegmentedAsync(
+        DownloadJob job,
+        DownloadCheckpoint? checkpoint,
+        IProgress<TransferProgress>? progress,
+        CancellationToken cancellationToken)
     {
-        using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
-            .ConfigureAwait(false);
-        using var response = await SendWithRedirectsAsync(job, 0, cancellationToken, rangeEnd: 0)
-            .ConfigureAwait(false);
-        if ((int)response.StatusCode != 206)
+        for (var attempt = 1; ; attempt++)
         {
-            if ((int)response.StatusCode == 200) job.ResumeSupported = false;
-            return null;
-        }
+            var probe = await ProbeSegmentedOnceAsync(job, checkpoint is not null, cancellationToken).ConfigureAwait(false);
 
-        var range = response.Content.Headers.ContentRange;
-        if (range?.From != 0 || range.To is null || range.Length is not > 0)
+            // Without saved progress the single-stream path takes over and does its own retrying.
+            if (probe.Failure is null || !probe.IsRetryable || checkpoint is null || attempt >= _options.MaxAttempts)
+            {
+                return probe;
+            }
+
+            var delay = RetryPolicy.Delay(attempt, _options, probe.RetryAfter);
+            try
+            {
+                progress?.Report(new TransferProgress(checkpoint.CompletedBytes, checkpoint.TotalBytes, 0, null, 0,
+                    $"Retrying in {Math.Max(1, Math.Ceiling(delay.TotalSeconds))}s"));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Progress observers must not be able to break a transfer.
+            }
+
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<SegmentedProbe> ProbeSegmentedOnceAsync(DownloadJob job, bool hasLocalData, CancellationToken cancellationToken)
+    {
+        try
         {
-            return null;
-        }
+            using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
+                .ConfigureAwait(false);
+            using var response = await SendWithRedirectsAsync(job, 0, cancellationToken, rangeEnd: 0)
+                .ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            if (status is 401 or 403 or 404 or 407 or 410)
+            {
+                return new SegmentedProbe { Failure = ClassifyHttpFailure(status, response) };
+            }
 
-        job.ResumeSupported = true;
-        return new SegmentedPlan(
-            range.Length.Value,
-            response.Headers.ETag?.Tag,
-            response.Content.Headers.LastModified?.ToString("R"),
-            response.Content.Headers.ContentType?.ToString());
+            if (status is 408 or 425 or 429 || status >= 500)
+            {
+                return new SegmentedProbe
+                {
+                    Failure = new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", true, true, DateTimeOffset.UtcNow, status),
+                    IsRetryable = true,
+                    RetryAfter = RetryAfterOf(response),
+                };
+            }
+
+            if (status is < 200 or >= 300)
+            {
+                return new SegmentedProbe
+                {
+                    Failure = new JobFailure(FailureKind.Http, $"The server returned HTTP {status}.", false, true, DateTimeOffset.UtcNow, status),
+                };
+            }
+
+            if (LooksLikeErrorBody(job, response) is { } errorBody)
+            {
+                return new SegmentedProbe { Failure = errorBody, IsErrorBody = true };
+            }
+
+            if (NotThePromisedFile(job, response, hasLocalData) is { } notThePromisedFile)
+            {
+                return new SegmentedProbe { Failure = notThePromisedFile, IsErrorBody = true };
+            }
+
+            if (status != 206)
+            {
+                job.ResumeSupported = false;
+                return new SegmentedProbe();
+            }
+
+            var range = response.Content.Headers.ContentRange;
+            if (range?.From != 0 || range.To is null || range.Length is not > 0)
+            {
+                return new SegmentedProbe();
+            }
+
+            job.ResumeSupported = true;
+            if (!hasLocalData) AdoptServerName(job, response);
+            return new SegmentedProbe
+            {
+                Plan = new SegmentedPlan(
+                    range.Length.Value,
+                    response.Headers.ETag?.Tag,
+                    response.Content.Headers.LastModified?.ToString("R"),
+                    response.Content.Headers.ContentType?.ToString()),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var failure = MapException(ex, out var retryable);
+            return new SegmentedProbe { Failure = failure, IsRetryable = retryable };
+        }
     }
 
     private async Task RunSegmentWorkerAsync(
@@ -3149,12 +3369,23 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         job, offset, cancellationToken, requestEnd).ConfigureAwait(false);
                     var status = (int)response.StatusCode;
 
+                    if (status is 200 or 206 && LooksLikeErrorBody(job, response) is { } errorBody)
+                    {
+                        throw new SegmentFailureException(errorBody, retryable: false);
+                    }
+
+                    if (NotThePromisedFile(job, response, hasLocalData: true) is { } notThePromisedFile)
+                    {
+                        throw new SegmentFailureException(notThePromisedFile, retryable: false);
+                    }
+
                     if (status == 200)
                     {
                         throw new SegmentationUnsupportedException();
                     }
 
-                    if (status == 416)
+                    // The same past-the-end answer as the single-stream path knows, in both its forms.
+                    if (status == 416 || (status == 206 && response.Content.Headers.ContentRange is { HasRange: false, HasLength: true }))
                     {
                         lock (run.Sync)
                         {
@@ -3181,8 +3412,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         throw new SegmentFailureException(
                             new JobFailure(FailureKind.Http,
                                 $"The server returned HTTP {status} for a segment.",
-                                true, true, DateTimeOffset.UtcNow),
-                            retryable: true);
+                                true, true, DateTimeOffset.UtcNow, status),
+                            retryable: true,
+                            RetryAfterOf(response));
                     }
 
                     if (status != 206)
@@ -3190,7 +3422,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         throw new SegmentFailureException(
                             new JobFailure(FailureKind.Http,
                                 $"Unexpected HTTP {status} for a segment.",
-                                false, false, DateTimeOffset.UtcNow),
+                                false, false, DateTimeOffset.UtcNow, status),
                             retryable: false);
                     }
 
@@ -3331,7 +3563,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                     await SaveSegmentedCheckpointAsync(run, CancellationToken.None)
                         .ConfigureAwait(false);
-                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
+                    await Task.Delay(RetryPolicy.Delay(attempt, _options, ex.RetryAfter), cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -3360,7 +3592,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         var now = DateTimeOffset.UtcNow;
         lock (run.Sync)
         {
-            if (now - run.LastCheckpoint < TimeSpan.FromSeconds(1))
+            if (now - run.LastCheckpoint < _options.CheckpointInterval)
             {
                 return;
             }
@@ -3397,6 +3629,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 };
             }
 
+            // Every byte this checkpoint counts is written, and the flush makes it durable. The
+            // file is sparse, so a checkpoint that landed first would mark zeros as downloaded,
+            // and with no md5 from the provider nothing later would notice.
+            if (!run.FileClosed)
+            {
+                await Task.Run(() => RandomAccess.FlushToDisk(run.File.SafeFileHandle), cancellationToken).ConfigureAwait(false);
+            }
+            else if (!run.FileDurable)
+            {
+                return;
+            }
+
             await _checkpoints.SaveAsync(checkpoint, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
@@ -3406,6 +3650,19 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         finally
         {
             run.CheckpointGate.Release();
+        }
+    }
+
+    private static bool TryFlushToDisk(FileStream file)
+    {
+        try
+        {
+            RandomAccess.FlushToDisk(file.SafeFileHandle);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
@@ -3435,6 +3692,82 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 // best effort
             }
         }
+    }
+
+    /// <summary>Deletes the part and checkpoint, when they can no longer become the requested file.</summary>
+    private async Task DiscardLocalDataAsync(DownloadJob job)
+    {
+        try
+        {
+            if (File.Exists(job.PartFilePath))
+            {
+                File.Delete(job.PartFilePath);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Without a checkpoint the next attempt truncates or replaces the file anyway.
+        }
+
+        // Identity is what is being discarded; old validators would only conflict with the new file.
+        job.ETag = null;
+        job.LastModified = null;
+
+        if (_checkpoints is not null)
+        {
+            try
+            {
+                await _checkpoints.DeleteAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A stale checkpoint fails validation against the missing part file.
+            }
+        }
+    }
+
+    private static JobFailure ExpectedSizeMismatch(DownloadJob job, long actual)
+        => new(FailureKind.RemoteChanged,
+            $"The server's file is {actual:N0} bytes, not the expected {job.ExpectedTotalBytes:N0}. " +
+            "The partial file was deleted, so a retry starts from the beginning.",
+            false, false, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// A failure when a whole-file answer can't be the file the job was promised. A 206 with another
+    /// total describes a different file, but a 200 is any document at all, usually a dead link's
+    /// short message, so it says nothing about the saved bytes and must not cost them. It counts
+    /// as a dead link so that a provider's job gets a fresh one.
+    /// </summary>
+    private static JobFailure? NotThePromisedFile(DownloadJob job, HttpResponseMessage response, bool hasLocalData)
+    {
+        if (job.ExpectedTotalBytes is not > 0 || response.StatusCode != HttpStatusCode.OK)
+        {
+            return null;
+        }
+
+        var length = response.Content.Headers.ContentLength;
+        if (length == job.ExpectedTotalBytes || (length is null && !hasLocalData))
+        {
+            return null;
+        }
+
+        return LinkAnsweredAnotherSize(job, length, (int)response.StatusCode);
+    }
+
+    private static JobFailure LinkAnsweredAnotherSize(DownloadJob job, long? length, int status)
+        => new(FailureKind.ExpiredUrl,
+            $"The link answered with {(length is null ? "a response of unknown size" : $"{length:N0} bytes")} " +
+            $"instead of the expected {job.ExpectedTotalBytes:N0}-byte file. Anything already downloaded was kept.",
+            false, true, DateTimeOffset.UtcNow, status);
+
+    /// <summary>For a file whose bytes a provider vouched for: keeping them can only reach the same result.</summary>
+    private async Task<DownloadResult> FailVerificationAsync(DownloadJob job, string problem, long? total)
+    {
+        await DiscardLocalDataAsync(job).ConfigureAwait(false);
+        return DownloadResult.Fail(DownloadState.Failed,
+            new JobFailure(FailureKind.VerificationFailed, problem + " The partial file was deleted, so a retry starts from the beginning.",
+                false, false, DateTimeOffset.UtcNow),
+            0, total);
     }
 
     private static List<SegmentCheckpoint> BuildSegments(long total, int requestedConnections)
@@ -3529,6 +3862,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         string? LastModified,
         string? ContentType);
 
+    /// <summary>A plan; a failure; or neither, when the server simply won't do ranged requests.</summary>
+    private sealed record SegmentedProbe
+    {
+        public SegmentedPlan? Plan { get; init; }
+        public JobFailure? Failure { get; init; }
+        public bool IsRetryable { get; init; }
+        public bool IsErrorBody { get; init; }
+        public TimeSpan? RetryAfter { get; init; }
+    }
+
     private sealed class SegmentedRun
     {
         public SegmentedRun(
@@ -3542,9 +3885,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             File = file;
             Segments = segments;
             RateLimiter = new TransferRateLimiter(() => job.SpeedLimitBytesPerSecond);
-            Host = Uri.TryCreate(job.Url, UriKind.Absolute, out var uri)
-                ? uri.Host
-                : string.Empty;
+            Host = HostOf(job);
         }
 
         public DownloadJob Job { get; }
@@ -3562,6 +3903,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         public SemaphoreSlim CheckpointGate { get; } = new(1, 1);
         public CancellationTokenSource? Cancellation { get; set; }
         public SegmentedReporter Reporter { get; set; } = null!;
+        public bool FileClosed { get; set; }
+        /// <summary>Whether the last flush before closing worked. If not, an older checkpoint is the honest one.</summary>
+        public bool FileDurable { get; set; }
     }
 
     private sealed class SegmentedReporter
@@ -3617,14 +3961,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
     private sealed class SegmentFailureException : Exception
     {
-        public SegmentFailureException(JobFailure failure, bool retryable)
+        public SegmentFailureException(JobFailure failure, bool retryable, TimeSpan? retryAfter = null)
         {
             Failure = failure;
             Retryable = retryable;
+            RetryAfter = retryAfter;
         }
 
         public JobFailure Failure { get; }
         public bool Retryable { get; }
+        public TimeSpan? RetryAfter { get; }
     }
 
     private async Task<DownloadResult> FinalizeAsync(
@@ -3662,16 +4008,41 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 state.Bytes, state.Total);
         }
 
+        if (job.ExpectedTotalBytes is > 0 && state.Bytes != job.ExpectedTotalBytes)
+        {
+            return await FailVerificationAsync(job,
+                $"The server sent {state.Bytes:N0} bytes, not the expected {job.ExpectedTotalBytes:N0}.",
+                job.ExpectedTotalBytes).ConfigureAwait(false);
+        }
+
         if (!string.IsNullOrWhiteSpace(job.ExpectedSha256))
         {
             var actual = await Hashing.Sha256FileAsync(job.PartFilePath, cancellationToken).ConfigureAwait(false);
             if (!actual.Equals(job.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
             {
+                var problem = $"SHA-256 mismatch. Expected {job.ExpectedSha256}, got {actual}.";
+                if (job.RemoteSource is not null)
+                {
+                    return await FailVerificationAsync(job, problem, state.Total).ConfigureAwait(false);
+                }
+
+                // A hash the user typed can simply be wrong, and the file may be gone from the
+                // server by the time they notice. Only they can decide to throw these bytes away.
                 return DownloadResult.Fail(DownloadState.Failed,
-                    new JobFailure(FailureKind.InvalidContent,
-                        $"SHA-256 mismatch. Expected {job.ExpectedSha256}, got {actual}.",
+                    new JobFailure(FailureKind.VerificationFailed,
+                        problem + $" The downloaded data was kept in {Path.GetFileName(job.PartFilePath)}. Use Redownload to fetch the file again.",
                         false, true, DateTimeOffset.UtcNow),
                     state.Bytes, state.Total);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.ExpectedMd5))
+        {
+            var actual = await Hashing.Md5FileAsync(job.PartFilePath, cancellationToken).ConfigureAwait(false);
+            if (!actual.Equals(job.ExpectedMd5, StringComparison.OrdinalIgnoreCase))
+            {
+                return await FailVerificationAsync(job,
+                    $"MD5 mismatch. Expected {job.ExpectedMd5}, got {actual}.", state.Total).ConfigureAwait(false);
             }
         }
 
@@ -3706,6 +4077,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 }
             }
 
+            await SaveCheckpointAsync(job, state, CancellationToken.None, finalPath).ConfigureAwait(false);
             File.Move(job.PartFilePath, finalPath,
                 overwrite: job.ConflictPolicy is ConflictPolicy.Overwrite);
         }
@@ -3714,7 +4086,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             return DownloadResult.Fail(DownloadState.Failed, MapException(ex, out _), state.Bytes, state.Total);
         }
 
-        if (_checkpoints is not null)
+        if (_checkpoints is not null && !job.KeepCheckpointAfterFinalize)
         {
             try
             {
@@ -3729,8 +4101,34 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         return DownloadResult.Ok(state.Bytes, state.Total, finalPath, state.ETag, state.LastModified, state.ContentType);
     }
 
-    private async Task SaveCheckpointAsync(DownloadJob job, TransferState state, CancellationToken cancellationToken)
+    /// <summary>For after the part file was closed by an interruption, with bytes the OS may still hold.</summary>
+    private async Task SaveStoppedCheckpointAsync(DownloadJob job, TransferState state)
     {
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (!File.Exists(job.PartFilePath))
+                {
+                    return;
+                }
+
+                using var part = File.OpenHandle(job.PartFilePath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                RandomAccess.FlushToDisk(part);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // These bytes aren't known to be durable, so the earlier checkpoint stands.
+            return;
+        }
+
+        await SaveCheckpointAsync(job, state, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task SaveCheckpointAsync(DownloadJob job, TransferState state, CancellationToken cancellationToken, string? finalizingTo = null)
+    {
+        state.RecordedBytes = state.Bytes;
         if (_checkpoints is null)
         {
             return;
@@ -3746,6 +4144,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             TotalBytes = state.Total,
             ContentType = state.ContentType,
             UpdatedAt = DateTimeOffset.UtcNow,
+            FinalizingTo = finalizingTo,
         };
         checkpoint.Segments.Add(new SegmentCheckpoint
         {
@@ -3864,20 +4263,109 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     }
 
     private static string HostOf(DownloadJob job)
-        => Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
+        => Uri.TryCreate(job.EffectiveUrl, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
 
-    private static bool IsHtmlErrorPage(DownloadJob job, string? mediaType)
+    /// <summary>The wait a throttled server asks for. Other statuses' headers are not a promise about capacity.</summary>
+    private static TimeSpan? RetryAfterOf(HttpResponseMessage response)
     {
-        if (string.IsNullOrWhiteSpace(mediaType) ||
-            (!mediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase) &&
-             !mediaType.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
+        if ((int)response.StatusCode is not (429 or 503))
+        {
+            return null;
+        }
+
+        var header = response.Headers.RetryAfter;
+        return header?.Delta ?? (header?.Date is { } date ? date - DateTimeOffset.UtcNow : (TimeSpan?)null);
+    }
+
+    /// <summary>
+    /// A failure when a 200 or 206 is really an error document rather than the file. Ordinary
+    /// downloads of pages and JSON stay allowed: the target's name says what the user wants.
+    /// </summary>
+    private static JobFailure? LooksLikeErrorBody(DownloadJob job, HttpResponseMessage response)
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        var extension = Path.GetExtension(job.FileName).TrimStart('.').ToLowerInvariant();
+        var html = IsHtmlErrorPage(extension, mediaType);
+        var json = !html && IsJsonErrorBody(job, extension, mediaType, response);
+        if (!html && !json)
+        {
+            return null;
+        }
+
+        var total = response.StatusCode == HttpStatusCode.PartialContent
+            ? response.Content.Headers.ContentRange?.Length
+            : response.Content.Headers.ContentLength;
+        if (job.ExpectedTotalBytes is > 0)
+        {
+            // Exactly the promised size is the promised file, whatever type the server calls it.
+            if (total == job.ExpectedTotalBytes)
+            {
+                return null;
+            }
+        }
+        else if (total >= LargestErrorBody && (json || !BinaryExtensions.Contains(extension)))
+        {
+            // Error documents are small. A large one is a real page or a mislabelled file, unless
+            // the name says it can't be HTML at all.
+            return null;
+        }
+
+        return new JobFailure(
+            FailureKind.InvalidContent,
+            html
+                ? "The server returned an HTML page instead of the requested file. " +
+                  "Rename the target to .html to save it as a page."
+                : "The server returned a JSON response instead of the requested file.",
+            false, false, DateTimeOffset.UtcNow, (int)response.StatusCode);
+    }
+
+    private static bool IsHtmlErrorPage(string extension, string? mediaType)
+        => mediaType is not null &&
+           (mediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase) ||
+            mediaType.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)) &&
+           extension is not ("html" or "htm" or "xhtml" or "txt" or "xml" or "json" or "mhtml" or "mht");
+
+    private static bool IsJsonErrorBody(DownloadJob job, string extension, string? mediaType, HttpResponseMessage response)
+    {
+        if (mediaType is null ||
+            (!mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase) &&
+             !mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
-        var extension = Path.GetExtension(job.FileName).TrimStart('.').ToLowerInvariant();
-        return extension is not ("html" or "htm" or "xhtml" or "txt" or "xml" or "json" or "mhtml" or "mht");
+        // JSON has many legitimate shapes and names, so unlike HTML it is only called an error
+        // when the target is known not to be JSON at all.
+        return job.ExpectedTotalBytes is > 0
+            ? extension is not ("json" or "jsonl" or "ndjson" or "geojson" or "txt" or "log" or "xml" or "html" or "htm")
+            : BinaryExtensions.Contains(extension) && !IsCompressedJson(job.FileName, extension, response);
     }
+
+    /// <summary>Object stores label a gzipped JSON file as JSON, which is true of what is inside it.</summary>
+    private static bool IsCompressedJson(string fileName, string extension, HttpResponseMessage response)
+    {
+        if (extension is not ("gz" or "br" or "zst"))
+        {
+            return false;
+        }
+
+        var inner = Path.GetExtension(Path.GetFileNameWithoutExtension(fileName)).TrimStart('.');
+        return inner.Equals("json", StringComparison.OrdinalIgnoreCase) ||
+               inner.Equals("jsonl", StringComparison.OrdinalIgnoreCase) ||
+               inner.Equals("ndjson", StringComparison.OrdinalIgnoreCase) ||
+               response.Content.Headers.ContentEncoding.Any(encoding => !encoding.Equals("identity", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private const long LargestErrorBody = 1024 * 1024;
+
+    private static readonly HashSet<string> BinaryExtensions = new(StringComparer.Ordinal)
+    {
+        "bin", "iso", "img", "exe", "msi", "dmg", "deb", "rpm", "apk",
+        "zip", "rar", "7z", "gz", "tar", "bz2", "xz", "cab",
+        "mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "ts",
+        "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus",
+        "jpg", "jpeg", "png", "gif", "webp", "pdf",
+    };
 
     private void EnsureFreeSpace(DownloadJob job, long? total, long alreadyBytes)
     {
@@ -3938,7 +4426,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     ? $"The server returned HTTP {status} for a segment."
                     : $"The server returned HTTP {status}.";
         var resumable = status is 401 or 403 or 410;
-        return new JobFailure(kind, message, false, resumable, DateTimeOffset.UtcNow);
+        return new JobFailure(kind, message, false, resumable, DateTimeOffset.UtcNow, status);
     }
 
     private static JobFailure MapException(Exception ex, out bool retryable)
@@ -4028,9 +4516,12 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             LastModified = checkpoint?.LastModified ?? job.LastModified;
             ContentType = checkpoint?.ContentType ?? job.ContentType;
             CheckpointPresent = checkpoint is not null && checkpoint.JobId == job.Id;
+            RecordedBytes = CheckpointPresent ? checkpoint!.CompletedBytes : 0;
         }
 
         public long Bytes { get; set; }
+        /// <summary>The bytes known to be good: from the checkpoint this began with, then as each is saved.</summary>
+        public long RecordedBytes { get; set; }
         public TransferRateLimiter RateLimiter { get; }
         public long? Total { get; set; }
         public string? ETag { get; set; }
@@ -4075,6 +4566,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         public void RestartFromZero()
         {
             Bytes = 0;
+            RecordedBytes = 0;
             Total = null;
             ETag = null;
             LastModified = null;
@@ -4106,15 +4598,24 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
     private sealed class DownloadEngineException : Exception
     {
-        public DownloadEngineException(JobFailure failure, bool isRetryable, TimeSpan? retryAfter = null, Exception? inner = null)
+        public DownloadEngineException(
+            JobFailure failure,
+            bool isRetryable,
+            TimeSpan? retryAfter = null,
+            Exception? inner = null,
+            bool discardLocalData = false)
             : base(failure.Message, inner)
         {
             Failure = failure;
             IsRetryable = isRetryable;
+            RetryAfter = retryAfter;
+            DiscardLocalData = discardLocalData;
         }
 
         public JobFailure Failure { get; }
         public bool IsRetryable { get; }
+        public TimeSpan? RetryAfter { get; }
+        public bool DiscardLocalData { get; }
     }
 }
 

@@ -1,7 +1,7 @@
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -122,13 +122,8 @@ public sealed class JobCompletionEditor
         _browse.IsEnabled = false;
         try
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".exe");
-            picker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_owner));
-            var file = await picker.PickSingleFileAsync();
-            if (file is null) return;
-            _programPath.Text = file.Path;
+            if (await Pickers.PickFilesAsync(WindowNative.GetWindowHandle(_owner), [".exe"], multiple: false, PickerLocationId.ComputerFolder) is not [var file]) return;
+            _programPath.Text = file;
             _programMode.SelectedIndex = 2;
             _error.Visibility = Visibility.Collapsed;
         }

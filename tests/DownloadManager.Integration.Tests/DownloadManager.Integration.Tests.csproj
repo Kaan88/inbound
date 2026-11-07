@@ -22,6 +22,9 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
+    <Compile Include="..\DownloadManager.Archives.Tests\RarBuilder.cs" Link="RarBuilder.cs" />
+    <Compile Include="..\DownloadManager.Containers.Tests\ContainerFixtures.cs" Link="ContainerFixtures.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,6 +34,13 @@
     <ProjectReference Include="..\..\src\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
     <ProjectReference Include="..\..\tools\TestServer\TestServer.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Archives\DownloadManager.Archives.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Containers\DownloadManager.Containers.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+    <!-- Run as real processes by the pipe tests, so only built here, not linked. -->
+    <ProjectReference Include="..\..\src\DownloadManager.Host\DownloadManager.Host.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
+    <ProjectReference Include="..\..\src\DownloadManager.Cli\DownloadManager.Cli.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\..\src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
 </Project>

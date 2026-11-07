@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using DownloadManager.Contracts;
+using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 
 namespace DownloadManager.NativeHost;
@@ -10,6 +11,7 @@ internal static class Program
 {
     private static Stream _stdin = Stream.Null;
     private static Stream _stdout = Stream.Null;
+    private static readonly SemaphoreSlim StdoutGate = new(1, 1);
 
     private static async Task<int> Main(string[] args)
     {
@@ -53,8 +55,7 @@ internal static class Program
                 return 4;
             }
 
-            await host.SendAsync(first).ConfigureAwait(false);
-            log($"Forwarded '{first.Type}' {first.Id}.");
+            await ForwardToHostAsync(host, first, log).ConfigureAwait(false);
 
             var toHost = PumpStdinToHostAsync(host, log);
             var toExtension = PumpHostToExtensionAsync(host, log);
@@ -65,7 +66,7 @@ internal static class Program
         catch (Exception ex)
         {
             log($"Bridge failed: {ex}");
-            await TrySendErrorAsync("bridge_failure", ex.Message, log).ConfigureAwait(false);
+            await TrySendErrorAsync("bridge_failure", UrlRedactor.RedactText(ex.Message), log).ConfigureAwait(false);
             return 1;
         }
         finally
@@ -89,13 +90,36 @@ internal static class Program
                     break;
                 }
 
-                await host.SendAsync(message).ConfigureAwait(false);
+                await ForwardToHostAsync(host, message, log).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is IOException or EndOfStreamException)
         {
             log($"Extension stdin closed: {ex.Message}");
         }
+    }
+
+    private static async Task ForwardToHostAsync(IpcClient host, IpcMessage message, Action<string> log)
+    {
+        if (NativeBridgePolicy.AllowFromExtension(message.Type))
+        {
+            await host.SendAsync(message).ConfigureAwait(false);
+            log($"Forwarded '{message.Type}' {message.Id}.");
+            return;
+        }
+
+        log($"Refused message type from the extension: {message.Id}.");
+        await WriteToExtensionAsync(IpcMessage.Create(MessageTypes.HostActionResult,
+            new HostActionResult { Ok = false, Message = "The browser extension cannot send this message." }, message.Id))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Both pumps can answer the extension, and two frames must not interleave on stdout.</summary>
+    private static async Task WriteToExtensionAsync(IpcMessage message)
+    {
+        await StdoutGate.WaitAsync().ConfigureAwait(false);
+        try { await IpcFraming.WriteAsync(_stdout, message).ConfigureAwait(false); }
+        finally { StdoutGate.Release(); }
     }
 
     private static async Task PumpHostToExtensionAsync(IpcClient host, Action<string> log)
@@ -110,7 +134,10 @@ internal static class Program
                     break;
                 }
 
-                await IpcFraming.WriteAsync(_stdout, message).ConfigureAwait(false);
+                if (NativeBridgePolicy.ToExtension(message) is { } allowed)
+                {
+                    await WriteToExtensionAsync(allowed).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or EndOfStreamException)
@@ -199,7 +226,7 @@ internal static class Program
     {
         try
         {
-            await IpcFraming.WriteAsync(_stdout, IpcMessage.Create(MessageTypes.HandoffError,
+            await WriteToExtensionAsync(IpcMessage.Create(MessageTypes.HandoffError,
                 new { errorCode = code, error = message })).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -259,7 +286,7 @@ internal static class NativeLog
         {
             try
             {
-                File.AppendAllText(path, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}", new UTF8Encoding(false));
+                File.AppendAllText(path, $"{DateTimeOffset.Now:O} {UrlRedactor.RedactText(message)}{Environment.NewLine}", new UTF8Encoding(false));
             }
             catch (Exception)
             {

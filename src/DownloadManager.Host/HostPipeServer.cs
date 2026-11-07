@@ -5,7 +5,10 @@ using System.Security.Principal;
 using System.Threading.Channels;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Archives;
+using DownloadManager.Runtime.Remote;
 using DownloadManager.Tray;
 
 namespace DownloadManager.Host;
@@ -18,21 +21,33 @@ public interface IHostController
         => Task.FromResult(new FolderPickResult { Error = "Folder selection is unavailable in this Host." });
 }
 
-public sealed class HostPipeServer
+public sealed partial class HostPipeServer
 {
     private readonly DownloadManagerService _service;
     private readonly IHostController _controller;
     private readonly FileLogger _log;
+    private readonly RemoteCommands? _remote;
     private readonly ConcurrentDictionary<Guid, ClientConnection> _clients = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _acceptLoop;
     private int _updateWindowOpened;
 
-    public HostPipeServer(DownloadManagerService service, IHostController controller, FileLogger log)
+    public HostPipeServer(DownloadManagerService service, IHostController controller, FileLogger log, RemoteCommands? remote = null)
     {
         _service = service;
         _controller = controller;
         _log = log;
+        _remote = remote;
+    }
+
+    /// <summary>Answers <c>archive.*</c>. Set before <see cref="Start"/>.</summary>
+    public ArchiveIpcDispatcher? Archives { get; init; }
+
+    /// <summary>Whole-state broadcast of one set. The Host subscribes this to the coordinator's change event.</summary>
+    public void BroadcastArchiveChanged(ArchiveChangedDto change)
+    {
+        var message = IpcMessage.Create(ArchiveMessageTypes.Changed, change);
+        foreach (var client in _clients.Values) client.Writer.TryWrite(message);
     }
 
     public void Start()
@@ -40,6 +55,7 @@ public sealed class HostPipeServer
         _service.JobChanged += OnJobChanged;
         _service.UpdateProgressChanged += OnUpdateProgressChanged;
         _service.SettingsChanged += OnSettingsChanged;
+        if (_remote is not null) _remote.Changed += OnRemoteChanged;
         _acceptLoop = AcceptLoopAsync(_cts.Token);
         _log.Info($"IPC server listening on pipe '{PipeNames.HostPipe()}'.");
     }
@@ -49,6 +65,7 @@ public sealed class HostPipeServer
         _service.JobChanged -= OnJobChanged;
         _service.UpdateProgressChanged -= OnUpdateProgressChanged;
         _service.SettingsChanged -= OnSettingsChanged;
+        if (_remote is not null) _remote.Changed -= OnRemoteChanged;
         _cts.Cancel();
         foreach (var client in _clients.Values)
         {
@@ -77,7 +94,7 @@ public sealed class HostPipeServer
             {
                 pipe = CreatePipe();
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                var client = new ClientConnection(pipe);
+                var client = new ClientConnection(pipe, _log);
                 _ = HandleClientAsync(client, cancellationToken);
             }
             catch (OperationCanceledException)
@@ -118,8 +135,10 @@ public sealed class HostPipeServer
 
     private async Task HandleClientAsync(ClientConnection client, CancellationToken serverToken)
     {
+        // Registered first, so nothing that happens after the snapshot is missed. What is sent to it
+        // meanwhile waits in its channel, because a client is promised the snapshot before any event.
         _clients[client.Id] = client;
-        var writerTask = client.WriterLoopAsync(serverToken);
+        Task? writerTask = null;
         try
         {
             await client.SendDirectAsync(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto
@@ -127,12 +146,13 @@ public sealed class HostPipeServer
                 HostVersion = Protocol.HostVersion,
                 ProtocolVersion = Protocol.Version,
                 StartedAt = _service.StartedAt,
-                Capabilities = new List<string> { "jobs", "settings", "handoff", "tray", "status" },
+                Capabilities = _remote is null
+                    ? new List<string> { "jobs", "settings", "handoff", "tray", "status" }
+                    : new List<string> { "jobs", "settings", "handoff", "tray", "status", "remote" },
             }), serverToken).ConfigureAwait(false);
 
-            await client.SendDirectAsync(
-                IpcMessage.Create(MessageTypes.JobsSnapshot, _service.GetSnapshot()),
-                serverToken).ConfigureAwait(false);
+            await SendSnapshotAsync(client, serverToken).ConfigureAwait(false);
+            writerTask = client.WriterLoopAsync(serverToken);
 
             Task<IpcMessage?>? pendingRead = null;
             while (!serverToken.IsCancellationRequested)
@@ -155,7 +175,7 @@ public sealed class HostPipeServer
                     break;
                 }
 
-                if (message.Type == MessageTypes.FileMetadata)
+                if (message.Type == MessageTypes.FileMetadata || WaitsOnProvider(message.Type))
                 {
                     pendingRead = IpcFraming.ReadAsync(client.Stream, serverToken);
                     await IpcOperationLifetime.RunAsync(token => DispatchAsync(client, message, token), pendingRead, serverToken).ConfigureAwait(false);
@@ -173,7 +193,7 @@ public sealed class HostPipeServer
         }
         catch (Exception ex)
         {
-            _log.Error($"IPC client failed: {ex}");
+            _log.Error($"IPC client failed: {UrlRedactor.RedactText(ex.ToString())}");
         }
         finally
         {
@@ -181,7 +201,7 @@ public sealed class HostPipeServer
             client.Writer.TryComplete();
             try
             {
-                await writerTask.ConfigureAwait(false);
+                if (writerTask is not null) await writerTask.ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -192,10 +212,47 @@ public sealed class HostPipeServer
         }
     }
 
+    /// <summary>
+    /// A snapshot too large for a frame would refuse every client on every connect, for as long as
+    /// the saved jobs stay as they are. Failure words go first, because the jobs are what a client needs.
+    /// </summary>
+    private async Task SendSnapshotAsync(ClientConnection client, CancellationToken cancellationToken)
+    {
+        var snapshot = _service.GetSnapshot();
+        try
+        {
+            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.JobsSnapshot, snapshot), cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidDataException)
+        {
+            _log.Warn($"The snapshot of {snapshot.Jobs.Count} downloads was too large to send, so their failure messages were left out.");
+            foreach (var job in snapshot.Jobs)
+            {
+                if (job.Failure is { } failure)
+                {
+                    failure.Message = "Too long to show.";
+                }
+            }
+
+            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.JobsSnapshot, snapshot), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private async Task DispatchAsync(ClientConnection client, IpcMessage message, CancellationToken cancellationToken)
     {
         try
         {
+            if (await TryDispatchRemoteAsync(client, message, cancellationToken).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            if (Archives is { } archives && ArchiveIpcDispatcher.Handles(message.Type))
+            {
+                await client.SendAsync(await archives.DispatchAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
             switch (message.Type)
             {
                 case MessageTypes.HostPing:
@@ -285,7 +342,7 @@ public sealed class HostPipeServer
                 case MessageTypes.JobRefreshUrl:
                     var refreshUrl = message.GetPayload<JobRefreshUrlRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, cancellationToken)
+                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -372,6 +429,12 @@ public sealed class HostPipeServer
                         }).ConfigureAwait(false);
                     break;
 
+                case MessageTypes.FolderSpace:
+                    await Reply(client, message, MessageTypes.FolderSpaceResult,
+                        await _service.GetFolderSpaceAsync(message.GetPayload<FolderSpaceRequest>(), cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
                     await Reply(client, message, MessageTypes.SettingsResult,
@@ -408,8 +471,9 @@ public sealed class HostPipeServer
                     break;
 
                 case MessageTypes.HostShutdown:
-                    await Reply(client, message, MessageTypes.HostActionResult,
-                        new HostActionResult { Ok = true, Message = "Shutting down." }).ConfigureAwait(false);
+                    // Written here and not queued: stopping ends the writer loop, and a reply still in its queue would be lost.
+                    await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostActionResult,
+                        new HostActionResult { Ok = true, Message = "Shutting down." }, message.Id), cancellationToken).ConfigureAwait(false);
                     await NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
                     _controller.RequestShutdown();
                     break;
@@ -423,9 +487,10 @@ public sealed class HostPipeServer
         }
         catch (Exception ex)
         {
-            _log.Error($"IPC command '{message.Type}' failed: {ex.Message}");
+            var reason = UrlRedactor.RedactText(ex.Message);
+            _log.Error($"IPC command '{message.Type}' failed: {reason}");
             await Reply(client, message, MessageTypes.HostActionResult,
-                new HostActionResult { Ok = false, Message = ex.Message }).ConfigureAwait(false);
+                new HostActionResult { Ok = false, Message = reason }).ConfigureAwait(false);
         }
     }
 
@@ -525,25 +590,44 @@ public sealed class HostPipeServer
         })).ConfigureAwait(false);
     }
 
+    private static readonly TimeSpan GroupsBroadcastDelay = TimeSpan.FromMilliseconds(100);
     private List<DownloadGroupDto>? _lastGroups;
+    private int _groupsBroadcastPending;
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
         // Packages are shown in the download list, so clients need membership changes live
-        // (a browser batch or a split archive can form one without any UI involvement).
-        var groups = _service.GetSnapshot().Settings.DownloadGroups;
-        var signature = System.Text.Json.JsonSerializer.Serialize(groups);
-        lock (_clients)
-        {
-            if (_lastGroups is not null && System.Text.Json.JsonSerializer.Serialize(_lastGroups) == signature) return;
-            _lastGroups = groups;
-        }
-        var message = IpcMessage.Create(MessageTypes.GroupsChanged, groups);
-        foreach (var client in _clients.Values)
-        {
-            client.Writer.TryWrite(message);
-        }
+        // (a browser batch or a split archive can form one without any UI involvement). A batch
+        // changes them once per file and each message carries every package, so a burst shares one.
+        if (Interlocked.Exchange(ref _groupsBroadcastPending, 1) == 0) _ = BroadcastGroupsAsync();
     }
+
+    private async Task BroadcastGroupsAsync()
+    {
+        try
+        {
+            await Task.Delay(GroupsBroadcastDelay, _cts.Token).ConfigureAwait(false);
+            Interlocked.Exchange(ref _groupsBroadcastPending, 0);
+            var groups = _service.GetDownloadGroups();
+            lock (_clients)
+            {
+                if (_lastGroups is not null && SameGroups(_lastGroups, groups)) return;
+                _lastGroups = groups;
+            }
+            var message = IpcMessage.Create(MessageTypes.GroupsChanged, groups);
+            foreach (var client in _clients.Values)
+            {
+                client.Writer.TryWrite(message);
+            }
+        }
+        catch (OperationCanceledException) { /* stopping */ }
+        catch (Exception ex) { _log.Warn($"Could not announce package changes: {ex.GetType().Name}"); }
+    }
+
+    private static bool SameGroups(List<DownloadGroupDto> left, List<DownloadGroupDto> right)
+        => left.Count == right.Count && left.Zip(right).All(pair =>
+            pair.First.Id == pair.Second.Id && pair.First.Name == pair.Second.Name && pair.First.Key == pair.Second.Key &&
+            pair.First.JobIds.SequenceEqual(pair.Second.JobIds));
 
     private void OnJobChanged(object? sender, JobChangeEventArgs e)
     {
@@ -564,10 +648,12 @@ public sealed class HostPipeServer
         private readonly NamedPipeServerStream _pipe;
         private readonly SemaphoreSlim _directWrite = new(1, 1);
         private readonly Channel<IpcMessage> _channel;
+        private readonly FileLogger _log;
 
-        public ClientConnection(NamedPipeServerStream pipe)
+        public ClientConnection(NamedPipeServerStream pipe, FileLogger log)
         {
             _pipe = pipe;
+            _log = log;
             _channel = Channel.CreateBounded<IpcMessage>(new BoundedChannelOptions(512)
             {
                 FullMode = BoundedChannelFullMode.DropOldest,
@@ -605,7 +691,15 @@ public sealed class HostPipeServer
             {
                 await foreach (var message in _channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    await SendDirectAsync(message, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await SendDirectAsync(message, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // Too large for a frame, and nothing of it was sent. Everything after it still has to get through.
+                        _log.Warn($"IPC message '{message.Type}' was too large to send.");
+                    }
                 }
             }
             catch (OperationCanceledException)

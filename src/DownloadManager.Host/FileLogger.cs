@@ -1,4 +1,5 @@
 using System.Text;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Host;
 
@@ -16,6 +17,9 @@ public sealed class FileLogger
         _prefix = prefix;
         Directory.CreateDirectory(_directory);
     }
+
+    /// <summary>Account keys to keep out of the file, wherever a line happens to quote one.</summary>
+    public IRemoteSecretMatcher? Secrets { get; set; }
 
     public void Info(string message) => Write("INFO", message);
     public void Warn(string message) => Write("WARN", message);
@@ -35,7 +39,9 @@ public sealed class FileLogger
                     _currentPath = Path.Combine(_directory, $"{_prefix}-{date}.log");
                 }
 
-                var line = $"{now:O} [{level}] {message}{Environment.NewLine}";
+                // Every line, so an address in an unexpected exception's text can't reach the file.
+                var text = UrlRedactor.RedactText(Secrets?.Mask(message) ?? message);
+                var line = $"{now:O} [{level}] {text}{Environment.NewLine}";
                 File.AppendAllText(_currentPath, line, new UTF8Encoding(false));
             }
         }

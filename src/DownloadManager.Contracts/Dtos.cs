@@ -7,6 +7,7 @@ public sealed class FailureDto
     public bool IsRetryable { get; set; }
     public bool IsResumable { get; set; }
     public DateTimeOffset OccurredAt { get; set; }
+    public int? HttpStatus { get; set; }
 }
 
 public sealed class JobDto
@@ -18,6 +19,11 @@ public sealed class JobDto
 
     public Guid Id { get; set; }
     public string Url { get; set; } = string.Empty;
+    /// <summary>
+    /// The real address held a secret, such as a provider's account key, and the Host keeps it to itself.
+    /// <see cref="Url"/> is then a masked copy that can't download anything, and clients show its site alone.
+    /// </summary>
+    public bool AddressHidden { get; set; }
     public string? FinalUrl { get; set; }
     public string? PageUrl { get; set; }
     public string FileName { get; set; } = string.Empty;
@@ -34,6 +40,10 @@ public sealed class JobDto
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>A completed download whose file was deleted on purpose after a verified extraction. Not a failure, and there is no file to open.</summary>
+    public bool FileRemovedAfterExtraction { get; set; }
+    /// <summary>Something to say about a job beside its state, in words for the user. Null when there is nothing.</summary>
+    public string? StatusNote { get; set; }
     public string? ContentType { get; set; }
     public string? ETag { get; set; }
     public string? LastModified { get; set; }
@@ -61,6 +71,43 @@ public sealed class JobDto
     public bool CanResume { get; set; }
     public bool IsTerminal { get; set; }
     public FailureDto? Failure { get; set; }
+    /// <summary>True when a provider supplies this file; its Url is then a reference, not an address.</summary>
+    public bool IsRemote { get; set; }
+    public string? RemoteProvider { get; set; }
+    /// <summary>The package whose Cancel stopped this file; null when it was cancelled on its own.</summary>
+    public Guid? CancelledByPackageId { get; set; }
+}
+
+public sealed class FavoriteFolderDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+}
+
+/// <summary>Asks the Host how much room there is at these folders, measured where the files would be written.</summary>
+public sealed class FolderSpaceRequest
+{
+    public List<string> Paths { get; set; } = new();
+}
+
+public sealed class FolderSpaceDto
+{
+    public string Path { get; set; } = string.Empty;
+    /// <summary>Null when it couldn't be measured, for example a drive that didn't answer in time.</summary>
+    public long? FreeBytes { get; set; }
+    public long? TotalBytes { get; set; }
+    /// <summary>
+    /// True when the Host runs in a container and this folder isn't on a mounted volume, so files written there are
+    /// lost when the container is rebuilt.
+    /// </summary>
+    public bool InsideContainer { get; set; }
+}
+
+public sealed class FolderSpaceResult
+{
+    public bool Ok { get; set; }
+    public List<FolderSpaceDto> Folders { get; set; } = new();
+    public string? Error { get; set; }
 }
 
 public sealed class CategoryDefinitionDto
@@ -177,6 +224,9 @@ public sealed class SettingsDto
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
+    /// <summary>Host-owned: folders recently downloaded to, newest first. A client's copy is ignored on save.</summary>
+    public List<string> RecentDestinationDirectories { get; set; } = new();
+    public List<FavoriteFolderDto> FavoriteFolders { get; set; } = new();
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<CategoryDefinitionDto> CustomCategories { get; set; } = new();
@@ -285,6 +335,8 @@ public sealed class AddJobRequest
     /// <summary>Jobs added with the same key are shown as one package (for example one pasted batch).</summary>
     public string? PackageKey { get; set; }
     public string? PackageName { get; set; }
+    /// <summary>A <see cref="JobPriorities"/> value; null is normal.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class AddJobResponse
@@ -350,6 +402,8 @@ public sealed class JobRefreshUrlRequest
 {
     public Guid JobId { get; set; }
     public string Url { get; set; } = string.Empty;
+    /// <summary>The user chose a direct request for an address nobody could classify. It doesn't excuse a known hoster link or folder link.</summary>
+    public bool ExplicitDirect { get; set; }
 }
 
 public sealed class JobUpdateRequest
@@ -366,6 +420,9 @@ public sealed class JobUpdateRequest
 
     /// <summary>New absolute path for a completed download (Move/Rename).</summary>
     public string? NewFilePath { get; set; }
+
+    /// <summary>Null leaves unchanged; otherwise a <see cref="JobPriorities"/> value.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class SegmentDto
@@ -450,6 +507,10 @@ public sealed class GroupActionRequest
     public string Action { get; set; } = string.Empty;
     public string? Name { get; set; }
     public List<Guid>? JobIds { get; set; }
+    /// <summary>Action "queue": the queue every file moves to.</summary>
+    public int? QueueId { get; set; }
+    /// <summary>Action "priority": a <see cref="JobPriorities"/> value.</summary>
+    public int? Priority { get; set; }
 }
 
 public sealed class GroupActionResult
@@ -459,6 +520,10 @@ public sealed class GroupActionResult
     public string? Error { get; set; }
     public Dictionary<Guid, string> FailedJobs { get; set; } = new();
     public List<DownloadGroupDto> Groups { get; set; } = new();
+    /// <summary>Files the action changed.</summary>
+    public int Changed { get; set; }
+    /// <summary>Resume only: cancelled files it left alone, see <see cref="PackageRules.ResumeTargets"/>.</summary>
+    public int LeftCancelled { get; set; }
 }
 
 public sealed class JobCompletionOptionsDto

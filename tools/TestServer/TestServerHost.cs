@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 
 namespace TestServer;
 
-public sealed class TestServerHost : IAsyncDisposable
+public sealed partial class TestServerHost : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly ConcurrentDictionary<string, byte[]> _content = new(StringComparer.Ordinal);
@@ -21,6 +21,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, int> _hlsSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashSegmentRequests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _dashRangeRequests = new(StringComparer.Ordinal);
+    private readonly ConcurrentQueue<string> _expiringRanges = new();
     private readonly ConcurrentQueue<string> _slowFirstRanges = new();
     private byte[]? _updateManifest;
     private byte[]? _updatePackage;
@@ -95,6 +96,11 @@ public sealed class TestServerHost : IAsyncDisposable
 
     public int FlakyRequests(string name) => _requestCounts.GetValueOrDefault($"flaky-{name}");
 
+    public int ThrottledRequests(string name) => _requestCounts.GetValueOrDefault($"throttled-{name}");
+
+    /// <summary>Range headers the expiring endpoint served, oldest first, since its stats were reset.</summary>
+    public IReadOnlyList<string> ExpiringRanges() => _expiringRanges.ToArray();
+
     public void ResetHlsStats()
     {
         _hlsSegmentRequests.Clear();
@@ -131,6 +137,7 @@ public sealed class TestServerHost : IAsyncDisposable
         Interlocked.Exchange(ref _expiringExpired, 0);
         Interlocked.Exchange(ref _expiringServed, 0);
         Interlocked.Exchange(ref _expiringRangeRequests, 0);
+        _expiringRanges.Clear();
     }
 
     public void ResetAuthStats()
@@ -150,6 +157,7 @@ public sealed class TestServerHost : IAsyncDisposable
     private TestServerHost(WebApplication app)
     {
         _app = app;
+        TorBox = new MockTorBox(() => BaseAddress);
     }
 
     public string BaseAddress { get; private set; } = string.Empty;
@@ -189,6 +197,7 @@ public sealed class TestServerHost : IAsyncDisposable
 
     private void MapEndpoints()
     {
+        MapTorBoxEndpoints();
         _app.MapGet("/health", () => Results.Text("ok"));
 
         _app.MapGet("/update/manifest", () =>
@@ -403,6 +412,7 @@ public sealed class TestServerHost : IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(context.Request.Headers.Range))
             {
                 Interlocked.Increment(ref _expiringRangeRequests);
+                _expiringRanges.Enqueue(context.Request.Headers.Range.ToString());
             }
 
             var size = QueryInt(context, "size", 1024 * 1024);
@@ -425,6 +435,71 @@ public sealed class TestServerHost : IAsyncDisposable
             served = ExpiringServed,
             rangeRequests = ExpiringRangeRequests,
         }));
+
+        // Answers the first `failures` requests after the first `skip` with `status` and a
+        // Retry-After header: `after` seconds, or an HTTP date when `date=1`.
+        _app.MapGet("/throttled/{name}", async (HttpContext context, string name) =>
+        {
+            var count = _requestCounts.AddOrUpdate($"throttled-{name}", 1, (_, existing) => existing + 1);
+            var skip = QueryInt(context, "skip", 0);
+            if (count > skip && count <= skip + QueryInt(context, "failures", 1))
+            {
+                context.Response.StatusCode = QueryInt(context, "status", 429);
+                var after = QueryInt(context, "after", 1);
+                context.Response.Headers.RetryAfter = QueryInt(context, "date", 0) == 1
+                    ? DateTimeOffset.UtcNow.AddSeconds(after).ToString("R")
+                    : after.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await context.Response.WriteAsync("slow down").ConfigureAwait(false);
+                return;
+            }
+
+            await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 1024 * 1024), QueryInt(context, "seed", 1)), name,
+                allowRanges: true, throttleBytesPerSecond: 0, unknownLength: false).ConfigureAwait(false);
+        });
+
+        // Serves the file until SetVersion(name, 2), then a small error document instead, the
+        // way a captive portal or an API behind a CDN answers. `ranged=1` makes it a 206.
+        _app.MapGet("/errorpage/{name}", async (HttpContext context, string name) =>
+        {
+            if (_versions.GetValueOrDefault(name, 1) < 2)
+            {
+                await ServeAsync(context, ContentFor(name, QueryInt(context, "size", 2 * 1024 * 1024), QueryInt(context, "seed", 1)), name,
+                    allowRanges: true, throttleBytesPerSecond: QueryInt(context, "bps", 0), unknownLength: false).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteErrorDocumentAsync(context).ConfigureAwait(false);
+        });
+
+        // The same error document on every request, so a job meets it at its first request.
+        _app.MapGet("/errordoc/{name}", (HttpContext context) => WriteErrorDocumentAsync(context));
+
+        // A real file served with a text type: what a user who wants the page itself downloads.
+        _app.MapGet("/typed/{name}", async (HttpContext context, string name) =>
+        {
+            var content = ContentFor(name, QueryInt(context, "size", 2 * 1024 * 1024), QueryInt(context, "seed", 1));
+            var range = context.Request.Headers.Range.ToString();
+            context.Response.ContentType = context.Request.Query["type"].ToString();
+            if (!string.IsNullOrEmpty(context.Request.Query["encoding"]))
+            {
+                context.Response.Headers.ContentEncoding = context.Request.Query["encoding"].ToString();
+            }
+
+            context.Response.Headers.AcceptRanges = "bytes";
+            long start = 0;
+            long end = content.Length - 1;
+            if (!string.IsNullOrWhiteSpace(range) && TryParseRange(range, content.Length, out var from, out var to))
+            {
+                start = from;
+                end = to;
+                context.Response.StatusCode = 206;
+                context.Response.Headers.ContentRange = $"bytes {start}-{end}/{content.Length}";
+            }
+
+            context.Response.ContentLength = end - start + 1;
+            await context.Response.Body.WriteAsync(content.AsMemory((int)start, (int)(end - start + 1)), context.RequestAborted)
+                .ConfigureAwait(false);
+        });
 
         _app.MapGet("/flaky-range/{name}", async (HttpContext context, string name) =>
         {
@@ -1052,6 +1127,22 @@ public sealed class TestServerHost : IAsyncDisposable
                 .ConfigureAwait(false);
         });
 
+        // Requests in flight, by route, so a run against the standalone server can tell data-carrying
+        // requests from idle keep-alive connections the TCP table also counts.
+        _app.MapGet("/admin/concurrency", () => Results.Json(new
+        {
+            peakFileRequests = PeakConcurrentFileRequests,
+            peakRangeRequests = PeakConcurrentRangeRequests,
+            peakCdnRequests = TorBox.PeakCdnConnections,
+        }));
+
+        _app.MapPost("/admin/concurrency/reset", () =>
+        {
+            ResetConcurrency();
+            TorBox.ResetCdnPeak();
+            return Results.Ok();
+        });
+
         _app.MapPost("/admin/reset", () =>
         {
             _content.Clear();
@@ -1062,8 +1153,26 @@ public sealed class TestServerHost : IAsyncDisposable
             ResetAuthStats();
             ResetExpiringStats();
             ResetSiteAuthStats();
+            TorBox.Reset();
             return Results.Ok();
         });
+    }
+
+    private static async Task WriteErrorDocumentAsync(HttpContext context)
+    {
+        var type = context.Request.Query["type"].ToString();
+        var body = Encoding.UTF8.GetBytes(type.Contains("json", StringComparison.OrdinalIgnoreCase)
+            ? "{\"success\":false,\"error\":\"DATABASE_ERROR\"}"
+            : "<html><body>Sign in to continue</body></html>");
+        context.Response.ContentType = type;
+        if (QueryInt(context, "ranged", 0) == 1)
+        {
+            context.Response.StatusCode = 206;
+            context.Response.Headers.ContentRange = $"bytes 0-{body.Length - 1}/{body.Length}";
+        }
+
+        context.Response.ContentLength = body.Length;
+        await context.Response.Body.WriteAsync(body, context.RequestAborted).ConfigureAwait(false);
     }
 
     private void RecordAuth(bool cookiePresent, string referer, string userAgent, string range, string? failure)
@@ -1197,7 +1306,7 @@ public sealed class TestServerHost : IAsyncDisposable
         }
     }
 
-    private static bool TryParseRange(string header, int length, out long start, out long end)
+    internal static bool TryParseRange(string header, int length, out long start, out long end)
     {
         start = 0;
         end = 0;

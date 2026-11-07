@@ -1,5 +1,6 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Runtime;
 
@@ -164,6 +165,9 @@ public sealed partial class DownloadManagerService
         var errors = 0;
         foreach (var original in completed)
         {
+            // Their addresses are not this job's to probe or to store: a provider's expire, and
+            // a pasted one is a secret that FinalUrl would write out in plain text.
+            if (original.RemoteSource is not null || original.ProtectedUrl is not null) continue;
             if (!SupportsLiveSpeedLimit(original)) { errors++; continue; }
             FileMetadata metadata;
             try
@@ -175,7 +179,7 @@ public sealed partial class DownloadManagerService
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { errors++; continue; }
             catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException) { errors++; continue; }
             var comparable = false;
-            var changed = !File.Exists(original.FinalFilePath);
+            var changed = !File.Exists(original.FinalFilePath) && !original.FileRemovedAfterExtraction;
             if (metadata.ETag is not null && original.ETag is not null)
             { comparable = true; changed |= metadata.ETag != original.ETag; }
             if (metadata.LastModified is not null && original.LastModified is not null)
@@ -219,7 +223,9 @@ public sealed partial class DownloadManagerService
                             runtime.Job.TotalBytes = metadata.TotalBytes;
                             runtime.Job.ETag = null;
                             runtime.Job.LastModified = null;
-                            runtime.Job.FinalUrl = metadata.FinalUrl;
+                            // An ordinary address can redirect to a provider's, whose key must not be
+                            // stored. The next run follows the redirect again and needs nothing kept.
+                            runtime.Job.FinalUrl = HoldsProviderSecret(metadata.FinalUrl) ? null : metadata.FinalUrl;
                             runtime.Job.CompletedAt = null;
                             runtime.Job.StartedAt = null;
                             runtime.Job.CompletionActionsStarted = false;

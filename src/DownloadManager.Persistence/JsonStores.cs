@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Persistence;
 
@@ -18,6 +19,8 @@ public sealed class StoragePaths
         DedupeDirectory = Path.Combine(root, "dedupe");
         LogsDirectory = Path.Combine(root, "logs");
         CorruptDirectory = Path.Combine(root, "corrupt");
+        RemoteDirectory = Path.Combine(root, "remote");
+        RemoteJobsDirectory = Path.Combine(RemoteDirectory, "jobs");
         SettingsFile = Path.Combine(root, "settings.json");
         HistoryFile = Path.Combine(root, "history.jsonl");
     }
@@ -30,6 +33,8 @@ public sealed class StoragePaths
     public string DedupeDirectory { get; }
     public string LogsDirectory { get; }
     public string CorruptDirectory { get; }
+    public string RemoteDirectory { get; }
+    public string RemoteJobsDirectory { get; }
     public string SettingsFile { get; }
     public string HistoryFile { get; }
 
@@ -41,6 +46,9 @@ public sealed class StoragePaths
         {
             candidates.Add(overridden);
         }
+
+        var sandboxProfile = !string.IsNullOrWhiteSpace(overridden) &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_INSTANCE"));
 
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!string.IsNullOrWhiteSpace(local))
@@ -68,6 +76,9 @@ public sealed class StoragePaths
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
+                // A sandbox profile exists to stay away from the real state, so failing is the only safe answer.
+                if (sandboxProfile && candidate == overridden) throw;
+
                 // Try the next location. This also covers sandboxed development shells
                 // where LocalAppData exists but is not writable by child processes.
             }
@@ -86,6 +97,8 @@ public sealed class StoragePaths
         Directory.CreateDirectory(DedupeDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(CorruptDirectory);
+        Directory.CreateDirectory(RemoteDirectory);
+        Directory.CreateDirectory(RemoteJobsDirectory);
     }
 }
 
@@ -130,7 +143,7 @@ internal static class AtomicFile
                 stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temp, path, overwrite: true);
+            await ReplaceAsync(temp, path).ConfigureAwait(false);
         }
         finally
         {
@@ -144,6 +157,24 @@ internal static class AtomicFile
             catch (IOException)
             {
                 // best effort
+            }
+        }
+    }
+
+    /// <summary>A scanner or indexer can hold the old file for a moment, and that shouldn't cost a save.</summary>
+    private static async Task ReplaceAsync(string temp, string path)
+    {
+        const int MostAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < MostAttempts)
+            {
+                await Task.Delay(20 << attempt, CancellationToken.None).ConfigureAwait(false);
             }
         }
     }
@@ -252,6 +283,9 @@ public sealed class JsonJobStore : IJobStore
             stored.RequestHeadersProtected[name] = SecretProtector.ProtectHeader(value);
             stored.RequestHeaders.Remove(name);
         }
+        // Already ciphertext only when it could not be decrypted at load; keep it as it is.
+        if (!string.IsNullOrEmpty(stored.ProtectedUrl) && !SecretProtector.IsProtected(stored.ProtectedUrl))
+            stored.ProtectedUrl = SecretProtector.ProtectUrl(stored.ProtectedUrl);
         var json = JsonSerializer.Serialize(stored, PersistenceJson.Options);
         var path = JobPath(job.Id);
         await AtomicFile.WriteAsync(path, json, cancellationToken).ConfigureAwait(false);
@@ -382,7 +416,10 @@ public sealed class JsonJobStore : IJobStore
             var value = SecretProtector.UnprotectHeader(protectedValue);
             if (value is not null) job.RequestHeaders[name] = value;
         }
-        job.CreatedAt = job.CreatedAt == default ? DateTimeOffset.UtcNow : job.CreatedAt;
+        // Unreadable ciphertext stays in place: a run can then say why it cannot start, and a
+        // later save does not destroy it. Unlike a lost header, this address has no fallback.
+        job.ProtectedUrl = SecretProtector.UnprotectUrl(job.ProtectedUrl) ?? job.ProtectedUrl;
+        job.CreatedAt =job.CreatedAt == default ? DateTimeOffset.UtcNow : job.CreatedAt;
         job.UpdatedAt = job.UpdatedAt == default ? DateTimeOffset.UtcNow : job.UpdatedAt;
     }
 
@@ -425,6 +462,8 @@ public sealed class JsonJobStore : IJobStore
 
 public sealed class JsonCheckpointStore : IDownloadCheckpointStore
 {
+    private const int LoadAttempts = 4;
+
     private readonly StoragePaths _paths;
 
     public JsonCheckpointStore(StoragePaths paths)
@@ -440,21 +479,32 @@ public sealed class JsonCheckpointStore : IDownloadCheckpointStore
             return null;
         }
 
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            var checkpoint = JsonSerializer.Deserialize<DownloadCheckpoint>(json, PersistenceJson.Options);
-            if (checkpoint is null || checkpoint.JobId != jobId ||
-                checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+            try
+            {
+                var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+                var checkpoint = JsonSerializer.Deserialize<DownloadCheckpoint>(json, PersistenceJson.Options);
+                if (checkpoint is null || checkpoint.JobId != jobId ||
+                    checkpoint.SchemaVersion > DownloadCheckpoint.CurrentSchemaVersion)
+                {
+                    return null;
+                }
+
+                return checkpoint;
+            }
+            catch (JsonException)
             {
                 return null;
             }
-
-            return checkpoint;
-        }
-        catch (Exception ex) when (ex is JsonException or IOException)
-        {
-            return null;
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < LoadAttempts)
+            {
+                await Task.Delay(100 * attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -590,10 +640,18 @@ public sealed class JsonSettingsStore : ISettingsStore
                 throw new InvalidDataException($"Unsupported settings schema {settings.SchemaVersion}.");
             }
 
+            // Saved by a build from before provider links were recognised. Filtering them in memory
+            // would leave the account key on disk until the next unrelated settings change.
+            var heldProviderLink = settings.RecentUrls?.Any(ProviderLinks.IsProviderLink) == true;
             Normalize(settings);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
                 settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
+            }
+
+            if (heldProviderLink)
+            {
+                await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
 
             return settings;
@@ -751,11 +809,14 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.CategoryFoldersRoot = root;
         }
 
+        settings.FavoriteFolders = DownloadFolders.Normalize(settings.FavoriteFolders);
+        settings.RecentDestinationDirectories = DownloadFolders.NormalizeRecent(settings.RecentDestinationDirectories);
         settings.RecentUrls ??= new List<string>();
         settings.RecentUrls = settings.RecentUrls
             .Where(value => !string.IsNullOrWhiteSpace(value) &&
                             Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-                            uri.Scheme is "http" or "https" or "ftp")
+                            uri.Scheme is "http" or "https" or "ftp" &&
+                            !ProviderLinks.IsProviderLink(value))
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(20)

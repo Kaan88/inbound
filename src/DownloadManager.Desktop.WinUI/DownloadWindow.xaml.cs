@@ -14,23 +14,17 @@ public sealed partial class DownloadWindow : Window
     private readonly Guid _jobId;
     private readonly HostConnection _connection = new();
     private readonly JobViewModel _iconJob = new();
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private JobDto? _job;
     private SettingsDto? _settings;
     private bool _globalShowCompletion = true;
     private bool _connected;
     private bool _closed;
-    private bool _loadingSegments;
-    private bool _haveSegmentMap;
-    // Highest completed byte count shown per segment start; display never moves backwards between refreshes.
-    private readonly Dictionary<long, long> _segmentHighWater = [];
-    // Exponentially smoothed per-segment speed; raw per-stream rates sawtooth between reads.
-    private readonly Dictionary<long, double> _segmentRate = [];
     private bool _updatingControls;
     private readonly bool _manual;
     private bool _completedLayout;
     private bool _refreshingCompletion;
     private long? _displayedSpeedLimit;
+    private int? _heightBeforeSegments;
 
     public DownloadWindow(Guid jobId, bool manual = false)
     {
@@ -70,24 +64,24 @@ public sealed partial class DownloadWindow : Window
         {
             if (_closed) return;
             _connected = connected;
+            Details.SetConnected(connected);
             if (!connected) Notice.Text = $"Host disconnected. Reconnecting… {error}";
             else if (Notice.Text.StartsWith("Host disconnected", StringComparison.Ordinal)) Notice.Text = string.Empty;
             UpdateButtons();
         });
-        _timer.Tick += async (_, _) => await LoadSegmentsAsync();
-        SegmentDetails.Expanding += (_, _) => FitSegmentsSoon();
-        SegmentDetails.Collapsed += (_, _) => FitSegmentsSoon();
+        Details.Attach(_connection, SegmentMap, OverallFooter, Root);
+        Details.SegmentsLayoutChanged += FitSegmentsSoon;
+        Details.Problem += words => Notice.Text = words;
         Root.Loaded += (_, _) => FitSegmentsSoon();
         Closed += async (_, _) =>
         {
             _closed = true;
-            _timer.Stop();
+            Details.Stop();
             await _connection.DisposeAsync();
         };
         UseSpeedLimit.Click += (_, _) => SpeedLimitInput.IsEnabled = UseSpeedLimit.IsChecked == true && _job?.CanChangeSpeedLimit == true;
         UpdateButtons();
         _connection.Start();
-        _timer.Start();
     }
 
     public void ShowWindow()
@@ -125,14 +119,11 @@ public sealed partial class DownloadWindow : Window
     {
         _job = null;
         Heading.Text = "Download removed";
-        OverallFooter.IsIndeterminate = false;
-        OverallFooter.Value = 0;
-        StatusValue.Text = "Removed";
+        Details.ShowNothing("Removed");
         FileNameText.Text = string.Empty;
         DetailsTabs.Visibility = CompletionSummary.Visibility = Visibility.Collapsed;
         DontShowAgain.Visibility = Visibility.Collapsed;
         Notice.Text = "This download is no longer in the list.";
-        Segments.Children.Clear();
         CloseButton.Content = "Close";
         UpdateButtons();
     }
@@ -160,46 +151,26 @@ public sealed partial class DownloadWindow : Window
             _completedLayout = true;
             DetailsTabs.Visibility = Visibility.Collapsed;
             CompletionSummary.Visibility = Visibility.Visible;
-            WindowLayout.ResizeForDpi(this, 600, 400);
+            WindowLayout.ResizeForDpi(this, 600, 480);
         }
 
-        var percent = job.TotalBytes is > 0
-            ? Math.Clamp(job.ReceivedBytes * 100.0 / job.TotalBytes.Value, 0, 100)
-            : (job.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0);
+        var percent = JobDetailsPanel.Percent(job);
         var displayName = string.IsNullOrWhiteSpace(job.FileName) ? "Download" : job.FileName;
         Heading.Text = complete ? "Download complete" : JobViewModel.ToDisplayState(job.State);
         Title = complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}";
         FileNameText.Text = displayName;
-        UrlText.Text = job.Url;
+        // A file from a provider account has no address of its own: only a reference to the account's item.
+        var hasAddress = JobAddress.HasAddress(job);
+        UrlHeader.Visibility = UrlText.Visibility = CompletedUrlHeader.Visibility = CompletedUrl.Visibility = hasAddress ? Visibility.Visible : Visibility.Collapsed;
+        UrlHeader.Text = CompletedUrlHeader.Text = JobAddress.Label(job);
+        UrlText.Text = JobAddress.Shown(job);
         CompletionPath.Text = job.FinalFilePath;
-        CompletedUrl.Text = job.Url;
+        CompletedUrl.Text = JobAddress.Shown(job);
         CompletedPath.Text = job.FinalFilePath;
         CompletedSize.Text = $"Downloaded {Bytes(job.ReceivedBytes)} ({job.ReceivedBytes:N0} bytes)";
-        OverallFooter.IsIndeterminate = job.TotalBytes is not > 0 && !job.IsTerminal;
-        OverallFooter.Value = complete ? 100 : percent;
-        // One main bar: the segment map when the size is known, the indeterminate bar only for unknown sizes.
-        var sized = job.TotalBytes is > 0 || complete;
-        OverallFooter.Visibility = sized ? Visibility.Collapsed : Visibility.Visible;
-        SegmentMap.Visibility = sized ? Visibility.Visible : Visibility.Collapsed;
-        if (complete) SegmentMap.SetFraction(1);
-        else if (!_haveSegmentMap) SegmentMap.SetFraction(percent / 100);
-        StatusValue.Text = JobViewModel.ToDisplayState(job.State);
-        SizeValue.Text = job.TotalBytes is >= 0 ? Bytes(job.TotalBytes.Value) : "Unknown";
-        DownloadedValue.Text = job.TotalBytes is > 0
-            ? $"{Bytes(job.ReceivedBytes)} ({percent:0.00}%)"
-            : Bytes(job.ReceivedBytes);
-        RateValue.Text = job.BytesPerSecond is > 0 ? $"{Bytes((long)job.BytesPerSecond.Value)}/s" : "—";
-        TimeLeftValue.Text = job.EstimatedRemaining is { } eta && !complete
-            ? FormatDuration(eta)
-            : complete ? "Complete" : "—";
-        ResumeValue.Text = job.ResumeSupported switch
-        {
-            true => "Yes",
-            false => "No",
-            null => "Unknown",
-        };
-        var completionText = complete
-            ? "The file has been saved. Choose an action below."
+        Details.Show(job);
+        var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
+            : complete ? "The file has been saved. Choose an action below."
             : job.State == "paused" ? "The download is paused. Resume it or close this window."
             : "Closing this window will not stop the download.";
         if (_connected) Notice.Text = job.Failure?.Message ?? completionText;
@@ -232,7 +203,6 @@ public sealed partial class DownloadWindow : Window
         finally { _updatingControls = false; }
 
         CloseButton.Content = job.IsTerminal ? "Close" : "Hide";
-        if (job.IsTerminal && Segments.Children.Count > 0) { Segments.Children.Clear(); _segmentRows.Clear(); FitSegmentsSoon(); }
         UpdateButtons();
     }
 
@@ -249,154 +219,7 @@ public sealed partial class DownloadWindow : Window
         DeleteButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
         DeleteButton.IsEnabled = _connected && _job is not null;
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility =
-            complete ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private async Task LoadSegmentsAsync()
-    {
-        if (_closed || _loadingSegments || !_connected || _job is null || _job.IsTerminal) return;
-        _loadingSegments = true;
-        try
-        {
-            var reply = await _connection.GetSegmentsAsync(_jobId);
-            if (_closed || _job?.IsTerminal != false) return;
-            var segments = reply.GetPayload<List<SegmentDto>>();
-            var connectionsReply = await _connection.GetConnectionsAsync(_jobId);
-            if (_closed || _job?.IsTerminal != false) return;
-            var connections = connectionsReply.GetPayload<List<ConnectionTelemetryDto>>();
-            var job = _job!;
-            var total = job.TotalBytes ?? 0;
-            // Single-stream downloads have no saved ranges; show them as one segment covering the file.
-            if (segments.Count == 0 && total > 0)
-                segments = [new SegmentDto { Start = 0, End = total - 1, Completed = job.ReceivedBytes,
-                    IsComplete = job.ReceivedBytes >= total, Fraction = job.ReceivedBytes / (double)total }];
-            // Checkpoints lag the live streams. Each live range starts at segment.Start + (bytes already saved),
-            // so its true position is RangeStart - Start + ReceivedBytes. Take the furthest known point.
-            foreach (var segment in segments)
-            {
-                var live = connections
-                    .Where(c => c.RangeStart is { } from && from >= segment.Start && from <= segment.End)
-                    .Select(c => c.RangeStart!.Value - segment.Start + c.ReceivedBytes)
-                    .DefaultIfEmpty(0).Max();
-                var length = Math.Max(1, segment.End - segment.Start + 1);
-                _segmentHighWater.TryGetValue(segment.Start, out var shown);
-                segment.Completed = Math.Min(length, Math.Max(Math.Max(segment.Completed, live), shown));
-                _segmentHighWater[segment.Start] = segment.Completed;
-                segment.IsComplete |= segment.Completed >= length;
-            }
-            if (segments.Count > 0) { SegmentMap.SetSegments(segments, total); _haveSegmentMap = true; }
-            else SegmentMap.SetFraction(0);
-            RenderSegmentTable(segments, connections);
-        }
-        catch (Exception ex)
-        {
-            if (!_closed) Notice.Text = $"Saved segment details unavailable: {ex.Message}";
-        }
-        finally { _loadingSegments = false; }
-    }
-
-    private sealed record SegmentRow(TextBlock Number, ProgressBar Bar, TextBlock Downloaded, TextBlock Speed, TextBlock Info);
-    private readonly List<SegmentRow> _segmentRows = [];
-    private int? _heightBeforeSegments;
-
-    private void RenderSegmentTable(IReadOnlyList<SegmentDto> segments, IReadOnlyList<ConnectionTelemetryDto> connections)
-    {
-        var secondary = InboundTheme.Brush("InboundSecondaryTextBrush", Root);
-        void Tone(TextBlock block, bool muted)
-        {
-            // Normal cells keep the inherited theme foreground; a null brush renders invisible text.
-            if (muted) block.Foreground = secondary; else block.ClearValue(TextBlock.ForegroundProperty);
-        }
-
-        if (segments.Count == 0)
-        {
-            if (_segmentRows.Count > 0 || Segments.Children.Count != 1)
-            {
-                _segmentRows.Clear();
-                Segments.Children.Clear();
-                Segments.Children.Add(SegmentText("No segment information yet.", secondary, muted: true));
-                FitSegmentsSoon();
-            }
-            return;
-        }
-
-        // Rows are updated in place. Recreating the ProgressBars on every refresh made each bar
-        // first draw against a default width and then snap to the real one, so the bars jumped.
-        if (_segmentRows.Count != segments.Count || Segments.Children.Count != segments.Count + 2)
-        {
-            BuildSegmentRows(segments.Count, secondary);
-            FitSegmentsSoon();
-        }
-
-        for (var index = 0; index < segments.Count; index++)
-        {
-            var segment = segments[index];
-            var length = Math.Max(1, segment.End - segment.Start + 1);
-            var live = connections.Where(c => c.RangeStart is { } from ? from >= segment.Start && from <= segment.End
-                : segments.Count == 1).ToList();
-            var raw = live.Sum(c => Math.Max(0, c.BytesPerSecond));
-            var rate = _segmentRate.TryGetValue(segment.Start, out var previous) && raw > 0 ? previous * 0.75 + raw * 0.25 : raw;
-            _segmentRate[segment.Start] = rate;
-            var row = _segmentRows[index];
-            var value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100);
-            if (Math.Abs(row.Bar.Value - value) > 0.001) row.Bar.Value = value;
-            row.Downloaded.Text = $"{Bytes(segment.Completed)} / {Bytes(length)}";
-            row.Speed.Text = rate > 0 ? $"{Bytes((long)rate)}/s" : "—";
-            Tone(row.Speed, rate <= 0);
-            row.Info.Text = segment.IsComplete ? "Complete" : live.Count > 0 ? "Receiving data…" : "Waiting";
-            Tone(row.Info, live.Count == 0);
-        }
-    }
-
-    private static TextBlock SegmentText(string value, Microsoft.UI.Xaml.Media.Brush secondary, bool muted = false, bool header = false)
-    {
-        var block = new TextBlock
-        {
-            Text = value, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
-            FontWeight = header ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-        };
-        if (muted || header) block.Foreground = secondary;
-        return block;
-    }
-
-    private void BuildSegmentRows(int count, Microsoft.UI.Xaml.Media.Brush secondary)
-    {
-        _segmentRows.Clear();
-        Segments.Children.Clear();
-        static Grid NewRow()
-        {
-            var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var width in new[] { 28d, -1d, 170d, 90d, 120d })
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = width < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(width) });
-            return row;
-        }
-        static T Cell<T>(Grid row, int column, T element) where T : FrameworkElement
-        {
-            Grid.SetColumn(element, column);
-            element.VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(element);
-            return element;
-        }
-
-        var head = NewRow();
-        Cell(head, 0, SegmentText("N.", secondary, header: true));
-        Cell(head, 1, SegmentText("Progress", secondary, header: true));
-        Cell(head, 2, SegmentText("Downloaded", secondary, header: true));
-        Cell(head, 3, SegmentText("Speed", secondary, header: true));
-        Cell(head, 4, SegmentText("Info", secondary, header: true));
-        Segments.Children.Add(head);
-        Segments.Children.Add(new Border { Height = 1, Background = InboundTheme.Brush("InboundDividerBrush", Root) });
-        for (var index = 0; index < count; index++)
-        {
-            var row = NewRow();
-            _segmentRows.Add(new SegmentRow(
-                Cell(row, 0, SegmentText((index + 1).ToString(CultureInfo.CurrentCulture), secondary, muted: true)),
-                Cell(row, 1, InboundTheme.Styled(new ProgressBar { Maximum = 100 })),
-                Cell(row, 2, SegmentText(string.Empty, secondary)),
-                Cell(row, 3, SegmentText("—", secondary, muted: true)),
-                Cell(row, 4, SegmentText(string.Empty, secondary, muted: true))));
-            Segments.Children.Add(row);
-        }
+            complete && _job?.FileRemovedAfterExtraction != true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>Grows the window so every segment row is visible; restores the height when collapsed.</summary>
@@ -407,7 +230,7 @@ public sealed partial class DownloadWindow : Window
     {
         if (_closed || Root.XamlRoot is null) return;
         var size = AppWindow.Size;
-        if (!SegmentDetails.IsExpanded || _segmentRows.Count == 0)
+        if (!Details.SegmentsOpen || Details.SegmentRowCount == 0)
         {
             if (_heightBeforeSegments is { } previous)
             {
@@ -440,15 +263,7 @@ public sealed partial class DownloadWindow : Window
             AppWindow.Move(new Windows.Graphics.PointInt32(position.X, Math.Max(area.Y, area.Y + area.Height - target)));
     }
 
-    private static string Bytes(long bytes) => bytes >= 1024L * 1024
-        ? $"{bytes / (1024.0 * 1024):N2} MB" : bytes >= 1024 ? $"{bytes / 1024.0:N1} KB" : $"{bytes:N0} B";
-
-    private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration < TimeSpan.Zero) return "—";
-        if (duration.TotalDays >= 1) return $"{(int)duration.TotalDays}d {duration.Hours:D2}:{duration.Minutes:D2}:{duration.Seconds:D2}";
-        return duration.ToString(@"hh\:mm\:ss", CultureInfo.CurrentCulture);
-    }
+    private static string Bytes(long bytes) => JobDetailsPanel.Bytes(bytes);
 
     private async Task RunAsync(Func<Task<IpcMessage>> action)
     {
@@ -479,7 +294,9 @@ public sealed partial class DownloadWindow : Window
             XamlRoot = Root.XamlRoot,
             RequestedTheme = Root.ActualTheme,
             Title = "Delete download?",
-            Content = $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
+            Content = _job.FileRemovedAfterExtraction
+                ? $"Remove {name} from the list? {JobNotes.NothingToDelete(1)}"
+                : $"Remove {name} from the list and delete its downloaded file? This cannot be undone.",
             PrimaryButtonText = "Delete",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
@@ -487,7 +304,7 @@ public sealed partial class DownloadWindow : Window
         if (await confirm.ShowAsync() != ContentDialogResult.Primary || _closed || _job is null) return;
         try
         {
-            var reply = await _connection.RemoveAsync(_jobId, deleteFile: true);
+            var reply = await _connection.RemoveAsync(_jobId, deleteFile: !_job.FileRemovedAfterExtraction);
             if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
             {
                 Notice.Text = result.Error ?? "The host could not delete this download.";
@@ -630,7 +447,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPath(bool folder)
     {
-        if (_job?.State != "completed") return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
         try
         {
             if (folder)
@@ -644,7 +461,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPathWith()
     {
-        if (_job?.State != "completed") return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
         try
         {
             if (File.Exists(_job.FinalFilePath))
