@@ -935,7 +935,7 @@ public sealed partial class RemoteJobCoordinator
         var graceEnds = missingSince + RemoteJobRules.RegistrationGrace;
         if (now >= graceEnds)
         {
-            await FailAsync(record.Id, RemoteFailureKind.NotFound, NotOnAccount(entry)).ConfigureAwait(false);
+            await FailAsync(record.Id, RemoteFailureKind.NotFound, GoneFromAccount(entry)).ConfigureAwait(false);
             return;
         }
 
@@ -1196,6 +1196,10 @@ public sealed partial class RemoteJobCoordinator
         => UpdateAsync(id, record => RemoteJobRules.IsTerminal(record.State)
             ? null
             : record with { State = RemoteJobState.Failed, FailureKind = kind, FailureMessage = message, ApprovalNeeded = false, NextCheckAt = null });
+
+    /// <summary>For something this app sent, or saw on the account, and can't find any more.</summary>
+    private static string GoneFromAccount(RemoteProviderEntry entry)
+        => $"This item is no longer on your {entry.DisplayName} account. It may have been removed there.";
 
     internal static string NotOnAccount(RemoteProviderEntry entry)
         => $"This item is not on your {entry.DisplayName} account. A folder link only works for the account it came from, and the item may have been removed.";

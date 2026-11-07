@@ -1552,6 +1552,8 @@ public sealed partial class RuntimeServiceTests
         var gone = rig.View(job.Id);
         Assert.Equal(RemoteJobState.Failed, gone.State);
         Assert.Equal(RemoteFailureKind.NotFound, gone.FailureKind);
+        Assert.Contains("no longer on your TorBox account", gone.FailureMessage);
+        Assert.DoesNotContain("folder link", gone.FailureMessage);
         Assert.Equal(1, rig.Mock.Calls(CreateWeb));
 
         // It stays failed until asked. Then it is a new submission, of something confirmed to be gone.
