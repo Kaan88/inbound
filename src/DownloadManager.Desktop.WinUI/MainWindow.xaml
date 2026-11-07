@@ -88,6 +88,11 @@
                 <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" AccessKey="Q" />
                 <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" AccessKey="U" />
                 <MenuFlyoutSeparator />
+                <!-- UI.R15, UI.R16: the limits, each a submenu of common values; a choice applies at once. -->
+                <MenuFlyoutSubItem x:Name="DownloadsLimitMenu" Text="Simultaneous Downloads" AccessKey="M" />
+                <MenuFlyoutSubItem x:Name="ConnectionsLimitMenu" Text="Connections per Download" AccessKey="C" />
+                <MenuFlyoutSubItem x:Name="SpeedLimitMenu" Text="Speed Limit" AccessKey="P" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Scheduler…" AccessKey="H" Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
             </MenuBarItem>

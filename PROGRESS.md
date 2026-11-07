@@ -1,5 +1,70 @@
 # Progress — session handoff
 
+### Extension request for later (2026-11-08)
+
+- Owner: an extension option to ask whether to save to a default folder set in the extension, or a custom location, probably as a popup from the existing menu; to do during the web UI and Docker work. Recorded as EXT.R1.
+
+### Two options: folders by category (UI.R19), closing ends the window (PERF.5) (2026-11-08)
+
+- Owner: "make folders by category an option. make closing the window as part of perf changes an option and implement but make note of more investigation in the future."
+- Both are in Options (and the CLI), off/on as before by default. Test instance: closing with the option on ended the window process, the Host kept running, and a new start showed the window. Further investigation for PERF.5 is listed in ROADMAP.
+- Tests before these options: all suites passed except the known flaky TEST.1; the new folder and settings tests (24) pass.
+- Tests with these options: Core 818 passed; Integration 1,090 of 1,091, the one failure the load-sensitive RAR password test (30 s timeout), which passed alone in under a second.
+
+### UI.B6: folders in Options (2026-11-08)
+
+- Owner report recorded and fixed as UI.B6: category folders follow a new default only when they were still under the old one; Options now shows what was saved, loads fresh settings when it opens, and adds no longer change category folders unless asked. Folder and category tests (61) pass; not checked on screen.
+
+### Limits moved to the Downloads menu; UI.R6 tabular digits (2026-11-08)
+
+- Owner: "I meant a dropdown, like under downloads menu on the toolbar. this is ugly. also, did counter font fix happened?" The limit buttons left the toolbar; they are submenus under Downloads with the value in each name (checked on a test instance with UI Automation). UI.R6 hadn't been done; now all unstyled text uses same-width digits. Neither is checked on screen.
+
+### Web UI and Docker decisions (2026-11-08)
+
+- Owner: "for web ui tech, whatever is fancy. published on ghcr sure. turn it off on home network, these won't be open to internet." Recorded in `docs/docker-webui-plan.md`: Svelte 5 + Vite + Tailwind, GHCR on each tag, sign-in can be turned off.
+- Owner provided a LAN-only Linux VM for container tests (details kept out of tracked files).
+
+### User reports built in one go (2026-11-08, branch `torbox-addflow`)
+
+- Owner: "Yes, unstarted ones", then "make ftp speed limit a future maybe goal, also implement everything I said in one go and test it."
+- Built: UI.B5 connections for unstarted downloads and the default queue following the overall limit; UI.R15 and UI.R16 toolbar menus; UI.R17 all files chosen in My TorBox; UI.R18 long links cut short in Add URL; UI.R14 update window sized for scaling and centred on the main window; UI.B3 likely cause (stale settings in the window) fixed; PERF.6 recorded. Details in ROADMAP.
+- Tests: Core 818, Engine 146, Archives 309, Containers 183, TorBox 321 passed; Integration 1,088 of 1,089, the one failure the known flaky TEST.1. Test instance (UI Automation): the three toolbar buttons show "3 downloads", "8 connections" and "No speed limit"; the menus' items, the update window and the tray focus weren't checked on screen.
+
+### UI.B5: one shared speed cap (2026-11-08, branch `torbox-addflow`)
+
+- Owner: "Yes, shared cap". The Options speed limit is now a total for all HTTP/HTTPS downloads together, applied live to running and resumed downloads, and no longer copied into new downloads. Details in ROADMAP UI.B5.
+- Tests: Core 818, Engine 146 (two new) and Integration 1,087 (one replaced) run. One Integration failure, the known flaky kill test (now TEST.1, with its message); it passed 2 of 3 alone and sets no speed limit.
+- Not done: FTP has no speed limit at all; the connections and queue-maximum decisions are still open.
+
+### UI.B4 tray focus fix; UI.B5 limits checked (2026-11-08)
+
+- Owner: "clicking tray popup does not bring the app into focus." Recorded and fixed as UI.B4 (foreground permission passed from the Host and the second launch to the running window). Not yet confirmed on screen.
+- Owner: "yes, check limits". Found by reading the code (UI.B5): the simultaneous-download limit works, but queue maximums also cap it; connections per download and the "global" speed limit are copied into each job when it is added, so changes don't reach existing or resumed downloads, and the speed limit applies to each download separately, not to the total. Not changed; it needs the owner's decisions.
+
+### User reports and owner findings (2026-11-08)
+
+- Recorded in ROADMAP: UI.B3 (default folder not reaching Add Links; owner couldn't reproduce), UI.R15 (simultaneous downloads and connections as a main-window dropdown; check limits apply to resumed jobs), UI.R16 (speed presets in MB/s as a dropdown), UI.R17 (select all files in the download window), UI.R18 (shorten long links in the Add Links dropdown), and UI.R14 updated (update progress centred on the main window, or inline). Nothing built yet.
+
+### PERF.4: what still wakes the hidden window (2026-11-08)
+
+- Owner: "Yes, trace it". Per-thread counters: two threads in the window process wake about 95 times a second each, whether the window is shown, minimised or closed to the tray, in installed, published and bin builds, with an empty test instance too.
+- They aren't .NET threads (dotnet-stack, installed into the scratchpad, run against a test instance only). Their start address is in `nvwgf2umx.dll`, the NVIDIA Direct3D driver, which WinUI loads for drawing. Not caused by Inbound's timers.
+- Option for the owner: end the window process when it is closed to the tray and start it again from the tray. That removes these wake-ups and the window's memory while closed, but reopening takes a fresh start. Not built.
+- Owner: "whatever debugger you need, install it." Installed WinDbg (winget `Microsoft.WinDbg`). cdb, noninvasive, on a test instance: both threads wait in a loop inside the NVIDIA driver, with nothing else on their stacks.
+- Owner: "make closing completely a future goal/idea to try." Recorded as PERF.5. Owner asked whether RivaTuner could be the cause: RivaTuner and Afterburner are running and `RTSSHooks64.dll` is loaded in the window, but it isn't on these threads' stacks. A comparison with RivaTuner excluded for the window would settle it.
+- Owner closed RivaTuner ("I just closed it, easier."). A fresh test window then loaded no RivaTuner hook and still had both driver threads at 95/s: RivaTuner is not the cause.
+
+### PERF.4: idle check on installed 0.5.2 (2026-11-08)
+
+- Owner: "do the idle check". 30 minutes, window hidden, read-only sampling, compared with the 0.5.1 run: Host CPU 3.0 s to 0.08 s, Host reads 17,910 to 0, Host other I/O 35,821 to 3, Host context switches 12/s to 0.8/s; window CPU 16.1 s to 3.0 s. No writes from either process.
+- Still open: the hidden window averages 202 context switches/s (was 212); the cause isn't traced yet. Details in ROADMAP PERF.4.
+
+### Release 0.5.2 (2026-11-07)
+
+- Owner: "Release 0.5.2". Contents: the PERF.4 idle fixes. Main commit 0ba1f74, tag v0.5.2, https://github.com/Kaan88/inbound/releases/tag/v0.5.2.
+- Checks: manifest signature verified with the release public key (same key as 0.3.0 onwards), the latest feed serves 0.5.2, the downloaded Setup hash matches SHA256SUMS, the package contains 7-Zip, and the credential-token scan of the tree found nothing. The squashed main tree is identical to `torbox-addflow`.
+- Not yet done: updating the installed app to 0.5.2 and a 30-minute idle measurement on it.
+
 ### PERF.4: idle fixes (2026-11-07, branch `torbox-addflow`)
 
 - Tray refreshes on job and setting changes instead of every second, and checks browser integration only when its menu opens. Clipboard polling runs only while monitoring is on. The speed graph draws only while it can be seen.

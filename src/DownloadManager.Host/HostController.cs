@@ -72,6 +72,9 @@ public sealed class HostController : IHostController
         return completion.Task.WaitAsync(cancellationToken);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
     private void LaunchUi(string? page, Guid? jobId, Guid? packageId = null)
     {
         var executable = FindUiExecutable();
@@ -91,6 +94,8 @@ public sealed class HostController : IHostController
             var arguments = packageId is { } package ? $"--package {package:D}" :
                 jobId is { } id ? $"--job {id:D}" :
                 string.IsNullOrWhiteSpace(page) ? string.Empty : $"--page {page}";
+            // The tray click gave the Host the foreground; pass it on so the window comes to the front (UI.B4).
+            AllowSetForegroundWindow(-1);
             Process.Start(new ProcessStartInfo
             {
                 FileName = executable,

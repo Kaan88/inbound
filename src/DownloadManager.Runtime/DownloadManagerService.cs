@@ -111,6 +111,7 @@ public sealed partial class DownloadManagerService
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
+        _engine.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -541,7 +542,8 @@ public sealed partial class DownloadManagerService
                     Math.Min(request.Connections ?? _settings.DefaultConnections, EffectiveConnectionLimit(uri)),
                     providerCap),
                 1, 32),
-            SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
+            // The global limit is shared by all downloads in the engine (UI.B5), not copied into each one.
+            SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond,
             Description = request.Description,
             ExpectedSha256 = string.IsNullOrWhiteSpace(request.ExpectedSha256) ? null : request.ExpectedSha256.Trim(),
             ConflictPolicy = conflictPolicy,
@@ -650,11 +652,16 @@ public sealed partial class DownloadManagerService
         {
             lock (_sync)
             {
+                // UI.B6: a category's folder changes only when the add asks for it. Re-adds, imports and other
+                // clients that don't say leave the Options value alone; the manual-download folder is still remembered.
                 if (!string.IsNullOrWhiteSpace(request.CategoryId))
                 {
-                    var custom = _settings.CustomCategories.FirstOrDefault(category => category.Id == categoryId);
-                    if (custom is not null) custom.DestinationDirectory = destination;
-                    else _settings.CategoryFolders[categoryId!] = destination;
+                    if (request.RememberDestination == true)
+                    {
+                        var custom = _settings.CustomCategories.FirstOrDefault(category => category.Id == categoryId);
+                        if (custom is not null) custom.DestinationDirectory = destination;
+                        else _settings.CategoryFolders[categoryId!] = destination;
+                    }
                 }
                 else _settings.LastDestinationDirectory = destination;
                 _settings.RecentDestinationDirectories = DownloadFolders.Remember(_settings.RecentDestinationDirectories, destination);
@@ -1215,6 +1222,8 @@ public sealed partial class DownloadManagerService
             DefaultDownloadDirectory = directory,
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
+            UseCategoryFolders = settings.UseCategoryFolders,
+            CloseWindowCompletely = settings.CloseWindowCompletely,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             ConnectionProfiles = settings.ConnectionProfiles
                 .Where(profile => !string.IsNullOrWhiteSpace(profile.Pattern))
@@ -1297,11 +1306,43 @@ public sealed partial class DownloadManagerService
                     Settings = MapSettings(_settings),
                 };
         }
+        // UI.B5: the default queue has its own maximum, and the lower one wins, so a raised overall limit did
+        // nothing for queued downloads. Where the default queue matched the old overall limit, and this request
+        // leaves it alone, it follows the new one.
+        if (next.MaxConcurrentDownloads != _settings.MaxConcurrentDownloads &&
+            next.Queues.FirstOrDefault(queue => queue.Id == next.DefaultQueueId) is { } defaultQueue &&
+            _settings.Queues.FirstOrDefault(queue => queue.Id == defaultQueue.Id) is { } before &&
+            before.MaxConcurrentDownloads == _settings.MaxConcurrentDownloads &&
+            defaultQueue.MaxConcurrentDownloads == before.MaxConcurrentDownloads)
+        {
+            defaultQueue.MaxConcurrentDownloads = next.MaxConcurrentDownloads;
+        }
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
+        _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
+        List<JobRuntime> reconnected;
         lock (_sync)
         {
+            // What each unstarted download would have got from the old default, read before the settings change.
+            var unstarted = _settings.DefaultConnections == next.DefaultConnections
+                ? []
+                : _jobs.Values.Where(IsUnstartedForConnections)
+                    .Select(runtime => (Runtime: runtime, Uri: Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var uri) ? uri : null))
+                    .Where(item => item.Uri is not null)
+                    .Select(item => (item.Runtime, item.Uri, Old: Math.Clamp(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(item.Uri!)), 1, 32)))
+                    .ToList();
             _settings = next;
+            reconnected = [];
+            // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
+            // (not what the old default gave it) keeps it; provider downloads keep their provider's cap.
+            foreach (var (runtime, uri, previous) in unstarted)
+            {
+                if (runtime.Job.RequestedConnections != previous) continue;
+                var connections = Math.Clamp(Math.Min(next.DefaultConnections, EffectiveConnectionLimit(uri!)), 1, 32);
+                if (connections == runtime.Job.RequestedConnections) continue;
+                runtime.Job.RequestedConnections = connections;
+                reconnected.Add(runtime);
+            }
             var queueNames = next.Queues.ToDictionary(q => q.Id, q => q.Name);
             foreach (var runtime in _jobs.Values)
             {
@@ -1319,6 +1360,11 @@ public sealed partial class DownloadManagerService
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(next));
         _ftpEngine?.UpdateFfmpegPath(next.FfmpegPath);
         UpdateSleepPrevention();
+        foreach (var runtime in reconnected)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "updated");
+        }
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -3904,7 +3950,14 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    private int EffectiveConnectionLimit(Uri uri)
+    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
+    private static bool IsUnstartedForConnections(JobRuntime runtime) =>
+        runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
+        runtime.Job.ReceivedBytes == 0 &&
+        !runtime.Starting && runtime.Runner is null or { IsCompleted: true } &&
+        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null;
+
+        private int EffectiveConnectionLimit(Uri uri)
     {
         var limit = _settings.MaxConnectionsPerHost;
         var profile = _settings.ConnectionProfiles
@@ -3941,6 +3994,8 @@ public sealed partial class DownloadManagerService
             return Path.GetFullPath(requested.Trim());
         }
 
+        // Folders by category can be turned off in Options; then everything goes to the download folder.
+        useCategoryFolder &= _settings.UseCategoryFolders;
         var category = categoryId ?? FileCategories.For(fileName);
         var customFolder = _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
         if (useCategoryFolder && !string.IsNullOrWhiteSpace(customFolder)) return Path.GetFullPath(customFolder);
@@ -4182,6 +4237,8 @@ public sealed partial class DownloadManagerService
             DefaultDownloadDirectory = settings.DefaultDownloadDirectory,
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
+            UseCategoryFolders = settings.UseCategoryFolders,
+            CloseWindowCompletely = settings.CloseWindowCompletely,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             ConnectionProfiles = settings.ConnectionProfiles
                 .Select(profile => new ConnectionProfileDto

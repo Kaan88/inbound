@@ -197,6 +197,10 @@ public sealed class SettingsDto
     public List<QueueDto> Queues { get; set; } = new();
     public List<ScheduleDto> Schedules { get; set; } = new();
     public int DefaultConnections { get; set; } = 8;
+    /// <summary>New downloads go to their category's folder (Options, Categories); off, they go to the download folder.</summary>
+    public bool UseCategoryFolders { get; set; } = true;
+    /// <summary>PERF.5: closing the main window ends its process instead of hiding it; the tray starts it again.</summary>
+    public bool CloseWindowCompletely { get; set; }
     public int MaxConnectionsPerHost { get; set; } = 8;
     public List<ConnectionProfileDto> ConnectionProfiles { get; set; } = new();
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }

@@ -260,6 +260,7 @@ public sealed partial class MainWindow
             foreach (var (input, result) in answered ?? []) session.Seed(input, result);
 
             var initial = focus is AddFocus.Links or AddFocus.Magnet ? await ClipboardInputsAsync(focus) : null;
+            await RefreshSettingsAsync();
             var dialog = new AddLinksDialog(
                 session,
                 focus,

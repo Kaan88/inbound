@@ -728,34 +728,103 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task GlobalSpeedLimitAppliesToNewJobs()
+    public async Task DefaultQueueFollowsTheOverallDownloadLimitUnlessSetApart()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
         var settings = ctx.Service.GetSnapshot().Settings;
+        var main = settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId);
+        Assert.Equal(settings.MaxConcurrentDownloads, main.MaxConcurrentDownloads);
+
+        settings.MaxConcurrentDownloads = 6;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        Assert.Equal(6, settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads);
+
+        // Set apart in the Scheduler: the overall limit no longer moves it.
+        settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads = 2;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.MaxConcurrentDownloads = 8;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        Assert.Equal(8, settings.MaxConcurrentDownloads);
+        Assert.Equal(2, settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads);
+    }
+
+    [Fact]
+    public async Task ChangedDefaultConnectionsReachOnlyUnstartedDownloads()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.DefaultConnections = 4;
+        settings.MaxConnectionsPerHost = 16;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task<JobDto> AddAsync(string name, string startMode, int? connections)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=65536&seed=40",
+                DestinationDirectory = ctx.Destination,
+                FileName = name,
+                Connections = connections,
+                StartMode = startMode,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!;
+        }
+
+        var waiting = await AddAsync("conn-default.bin", "later", null);
+        var chosen = await AddAsync("conn-chosen.bin", "later", 2);
+        var finished = await AddAsync("conn-done.bin", "startNow", null);
+        await ctx.WaitFor(finished.Id, job => job.State == "completed", TimeSpan.FromSeconds(20));
+        Assert.Equal(4, waiting.RequestedConnections);
+
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.DefaultConnections = 6;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var jobs = ctx.Service.GetSnapshot().Jobs.ToDictionary(job => job.Id);
+        Assert.Equal(6, jobs[waiting.Id].RequestedConnections);
+        Assert.Equal(2, jobs[chosen.Id].RequestedConnections);
+        Assert.Equal(4, jobs[finished.Id].RequestedConnections);
+    }
+
+    [Fact]
+    public async Task GlobalSpeedLimitIsSharedByAllDownloads()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);
+        var settings = ctx.Service.GetSnapshot().Settings;
         settings.GlobalSpeedLimitBytesPerSecond = 131_072;
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-        const int size = 524_288;
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        const int size = 262_144;
+        var jobs = new List<JobDto>();
+        foreach (var seed in new[] { 18, 19 })
         {
-            Url = $"{_server.BaseAddress}/file/global-speed.bin?size={size}&seed=18",
-            DestinationDirectory = ctx.Destination,
-            FileName = "global-speed.bin",
-            Connections = 1,
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        Assert.Equal(131_072, response.Job!.SpeedLimitBytesPerSecond);
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/global-speed-{seed}.bin?size={size}&seed={seed}",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"global-speed-{seed}.bin",
+                Connections = 1,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            // Not copied into the download: it stays one cap for all of them, and a change reaches running ones.
+            Assert.Null(response.Job!.SpeedLimitBytesPerSecond);
+            jobs.Add(response.Job);
+        }
 
+        // 512 KB in all at 128 KB/s together: about 4 s, where a copy per download would take about 2 s.
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(20));
+        foreach (var job in jobs)
+        {
+            var completed = await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(20));
+            Assert.Equal(size, completed.ReceivedBytes);
+        }
         stopwatch.Stop();
         Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 8.0);
-        Assert.Equal(size, completed.ReceivedBytes);
-        Assert.Equal(
-            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                TestContent.Generate(18, size))).ToLowerInvariant(),
-            await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
     [Fact]
@@ -1200,6 +1269,66 @@ public sealed partial class RuntimeServiceTests
         var invalid = await restarted.Service.AddJobAsync(new AddJobRequest { Url = $"{_server.BaseAddress}/file/invalid", CategoryId = Guid.NewGuid().ToString("N") });
         Assert.False(invalid.Accepted);
         Assert.Equal("invalid_category", invalid.ErrorCode);
+    }
+
+    [Fact]
+    public async Task FoldersByCategoryCanBeTurnedOff()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        Assert.True(settings.UseCategoryFolders);
+        settings.DefaultDownloadDirectory = ctx.Destination;
+        settings.CategoryFolders["documents"] = Path.Combine(ctx.Destination, "Docs");
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task<string> FolderForAsync(string name)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=1024&seed=61", FileName = name, StartMode = "later", Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!.DestinationDirectory;
+        }
+
+        Assert.Equal(Path.Combine(ctx.Destination, "Docs"), await FolderForAsync("on.pdf"));
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.UseCategoryFolders = false;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.False(ctx.Service.GetSnapshot().Settings.UseCategoryFolders);
+        Assert.Equal(ctx.Destination, await FolderForAsync("off.pdf"));
+        // The folders themselves are kept for when it is turned back on.
+        Assert.Equal(Path.Combine(ctx.Destination, "Docs"), ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
+    }
+
+    [Fact]
+    public async Task CategoryFolderChangesOnlyWhenTheAddAsksToRememberIt()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var chosen = Path.Combine(ctx.Destination, "Docs from Options");
+        settings.CategoryFolders["documents"] = chosen;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task AddAsync(string name, bool? remember, string folder)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=1024&seed=60", FileName = name, CategoryId = "documents",
+                DestinationDirectory = folder, RememberDestination = remember, StartMode = "later",
+            });
+            Assert.True(response.Accepted, response.Error);
+        }
+
+        // A re-add, an import or another client that doesn't say: the Options folder stays.
+        await AddAsync("unsaid.pdf", null, Path.Combine(ctx.Destination, "elsewhere"));
+        await AddAsync("declined.pdf", false, Path.Combine(ctx.Destination, "elsewhere"));
+        Assert.Equal(chosen, ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
+
+        // Remember ticked in Add URL: it becomes the category's folder.
+        var remembered = Path.Combine(ctx.Destination, "remembered");
+        await AddAsync("asked.pdf", true, remembered);
+        Assert.Equal(remembered, ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
     }
 
     [Fact]

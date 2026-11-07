@@ -656,6 +656,51 @@ public sealed class HttpDownloadEngineTests
     }
 
     [Fact]
+    public async Task SharedSpeedLimitCapsAllTransfersTogether()
+    {
+        using var ctx = new EngineContext();
+        const int size = 262_144;
+        var first = ctx.CreateJob($"{_server.BaseAddress}/file/shared-a.bin?size={size}&seed=31", "shared-a.bin");
+        var second = ctx.CreateJob($"{_server.BaseAddress}/file/shared-b.bin?size={size}&seed=32", "shared-b.bin");
+        using var engine = CreateEngine();
+        // 512 KB in all at 128 KB/s together takes about 4 s; a cap per transfer would take about 2 s.
+        engine.UpdateSharedSpeedLimit(131_072);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var results = await Task.WhenAll(
+            engine.ExecuteAsync(first, null, null, CancellationToken.None),
+            engine.ExecuteAsync(second, null, null, CancellationToken.None));
+        stopwatch.Stop();
+
+        Assert.All(results, result => Assert.True(result.Success, result.Failure?.Message));
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 8.0);
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(31, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(results[0].FinalFilePath!));
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(TestContent.Generate(32, size))).ToLowerInvariant(),
+            await Hashing.Sha256FileAsync(results[1].FinalFilePath!));
+    }
+
+    [Fact]
+    public async Task SharedSpeedLimitCanBeRemovedDuringTransfer()
+    {
+        using var ctx = new EngineContext();
+        const int size = 4 * 1024 * 1024;
+        var job = ctx.CreateJob($"{_server.BaseAddress}/file/shared-off.bin?size={size}&seed=33", "shared-off.bin");
+        using var engine = CreateEngine();
+        // At 64 KB/s this would take over a minute; lifting the cap after a second lets it finish quickly.
+        engine.UpdateSharedSpeedLimit(65_536);
+        var run = engine.ExecuteAsync(job, null, null, CancellationToken.None);
+        await Task.Delay(1000);
+        engine.UpdateSharedSpeedLimit(null);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await run.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(15));
+        Assert.Equal(size, new FileInfo(result.FinalFilePath!).Length);
+    }
+
+    [Fact]
     public async Task PerDownloadSpeedLimitIsApplied()
     {
         using var ctx = new EngineContext();

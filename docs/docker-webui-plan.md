@@ -112,7 +112,13 @@ PERF.1 and PERF.2 are independent of these and can come first.
 
 ## Decisions for the owner
 
-1. PERF.1: let the window process close with the window, as an option, or keep it loaded?
-2. Web UI technology: Preact and esbuild (recommended), or plain TypeScript.
-3. Publish the image on GHCR, or build it locally only?
-4. Sign-in always on (recommended), or an option to turn it off on a home network?
+Answered 2026-11-08:
+
+1. PERF.1: the window process closing with the window is a future idea (ROADMAP PERF.5), not part of this work.
+2. Web UI technology: "whatever is fancy". Chosen: Svelte 5 with Vite and Tailwind CSS, built to static files the
+   Server serves. Svelte's transitions and small bundles suit a live download list; nothing needs Node at run time.
+3. Publish the image on GHCR: yes (`ghcr.io/kaan88/inbound`, built on each tag).
+4. Sign-in: can be turned off. These installs stay on a home network and aren't opened to the internet, so sign-in
+   is an option (on by default for a new install, off with one setting), not a requirement.
+
+Test machine: a LAN-only Linux VM the owner provided (DietPi). Details stay out of tracked files.
