@@ -1,5 +1,26 @@
 # Progress — session handoff
 
+### PERF.4: idle fixes (2026-11-07, branch `torbox-addflow`)
+
+- Tray refreshes on job and setting changes instead of every second, and checks browser integration only when its menu opens. Clipboard polling runs only while monitoring is on. The speed graph draws only while it can be seen.
+- Test-instance probe: Host other I/O 1,800/min before, 7/min after; window 110 ms CPU per 30 s visible, 62 ms minimised. Not yet measured on an installed build.
+- Build clean. Core 818 passed. Integration: one failure in the first full run, then 1,087 passed on the rerun; the failing test's name wasn't captured, most likely the known load-sensitive RAR test.
+
+### Memory, and the Docker and web UI plan (2026-11-07)
+
+- The owner asked for a Docker and web UI plan and how memory use is, since high memory is what they dislike in another download manager.
+- Measured, private bytes, build 0.5.1: the owner's idle copy has Host 31 MB and window 215 MB. In a test instance: Host 19 MB idle, 48 MB with 500 queued jobs, 69 to 72 MB (flat) while four 500 MB files downloaded from the local test server; window 233 to 235 MB with 504 rows, the same as empty. Not measured: long runs, real internet, thousands of jobs.
+- Plan in `docs/docker-webui-plan.md`; ROADMAP D.PLAN, PERF.1 to PERF.3. Waiting on four owner decisions listed in the plan.
+- Owner: PERF.1 "Not now", and "I care more about idle resource usage than 200 mb." Recorded as PERF.4: measure and cut what Inbound does while idle (CPU, wake-ups, disk writes, network polling).
+- PERF.4 measured on the installed app (30 min idle, window hidden): Host 0.17% of a core, no writes, no network, but steady reads (~10/s) and other I/O (~20/s); window 0.9% of a core and 212 context switches/s, likely the speed graph redrawing every second while hidden. Details and fixes in ROADMAP PERF.4. About 35 minutes, mostly waiting.
+
+### Release 0.5.1 (2026-11-07)
+
+- The owner asked for 0.5.1 with the UI.B2 and UP.B1 fixes, after proper tests (results under Release 0.5.0 below).
+- Published as v0.5.1 on `Kaan88/inbound`: main `460c11f`, the same tree as branch `ab142d7`, tag `v0.5.1`, five assets. Same signing key; manifest signature verified; the live feed says 0.5.1; the downloaded Setup matches SHA256SUMS; the package holds 7-Zip. No token from the test credentials file in the tree.
+- After the version bump: Core 818 and 65 update, release, bridge and settings integration tests.
+- Not verified: install of Setup 0.5.1, auto-update from 0.5.0 to 0.5.1, Options on screen by the owner.
+
 ### Release 0.5.0 (2026-11-07)
 
 - The owner finished the UI and TorBox tests and asked for quick extraction tests, then push and release.

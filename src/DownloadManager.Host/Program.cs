@@ -223,6 +223,11 @@ internal static class Program
                 copiedLinks.DescribeForLog,
                 log.Info);
             clipboardMonitor.Start();
+            // Settings change on the pipe's threads; the clipboard timer belongs to this one.
+            service.SettingsChanged += (_, _) => controller.UiContext?.Post(_ => clipboardMonitor.Apply(), null);
+            // The tray refreshes on changes instead of every second.
+            service.JobChanged += (_, _) => tray.RequestRefresh();
+            service.SettingsChanged += (_, _) => tray.RequestRefresh();
 
             var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
             using var eventSounds = new CompletionSoundPlayer(log.Warn);

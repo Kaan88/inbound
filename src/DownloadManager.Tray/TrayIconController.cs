@@ -27,6 +27,9 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     public void Notify(string title, string message) => _tray.Notify(title, message);
 
+    /// <summary>Something the tray shows may have changed. Safe from any thread.</summary>
+    public void RequestRefresh() => _tray.RequestRefresh();
+
     public void ExitNow()
     {
         _tray.Dispose();
@@ -44,8 +47,14 @@ public sealed class TrayIconController : IDisposable
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _resumeItem;
     private readonly ToolStripMenuItem _updateItem;
+    /// <summary>
+    /// One-shot, started only when something changed, so an idle tray wakes for nothing. Several changes inside
+    /// its interval make one refresh, which keeps it to about one a second during downloads.
+    /// </summary>
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly SynchronizationContext _ui;
     private readonly ConcurrentQueue<(string Title, string Message)> _notifications = new();
+    private int _refreshPending;
     private bool _disposed;
 
     public TrayIconController(TrayActions actions, Icon? icon)
@@ -90,15 +99,49 @@ public sealed class TrayIconController : IDisposable
         };
         _icon.BalloonTipClicked += (_, _) => _actions.Open();
 
+        // Created on the tray's own thread, so posts run there.
+        _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
-        _timer.Tick += (_, _) => RefreshState();
-        _timer.Start();
+        _timer.Tick += (_, _) =>
+        {
+            _timer.Stop();
+            Interlocked.Exchange(ref _refreshPending, 0);
+            RefreshState();
+        };
+        // The integration line reads the registry and a file, so only when someone looks at the menu.
+        _menu.Opening += (_, _) =>
+        {
+            RefreshState();
+            RefreshIntegration();
+        };
         RefreshState();
     }
 
     public void Notify(string title, string message)
     {
         _notifications.Enqueue((title, message));
+        RequestRefresh();
+    }
+
+    public void RequestRefresh()
+    {
+        if (_disposed || Interlocked.Exchange(ref _refreshPending, 1) == 1) return;
+        _ui.Post(_ =>
+        {
+            if (!_disposed) _timer.Start();
+        }, null);
+    }
+
+    private void RefreshIntegration()
+    {
+        try
+        {
+            _integrationItem.Text = $"Browser integration: {_actions.IntegrationStatus()}";
+        }
+        catch
+        {
+            // The tray must survive transient host errors.
+        }
     }
 
     private void RefreshState()
@@ -113,7 +156,6 @@ public sealed class TrayIconController : IDisposable
             var active = _actions.ActiveCount();
             _statusItem.Text = active == 0 ? "Idle" : $"{active} active download{(active == 1 ? "" : "s")}";
             _icon.Text = active == 0 ? "Inbound Download Manager" : $"Inbound — {active} active";
-            _integrationItem.Text = $"Browser integration: {_actions.IntegrationStatus()}";
             var updateText = _actions.UpdateText();
             _updateItem.Visible = !string.IsNullOrWhiteSpace(updateText);
             _updateItem.Text = updateText ?? "Update Available";
