@@ -385,8 +385,8 @@ internal static partial class RemoteText
     {
         var provider = ProviderName(job);
         if (job.HeldForApproval)
-            return $"'{JobName(job)}' was copied from the clipboard, and nothing has been sent to {provider}. Approving hands it to {provider}, which may count against your {provider} limits. Downloading to this computer starts only when {provider} has it.";
-        return $"'{JobName(job)}' isn't cached on {provider}. Approving starts work on {provider}: it fetches this on your account, which may count against your {provider} limits. Downloading to this computer starts only when {provider} has it.";
+            return $"'{JobName(job)}' was copied from the clipboard, and nothing has been sent to {provider}. Approving hands it to {provider}. Downloading to this computer starts only when {provider} has it.";
+        return $"'{JobName(job)}' isn't cached on {provider}. Approving starts work on {provider}: it fetches this on your account. Downloading to this computer starts only when {provider} has it.";
     }
 
     public static string RemoveQuestion(IReadOnlyList<RemoteJobDto> jobs)

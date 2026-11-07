@@ -141,7 +141,7 @@ internal sealed class AddLine(string input)
         }
     }
 
-    /// <summary>The provider says the site is down, or that today's allowance for it is gone. Adding it would most likely just fail.</summary>
+    /// <summary>The provider says the site is down, or that it has no links left for it today. Adding it would most likely just fail.</summary>
     public bool HosterLooksUnusable => Result is { Kind: "hosterLink" } hoster &&
         (hoster.HosterAvailable == false || hoster.HosterDailyLinksLeft == 0 || hoster.HosterDailyBytesLeft == 0);
 
@@ -791,7 +791,7 @@ internal static partial class RemoteText
     }
 
     public static string ApproveExplanation(string provider)
-        => $"{provider} fetches what isn't cached on your account, and that uses your account's quota. Nothing is sent to {provider} until you approve it. Anything you leave stays on the list as not cached, and you can approve it there later.";
+        => $"{provider} fetches what isn't cached on your account. Nothing is sent to {provider} until you approve it. Anything you leave stays on the list as not cached, and you can approve it there later.";
 
     public static string CacheHint(string provider)
         => $"Adding asks {provider} whether each of these is cached. Anything that isn't waits for your approval, and {provider} fetches nothing before that.";

@@ -1,5 +1,13 @@
 # Progress — session handoff
 
+### TB.F7, TB.F2 wording: one notice per package, no quota claims (2026-11-07)
+
+- `DownloadNotices` (Runtime) now decides every completion, failure and extraction notice, and the Host only maps them to tray and sound under the existing settings. A package of two or more gets one closing notice once nothing in it is working, covering its files and archive sets. A download on its own, and a package of one file, keep their words.
+- A failing package says at most two things: the first failure at once, and the closing count. Retrying starts this again. Extraction failures always show; a package's extraction success follows the notification setting.
+- The extraction line above the list holds a package's completions until its last set is done, and a CLI package opens one window when the main window is up.
+- Every quota, allowance and "count against" claim about a provider is gone from the add, approve and container screens and from the Host's status text. Limits the provider reports stay and read as its figures. The screens' shape is unchanged, pending TB.F9 and TB.F10.
+- Evidence: `DownloadNoticesTests`, `ProviderWordingTests`, `ArchiveRowsTests`. Status: **unverified in the live UI**: no balloon or sound was seen on screen, and the Host's mapping and the CLI package window have no test.
+
 ### TB.F5, TB.F6, TB.F8: extraction records and folders (2026-11-07)
 
 - A set now goes with the last download behind it, finished or not. Its files are never touched. A set picked from disk never had a download and stays, because its row is the only place its outcome shows. A running set finishes first, and a set with archives still to delete finishes that first. Each Host start clears older sets with no downloads.

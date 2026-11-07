@@ -89,6 +89,13 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
     /// <summary>A set's whole state changed. Handlers run on the caller's thread and must not block.</summary>
     public event EventHandler<ArchiveChangedDto>? Changed;
 
+    /// <summary>
+    /// A newly finished package's sets are up to date, so one that will extract now says so. Raised on the
+    /// worker, after every earlier job's completion was counted. Handlers must not block. A package only
+    /// looked at again by a start doesn't raise it.
+    /// </summary>
+    public event EventHandler<PackageCompletedEventArgs>? PackageExamined;
+
     private sealed record RunningExtraction(CancellationTokenSource Cancellation)
     {
         public Task Task { get; set; } = Task.CompletedTask;
@@ -110,7 +117,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
     private sealed record JobTrigger(JobDto Job, string Change) : Trigger;
 
-    private sealed record PackageTrigger(PackageCompletedEventArgs Package) : Trigger;
+    private sealed record PackageTrigger(PackageCompletedEventArgs Package, bool IsNews = false) : Trigger;
 
     private sealed record WakeTrigger : Trigger;
 
@@ -248,7 +255,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         _triggers.Writer.TryWrite(new JobTrigger(e.Job, e.ChangeType));
     }
 
-    private void OnPackageCompleted(object? sender, PackageCompletedEventArgs e) => _triggers.Writer.TryWrite(new PackageTrigger(e));
+    private void OnPackageCompleted(object? sender, PackageCompletedEventArgs e) => _triggers.Writer.TryWrite(new PackageTrigger(e, IsNews: true));
 
     private void Wake() => _triggers.Writer.TryWrite(new WakeTrigger());
 
@@ -265,7 +272,15 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                         await HandleJobAsync(job.Job, job.Change).ConfigureAwait(false);
                         break;
                     case PackageTrigger package:
-                        await HandlePackageAsync(package.Package).ConfigureAwait(false);
+                        try
+                        {
+                            await HandlePackageAsync(package.Package).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            if (package.IsNews) RaisePackageExamined(package.Package);
+                        }
+
                         break;
                     case ResumeDeletesTrigger resume:
                         await FinishDeletingAsync(resume.SetId).ConfigureAwait(false);
@@ -283,6 +298,18 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                 // A save that failed here is counted again by the next trigger or start.
                 _log?.Invoke($"Archive work failed: {exception.GetType().Name}: {exception.Message}");
             }
+        }
+    }
+
+    private void RaisePackageExamined(PackageCompletedEventArgs package)
+    {
+        try
+        {
+            PackageExamined?.Invoke(this, package);
+        }
+        catch (Exception exception)
+        {
+            _log?.Invoke($"A package handler failed: {exception.GetType().Name}");
         }
     }
 

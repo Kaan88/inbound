@@ -506,6 +506,26 @@ public sealed class ArchiveRowsTests
     }
 
     [Fact]
+    public void A_package_shows_one_line_when_its_last_set_is_done_and_a_lone_set_does_not_wait()
+    {
+        var package = Guid.NewGuid();
+        var board = new ArchiveNoticeBoard();
+        var done = Set("completed", change: s => { s.PackageId = package; s.CompletedAt = Since.AddMinutes(1); });
+        var next = Set("extracting", change: s => { s.PackageId = package; s.Name = "other"; });
+        Assert.Null(board.Update([done, next], Since, true));
+
+        next.State = "completed";
+        next.CompletedAt = Since.AddMinutes(2);
+        Assert.Equal("Extraction completed: \"other\" and 1 more.", board.Update([done, next], Since, true)!.Text);
+
+        // Short of a volume, a set waits for the user, and that holds nothing back.
+        var lone = new ArchiveNoticeBoard();
+        var finished = Set("completed", change: s => { s.PackageId = package; s.CompletedAt = Since.AddMinutes(1); });
+        var stuck = Set("waiting", change: s => { s.PackageId = package; s.MissingVolumes = ["a.part2.rar"]; });
+        Assert.NotNull(lone.Update([finished, stuck], Since, true));
+    }
+
+    [Fact]
     public void A_notice_leaves_with_its_set()
     {
         var board = new ArchiveNoticeBoard();

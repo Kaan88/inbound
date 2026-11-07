@@ -424,7 +424,7 @@ public sealed partial class RemoteJobCoordinator
                             State = RemoteJobState.Blocked,
                             ConsecutiveFailures = failures,
                             FailureKind = RemoteFailureKind.AccountBusy,
-                            FailureMessage = $"{entry.DisplayName} has used up today's allowance for {site}. This will be tried again by itself.",
+                            FailureMessage = $"{entry.DisplayName} reports {site}'s daily limit is reached. This will be tried again by itself.",
                             NextCheckAt = _time.GetUtcNow() + RemoteJobRules.Backoff(failures, _options.Jitter()),
                         }
                         : null;

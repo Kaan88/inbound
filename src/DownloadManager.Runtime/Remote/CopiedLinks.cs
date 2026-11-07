@@ -9,7 +9,7 @@ public sealed record CopiedLinkOutcome(string? Title = null, string? Words = nul
 /// <summary>
 /// What copying a link does. With no usable provider key that is a direct add, and nothing else happens.
 /// With one, a hoster link never gets a direct request, so it waits on the list for the user's go-ahead:
-/// copying something must not spend the account's quota by itself. A link nobody can classify isn't added.
+/// copying something isn't a request to fetch it. A link nobody can classify isn't added.
 /// A link called ordinary with a listed site left unchecked is added but not started: nothing asks its server
 /// until the user starts it. Refusing it would refuse every copied link for as long as that list lasts.
 /// </summary>

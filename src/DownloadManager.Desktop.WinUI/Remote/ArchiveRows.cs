@@ -444,9 +444,14 @@ internal sealed class ArchiveNoticeBoard
             return new ArchiveNotice(ArchiveNoticeKind.Password, first.Id, words, "Enter Password…");
         }
 
-        if (_completed.Count == 0) return null;
-        var latest = sets.First(set => set.Id == _completed[^1]);
-        var others = _completed.Count - 1;
+        // A package's sets share a line once the last of them is done, rather than one line after another.
+        var ready = _completed
+            .Select(id => sets.First(set => set.Id == id))
+            .Where(done => done.PackageId is not { } package || !sets.Any(set => set.PackageId == package && set.IsStillWorking()))
+            .ToList();
+        if (ready.Count == 0) return null;
+        var latest = ready[^1];
+        var others = ready.Count - 1;
         return new ArchiveNotice(
             ArchiveNoticeKind.Completed,
             latest.Id,

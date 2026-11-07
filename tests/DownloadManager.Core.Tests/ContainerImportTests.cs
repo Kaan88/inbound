@@ -364,7 +364,7 @@ public sealed class ContainerImportTests
         Assert.Equal("Not cached, needs Fetcher to fetch it", view.Word);
         Assert.True(view.ShowBox);
         Assert.Equal(false, view.Checked);
-        Assert.Contains("using your account's quota", view.Detail, StringComparison.Ordinal);
+        Assert.Contains("Tick it to let Fetcher fetch this.", view.Detail, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -352,7 +352,11 @@ public sealed partial class MainWindow : Window
 
         // Preserve notifications for headless jobs when the main UI is already open.
         if (changeType == "completed" && job.Source == "cli" && (job.ShowCompletionDialog ?? _settings?.ShowCompletionDialog) == true)
-            OpenDownloadWindow(job.Id);
+        {
+            // A package opens one window, when its last file is done, as the Host does for the other sources.
+            if (PackageOf(job.Id) is not { } package) OpenDownloadWindow(job.Id);
+            else if (PackageMembers(package).All(member => member.State == "completed")) OpenPackageWindow(package.Id);
+        }
     }
 
     private void ApplyConnection(bool connected, string? error)

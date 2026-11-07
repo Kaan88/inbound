@@ -769,7 +769,7 @@ public sealed partial class RuntimeServiceTests
         await rig.RunAsync();
 
         Assert.Equal(RemoteJobState.Blocked, rig.View(job.Id).State);
-        Assert.Contains("today's allowance", rig.View(job.Id).FailureMessage);
+        Assert.Contains("daily limit is reached", rig.View(job.Id).FailureMessage);
         Assert.Equal(0, rig.Mock.Calls(CreateWeb));
     }
 

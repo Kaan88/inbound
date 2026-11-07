@@ -208,16 +208,6 @@ internal static class Program
             var tray = new TrayApplicationContext(trayActions, icon);
             updateMonitor.Attach(tray.Notify);
             updateMonitor.Start();
-            var toldAboutArchives = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string>();
-            archives.Changed += (_, change) =>
-            {
-                // Each outcome once: progress and later saves repeat the same state.
-                if (change.Set is not { State: "completed" or "failed" } set) return;
-                var outcome = $"{set.Attempts}:{set.State}:{set.FailureKind}";
-                if (toldAboutArchives.TryGetValue(set.Id, out var told) && told == outcome) return;
-                toldAboutArchives[set.Id] = outcome;
-                tray.Notify(set.State == "completed" ? "Extraction complete" : "Extraction stopped", $"{set.Name}: {set.StateText}");
-            };
             controller.UiContext = SynchronizationContext.Current;
             if (controller.UiContext is null)
             {
@@ -245,6 +235,27 @@ internal static class Program
                     catch (Exception ex) { log.Warn($"Event sound failed: {ex.GetType().Name}"); }
                 });
             }
+            using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
+            {
+                var current = currentSettings;
+                switch (notice.Kind)
+                {
+                    case DownloadNoticeKind.Completed:
+                        if (current.NotifyOnCompletion) tray.Notify(notice.Title, notice.Message);
+                        if (current.PlayCompletionSound) PlayEventSound("completed", current);
+                        break;
+                    case DownloadNoticeKind.Failed:
+                        tray.Notify(notice.Title, notice.Message);
+                        if (current.EventSoundFiles.ContainsKey("failed")) PlayEventSound("failed", current);
+                        break;
+                    case DownloadNoticeKind.Extraction:
+                        tray.Notify(notice.Title, notice.Message);
+                        break;
+                    case DownloadNoticeKind.PackageExtractionCompleted:
+                        if (current.NotifyOnCompletion) tray.Notify(notice.Title, notice.Message);
+                        break;
+                }
+            }, log.Warn);
             service.JobChanged += (_, e) =>
             {
                 var current = currentSettings;
@@ -276,23 +287,6 @@ internal static class Program
                 }
                 if (e.ChangeType is "paused" or "cancelled" or "failed" or "completed" or "removed")
                     shownDownloads.TryRemove(e.Job.Id, out var ignored);
-                if (e.ChangeType == "completed")
-                {
-                    if (current.NotifyOnCompletion)
-                    {
-                        tray.Notify("Download complete", e.Job.FileName);
-                    }
-
-                    if (current.PlayCompletionSound)
-                    {
-                        PlayEventSound("completed", current);
-                    }
-                }
-                else if (e.ChangeType == "failed")
-                {
-                    tray.Notify("Download failed", $"{e.Job.FileName}: {e.Job.Failure?.Message}");
-                    if (current.EventSoundFiles.ContainsKey("failed")) PlayEventSound("failed", current);
-                }
                 if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
                     service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
                         .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&

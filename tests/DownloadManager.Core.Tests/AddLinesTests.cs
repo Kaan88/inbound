@@ -697,11 +697,10 @@ public sealed class AddLinesTests
     }
 
     [Fact]
-    public void TheWordingSaysItUsesTheQuotaAndThatNothingIsSentBeforeApproval()
+    public void TheWordingSaysNothingIsSentBeforeApproval()
     {
         var words = RemoteText.ApproveExplanation("TorBox");
 
-        Assert.Contains("uses your account's quota", words);
         Assert.Contains("Nothing is sent to TorBox until you approve it", words);
     }
 

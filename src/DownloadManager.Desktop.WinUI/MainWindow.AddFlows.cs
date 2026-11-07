@@ -622,8 +622,8 @@ public sealed partial class MainWindow
             _themeRoot = themeRoot;
             JobId = result.Job!.Id;
             _nameText.Text = name;
-            _approve = new CheckBox { Content = $"Let {provider} fetch this, using your account's quota", Visibility = Visibility.Collapsed };
-            AutomationProperties.SetName(_approve, $"Let {provider} fetch {name}, using your account's quota");
+            _approve = new CheckBox { Content = $"Let {provider} fetch this", Visibility = Visibility.Collapsed };
+            AutomationProperties.SetName(_approve, $"Let {provider} fetch {name}");
             _approve.Click += (_, _) => Changed?.Invoke();
             _password = new PasswordBox
             {

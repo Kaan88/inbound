@@ -57,7 +57,7 @@ public static class RemoteJobRules
             ? "An archive password cannot contain a line break."
             : null;
 
-    /// <summary>Whether the provider has said this site's daily allowance is used up. Zero means no limit.</summary>
+    /// <summary>Whether the provider has said this site's daily limit is reached. Zero means no limit.</summary>
     public static bool DailyLimitUsedUp(RemoteHoster hoster)
         => (hoster.DailyLinkLimit is > 0 and var links && hoster.DailyLinksUsed >= links) ||
            (hoster.DailyBandwidthLimit is > 0 and var bytes && hoster.DailyBandwidthUsed >= bytes);

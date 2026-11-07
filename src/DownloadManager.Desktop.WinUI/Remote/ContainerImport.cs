@@ -395,7 +395,7 @@ internal sealed class ContainerOutcomes
             var current = Current;
             var parts = new List<string>();
             if (current.Detail.Length > 0) parts.Add(current.Detail);
-            if (current.NeedsApproval) parts.Add($"Tick it to let {ProviderName} fetch this, using your account's quota.");
+            if (current.NeedsApproval) parts.Add($"Tick it to let {ProviderName} fetch this.");
             if (current.NeedsLinkPassword) parts.Add("Enter it from the download list: select the item and press Enter.");
             if (!string.IsNullOrEmpty(Problem)) parts.Add(Problem);
             var detail = string.Join(" ", parts);

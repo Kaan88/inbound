@@ -78,6 +78,21 @@ public sealed class ArchiveSetDto
     public DateTimeOffset? CompletedAt { get; set; }
 }
 
+public static class ArchiveSetProgress
+{
+    /// <summary>
+    /// Whether an outcome can still follow without the user doing anything: it is extracting, next in line, or
+    /// has volumes on their way. A set short of a volume that failed or is missing waits for the user.
+    /// </summary>
+    public static bool IsStillWorking(this ArchiveSetDto set) => set.State switch
+    {
+        "extracting" => true,
+        "waiting" => set.DownloadingVolumes.Count > 0 || (set.FailedVolumes.Count == 0 && set.MissingVolumes.Count == 0),
+        "downloading" => set.DownloadingVolumes.Count > 0,
+        _ => false,
+    };
+}
+
 public sealed class ArchiveChangedDto
 {
     /// <summary>The set as it is now. Null when it left the list.</summary>
