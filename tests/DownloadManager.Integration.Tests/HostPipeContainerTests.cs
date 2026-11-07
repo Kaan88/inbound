@@ -146,7 +146,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
 
         var hash = new string('a', 40);
         var magnet = $"magnet:?xt=urn:btih:{hash}&dn=Magnet%20Name&tr=http%3A%2F%2Ftracker.invalid%2F{passkey}";
-        // Two files each, so there is a choice to wait for.
+        // Two files each. The folder link waits for a choice; the magnet isn't cached, so it takes both.
         var magnetFile = MockTorBoxFile.Of(Mock.NextFileId(), "Magnet Name/magnet.bin", 8 * Kb, 81);
         Mock.ScriptSubmission(hash, [magnetFile, MockTorBoxFile.Of(Mock.NextFileId(), "Magnet Name/extra.bin", 8 * Kb, 83)], [MockTorBoxState.Ready]);
 
@@ -222,10 +222,12 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         var shown = await UntilJobAsync(connection, added.Outcomes[3].Job!.Id, job => job.State == "awaitingSelection", "the folder link to be ready");
         Assert.Equal("Shared", shown.Name);
 
-        // With the go-ahead the magnet goes the way any magnet does.
+        // With the go-ahead the magnet goes the way any uncached magnet does: all of its files, with no question.
+        Assert.Equal("askIfCached", magnetJob.SelectionMode);
         var approved = await connection.AskAsync<RemoteActionResultDto>(MessageTypes.RemoteRetry, new RemoteRetryRequest { JobId = magnetJob.Id, ApproveUncached = true });
         Assert.True(approved.Ok, approved.Error);
-        await UntilJobAsync(connection, magnetJob.Id, job => job.State == "awaitingSelection", "the magnet to be ready", checkNow: true);
+        var magnetStarted = await UntilJobAsync(connection, magnetJob.Id, job => job.State == "localStarted", "the magnet to be ready", checkNow: true);
+        Assert.Equal("all", magnetStarted.SelectionMode);
         Assert.Equal(2, Mock.Submissions.Count);
         Assert.Equal(magnet, Mock.Submissions[1].Link);
 

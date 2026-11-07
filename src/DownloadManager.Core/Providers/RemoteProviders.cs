@@ -147,7 +147,8 @@ public sealed record RemoteHoster
     public long? PerLinkSizeLimit { get; init; }
 }
 
-public sealed record RemoteCacheHit(string Hash, string? Name, long? Size);
+/// <param name="Files">The item's files, when they were asked for and the provider listed them. Null otherwise.</param>
+public sealed record RemoteCacheHit(string Hash, string? Name, long? Size, IReadOnlyList<RemoteFile>? Files = null);
 
 public sealed record RemoteSubmission
 {
@@ -228,6 +229,13 @@ public interface IRemoteCacheChecker
 {
     /// <summary>What the provider already holds, by hash. A missing hash means not cached.</summary>
     Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same, with each hit's files, under the ids its item will have, so they can be chosen before it is added.
+    /// A provider that can't list them answers without.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedWithFilesAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default)
+        => CheckCachedAsync(kind, hashes, cancellationToken);
 }
 
 public interface IRemoteSubmitter

@@ -31,6 +31,33 @@ public enum RemoteSelectionMode
     AskWhenReady,
     All,
     Chosen,
+    /// <summary>
+    /// What a magnet or a .torrent file gets when nobody said: asks when ready if the provider had it cached, and
+    /// otherwise takes all, because then the files come only once the provider has fetched every one of them.
+    /// Becomes one or the other once the cache is checked, before anything is sent.
+    /// </summary>
+    AskIfCached,
+}
+
+/// <summary>
+/// A file chosen from the input's own list before the provider listed the item, by what finds it again there:
+/// its path without the first folder, and its size. The provider puts a folder of its own around what a torrent
+/// holds, and makes one up for a torrent of one file, so that folder can't be matched on. Compared exactly.
+/// </summary>
+public sealed record RemoteFileKey(string Path, long Size)
+{
+    /// <summary>Null for a path that isn't safe to use, which no file could be found again by.</summary>
+    public static RemoteFileKey? Of(string? path, long size)
+    {
+        var safe = RemotePaths.ToSafeRelativePath(path);
+        if (safe is null)
+        {
+            return null;
+        }
+
+        var parts = safe.Split(System.IO.Path.DirectorySeparatorChar);
+        return new RemoteFileKey(parts.Length == 1 ? parts[0] : string.Join('/', parts[1..]), size);
+    }
 }
 
 /// <summary>
@@ -89,6 +116,12 @@ public sealed record RemoteJobRecord
     public string StartMode { get; init; } = "startNow";
     public RemoteSelectionMode SelectionMode { get; init; }
     public IReadOnlyList<string> SelectedFileIds { get; init; } = [];
+    /// <summary>
+    /// With <see cref="RemoteSelectionMode.Chosen"/>: files chosen from the input's own list, such as a .torrent file's,
+    /// before the provider had one. Turned into <see cref="SelectedFileIds"/> when the item is ready. Any still here
+    /// then weren't found, and the job asks again rather than leave them out.
+    /// </summary>
+    public IReadOnlyList<RemoteFileKey> SelectedPaths { get; init; } = [];
 
     public bool ApprovedUncached { get; init; }
     /// <summary>It isn't cached and nobody has agreed to start work on the provider yet, so nothing was sent.</summary>

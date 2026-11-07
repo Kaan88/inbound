@@ -117,6 +117,16 @@ public static class RemoteJobRules
         return spread < LongestBackoff ? spread : LongestBackoff;
     }
 
+    /// <summary>A choice left to the cache, once it is known: asked if it was cached, and all of it otherwise. Any other choice stays.</summary>
+    public static RemoteSelectionMode DecideSelection(RemoteSelectionMode mode, bool cached)
+        => mode == RemoteSelectionMode.AskIfCached ? (cached ? RemoteSelectionMode.AskWhenReady : RemoteSelectionMode.All) : mode;
+
+    /// <summary>Some of a choice made before the provider listed the files isn't among them, so nothing was started.</summary>
+    public static string ChosenFilesMissing(int missing, string providerName)
+        => missing == 1
+            ? $"1 of the chosen files isn't in {providerName}'s list. Choose again."
+            : $"{missing} of the chosen files aren't in {providerName}'s list. Choose again.";
+
     public static bool SameHash(RemoteItem item, string hash)
         => string.Equals(item.Hash, hash, StringComparison.OrdinalIgnoreCase) ||
            item.AlternativeHashes.Contains(hash, StringComparer.OrdinalIgnoreCase);
@@ -173,6 +183,7 @@ public static class RemoteJobRules
             RemoteStage.Unknown when !string.IsNullOrEmpty(record.RawState) => $"{providerName} reports: {record.RawState}",
             _ => $"Waiting for {providerName}",
         },
+        RemoteJobState.AwaitingSelection when record.FailureMessage is { } problem => problem,
         RemoteJobState.AwaitingSelection => "Ready to download. Choose the files.",
         RemoteJobState.LocalStarted => LocalWords(local),
         RemoteJobState.Blocked => record.FailureMessage ?? $"Your {providerName} account is busy. This will be tried again by itself.",
@@ -217,6 +228,50 @@ public static class RemoteChildPlanner
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         return files.Count(file => seen.Add(file.FileId) && Check(file, out _) == Unusable.None);
+    }
+
+    /// <summary>
+    /// A choice against the files the provider lists: the ids of everything chosen, by id or found again by path and
+    /// size, the paths that weren't found, and how much of the choice is missing either way.
+    /// </summary>
+    public static (IReadOnlyList<string> Ids, IReadOnlyList<RemoteFileKey> Unfound, int Missing) MatchChoice(
+        IReadOnlyList<string> fileIds,
+        IReadOnlyList<RemoteFileKey> paths,
+        IReadOnlyList<RemoteFile> files)
+    {
+        var present = files.Select(file => file.FileId).ToHashSet(StringComparer.Ordinal);
+        var missing = fileIds.Count(id => !present.Contains(id));
+        if (paths.Count == 0)
+        {
+            return (fileIds, paths, missing);
+        }
+
+        var byKey = new Dictionary<RemoteFileKey, string>();
+        foreach (var file in files)
+        {
+            if (RemoteFileKey.Of(file.Path, file.Size) is { } key)
+            {
+                byKey.TryAdd(key, file.FileId);
+            }
+        }
+
+        var ids = fileIds.ToList();
+        var taken = ids.ToHashSet(StringComparer.Ordinal);
+        var unfound = new List<RemoteFileKey>();
+        foreach (var path in paths)
+        {
+            if (!byKey.TryGetValue(path, out var id))
+            {
+                unfound.Add(path);
+            }
+            else if (taken.Add(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        // The same lists when nothing was found, so a record that a look didn't change compares equal and isn't saved again.
+        return (ids.Count == fileIds.Count ? fileIds : ids, unfound.Count == paths.Count ? paths : unfound, missing + unfound.Count);
     }
 
     public static Plan Build(RemoteJobRecord record, RemoteItem item, string providerName, int maxConnections, string destination)

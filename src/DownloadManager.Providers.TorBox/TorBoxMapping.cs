@@ -49,25 +49,7 @@ public static partial class TorBoxMapping
         var finished = Bool(element, "download_finished");
         var present = Bool(element, "download_present");
 
-        var files = new List<RemoteFile>();
-        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty("files", out var list) && list.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var file in list.EnumerateArray())
-            {
-                var id = IdText(file, "id");
-                var path = Text(file, "name") ?? Text(file, "short_name");
-                if (id is null || path is null) continue;
-                files.Add(new RemoteFile
-                {
-                    FileId = id,
-                    Path = path,
-                    Size = Long(file, "size") ?? 0,
-                    Md5 = Text(file, "md5"),
-                    MimeType = Text(file, "mimetype"),
-                    Infected = Bool(file, "infected"),
-                });
-            }
-        }
+        var files = Files(element);
 
         // Readiness is checked first, as the reference client does: a file that can be fetched can be
         // fetched, whatever an earlier attempt left in the error field. No file list yet means it can't.
@@ -104,6 +86,37 @@ public static partial class TorBoxMapping
             Error = error,
             Files = files,
         };
+    }
+
+    /// <summary>
+    /// The <c>files</c> of an item, or of a cache check that asked for them, which have the same fields and the same
+    /// ids. A file without an id or a name is left out.
+    /// </summary>
+    public static List<RemoteFile> Files(JsonElement element)
+    {
+        var files = new List<RemoteFile>();
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("files", out var list) || list.ValueKind != JsonValueKind.Array)
+        {
+            return files;
+        }
+
+        foreach (var file in list.EnumerateArray())
+        {
+            var id = IdText(file, "id");
+            var path = Text(file, "name") ?? Text(file, "short_name");
+            if (id is null || path is null) continue;
+            files.Add(new RemoteFile
+            {
+                FileId = id,
+                Path = path,
+                Size = Long(file, "size") ?? 0,
+                Md5 = Text(file, "md5"),
+                MimeType = Text(file, "mimetype"),
+                Infected = Bool(file, "infected"),
+            });
+        }
+
+        return files;
     }
 
     public static RemoteHoster Hoster(JsonElement element)

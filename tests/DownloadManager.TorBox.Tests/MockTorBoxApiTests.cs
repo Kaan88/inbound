@@ -527,6 +527,22 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     }
 
     [Fact]
+    public async Task ACacheCheckListsTheFilesACreateWillHave()
+    {
+        const string hash = "2222333344445555666677778888999900001111";
+        _mock.AddCached(hash, "Pack", 30);
+        MockTorBoxFile[] files = [MockTorBoxFile.Of(_mock.NextFileId(), "Pack/a.bin", 10), MockTorBoxFile.Of(_mock.NextFileId(), "Pack/sub/b.bin", 20)];
+        _mock.ScriptSubmission(hash, files, [MockTorBoxState.CachedReady]);
+
+        var listed = (await _client.CheckCachedWithFilesAsync(RemoteItemKind.Torrent, [hash]))[hash].Files!;
+        Assert.Equal(files.Select(file => file.Id.ToString()), listed.Select(file => file.FileId));
+        Assert.Equal(["Pack/a.bin", "Pack/sub/b.bin"], listed.Select(file => file.Path));
+
+        // Without being asked, the answer has none.
+        Assert.Null((await _client.CheckCachedAsync(RemoteItemKind.Torrent, [hash]))[hash].Files);
+    }
+
+    [Fact]
     public async Task CacheChecksReturnOnlyHits()
     {
         _mock.AddCached("1111222233334444555566667777888899990000", "test_folder", 19);

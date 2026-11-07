@@ -411,6 +411,34 @@ public sealed class TorBoxClientTests
     }
 
     [Fact]
+    public async Task ACacheCheckWithFilesAsksForThemAndKeepsTheirIds()
+    {
+        // The real answer's shape, from a probe: the folder comes first in each name, and the ids are the item's own.
+        var (client, stub) = Make(_ => Json("""
+            {"success":true,"error":null,"data":{"d984":{"name":"Pack","size":30,"hash":"d984","files":[
+              {"id":0,"name":"Pack/a.bin","size":10,"short_name":"a.bin","mimetype":"application/octet-stream"},
+              {"id":3,"name":"Pack/sub/b.bin","size":20,"short_name":"b.bin","mimetype":"application/octet-stream"}]}}}
+            """));
+        var hits = await client.CheckCachedWithFilesAsync(RemoteItemKind.Torrent, ["d984"]);
+
+        Assert.Contains("list_files=true", stub.Calls[0].Url);
+        var files = hits["d984"].Files!;
+        Assert.Equal(["0", "3"], files.Select(file => file.FileId));
+        Assert.Equal(["Pack/a.bin", "Pack/sub/b.bin"], files.Select(file => file.Path));
+        Assert.Equal([10L, 20L], files.Select(file => file.Size));
+    }
+
+    [Fact]
+    public async Task AnOrdinaryCacheCheckAsksForNoFiles()
+    {
+        var (client, stub) = Make(_ => Json("""{"success":true,"error":null,"data":{"d984":{"name":"Pack","size":30,"hash":"d984"}}}"""));
+        var hits = await client.CheckCachedAsync(RemoteItemKind.Torrent, ["d984"]);
+
+        Assert.Contains("list_files=false", stub.Calls[0].Url);
+        Assert.Null(hits["d984"].Files);
+    }
+
+    [Fact]
     public async Task EmptyCacheAnswerMeansNothingCached()
     {
         var (client, _) = Make(_ => Json("""{"success":true,"error":null,"data":{}}"""));

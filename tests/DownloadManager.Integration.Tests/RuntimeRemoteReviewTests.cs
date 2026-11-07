@@ -620,8 +620,9 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task AChoiceOfNothingUsableCanBeChosenAgain()
+    public async Task AChoiceOfFilesTheListDoesntHaveAsksAgainInsteadOfFailing()
     {
+        // Before, this failed the job. Nothing about the item is wrong, so the choice is asked for again, saying why.
         await using var rig = await RemoteRig.CreateAsync(_server);
         var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, 23);
         var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
@@ -632,7 +633,36 @@ public sealed partial class RuntimeServiceTests
             FileIds = ["99"],
         });
         await rig.RunAsync();
+        var asking = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.AwaitingSelection, asking.State);
+        Assert.Equal("1 of the chosen files isn't in TorBox's list. Choose again.", asking.Status);
+        Assert.Empty(rig.Children());
+
+        var again = await rig.Jobs.ChooseFilesAsync(job.Id, all: true, null);
+        Assert.True(again.Ok, again.Error);
+        Assert.Null(rig.View(job.Id).FailureMessage);
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        await rig.AssertCompletedAsync(file, "Pack", "a.bin");
+    }
+
+    [Fact]
+    public async Task AChoiceOfNothingUsableCanBeChosenAgain()
+    {
+        // The chosen file is in the list, but it can't be downloaded.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var infected = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/bad.bin", 4 * Kb, 26, infected: true);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, 23);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [infected, file]);
+        var job = await rig.AddAsync(new RemoteAddRequest
+        {
+            ExistingItem = new RemoteItemRef("torbox", RemoteItemKind.Torrent, item.Id.ToString()),
+            Selection = RemoteSelectionMode.Chosen,
+            FileIds = [infected.Id.ToString()],
+        });
+        await rig.RunAsync();
         Assert.Equal(RemoteJobState.Failed, rig.View(job.Id).State);
+        Assert.Equal("None of the chosen files can be downloaded.", rig.View(job.Id).FailureMessage);
 
         var again = await rig.Jobs.ChooseFilesAsync(job.Id, all: true, null);
         Assert.True(again.Ok, again.Error);

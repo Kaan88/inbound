@@ -59,6 +59,50 @@ public sealed class TorrentMetadataTests
     }
 
     [Fact]
+    public void AMultiFileTorrentListsItsFilesInsideItsOwnFolder()
+    {
+        var info = "d5:filesl" +
+                   "d6:lengthi10e4:pathl3:sub5:a.bineed6:lengthi20e4:pathl5:b.bineee" +
+                   $"4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e";
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(info)), out var metadata, out var problem), problem);
+        Assert.Equal([new TorrentFileEntry("pack/sub/a.bin", 10), new TorrentFileEntry("pack/b.bin", 20)], metadata!.Files);
+    }
+
+    [Fact]
+    public void ASingleFileTorrentListsItsName()
+    {
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(SingleFileInfo())), out var metadata, out var problem), problem);
+        Assert.Equal([new TorrentFileEntry("file.bin", 1234)], metadata!.Files);
+    }
+
+    [Fact]
+    public void AFilesUtf8PathIsTheOneListed()
+    {
+        // An old client's own spelling in "path", and the one everything shows in "path.utf-8": 7 bytes for 5 letters.
+        var info = "d5:filesl" +
+                   "d6:lengthi10e4:pathl5:old.be10:path.utf-8l7:été.bee" +
+                   $"e4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e";
+        Assert.True(TorrentMetadata.TryParse(Encoding.UTF8.GetBytes(Wrap(info)), out var metadata, out var problem), problem);
+        Assert.Equal([new TorrentFileEntry("pack/été.b", 10)], metadata!.Files);
+    }
+
+    [Fact]
+    public void PaddingFilesAreCountedButNotListed()
+    {
+        var info = "d5:filesl" +
+                   "d6:lengthi10e4:pathl5:a.bineed4:attr1:p6:lengthi6e4:pathl4:.pad1:6eed6:lengthi20e4:pathl5:b.bineee" +
+                   $"4:name4:pack12:piece lengthi16384e6:pieces{Pieces}e";
+        Assert.True(TorrentMetadata.TryParse(Bytes(Wrap(info)), out var metadata, out var problem), problem);
+        Assert.Equal(3, metadata!.FileCount);
+        Assert.Equal(36, metadata.TotalBytes);
+        Assert.Equal(["pack/a.bin", "pack/b.bin"], metadata.Files.Select(file => file.Path));
+    }
+
+    [Fact]
+    public void APathOfSomethingOtherThanTextIsRefused()
+        => Refused(Wrap($"d5:filesld6:lengthi1e4:pathli1eeee4:name1:a12:piece lengthi1e6:pieces{Pieces}e"));
+
+    [Fact]
     public void BinaryInStringsSurvivesInTheHash()
     {
         var pieces = "20:" + new string('\xFF', 20);

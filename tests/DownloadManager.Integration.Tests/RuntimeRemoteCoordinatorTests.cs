@@ -1247,7 +1247,8 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(RemoteInputKind.Magnet, classified.Kind);
         Assert.Equal(hash, classified.Hash);
 
-        var job = await rig.AddAsync(new RemoteAddRequest { Input = magnet });
+        // Told to wait for a choice, as "Let me choose files when TorBox is done" does. Left alone, it would take all.
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = magnet, Selection = RemoteSelectionMode.AskWhenReady });
         Assert.Equal("Pretty Name", job.Name);
         await rig.RunAsync();
         Assert.True(rig.View(job.Id).ApprovalNeeded);
@@ -1348,7 +1349,10 @@ public sealed partial class RuntimeServiceTests
         FolderLink,
     }
 
-    /// <summary>An item that asks for a choice when it is ready, holding these files.</summary>
+    /// <summary>
+    /// An item that asks for a choice when it is ready, holding these files. An uncached magnet or .torrent asks only
+    /// when told to, as with the add box's "Let me choose files when TorBox is done"; a folder link always may.
+    /// </summary>
     private static async Task<RemoteJobView> AddAskingAsync(RemoteRig rig, AskedInput input, string name, MockTorBoxFile[] files)
     {
         switch (input)
@@ -1356,12 +1360,12 @@ public sealed partial class RuntimeServiceTests
             case AskedInput.Magnet:
                 var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant();
                 rig.Mock.ScriptSubmission(hash, files, [MockTorBoxState.Ready]);
-                return await rig.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, ApprovedUncached = true });
+                return await rig.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, ApprovedUncached = true, Selection = RemoteSelectionMode.AskWhenReady });
             case AskedInput.TorrentFile:
                 var (bytes, infoHash) = Torrent(name);
                 rig.Mock.ScriptTorrentUpload(bytes, infoHash);
                 rig.Mock.ScriptSubmission(infoHash, files, [MockTorBoxState.Ready]);
-                return await rig.AddAsync(new RemoteAddRequest { TorrentFile = bytes, ApprovedUncached = true });
+                return await rig.AddAsync(new RemoteAddRequest { TorrentFile = bytes, ApprovedUncached = true, Selection = RemoteSelectionMode.AskWhenReady });
             default:
                 var item = rig.Mock.AddItem(RemoteItemKind.Torrent, name, files);
                 return await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });

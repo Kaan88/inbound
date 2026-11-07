@@ -166,20 +166,27 @@ public sealed class TorBoxClient :
 
     public RemoteFolderLinkParse? ParseFolderLink(string? text) => TorBoxFolderLink.Parse(text);
 
-    public async Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default)
+        => CheckCachedAsync(kind, hashes, listFiles: false, cancellationToken);
+
+    /// <summary>Its files carry the ids the item gets on the account, seen to be the same on a real one.</summary>
+    public Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedWithFilesAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, CancellationToken cancellationToken = default)
+        => CheckCachedAsync(kind, hashes, listFiles: true, cancellationToken);
+
+    private async Task<IReadOnlyDictionary<string, RemoteCacheHit>> CheckCachedAsync(RemoteItemKind kind, IReadOnlyCollection<string> hashes, bool listFiles, CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, RemoteCacheHit>(StringComparer.OrdinalIgnoreCase);
         // The query form takes a list too, but a body keeps long lists out of the address.
         foreach (var chunk in hashes.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(100))
         {
             using var body = new StringContent(JsonSerializer.Serialize(new { hashes = chunk }), Encoding.UTF8, "application/json");
-            using var document = await SendAsync(HttpMethod.Post, $"{Family(kind)}/checkcached?format=object&list_files=false", body, false, cancellationToken).ConfigureAwait(false);
+            using var document = await SendAsync(HttpMethod.Post, $"{Family(kind)}/checkcached?format=object&list_files={(listFiles ? "true" : "false")}", body, false, cancellationToken).ConfigureAwait(false);
             var data = Data(document);
             if (data.ValueKind != JsonValueKind.Object) continue;
             foreach (var entry in data.EnumerateObject())
             {
                 if (entry.Value.ValueKind != JsonValueKind.Object) continue;
-                var hit = new RemoteCacheHit(entry.Name, Text(entry.Value, "name"), Long(entry.Value, "size"));
+                var hit = new RemoteCacheHit(entry.Name, Text(entry.Value, "name"), Long(entry.Value, "size"), listFiles ? TorBoxMapping.Files(entry.Value) : null);
                 result[entry.Name] = hit;
 
                 // Asked by one of an item's alternative hashes, the answer comes back under its main

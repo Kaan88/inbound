@@ -477,7 +477,15 @@ public sealed partial class RemoteJobCoordinator
         }
 
         var submitting = await UpdateAsync(record.Id, latest => latest.State is RemoteJobState.Intended or RemoteJobState.Blocked
-            ? WithoutAccountProblem(latest) with { State = RemoteJobState.Submitting, SubmittedAt = now, Cached = cached, ApprovalNeeded = false, NextCheckAt = null }
+            ? WithoutAccountProblem(latest) with
+            {
+                State = RemoteJobState.Submitting,
+                SubmittedAt = now,
+                Cached = cached,
+                ApprovalNeeded = false,
+                NextCheckAt = null,
+                SelectionMode = RemoteJobRules.DecideSelection(latest.SelectionMode, cached),
+            }
             : null).ConfigureAwait(false);
         if (submitting is null)
         {
@@ -801,6 +809,8 @@ public sealed partial class RemoteJobCoordinator
                         ItemId = item.Ref.ItemId,
                         PredictedHash = item.Hash ?? latest.PredictedHash,
                         NextCheckAt = now,
+                        // Already on the account and done is as good as cached. Still working on it is not.
+                        SelectionMode = RemoteJobRules.DecideSelection(latest.SelectionMode, item.Stage == RemoteStage.Ready || item.Cached),
                     }
                     : null).ConfigureAwait(false);
                 if (adopted is not null)
@@ -817,6 +827,7 @@ public sealed partial class RemoteJobCoordinator
                         State = RemoteJobState.Waiting,
                         Stage = RemoteStage.Queued,
                         NextCheckAt = now + RemoteJobRules.NextPoll(null, policy: work.Entry.TransferPolicy),
+                        SelectionMode = RemoteJobRules.DecideSelection(latest.SelectionMode, cached: false),
                     }
                     : null).ConfigureAwait(false);
                 return true;
@@ -983,14 +994,7 @@ public sealed partial class RemoteJobCoordinator
                     FailureMessage = $"{entry.DisplayName} reports that this item failed: {Words(entry, item.Error ?? item.RawState, 500, SecretsOf(record)) ?? "no reason given"}.",
                     NextCheckAt = null,
                 },
-                // Only a real choice is asked for. One file, or none, goes on as if all had been chosen.
-                RemoteItemOutcome.Ready when record.SelectionMode == RemoteSelectionMode.AskWhenReady && RemoteChildPlanner.UsableCount(item.Files) > 1 => next with
-                {
-                    State = RemoteJobState.AwaitingSelection,
-                    NextCheckAt = null,
-                },
-                // Still Waiting until the jobs exist, so a crash anywhere before that comes back here.
-                RemoteItemOutcome.Ready => next with { ConsecutiveFailures = record.ConsecutiveFailures, NextCheckAt = now + ReadyRetry },
+                RemoteItemOutcome.Ready => WhenReady(record, next, item, entry.DisplayName, now),
                 _ => next with { NextCheckAt = now + RemoteJobRules.NextPoll(item.EtaSeconds, unchanged, entry.TransferPolicy) },
             };
         }).ConfigureAwait(false);
@@ -999,6 +1003,41 @@ public sealed partial class RemoteJobCoordinator
         {
             await CreateChildrenAsync(work, updated, item, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// A ready item, as saved before its local jobs are made. A choice made before the provider listed the files is
+    /// matched to them first, and any of it that isn't found is said, with the list offered again rather than those
+    /// files left out. Otherwise only a real choice is asked for: one file, or none, goes on as if all had been chosen.
+    /// A job whose downloads exist already is never taken back to a question: it goes on, as in <see cref="NothingToCreate"/>.
+    /// </summary>
+    private static RemoteJobRecord WhenReady(RemoteJobRecord record, RemoteJobRecord next, RemoteItem item, string providerName, DateTimeOffset now)
+    {
+        var usable = RemoteChildPlanner.UsableCount(item.Files);
+        if (record.SelectionMode == RemoteSelectionMode.Chosen && usable > 0)
+        {
+            var (ids, unfound, missing) = RemoteChildPlanner.MatchChoice(record.SelectedFileIds, record.SelectedPaths, item.Files);
+            next = next with { SelectedFileIds = ids, SelectedPaths = unfound };
+            if (missing > 0 && record.PackageId is null)
+            {
+                // Kept as they are, so a look at it later says the same.
+                return next with
+                {
+                    State = RemoteJobState.AwaitingSelection,
+                    FailureMessage = RemoteJobRules.ChosenFilesMissing(missing, providerName),
+                    NextCheckAt = null,
+                };
+            }
+        }
+
+        // One saved before its cache was known can't be told apart from a choice left open, so it is asked.
+        if ((record.SelectionMode is RemoteSelectionMode.AskWhenReady or RemoteSelectionMode.AskIfCached) && usable > 1)
+        {
+            return next with { State = RemoteJobState.AwaitingSelection, NextCheckAt = null };
+        }
+
+        // Still Waiting until the jobs exist, so a crash anywhere before that comes back here.
+        return next with { ConsecutiveFailures = record.ConsecutiveFailures, NextCheckAt = now + ReadyRetry };
     }
 
     // ---- Local jobs ----------------------------------------------------------------------------
@@ -1147,7 +1186,7 @@ public sealed partial class RemoteJobCoordinator
     }
 
     private static bool SameChoice(RemoteJobRecord one, RemoteJobRecord other)
-        => one.SelectionMode == other.SelectionMode && one.SelectedFileIds.SequenceEqual(other.SelectedFileIds);
+        => one.SelectionMode == other.SelectionMode && one.SelectedFileIds.SequenceEqual(other.SelectedFileIds) && one.SelectedPaths.SequenceEqual(other.SelectedPaths);
 
     /// <summary>
     /// No file of this choice can be downloaded. That ends a job with nothing downloading, in a way a

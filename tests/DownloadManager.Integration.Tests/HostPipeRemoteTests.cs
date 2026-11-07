@@ -352,7 +352,8 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         var other = NewFile("Pretty Name/other.bin", 16 * Kb, 32);
         Mock.ScriptSubmission(hash, [wanted, other], [.. Enumerable.Repeat(MockTorBoxState.MetaData, 8), MockTorBoxState.Downloading(0.5), MockTorBoxState.Ready]);
 
-        var e = (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto { Input = magnet, Destination = host.Destination })).Job!;
+        // "ask", as the add box's "Let me choose files when TorBox is done" sends; an uncached magnet otherwise takes all.
+        var e = (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto { Input = magnet, Destination = host.Destination, Selection = "ask" })).Job!;
         Assert.Equal("Pretty Name", e.Name);
         await UntilAsync(connection, e.Id, job => job.ApprovalNeeded, "the question about the magnet");
         Assert.Single(Mock.Submissions);

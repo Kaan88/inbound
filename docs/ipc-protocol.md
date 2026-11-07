@@ -70,7 +70,7 @@ registered. Kinds are `torrents`, `webdl` and `usenet`.
 | `remote.account.setKey` | `provider?`, `key` | `remote.account.result` |
 | `remote.account.clearKey` | `provider?` | `remote.account.result` |
 | `remote.account.validate` | `provider?` | `remote.account.result` |
-| `remote.classify` | `text` | `remote.classifyResult` |
+| `remote.classify` | `text`, `withFiles?` | `remote.classifyResult` |
 | `remote.add` | see below | `remote.addResult` |
 | `remote.list` | none | `remote.listResult` |
 | `remote.item.get` | `provider?`, `kind`, `itemId?`, `offset?`, `limit?`, `includeFiles?`, `fresh?` | `remote.item.result` |
@@ -104,6 +104,14 @@ carries what the provider last said about that site, each null when it sets no l
 `hosterDailyLinksLeft`, `hosterDailyBytesLeft` and `hosterLargestFile`. Clients that don't know a
 value of `kind` should treat it as they would `unsupported`.
 
+With `withFiles` true, a `magnet` or `torrentFile` also says which files it holds, so they can be chosen
+before it is added. A `.torrent` file is read for its own list: `files` has each file's `relativePath`
+(inside the torrent's own folder) and `size`, and `fileId` only numbers them, so choose these with
+`filePaths`. A magnet is checked against the provider's cache, which is the only call this makes:
+`cached` says whether it is, and a cached one's `files` are the provider's, chosen by `fileIds`. `cached`
+is null when the check couldn't be made, and `files` is null when the files aren't known, or there are more
+than 5,000 of them. The entries are those of `remote.files`.
+
 `job.add` never classifies. It stays an explicit direct request, because a browser handoff is made of
 those. A frontend with a hoster link has to route it through `remote.add`. `dm add`, `dm add-batch` and
 `dm import` classify each address first: a hoster or folder link is refused, and in a batch or an import it
@@ -133,9 +141,19 @@ monitor adds every link directly, as it always has.
 **`remote.add`** takes either `input` (a folder link, magnet, hoster link or a full path to a local
 `.torrent` file) or `provider`, `itemKind` and `itemId` (an item from `remote.item.get`). Other fields:
 `destination` (full path), `queueId`, `startMode` (`startNow`, `queue`, `later`), `selection` (`ask`,
-`all`, `chosen`), `fileIds`, `approveUncached`, `linkPassword`, `archivePassword`. The input is stored encrypted and is
-never returned. With no `selection`, a hoster link takes `all` and starts by itself when ready, and
-anything else asks. The reply has `job`, `inputKind`, `note` when options given were not used, and
+`all`, `chosen`), `fileIds`, `filePaths`, `approveUncached`, `linkPassword`, `archivePassword`. The input is stored encrypted and is
+never returned. With no `selection`, `fileIds` or `filePaths` mean `chosen`. Otherwise a hoster link takes
+`all` and starts by itself when ready, and a folder link asks. A magnet or `.torrent` file is
+`selectionMode: askIfCached` until its cache is checked: it then asks if it was cached and takes `all` if
+it wasn't, and one found on the account already counts as cached when it is done there. `ask` makes it wait
+for a choice either way. `filePaths` is a list of `path` and `size`, as `remote.classify` with `withFiles`
+gave a `.torrent` file's files, and can't come with `fileIds`. The Host matches them to the provider's files
+once it lists them: the first folder of each path is left out, because the provider names that folder its
+own way, and the rest of the path and the size must agree exactly. When any chosen file, by id or by path,
+isn't in the provider's list, nothing is started and the job waits in `awaitingSelection` with
+`failureMessage` saying how many are missing, until a new `remote.select`. The files that were found are in
+`selectedFileIds`. A job that already has local downloads goes on with what was found instead.
+The reply has `job`, `inputKind`, `note` when options given were not used, and
 `existing` when an active job already covers
 this input. An ordinary link gets `ok: false`: those go through `job.add`. Adding only saves the
 intent, and the Host does the work afterwards, so watch `remote.changed`.
@@ -152,7 +170,7 @@ intent, and the Host does the work afterwards, so watch `remote.changed`.
 | `submitting` | Being sent |
 | `submissionUnknown` | The answer was lost. The provider's list decides, and nothing is sent twice |
 | `waiting` | The provider is working on it |
-| `awaitingSelection` | Ready. `remote.files` lists the files, `remote.select` chooses |
+| `awaitingSelection` | Ready, with more than one file to choose from, or with chosen files missing (`failureMessage` says so). `remote.files` lists the files, `remote.select` chooses |
 | `localStarted` | Local downloads exist |
 | `blocked` | The account is busy for now. Retries by itself |
 | `failed` | Waits for the user: `remote.retry` |

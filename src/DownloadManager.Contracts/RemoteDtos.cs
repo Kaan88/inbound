@@ -54,6 +54,13 @@ public sealed class RemoteClassifyRequest
     /// <summary>One pasted string or the full path of a local .torrent file. Not repeated in the reply.</summary>
     public string Text { get; set; } = string.Empty;
 
+    /// <summary>
+    /// For a magnet or a .torrent file, also say which files it holds, so they can be chosen before it is added: a
+    /// .torrent file is read for its own list, and a magnet is checked against the provider's cache, the only call this
+    /// makes. A magnet that isn't cached has no files to show.
+    /// </summary>
+    public bool WithFiles { get; set; }
+
     public override string ToString() => "[classify]";
 }
 
@@ -85,6 +92,16 @@ public sealed class RemoteClassifyResult
     public string? Note { get; set; }
     /// <summary>An ordinaryLink only: a listed site couldn't be checked against it, so it may be one the provider handles. The note says so.</summary>
     public bool CheckIncomplete { get; set; }
+
+    /// <summary>Asked <c>withFiles</c>, for a magnet: whether the provider has it cached. Null when it couldn't say.</summary>
+    public bool? Cached { get; set; }
+
+    /// <summary>
+    /// Asked <c>withFiles</c>: the files, when known. A cached magnet's are the provider's, and are chosen by their ids
+    /// (<c>fileIds</c>). A .torrent file's are its own, with ids that only number them, and are chosen by
+    /// <c>filePaths</c>. Null when unknown, or too many to choose from before adding.
+    /// </summary>
+    public List<RemoteFileDto>? Files { get; set; }
 }
 
 public sealed class RemoteAddRequestDto
@@ -100,9 +117,18 @@ public sealed class RemoteAddRequestDto
     public int QueueId { get; set; }
     /// <summary>startNow, queue or later.</summary>
     public string StartMode { get; set; } = "startNow";
-    /// <summary>ask, all or chosen. Null means chosen with <see cref="FileIds"/>; otherwise a hoster link takes all, and anything else asks.</summary>
+    /// <summary>
+    /// ask, all or chosen. Null means chosen with <see cref="FileIds"/> or <see cref="FilePaths"/>; otherwise a hoster link
+    /// takes all, a folder link asks, and a magnet or .torrent file asks if it was cached and takes all if it wasn't.
+    /// </summary>
     public string? Selection { get; set; }
     public List<string>? FileIds { get; set; }
+    /// <summary>
+    /// Instead of <see cref="FileIds"/>: files chosen from a .torrent file's own list, as <c>remote.classify</c> with
+    /// <c>withFiles</c> gave them. Matched to the provider's files by path and size once it lists them. Any that aren't
+    /// found leave the job asking, and saying so.
+    /// </summary>
+    public List<RemoteFilePathDto>? FilePaths { get; set; }
     /// <summary>Go ahead and have the provider fetch it if it isn't cached.</summary>
     public bool ApproveUncached { get; set; }
     public string? LinkPassword { get; set; }
@@ -110,6 +136,13 @@ public sealed class RemoteAddRequestDto
     public string? ArchivePassword { get; set; }
 
     public override string ToString() => "[remote add]";
+}
+
+/// <summary>A file chosen by its relative path and size, as an input's own list gave them.</summary>
+public sealed class RemoteFilePathDto
+{
+    public string Path { get; set; } = string.Empty;
+    public long Size { get; set; }
 }
 
 public sealed class RemoteJobDto
@@ -149,7 +182,7 @@ public sealed class RemoteJobDto
     public string? Destination { get; set; }
     public int QueueId { get; set; }
     public string StartMode { get; set; } = "startNow";
-    /// <summary>askWhenReady, all or chosen.</summary>
+    /// <summary>askWhenReady, all, chosen, or askIfCached until the cache has been checked, before anything is sent.</summary>
     public string SelectionMode { get; set; } = string.Empty;
     public List<string> SelectedFileIds { get; set; } = [];
     public Guid? PackageId { get; set; }

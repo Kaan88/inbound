@@ -53,11 +53,14 @@ public sealed record RemoteAddRequest
     public int QueueId { get; init; }
     public string StartMode { get; init; } = "startNow";
     /// <summary>
-    /// Null decides by the input: a hoster link starts by itself when the provider is done, because
-    /// there is nothing to choose among; what can hold many files waits for the user's choice.
+    /// Null decides by the input: a hoster link starts by itself when the provider is done, because there is
+    /// nothing to choose among. A magnet or a .torrent file asks if it was cached, and otherwise takes all
+    /// (<see cref="RemoteSelectionMode.AskIfCached"/>). A folder link asks.
     /// </summary>
     public RemoteSelectionMode? Selection { get; init; }
     public IReadOnlyList<string>? FileIds { get; init; }
+    /// <summary>With <see cref="RemoteSelectionMode.Chosen"/>, instead of <see cref="FileIds"/>: files chosen from the input's own list, such as a .torrent file's.</summary>
+    public IReadOnlyList<RemoteChosenPath>? FilePaths { get; init; }
     /// <summary>The user agreed to have the provider start work on this if it isn't cached.</summary>
     public bool ApprovedUncached { get; init; }
     /// <summary>Nobody asked for this yet, so it waits for the user's go-ahead before anything is sent or asked. See <see cref="RemoteJobRecord.HeldForApproval"/>.</summary>
@@ -77,6 +80,9 @@ public sealed record RemoteAddRequest
 
     public override string ToString() => "[remote add request]";
 }
+
+/// <summary>A file chosen from the input's own list, as that list gave it: its relative path and its size.</summary>
+public sealed record RemoteChosenPath(string Path, long Size);
 
 /// <summary>A remote job as a client may see it: no input, no link and no password, in any form.</summary>
 public sealed record RemoteJobView
@@ -159,6 +165,12 @@ public sealed record RemoteFilesResult
 /// </summary>
 public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 {
+    /// <summary>
+    /// The most files an input lists to choose from before it is added, or has chosen by path. Every one of them is
+    /// saved with the job, and one past this waits to be chosen from when the item is ready.
+    /// </summary>
+    public const int MostFilesToChooseFrom = 5000;
+
     private const int MostRoundsPerPass = 10;
     private const int LongestTorrentBytes = TorrentMetadata.MaxFileBytes;
     private const string NoChosenFiles = "None of the chosen files can be downloaded.";
@@ -472,6 +484,54 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         return answers;
     }
 
+    /// <summary>
+    /// As <see cref="ClassifyAsync"/>, and for a magnet or a .torrent file the files it holds, so they can be chosen
+    /// before it is added. A .torrent file is read for its own list. A magnet's come from the provider's cache check,
+    /// which also says whether it is cached: one that isn't has no files to show until the provider has fetched it.
+    /// That check is all that is sent, and when it can't be made, nothing is said about the cache.
+    /// </summary>
+    public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default)
+    {
+        var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
+        if (classified.Kind == RemoteInputKind.TorrentFile)
+        {
+            var read = await ReadTorrentFileAsync(text!.Trim(), cancellationToken).ConfigureAwait(false);
+            return read.Bytes is null
+                ? new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = read.Error }
+                : RemoteInputClassifier.ClassifyTorrent(read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), withFiles: true);
+        }
+
+        if (classified is not { Kind: RemoteInputKind.Magnet, Hash: { } hash, Provider: { } provider } ||
+            !_accounts.TryGetValue(provider, out var work) ||
+            work.Entry.CacheChecker is not { } checker ||
+            work.Entry.AccountProblem() is not null ||
+            work.Pacing.RateLimitedUntil > _time.GetUtcNow())
+        {
+            return classified;
+        }
+
+        try
+        {
+            var hits = await checker.CheckCachedWithFilesAsync(classified.ItemKind ?? RemoteItemKind.Torrent, [hash], cancellationToken).ConfigureAwait(false);
+            if (!hits.TryGetValue(hash, out var hit))
+            {
+                return classified with { Cached = false };
+            }
+
+            return classified with
+            {
+                Cached = true,
+                Files = hit.Files is { Count: > 0 and <= MostFilesToChooseFrom } files ? files.Select(file => ToFileView(work.Entry, file)).ToList() : null,
+            };
+        }
+        catch (Exception ex) when (ex is RemoteProviderException or HttpRequestException or IOException ||
+                                   (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            _log?.Invoke($"A cache check before adding failed: {ex.GetType().Name}.");
+            return classified;
+        }
+    }
+
     private async Task<List<RemoteClassifierProvider>> ClassifierProvidersAsync(bool withHosters, CancellationToken cancellationToken)
     {
         var result = new List<RemoteClassifierProvider>();
@@ -508,9 +568,27 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return new RemoteAddResult { Error = "The start mode has to be startNow, queue or later." };
         }
 
-        if (request.Selection == RemoteSelectionMode.Chosen && request.FileIds is not { Count: > 0 })
+        if (request.Selection == RemoteSelectionMode.Chosen && request.FileIds is not { Count: > 0 } && request.FilePaths is not { Count: > 0 })
         {
             return new RemoteAddResult { Error = "Choose at least one file." };
+        }
+
+        if (request.Selection == RemoteSelectionMode.Chosen && request.FilePaths is { Count: > 0 } paths)
+        {
+            if (request.FileIds is { Count: > 0 })
+            {
+                return new RemoteAddResult { Error = "Choose files by id or by path, not both." };
+            }
+
+            if (paths.Count > MostFilesToChooseFrom)
+            {
+                return new RemoteAddResult { Error = "That is too many files to choose before it is added. Choose them when it is ready." };
+            }
+
+            if (paths.Any(path => RemoteFileKey.Of(path.Path, path.Size) is null))
+            {
+                return new RemoteAddResult { Error = "A chosen file has a path that can't be used." };
+            }
         }
 
         if (RemoteJobRules.DescribeBadArchivePassword(request.ArchivePassword) is { } badPassword)
@@ -615,7 +693,9 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         }
 
         var files = request.Selection is { } selection && (selection != twin.SelectionMode ||
-            (selection == RemoteSelectionMode.Chosen && request.FileIds?.SequenceEqual(twin.SelectedFileIds) != true));
+            (selection == RemoteSelectionMode.Chosen && !(
+                (request.FileIds ?? []).SequenceEqual(twin.SelectedFileIds) &&
+                ChosenPaths(request).SequenceEqual(twin.SelectedPaths))));
 
         const string AnotherFolder = "To use another folder, remove it from the list and add it again.";
         const string ChooseFiles = "Its files can still be chosen from the list.";
@@ -692,7 +772,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 // Without a choice, a hoster link is one file to fetch, and so starts by itself. A magnet can hold anything.
                 return (NewRecord(request, classification.Provider!, classification.ItemKind!.Value) with
                 {
-                    SelectionMode = request.Selection ?? (classification.Kind == RemoteInputKind.HosterLink ? RemoteSelectionMode.All : RemoteSelectionMode.AskWhenReady),
+                    SelectionMode = request.Selection ?? (classification.Kind == RemoteInputKind.HosterLink ? RemoteSelectionMode.All : RemoteSelectionMode.AskIfCached),
                     ProtectedInput = SecretProtector.ProtectRemoteInput(request.Input!.Trim()),
                     ProtectedLinkPassword = string.IsNullOrEmpty(request.LinkPassword) ? null : SecretProtector.ProtectRemoteLinkPassword(request.LinkPassword),
                     PredictedHash = classification.Hash,
@@ -726,6 +806,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             ? (null, classification.Reason, classification.Kind)
             : (NewRecord(request, classification.Provider!, RemoteItemKind.Torrent) with
             {
+                SelectionMode = request.Selection ?? RemoteSelectionMode.AskIfCached,
                 ProtectedTorrent = SecretProtector.ProtectRemoteTorrent(bytes),
                 PredictedHash = classification.Hash,
                 Name = classification.Name,
@@ -765,7 +846,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             QueueId = request.QueueId,
             StartMode = request.StartMode,
             SelectionMode = request.Selection ?? RemoteSelectionMode.AskWhenReady,
-            SelectedFileIds = request.Selection == RemoteSelectionMode.Chosen ? request.FileIds!.ToList() : [],
+            SelectedFileIds = request.Selection == RemoteSelectionMode.Chosen ? request.FileIds?.ToList() ?? [] : [],
+            SelectedPaths = ChosenPaths(request),
             ApprovedUncached = request.ApprovedUncached,
             ProtectedArchivePassword = string.IsNullOrEmpty(request.ArchivePassword) ? null : SecretProtector.ProtectRemoteArchivePassword(request.ArchivePassword),
             ArchivePasswordOffered = request.ArchivePasswordOffered,
@@ -776,6 +858,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             UpdatedAt = now,
         };
     }
+
+    /// <summary>What finds each file chosen by path again, once <see cref="AddAsync"/> has checked that every one can.</summary>
+    private static List<RemoteFileKey> ChosenPaths(RemoteAddRequest request)
+        => request.Selection == RemoteSelectionMode.Chosen && request.FilePaths is { } paths
+            ? paths.Select(path => RemoteFileKey.Of(path.Path, path.Size)).OfType<RemoteFileKey>().ToList()
+            : [];
 
     // ---- User actions -------------------------------------------------------------------------
 
@@ -801,6 +889,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             StartMode = asked.StartMode,
             SelectionMode = asked.SelectionMode,
             SelectedFileIds = asked.SelectedFileIds,
+            SelectedPaths = asked.SelectedPaths,
             ProtectedLinkPassword = asked.ProtectedLinkPassword,
             Placement = asked.Placement,
             Name = asked.Name ?? twin.Name,
@@ -842,14 +931,21 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 return null;
             }
 
+            // This replaces any choice made before the provider listed the files, found or not.
             var chosen = record with
             {
                 SelectionMode = all ? RemoteSelectionMode.All : RemoteSelectionMode.Chosen,
                 SelectedFileIds = all ? [] : fileIds!.ToList(),
+                SelectedPaths = [],
             };
             if (failedOnChoice)
             {
                 chosen = chosen with { FailureKind = null, FailureMessage = null, ConsecutiveFailures = 0 };
+            }
+            else if (record.State == RemoteJobState.AwaitingSelection)
+            {
+                // What it said was about the choice this one replaces.
+                chosen = chosen with { FailureMessage = null };
             }
 
             return failedOnChoice || record.State is RemoteJobState.AwaitingSelection or RemoteJobState.LocalStarted
@@ -1230,12 +1326,14 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         };
     }
 
-    internal static RemoteFileView ToFileView(RemoteProviderEntry entry, RemoteFile file)
+    internal static RemoteFileView ToFileView(RemoteProviderEntry entry, RemoteFile file) => ToFileView(entry.DisplayName, file);
+
+    internal static RemoteFileView ToFileView(string providerName, RemoteFile file)
     {
         var note = RemoteChildPlanner.Check(file, out var relative) switch
         {
             RemoteChildPlanner.Unusable.UnsafePath => "Its path isn't safe to use.",
-            RemoteChildPlanner.Unusable.Infected => $"{entry.DisplayName} marks it as infected.",
+            RemoteChildPlanner.Unusable.Infected => $"{providerName} marks it as infected.",
             RemoteChildPlanner.Unusable.Empty => "It is empty.",
             _ => null,
         };

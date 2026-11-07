@@ -58,6 +58,15 @@ public sealed record RemoteInputClassification
     /// every ordinary link. A stale list only leaves the note, because it is still a good guide.
     /// </summary>
     public bool CheckIncomplete { get; init; }
+
+    /// <summary>Asked for with the files, for a magnet: whether the provider has it cached. Null when it couldn't say.</summary>
+    public bool? Cached { get; init; }
+
+    /// <summary>
+    /// Asked for with the files: a .torrent file's own, or a cached magnet's from the provider. Null when they aren't
+    /// known, or are too many to choose from here.
+    /// </summary>
+    public IReadOnlyList<RemoteFileView>? Files { get; init; }
 }
 
 /// <summary>What the classifier needs to know about one provider, all of it already fetched.</summary>
@@ -245,7 +254,8 @@ public static class RemoteInputClassifier
     }
 
     /// <summary>For a .torrent file already read. A malformed file gets its reason here, before anything is created.</summary>
-    public static RemoteInputClassification ClassifyTorrent(byte[] file, IReadOnlyList<RemoteClassifierProvider> providers)
+    /// <param name="withFiles">Also the files it lists, to choose from before it is added.</param>
+    public static RemoteInputClassification ClassifyTorrent(byte[] file, IReadOnlyList<RemoteClassifierProvider> providers, bool withFiles = false)
     {
         if (!TorrentMetadata.TryParse(file, out var metadata, out var problem))
         {
@@ -260,8 +270,23 @@ public static class RemoteInputClassifier
             ItemKind = RemoteItemKind.Torrent,
             Hash = metadata!.InfoHash,
             Name = RemoteText.Clean(metadata.Name, 200),
+            Files = withFiles ? FilesToChoose(metadata, provider.DisplayName) : null,
         });
     }
+
+    /// <summary>
+    /// A .torrent file's own list, with ids that only say where each file is in it. What is chosen from this goes back
+    /// by path and size, which is how the provider's files are matched to it once it lists them.
+    /// </summary>
+    private static List<RemoteFileView>? FilesToChoose(TorrentMetadata metadata, string providerName)
+        => metadata.Files.Count is > 0 and <= RemoteJobCoordinator.MostFilesToChooseFrom
+            ? metadata.Files.Select((file, index) => RemoteJobCoordinator.ToFileView(providerName, new RemoteFile
+            {
+                FileId = index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Path = file.Path,
+                Size = file.Length,
+            })).ToList()
+            : null;
 
     /// <summary>The info hash of a magnet, lower case hex, from either way of writing it. Null with the reason if none can be used.</summary>
     public static string? InfoHashOfMagnet(string magnet, out string? displayName, out string? problem)

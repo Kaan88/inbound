@@ -962,6 +962,7 @@ public sealed partial class MockTorBox
         }
 
         var asObject = !string.Equals(context.Request.Query["format"], "list", StringComparison.OrdinalIgnoreCase);
+        var listFiles = IsTrue(context.Request.Query["list_files"]);
         lock (_sync)
         {
             var map = new JsonObject();
@@ -975,6 +976,10 @@ public sealed partial class MockTorBox
                 }
 
                 var entry = new JsonObject { ["name"] = hit.Name, ["size"] = hit.Size, ["hash"] = main.ToLowerInvariant() };
+                if (listFiles)
+                {
+                    entry["files"] = CachedFilesLocked(main, hit.Name);
+                }
                 if (asObject)
                 {
                     map[main.ToLowerInvariant()] = entry;
@@ -987,6 +992,24 @@ public sealed partial class MockTorBox
 
             return Ok(asObject ? map : array, "Torrent cache status retrieved successfully.");
         }
+    }
+
+    /// <summary>
+    /// The files a cache check lists, under the ids the item will have: a scripted submission's, or the one file a
+    /// create would make without a script. The real answer has these fields and no others.
+    /// </summary>
+    private JsonArray CachedFilesLocked(string hash, string? name)
+    {
+        var folder = name ?? "torrent-" + hash[..Math.Min(8, hash.Length)];
+        var files = _scripts.TryGetValue(hash, out var script) ? script.Files : [MockTorBoxFile.Of(0, $"{folder}/{folder}.bin", 64 * 1024)];
+        return new JsonArray(files.Select(file => (JsonNode)new JsonObject
+        {
+            ["id"] = file.Id,
+            ["name"] = file.Name,
+            ["size"] = file.Size,
+            ["short_name"] = file.ShortName,
+            ["mimetype"] = file.MimeType,
+        }).ToArray());
     }
 
     private async Task<Answer> CreateTorrentAsync(HttpContext context)

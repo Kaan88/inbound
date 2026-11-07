@@ -4,6 +4,9 @@ using System.Text;
 
 namespace DownloadManager.Runtime.Remote;
 
+/// <summary>One file a .torrent lists, with its path as <see cref="TorrentMetadata.Files"/> describes it. Untrusted, like the rest of the file.</summary>
+public sealed record TorrentFileEntry(string Path, long Length);
+
 /// <summary>
 /// What a .torrent file says about itself, read just far enough to name it and find it again. The
 /// reader is strict and bounded because the file is untrusted, and because the hash has to be taken
@@ -12,6 +15,13 @@ namespace DownloadManager.Runtime.Remote;
 /// </summary>
 public sealed record TorrentMetadata(string InfoHash, string Name, long TotalBytes, int FileCount)
 {
+    /// <summary>
+    /// What it holds, in its own order, without the padding files some torrents have. A torrent of several files puts
+    /// them in a folder of its name, so that comes first in each path, '/' between the parts. Empty when only a
+    /// version 2 file tree describes them.
+    /// </summary>
+    public IReadOnlyList<TorrentFileEntry> Files { get; init; } = [];
+
     public const int MaxFileBytes = 16 * 1024 * 1024;
     private const int MaxDepth = 64;
     private const string NotATorrent = "This file is not a valid .torrent file";
@@ -74,11 +84,11 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             throw new TorrentFormatException($"{NotATorrent}: its info section has the wrong form.");
         }
 
-        var (name, totalBytes, fileCount) = ReadInfo(infoBytes);
-        return new TorrentMetadata(Convert.ToHexString(SHA1.HashData(infoBytes)).ToLowerInvariant(), name, totalBytes, fileCount);
+        var (name, totalBytes, fileCount, files) = ReadInfo(infoBytes);
+        return new TorrentMetadata(Convert.ToHexString(SHA1.HashData(infoBytes)).ToLowerInvariant(), name, totalBytes, fileCount) { Files = files };
     }
 
-    private static (string Name, long TotalBytes, int FileCount) ReadInfo(ReadOnlySpan<byte> info)
+    private static (string Name, long TotalBytes, int FileCount, List<TorrentFileEntry> Files) ReadInfo(ReadOnlySpan<byte> info)
     {
         var reader = new BencodeReader(info);
         string? name = null;
@@ -145,22 +155,22 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
 
         if (files is { } list)
         {
-            var (total, count) = ReadFiles(info[list]);
-            return (name, total, count);
+            var (total, count, entries) = ReadFiles(info[list], name);
+            return (name, total, count, entries);
         }
 
         if (singleLength is { } length)
         {
-            return (name, length, 1);
+            return (name, length, 1, [new TorrentFileEntry(name, length)]);
         }
 
         // A hybrid torrent may describe its files only in the version 2 tree.
         return hasFileTree
-            ? (name, 0, 0)
+            ? (name, 0, 0, [])
             : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
     }
 
-    private static (long Total, int Count) ReadFiles(ReadOnlySpan<byte> list)
+    private static (long Total, int Count, List<TorrentFileEntry> Files) ReadFiles(ReadOnlySpan<byte> list, string folder)
     {
         var reader = new BencodeReader(list);
         if (reader.Peek() != 'l')
@@ -170,9 +180,10 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
 
         var total = 0L;
         var count = 0;
+        var files = new List<TorrentFileEntry>();
         foreach (var entry in reader.ReadList(depth: 0))
         {
-            var length = ReadFileLength(list[entry]);
+            var (length, path, padding) = ReadFile(list[entry]);
             try
             {
                 total = checked(total + length);
@@ -183,12 +194,17 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             }
 
             count++;
+            if (!padding)
+            {
+                files.Add(new TorrentFileEntry($"{folder}/{path}", length));
+            }
         }
 
-        return count > 0 ? (total, count) : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
+        return count > 0 ? (total, count, files) : throw new TorrentFormatException($"{NotATorrent}: it lists no files.");
     }
 
-    private static long ReadFileLength(ReadOnlySpan<byte> entry)
+    /// <summary>A file's size, its path joined with '/', and whether it only pads the pieces out, which nobody downloads.</summary>
+    private static (long Length, string Path, bool Padding) ReadFile(ReadOnlySpan<byte> entry)
     {
         if (entry[0] != 'd')
         {
@@ -197,7 +213,9 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
 
         var reader = new BencodeReader(entry);
         long? length = null;
-        var hasPath = false;
+        string? path = null;
+        string? utf8Path = null;
+        var padding = false;
         foreach (var (key, value) in reader.ReadDictionary(depth: 0))
         {
             var bytes = entry[value];
@@ -206,15 +224,48 @@ public sealed record TorrentMetadata(string InfoHash, string Name, long TotalByt
             {
                 length = RequireWholeNumber(bytes, "length");
             }
-            else if (name.SequenceEqual("path"u8) || name.SequenceEqual("path.utf-8"u8))
+            else if (name.SequenceEqual("path"u8))
             {
-                hasPath = bytes[0] == 'l' && bytes.Length > 2;
+                path = PathOf(bytes);
+            }
+            else if (name.SequenceEqual("path.utf-8"u8))
+            {
+                utf8Path = PathOf(bytes);
+            }
+            else if (name.SequenceEqual("attr"u8) && char.IsAsciiDigit((char)bytes[0]))
+            {
+                padding = RequireString(bytes, "attr").Contains((byte)'p');
             }
         }
 
-        return length is { } size && hasPath
-            ? size
+        // The UTF-8 spelling, where there is one, is what a client shows.
+        return length is { } size && (utf8Path ?? path) is { } joined
+            ? (size, joined, padding)
             : throw new TorrentFormatException($"{NotATorrent}: an entry in its file list is incomplete.");
+    }
+
+    /// <summary>A list of path parts, joined with '/'. Null when it isn't a list of strings with at least one part.</summary>
+    private static string? PathOf(ReadOnlySpan<byte> value)
+    {
+        if (value[0] != 'l' || value.Length <= 2)
+        {
+            return null;
+        }
+
+        var reader = new BencodeReader(value);
+        var parts = new List<string>();
+        foreach (var part in reader.ReadList(depth: 0))
+        {
+            var bytes = value[part];
+            if (!char.IsAsciiDigit((char)bytes[0]))
+            {
+                return null;
+            }
+
+            parts.Add(TextOf(RequireString(bytes, "path")));
+        }
+
+        return parts.Count > 0 ? string.Join('/', parts) : null;
     }
 
     private static ReadOnlySpan<byte> RequireString(ReadOnlySpan<byte> value, string field)

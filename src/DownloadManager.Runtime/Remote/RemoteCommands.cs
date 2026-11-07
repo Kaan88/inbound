@@ -223,7 +223,9 @@ public sealed class RemoteCommands : IDisposable
 
     public async Task<RemoteClassifyResult> ClassifyAsync(RemoteClassifyRequest request, CancellationToken cancellationToken = default)
     {
-        var classified = await _jobs.ClassifyAsync(request.Text, cancellationToken).ConfigureAwait(false);
+        var classified = request.WithFiles
+            ? await _jobs.ClassifyWithFilesAsync(request.Text, cancellationToken).ConfigureAwait(false)
+            : await _jobs.ClassifyAsync(request.Text, cancellationToken).ConfigureAwait(false);
         return new RemoteClassifyResult
         {
             Ok = true,
@@ -243,6 +245,8 @@ public sealed class RemoteCommands : IDisposable
             Reason = Safe(classified.Reason),
             Note = Safe(classified.Note),
             CheckIncomplete = classified.CheckIncomplete,
+            Cached = classified.Cached,
+            Files = classified.Files?.Select(ToDto).ToList(),
         };
     }
 
@@ -283,6 +287,8 @@ public sealed class RemoteCommands : IDisposable
             StartMode = request.StartMode,
             Selection = selection,
             FileIds = request.FileIds,
+            // A missing entry or path is refused below as a path that can't be used.
+            FilePaths = request.FilePaths?.Select(file => new RemoteChosenPath(file?.Path ?? string.Empty, file?.Size ?? 0)).ToList(),
             ApprovedUncached = request.ApproveUncached,
             LinkPassword = request.LinkPassword,
             ArchivePassword = request.ArchivePassword,
@@ -305,7 +311,7 @@ public sealed class RemoteCommands : IDisposable
         switch (request.Selection?.ToLowerInvariant())
         {
             case null or "":
-                selection = request.FileIds is { Count: > 0 } ? RemoteSelectionMode.Chosen : null;
+                selection = request.FileIds is { Count: > 0 } || request.FilePaths is { Count: > 0 } ? RemoteSelectionMode.Chosen : null;
                 return true;
             case "ask" or "askwhenready":
                 selection = RemoteSelectionMode.AskWhenReady;
