@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Web UI and Docker decisions (2026-11-08)
+
+- Owner: "for web ui tech, whatever is fancy. published on ghcr sure. turn it off on home network, these won't be open to internet." Recorded in `docs/docker-webui-plan.md`: Svelte 5 + Vite + Tailwind, GHCR on each tag, sign-in can be turned off.
+- Owner provided a LAN-only Linux VM for container tests (details kept out of tracked files).
+
 ### User reports built in one go (2026-11-08, branch `torbox-addflow`)
 
 - Owner: "Yes, unstarted ones", then "make ftp speed limit a future maybe goal, also implement everything I said in one go and test it."
