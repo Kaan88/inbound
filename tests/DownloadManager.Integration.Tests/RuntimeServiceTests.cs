@@ -728,6 +728,70 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task DefaultQueueFollowsTheOverallDownloadLimitUnlessSetApart()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var main = settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId);
+        Assert.Equal(settings.MaxConcurrentDownloads, main.MaxConcurrentDownloads);
+
+        settings.MaxConcurrentDownloads = 6;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        Assert.Equal(6, settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads);
+
+        // Set apart in the Scheduler: the overall limit no longer moves it.
+        settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads = 2;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.MaxConcurrentDownloads = 8;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        settings = ctx.Service.GetSnapshot().Settings;
+        Assert.Equal(8, settings.MaxConcurrentDownloads);
+        Assert.Equal(2, settings.Queues.Single(queue => queue.Id == settings.DefaultQueueId).MaxConcurrentDownloads);
+    }
+
+    [Fact]
+    public async Task ChangedDefaultConnectionsReachOnlyUnstartedDownloads()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.DefaultConnections = 4;
+        settings.MaxConnectionsPerHost = 16;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task<JobDto> AddAsync(string name, string startMode, int? connections)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=65536&seed=40",
+                DestinationDirectory = ctx.Destination,
+                FileName = name,
+                Connections = connections,
+                StartMode = startMode,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!;
+        }
+
+        var waiting = await AddAsync("conn-default.bin", "later", null);
+        var chosen = await AddAsync("conn-chosen.bin", "later", 2);
+        var finished = await AddAsync("conn-done.bin", "startNow", null);
+        await ctx.WaitFor(finished.Id, job => job.State == "completed", TimeSpan.FromSeconds(20));
+        Assert.Equal(4, waiting.RequestedConnections);
+
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.DefaultConnections = 6;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var jobs = ctx.Service.GetSnapshot().Jobs.ToDictionary(job => job.Id);
+        Assert.Equal(6, jobs[waiting.Id].RequestedConnections);
+        Assert.Equal(2, jobs[chosen.Id].RequestedConnections);
+        Assert.Equal(4, jobs[finished.Id].RequestedConnections);
+    }
+
+    [Fact]
     public async Task GlobalSpeedLimitIsSharedByAllDownloads()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);

@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### User reports built in one go (2026-11-08, branch `torbox-addflow`)
+
+- Owner: "Yes, unstarted ones", then "make ftp speed limit a future maybe goal, also implement everything I said in one go and test it."
+- Built: UI.B5 connections for unstarted downloads and the default queue following the overall limit; UI.R15 and UI.R16 toolbar menus; UI.R17 all files chosen in My TorBox; UI.R18 long links cut short in Add URL; UI.R14 update window sized for scaling and centred on the main window; UI.B3 likely cause (stale settings in the window) fixed; PERF.6 recorded. Details in ROADMAP.
+- Tests: Core 818, Engine 146, Archives 309, Containers 183, TorBox 321 passed; Integration 1,088 of 1,089, the one failure the known flaky TEST.1. Test instance (UI Automation): the three toolbar buttons show "3 downloads", "8 connections" and "No speed limit"; the menus' items, the update window and the tray focus weren't checked on screen.
+
 ### UI.B5: one shared speed cap (2026-11-08, branch `torbox-addflow`)
 
 - Owner: "Yes, shared cap". The Options speed limit is now a total for all HTTP/HTTPS downloads together, applied live to running and resumed downloads, and no longer copied into new downloads. Details in ROADMAP UI.B5.

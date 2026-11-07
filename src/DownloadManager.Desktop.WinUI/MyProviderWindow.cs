@@ -45,6 +45,8 @@ public sealed class RemoteItemRow : INotifyPropertyChanged
 
     /// <summary>What was checked when this row's files were last on show. File ids only mean anything within one item.</summary>
     internal List<string> Chosen { get; set; } = [];
+    /// <summary>Its files have been shown once; from then on the list keeps what was chosen, even nothing.</summary>
+    internal bool FilesShown { get; set; }
 
     public string Name => _view.Name;
     public string Type => _view.Type;
@@ -751,7 +753,9 @@ internal sealed class MyProviderWindow : Window
     {
         if (files.Count > 0)
         {
-            _tree.SetFiles(files, keep: row.Chosen);
+            // UI.R17: the first time an item's files are shown, they all start chosen.
+            _tree.SetFiles(files, chooseAll: !row.FilesShown, keep: row.Chosen);
+            row.FilesShown = true;
             _treeRow = row;
         }
         else

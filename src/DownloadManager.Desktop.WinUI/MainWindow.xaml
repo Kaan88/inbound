@@ -204,6 +204,32 @@
                         </StackPanel>
                     </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <!-- UI.R15, UI.R16: the three limits, each a menu of common values; changes apply at once. -->
+                    <Button x:Name="DownloadsLimitButton" AutomationProperties.Name="Simultaneous downloads" Style="{StaticResource InboundToolButtonStyle}"
+                            ToolTipService.ToolTip="How many downloads run at the same time">
+                        <Button.Flyout><MenuFlyout x:Name="DownloadsLimitMenu" Placement="Bottom" /></Button.Flyout>
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE8FD;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
+                            <TextBlock x:Name="DownloadsLimitText" Text="Downloads" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ConnectionsLimitButton" AutomationProperties.Name="Connections per download" Style="{StaticResource InboundToolButtonStyle}"
+                            ToolTipService.ToolTip="Connections for each new download, and for waiting ones that haven't started">
+                        <Button.Flyout><MenuFlyout x:Name="ConnectionsLimitMenu" Placement="Bottom" /></Button.Flyout>
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE8CE;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
+                            <TextBlock x:Name="ConnectionsLimitText" Text="Connections" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SpeedLimitButton" AutomationProperties.Name="Speed limit" Style="{StaticResource InboundToolButtonStyle}"
+                            ToolTipService.ToolTip="Total speed for all downloads together">
+                        <Button.Flyout><MenuFlyout x:Name="SpeedLimitMenu" Placement="Bottom" /></Button.Flyout>
+                        <StackPanel>
+                            <FontIcon Glyph="&#xEC4A;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
+                            <TextBlock x:Name="SpeedLimitText" Text="Speed" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                     <Button x:Name="StartQueueButton" AutomationProperties.Name="Start Queue" Style="{StaticResource InboundToolButtonStyle}"
                             Click="StartQueueButton_Click"
                             ToolTipService.ToolTip="Start the selected queue">

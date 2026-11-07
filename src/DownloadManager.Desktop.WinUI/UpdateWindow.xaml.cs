@@ -20,7 +20,9 @@ public sealed partial class UpdateWindow : Window
         Root.RequestedTheme = theme is { } dark
             ? (dark ? ElementTheme.Dark : ElementTheme.Light)
             : ElementTheme.Default;
-        AppWindow.Resize(new SizeInt32(420, 230));
+        // UI.R14: sized for the display's scaling (it was clipped at 150%), and in the middle of the main window.
+        WindowLayout.ResizeForDpi(this, 460, 250);
+        WindowLayout.CenterOnMainWindow(this);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
         Title = "Inbound Download Manager update";
