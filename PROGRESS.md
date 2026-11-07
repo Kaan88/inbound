@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### Limits moved to the Downloads menu; UI.R6 tabular digits (2026-11-08)
+
+- Owner: "I meant a dropdown, like under downloads menu on the toolbar. this is ugly. also, did counter font fix happened?" The limit buttons left the toolbar; they are submenus under Downloads with the value in each name (checked on a test instance with UI Automation). UI.R6 hadn't been done; now all unstyled text uses same-width digits. Neither is checked on screen.
+
 ### Web UI and Docker decisions (2026-11-08)
 
 - Owner: "for web ui tech, whatever is fancy. published on ghcr sure. turn it off on home network, these won't be open to internet." Recorded in `docs/docker-webui-plan.md`: Svelte 5 + Vite + Tailwind, GHCR on each tag, sign-in can be turned off.

@@ -90,6 +90,12 @@
                 <Setter Property="Background" Value="{ThemeResource InboundDividerBrush}" />
             </Style>
 
+            <!-- UI.R6: digits all the same width (tabular figures in the current font), so live counters such as size,
+                 speed and time left hold still as their digits change. Applies to every TextBlock without a style. -->
+            <Style TargetType="TextBlock">
+                <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+            </Style>
+
             <Style x:Key="InboundToolLabelStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="10.5" />
                 <Setter Property="TextAlignment" Value="Center" />
