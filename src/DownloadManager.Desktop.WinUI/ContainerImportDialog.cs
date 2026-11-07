@@ -83,6 +83,7 @@ internal sealed class ContainerImportDialog
             Title = "Import JD Container",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = BuildContent(),
                 MaxHeight = Math.Max(240, Math.Min(620, _themeRoot.ActualHeight - 200)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,

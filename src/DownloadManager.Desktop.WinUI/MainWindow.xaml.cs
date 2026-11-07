@@ -1677,7 +1677,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Download properties",
-            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(180, RootGrid.ActualHeight - 220), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -2020,6 +2020,7 @@ public sealed partial class MainWindow : Window
             Title = "Clean up leftover partial files",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 MaxHeight = 320,
                 Content = new TextBlock
                 {
@@ -2322,6 +2323,8 @@ public sealed partial class MainWindow : Window
         {
             urlBox.Items.Add(recent);
         }
+        // With no recent addresses the list would open as an empty strip over the dialog.
+        urlBox.DropDownOpened += (_, _) => { if (urlBox.Items.Count == 0) urlBox.IsDropDownOpen = false; };
         // Like other download managers, start from a link already on the clipboard.
         try
         {
@@ -2666,7 +2669,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Download file info",
-            Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = Math.Max(200, Math.Min(480, RootGrid.ActualHeight - 240)) },
             PrimaryButtonText = "Start download",
             SecondaryButtonText = "Download later",
             CloseButtonText = "Cancel",
@@ -2861,7 +2864,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = "Add links",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 560 },
+            Content = new ScrollViewer { Padding = InboundTheme.DialogScrollPadding, Content = panel, MaxHeight = 560 },
             PrimaryButtonText = "Review",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -3059,6 +3062,7 @@ public sealed partial class MainWindow : Window
             Title = "Queues",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3314,6 +3318,7 @@ public sealed partial class MainWindow : Window
             Title = existing is null ? "New queue" : "Edit queue",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(220, Math.Min(480, RootGrid.ActualHeight - 240)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3450,6 +3455,7 @@ public sealed partial class MainWindow : Window
             Title = "Scheduler",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(240, Math.Min(540, RootGrid.ActualHeight - 220)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -3726,6 +3732,7 @@ public sealed partial class MainWindow : Window
             Title = existing is null ? "Add schedule" : "Edit schedule",
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(240, Math.Min(600, RootGrid.ActualHeight - 200)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -4812,6 +4819,7 @@ public sealed partial class MainWindow : Window
             Title = title,
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
                 MaxHeight = Math.Max(160, Math.Min(480, RootGrid.ActualHeight - 240)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
