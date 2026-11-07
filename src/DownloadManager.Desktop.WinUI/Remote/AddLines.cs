@@ -765,10 +765,67 @@ internal static partial class RemoteText
     }
 }
 
+/// <summary>
+/// Which files a magnet or a .torrent file takes, settled in the add dialog and straight after it. A .torrent file
+/// lists its own files, and a cached magnet's come from the provider's cache. Anything else can only be chosen once
+/// the provider has it: left alone, an uncached one takes all, unless "Let me choose files when ... is done" says wait.
+/// </summary>
+internal static class AddChoices
+{
+    /// <summary>The only inputs whose files can be known before they are added, so the only ones worth asking the Host about.</summary>
+    public static bool WantsFiles(string input) => LinkExtractor.IsMagnet(input) || LinkExtractor.IsTorrentPath(input);
+
+    /// <summary>The files to choose from straight after Add: known now, with more than one that can be chosen. Null leaves it to the Host.</summary>
+    public static IReadOnlyList<RemoteFileDto>? FilesToChoose(AddLine line)
+        => line is { Route: AddRoute.Provider, Result: { Kind: "magnet" or "torrentFile", Files: { Count: > 1 } files } } &&
+           RemoteFileTree.Build(files).ChoosableCount > 1
+            ? files
+            : null;
+
+    /// <summary>
+    /// Where "Let me choose files when ... is done" means something: a chosen magnet or .torrent file whose files
+    /// aren't known yet, and that isn't known to be cached. A cached one is asked about by itself.
+    /// </summary>
+    public static bool ChooseLaterApplies(AddLine line)
+        => line is { IsSelected: true, Route: AddRoute.Provider, Result: { Kind: "magnet" or "torrentFile", Files: null } result } && result.Cached != true;
+
+    public static bool ChooseLaterApplies(IEnumerable<AddLine> lines) => lines.Any(ChooseLaterApplies);
+
+    /// <summary>With no file dialog: wait for a choice if the box says so and it applies, and otherwise the Host's own rule.</summary>
+    public static AddFileChoice? Default(AddLine line, bool chooseLater) => chooseLater && ChooseLaterApplies(line) ? AddFileChoice.Later : null;
+}
+
+/// <summary>The <c>selection</c> remote.add is sent, with the files that go with it.</summary>
+internal sealed record AddFileChoice(string Selection, IReadOnlyList<string>? FileIds = null, IReadOnlyList<RemoteFilePathDto>? FilePaths = null)
+{
+    public static AddFileChoice Later { get; } = new("ask");
+
+    public static AddFileChoice All { get; } = new("all");
+
+    /// <summary>
+    /// From the file dialog. A magnet's files are the provider's, so they go by id. A .torrent file's are its own and
+    /// have no ids the provider knows, so they go by path and size, for the Host to find in the provider's list.
+    /// </summary>
+    public static AddFileChoice From(AddLine line, RemoteFileChoice choice)
+    {
+        if (choice.All) return All;
+        if (line.Result?.Kind != "torrentFile") return new("chosen", FileIds: choice.FileIds.ToList());
+        var chosen = choice.FileIds.ToHashSet(StringComparer.Ordinal);
+        var paths = (line.Result.Files ?? [])
+            .Where(file => chosen.Contains(file.FileId) && !string.IsNullOrEmpty(file.RelativePath))
+            .Select(file => new RemoteFilePathDto { Path = file.RelativePath!, Size = file.Size })
+            .ToList();
+        return new("chosen", FilePaths: paths);
+    }
+
+    public override string ToString() => $"[files: {Selection}]";
+}
+
 /// <summary>What the Host is asked to add. Adding is the decision, so each request carries the go-ahead and nothing waits for a second yes.</summary>
 internal static class AddRequests
 {
-    public static RemoteAddRequestDto ForLine(AddLine line, string? destination, int queueId, bool startLater, string? linkPassword) => new()
+    /// <param name="files">Null leaves the choice of files to the Host.</param>
+    public static RemoteAddRequestDto ForLine(AddLine line, string? destination, int queueId, bool startLater, string? linkPassword, AddFileChoice? files = null) => new()
     {
         Input = line.Input,
         Destination = destination,
@@ -776,6 +833,9 @@ internal static class AddRequests
         StartMode = startLater ? "later" : "startNow",
         LinkPassword = linkPassword,
         ApproveUncached = true,
+        Selection = files?.Selection,
+        FileIds = files?.FileIds?.ToList(),
+        FilePaths = files?.FilePaths?.ToList(),
     };
 
     public static RemoteContainerAddRequest ForContainer(Guid previewId, IReadOnlyList<int> entryIds, string? folder, int queueId) => new()

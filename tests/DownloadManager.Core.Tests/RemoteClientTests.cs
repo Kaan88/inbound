@@ -285,6 +285,40 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task AClassifierForAddingAsksForFilesOnlyWhereTheyCanBeKnown()
+    {
+        // For a magnet that is a call to the provider, so nothing else asks for it.
+        var host = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = host.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        const string Magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
+
+        async Task<bool> AskedForFiles(Func<string, Task> classify, string text)
+        {
+            await classify(text).WaitAsync(Patience);
+            return host.LastPayload(MessageTypes.RemoteClassify) is { } payload &&
+                   payload.TryGetProperty("withFiles", out var withFiles) && withFiles.GetBoolean();
+        }
+
+        await using (var adding = client.OpenClassifier(withFiles: true))
+        {
+            Assert.True(await AskedForFiles(text => adding.ClassifyAsync(text, CancellationToken.None), Magnet));
+            Assert.True(await AskedForFiles(text => adding.ClassifyAsync(text, CancellationToken.None), @"C:\Torrents\pack.torrent"));
+            Assert.False(await AskedForFiles(text => adding.ClassifyAsync(text, CancellationToken.None), "https://example.com/file.zip"));
+        }
+
+        await using (var plain = client.OpenClassifier())
+        {
+            Assert.False(await AskedForFiles(text => plain.ClassifyAsync(text, CancellationToken.None), Magnet));
+        }
+
+        Assert.True(await AskedForFiles(text => client.ClassifyAsync(text, withFiles: true), Magnet));
+        Assert.False(await AskedForFiles(text => client.ClassifyAsync(text), Magnet));
+    }
+
+    [Fact]
     public async Task ClosingAClassifierEndsItsCallAndGivesItsTurnBack()
     {
         var host = new FakeHost();

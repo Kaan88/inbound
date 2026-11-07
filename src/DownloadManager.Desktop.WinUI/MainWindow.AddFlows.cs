@@ -155,7 +155,8 @@ public sealed partial class MainWindow
             dialog.IsPrimaryButtonEnabled = false;
             try
             {
-                var result = await _remote.ClassifyAsync(text, closing.Token);
+                // What it says goes on to the add dialog, which may offer its files.
+                var result = await _remote.ClassifyAsync(text, closing.Token, withFiles: true);
                 checkedText = text;
                 checkedResult = result;
                 var name = string.IsNullOrWhiteSpace(result.ProviderName) ? provider : result.ProviderName;
@@ -245,7 +246,7 @@ public sealed partial class MainWindow
         // Closing it closes its connection: nothing is still being asked while the next steps run.
         using (var session = new AddLineSession(
             focus,
-            _remote.OpenClassifier,
+            () => _remote.OpenClassifier(withFiles: true),
             link => FindExistingJob(link) is not null,
             action => DispatcherQueue.TryEnqueue(() => action())))
         {
@@ -395,14 +396,14 @@ public sealed partial class MainWindow
         }
 
         var sent = 0;
-        var providerPicks = choice.Picks.Where(pick => pick.Line.Route == AddRoute.Provider).ToList();
+        var providerPicks = await ChooseFilesBeforeAddingAsync(choice, provider, problems);
 
         // Passing, like every other status: set directly it stayed until something else wrote there.
         if (providerPicks.Count > 0) ShowPassingStatus($"Adding to {provider}…");
-        foreach (var pick in providerPicks)
+        foreach (var (pick, files) in providerPicks)
         {
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;
-            var result = await _remote.AddAsync(AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword));
+            var result = await _remote.AddAsync(AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files));
             pick.LinkPassword = null;
 
             // A refusal is the end of it for this link. Nothing here tries it any other way.
@@ -412,6 +413,44 @@ public sealed partial class MainWindow
         }
 
         await ReportAddAsync("Add links", downloads, sent + folderLinks, provider, messages, problems);
+    }
+
+    /// <summary>
+    /// The provider's lines and the files each takes. A .torrent file, or a cached magnet, with more than one file
+    /// to choose shows them first, one after another, and all of the choosing is done before anything is sent.
+    /// Skipping one leaves it out of the add. Any other line takes the add box's word or the Host's rule.
+    /// </summary>
+    private async Task<List<(AddLinksPick Pick, AddFileChoice? Files)>> ChooseFilesBeforeAddingAsync(AddLinksChoice choice, string provider, List<string> problems)
+    {
+        var picks = new List<(AddLinksPick, AddFileChoice?)>();
+        foreach (var pick in choice.Picks.Where(pick => pick.Line.Route == AddRoute.Provider))
+        {
+            if (AddChoices.FilesToChoose(pick.Line) is not { } files)
+            {
+                picks.Add((pick, AddChoices.Default(pick.Line, choice.ChooseLater)));
+                continue;
+            }
+
+            var name = RemoteText.AddLineWords(pick.Line, provider).Name;
+            var answer = await RemoteFileSelectionDialog.AskAsync(
+                Content.XamlRoot,
+                RootGrid.ActualTheme,
+                $"Choose files: {name}",
+                provider,
+                _ => Task.FromResult(new RemoteFilesToShow(files)),
+                primaryText: "Add",
+                closeText: "Skip this one");
+            if (answer.Choice is { } chosen)
+            {
+                picks.Add((pick, AddFileChoice.From(pick.Line, chosen)));
+                continue;
+            }
+
+            pick.LinkPassword = null;
+            if (answer.CouldNotOpen) problems.Add($"{name}: wasn't added, because another dialog was open. Add it again.");
+        }
+
+        return picks;
     }
 
     /// <summary>

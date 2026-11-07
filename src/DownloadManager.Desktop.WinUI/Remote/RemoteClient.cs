@@ -128,8 +128,9 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     // ---- remote.classify, add, list, item, files, select, retry, checkNow, remove, deleteRemote ----
 
-    public Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = text }, MessageTypes.RemoteClassifyResult,
+    /// <param name="withFiles">For adding: a magnet or a .torrent file also says which files it holds, when that can be known.</param>
+    public Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken = default, bool withFiles = false)
+        => SlowAsync(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles), MessageTypes.RemoteClassifyResult,
             error => new RemoteClassifyResult { Error = RemoteText.ClassifyFailure(error) }, cancellationToken);
 
     /// <summary>
@@ -137,7 +138,12 @@ internal sealed class RemoteClient : IAsyncDisposable
     /// connection and read a whole snapshot per line. It connects when first used, and holds one of the
     /// slow-call turns until it is disposed, so dispose it as soon as there is nothing left to ask.
     /// </summary>
-    public IRemoteClassifier OpenClassifier() => new ClassifierChannel(this);
+    /// <param name="withFiles">As for <see cref="ClassifyAsync"/>, for every line asked about.</param>
+    public IRemoteClassifier OpenClassifier(bool withFiles = false) => new ClassifierChannel(this, withFiles);
+
+    /// <summary>Files are asked for only where they can be known, because for a magnet that is a call to the provider.</summary>
+    private static RemoteClassifyRequest ClassifyRequest(string text, bool withFiles)
+        => new() { Text = text, WithFiles = withFiles && AddChoices.WantsFiles(text) };
 
     public async Task<RemoteAddResultDto> AddAsync(RemoteAddRequestDto request, CancellationToken cancellationToken = default)
     {
@@ -654,7 +660,7 @@ internal sealed class RemoteClient : IAsyncDisposable
         FailPending();
     }
 
-    private sealed class ClassifierChannel(RemoteClient client) : IRemoteClassifier
+    private sealed class ClassifierChannel(RemoteClient client, bool withFiles) : IRemoteClassifier
     {
         private IRemotePipe? _pipe;
         private bool _holdsTurn;
@@ -677,7 +683,7 @@ internal sealed class RemoteClient : IAsyncDisposable
                     connected = true;
                 }
 
-                var message = IpcMessage.Create(MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = text });
+                var message = IpcMessage.Create(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles));
                 await _pipe.SendAsync(message, deadline.Token).ConfigureAwait(false);
                 while (await _pipe.ReadAsync(deadline.Token).ConfigureAwait(false) is { } reply)
                 {

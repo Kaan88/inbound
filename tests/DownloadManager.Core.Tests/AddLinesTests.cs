@@ -640,6 +640,7 @@ public sealed class AddLinesTests
 
         var add = AddRequests.ForLine(line, @"D:\In", 3, startLater: true, linkPassword: null);
         Assert.True(add.ApproveUncached);
+        Assert.Null(add.Selection);
         Assert.Equal(line.Input, add.Input);
         Assert.Equal(@"D:\In", add.Destination);
         Assert.Equal(3, add.QueueId);
@@ -650,6 +651,91 @@ public sealed class AddLinesTests
         Assert.True(container.ApproveUncached);
         Assert.Equal([1, 4], container.EntryIds);
         Assert.Equal(2, container.QueueId);
+    }
+
+    // ---- Files chosen before adding -------------------------------------------------------------------
+
+    private const string TorrentPath = @"C:\Torrents\pack.torrent";
+
+    private static RemoteFileDto FileOf(string id, string path, long size = 10, bool selectable = true)
+        => new() { FileId = id, RelativePath = path, Size = size, Selectable = selectable };
+
+    private static AddLine Ticked(string input, RemoteClassifyResult result) => new(input) { Result = result, IsSelected = true };
+
+    [Theory]
+    [InlineData(MagnetLink, true)]
+    [InlineData(TorrentPath, true)]
+    [InlineData(HosterLink, false)]
+    [InlineData("https://example.com/file.zip", false)]
+    public void OnlyMagnetsAndTorrentFilesAskForTheirFiles(string input, bool wants) => Assert.Equal(wants, AddChoices.WantsFiles(input));
+
+    [Fact]
+    public void FilesAreOfferedStraightAfterAddOnlyWhenThereIsARealChoice()
+    {
+        RemoteFileDto[] two = [FileOf("1", @"Pack\a.bin"), FileOf("2", @"Pack\b.bin")];
+        var torrent = Line(TorrentPath, Kind("torrentFile", result => result.Files = [.. two]));
+        Assert.Same(torrent.Result!.Files, AddChoices.FilesToChoose(torrent));
+        Assert.NotNull(AddChoices.FilesToChoose(Line(MagnetLink, Kind("magnet", result => { result.Cached = true; result.Files = [.. two]; }))));
+
+        // One that can be chosen beside one that can't is no choice at all.
+        Assert.Null(AddChoices.FilesToChoose(Line(TorrentPath, Kind("torrentFile", result => result.Files = [FileOf("1", @"One\a.bin"), FileOf("2", @"One\b.bin", selectable: false)]))));
+        Assert.Null(AddChoices.FilesToChoose(Line(TorrentPath, Kind("torrentFile", result => result.Files = [FileOf("1", @"One\a.bin"), FileOf("2", @"One\b.bin", size: 0)]))));
+        Assert.Null(AddChoices.FilesToChoose(Line(MagnetLink, Kind("magnet", result => result.Cached = false))));
+        Assert.Null(AddChoices.FilesToChoose(Line(HosterLink, Kind("hosterLink", result => result.Files = [.. two]))));
+    }
+
+    [Fact]
+    public void TheBoxForChoosingLaterShowsOnlyForWhatCantBeChosenNowAndIsntKnownToBeCached()
+    {
+        Assert.True(AddChoices.ChooseLaterApplies(Ticked(MagnetLink, Kind("magnet", result => result.Cached = false))));
+        // The cache couldn't be checked, so it may well not be.
+        Assert.True(AddChoices.ChooseLaterApplies(Ticked(MagnetLink, Kind("magnet"))));
+        // A .torrent file whose files couldn't be listed.
+        Assert.True(AddChoices.ChooseLaterApplies(Ticked(TorrentPath, Kind("torrentFile"))));
+
+        // Cached asks by itself, a listed .torrent file is chosen from at once, and a hoster link has nothing to choose.
+        Assert.False(AddChoices.ChooseLaterApplies(Ticked(MagnetLink, Kind("magnet", result => result.Cached = true))));
+        Assert.False(AddChoices.ChooseLaterApplies(Ticked(TorrentPath, Kind("torrentFile", result => result.Files = [FileOf("1", @"Pack\a.bin")]))));
+        Assert.False(AddChoices.ChooseLaterApplies(Ticked(HosterLink, Kind("hosterLink"))));
+        Assert.False(AddChoices.ChooseLaterApplies(Line(MagnetLink, Kind("magnet", result => result.Cached = false))));
+
+        Assert.True(AddChoices.ChooseLaterApplies([Ticked(HosterLink, Kind("hosterLink")), Ticked(MagnetLink, Kind("magnet", result => result.Cached = false))]));
+        Assert.False(AddChoices.ChooseLaterApplies([Ticked(HosterLink, Kind("hosterLink"))]));
+    }
+
+    [Fact]
+    public void TheBoxSendsAskOnlyWhereItApplies()
+    {
+        var uncached = Ticked(MagnetLink, Kind("magnet", result => result.Cached = false));
+        var cached = Ticked(MagnetLink, Kind("magnet", result => result.Cached = true));
+
+        Assert.Equal("ask", AddRequests.ForLine(uncached, null, 0, false, null, AddChoices.Default(uncached, chooseLater: true)).Selection);
+        Assert.Null(AddRequests.ForLine(uncached, null, 0, false, null, AddChoices.Default(uncached, chooseLater: false)).Selection);
+        Assert.Null(AddRequests.ForLine(cached, null, 0, false, null, AddChoices.Default(cached, chooseLater: true)).Selection);
+    }
+
+    [Fact]
+    public void AMagnetsChoiceGoesByIdAndATorrentFilesByPathAndSize()
+    {
+        RemoteFileDto[] files = [FileOf("0", @"Pack\sub\a.bin", 10), FileOf("1", @"Pack\b.bin", 20), FileOf("2", @"Pack\c.bin", 30)];
+        var magnet = Ticked(MagnetLink, Kind("magnet", result => { result.Cached = true; result.Files = [.. files]; }));
+        var torrent = Ticked(TorrentPath, Kind("torrentFile", result => result.Files = [.. files]));
+        var some = new RemoteFileChoice(false, ["0", "2"]);
+
+        var byId = AddRequests.ForLine(magnet, null, 0, false, null, AddFileChoice.From(magnet, some));
+        Assert.Equal("chosen", byId.Selection);
+        Assert.Equal(["0", "2"], byId.FileIds);
+        Assert.Null(byId.FilePaths);
+
+        var byPath = AddRequests.ForLine(torrent, null, 0, false, null, AddFileChoice.From(torrent, some));
+        Assert.Equal("chosen", byPath.Selection);
+        Assert.Null(byPath.FileIds);
+        Assert.Equal([(@"Pack\sub\a.bin", 10L), (@"Pack\c.bin", 30L)], byPath.FilePaths!.Select(path => (path.Path, path.Size)));
+
+        var all = AddRequests.ForLine(torrent, null, 0, false, null, AddFileChoice.From(torrent, new RemoteFileChoice(true, [])));
+        Assert.Equal("all", all.Selection);
+        Assert.Null(all.FileIds);
+        Assert.Null(all.FilePaths);
     }
 
     // ---- Helpers ------------------------------------------------------------------------------------

@@ -26,6 +26,9 @@ internal sealed class AddLinksChoice
     public int ConflictIndex { get; init; }
     public bool KeepPackage { get; init; }
 
+    /// <summary>"Let me choose files when ... is done" was on show and ticked.</summary>
+    public bool ChooseLater { get; init; }
+
     /// <summary>For the package ordinary links go into, for the one message that sets it.</summary>
     public string? ArchivePassword { get; set; }
 
@@ -54,6 +57,7 @@ internal sealed class AddLinksDialog
     private readonly StatusLine _status = new("Links status");
     private readonly TextBox _paste;
     private readonly CheckBox _selectAll = new() { Content = "Select all", Visibility = Visibility.Collapsed };
+    private readonly CheckBox _chooseLater = new() { Visibility = Visibility.Collapsed };
     private readonly StackPanel _directOptions = new() { Spacing = 10 };
     private readonly CheckBox _keepPackage = new() { Content = "Keep as one package", IsChecked = true };
     private readonly StackPanel _archivePanel = new() { Spacing = 4, Visibility = Visibility.Collapsed };
@@ -79,6 +83,10 @@ internal sealed class AddLinksDialog
         };
         ScrollViewer.SetVerticalScrollBarVisibility(_paste, ScrollBarVisibility.Auto);
         AutomationProperties.SetName(_paste, focus == AddFocus.Magnet ? "Magnet links" : "Links");
+
+        // Off by default: left alone, what isn't cached takes all its files.
+        _chooseLater.Content = $"Let me choose files when {provider} is done";
+        AutomationProperties.SetName(_chooseLater, $"Let me choose files when {provider} is done");
         AutomationProperties.SetName(_archivePassword, "Archive password for this package");
     }
 
@@ -129,6 +137,7 @@ internal sealed class AddLinksDialog
         panel.Children.Add(_status.Text);
         panel.Children.Add(_selectAll);
         panel.Children.Add(new ScrollViewer { Content = _list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        panel.Children.Add(_chooseLater);
         panel.Children.Add(destinationRow);
         panel.Children.Add(destinationError.Text);
         panel.Children.Add(startRow);
@@ -231,6 +240,7 @@ internal sealed class AddLinksDialog
             QueueId = queues.ElementAtOrDefault(Math.Max(0, queueBox.SelectedIndex))?.Id ?? _settings.DefaultQueueId,
             ConflictIndex = conflictBox.SelectedIndex,
             KeepPackage = _keepPackage.IsChecked == true,
+            ChooseLater = _chooseLater.Visibility == Visibility.Visible && _chooseLater.IsChecked == true,
             ArchivePassword = archivePassword.Length > 0 ? archivePassword : null,
         };
     }
@@ -362,6 +372,7 @@ internal sealed class AddLinksDialog
         _selectAll.Visibility = lines.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
         _selectAll.IsEnabled = lines.Any(AddLineSession.CanSelect);
         _selectAll.IsChecked = AddLineSession.SelectAllState(lines);
+        _chooseLater.Visibility = AddChoices.ChooseLaterApplies(lines) ? Visibility.Visible : Visibility.Collapsed;
 
         var direct = lines.Count(line => line.IsSelected && line.Route == AddRoute.Direct);
         _directOptions.Opacity = direct > 0 ? 1 : 0.6;
