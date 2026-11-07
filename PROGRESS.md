@@ -9,6 +9,7 @@
 - The store extension stays 0.4.0. Since 0.4.0 its source has changed only in one message, for a refused extension ID; bump the version before the next store upload.
 - Not verified: install of Setup 0.5.0, auto-update from 0.4.0 to 0.5.0.
 - Owner report: 0.4.0 can't update ("The update manifest signature is invalid."). The live manifest verifies against the built-in key; the installed settings' key is only its first line. Recorded as UP.B1; not fixed yet.
+- After the key was restored through the installed CLI (`settings set updatekeyfile`), the owner updated 0.4.0 to 0.5.0 from the app and reports it works. They noted the update progress window opens top-left and clipped: UI.R14, fix whenever.
 - The owner asked to note that spanned zips (`name.zip` with `name.z01`) are not recognised, since nothing on this PC can make one to test with. Recorded as ROADMAP A4.D.
 
 ### Owner's try of favorites and free space (2026-11-07)
