@@ -3906,7 +3906,7 @@ public sealed partial class MainWindow : Window
             var (directoryRow, directory) = window.FolderField("Default download folder", settings.DefaultDownloadDirectory);
             var maxConcurrent = SettingsWindow.Number("Maximum simultaneous downloads", settings.MaxConcurrentDownloads, 1, 16);
             var connections = SettingsWindow.Number("Connections per download", settings.DefaultConnections, 1, 32);
-            var speedLimit = SettingsWindow.Number("Global speed limit (KB/s)",
+            var speedLimit = SettingsWindow.Number("Total speed limit, all downloads (KB/s)",
                 settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value / 1024 : null,
                 1, 10_000_000, "Unlimited");
             speedLimit.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden;

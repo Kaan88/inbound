@@ -157,6 +157,11 @@ public interface IDownloadEngine
     void UpdateHostConnectionLimit(int limit)
     {
     }
+
+    /// <summary>Updates the speed cap shared by every transfer together; null or zero means none.</summary>
+    void UpdateSharedSpeedLimit(long? bytesPerSecond)
+    {
+    }
 }
 
 public interface IPostDownloadHook

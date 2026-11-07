@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### UI.B5: one shared speed cap (2026-11-08, branch `torbox-addflow`)
+
+- Owner: "Yes, shared cap". The Options speed limit is now a total for all HTTP/HTTPS downloads together, applied live to running and resumed downloads, and no longer copied into new downloads. Details in ROADMAP UI.B5.
+- Tests: Core 818, Engine 146 (two new) and Integration 1,087 (one replaced) run. One Integration failure, the known flaky kill test (now TEST.1, with its message); it passed 2 of 3 alone and sets no speed limit.
+- Not done: FTP has no speed limit at all; the connections and queue-maximum decisions are still open.
+
 ### UI.B4 tray focus fix; UI.B5 limits checked (2026-11-08)
 
 - Owner: "clicking tray popup does not bring the app into focus." Recorded and fixed as UI.B4 (foreground permission passed from the Host and the second launch to the running window). Not yet confirmed on screen.

@@ -111,6 +111,7 @@ public sealed partial class DownloadManagerService
         _engine.UpdateSiteLogins(BuildSiteLogins(_settings));
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
+        _engine.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -541,7 +542,8 @@ public sealed partial class DownloadManagerService
                     Math.Min(request.Connections ?? _settings.DefaultConnections, EffectiveConnectionLimit(uri)),
                     providerCap),
                 1, 32),
-            SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond ?? _settings.GlobalSpeedLimitBytesPerSecond,
+            // The global limit is shared by all downloads in the engine (UI.B5), not copied into each one.
+            SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond,
             Description = request.Description,
             ExpectedSha256 = string.IsNullOrWhiteSpace(request.ExpectedSha256) ? null : request.ExpectedSha256.Trim(),
             ConflictPolicy = conflictPolicy,
@@ -1299,6 +1301,7 @@ public sealed partial class DownloadManagerService
         }
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
+        _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
         lock (_sync)
         {
             _settings = next;
