@@ -7,6 +7,7 @@
 - Option for the owner: end the window process when it is closed to the tray and start it again from the tray. That removes these wake-ups and the window's memory while closed, but reopening takes a fresh start. Not built.
 - Owner: "whatever debugger you need, install it." Installed WinDbg (winget `Microsoft.WinDbg`). cdb, noninvasive, on a test instance: both threads wait in a loop inside the NVIDIA driver, with nothing else on their stacks.
 - Owner: "make closing completely a future goal/idea to try." Recorded as PERF.5. Owner asked whether RivaTuner could be the cause: RivaTuner and Afterburner are running and `RTSSHooks64.dll` is loaded in the window, but it isn't on these threads' stacks. A comparison with RivaTuner excluded for the window would settle it.
+- Owner closed RivaTuner ("I just closed it, easier."). A fresh test window then loaded no RivaTuner hook and still had both driver threads at 95/s: RivaTuner is not the cause.
 
 ### PERF.4: idle check on installed 0.5.2 (2026-11-08)
 
