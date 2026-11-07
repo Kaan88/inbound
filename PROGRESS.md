@@ -1,5 +1,20 @@
 # Progress — session handoff
 
+### Release 0.5.0 (2026-11-07)
+
+- The owner finished the UI and TorBox tests and asked for quick extraction tests, then push and release.
+- Published as v0.5.0 on `Kaan88/inbound`: the branch squashed onto `origin/main` as one commit (`1c2ceb0`, same tree as `bbc0a28`), main pushed, tag `v0.5.0`, five assets.
+- Checks: public key equals 0.4.0's, `releases/latest/download/manifest.json` says 0.5.0, the downloaded Setup matches SHA256SUMS. The tree held no token from the test credentials file. The package holds `app\tools\7-Zip`.
+- The tests before release: Archives 309, Core 818, 86 runtime archive integration tests. The full Engine and Integration suites were not run again after A4.C, which touched only archive and UI code.
+- The store extension stays 0.4.0. Since 0.4.0 its source has changed only in one message, for a refused extension ID; bump the version before the next store upload.
+- Not verified: install of Setup 0.5.0, auto-update from 0.4.0 to 0.5.0.
+- Owner report: 0.4.0 can't update ("The update manifest signature is invalid."). The live manifest verifies against the built-in key; the installed settings' key is only its first line. Recorded as UP.B1; not fixed yet.
+- After the key was restored through the installed CLI (`settings set updatekeyfile`), the owner updated 0.4.0 to 0.5.0 from the app and reports it works. They noted the update progress window opens top-left and clipped: UI.R14, fix whenever.
+- Owner report: Options does not open in 0.5.0 (cast of StackPanel to Grid on the Extraction page): UI.B2. Fixed on the branch together with UP.B1 (hidden update boxes removed; a bad stored key is replaced by the built-in one).
+- Tests before any 0.5.1: Core 818, Engine 144, Integration 1086 of 1087, TorBox 321, Archives 309, Containers 183, extension 56, typecheck clean. The one failure, `Rar4PasswordsWorkAndAWrongOneIsReportedAsSuch(encryptedHeaders: True)`, timed out at 30 s under the full load and passed three runs alone in about 0.5 s. The suites ran before the hidden-box removal, which is WinUI-only; Core ran again after it (818). UI Automation check of the built app: 9 of 9.
+- The owner said not to start .exe files from the PowerShell tool, since a Windows warning pops up and the session hangs. Recorded in CLAUDE.local.md and memory; the check above was started from Bash.
+- The owner asked to note that spanned zips (`name.zip` with `name.z01`) are not recognised, since nothing on this PC can make one to test with. Recorded as ROADMAP A4.D.
+
 ### Owner's try of favorites and free space (2026-11-07)
 
 The owner said the features work. They reported two layout faults (UI.R11, UI.R12, both fixed and built, not yet seen on screen). They asked for three more things before 0.5.0: a bundled extractor (A4.B), a hoster status window (UI.R13) and hover info on the speed graph (UI.R7). They also asked that TorBox's API limits be respected. The hoster window reads the Host's cached list, and the client already paces on TorBox's rate-limit headers.
