@@ -144,6 +144,9 @@ public static partial class TorBoxMapping
             DailyBandwidthLimit = Long(element, "daily_bandwidth_limit"),
             DailyBandwidthUsed = Long(element, "daily_bandwidth_used"),
             PerLinkSizeLimit = Long(element, "per_link_size_limit"),
+            // Only an https picture: the window loads it, and anything else isn't one.
+            IconUrl = Text(element, "icon") is { } icon && Uri.TryCreate(icon, UriKind.Absolute, out var iconUri) && iconUri.Scheme == Uri.UriSchemeHttps ? icon : null,
+            Type = Text(element, "type"),
         };
     }
 

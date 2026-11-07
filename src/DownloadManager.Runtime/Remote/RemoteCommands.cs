@@ -221,6 +221,37 @@ public sealed class RemoteCommands : IDisposable
 
     // ---- Classifying and adding ---------------------------------------------------------------
 
+    public async Task<RemoteHostersResult> GetHostersAsync(CancellationToken cancellationToken = default)
+    {
+        if (await _jobs.GetHosterListAsync(cancellationToken).ConfigureAwait(false) is not { } found)
+        {
+            return new RemoteHostersResult { Error = "No provider here has a list of sites." };
+        }
+
+        return new RemoteHostersResult
+        {
+            Ok = true,
+            Provider = found.Entry.Id,
+            ProviderName = found.Entry.DisplayName,
+            Problem = Safe(found.Problem),
+            FetchedAt = found.FetchedAt,
+            Hosters = found.Hosters.OrderBy(hoster => hoster.Name, StringComparer.OrdinalIgnoreCase).Select(hoster => new RemoteHosterDto
+            {
+                Name = Safe(hoster.Name) ?? string.Empty,
+                Domains = hoster.Domains.ToList(),
+                Available = hoster.Available,
+                Type = Safe(hoster.Type),
+                IconUrl = hoster.IconUrl,
+                Note = Safe(hoster.Note),
+                DailyLinkLimit = hoster.DailyLinkLimit,
+                DailyLinksUsed = hoster.DailyLinksUsed,
+                DailyBandwidthLimit = hoster.DailyBandwidthLimit,
+                DailyBandwidthUsed = hoster.DailyBandwidthUsed,
+                PerLinkSizeLimit = hoster.PerLinkSizeLimit,
+            }).ToList(),
+        };
+    }
+
     public async Task<RemoteClassifyResult> ClassifyAsync(RemoteClassifyRequest request, CancellationToken cancellationToken = default)
     {
         var classified = request.WithFiles

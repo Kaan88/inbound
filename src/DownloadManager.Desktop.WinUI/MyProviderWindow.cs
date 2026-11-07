@@ -160,6 +160,7 @@ internal sealed class MyProviderWindow : Window
     private readonly ProgressRing _busy = new() { Width = 18, Height = 18, IsActive = false, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _refresh = new() { Content = "Refresh", MinWidth = 92 };
     private readonly Button _checkNow = new() { Content = "Check Now", MinWidth = 92 };
+    private readonly Button _hosters = new() { Content = "Hosters", MinWidth = 92 };
     private readonly Border _listFrame = new() { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(2) };
     private readonly ListView _list = new()
     {
@@ -217,6 +218,7 @@ internal sealed class MyProviderWindow : Window
         _refresh.Click += (_, _) => RefreshPage();
         _loadMore.Click += (_, _) => { if (_page is { } page) _ = LoadAsync(page, fresh: false, more: true); };
         _checkNow.Click += (_, _) => _ = CheckNowAsync();
+        _hosters.Click += (_, _) => HosterWindow.Show(_client);
         _tree.SelectionChanged += (_, _) => UpdateActions();
         _browse.Click += async (_, _) => await BrowseAsync();
         _destination.TextChanged += (_, _) =>
@@ -287,10 +289,14 @@ internal sealed class MyProviderWindow : Window
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.Children.Add(_tabs);
         AddAt(top, _busy, column: 1);
         AddAt(top, _refresh, column: 2);
         AddAt(top, _checkNow, column: 3);
+        AddAt(top, _hosters, column: 4);
+        AutomationProperties.SetName(_hosters, $"{_name} file hosts");
+        ToolTipService.SetToolTip(_hosters, $"Which file hosts {_name} can fetch from, and today's use");
         AddAt(_root, top, row: 0);
 
         AutomationProperties.SetName(_tabs, $"{_name} item types");

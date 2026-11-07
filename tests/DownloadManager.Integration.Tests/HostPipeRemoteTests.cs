@@ -642,6 +642,32 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TheHosterListComesFromTheCacheWithIconsAndTodaysUse()
+    {
+        await using var host = await StartHostAsync();
+        await using var connection = await WithKeyAsync(host);
+
+        var first = await connection.AskAsync<RemoteHostersResult>(MessageTypes.RemoteHosters, new { });
+        Assert.True(first.Ok, first.Error);
+        Assert.Equal("torbox", first.Provider);
+        Assert.NotNull(first.FetchedAt);
+        var pretend = Assert.Single(first.Hosters, hoster => hoster.Name == "Pretend");
+        Assert.True(pretend.Available);
+        Assert.Equal("https://icons.invalid/hoster.png", pretend.IconUrl);
+        Assert.Equal("hoster", pretend.Type);
+        Assert.Equal((100, 3), (pretend.DailyLinkLimit, pretend.DailyLinksUsed));
+        Assert.Contains("pretend.invalid", pretend.Domains);
+
+        // Opening it again inside the hour asks the provider nothing more.
+        Mock.Fail("GET webdl/hosters", MockFault.Status5xx());
+        var again = await connection.AskAsync<RemoteHostersResult>(MessageTypes.RemoteHosters, new { });
+        Assert.True(again.Ok);
+        Assert.Null(again.Problem);
+        Assert.Equal(first.FetchedAt, again.FetchedAt);
+        Assert.Equal(first.Hosters.Count, again.Hosters.Count);
+    }
+
+    [Fact]
     public async Task BadRequestsGetPlainAnswersAndTheOldRulesStillHold()
     {
         await using var host = await StartHostAsync();

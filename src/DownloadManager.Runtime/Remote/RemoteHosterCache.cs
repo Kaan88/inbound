@@ -16,6 +16,7 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
     private readonly Lock _sync = new();
     private IReadOnlyList<RemoteHosterMatcher>? _hosters;
     private DateTimeOffset _freshUntil;
+    private DateTimeOffset? _fetchedAt;
     private DateTimeOffset _retryAfter;
     private string? _problem;
     private Task? _refresh;
@@ -44,6 +45,9 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
         await refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         lock (_sync) return (_hosters ?? [], _problem);
     }
+
+    /// <summary>When the list in hand was fetched. Null before the first fetch worked.</summary>
+    public DateTimeOffset? FetchedAt { get { lock (_sync) return _fetchedAt; } }
 
     /// <summary>Whether the provider currently offers this hoster. Null when the list can't say.</summary>
     public async Task<RemoteHoster?> FindAsync(string name, CancellationToken cancellationToken = default)
@@ -89,7 +93,8 @@ public sealed class RemoteHosterCache(IRemoteHosterDirectory directory, TimeProv
             lock (_sync)
             {
                 _hosters = matchers;
-                _freshUntil = time.GetUtcNow() + Lifetime;
+                _fetchedAt = time.GetUtcNow();
+                _freshUntil = _fetchedAt.Value + Lifetime;
                 _retryAfter = DateTimeOffset.MinValue;
                 _problem = null;
             }

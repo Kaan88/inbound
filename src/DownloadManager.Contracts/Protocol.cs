@@ -109,6 +109,8 @@ public static class MessageTypes
     public const string RemoteContainerSendResult = "remote.container.sendResult";
     /// <summary>Host push: one remote job, or the account, changed.</summary>
     public const string RemoteChanged = "remote.changed";
+    public const string RemoteHosters = "remote.hosters";
+    public const string RemoteHostersResult = "remote.hostersResult";
 }
 
 public static class IpcJson
