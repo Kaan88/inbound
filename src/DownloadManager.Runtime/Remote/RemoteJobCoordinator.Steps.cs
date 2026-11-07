@@ -983,7 +983,8 @@ public sealed partial class RemoteJobCoordinator
                     FailureMessage = $"{entry.DisplayName} reports that this item failed: {Words(entry, item.Error ?? item.RawState, 500, SecretsOf(record)) ?? "no reason given"}.",
                     NextCheckAt = null,
                 },
-                RemoteItemOutcome.Ready when record.SelectionMode == RemoteSelectionMode.AskWhenReady => next with
+                // Only a real choice is asked for. One file, or none, goes on as if all had been chosen.
+                RemoteItemOutcome.Ready when record.SelectionMode == RemoteSelectionMode.AskWhenReady && RemoteChildPlanner.UsableCount(item.Files) > 1 => next with
                 {
                     State = RemoteJobState.AwaitingSelection,
                     NextCheckAt = null,
@@ -1159,18 +1160,20 @@ public sealed partial class RemoteJobCoordinator
             return latest with { NextCheckAt = _time.GetUtcNow() };
         }
 
+        // Nobody chose anything when the item asked for no choice, so nothing says "chosen".
+        var none = latest.SelectionMode == RemoteSelectionMode.Chosen ? NoChosenFiles : NoFilesUsable;
         return latest.PackageId is not null
             ? latest with
             {
                 State = RemoteJobState.LocalStarted,
-                Notes = [.. notes, $"{NoChosenFiles} The downloads already created go on as they were."],
+                Notes = [.. notes, $"{none} The downloads already created go on as they were."],
                 NextCheckAt = null,
             }
             : latest with
             {
                 State = RemoteJobState.Failed,
                 FailureKind = RemoteFailureKind.Rejected,
-                FailureMessage = NoChosenFiles,
+                FailureMessage = none,
                 Notes = notes,
                 NextCheckAt = null,
             };

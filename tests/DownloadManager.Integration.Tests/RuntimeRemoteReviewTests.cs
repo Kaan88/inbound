@@ -727,7 +727,9 @@ public sealed partial class RuntimeServiceTests
         await using var rig = await RemoteRig.CreateAsync(_server);
         var hash = new string('c', 40);
         rig.Mock.AddCached(hash);
-        rig.Mock.ScriptSubmission(hash, [MockTorBoxFile.Of(rig.Mock.NextFileId(), "m/a.bin", 4 * Kb, 26)], [MockTorBoxState.CachedReady]);
+        rig.Mock.ScriptSubmission(hash,
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "m/a.bin", 4 * Kb, 26), MockTorBoxFile.Of(rig.Mock.NextFileId(), "m/b.bin", 4 * Kb, 27)],
+            [MockTorBoxState.CachedReady]);
         var job = await rig.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash });
         await rig.RunAsync();
         Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);

@@ -112,7 +112,8 @@ public sealed partial class RuntimeServiceTests
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
         var links = await CopiedLinksFor(rig);
-        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, seed: 802)]);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack",
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 4 * Kb, seed: 802), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/b.bin", 4 * Kb, seed: 804)]);
         var link = $"https://torbox.app/download?id={item.Id}&type=torrents";
 
         var outcome = await links.AddAsync(link);

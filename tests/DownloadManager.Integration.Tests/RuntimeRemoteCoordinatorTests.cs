@@ -501,7 +501,7 @@ public sealed partial class RuntimeServiceTests
 
         var failed = rig.View(job.Id);
         Assert.Equal(RemoteJobState.Failed, failed.State);
-        Assert.Contains("None of the chosen files", failed.FailureMessage);
+        Assert.Equal("None of its files can be downloaded.", failed.FailureMessage);
         Assert.Contains(failed.Notes, note => note.Contains("infected"));
         Assert.Empty(rig.Children());
     }
@@ -1324,7 +1324,8 @@ public sealed partial class RuntimeServiceTests
     public async Task ScenarioE_AChoiceIsRequiredBeforeAnyLocalJob()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
-        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", Kb, 1)]);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack",
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", Kb, 1), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/b.bin", Kb, 2)]);
         var job = await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });
         await rig.RunAsync();
 
@@ -1334,6 +1335,145 @@ public sealed partial class RuntimeServiceTests
         await rig.AdvanceAsync(3600);
         Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);
         Assert.Empty(rig.Children());
+    }
+
+    // ---- Only a real choice is asked for ------------------------------------------------------
+
+    public enum AskedInput
+    {
+        Magnet,
+        TorrentFile,
+        FolderLink,
+    }
+
+    /// <summary>An item that asks for a choice when it is ready, holding these files.</summary>
+    private static async Task<RemoteJobView> AddAskingAsync(RemoteRig rig, AskedInput input, string name, MockTorBoxFile[] files)
+    {
+        switch (input)
+        {
+            case AskedInput.Magnet:
+                var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant();
+                rig.Mock.ScriptSubmission(hash, files, [MockTorBoxState.Ready]);
+                return await rig.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, ApprovedUncached = true });
+            case AskedInput.TorrentFile:
+                var (bytes, infoHash) = Torrent(name);
+                rig.Mock.ScriptTorrentUpload(bytes, infoHash);
+                rig.Mock.ScriptSubmission(infoHash, files, [MockTorBoxState.Ready]);
+                return await rig.AddAsync(new RemoteAddRequest { TorrentFile = bytes, ApprovedUncached = true });
+            default:
+                var item = rig.Mock.AddItem(RemoteItemKind.Torrent, name, files);
+                return await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });
+        }
+    }
+
+    [Theory]
+    [InlineData(AskedInput.Magnet)]
+    [InlineData(AskedInput.TorrentFile)]
+    [InlineData(AskedInput.FolderLink)]
+    public async Task OneFileThatCanBeDownloadedStartsWithoutAskingEvenBesideOnesThatCant(AskedInput input)
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var wanted = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Solo/solo.bin", 32 * Kb, 51);
+        MockTorBoxFile[] files =
+        [
+            wanted,
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Solo/infected.bin", 8 * Kb, 52, infected: true),
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Solo/empty.txt", 0),
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "../outside.bin", 8 * Kb, 53),
+        ];
+
+        var job = await AddAskingAsync(rig, input, "Solo", files);
+        Assert.Equal(RemoteSelectionMode.AskWhenReady, rig.View(job.Id).SelectionMode);
+        await rig.RunAsync();
+
+        var started = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.LocalStarted, started.State);
+        Assert.Single(rig.Children());
+        await rig.AssertCompletedAsync(wanted, "Solo", "solo.bin");
+        Assert.Contains(started.Notes, note => note.Contains("infected", StringComparison.Ordinal));
+        Assert.Contains(started.Notes, note => note.Contains("empty", StringComparison.Ordinal));
+        Assert.Contains(started.Notes, note => note.Contains("isn't safe", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(AskedInput.Magnet)]
+    [InlineData(AskedInput.TorrentFile)]
+    [InlineData(AskedInput.FolderLink)]
+    public async Task TwoFilesThatCanBeDownloadedWaitForTheChoice(AskedInput input)
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        MockTorBoxFile[] files =
+        [
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Duo/a.bin", 8 * Kb, 54),
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Duo/b.bin", 8 * Kb, 55),
+        ];
+
+        var job = await AddAskingAsync(rig, input, "Duo", files);
+        await rig.RunAsync();
+
+        Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);
+        Assert.Empty(rig.Children());
+    }
+
+    [Theory]
+    [InlineData(AskedInput.Magnet)]
+    [InlineData(AskedInput.TorrentFile)]
+    [InlineData(AskedInput.FolderLink)]
+    public async Task NoFileThatCanBeDownloadedEndsInWordsThatDontTalkOfAChoice(AskedInput input)
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        MockTorBoxFile[] files =
+        [
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Bad/infected.bin", 8 * Kb, 56, infected: true),
+            MockTorBoxFile.Of(rig.Mock.NextFileId(), "Bad/empty.txt", 0),
+        ];
+
+        var job = await AddAskingAsync(rig, input, "Bad", files);
+        await rig.RunAsync();
+
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.Equal("None of its files can be downloaded.", failed.FailureMessage);
+        Assert.Equal(2, failed.Notes.Count);
+        Assert.Empty(rig.Children());
+    }
+
+    [Fact]
+    public async Task AChoiceThatEndsUpEmptyStillSaysChosen()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var infected = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Mix/infected.bin", 8 * Kb, 57, infected: true);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Mix", [infected, MockTorBoxFile.Of(rig.Mock.NextFileId(), "Mix/fine.bin", 8 * Kb, 58)]);
+        var job = await rig.AddAsync(new RemoteAddRequest
+        {
+            Input = $"https://torbox.app/download?id={item.Id}&type=torrents",
+            Selection = RemoteSelectionMode.Chosen,
+            FileIds = [infected.Id.ToString()],
+        });
+        await rig.RunAsync();
+
+        Assert.Equal("None of the chosen files can be downloaded.", rig.View(job.Id).FailureMessage);
+    }
+
+    [Fact]
+    public async Task AJobLeftWaitingForAChoiceOfOneFileGoesOnWhenLookedAtAgain()
+    {
+        // Saved by an earlier version, which asked even for one file. Check Now is how such a row moves.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Old/one.bin", 8 * Kb, 59);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Old", [file, MockTorBoxFile.Of(rig.Mock.NextFileId(), "Old/two.bin", 8 * Kb, 60)]);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);
+
+        item.Files.RemoveAt(1);
+        await rig.RestartAsync();
+        Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);
+        Assert.True((await rig.Jobs.CheckNowAsync(job.Id)).Ok);
+        await rig.RunAsync();
+
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        await rig.AssertCompletedAsync(file, "Old", "one.bin");
     }
 
     // ---- .torrent files -----------------------------------------------------------------------
@@ -1604,7 +1744,8 @@ public sealed partial class RuntimeServiceTests
     public async Task CheckNowLooksAgainAtWhatIsWaitingForTheUser()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);
-        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 8 * Kb, 1)]);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack",
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/a.bin", 8 * Kb, 1), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/b.bin", 8 * Kb, 2)]);
         var job = await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });
         await rig.RunAsync();
         Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(job.Id).State);

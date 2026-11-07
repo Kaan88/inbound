@@ -531,8 +531,9 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
     {
         await using var host = await StartHostAsync();
         await using var connection = await WithKeyAsync(host);
-        var one = Mock.AddItem(RemoteItemKind.Torrent, "One", [NewFile("One/a.bin", 2 * Kb, 1)]);
-        var two = Mock.AddItem(RemoteItemKind.Torrent, "Two", [NewFile("Two/a.bin", 2 * Kb, 2)]);
+        // Two files each, so both rest at the choice of files.
+        var one = Mock.AddItem(RemoteItemKind.Torrent, "One", [NewFile("One/a.bin", 2 * Kb, 1), NewFile("One/b.bin", 2 * Kb, 3)]);
+        var two = Mock.AddItem(RemoteItemKind.Torrent, "Two", [NewFile("Two/a.bin", 2 * Kb, 2), NewFile("Two/b.bin", 2 * Kb, 4)]);
         async Task<RemoteJobDto> AddAsync(MockTorBoxItem item)
             => (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto
             {

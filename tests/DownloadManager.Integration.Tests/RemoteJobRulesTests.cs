@@ -23,6 +23,20 @@ public sealed class RemoteJobRulesTests
     }
 
     [Fact]
+    public void OnlyTheFirstOfEachIdCountsAsAFileToChoose()
+    {
+        static RemoteFile File(string id, string path, long size = 10, bool infected = false)
+            => new() { FileId = id, Path = path, Size = size, Infected = infected };
+
+        Assert.Equal(0, RemoteChildPlanner.UsableCount([]));
+        Assert.Equal(1, RemoteChildPlanner.UsableCount([File("1", "a/x.bin"), File("1", "a/y.bin")]));
+        Assert.Equal(2, RemoteChildPlanner.UsableCount([File("1", "a/x.bin"), File("2", "a/y.bin")]));
+        // The plan skips a repeated id whatever the repeat holds, so a usable repeat can't make the count two.
+        Assert.Equal(1, RemoteChildPlanner.UsableCount([File("1", "a/x.bin", 0), File("1", "a/y.bin"), File("2", "a/z.bin")]));
+        Assert.Equal(1, RemoteChildPlanner.UsableCount([File("1", "../x.bin"), File("2", "a/x.bin", infected: true), File("3", "a/y.bin"), File("4", "a/e.txt", 0)]));
+    }
+
+    [Fact]
     public void ARestartOnlyChangesSubmitting()
     {
         foreach (var state in Enum.GetValues<RemoteJobState>())

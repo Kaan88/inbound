@@ -159,6 +159,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     private const int MostRoundsPerPass = 10;
     private const int LongestTorrentBytes = TorrentMetadata.MaxFileBytes;
     private const string NoChosenFiles = "None of the chosen files can be downloaded.";
+    private const string NoFilesUsable = "None of its files can be downloaded.";
     private static readonly TimeSpan StoreTroublePause = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ReadyRetry = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ShortestLoopWait = TimeSpan.FromSeconds(1);
@@ -1203,11 +1204,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     internal static RemoteFileView ToFileView(RemoteProviderEntry entry, RemoteFile file)
     {
-        var relative = RemotePaths.ToSafeRelativePath(file.Path);
-        var note = relative is null ? "Its path isn't safe to use."
-            : file.Infected ? $"{entry.DisplayName} marks it as infected."
-            : file.Size <= 0 ? "It is empty."
-            : null;
+        var note = RemoteChildPlanner.Check(file, out var relative) switch
+        {
+            RemoteChildPlanner.Unusable.UnsafePath => "Its path isn't safe to use.",
+            RemoteChildPlanner.Unusable.Infected => $"{entry.DisplayName} marks it as infected.",
+            RemoteChildPlanner.Unusable.Empty => "It is empty.",
+            _ => null,
+        };
         return new RemoteFileView
         {
             FileId = file.FileId,

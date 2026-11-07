@@ -854,7 +854,9 @@ public sealed partial class RuntimeServiceTests
     public async Task AnArchivePasswordCanBeSetBeforeOrAfterTheDownloadsExistAndCleared()
     {
         await using var rig = await ContainerRig.CreateAsync(_server);
-        var early = rig.Mock.AddItem(RemoteItemKind.Torrent, "Early", [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Early/a.rar", 2 * Kb, 71)]);
+        // Two files, so it waits for a choice before any download exists.
+        var early = rig.Mock.AddItem(RemoteItemKind.Torrent, "Early",
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Early/a.rar", 2 * Kb, 71), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Early/b.nfo", Kb, 72)]);
 
         // Before: at remote.add. Not a link password, and sent nowhere.
         var added = await rig.Commands.AddAsync(new RemoteAddRequestDto

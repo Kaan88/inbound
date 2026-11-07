@@ -146,10 +146,12 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
 
         var hash = new string('a', 40);
         var magnet = $"magnet:?xt=urn:btih:{hash}&dn=Magnet%20Name&tr=http%3A%2F%2Ftracker.invalid%2F{passkey}";
+        // Two files each, so there is a choice to wait for.
         var magnetFile = MockTorBoxFile.Of(Mock.NextFileId(), "Magnet Name/magnet.bin", 8 * Kb, 81);
-        Mock.ScriptSubmission(hash, [magnetFile], [MockTorBoxState.Ready]);
+        Mock.ScriptSubmission(hash, [magnetFile, MockTorBoxFile.Of(Mock.NextFileId(), "Magnet Name/extra.bin", 8 * Kb, 83)], [MockTorBoxState.Ready]);
 
-        var shared = Mock.AddItem(RemoteItemKind.Torrent, "Shared", [MockTorBoxFile.Of(Mock.NextFileId(), "Shared/shared.bin", 8 * Kb, 82)]);
+        var shared = Mock.AddItem(RemoteItemKind.Torrent, "Shared",
+            [MockTorBoxFile.Of(Mock.NextFileId(), "Shared/shared.bin", 8 * Kb, 82), MockTorBoxFile.Of(Mock.NextFileId(), "Shared/other.bin", 8 * Kb, 84)]);
         var folderLink = $"https://torbox.app/download?id={shared.Id}&type=torrents&name=Elsewhere";
 
         var ordinary = $"https://example.invalid/some/plain.zip?sig={signature}";

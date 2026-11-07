@@ -189,6 +189,35 @@ public static class RemoteChildPlanner
 
     public sealed record Plan(IReadOnlyList<RemoteJobRequest> Requests, IReadOnlyList<string> Notes);
 
+    /// <summary>Why a file can't become a download. The list a user chooses from and the plan use this one rule.</summary>
+    public enum Unusable
+    {
+        None,
+        UnsafePath,
+        Infected,
+        Empty,
+    }
+
+    /// <summary>Whether a file could be downloaded, with the safe relative path it would have.</summary>
+    public static Unusable Check(RemoteFile file, out string? relative)
+    {
+        relative = RemotePaths.ToSafeRelativePath(file.Path);
+        return relative is null ? Unusable.UnsafePath
+            : file.Infected ? Unusable.Infected
+            : file.Size <= 0 ? Unusable.Empty
+            : Unusable.None;
+    }
+
+    /// <summary>
+    /// How many files a plan with no choice would take: the first of each id, when it can be downloaded.
+    /// A choice is only worth asking for when this is more than one.
+    /// </summary>
+    public static int UsableCount(IEnumerable<RemoteFile> files)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return files.Count(file => seen.Add(file.FileId) && Check(file, out _) == Unusable.None);
+    }
+
     public static Plan Build(RemoteJobRecord record, RemoteItem item, string providerName, int maxConnections, string destination)
     {
         var requests = new List<RemoteJobRequest>();
@@ -203,20 +232,21 @@ public static class RemoteChildPlanner
                 continue;
             }
 
-            var relative = RemotePaths.ToSafeRelativePath(file.Path);
-            if (relative is null)
+            var unusable = Check(file, out var safe);
+            if (unusable == Unusable.UnsafePath)
             {
                 notes.Add($"Skipped file {RemoteText.Clean(file.FileId, 40)}: its path isn't safe to use.");
                 continue;
             }
 
-            if (file.Infected)
+            var relative = safe!;
+            if (unusable == Unusable.Infected)
             {
                 notes.Add($"Skipped {RemoteText.Clean(relative, LongestPathInNote)}: {providerName} marks it as infected.");
                 continue;
             }
 
-            if (file.Size <= 0)
+            if (unusable == Unusable.Empty)
             {
                 notes.Add($"Skipped {RemoteText.Clean(relative, LongestPathInNote)}: it is empty.");
                 continue;
