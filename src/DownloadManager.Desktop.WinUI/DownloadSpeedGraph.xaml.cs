@@ -28,6 +28,12 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private bool _expanded = true;
     private Storyboard? _transition;
 
+    // Where the last drawing put things, for the hover layer.
+    private double _left, _upper, _chartWidth, _chartHeight, _top;
+    private DateTimeOffset _start;
+    private bool _drawn;
+    private double? _pointerX;
+
     public DownloadSpeedGraph()
     {
         InitializeComponent();
@@ -52,6 +58,9 @@ public sealed partial class DownloadSpeedGraph : UserControl
         DescribeToggle();
         Plot.SizeChanged += (_, _) => Draw();
         ActualThemeChanged += (_, _) => Draw();
+        Plot.PointerMoved += (_, e) => { _pointerX = e.GetCurrentPoint(Plot).Position.X; DrawHover(); };
+        Plot.PointerExited += (_, _) => { _pointerX = null; DrawHover(); };
+        Plot.PointerCanceled += (_, _) => { _pointerX = null; DrawHover(); };
     }
 
     /// <summary>Raised when the user opens or closes the plot.</summary>
@@ -159,9 +168,10 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
         if (!_expanded) return;
         Plot.Children.Clear();
+        _drawn = false;
         var width = Plot.ActualWidth;
         var height = Plot.ActualHeight;
-        if (width < 150 || height < 60) return;
+        if (width < 150 || height < 60) { DrawHover(); return; }
         var top = peak <= 0 ? 1024 : Math.Pow(10, Math.Floor(Math.Log10(peak)));
         top *= Math.Ceiling(Math.Max(peak, top) / top);
         if (!double.IsFinite(top) || top <= 0) top = Math.Max(peak, 1024);
@@ -169,6 +179,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
         const int rows = 2, columns = 4;
         var chartWidth = width - left - 8;
         var chartHeight = height - upper - lower;
+        (_left, _upper, _chartWidth, _chartHeight, _top, _start, _drawn) = (left, upper, chartWidth, chartHeight, top, start, true);
         var foreground = InboundTheme.Brush("InboundSecondaryTextBrush", this);
         var gridBrush = InboundTheme.Brush("InboundDividerBrush", this);
         void Label(string text, double x, double y)
@@ -211,5 +222,63 @@ public sealed partial class DownloadSpeedGraph : UserControl
             line.Points.Add(new Point(left + Math.Clamp((sample.Time - start).TotalSeconds / _seconds, 0, 1) * chartWidth,
                 upper + chartHeight * (1 - Math.Clamp(sample.Rate.Value / top, 0, 1))));
         }
+
+        // A new sample moves the line under a pointer that is still there.
+        DrawHover();
     }
+
+    /// <summary>
+    /// The point under the pointer: a guide line, a dot on the line and its speed and time. A gap says there was no
+    /// figure then, rather than showing a nearby one as if it were.
+    /// </summary>
+    private void DrawHover()
+    {
+        Hover.Children.Clear();
+        if (_pointerX is not { } x || !_drawn || !_expanded || x < _left || x > _left + _chartWidth) return;
+        var time = _start + TimeSpan.FromSeconds((x - _left) / _chartWidth * _seconds);
+        var nearest = _samples.Where(sample => sample.Time >= _start)
+            .OrderBy(sample => Math.Abs((sample.Time - time).TotalSeconds)).FirstOrDefault();
+        var close = nearest.Time != default && Math.Abs((nearest.Time - time).TotalSeconds) <= Math.Max(2, _seconds / _chartWidth * 4);
+        var guide = InboundTheme.Brush("InboundSecondaryTextBrush", this);
+        var pointX = close ? _left + Math.Clamp((nearest.Time - _start).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
+        Hover.Children.Add(new Line { X1 = pointX, X2 = pointX, Y1 = _upper, Y2 = _upper + _chartHeight, Stroke = guide, StrokeThickness = 1, Opacity = 0.6 });
+
+        string text;
+        if (close && nearest.Rate is { } rate)
+        {
+            var y = _upper + _chartHeight * (1 - Math.Clamp(rate / _top, 0, 1));
+            var dot = new Ellipse { Width = 7, Height = 7, Fill = InboundTheme.Brush("InboundProgressFillBrush", this) };
+            Canvas.SetLeft(dot, pointX - 3.5);
+            Canvas.SetTop(dot, y - 3.5);
+            Hover.Children.Add(dot);
+            text = $"{RateText(rate)}  ·  {nearest.Time.ToLocalTime():HH:mm:ss}  ·  {Ago(_samples.Last().Time - nearest.Time)}";
+        }
+        else
+        {
+            var at = close ? nearest.Time : time;
+            text = $"No figure  ·  {at.ToLocalTime():HH:mm:ss}";
+        }
+
+        var label = new Border
+        {
+            Background = InboundTheme.Brush("InboundChromeBrush", this),
+            BorderBrush = InboundTheme.Brush("InboundDividerBrush", this),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6, 2, 6, 2),
+            Child = new TextBlock { Text = text, FontSize = 11 },
+        };
+        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var labelWidth = label.DesiredSize.Width;
+        // Beside the guide, on whichever side has room.
+        var labelX = pointX + 8 + labelWidth <= _left + _chartWidth ? pointX + 8 : Math.Max(_left, pointX - 8 - labelWidth);
+        Canvas.SetLeft(label, labelX);
+        Canvas.SetTop(label, _upper);
+        Hover.Children.Add(label);
+    }
+
+    private static string Ago(TimeSpan span) => span.TotalSeconds < 1.5 ? "now"
+        : span.TotalMinutes < 1 ? $"{span.TotalSeconds:0} s ago"
+        : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min {span.Seconds:00} s ago"
+        : $"{(int)span.TotalHours} h {span.Minutes:00} min ago";
 }
