@@ -276,10 +276,32 @@ public static class RemoteChildPlanner
     {
         if (placement is null)
         {
-            return relative;
+            return onlyFile ? WithoutFolderNamedAfterItsFile(relative) : relative;
         }
 
         var within = onlyFile ? Path.GetFileName(relative) : relative;
         return placement.Subfolder is { } folder ? RemotePaths.ToSafeRelativePath(Path.Combine(folder, within)) : within;
+    }
+
+    /// <summary>
+    /// A provider can put a lone file in a folder of the file's own name, x.rar/x.rar, and a folder with an extension is
+    /// no use to anyone. An archive keeps a folder, without its extension, because what is extracted next to it stays
+    /// together that way. Any other file needs no folder. A folder with any other name is the provider's real structure.
+    /// </summary>
+    private static string WithoutFolderNamedAfterItsFile(string relative)
+    {
+        var file = Path.GetFileName(relative);
+        if (!string.Equals(Path.GetDirectoryName(relative), file, StringComparison.OrdinalIgnoreCase))
+        {
+            return relative;
+        }
+
+        if (!file.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))
+        {
+            return file;
+        }
+
+        var folder = MultipartArchiveName.TryGetBaseName(file, out var baseName) ? baseName : file[..^".rar".Length];
+        return RemotePaths.ToSafeRelativePath(Path.Combine(folder, file)) ?? file;
     }
 }

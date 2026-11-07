@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### TB.F5, TB.F6, TB.F8: extraction records and folders (2026-11-07)
+
+- A set now goes with the last download behind it, finished or not. Its files are never touched. A set picked from disk never had a download and stays, because its row is the only place its outcome shows. A running set finishes first, and a set with archives still to delete finishes that first. Each Host start clears older sets with no downloads.
+- A lone provider file in a folder of its own name no longer keeps that folder name. An archive goes to x/x.rar with extraction beside it; any other file goes straight to the destination. Only an exact match counts, so a real folder keeps its whole name, dots included.
+- Menu: a failed or finished set shows one line to run it again, and a record's own row gets Open Archive Folder and loses the file picker from its context menu.
+- Evidence: `RuntimeArchiveTests`, `RuntimeArchiveReviewTests`, `RemoteJobRulesTests`, `ArchiveRowsTests`. Status: **unverified in the live UI**.
+
 
 ### Open for the owner (recorded 2026-11-06, for later)
 

@@ -41,13 +41,16 @@ public sealed partial class MainWindow
         public required MenuFlyoutItem Retry { get; init; }
         public required MenuFlyoutItem Cancel { get; init; }
         public required MenuFlyoutItem OpenFolder { get; init; }
+        public required MenuFlyoutItem OpenArchiveFolder { get; init; }
         public required MenuFlyoutItem Remove { get; init; }
         public MenuFlyoutSeparator Separator { get; } = new();
 
-        public MenuFlyoutItemBase[] All => [Extract, ExtractFile, Password, Retry, Cancel, OpenFolder, Remove, Separator];
+        public MenuFlyoutItemBase[] All => [Extract, ExtractFile, Password, Retry, Cancel, OpenFolder, OpenArchiveFolder, Remove, Separator];
 
-        /// <summary>Null hides everything. Only Extract stays when it can't run, to say why.</summary>
-        public void Apply(ArchivePlan? plan, bool connected)
+        /// <summary>Null hides everything. Only Extract stays when it can't run, to say why, unless another line already offers it.</summary>
+        /// <param name="recordsOnly">Only records' own rows are selected. They have no Open Folder of a download's.</param>
+        /// <param name="offerPicking">Whether to offer picking some other archive from the disk, which has nothing to do with the row a context menu opened on.</param>
+        public void Apply(ArchivePlan? plan, bool connected, bool recordsOnly, bool offerPicking)
         {
             static void Show(MenuFlyoutItemBase item, bool on)
             {
@@ -56,12 +59,13 @@ public sealed partial class MainWindow
             }
 
             Show(Separator, plan is not null);
-            Show(Extract, plan is not null);
-            Show(ExtractFile, plan is not null);
+            Show(Extract, plan?.ShowExtract == true);
+            Show(ExtractFile, plan is not null && offerPicking);
             Show(Password, plan?.Password is not null);
             Show(Retry, plan?.Retry.Count > 0);
             Show(Cancel, plan?.Cancel.Count > 0);
             Show(OpenFolder, plan?.OpenFolders.Count > 0);
+            Show(OpenArchiveFolder, recordsOnly && plan?.ArchiveFolders.Count > 0);
             Show(Remove, plan?.Remove.Count > 0);
             if (plan is null) return;
 
@@ -103,6 +107,7 @@ public sealed partial class MainWindow
         _downloadsArchiveMenu.Retry.AccessKey = "R";
         _downloadsArchiveMenu.Cancel.AccessKey = "C";
         _downloadsArchiveMenu.OpenFolder.AccessKey = "O";
+        _downloadsArchiveMenu.OpenArchiveFolder.AccessKey = "F";
         _downloadsArchiveMenu.Remove.AccessKey = "M";
 
         SyncArchiveEntryPoints();
@@ -119,6 +124,7 @@ public sealed partial class MainWindow
         Retry = CreateContextItem("Retry Extraction", async (_, _) => await RetryArchivesAsync(CurrentArchivePlan().Retry)),
         Cancel = CreateContextItem("Cancel Extraction", async (_, _) => await CancelArchivesAsync(CurrentArchivePlan().Cancel)),
         OpenFolder = CreateContextItem("Open Extracted Folder", async (_, _) => await OpenExtractedFoldersAsync(CurrentArchivePlan().OpenFolders)),
+        OpenArchiveFolder = CreateContextItem("Open Archive Folder", async (_, _) => await OpenExtractedFoldersAsync(CurrentArchivePlan().ArchiveFolders)),
         Remove = CreateContextItem("Remove Extraction Record…", async (_, _) => await RemoveArchiveRecordsAsync(CurrentArchivePlan().Remove)),
     };
 
@@ -184,15 +190,17 @@ public sealed partial class MainWindow
     private void SyncArchiveMenus()
     {
         if (_downloadsArchiveMenu is null) return;
-        _downloadsArchiveMenu.Apply(_remote.State.ArchivesSupported ? CurrentArchivePlan() : null, _remote.State.IsConnected);
+        _downloadsArchiveMenu.Apply(_remote.State.ArchivesSupported ? CurrentArchivePlan() : null, _remote.State.IsConnected, OnlyArchiveRowsSelected, offerPicking: true);
     }
 
     /// <summary>Runs last when the context menu opens. A selection of remote rows alone has nothing here to act on.</summary>
     private void ShowArchiveContextItems()
     {
         var remoteOnly = FirstLocalRow is null && SelectedRemoteRows.Count > 0 && SelectedArchiveRows.Count == 0;
-        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected);
+        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected, OnlyArchiveRowsSelected, offerPicking: !OnlyArchiveRowsSelected);
     }
+
+    private bool OnlyArchiveRowsSelected => FirstLocalRow is null && SelectedRemoteRows.Count == 0 && SelectedArchiveRows.Count > 0;
 
     private List<JobViewModel> SelectedArchiveRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsArchiveRow).ToList();
 
@@ -539,6 +547,6 @@ public sealed partial class MainWindow
             }
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Open extracted folder", $"This folder could not be opened: {string.Join(", ", problems)}");
+        if (problems.Count > 0) await ShowMessageAsync("Open folder", $"This folder could not be opened: {string.Join(", ", problems)}");
     }
 }

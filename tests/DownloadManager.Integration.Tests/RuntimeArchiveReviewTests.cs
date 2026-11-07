@@ -275,6 +275,22 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         Assert.Equal(volumes.Destination, run.Archives.Find(volumes.Id)!.Destination);
     }
 
+    [Theory]
+    [InlineData("Game.v1.02.Demo-GROUP.rar", "Game.v1.02.Demo-GROUP")]
+    [InlineData("Game.v1.02.Demo-GROUP.part01.rar", "Game.v1.02.Demo-GROUP")]
+    [InlineData("Game.v1.02.Demo-GROUP.001.rar", "Game.v1.02.Demo-GROUP")]
+    public async Task AnExtractionFolderLosesTheFilesExtensionAndNoMoreOfItsName(string file, string folder)
+    {
+        var tool = new FakeExtractor();
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool });
+        await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { Destination = "subfolder" });
+
+        await AskAsync(run, run.WriteFile(file, Text));
+        var set = await run.WaitForStateAsync("completed");
+
+        Assert.Equal(run.PathOf(folder), set.Destination);
+    }
+
     [Fact]
     public async Task ANameThatCantBeAFolderFallsBackWithoutSharing()
     {

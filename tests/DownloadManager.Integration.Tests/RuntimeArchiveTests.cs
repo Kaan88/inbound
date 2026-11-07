@@ -726,6 +726,143 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await WaitUntilAsync(() => run.Archives.List().Count == 0);
     }
 
+    private static async Task<(JobDto First, JobDto Second, ArchiveSetDto Set)> FailOnAMissingVolumeAsync(ArchiveHarness run)
+    {
+        var first = await run.DownloadAsync("w.part1.rar", Text);
+        var second = await run.DownloadAsync("w.part2.rar", Text);
+        await run.WaitForJobAsync(first.Id, "completed");
+        await run.WaitForJobAsync(second.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [first.Id] });
+        var failed = await run.WaitForFailureAsync("missingVolume");
+        Assert.Equal(2, failed.JobIds.Count);
+        return (first, second, failed);
+    }
+
+    private static ArchiveCoordinatorOptions FailsOnMissingVolume() => new()
+    {
+        ExtractorFactory = _ => new FakeExtractor
+        {
+            FailOnRun = _ => new ExtractionException(ExtractionFailureKind.MissingVolume, "Missing volume: w.part3.rar", ["w.part3.rar"]),
+        },
+    };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASetThatFailedOnAMissingVolumeGoesWithItsLastDownload(bool deleteFiles)
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server, FailsOnMissingVolume());
+        var (first, second, failed) = await FailOnAMissingVolumeAsync(run);
+        await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { SetId = failed.Id, Password = Secret });
+
+        // One download left is still a set to show.
+        await run.Service.RemoveAsync(first.Id, deleteFiles);
+        await WaitUntilAsync(() => run.Archives.Find(failed.Id)?.JobIds.SequenceEqual([second.Id]) == true);
+
+        await run.Service.RemoveAsync(second.Id, deleteFiles);
+        await WaitUntilAsync(() => run.Archives.List().Count == 0);
+
+        Assert.False(File.Exists(Path.Combine(run.Paths.Root, "archive", "sets", $"{failed.Id:N}.json")));
+        Assert.Equal(!deleteFiles, File.Exists(run.PathOf("w.part1.rar")));
+    }
+
+    [UnrarFact]
+    public async Task AFinishedSetGoesWithItsLastDownloadAndWhatItExtractedStays()
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server);
+        var job = await run.DownloadAsync("done.rar", OneFileRar("out.txt"));
+        await run.WaitForJobAsync(job.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [job.Id] });
+        await run.WaitForStateAsync("completed");
+
+        await run.Service.RemoveAsync(job.Id, true);
+
+        await WaitUntilAsync(() => run.Archives.List().Count == 0);
+        Assert.Equal(["out.txt"], run.AllFiles());
+    }
+
+    [Fact]
+    public async Task ASetPickedFromTheDiskHadNoDownloadToLoseAndStays()
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() });
+        var other = await run.DownloadAsync("other.mp4", Text);
+        await run.WaitForJobAsync(other.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = run.WriteFile("picked.rar", OneFileRar()) });
+        var done = await run.WaitForStateAsync("completed");
+
+        await run.Service.RemoveAsync(other.Id, false);
+        await run.StartAgainAsync();
+        await Task.Delay(300);
+
+        Assert.Equal(done.Id, Assert.Single(run.Archives.List()).Id);
+    }
+
+    [Fact]
+    public async Task RemovingADownloadLeavesItsRunningExtractionToFinish()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tool = new FakeExtractor { Release = release };
+        var quick = new FakeExtractor();
+        var tools = new Queue<FakeExtractor>([tool, quick]);
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { MaxConcurrentExtractions = 2, ExtractorFactory = _ => tools.Dequeue() });
+        var job = await run.DownloadAsync("slow.rar", OneFileRar());
+        await run.WaitForJobAsync(job.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [job.Id] });
+        await tool.Started.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+        await run.Service.RemoveAsync(job.Id, false);
+
+        // Another run finishing is when the Host next looks for sets without downloads.
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = run.WriteFile("picked.rar", OneFileRar()) });
+        await quick.Started.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        await WaitUntilAsync(() => run.Archives.List().Any(set => set.Name == "picked" && set.State == "completed"));
+        await Task.Delay(300);
+
+        Assert.Equal("extracting", run.Archives.List().Single(set => set.Name == "slow").State);
+
+        release.SetResult();
+        await WaitUntilAsync(() => run.Archives.List().All(set => set.Name != "slow"));
+        Assert.Equal(1, tool.Runs);
+        Assert.Equal("picked", Assert.Single(run.Archives.List()).Name);
+    }
+
+    [Fact]
+    public async Task SetsWhoseDownloadsWentBeforeThisStartAreTidiedAway()
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() });
+        var job = await run.DownloadAsync("old.rar", OneFileRar());
+        await run.WaitForJobAsync(job.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [job.Id] });
+        var done = await run.WaitForStateAsync("completed");
+
+        await run.Archives.ShutdownAsync();
+        await run.Service.RemoveAsync(job.Id, false);
+        await run.StartCoordinatorAsync(new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() });
+
+        await WaitUntilAsync(() => run.Archives.List().Count == 0);
+        Assert.False(File.Exists(Path.Combine(run.Paths.Root, "archive", "sets", $"{done.Id:N}.json")));
+    }
+
+    [Fact]
+    public async Task ARunStoppedByAShutdownDoesntStartAgainIfItsDownloadWentMeanwhile()
+    {
+        var first = new FakeExtractor { HoldUntilCancelled = true };
+        await using var run = await ArchiveHarness.StartAsync(_server, new ArchiveCoordinatorOptions { ExtractorFactory = _ => first });
+        var job = await run.DownloadAsync("stopped.rar", OneFileRar());
+        await run.WaitForJobAsync(job.Id, "completed");
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [job.Id] });
+        await first.Started.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+        await run.Archives.ShutdownAsync();
+        await run.Service.RemoveAsync(job.Id, false);
+        var second = new FakeExtractor();
+        await run.StartCoordinatorAsync(new ArchiveCoordinatorOptions { ExtractorFactory = _ => second });
+
+        await WaitUntilAsync(() => run.Archives.List().Count == 0);
+        await Task.Delay(200);
+        Assert.Equal(0, second.Runs);
+    }
+
     // ----- Safety -----
 
     public static TheoryData<string, byte[]> HostileArchives() => new()

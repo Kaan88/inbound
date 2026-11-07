@@ -116,6 +116,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
     private sealed record ResumeDeletesTrigger(Guid SetId) : Trigger;
 
+    private sealed record TidyTrigger : Trigger;
+
     /// <summary>
     /// Recovers from whatever a crash left, then starts work. A set interrupted while extracting
     /// goes back to waiting and runs again: nothing it did before the crash counts.
@@ -190,6 +192,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         _worker = Task.Run(RunWorkerAsync, CancellationToken.None);
 
+        // First: a set left waiting by a download removed before this start must not run now.
+        _triggers.Writer.TryWrite(new TidyTrigger());
         foreach (var id in resumeDeletes) _triggers.Writer.TryWrite(new ResumeDeletesTrigger(id));
 
         // Finishes a crash separated from their intent. Each is counted once, by job and time.
@@ -265,6 +269,10 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                         break;
                     case ResumeDeletesTrigger resume:
                         await FinishDeletingAsync(resume.SetId).ConfigureAwait(false);
+                        await DropSetsWithoutDownloadsAsync().ConfigureAwait(false);
+                        break;
+                    case TidyTrigger:
+                        await DropSetsWithoutDownloadsAsync().ConfigureAwait(false);
                         break;
                 }
 
@@ -510,7 +518,16 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         try
         {
             lock (_sync) record = _sets.GetValueOrDefault(id);
-            if (record is null || record.Removed || record.State is ArchiveSetState.Extracting or ArchiveSetState.Completed) return;
+            if (record is null || record.Removed || record.State == ArchiveSetState.Extracting) return;
+
+            if (LostItsDownloads(record))
+            {
+                await ForgetLockedAsync(id).ConfigureAwait(false);
+                gone = id;
+                return;
+            }
+
+            if (record.State == ArchiveSetState.Completed) return;
 
             var next = record.Clone();
             if (set is not null)
@@ -520,8 +537,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
             else if (!next.Wanted && next.ProtectedPassword is null)
             {
                 // Nothing here and nobody waiting for it: the download it was listed for has gone.
-                await _store.DeleteSetAsync(id).ConfigureAwait(false);
-                lock (_sync) _sets.Remove(id);
+                await ForgetLockedAsync(id).ConfigureAwait(false);
                 gone = id;
             }
             else
@@ -542,10 +558,53 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         finally
         {
             _gate.Release();
+            if (gone is { } removed) AnnounceRemoved(removed);
         }
 
-        if (gone is { } removed) AnnounceRemoved(removed);
         Announce(announce);
+    }
+
+    /// <summary>
+    /// Whether every download behind a set has been removed. The list holds a set for its downloads, so it goes with them,
+    /// finished or not: its files stay wherever they are, and the same file can be extracted again. A set picked from the disk
+    /// never had a download and is unaffected, because its record is the only place its outcome shows. A run still going, or
+    /// archives still to be deleted, finishes first. The caller holds the gate, so nothing can list a new download meanwhile.
+    /// </summary>
+    private bool LostItsDownloads(ArchiveSetRecord set)
+    {
+        if (set.State == ArchiveSetState.Extracting || set.VolumesToDelete.Count > 0) return false;
+        var had = set.JobIds.Concat(set.SeenJobs.Keys).ToList();
+        return had.Count > 0 && had.All(job => _service.GetJob(job) is null);
+    }
+
+    /// <summary>Only the worker calls this. For what no job event can report: a run that was still going, or a removal before this start.</summary>
+    private async Task DropSetsWithoutDownloadsAsync()
+    {
+        var gone = new List<Guid>();
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            List<ArchiveSetRecord> sets;
+            lock (_sync) sets = _sets.Values.Where(set => !set.Removed).ToList();
+            foreach (var set in sets.Where(LostItsDownloads))
+            {
+                await ForgetLockedAsync(set.Id).ConfigureAwait(false);
+                gone.Add(set.Id);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        foreach (var id in gone) AnnounceRemoved(id);
+    }
+
+    /// <summary>The whole record goes, with any password in it. Never touches a download's or an extraction's files. The caller holds the gate.</summary>
+    private async Task ForgetLockedAsync(Guid id)
+    {
+        await _store.DeleteSetAsync(id).ConfigureAwait(false);
+        lock (_sync) _sets.Remove(id);
     }
 
     private static bool SameContent(ArchiveSetRecord left, ArchiveSetRecord right) =>

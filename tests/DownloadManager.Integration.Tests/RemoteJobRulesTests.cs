@@ -235,6 +235,32 @@ public sealed class RemoteJobRulesTests
         Assert.Equal("flat.bin", plan.Requests.Single().FileName);
     }
 
+    [Theory]
+    [InlineData("name.bin/name.bin", "name.bin")]
+    [InlineData("NAME.BIN/name.bin", "name.bin")]
+    [InlineData("Game.v1.02.Demo-GROUP/Game.v1.02.Demo-GROUP", "Game.v1.02.Demo-GROUP")]
+    [InlineData("Game.v1.02.Demo-GROUP.rar/Game.v1.02.Demo-GROUP.rar", @"Game.v1.02.Demo-GROUP\Game.v1.02.Demo-GROUP.rar")]
+    [InlineData("Game.v1.02.part01.rar/Game.v1.02.part01.rar", @"Game.v1.02\Game.v1.02.part01.rar")]
+    public void ALoneFileGetsNoFolderWithAnExtension(string path, string expected)
+    {
+        var request = Build(Record(), Item(File("0", path))).Requests.Single();
+        Assert.Equal(expected, request.Source.RelativePath);
+        Assert.Equal(Path.GetFileName(path), request.FileName);
+    }
+
+    [Theory]
+    [InlineData("Game.v1.02.Demo-GROUP/other.bin")]
+    [InlineData("name.rar/sub/name.rar")]
+    public void ALoneFilesRealFolderIsKeptWithItsWholeName(string path)
+        => Assert.Equal(path.Replace('/', Path.DirectorySeparatorChar), Build(Record(), Item(File("0", path))).Requests.Single().Source.RelativePath);
+
+    [Fact]
+    public void AnItemWithSeveralFilesKeepsItsFolderWhateverItsName()
+    {
+        var plan = Build(Record(), Item(File("0", "a.rar/a.rar"), File("1", "a.rar/b.bin")));
+        Assert.Equal(Path.Combine("a.rar", "a.rar"), plan.Requests[0].Source.RelativePath);
+    }
+
     [Fact]
     public void TheRequestCarriesTheChosenQueueStartModeAndLimit()
     {

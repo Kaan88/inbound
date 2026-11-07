@@ -270,7 +270,9 @@ public sealed partial class ArchiveCoordinator
             _live.TryRemove(id, out _);
             lock (_sync) _running.Remove(id);
             cancellation.Dispose();
-            Wake();
+
+            // Its downloads may have been removed while it ran. Wakes the worker as well.
+            _triggers.Writer.TryWrite(new TidyTrigger());
         }
     }
 

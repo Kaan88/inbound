@@ -543,7 +543,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Null(early.Job.PackageId);
         await UntilJobAsync(connection, third.Job.Id, job => job.State == "localStarted", "the link to be ready", checkNow: true);
         await UntilSetAsync(connection, host, set => set.Name == "later" && set.State == "completed", "the set told before its download existed");
-        Assert.Equal(Inner, await File.ReadAllBytesAsync(Path.Combine(host.Destination, "later.rar", "later.txt")));
+        Assert.Equal(Inner, await File.ReadAllBytesAsync(Path.Combine(host.Destination, "later", "later.txt")));
 
         Assert.All(Mock.Submissions, submission => Assert.Null(submission.Password));
         await host.StopAsync();

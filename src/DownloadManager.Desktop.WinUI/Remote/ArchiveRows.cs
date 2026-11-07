@@ -240,9 +240,14 @@ internal sealed record ArchivePlan(
     IReadOnlyList<ArchiveSetDto> Retry,
     IReadOnlyList<ArchiveSetDto> Cancel,
     IReadOnlyList<ArchiveSetDto> Remove,
-    IReadOnlyList<string> OpenFolders)
+    IReadOnlyList<string> OpenFolders,
+    IReadOnlyList<string> ArchiveFolders,
+    bool ExtractRepeatsRetry)
 {
     public bool CanExtract => ExtractReason is null;
+
+    /// <summary>Retry Extraction or Extract Again already says it, for the same sets. Two lines for one command read as a fault.</summary>
+    public bool ShowExtract => !ExtractRepeatsRetry;
 
     public string ExtractText => ExtractReason is null ? "Extract" : $"Extract ({ExtractReason})";
 }
@@ -278,16 +283,29 @@ internal static partial class ArchiveRules
             : jobIds.Count > 0 || ownSets.Count > 0 ? null
             : WhyNotAgain(sets);
 
+        var retry = sets.Where(CanRetry).ToList();
+        var opens = sets.Where(set => set.State == "completed" && !string.IsNullOrWhiteSpace(set.Destination))
+            .Select(set => set.Destination!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        // Each asks the Host for the same thing: a failed set runs again, and a finished one only ever through Extract Again.
+        var repeats = retry.Count > 0 && (reason is null
+            ? rarFiles.All(file => file.Set is { } set && retry.Contains(set)) && ownSets.All(retry.Contains)
+            : sets.All(set => set.State == "completed"));
+
         return new ArchivePlan(
             reason,
             reason is null ? jobIds : [],
             reason is null ? ownSets : [],
             PasswordFor(rarFiles, sets, packageAlone),
-            sets.Where(CanRetry).ToList(),
+            retry,
             sets.Where(set => set.State is "waiting" or "extracting").ToList(),
             sets.Where(set => set.State != "extracting").ToList(),
-            sets.Where(set => set.State == "completed" && !string.IsNullOrWhiteSpace(set.Destination))
-                .Select(set => set.Destination!).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            opens,
+
+            // Where a record's own archives are, unless Open Extracted Folder goes to the same place.
+            listedSets.Select(set => set.Directory).Where(folder => !string.IsNullOrWhiteSpace(folder))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Except(opens, StringComparer.OrdinalIgnoreCase).ToList(),
+            repeats);
     }
 
     /// <summary>What a double-click or Enter does on a record's own row.</summary>

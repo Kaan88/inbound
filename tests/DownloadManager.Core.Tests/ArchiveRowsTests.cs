@@ -259,6 +259,49 @@ public sealed class ArchiveRowsTests
     }
 
     [Fact]
+    public void A_finished_records_menu_has_one_line_for_extracting_again()
+    {
+        var done = Set("completed", change: s => { s.Destination = @"C:\out"; s.Directory = @"C:\in"; });
+        var plan = ArchiveRules.Plan([], [done], null, true);
+
+        Assert.False(plan.ShowExtract);
+        Assert.Equal([done], plan.Retry);
+        Assert.Equal([@"C:\out"], plan.OpenFolders);
+        Assert.Equal([@"C:\in"], plan.ArchiveFolders);
+    }
+
+    [Fact]
+    public void A_failed_set_has_one_line_for_running_again_from_either_row()
+    {
+        var failed = Set("failed", "missingVolume");
+        Assert.False(ArchiveRules.Plan([], [failed], null, true).ShowExtract);
+        Assert.False(ArchiveRules.Plan([File("a.rar", failed)], [], null, true).ShowExtract);
+    }
+
+    [Fact]
+    public void Extract_stays_where_nothing_else_offers_it_or_says_why()
+    {
+        Assert.True(ArchiveRules.Plan([File("a.rar", Set("downloaded"))], [], null, true).ShowExtract);
+        Assert.True(ArchiveRules.Plan([File("a.rar")], [], null, true).ShowExtract);
+        Assert.True(ArchiveRules.Plan([File("a.rar"), File("b.rar", Set("failed", "corrupted"))], [], null, true).ShowExtract);
+
+        var archivesGone = Set("completed", change: s => s.ArchivesDeleted = true);
+        var plan = ArchiveRules.Plan([], [archivesGone], null, true);
+        Assert.True(plan.ShowExtract);
+        Assert.Equal("Extract (already extracted)", plan.ExtractText);
+    }
+
+    [Fact]
+    public void The_archive_folder_is_left_out_when_the_extracted_folder_is_the_same_place()
+    {
+        var done = Set("completed", change: s => { s.Destination = @"C:\in"; s.Directory = @"C:\IN"; });
+        Assert.Empty(ArchiveRules.Plan([], [done], null, true).ArchiveFolders);
+
+        var failed = Set("failed", "corrupted", change: s => s.Directory = @"C:\in");
+        Assert.Equal([@"C:\in"], ArchiveRules.Plan([], [failed], null, true).ArchiveFolders);
+    }
+
+    [Fact]
     public void Retry_is_not_offered_when_it_could_only_fail()
     {
         var noPassword = Set("failed", "passwordRequired");
