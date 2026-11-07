@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### PERF.4: idle fixes (2026-11-07, branch `torbox-addflow`)
+
+- Tray refreshes on job and setting changes instead of every second, and checks browser integration only when its menu opens. Clipboard polling runs only while monitoring is on. The speed graph draws only while it can be seen.
+- Test-instance probe: Host other I/O 1,800/min before, 7/min after; window 110 ms CPU per 30 s visible, 62 ms minimised. Not yet measured on an installed build.
+- Build clean. Core 818 passed. Integration: one failure in the first full run, then 1,087 passed on the rerun; the failing test's name wasn't captured, most likely the known load-sensitive RAR test.
+
 ### Memory, and the Docker and web UI plan (2026-11-07)
 
 - The owner asked for a Docker and web UI plan and how memory use is, since high memory is what they dislike in another download manager.

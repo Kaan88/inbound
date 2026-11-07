@@ -18,6 +18,7 @@ internal sealed class HostClipboardMonitor : IDisposable
     private string? _lastText;
     private string? _lastUrl;
     private DateTimeOffset _lastUrlAt;
+    private bool _disposed;
 
     /// <param name="describe">What the log may say about a copied address.</param>
     public HostClipboardMonitor(Func<bool> enabled, Action<string> onUrl, Func<string, string> describe, Action<string> log)
@@ -30,10 +31,20 @@ internal sealed class HostClipboardMonitor : IDisposable
         _timer.Tick += (_, _) => Poll();
     }
 
-    public void Start() => _timer.Start();
+    /// <summary>Runs the poll only while monitoring is on, so the Host doesn't wake for it otherwise. Call on the UI thread.</summary>
+    public void Start() => Apply();
+
+    /// <summary>Starts or stops polling to match the setting. Call on the UI thread.</summary>
+    public void Apply()
+    {
+        if (_disposed) return;
+        if (_enabled()) _timer.Start();
+        else _timer.Stop();
+    }
 
     public void Dispose()
     {
+        _disposed = true;
         _timer.Stop();
         _timer.Dispose();
     }
