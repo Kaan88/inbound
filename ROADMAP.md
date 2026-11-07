@@ -392,6 +392,10 @@ searching the account.
 | D3 | Docker packaging | deferred | D1/D2 | Dockerfile + compose with state/download volumes, non-root user, healthcheck, host and web UI deployed together |
 | D4 | End-to-end provider/Docker test | deferred | A4/D3 | TorBox link/list → queue → download → unrar through the Linux container and web UI, including expiring-link refresh; image/logs contain no token |
 | D5 | Linux port | far goal; owner, 2026-11-07 | D1 | Run the app on Linux. D1 to D4 cover a headless host, web UI and Docker. WinUI 3 and the tray are Windows-only, so whether a port also needs a native Linux desktop frontend is undecided |
+| D.PLAN | Plan for D1 to D4 | written 2026-11-07 | - | `docs/docker-webui-plan.md`: one command handler shared by the pipe and a WebSocket, Linux replacements for DPAPI, 7-Zip and the job object, a web UI with a folder browser limited to mounted roots, sign-in, Docker image. Four owner decisions listed there. |
+| PERF.1 | Close the window process with the window | proposed, owner decision 2026-11-07 | - | Measured: the WinUI window holds 215 to 235 MB private whether the list is empty or has 504 rows, and closing only hides it. The Host holds 19 MB idle, 48 MB with 500 jobs, about 70 MB during four parallel downloads. Ending the UI process on close would save about 215 MB while in the tray; reopening costs a start. |
+| PERF.2 | Soak test | proposed 2026-11-07 | - | 8 hours of downloads and 5,000 jobs in a test instance, Host and UI memory every minute, to find growth. |
+| PERF.3 | GC settings | proposed 2026-11-07 | PERF.2 | Heap limit and conserve-memory for the server image, the Host's GC mode; only with before-and-after numbers. |
 
 ## Cross-cutting tasks
 
