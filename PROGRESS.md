@@ -1,5 +1,35 @@
 # Progress — session handoff
 
+### Live scenarios F, G and H, with TB.F6 and TB.F7 on real data (2026-11-07)
+
+Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window read through UI Automation. I added only freely licensed test files and one link of the owner's, and deleted all of it afterwards. The account is back to its earlier counts, with an empty queue.
+
+- **F, real link expiry: not verified live.** It wasn't seen in 4 hours earlier, and I didn't wait for it here.
+- **F, stopped for a while, then resumed: passed live.** Real link, real CDN, nothing forced. Stopped for 360 s at about 103 MB of a 571 MB file. It resumed without starting again, and the Host log shows a new link request. Size equal, 1088 torrent pieces checked, 0 bad. I didn't compare whether the new link's text differed.
+- **F, refused link and refresh: partly verified live.** The refusal is a real CDN 403, and the refresh a real API call and a real transfer. The refused link was forced, and this ran in the real service and engine in a test process, not in the Host, because a provider job keeps no link on disk to tamper with. New test `LiveLinkRefreshTests`, three cases:
+  - Refused at the start: 2 links asked, md5 equal to TorBox's.
+  - Refused after a stop at 1 089 536 of 4 116 552 bytes: resumed from there, 3 links, md5 equal, at most 4 connections.
+  - Always refused: 3 links, then it fails saying the bytes were kept. A later resume finishes with md5 equal.
+- **F, pasted direct link swapped in the job file with the Host down: passed live.** Real CDN 403, job failed as resumable, bytes kept. `dm refresh` with a real link resumed, size equal, 0 bad pieces. A pasted link doesn't refresh itself; that is the user's step. The address was protected again after the run.
+- **F, job or checkpoint changed by hand: safe restart seen.** A changed size or Last-Modified restarts from about the start and ends with 0 bad pieces. The changed size says why in the log. The changed Last-Modified doesn't.
+- **F, item deleted from the account during its download: the transfer finished.** It was my own test item. The CDN kept delivering for the 64 s it took, including on new connections. Size equal, 0 bad pieces.
+- **F, connections: no more than 4 carried data.** Counted per tunnel by a local proxy over a whole file, asked for 4. A 5th tunnel was open at times and carried 219 bytes, so it was idle.
+- **G, password RAR: passed live, by CLI and on screen.** Public test archives through TorBox, 3 sets. Each stopped at "Password required". On screen I entered a wrong password, saw "Wrong password" and the dialog saying so, then entered the right one and saw "Extraction completed" with the folder. CRC of the extracted files equals what the tool lists. The password was in clear in 0 of 72 sandbox data files.
+- **H, multi-part RAR: passed live on small sets.** All volumes through TorBox, one set, no duplicated output, output md5 equal to an independent UnRAR extraction, no staging left. Two sets in one item stayed two sets.
+- **H, a volume left unselected: passed live, after a fix.** A first or middle volume showed "Waiting: part1 missing" or "Waiting: part2 missing" on screen. A last one showed "Missing volume" as a failure, since local names can't show where a set ends until the tool runs. It now reads "Waiting: part3 missing", seen on screen. Selecting the part afterwards extracted it with no other step, with output equal to the all-volumes run.
+- **H, 6 GB of real volumes through the owner's mega link: partly verified live.** With one volume held back the set waited for it, and once it came there was one set and all sizes equal TorBox's. That archive needs a password I don't have and didn't guess, so its extraction and content are not verified live.
+- **TB.F7, one notice per package: seen in the Host log on real data.** Each package gave one notice when it closed, and each later user action one more. The log holds kinds only, so I didn't read the words, and I didn't see the balloons.
+- **TB.F6, folder naming: seen on real data.** A lone web archive `x.rar/x.rar` landed in `x\x.rar`, a lone web non-archive `x/x` straight in the destination, and a single-file torrent `s/s.rar` in `s\s.rar`. Exact matches only, so a torrent of `a.rar/a.rar.exp` keeps the folder `a.rar\`. A lone torrent non-archive keeps its stem folder and a lone web one doesn't; I left that for the owner to judge.
+- **Web folder links work:** seen here, which closes a gap left from scenario A.
+- **Fixed:**
+  - A last volume left unselected now reads as waiting, on the row and on a package row. It is still a stopped set underneath, so Retry stays. `A_last_volume_named_by_the_tool_reads_like_any_other_part_being_waited_for`, `A_package_with_a_last_volume_missing_is_waiting_and_has_no_problem`.
+  - The Host said "Missing volume: Missing volume: x". `AMissingVolumeIsSaidOnceInTheSetsWords`.
+  - A package row's spoken text had ".." between its sets. `A_package_is_spoken_without_a_doubled_full_stop`.
+  - The Host log now says when a provider gave a link for a run and when a refused link led to asking for another, with no address in either line.
+  - The new tests above failed with the wording changes undone.
+- **Bearing on the add flow, nothing built:** GitHub repository file links are refused by TorBox with its own words, and no item is created. Adding an input whose row is already on the list answers "already on the list" and ignores the new destination and choice. Files can be added to a row after its download started, and the row goes back to waiting for a moment.
+- **Not seen:** real link expiry, a refresh inside the real Host process, extraction of the owner's password archive, real balloons and sounds.
+
 ### Live scenarios E and J, and killing the Host during a provider file (2026-11-07)
 
 Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window read through UI Automation. Only freely licensed test files were added, and all of them are deleted again: the account is back at 144 and 13.
