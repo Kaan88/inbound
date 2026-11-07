@@ -11,8 +11,10 @@ using Microsoft.UI.Xaml.Media;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
-/// One progress window for a whole package: overall progress plus a row per file. The Host opens
-/// it instead of one window per member; double-clicking a file opens that file's own window.
+/// One progress window for a whole package: overall progress, a row per file, and below them the same
+/// details a file's own window shows, for the selected file. The Host opens it instead of one window
+/// per member; double-clicking a file, or Enter on it, opens that file's own window, which also has its
+/// speed limiter and completion options.
 /// Closing it never stops the Host or the downloads.
 /// </summary>
 internal sealed class PackageWindow : Window
@@ -37,9 +39,20 @@ internal sealed class PackageWindow : Window
     private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
     private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _summary = new() { Opacity = 0.8 };
-    private readonly ProgressBar _overall = new() { Minimum = 0, Maximum = 100, Height = 6 };
+    private readonly ProgressBar _overall = InboundTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 100 });
     private readonly TextBlock _detail = new() { Opacity = 0.8 };
-    private readonly StackPanel _list = new() { Spacing = 2 };
+    private readonly ListView _list = new()
+    {
+        SelectionMode = ListViewSelectionMode.Single,
+        ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
+    };
+    private readonly TextBlock _fileHeading = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly SegmentMapBar _fileMap = new() { Visibility = Visibility.Collapsed };
+    private readonly ProgressBar _fileMoving = InboundTheme.Styled(new ProgressBar { Maximum = 100, Height = 14, MinHeight = 14, CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed });
+    private readonly JobDetailsPanel _fileDetails = new() { ShowSavePath = true };
+    private Guid? _pickedFile;
+    private Guid? _shownFile;
+    private bool _selectingFile;
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
     private readonly Button _pause = new() { Content = "Pause all", MinWidth = 100 };
     private readonly Button _resume = new() { Content = "Resume all", MinWidth = 100 };
@@ -53,7 +66,7 @@ internal sealed class PackageWindow : Window
     private readonly StatusLine _passwordStatus = new("Archive password status");
     private readonly StatusLine _extractionStatus = new("Extraction");
 
-    private sealed record Row(Grid Grid, TextBlock Name, TextBlock Status, ProgressBar Bar, TextBlock Size);
+    private sealed record Row(ListViewItem Item, Guid JobId, TextBlock Name, TextBlock Status, ProgressBar Bar, TextBlock Size);
 
     public PackageWindow(Guid packageId)
     {
@@ -61,24 +74,33 @@ internal sealed class PackageWindow : Window
         var theme = UiStateStore.Load().DarkMode;
         _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
         Title = "Package status — Inbound Download Manager";
-        WindowLayout.ResizeForDpi(this, 720, 640);
+        WindowLayout.ResizeForDpi(this, 720, 820);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
-        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
-            _root.RowDefinitions.Add(new RowDefinition { Height = height });
+        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
+            _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 110 : 0 });
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(_title);
         header.Children.Add(_summary);
         _root.Children.Add(header);
         Add(_overall, 1);
         Add(_detail, 2);
-        var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(4),
-            Child = new ScrollViewer { Content = _list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(4), Child = _list };
+        AutomationProperties.SetName(_list, "Files in this package");
+        if (Application.Current.Resources.TryGetValue("InboundListRowStyle", out var rowStyle) && rowStyle is Style style) _list.ItemContainerStyle = style;
+        _list.SelectionChanged += (_, _) => OnFileSelected();
+        _list.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Enter || _shownFile is not { } file) return;
+            args.Handled = true;
+            OpenFileWindow(file);
+        };
         Add(listFrame, 3);
+        Add(BuildFileDetails(), 4);
         BuildArchivePanel();
-        Add(_archivePanel, 4);
+        Add(_archivePanel, 5);
         var footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < 5; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -89,7 +111,7 @@ internal sealed class PackageWindow : Window
             Grid.SetColumn(button, column++);
             footer.Children.Add(button);
         }
-        Add(footer, 5);
+        Add(footer, 6);
 
         void ApplyColors()
         {
@@ -140,11 +162,13 @@ internal sealed class PackageWindow : Window
         {
             if (_closed) return;
             _hostConnected = connected;
+            _fileDetails.SetConnected(connected);
             _notice.Text = connected ? string.Empty : $"Host disconnected. Reconnecting… {error}";
         });
         Closed += async (_, _) =>
         {
             _closed = true;
+            _fileDetails.Stop();
             _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
         };
@@ -174,6 +198,44 @@ internal sealed class PackageWindow : Window
         var accelerator = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         accelerator.Invoked += (_, args) => { args.Handled = true; Close(); };
         return accelerator;
+    }
+
+    /// <summary>The same segment map and figures as a file's own window, for the selected file.</summary>
+    private FrameworkElement BuildFileDetails()
+    {
+        _fileDetails.Attach(_connection, _fileMap, _fileMoving, _root);
+        _fileDetails.Problem += words => _notice.Text = words;
+        ToolTipService.SetToolTip(_fileMap, "Start positions and download progress by connection");
+        var bars = new Grid();
+        bars.Children.Add(_fileMap);
+        bars.Children.Add(_fileMoving);
+        var panel = new StackPanel { Spacing = 8, Padding = new Thickness(0, 0, 12, 0) };
+        panel.Children.Add(_fileHeading);
+        panel.Children.Add(bars);
+        panel.Children.Add(_fileDetails);
+        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    }
+
+    /// <summary>Someone chose a file. It stays the one shown until it leaves the package.</summary>
+    private void OnFileSelected()
+    {
+        if (_selectingFile || _list.SelectedItem is not ListViewItem { Tag: Guid file }) return;
+        _pickedFile = file;
+        ShowFileDetails(_jobs.GetValueOrDefault(file));
+    }
+
+    private void ShowFileDetails(JobDto? job)
+    {
+        _shownFile = job?.Id;
+        if (job is null)
+        {
+            _fileHeading.Text = string.Empty;
+            _fileDetails.ShowNothing("No file selected");
+            return;
+        }
+
+        _fileHeading.Text = string.IsNullOrWhiteSpace(job.FileName) ? "Download" : job.FileName;
+        _fileDetails.Show(job);
     }
 
     private void SetMembers(List<DownloadGroupDto> groups)
@@ -351,25 +413,32 @@ internal sealed class PackageWindow : Window
             .OrderBy(job => job.FileName, StringComparer.CurrentCultureIgnoreCase).ToList();
         foreach (var stale in _rows.Keys.Except(members.Select(job => job.Id)).ToList())
         {
-            _list.Children.Remove(_rows[stale].Grid);
+            _list.Items.Remove(_rows[stale].Item);
             _rows.Remove(stale);
         }
         for (var index = 0; index < members.Count; index++)
         {
             var job = members[index];
             if (!_rows.TryGetValue(job.Id, out var row)) _rows[job.Id] = row = CreateRow(job.Id);
-            var at = _list.Children.IndexOf(row.Grid);
+            var at = _list.Items.IndexOf(row.Item);
             if (at != index)
             {
-                if (at >= 0) _list.Children.RemoveAt(at);
-                _list.Children.Insert(Math.Min(index, _list.Children.Count), row.Grid);
+                if (at >= 0) _list.Items.RemoveAt(at);
+                _list.Items.Insert(Math.Min(index, _list.Items.Count), row.Item);
             }
             row.Name.Text = job.FileName;
+            AutomationProperties.SetName(row.Item, $"{job.FileName}, {StateText(job)}");
             row.Status.Text = StateText(job);
             row.Bar.IsIndeterminate = job.TotalBytes is not > 0 && job.State is "connecting" or "downloading";
             row.Bar.Value = job.State == "completed" ? 100 : Percent(job.ReceivedBytes, job.TotalBytes);
             row.Size.Text = job.TotalBytes is > 0 ? $"{Bytes(job.ReceivedBytes)} / {Bytes(job.TotalBytes.Value)}" : Bytes(job.ReceivedBytes);
         }
+
+        var shown = ProgressDetailRules.FileToShow(members, _pickedFile);
+        _selectingFile = true;
+        _list.SelectedItem = shown is { } file ? _rows[file].Item : null;
+        _selectingFile = false;
+        ShowFileDetails(shown is { } showing ? _jobs[showing] : null);
 
         var total = members.Sum(job => job.TotalBytes ?? 0);
         var received = members.Sum(job => job.State == "completed" && job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes);
@@ -407,7 +476,7 @@ internal sealed class PackageWindow : Window
         var name = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis };
         var status = new TextBlock { Opacity = 0.8 };
         var size = new TextBlock { Opacity = 0.8, HorizontalAlignment = HorizontalAlignment.Right };
-        var bar = new ProgressBar { Minimum = 0, Maximum = 100, Margin = new Thickness(0, 4, 0, 0) };
+        var bar = InboundTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 100, Margin = new Thickness(0, 4, 0, 0) });
         Grid.SetColumn(status, 1);
         Grid.SetColumn(size, 2);
         Grid.SetRow(bar, 1);
@@ -416,9 +485,11 @@ internal sealed class PackageWindow : Window
         grid.Children.Add(status);
         grid.Children.Add(size);
         grid.Children.Add(bar);
-        ToolTipService.SetToolTip(grid, "Double-click for this file's progress details");
+        ToolTipService.SetToolTip(grid, "Double-click for this file's own window");
         grid.DoubleTapped += (_, _) => OpenFileWindow(jobId);
-        return new Row(grid, name, status, bar, size);
+        var item = new ListViewItem { Content = grid, Tag = jobId };
+        AutomationProperties.SetHelpText(item, "Its details show below. Enter opens this file's own window.");
+        return new Row(item, jobId, name, status, bar, size);
     }
 
     private async Task RunPackageActionAsync(string action)

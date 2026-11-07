@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### TB.F1, TB.F3, TB.F4: progress details, list columns, selection box (2026-11-07)
+
+- TB.F1: the package window and a file's own window were written separately, so a package showed no figures per file and no segments. Both now use one `JobDetailsPanel`, and the package window shows it for the selected file, under the file list. My provider's Show progress opened the package window even for one file; that now opens the file's own window. A provider file still shows no address, on purpose: its address is a reference to the account's item, not something to read or send. Speed limiter and completion options stay in the file's own window, reached by double-click or Enter.
+- TB.F3: the download list and My provider's list have a header button per column that sorts, with a chevron, and a grip on each right edge that resizes. Widths and order are saved in `ui-state.json`. All View menu sorts share one path. Remote and archive rows stay on top. A reorder touching more than 64 rows swaps the list's source once instead of moving rows one by one. My provider sorts what is loaded so far, and Load more merges in. File trees keep their path order and have no header: they have only a name and a size, under an indent.
+- TB.F4: dragging a box selects rows in the download list and ticks them in file trees, with Ctrl to add. My provider's item list stays single-select, as it drives one detail pane. The arithmetic is in `RegionSelection`, the tree's rule in `RemoteFileTree.ChooseRows`.
+- Evidence: `ListColumnsAndRegionTests`; each of eight fixes was undone once and its test failed. Status: **unverified in the live UI**: none of it has been run or seen, in either theme. Pointer capture over list rows, the resize cursor, the chevrons and the package window's new layout are what to check first.
+
 ### TB.F7, TB.F2 wording: one notice per package, no quota claims (2026-11-07)
 
 - `DownloadNotices` (Runtime) now decides every completion, failure and extraction notice, and the Host only maps them to tray and sound under the existing settings. A package of two or more gets one closing notice once nothing in it is working, covering its files and archive sets. A download on its own, and a package of one file, keep their words.

@@ -19,8 +19,6 @@ public sealed partial class MainWindow
 {
     private const string ArchiveSetsTag = "archive:sets";
     private const string ArchiveSetsEmptyText = "No archives yet.\nSelect a RAR download and choose Extract, or use Extract Archive… in the Downloads menu.";
-    private const double ListWidthWithoutExtraction = 1040;
-    private const double ExtractionColumnWidth = 140;
 
     private static readonly DateTimeOffset WatchingSince = DateTimeOffset.Now;
 
@@ -137,8 +135,7 @@ public sealed partial class MainWindow
     private void SyncExtractionColumn()
     {
         var show = _remote.State.ArchivesSupported && _remote.State.ArchiveSets.Count > 0;
-        ExtractionHeader.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        DownloadListGrid.MinWidth = ListWidthWithoutExtraction + (show ? ExtractionColumnWidth : 0);
+        _jobsHeader.SetColumnVisible("extraction", show);
         if (JobViewModel.ShowExtractionColumn == show) return;
         JobViewModel.ShowExtractionColumn = show;
         foreach (var row in _jobsById.Values.Concat(_packageRows.Values).Concat(_remoteRows.Values).Concat(_archiveRows.Values)) row.NotifyExtractionColumn();

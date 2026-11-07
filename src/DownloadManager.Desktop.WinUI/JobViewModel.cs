@@ -71,6 +71,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public string Description { get => _description; private set => Set(ref _description, value); }
     public string RawDescription { get => _rawDescription; private set => Set(ref _rawDescription, value); }
     public long TotalSize { get; private set; }
+    /// <summary>Null when there is no estimate, and that row has nothing to sort by.</summary>
+    public TimeSpan? Remaining { get; private set; }
     public double BytesPerSecond { get; private set; }
     public DateTimeOffset LastUpdated { get; private set; }
     public Visibility ProgressVisibility { get => _progressVisibility; private set => Set(ref _progressVisibility, value); }
@@ -102,6 +104,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         LastUpdated = job.UpdatedAt;
         SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
+        Remaining = job.EstimatedRemaining;
         EtaText = FormatDuration(job.EstimatedRemaining);
         DetailText = job.Failure?.Message is { Length: > 0 } failure
             ? failure
@@ -177,7 +180,11 @@ public sealed class JobViewModel : INotifyPropertyChanged
     /// <summary>The file rows of a package row, in display order.</summary>
     public IReadOnlyList<JobViewModel> Children { get; private set; } = [];
 
-    public Thickness RowPadding => !IsPackage && PackageId is not null ? new Thickness(28, 0, 4, 0) : new Thickness(4, 0, 4, 0);
+    /// <summary>A package's file sits in a little, inside its first two cells, because the columns after them must stay under their headers.</summary>
+    private bool IsIndented => !IsPackage && PackageId is not null;
+    public Thickness IconIndent => IsIndented ? new Thickness(RowIndent, 0, 0, 0) : default;
+    public Thickness NameIndent => IsIndented ? new Thickness(RowIndent, 0, 0, 0) : default;
+    private const double RowIndent = 24;
     public string ChevronGlyph => IsExpanded ? "" : "";
     public Visibility ChevronVisibility => IsPackage ? Visibility.Visible : Visibility.Collapsed;
     public Visibility FileIconAreaVisibility => IsPackage ? Visibility.Collapsed : Visibility.Visible;
@@ -185,7 +192,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
 
     private void NotifyPackageLayout()
     {
-        foreach (var name in new[] { nameof(RowPadding), nameof(ChevronGlyph), nameof(ChevronVisibility), nameof(FileIconAreaVisibility), nameof(NameWeight) })
+        foreach (var name in new[] { nameof(IconIndent), nameof(NameIndent), nameof(ChevronGlyph), nameof(ChevronVisibility), nameof(FileIconAreaVisibility), nameof(NameWeight) })
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
@@ -208,6 +215,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         BytesPerSecond = summary.BytesPerSecond;
         SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
+        Remaining = summary.EstimatedRemaining;
         EtaText = FormatDuration(summary.EstimatedRemaining);
         ProgressPercent = summary.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
         ProgressVisibility = summary.State is "active" or "paused" && ProgressPercent > 0 ? Visibility.Visible : Visibility.Collapsed;

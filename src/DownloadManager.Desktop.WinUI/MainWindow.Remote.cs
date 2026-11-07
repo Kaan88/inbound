@@ -285,7 +285,9 @@ public sealed partial class MainWindow
                 DownloadedPlacesOf,
                 LocalStatusOf,
                 OpenPackageWindow,
-                RememberFolder));
+                RememberFolder,
+                _uiState,
+                () => SaveUiState()));
             _providerWindows[provider] = window;
             window.Closed += (_, _) => _providerWindows.Remove(provider);
         }

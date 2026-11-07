@@ -60,6 +60,21 @@ internal sealed record RemoteItemView(
     string ToolTip,
     string AccessibleName);
 
+/// <summary>The order of My provider's list by a column. A provider gives no size or date for some items, and those stay at the end.</summary>
+internal static class RemoteItemSort
+{
+    public static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, RemoteItemDto> item, Func<T, RemoteItemView> view, string key, bool ascending) => key switch
+    {
+        "type" => ListSort.Order(rows, row => view(row).Type, NaturalStringComparer.Instance, ascending),
+        "status" => ListSort.Order(rows, row => view(row).Status, NaturalStringComparer.Instance, ascending),
+        "size" => ListSort.Order(rows, row => item(row).Size, null, ascending, row => item(row).Size <= 0),
+        "files" => ListSort.Order(rows, row => item(row).FileCount, null, ascending, row => item(row).FileCount <= 0),
+        "added" => ListSort.Order(rows, row => item(row).CreatedAt, null, ascending, row => item(row).CreatedAt is null),
+        "expires" => ListSort.Order(rows, row => item(row).ExpiresAt, null, ascending, row => item(row).ExpiresAt is null),
+        _ => ListSort.Order(rows, row => view(row).Name, NaturalStringComparer.Instance, ascending),
+    };
+}
+
 /// <summary>Where a job's downloads should be: the paths are collected on the UI thread, and <see cref="Find"/> runs off it.</summary>
 internal sealed class DownloadedPlaces(IEnumerable<string?> files, IEnumerable<string?> folders)
 {

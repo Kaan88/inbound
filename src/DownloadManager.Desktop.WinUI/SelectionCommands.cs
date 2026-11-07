@@ -7,6 +7,26 @@ namespace DownloadManager.Desktop.WinUI;
 /// <param name="OpenReason">For what needs the file itself to be there: Open, Open Folder, Move/Rename.</param>
 internal sealed record FileMenuPlan(string? FileReason, string? LocalReason, string? RemoveReason, string? OpenReason = null);
 
+/// <summary>Which file the progress windows talk about. Nothing here touches the UI.</summary>
+internal static class ProgressDetailRules
+{
+    /// <summary>
+    /// The file whose details a package window shows: the one someone picked while it is still there,
+    /// otherwise the first that is doing something, then the first unfinished, then the first.
+    /// </summary>
+    public static Guid? FileToShow(IReadOnlyList<JobDto> members, Guid? picked)
+    {
+        if (picked is { } id && members.Any(job => job.Id == id)) return id;
+        return (members.FirstOrDefault(job => job.State is "connecting" or "downloading" or "verifying")
+            ?? members.FirstOrDefault(job => !job.IsTerminal)
+            ?? members.FirstOrDefault())?.Id;
+    }
+
+    /// <summary>A package of one file has nothing to add to that file's own window, which a package of one is shown as on the list too.</summary>
+    public static Guid? OnlyFile(DownloadGroupDto? group, Func<Guid, bool> isListed)
+        => group?.JobIds.Where(isListed).ToList() is [var only] ? only : null;
+}
+
 internal static class FileMenuRules
 {
     /// <summary>A finished download whose archive went on purpose after extraction. Nothing is wrong with it, and there is no file to act on.</summary>

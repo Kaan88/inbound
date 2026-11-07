@@ -217,6 +217,21 @@ internal sealed class RemoteFileTree
         foreach (var file in _files.Where(file => file.FileId is not null && chosen.Contains(file.FileId))) SetChecked(file, true);
     }
 
+    /// <summary>
+    /// A box dragged over rows: what is kept, plus what the box touches. An open folder's row is passed
+    /// over, because its files have rows of their own and the box may touch only some of them. A closed
+    /// folder's row stands for everything under it.
+    /// </summary>
+    public void ChooseRows(IEnumerable<string> keep, IEnumerable<RemoteFileNode> rows)
+    {
+        SelectNone();
+        Restore(keep);
+        foreach (var row in rows)
+        {
+            if (!row.IsFolder || !row.IsExpanded) SetChecked(row, true);
+        }
+    }
+
     /// <summary>For the line above the tree. Sizes count only what is chosen.</summary>
     public string Summary()
     {

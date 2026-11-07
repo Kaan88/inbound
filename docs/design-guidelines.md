@@ -95,13 +95,30 @@ default window width. With one remote or archive row selected, the status bar sa
   Foreground in code; it renders the text invisible.
 - Keep the defaults: no gradients, no animated stripes, no percentage text
   drawn over the bar.
+- A file's figures, segment map and segment table are one control, `JobDetailsPanel`. A file's own window and
+  a package's window both use it, for that file or the selected one, so a file reads the same in both. A
+  package's window adds what is about the package: overall progress, the file list and the archive password.
+  A package of one file opens the file's own window, as it is an ordinary row on the list.
 
 ## 4. Layout and density
 
 - List rows are 27px with 11–12px text. Column headers are 12px SemiBold on
   `InboundChromeBrush`, with a 1px bottom divider.
-- Header and row column widths must match exactly. Change both definitions in
-  `MainWindow.xaml` together.
+- Header and row column widths always match, because `ColumnHeaderRow` sets both from one
+  `ListColumnLayout`. A new column goes in `ListColumnSets` and in the row template, at the same position.
+- A list with a header sorts by a click on it, with a small chevron for the direction, and a second click
+  reverses. Blank cells stay at the end either way. Remote and archive rows stay on top of the download
+  list whatever the order. Dragging a header's right edge resizes its column and a double-click on that
+  edge puts it back. Shift with Left or Right does the same from the keyboard, and the header is one Tab stop
+  that the arrow keys move along.
+- Until a column is resized, the name column takes the room left. The first resize fixes it, and the last
+  column takes the room left from then on, so a column's right edge follows the pointer. A package's file
+  is indented inside its icon and name cells, never with the row's padding, or its columns would leave
+  their headers.
+- Dragging a box with the mouse selects the rows it touches in the download list, and ticks them in a file
+  tree, where a box replaces what is there and Ctrl adds to it. A tree's open folder row is passed over,
+  since its files have rows of their own; a closed one stands for everything in it. The box is
+  `InboundProgressFillBrush` around `InboundHighlightBrush`. A row's own buttons and checkboxes never start one.
 - Leave unknown values blank: no "0 B" for an unknown size and no empty speeds.
   Use "—" for missing live values in summaries.
 - Units: binary multiples labelled `KB`/`MB`/`GB` (1024-based), the same in the

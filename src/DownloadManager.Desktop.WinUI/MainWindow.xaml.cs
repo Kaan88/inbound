@@ -12,7 +12,7 @@ namespace DownloadManager.Desktop.WinUI;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly ObservableCollection<JobViewModel> _visibleJobs = new();
+    private ObservableCollection<JobViewModel> _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
     private readonly HostConnection _connection;
     private readonly RemoteClient _remote;
@@ -120,6 +120,8 @@ public sealed partial class MainWindow : Window
         _connection.Start();
         UiTrace.Write("MainWindow connection started");
 
+        InitializeListHeader();
+
         // On connections of its own: nothing it waits for can hold up the one above.
         _remote = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
         InitializeRemoteUi();
@@ -145,17 +147,11 @@ public sealed partial class MainWindow : Window
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
-            () =>
-            {
-                _sortKey = "size";
-                _sortAscending = false;
-                RebuildVisible();
-            }));
+            () => ApplySort("size", ascending: false)));
 
-        _sortKey = _uiState.SortKey is "added" or "name" or "size" or "status" or "rate" or "lastTry"
-            ? _uiState.SortKey
-            : "added";
+        _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
         _sortAscending = _uiState.SortAscending;
+        _jobsHeader.ShowSort(_sortKey, _sortAscending);
         _toolbarLarge = _uiState.ToolbarLarge;
         _hideCategories = _uiState.HideCategories;
         HideCategoriesMenuItem.IsChecked = _hideCategories;
@@ -579,15 +575,7 @@ public sealed partial class MainWindow : Window
             if (Matches(job)) top.Add(job);
         }
 
-        var ordered = _sortKey switch
-        {
-            "name" => _sortAscending ? top.OrderBy(j => j.FileName, NaturalStringComparer.Instance) : top.OrderByDescending(j => j.FileName, NaturalStringComparer.Instance),
-            "size" => _sortAscending ? top.OrderBy(j => j.TotalSize) : top.OrderByDescending(j => j.TotalSize),
-            "status" => _sortAscending ? top.OrderBy(j => j.State) : top.OrderByDescending(j => j.State),
-            "rate" => _sortAscending ? top.OrderBy(j => j.BytesPerSecond) : top.OrderByDescending(j => j.BytesPerSecond),
-            "lastTry" => _sortAscending ? top.OrderBy(j => j.LastUpdated) : top.OrderByDescending(j => j.LastUpdated),
-            _ => _sortAscending ? top.OrderBy(j => j.CreatedAt) : top.OrderByDescending(j => j.CreatedAt),
-        };
+        var ordered = Sorted(top);
 
         // On top and in their own order: a sort is about local files, and these have no size or rate.
         target.AddRange(RemoteRowsInView());
@@ -597,11 +585,19 @@ public sealed partial class MainWindow : Window
         {
             target.Add(row);
             if (row.IsPackage && row.IsExpanded)
-                foreach (var child in row.Children.Where(Matches)) target.Add(child);
+                foreach (var child in _sortKey == "added" ? row.Children.Where(Matches) : Sorted(row.Children.Where(Matches))) target.Add(child);
         }
 
         // Sync in place instead of Clear + Add: rows that stay keep their containers, so
         // progress bars do not replay from another row's value and nothing jumps.
+        // A sort can put most of a long list out of place, and one move at a time would crawl.
+        var outOfPlace = target.Where((row, at) => at >= _visibleJobs.Count || !ReferenceEquals(_visibleJobs[at], row)).Count();
+        if (outOfPlace > ListSort.MostMovesInPlace)
+        {
+            _visibleJobs = new ObservableCollection<JobViewModel>(target);
+            JobsList.ItemsSource = _visibleJobs;
+        }
+
         for (var i = 0; i < target.Count; i++)
         {
             if (i < _visibleJobs.Count && ReferenceEquals(_visibleJobs[i], target[i])) continue;
@@ -783,6 +779,8 @@ public sealed partial class MainWindow : Window
 
     private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        // One box can change many rows. It says so itself as it goes, and when it ends.
+        if (_regionKeep is not null) return;
         UpdateButtons();
         UpdateStatusText();
     }
@@ -1455,6 +1453,13 @@ public sealed partial class MainWindow : Window
 
     private void OpenPackageWindow(Guid packageId)
     {
+        // A package of one is an ordinary row on the list, so it gets an ordinary file's window.
+        if (ProgressDetailRules.OnlyFile(_groups.FirstOrDefault(group => group.Id == packageId), _jobsById.ContainsKey) is { } only)
+        {
+            OpenDownloadWindow(only);
+            return;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--package {packageId:D}") { UseShellExecute = false });
@@ -2071,17 +2076,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (_sortKey == key)
-        {
-            _sortAscending = !_sortAscending;
-        }
-        else
-        {
-            _sortKey = key;
-            _sortAscending = key is "name" or "status";
-        }
-
-        RebuildVisible();
+        var (next, ascending) = ListSort.Next(_sortKey, _sortAscending, key);
+        ApplySort(next, ascending);
     }
 
     private void MenuLargeToolbar_Click(object sender, RoutedEventArgs e) => SetToolbarScale(large: true);

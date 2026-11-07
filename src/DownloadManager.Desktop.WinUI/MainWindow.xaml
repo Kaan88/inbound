@@ -358,30 +358,8 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
-                    <Grid Padding="4,0" ColumnSpacing="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="30" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="30" />
-                            <ColumnDefinition Width="78" />
-                            <ColumnDefinition Width="140" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="78" />
-                            <ColumnDefinition Width="86" />
-                            <ColumnDefinition Width="116" />
-                            <ColumnDefinition Width="210" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="" />
-                        <TextBlock Grid.Column="1" Text="File Name" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="2" Text="Q" Style="{StaticResource InboundHeaderTextStyle}" HorizontalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="Size" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="4" Text="Status" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock x:Name="ExtractionHeader" Grid.Column="5" Width="140" Text="Extraction" Visibility="Collapsed" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="6" Text="Time left" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="7" Text="Transfer rate" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="8" Text="Last Try Date" Style="{StaticResource InboundHeaderTextStyle}" />
-                        <TextBlock Grid.Column="9" Text="Description" Style="{StaticResource InboundHeaderTextStyle}" />
-                    </Grid>
+                    <!-- Built in ColumnHeaderRow: a button that sorts and a grip that resizes, per column. -->
+                    <Grid x:Name="JobsHeader" Padding="4,0" ColumnSpacing="0" />
                 </Border>
 
                 <Grid Grid.Row="1">
@@ -408,7 +386,7 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="27" Padding="{Binding RowPadding}" ColumnSpacing="0" Background="Transparent"
+                                <Grid Height="27" Padding="4,0" ColumnSpacing="0" Background="Transparent"
                                       BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="{Binding RowBorder}"
                                       ToolTipService.ToolTip="{Binding RowToolTip}">
                                     <Grid.ColumnDefinitions>
@@ -423,14 +401,14 @@
                                         <ColumnDefinition Width="116" />
                                         <ColumnDefinition Width="210" />
                                     </Grid.ColumnDefinitions>
-                                    <Grid Visibility="{Binding FileIconAreaVisibility}">
+                                    <Grid Grid.ColumnSpan="2" Width="30" HorizontalAlignment="Left" Margin="{Binding IconIndent}" Visibility="{Binding FileIconAreaVisibility}">
                                         <FontIcon Glyph="{Binding FileGlyph}" FontSize="15" Foreground="{ThemeResource InboundIconInfoBrush}"
                                                   Visibility="{Binding FileGlyphVisibility}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                         <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}"
                                                Width="16" Height="16" VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Grid>
-                                    <Border Width="22" Height="22" CornerRadius="4" Background="Transparent"
+                                    <Border Tag="RowAction" Width="22" Height="22" CornerRadius="4" Background="Transparent"
                                             Visibility="{Binding ChevronVisibility}"
                                             VerticalAlignment="Center" HorizontalAlignment="Center"
                                             Tapped="PackageChevron_Tapped" DoubleTapped="PackageChevron_DoubleTapped"
@@ -442,7 +420,7 @@
                                                   Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
+                                    <TextBlock Grid.Column="1" Margin="{Binding NameIndent}" Text="{Binding FileName}" FontSize="12" FontWeight="{Binding NameWeight}" FontStyle="{Binding NameStyle}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"
@@ -454,7 +432,7 @@
                                         <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Style="{StaticResource InboundProgressBarStyle}" Margin="0,1,6,0"
                                                      Visibility="{Binding ProgressVisibility}" />
                                     </StackPanel>
-                                    <Grid Grid.Column="5" Width="140" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
+                                    <Grid Grid.Column="5" Visibility="{Binding ExtractionColumnVisibility}" ColumnSpacing="4" Padding="0,0,6,0"
                                           Background="Transparent" ToolTipService.ToolTip="{Binding ArchiveToolTip}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
@@ -486,6 +464,7 @@
                                Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                 TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    <Canvas x:Name="JobsRegionLayer" IsHitTestVisible="False" />
                 </Grid>
             </Grid>
             </ScrollViewer>

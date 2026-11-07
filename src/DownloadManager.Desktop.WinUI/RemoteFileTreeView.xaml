@@ -71,6 +71,7 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+                <Canvas x:Name="RegionLayer" IsHitTestVisible="False" />
                 <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                            Margin="16" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            AutomationProperties.Name="Files status" AutomationProperties.LiveSetting="Polite" />

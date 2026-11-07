@@ -90,11 +90,29 @@ public sealed partial class RemoteFileTreeView : UserControl
     private RemoteFileTree _tree = RemoteFileTree.Empty;
     private bool _readOnly;
     private bool _showingChecked;
+    private readonly RegionDrag _region;
+    private List<string> _regionKeep = [];
 
     public RemoteFileTreeView()
     {
         InitializeComponent();
         RowsList.ItemsSource = _rows;
+
+        // Ticking is what this tree is for and its rows have no other selection, so a box ticks.
+        _region = new RegionDrag(RowsList, RegionLayer, () => _readOnly || _tree.ChoosableCount == 0, BeginRegion, ChangeRegion, () => _regionKeep = []);
+    }
+
+    private void BeginRegion(bool add)
+    {
+        _regionKeep = add ? _tree.ChosenFileIds.ToList() : [];
+        ChangeRegion(null, null, false);
+    }
+
+    private void ChangeRegion(RowRange? before, RowRange? now, bool rowsMoved)
+    {
+        var rows = now is { } range ? _rows.Skip(range.First).Take(range.Last - range.First + 1).Select(row => row.Node) : [];
+        _tree.ChooseRows(_regionKeep, rows);
+        Changed();
     }
 
     /// <summary>What is chosen changed.</summary>

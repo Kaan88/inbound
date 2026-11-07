@@ -17,12 +17,16 @@ namespace DownloadManager.Desktop.WinUI;
 /// <param name="LocalStatus">How this job's local downloads are doing, or null when none are known.</param>
 /// <param name="OpenPackage">Opens a package's progress window.</param>
 /// <param name="RememberFolder">Records a folder as the last one used.</param>
+/// <param name="Ui">The main window's saved layout, which this window's columns and order are part of.</param>
+/// <param name="SaveUi">Saves that layout.</param>
 internal sealed record MyProviderContext(
     Func<SettingsDto?> Settings,
     Func<RemoteJobDto, DownloadedPlaces> DownloadedPlaces,
     Func<RemoteJobDto, string?> LocalStatus,
     Action<Guid> OpenPackage,
-    Action<string> RememberFolder);
+    Action<string> RememberFolder,
+    UiState Ui,
+    Action SaveUi);
 
 /// <summary>One line of the item list. Public because the list's bindings read it by reflection.</summary>
 public sealed class RemoteItemRow : INotifyPropertyChanged
@@ -155,6 +159,11 @@ internal sealed class MyProviderWindow : Window
     private bool _checkingLocation;
     private long _locationCheckedAt;
     private readonly DispatcherTimer _localTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly ListColumnLayout _columns = ListColumnSets.ProviderItems();
+    private ColumnHeaderRow _header = null!;
+    private string? _sortKey;
+    private bool _sortAscending;
+    private bool _reordering;
 
     private readonly Grid _root = new() { Padding = new Thickness(14), RowSpacing = 8 };
     private readonly SelectorBar _tabs = new();
@@ -314,12 +323,12 @@ internal sealed class MyProviderWindow : Window
         _delete.Content = $"Delete from {_name}…";
         AutomationProperties.SetName(_delete, $"Delete this item from {_name}");
         ToolTipService.SetToolTip(_delete, "Asks first. It can't be undone.");
-        ToolTipService.SetToolTip(_showProgress, "The files are ordinary downloads in the main list. This opens their package's progress.");
+        ToolTipService.SetToolTip(_showProgress, "The files are ordinary downloads in the main list. This opens their progress details.");
 
-        // The list: same density as the main one.
+        // The list: same density as the main one. The header sets the widths, so that wide columns can scroll sideways.
         if (Application.Current.Resources.TryGetValue("InboundListRowStyle", out var rowStyle) && rowStyle is Style style) _list.ItemContainerStyle = style;
         _list.ItemTemplate = (DataTemplate)XamlReader.Load(ItemTemplate);
-        var listGrid = new Grid();
+        var listGrid = new Grid { MinWidth = _columns.MinimumTotal };
         listGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(27) });
         listGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         listGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -329,7 +338,18 @@ internal sealed class MyProviderWindow : Window
         listArea.Children.Add(_empty);
         AddAt(listGrid, listArea, row: 1);
         AddAt(listGrid, _loadMore, row: 2);
-        _listFrame.Child = listGrid;
+        var sideways = new ScrollViewer
+        {
+            Content = listGrid,
+            HorizontalScrollMode = ScrollMode.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        sideways.SizeChanged += (_, args) => listGrid.Width = args.NewSize.Width;
+        _header.MinimumWidthChanged += width => listGrid.MinWidth = width;
+        _header.ApplyToAll();
+        _listFrame.Child = sideways;
         AddAt(_root, _listFrame, row: 1);
 
         // The chosen item.
@@ -388,27 +408,56 @@ internal sealed class MyProviderWindow : Window
         _root.Loaded += (_, _) => ApplyColors();
         _root.ActualThemeChanged += (_, _) => ApplyColors();
 
-        // The same widths as the rows in ItemTemplate.
-        var columns = new (string Text, GridLength Width)[]
+        var saved = _context.Ui;
+        _columns.Import(saved.ProviderColumnWidths);
+        _sortKey = ListColumnSets.IsProviderSort(saved.ProviderSortKey) ? saved.ProviderSortKey : null;
+        _sortAscending = saved.ProviderSortAscending;
+        _header = new ColumnHeaderRow(_columns, header, _list, _root, HeaderSort_Clicked, () =>
         {
-            ("Name", new GridLength(1, GridUnitType.Star)),
-            ("Type", new GridLength(86)),
-            ("Status", new GridLength(190)),
-            ("Size", new GridLength(70)),
-            ("Files", new GridLength(40)),
-            ("Added", new GridLength(82)),
-            ("Expires", new GridLength(82)),
-        };
-        var column = 0;
-        foreach (var (text, width) in columns)
+            saved.ProviderColumnWidths = _columns.Export();
+            _context.SaveUi();
+        });
+        if (_sortKey is not null) _header.ShowSort(_sortKey, _sortAscending);
+        return chrome;
+    }
+
+    private void HeaderSort_Clicked(string key)
+    {
+        (_sortKey, _sortAscending) = _sortKey is { } current ? ListSort.Next(current, _sortAscending, key) : (key, ListSort.StartsAscending(key));
+        _header.ShowSort(_sortKey, _sortAscending);
+        _context.Ui.ProviderSortKey = _sortKey;
+        _context.Ui.ProviderSortAscending = _sortAscending;
+        _context.SaveUi();
+        if (_page is { } page) KeepingSelection(() => SortRows(page));
+    }
+
+    /// <summary>Puts a page in the order the header asks for. With no order asked for, it stays as the provider answered.</summary>
+    private void SortRows(KindPage page)
+    {
+        if (_sortKey is not { } key) return;
+        var target = RemoteItemSort.Order(page.Rows.ToList(), row => row.Item, row => row.View, key, _sortAscending).ToList();
+        for (var i = 0; i < target.Count; i++)
         {
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
-            var label = new TextBlock { Text = text, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(label, column++);
-            header.Children.Add(label);
+            if (!ReferenceEquals(page.Rows[i], target[i])) page.Rows.Move(page.Rows.IndexOf(target[i]), i);
+        }
+    }
+
+    /// <summary>A moved row can lose its selection for a moment, which must not read as another item being chosen and read its files again.</summary>
+    private void KeepingSelection(Action reorder)
+    {
+        var selected = _selected;
+        _reordering = true;
+        try
+        {
+            reorder();
+            if (selected is not null && _page?.Rows.Contains(selected) == true && !ReferenceEquals(_list.SelectedItem, selected)) _list.SelectedItem = selected;
+        }
+        finally
+        {
+            _reordering = false;
         }
 
-        return chrome;
+        OnItemSelected();
     }
 
     private static void AddAt(Panel panel, FrameworkElement element, int row = 0, int column = 0)
@@ -426,6 +475,7 @@ internal sealed class MyProviderWindow : Window
         var page = _pages.FirstOrDefault(candidate => candidate.Kind == kind);
         if (page is null) return;
         _page = page;
+        SortRows(page);
         _list.ItemsSource = page.Rows;
         _list.SelectedItem = page.Rows.FirstOrDefault(row => row.Item.ItemId == page.SelectedItemId);
         OnItemSelected();
@@ -473,7 +523,11 @@ internal sealed class MyProviderWindow : Window
             page.Loaded = true;
             page.HasMore = result.HasMore;
             page.NextOffset = (more ? page.NextOffset : 0) + result.Items.Count;
-            Apply(page, result.Items, more);
+            KeepingSelection(() =>
+            {
+                Apply(page, result.Items, more);
+                SortRows(page);
+            });
             if (onShow) _status.Show(result.Items.Count == 0 && !more ? string.Empty : Counted(page));
             UpdateEmptyState();
             if (onShow && !more && _selected is not null) RenderDetail(readFiles: true);
@@ -572,6 +626,7 @@ internal sealed class MyProviderWindow : Window
 
     private void OnItemSelected()
     {
+        if (_reordering) return;
         var row = _list.SelectedItem as RemoteItemRow;
         if (ReferenceEquals(row, _selected)) return;
         _selected = row;
