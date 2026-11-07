@@ -743,6 +743,9 @@ internal static partial class RemoteText
         return parts.Count == 0 ? string.Empty : $"Added {string.Join(" and ", parts)}.";
     }
 
+    /// <summary>A line of an add that was refused, with the reason. Addresses in the reason are taken out, as everywhere.</summary>
+    public static string Refused(string name, string? error, string? provider = null) => $"{name}: {Failure(error, null, provider)}";
+
     /// <summary>
     /// For something added again, by the name its row has, so it can be found: a folder link's line only knows the
     /// item's number. Never "added": it was on the list already, and the Host's note says what of the new request it

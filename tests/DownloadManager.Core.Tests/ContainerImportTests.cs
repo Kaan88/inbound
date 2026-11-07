@@ -358,6 +358,24 @@ public sealed class ContainerImportTests
     }
 
     [Fact]
+    public void What_an_import_lists_afterwards_never_carries_an_address_the_Host_gave()
+    {
+        const string link = "https://cdn1.tb-cdn.io/dl/1?token=invented-token";
+        var job = Job("intended");
+        var outcomes = Outcomes(false,
+            new RemoteContainerAddOutcomeDto { EntryId = 1, Error = $"Fetcher refused {link}" },
+            new RemoteContainerAddOutcomeDto { EntryId = 2, Ok = true, Existing = true, JobId = job.Id, Job = job, Note = $"Already there as {link}." });
+
+        Assert.Equal(2, outcomes.Problems.Count);
+        Assert.StartsWith("entry 1: Fetcher refused", outcomes.Problems[0], StringComparison.Ordinal);
+        Assert.All(outcomes.Problems, line =>
+        {
+            Assert.DoesNotContain("invented-token", line, StringComparison.Ordinal);
+            Assert.DoesNotContain("tb-cdn", line, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void Every_entry_that_wasnt_added_is_listed_however_many_there_are()
     {
         var outcomes = Outcomes(false, [.. Enumerable.Range(1, 40).Select(id => new RemoteContainerAddOutcomeDto { EntryId = id, Error = "No." })]);

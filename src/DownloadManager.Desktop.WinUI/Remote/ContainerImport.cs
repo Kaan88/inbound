@@ -276,7 +276,7 @@ internal sealed class ContainerOutcomes
         .Where(line => !line.Outcome.Ok || line.Outcome.Existing)
         .Select(line => line.Outcome.Ok
             ? RemoteText.AlreadyListed(line.Name, line.Outcome.Note)
-            : $"{line.Name}: {RemoteText.Failure(line.Outcome.Error)}")
+            : RemoteText.Refused(line.Name, line.Outcome.Error))
         .ToList();
 
     public string Summary(string provider)

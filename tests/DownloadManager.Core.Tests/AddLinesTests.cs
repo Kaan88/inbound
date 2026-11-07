@@ -619,6 +619,28 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    public void The_message_after_an_add_never_carries_a_secret_of_a_link_or_of_what_the_Host_said()
+    {
+        // What the message is made of, as the add makes it: each line's name, and the Host's reason or note.
+        var hoster = RemoteText.AddLineWords(Line(HosterLink, Kind("hosterLink")), "TorBox").Name;
+        var direct = RemoteText.AddLineWords(Line(DirectLink, Kind("providerDirectLink")), "TorBox").Name;
+        var listed = new RemoteJobDto { Name = $"Named after {DirectLink}", ProviderName = "TorBox", State = "waiting" };
+        var report = RemoteText.AddReport(RemoteText.AddedWords(1, 1, "TorBox"), [],
+        [
+            RemoteText.Refused(hoster, $"TorBox refused {HosterLink}", "TorBox"),
+            RemoteText.Refused(direct, $"Could not reach {DirectLink}"),
+            RemoteText.AlreadyListed(listed, hoster, $"The folder given for {DirectLink} wasn't used."),
+            RemoteText.AlreadyListed(hoster, $"See {HosterLink}"),
+        ]);
+
+        Assert.Contains("TorBox refused", report, StringComparison.Ordinal);
+        foreach (var secret in new[] { "SecretKeyValue", "AbCdEf", "aaaa-bbbb-cccc", "token=" })
+        {
+            Assert.DoesNotContain(secret, report, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void Something_found_on_the_list_again_is_named_as_its_row_is_so_it_can_be_found()
     {
         // A folder link's line knows only the item's number; the row it was found as has the item's name.

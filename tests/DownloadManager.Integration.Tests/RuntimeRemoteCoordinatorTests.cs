@@ -167,6 +167,10 @@ public sealed partial class RuntimeServiceTests
 
         public RemoteCoordinatorOptions Options { get; init; } = new();
 
+        /// <summary>The tray balloons the Host would show, listening as the Host does, so the search for secrets covers them too.</summary>
+        public List<RemoteNotice> Told { get; } = [];
+        private RemoteNotices? _notices;
+
         public static async Task<RemoteRig> CreateAsync(TestServerHost server, string? key = MockKey, int connections = 2, bool loops = false, RemoteCoordinatorOptions? options = null)
         {
             var box = await TorBoxRig.CreateAsync(server, key: key, connections: connections);
@@ -175,7 +179,18 @@ public sealed partial class RuntimeServiceTests
             rig.Mock.AddHoster("Pretend Down", ["down.invalid", "127.0.0.1", "localhost"], "/hoster-down/", available: false, note: "Down for maintenance");
             rig.Jobs = rig.NewCoordinator(loops);
             await rig.Jobs.StartAsync();
+            rig.ListenForNotices();
             return rig;
+        }
+
+        /// <summary>As the Host does once its coordinator has started.</summary>
+        private void ListenForNotices()
+        {
+            _notices?.Dispose();
+            _notices = RemoteNotices.Listen(Jobs, Time, () => true, () => false, notice =>
+            {
+                lock (Told) Told.Add(notice);
+            });
         }
 
         private RemoteJobCoordinator NewCoordinator(bool loops)
@@ -210,6 +225,7 @@ public sealed partial class RuntimeServiceTests
             Host = new KillableHost(ctx.Service);
             Jobs = NewCoordinator(loops);
             await Jobs.StartAsync();
+            ListenForNotices();
         }
 
         /// <summary>Lets a coordinator with a chosen store and host start in place of the running one.</summary>
@@ -219,6 +235,7 @@ public sealed partial class RuntimeServiceTests
             Store = new KillableStore(new JsonRemoteJobStore(Ctx.Paths));
             Jobs = NewCoordinator(false);
             await Jobs.StartAsync();
+            ListenForNotices();
         }
 
         public Task RunAsync() => Jobs.RunDueAsync();
@@ -274,17 +291,21 @@ public sealed partial class RuntimeServiceTests
             var views = JsonSerializer.Serialize(Jobs.List());
             string lines;
             lock (Log) lines = string.Join('\n', Log);
+            string balloons;
+            lock (Told) balloons = string.Join('\n', Told.Select(notice => $"{notice.Title}\n{notice.Message}"));
             foreach (var secret in all)
             {
                 await AssertSecretNotOnDiskAsync(Ctx, secret);
                 Assert.DoesNotContain(secret, snapshot);
                 Assert.DoesNotContain(secret, views);
                 Assert.DoesNotContain(secret, lines);
+                Assert.DoesNotContain(secret, balloons);
             }
         }
 
         public async ValueTask DisposeAsync()
         {
+            _notices?.Dispose();
             await Jobs.DisposeAsync();
             foreach (var ctx in _contexts) await ctx.DisposeAsync();
             await Box.DisposeAsync();

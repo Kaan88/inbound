@@ -258,6 +258,17 @@ internal static class Program
                         break;
                 }
             }, log.Warn);
+
+            // Remote items that come to need the user, by count. Ready to choose follows the completion setting, as
+            // finished downloads do; a failure always shows, as a failed download's does.
+            using var remoteNotices = remoteStarted
+                ? RemoteNotices.Listen(remoteJobs, TimeProvider.System, () => currentSettings.NotifyOnCompletion, AppWindowInFront.Now, notice =>
+                {
+                    // Counts and the provider's name only, so it can be logged as it is.
+                    log.Info($"Remote notice: {notice.Title}: {notice.Message}");
+                    tray.Notify(notice.Title, notice.Message);
+                }, log.Warn)
+                : null;
             using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
             {
                 // Process launch has no WinForms affinity. Keep it off the engine's event path
@@ -296,6 +307,7 @@ internal static class Program
 
             // Shutting down stops what is running, which isn't news about any package.
             downloadNotices.Dispose();
+            remoteNotices?.Dispose();
             downloadWindows.Dispose();
             try
             {

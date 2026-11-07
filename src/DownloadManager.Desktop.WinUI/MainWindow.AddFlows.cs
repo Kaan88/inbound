@@ -423,7 +423,7 @@ public sealed partial class MainWindow
 
             // A refusal is the end of it for this link. Nothing here tries it any other way. Found again, it says what
             // of this add it didn't use, such as a folder.
-            if (!result.Ok) problems.Add($"{name}: {RemoteText.Failure(result.Error, null, provider)}");
+            if (!result.Ok) problems.Add(RemoteText.Refused(name, result.Error, provider));
             else if (result.Existing) problems.Add(RemoteText.AlreadyListed(result.Job, name, result.Note));
             else if (result.Job is not null) sent++;
         }
