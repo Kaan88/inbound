@@ -1,5 +1,24 @@
 # Progress — session handoff
 
+### TB.F11, TB.F12, TB.F13: direct links in Add Links, hidden addresses, My TorBox closes (2026-11-07, branch `torbox-addflow`)
+
+Traced against `tools/TestServer` and a fake CDN in the tests. No live run: the links the owner used had expired, and nothing was added to the account. Each new test fails with its fix undone.
+- **TB.F12, security: a direct link's address is no longer shown, copied or exported anywhere.** One rule, `ShownAddress`, says what of an address may be shown. A link on a TorBox host, or any address the Host says held the key (`JobDto.AddressHidden`), shows its site alone, such as `store-1.weur.tb-cdn.st`, labelled Site. A masked link still gave away the account's file id. Why the completion window showed the token while the progress window masked it was not found for certain: both now show the site, from the same rule.
+  - Uses it: the progress and Download complete windows, Properties, the list's second line and tooltip, the Description column, the Refresh address box (it starts empty and an empty box tries the saved link), the Add Links lines and the CLI list and details.
+  - The JSON list export leaves hidden addresses out, as it already did for provider files. Logs were already masked, and recent addresses already left out protected links. The test below checks both.
+  - No secret is kept anywhere new. The engine still downloads from the protected copy.
+  - Tests: `ShownAddressTests` (14), and `APastedDirectLinksTokenReachesNoSurface`, which pastes a link with a known key and checks the snapshot every client gets, the export, the service log, recent addresses and the files on disk.
+- **TB.F11: each report traced and fixed.**
+  - *Three windows.* The Host put each pasted link in its package only after announcing it, so the first "started" saw a single job with no package and opened its own window. The window rule also wanted more than one member. Jobs now join their package before anyone hears of them, and the window rule moved to `DownloadWindows` in the Runtime, where it is tested: one package window per start, and one window when a package completes.
+  - *The Download complete window for one file of a package.* The same rule: a finished file of a package waits for the package's own completion.
+  - *The empty file failed.* The engine asks for `bytes=0-` once it knows the server. For an empty file the server can only answer "nothing in that range" (416 or 206 with `bytes */0`), which was taken as a failure. With no bytes, a total of 0 and no other expected size, that answer now completes an empty file. With no size known it still fails as before.
+  - *A name left as the link's id.* The add-time name check is a separate request, and a failed one left the id. The name in the transfer's own answer is now used when the name came only from the address, before any byte is written. A name the user typed, a moved or renamed file, and a name that is the token are never replaced.
+  - Tests: `DirectLinkBatchTests` (3 more beside the token test), and 3 in `ResolvedLinkEngineTests`.
+- **TB.F13: Download in My TorBox closes the window once the Host has the download on its way.** A refusal, a job that failed or was blocked at once, or a note that part of the request wasn't used keeps it open with the reason. `RemoteRules.DownloadStarted` holds the rule, with tests. Show progress and Open downloaded location are gone, since they only served the open window. Progress details on the package row opens the package window, and that window has Open folder once it is done.
+- **Not checked:** none of this was walked on real screens. Why the owner's own name check failed is not known, since the links had expired. How the real CDN answers a range request for an empty file is not known: both answers are handled.
+- **Suites, one run each at the end:** Archives 293, Containers 183, Core 766, Engine 144, Integration 993, TorBox 314, all passed. In an earlier full Integration run, `KilledWithAPackageHalfDone_TheFinishedFileIsKeptAndTheRestGoOn` failed once and then passed 3 of 3 alone. That test covers provider jobs, which these changes leave alone. The failure message wasn't kept, so the cause is not known.
+- Commits: `4549382` (TB.F11, TB.F12), `57015e1` (TB.F13).
+
 ### Owner's second try in the sandbox (`0870d34`, 2026-11-07)
 
 Recorded as reported. Nothing is traced or fixed yet. See ROADMAP TB.F9 and TB.F11 to TB.F14.
