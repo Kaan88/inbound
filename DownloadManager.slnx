@@ -22,6 +22,7 @@
     <Project Path="tests/DownloadManager.Core.Tests/DownloadManager.Core.Tests.csproj" />
     <Project Path="tests/DownloadManager.Engine.Tests/DownloadManager.Engine.Tests.csproj" />
     <Project Path="tests/DownloadManager.Integration.Tests/DownloadManager.Integration.Tests.csproj" />
+    <Project Path="tests/DownloadManager.TorBox.LiveTests/DownloadManager.TorBox.LiveTests.csproj" />
     <Project Path="tests/DownloadManager.TorBox.Tests/DownloadManager.TorBox.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
