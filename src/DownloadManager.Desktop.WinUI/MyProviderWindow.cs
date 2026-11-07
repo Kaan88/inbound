@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.Diagnostics;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -13,17 +12,13 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>What the My provider window needs from the main window, which knows the local downloads and settings.</summary>
 /// <param name="Settings">The Host's settings as last seen, or null before the first snapshot.</param>
-/// <param name="DownloadedPlaces">Where this job's local downloads should be. Asking whether they are there goes off the UI thread.</param>
 /// <param name="LocalStatus">How this job's local downloads are doing, or null when none are known.</param>
-/// <param name="OpenPackage">Opens a package's progress window.</param>
 /// <param name="RememberFolder">Records a folder as the last one used.</param>
 /// <param name="Ui">The main window's saved layout, which this window's columns and order are part of.</param>
 /// <param name="SaveUi">Saves that layout.</param>
 internal sealed record MyProviderContext(
     Func<SettingsDto?> Settings,
-    Func<RemoteJobDto, DownloadedPlaces> DownloadedPlaces,
     Func<RemoteJobDto, string?> LocalStatus,
-    Action<Guid> OpenPackage,
     Action<string> RememberFolder,
     UiState Ui,
     Action SaveUi);
@@ -82,7 +77,6 @@ public sealed class RemoteItemRow : INotifyPropertyChanged
 internal sealed class MyProviderWindow : Window
 {
     private const int PageSize = 50;
-    private const long LocationCheckEveryMilliseconds = 1500;
 
     /// <summary>Header and a row or two, with Load more when it shows.</summary>
     private const double ListMinimumHeight = 110;
@@ -154,10 +148,6 @@ internal sealed class MyProviderWindow : Window
     private string _freeDestination = string.Empty;
     private RemoteItemRow? _treeRow;
     private string _filesProblem = string.Empty;
-    private Guid? _locationJob;
-    private bool _locationThere;
-    private bool _checkingLocation;
-    private long _locationCheckedAt;
     private readonly DispatcherTimer _localTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly ListColumnLayout _columns = ListColumnSets.ProviderItems();
     private ColumnHeaderRow _header = null!;
@@ -190,8 +180,6 @@ internal sealed class MyProviderWindow : Window
     private readonly StatusLine _status;
     private readonly Button _downloadSelected = new() { Content = "Download selected", MinWidth = 92, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     private readonly Button _downloadAll = new() { Content = "Download all", MinWidth = 92 };
-    private readonly Button _showProgress = new() { Content = "Show progress", MinWidth = 92, Visibility = Visibility.Collapsed };
-    private readonly Button _openLocation = new() { Content = "Open downloaded location", MinWidth = 92, Visibility = Visibility.Collapsed };
     private readonly Button _delete = new() { MinWidth = 92, Visibility = Visibility.Collapsed };
     private readonly Button _close = new() { Content = "Close", MinWidth = 92 };
 
@@ -239,8 +227,6 @@ internal sealed class MyProviderWindow : Window
         };
         _downloadSelected.Click += (_, _) => _ = DownloadAsync(all: false);
         _downloadAll.Click += (_, _) => _ = DownloadAsync(all: true);
-        _showProgress.Click += (_, _) => ShowProgress();
-        _openLocation.Click += (_, _) => _ = OpenLocationAsync();
         _delete.Click += (_, _) => _ = DeleteFromProviderAsync();
         _close.Click += (_, _) => Close();
 
@@ -319,12 +305,10 @@ internal sealed class MyProviderWindow : Window
         AutomationProperties.SetName(_browse, "Browse for the destination folder");
         AutomationProperties.SetName(_downloadSelected, "Download the selected files");
         AutomationProperties.SetName(_downloadAll, "Download all files of this item");
-        AutomationProperties.SetName(_showProgress, "Show the download progress of this item");
         AutomationProperties.SetName(_close, $"Close My {_name}");
         _delete.Content = $"Delete from {_name}…";
         AutomationProperties.SetName(_delete, $"Delete this item from {_name}");
         ToolTipService.SetToolTip(_delete, "Asks first. It can't be undone.");
-        ToolTipService.SetToolTip(_showProgress, "The files are ordinary downloads in the main list. This opens their progress details.");
 
         // The list: same density as the main one. The header sets the widths, so that wide columns can scroll sideways.
         if (Application.Current.Resources.TryGetValue("InboundListRowStyle", out var rowStyle) && rowStyle is Style style) _list.ItemContainerStyle = style;
@@ -381,7 +365,7 @@ internal sealed class MyProviderWindow : Window
         AddAt(_root, _status.Text, row: 3);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
-        foreach (var button in new[] { _downloadSelected, _downloadAll, _showProgress, _openLocation, _delete, _close }) buttons.Children.Add(button);
+        foreach (var button in new[] { _downloadSelected, _downloadAll, _delete, _close }) buttons.Children.Add(button);
         AddAt(_root, new ScrollViewer { Content = buttons, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollMode = ScrollMode.Disabled }, row: 4);
 
         void ApplyColors()
@@ -813,42 +797,6 @@ internal sealed class MyProviderWindow : Window
         // Only what the Host would take: a job that knows its item, with local files behind it for the rest.
         _delete.Visibility = RemoteRules.CanDeleteFromProvider(job) ? Visibility.Visible : Visibility.Collapsed;
         _delete.IsEnabled = free;
-        _showProgress.Visibility = job is { State: "localStarted", PackageId: not null } ? Visibility.Visible : Visibility.Collapsed;
-        CheckLocation(job);
-        _openLocation.Visibility = _locationThere ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    /// <summary>
-    /// This runs often, and the downloads can be on a slow or missing network share. So the button goes
-    /// by the last answer, and one check at a time asks again off the UI thread.
-    /// </summary>
-    private void CheckLocation(RemoteJobDto? job)
-    {
-        var id = job is { State: "localStarted" } ? job.Id : (Guid?)null;
-        if (id != _locationJob)
-        {
-            _locationJob = id;
-            _locationThere = false;
-            _locationCheckedAt = 0;
-        }
-
-        if (id is not { } current || _checkingLocation || Environment.TickCount64 - _locationCheckedAt < LocationCheckEveryMilliseconds) return;
-        _ = CheckLocationAsync(current, _context.DownloadedPlaces(job!));
-    }
-
-    private async Task CheckLocationAsync(Guid id, DownloadedPlaces places)
-    {
-        _checkingLocation = true;
-        var there = await Task.Run(() => places.Find() is not null);
-        _checkingLocation = false;
-        if (_closed) return;
-        if (_locationJob == id)
-        {
-            _locationThere = there;
-            _locationCheckedAt = Environment.TickCount64;
-        }
-
-        UpdateActions();
     }
 
     /// <summary>A job already on the list keeps its folder. Taking another one means removing it from the list first.</summary>
@@ -925,8 +873,8 @@ internal sealed class MyProviderWindow : Window
             {
                 var result = await _client.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = all, FileIds = chosen }, token);
                 return result.Ok
-                    ? ("Your file choice was sent.", false)
-                    : (RemoteText.Failure(result.Error, null, _name), true);
+                    ? (string.Empty, false, true)
+                    : (RemoteText.Failure(result.Error, null, _name), true, false);
             });
             return;
         }
@@ -953,14 +901,15 @@ internal sealed class MyProviderWindow : Window
                 Selection = all ? "all" : "chosen",
                 FileIds = chosen,
             }, token);
-            if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true);
+            if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true, false);
             if (destination.Length > 0) _context.RememberFolder(destination);
-            var note = string.IsNullOrWhiteSpace(result.Note) ? string.Empty : $" {DownloadManager.Core.Providers.UrlRedactor.HideAddresses(result.Note)}";
-            return (Sent() + note, false);
+            // Started: the window has done its job and closes. Otherwise it stays and says why.
+            if (RemoteRules.DownloadStarted(result)) return (string.Empty, false, true);
+            if (!string.IsNullOrWhiteSpace(result.Note)) return (DownloadManager.Core.Providers.UrlRedactor.HideAddresses(result.Note) ?? string.Empty, true, false);
+            var added = result.Job!;
+            return (RemoteText.Failure(added.FailureMessage, added.FailureKind, _name), true, false);
         });
     }
-
-    private string Sent() => $"Added. Downloads appear in the main list once {_name} has the files ready.";
 
     private async Task CheckNowAsync()
     {
@@ -970,41 +919,9 @@ internal sealed class MyProviderWindow : Window
         {
             var result = await _client.CheckNowAsync(one?.Id, one is null ? _provider : null, token);
             return result.Ok
-                ? ($"Checking {_name} now. The status above changes when it answers, unless {_name} has asked this app to wait.", false)
-                : (RemoteText.Failure(result.Error, null, _name), true);
+                ? ($"Checking {_name} now. The status above changes when it answers, unless {_name} has asked this app to wait.", false, false)
+                : (RemoteText.Failure(result.Error, null, _name), true, false);
         });
-    }
-
-    private void ShowProgress()
-    {
-        if (_selected is { } row && RemoteRules.JobFor(_client.State.Jobs, row.Item) is { PackageId: { } package }) _context.OpenPackage(package);
-    }
-
-    private async Task OpenLocationAsync()
-    {
-        if (_selected is not { } row || RemoteRules.JobFor(_client.State.Jobs, row.Item) is not { } job) return;
-        var places = _context.DownloadedPlaces(job);
-        _openLocation.IsEnabled = false;
-        var problem = await Task.Run(() => OpenPlace(places));
-        if (_closed) return;
-        _openLocation.IsEnabled = true;
-        if (problem is not null) _status.Show(problem, isProblem: true);
-    }
-
-    /// <summary>Off the UI thread: all of this can wait on a slow or missing network share.</summary>
-    private static string? OpenPlace(DownloadedPlaces places)
-    {
-        try
-        {
-            if (places.Find() is not { } path) return "The downloaded files weren't found.";
-            if (Directory.Exists(path)) Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
-            else Process.Start(ShellActions.RevealFile(path));
-            return null;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
-        {
-            return "That folder couldn't be opened.";
-        }
     }
 
     private async Task DeleteFromProviderAsync()
@@ -1033,14 +950,14 @@ internal sealed class MyProviderWindow : Window
         await RunAsync($"Deleting from {_name}…", async token =>
         {
             var result = await _client.DeleteRemoteAsync(job.Id, confirmed: true, token);
-            if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true);
+            if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true, false);
             page?.Rows.Remove(row);
-            return ($"Deleted '{row.View.Name}' from {_name}.", false);
+            return ($"Deleted '{row.View.Name}' from {_name}.", false, false);
         });
         UpdateEmptyState();
     }
 
-    private async Task RunAsync(string working, Func<CancellationToken, Task<(string Text, bool IsProblem)>> call)
+    private async Task RunAsync(string working, Func<CancellationToken, Task<(string Text, bool IsProblem, bool Done)>> call)
     {
         _acting = true;
         UpdateBusy();
@@ -1048,7 +965,13 @@ internal sealed class MyProviderWindow : Window
         _status.Show(working);
         try
         {
-            var (text, isProblem) = await call(_closing.Token);
+            var (text, isProblem, done) = await call(_closing.Token);
+            if (done)
+            {
+                Close();
+                return;
+            }
+
             _status.Show(text, isProblem);
         }
         catch (OperationCanceledException)

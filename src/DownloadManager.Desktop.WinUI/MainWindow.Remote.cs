@@ -292,9 +292,7 @@ public sealed partial class MainWindow
         {
             window = new MyProviderWindow(_remote, account, new MyProviderContext(
                 () => _settings,
-                DownloadedPlacesOf,
                 LocalStatusOf,
-                OpenPackageWindow,
                 RememberFolder,
                 _uiState,
                 () => SaveUiState()));
@@ -314,12 +312,6 @@ public sealed partial class MainWindow
     private string? LocalStatusOf(RemoteJobDto job)
         => RemoteText.LocalWords(LocalFilesOf(job).Select(file => file.Dto).OfType<JobDto>().ToList());
 
-    /// <summary>Where this job's downloads should be. Only collects the paths: whether they are there is asked off the UI thread.</summary>
-    private DownloadedPlaces DownloadedPlacesOf(RemoteJobDto job)
-    {
-        var files = LocalFilesOf(job);
-        return new DownloadedPlaces(files.Select(file => file.FinalFilePath), files.Select(file => file.Destination).Append(job.Destination));
-    }
 
     /// <summary>The same memory Add URL fills: <c>remote.add</c> leaves it alone, so a folder chosen for a provider's item is saved here.</summary>
     private async void RememberFolder(string folder)

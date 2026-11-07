@@ -203,26 +203,6 @@ public sealed class RemoteFileTreeTests
 
 public sealed class RemoteRulesTests
 {
-    [Fact]
-    public void DownloadedPlacesPrefersAFileThatIsThereThenAFolderThatIsThere()
-    {
-        var folder = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "places-" + Guid.NewGuid().ToString("N"))).FullName;
-        try
-        {
-            var file = Path.Combine(folder, "done.bin");
-            File.WriteAllBytes(file, [1]);
-            var missing = Path.Combine(folder, "missing");
-
-            Assert.Equal(file, new DownloadedPlaces([null, missing, file], [folder]).Find());
-            Assert.Equal(folder, new DownloadedPlaces([missing], ["", missing, folder]).Find());
-            Assert.Null(new DownloadedPlaces([missing], [null, missing]).Find());
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
-
     private static RemoteJobDto Job(string state, string? stage = null, string? failureKind = null, bool approval = false) => new()
     {
         Id = Guid.NewGuid(),
@@ -235,6 +215,26 @@ public sealed class RemoteRulesTests
         ApprovalNeeded = approval,
         ItemId = "42",
     };
+
+    // TB.F13: Download in My provider closes the window once the Host has the job on its way, and only then.
+    [Theory]
+    [InlineData("intended", true)]
+    [InlineData("submitting", true)]
+    [InlineData("waiting", true)]
+    [InlineData("localStarted", true)]
+    [InlineData("failed", false)]
+    [InlineData("blocked", false)]
+    [InlineData("removed", false)]
+    public void ADownloadThatStartedClosesTheWindowAndOneThatFailedAtOnceDoesNot(string state, bool started)
+        => Assert.Equal(started, RemoteRules.DownloadStarted(new RemoteAddResultDto { Ok = true, Job = Job(state) }));
+
+    [Fact]
+    public void ARefusalOrANoteKeepsTheWindowOpen()
+    {
+        Assert.False(RemoteRules.DownloadStarted(new RemoteAddResultDto { Error = "No." }));
+        Assert.False(RemoteRules.DownloadStarted(new RemoteAddResultDto { Ok = true }));
+        Assert.False(RemoteRules.DownloadStarted(new RemoteAddResultDto { Ok = true, Existing = true, Note = "Your file choice was not used.", Job = Job("waiting") }));
+    }
 
     [Theory]
     [InlineData("intended", true)]

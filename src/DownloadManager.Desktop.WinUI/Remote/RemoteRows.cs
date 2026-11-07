@@ -81,16 +81,6 @@ internal static class RemoteItemSort
     };
 }
 
-/// <summary>Where a job's downloads should be: the paths are collected on the UI thread, and <see cref="Find"/> runs off it.</summary>
-internal sealed class DownloadedPlaces(IEnumerable<string?> files, IEnumerable<string?> folders)
-{
-    private readonly List<string> _files = files.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
-    private readonly List<string> _folders = folders.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).ToList();
-
-    /// <summary>A downloaded file, or the folder given when there is none yet. Null when neither is on disk. This can block for a long time on a slow or missing network share.</summary>
-    public string? Find() => _files.FirstOrDefault(File.Exists) ?? _folders.FirstOrDefault(Directory.Exists);
-}
-
 /// <summary>Which jobs get a row, which account gets which entry point, and what each state allows. Nothing here touches the UI.</summary>
 internal static class RemoteRules
 {
@@ -98,6 +88,14 @@ internal static class RemoteRules
     public static bool IsRow(RemoteJobDto job) => job.State is not ("localStarted" or "removed");
 
     public static bool SameProvider(string? left, string? right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether Download in My provider has done its job, so the window can close: the Host took the item as a job
+    /// that is on its way. A refusal, a job that failed or was blocked at once, or a note that something asked for
+    /// didn't happen keeps the window open with the reason.
+    /// </summary>
+    public static bool DownloadStarted(RemoteAddResultDto result)
+        => result is { Ok: true, Job: { } job } && string.IsNullOrWhiteSpace(result.Note) && job.State is not ("failed" or "blocked" or "removed");
 
     public static bool HasUsableKey(RemoteAccountDto account) => account is { HasKey: true, KeyUnreadable: false };
 
