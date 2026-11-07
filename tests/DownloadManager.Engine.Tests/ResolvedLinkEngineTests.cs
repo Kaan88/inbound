@@ -95,6 +95,93 @@ public sealed class ResolvedLinkEngineTests : IDisposable
         Assert.False(File.Exists(job.PartFilePath));
     }
 
+    /// <summary>
+    /// An empty file asked for as a range from zero has no byte to send, so the answer is the past-the-end one with
+    /// a total of 0. A pasted direct link knows no size beforehand; a provider's file may report its 0 bytes.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.PartialContent, null, 1)]
+    [InlineData(HttpStatusCode.RequestedRangeNotSatisfiable, null, 1)]
+    [InlineData(HttpStatusCode.PartialContent, 0L, 1)]
+    [InlineData(HttpStatusCode.RequestedRangeNotSatisfiable, 0L, 4)]
+    public async Task AnEmptyFileAskedForAsARangeFromZeroCompletesEmpty(HttpStatusCode status, long? expected, int connections)
+    {
+        var job = Job("empty.txt");
+        job.ExpectedTotalBytes = expected;
+        job.TotalBytes = expected;
+        job.RequestedConnections = connections;
+        var ranges = new List<string?>();
+        using var handler = new Handler(request =>
+        {
+            lock (ranges) ranges.Add(request.Headers.Range?.ToString());
+            var response = new HttpResponseMessage(status) { Content = new ByteArrayContent([]) };
+            response.Content.Headers.ContentRange = new ContentRangeHeaderValue(0);
+            return response;
+        });
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        using var engine = Engine(handler, new JsonCheckpointStore(paths));
+
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.True(File.Exists(job.FinalFilePath));
+        Assert.Equal(0, new FileInfo(job.FinalFilePath).Length);
+        Assert.False(File.Exists(job.PartFilePath));
+        Assert.Contains("bytes=0-", ranges);
+    }
+
+    /// <summary>When the add couldn't ask the server, a direct link's name is its id; the transfer's own answer says the real one.</summary>
+    [Theory]
+    [InlineData(true, 1, "attachment; filename=\"notes.txt\"", "notes.txt")]
+    [InlineData(true, 4, "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.txt", "résumé.txt")]
+    [InlineData(false, 1, "attachment; filename=\"notes.txt\"", "abc")]
+    [InlineData(true, 1, null, "abc")]
+    [InlineData(true, 1, "attachment; filename=\"invented-key\"", "abc")]
+    public async Task ANameTakenFromTheAddressGivesWayToTheServersOwn(bool nameFromAddress, int connections, string? disposition, string expected)
+    {
+        var job = Job("abc");
+        job.NameFromAddress = nameFromAddress;
+        job.RequestedConnections = connections;
+        using var handler = new Handler(request =>
+        {
+            var from = request.Headers.Range?.Ranges.First().From ?? 0;
+            var to = Math.Min(request.Headers.Range?.Ranges.First().To ?? Size - 1, Size - 1);
+            var response = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(new byte[to - from + 1]) };
+            response.Content.Headers.ContentRange = new ContentRangeHeaderValue(from, to, Size);
+            if (disposition is not null) response.Content.Headers.TryAddWithoutValidation("Content-Disposition", disposition);
+            return response;
+        });
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        using var engine = Engine(handler, new JsonCheckpointStore(paths));
+
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(expected, job.FileName);
+        Assert.Equal(expected, Path.GetFileName(result.FinalFilePath ?? job.FinalFilePath));
+        Assert.True(File.Exists(Path.Combine(_root, "downloads", expected)));
+        Assert.False(job.NameFromAddress);
+    }
+
+    [Fact]
+    public async Task ARangeFromZeroRefusedWithNoSizeIsNotTakenForAnEmptyFile()
+    {
+        var job = Job("unknown.bin");
+        job.ExpectedTotalBytes = null;
+        job.TotalBytes = null;
+        using var handler = new Handler(_ => new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable) { Content = new ByteArrayContent([]) });
+        var paths = new StoragePaths(Path.Combine(_root, "state"));
+        paths.EnsureCreated();
+        using var engine = Engine(handler, new JsonCheckpointStore(paths));
+
+        var result = await engine.ExecuteAsync(job, null, null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.False(File.Exists(job.FinalFilePath));
+    }
+
     [Fact]
     public async Task AWholePartFileTheCheckpointDoesntVouchForIsFetchedAgain()
     {

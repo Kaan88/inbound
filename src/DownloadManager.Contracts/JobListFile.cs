@@ -27,7 +27,8 @@ public static class JobListFile
     {
         var entries = jobs
             // A provider's file is reached through the account, so its reference means nothing in a list.
-            .Where(job => !string.IsNullOrWhiteSpace(job.Url) && !job.IsRemote)
+            // A hidden address is a masked copy: it can't download anything, and it names a file on the account.
+            .Where(job => !string.IsNullOrWhiteSpace(job.Url) && !job.IsRemote && !job.AddressHidden)
             .Select(job => new JobListEntry
             {
                 Url = job.Url,

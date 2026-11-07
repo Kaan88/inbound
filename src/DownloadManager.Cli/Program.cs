@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Cli;
 
@@ -1683,7 +1684,7 @@ internal static partial class Program
             var size = job.TotalBytes is null ? FormatUtil.Bytes(job.ReceivedBytes) : FormatUtil.Bytes(job.TotalBytes.Value);
             var speed = job.BytesPerSecond is null ? "-" : $"{FormatUtil.Bytes((long)job.BytesPerSecond.Value)}/s";
             Console.WriteLine($"{job.State,-12} {size,12} {progress,9} {speed,12}  {job.FileName}");
-            Console.WriteLine($"  {job.Id:N}  {job.Url}");
+            Console.WriteLine($"  {job.Id:N}  {ShownAddress.For(job.Url, job.AddressHidden)}");
             if (job.StatusNote is not null) Console.WriteLine($"  {job.StatusNote}");
         }
     }
@@ -1692,7 +1693,7 @@ internal static partial class Program
     {
         Console.WriteLine($"id:       {job.Id:N}");
         Console.WriteLine($"file:     {job.FinalFilePath}");
-        Console.WriteLine($"url:      {job.Url}");
+        Console.WriteLine($"{(ShownAddress.IsHidden(job.Url, job.AddressHidden) ? "site:" : "url:"),-10}{ShownAddress.For(job.Url, job.AddressHidden)}");
         Console.WriteLine($"state:    {job.State}");
         if (job.StatusNote is not null) Console.WriteLine($"note:     {job.StatusNote}");
         Console.WriteLine($"queue:    {job.QueueId}:{job.QueueName}");

@@ -112,6 +112,12 @@ public sealed class DownloadJob
     public string? UserAgent { get; set; }
 
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Nobody gave a name and the server wasn't asked or didn't answer before the job was made, so
+    /// <see cref="FileName"/> came from the address. The transfer's own first answer may still name the file.
+    /// </summary>
+    public bool NameFromAddress { get; set; }
     public string? CategoryId { get; set; }
     public bool CategoryIsAutomatic { get; set; } = true;
     public string DestinationDirectory { get; set; } = string.Empty;

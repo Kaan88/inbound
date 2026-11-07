@@ -630,7 +630,7 @@ internal static partial class RemoteText
             return Clean(result.DisplayHost, Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.IdnHost : "This link");
         }
 
-        return ProviderLinks.IsProviderLink(url) ? ProviderLinks.MaskToken(url) : url;
+        return ShownAddress.For(url);
     }
 
     /// <summary>

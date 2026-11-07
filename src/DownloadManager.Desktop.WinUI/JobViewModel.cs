@@ -106,9 +106,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
         Remaining = job.EstimatedRemaining;
         EtaText = DurationText.TimeLeft(job.EstimatedRemaining);
-        DetailText = job.Failure?.Message is { Length: > 0 } failure
-            ? failure
-            : job.Url;
+        DetailText = JobAddress.Detail(job);
         ProgressPercent = job.Progress is not null
             ? Math.Clamp(job.Progress.Value * 100, 0, 100)
             : job.TotalBytes is > 0
@@ -144,7 +142,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         LastTryText = (job.CompletedAt ?? job.UpdatedAt).LocalDateTime
             .ToString("MMM dd HH:mm:ss yyyy", CultureInfo.InvariantCulture);
         RawDescription = job.Description ?? string.Empty;
-        Description = JobNotes.Description(StatusNote, job.Description ?? job.PageUrl);
+        Description = JobNotes.Description(StatusNote, JobAddress.Own(job));
         ProgressVisibility = (job.State is "downloading" or "connecting" or "retryWaiting" or "verifying" or "paused") &&
                              ProgressPercent > 0
             ? Visibility.Visible

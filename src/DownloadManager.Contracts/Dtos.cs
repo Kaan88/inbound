@@ -19,6 +19,11 @@ public sealed class JobDto
 
     public Guid Id { get; set; }
     public string Url { get; set; } = string.Empty;
+    /// <summary>
+    /// The real address held a secret, such as a provider's account key, and the Host keeps it to itself.
+    /// <see cref="Url"/> is then a masked copy that can't download anything, and clients show its site alone.
+    /// </summary>
+    public bool AddressHidden { get; set; }
     public string? FinalUrl { get; set; }
     public string? PageUrl { get; set; }
     public string FileName { get; set; } = string.Empty;

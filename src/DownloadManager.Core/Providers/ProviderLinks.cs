@@ -22,9 +22,16 @@ public static class ProviderLinks
     public static bool IsMasked(string? url)
         => TryGetToken(url, out var value) && value == Mask;
 
+    /// <summary>Any http or https address on a provider's own host, with a token or without one.</summary>
+    public static bool IsOnProviderHost(string? url)
+        => !string.IsNullOrWhiteSpace(url) &&
+           Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) &&
+           uri.Scheme is "http" or "https" &&
+           IsProviderHost(uri.Host);
+
     /// <summary>
-    /// The address with its token, every other secret and any login removed. Safe to store and
-    /// show: the real address is kept in the job's protected field, so nothing is lost by this.
+    /// The address with its token, every other secret and any login removed. Safe to store, and
+    /// for the Host to send: the real address is kept in the job's protected field, so nothing is lost by this.
     /// </summary>
     public static string MaskToken(string url)
     {

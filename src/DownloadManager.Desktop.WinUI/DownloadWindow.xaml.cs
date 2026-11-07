@@ -160,11 +160,12 @@ public sealed partial class DownloadWindow : Window
         Title = complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}";
         FileNameText.Text = displayName;
         // A file from a provider account has no address of its own: only a reference to the account's item.
-        var hasAddress = !job.IsRemote && !job.Url.StartsWith("remote://", StringComparison.OrdinalIgnoreCase);
+        var hasAddress = JobAddress.HasAddress(job);
         UrlHeader.Visibility = UrlText.Visibility = CompletedUrlHeader.Visibility = CompletedUrl.Visibility = hasAddress ? Visibility.Visible : Visibility.Collapsed;
-        UrlText.Text = hasAddress ? job.Url : string.Empty;
+        UrlHeader.Text = CompletedUrlHeader.Text = JobAddress.Label(job);
+        UrlText.Text = JobAddress.Shown(job);
         CompletionPath.Text = job.FinalFilePath;
-        CompletedUrl.Text = hasAddress ? job.Url : string.Empty;
+        CompletedUrl.Text = JobAddress.Shown(job);
         CompletedPath.Text = job.FinalFilePath;
         CompletedSize.Text = $"Downloaded {Bytes(job.ReceivedBytes)} ({job.ReceivedBytes:N0} bytes)";
         Details.Show(job);

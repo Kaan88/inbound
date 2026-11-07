@@ -41,6 +41,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="WinUI\ContainerImport.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\NaturalStringComparer.cs" Link="WinUI\NaturalStringComparer.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CrashLogText.cs" Link="WinUI\CrashLogText.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\JobAddress.cs" Link="WinUI\JobAddress.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SelectionCommands.cs" Link="WinUI\SelectionCommands.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ListColumns.cs" Link="WinUI\ListColumns.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DurationText.cs" Link="WinUI\DurationText.cs" />

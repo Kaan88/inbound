@@ -294,12 +294,17 @@ public sealed partial class DownloadManagerService
         try
         {
             if (RefuseIfPackageFull(request) is { } refused) return refused;
-            var result = await AddJobCoreAsync(request, cancellationToken).ConfigureAwait(false);
-            if (result.Accepted && result.Job is { } job)
+
+            // In its package before anyone hears of it or it can start: what opens a window or tells of a
+            // finish looks the package up then, and a small first file could otherwise finish alone.
+            var result = await AddJobCoreAsync(request, cancellationToken,
+                beforeAnnounce: id => AssignPackageAfterAddAsync(id, request, cancellationToken)).ConfigureAwait(false);
+
+            // A repeat too, because a crash can land between saving the job and saving its package.
+            if (result is { Accepted: true, Duplicate: true, Job: { } repeated })
             {
-                await AssignPackageAfterAddAsync(job.Id, request, cancellationToken).ConfigureAwait(false);
-                // A small file can finish before its package is saved, which no job event then reports.
-                if (GetJob(job.Id)?.State == "completed") RequestPackageCheck();
+                await AssignPackageAfterAddAsync(repeated.Id, request, cancellationToken).ConfigureAwait(false);
+                if (GetJob(repeated.Id)?.State == "completed") RequestPackageCheck();
             }
 
             return result;
@@ -332,18 +337,26 @@ public sealed partial class DownloadManagerService
                 Referrer = request.Referrer,
             }, timeout.Token).ConfigureAwait(false);
             var serverName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl);
-            if (serverName is not null && !string.Equals(serverName, "download", StringComparison.OrdinalIgnoreCase))
+            // The address's own last part is no answer: left unset, the transfer can still find the real name.
+            if (serverName is not null && !string.Equals(serverName, "download", StringComparison.OrdinalIgnoreCase) &&
+                serverName != FileNameResolver.Resolve(null, uri))
                 request.FileName = serverName;
         }
-        // Any probe failure (timeout, HTTP error, refused range) falls back to the URL name.
-        catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
+        // Any probe failure (timeout, HTTP error, refused range) falls back to the URL name, and the transfer may name it later.
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Never the address: the kind and the status are all that says why.
+            var status = ex is HttpRequestException { StatusCode: { } code } ? $", HTTP {(int)code}" : string.Empty;
+            _log?.Invoke($"The server's name for a new download wasn't read ({ex.GetType().Name}{status}).");
+        }
         finally { _addProbeGate.Release(); }
     }
 
     private async Task<AddJobResponse> AddJobCoreAsync(
         AddJobRequest request,
         CancellationToken cancellationToken,
-        RemoteAddContext? remote = null)
+        RemoteAddContext? remote = null,
+        Func<Guid, Task>? beforeAnnounce = null)
     {
         if (request.Priority is { } requestedPriority && !JobPriorities.IsValid(requestedPriority))
         {
@@ -488,6 +501,7 @@ public sealed partial class DownloadManagerService
             QueueName = queue.Name,
             Priority = request.Priority ?? JobPriorities.Normal,
             FileName = Path.GetFileName(finalPath),
+            NameFromAddress = remote is null && string.IsNullOrWhiteSpace(request.FileName),
             CategoryId = categoryId,
             CategoryIsAutomatic = string.IsNullOrWhiteSpace(request.CategoryId),
             DestinationDirectory = destination,
@@ -603,6 +617,7 @@ public sealed partial class DownloadManagerService
             _completionFiredQueues.Remove(queueId);
         }
 
+        if (beforeAnnounce is not null) await beforeAnnounce(job.Id).ConfigureAwait(false);
         Raise(runtime, "added");
         Schedule();
 
@@ -2310,6 +2325,7 @@ public sealed partial class DownloadManagerService
             {
                 runtime.Job.FinalFilePath = moveTo;
                 runtime.Job.FileName = Path.GetFileName(moveTo);
+                runtime.Job.NameFromAddress = false;
                 runtime.Job.DestinationDirectory = Path.GetDirectoryName(moveTo)!;
                 runtime.Job.PartFilePath = Path.Combine(
                     runtime.Job.DestinationDirectory,
@@ -4062,6 +4078,7 @@ public sealed partial class DownloadManagerService
         {
             Id = job.Id,
             Url = job.Url,
+            AddressHidden = job.RemoteSource is null && (job.ProtectedUrl is not null || ShownAddress.IsHidden(job.Url)),
             FinalUrl = job.FinalUrl,
             PageUrl = job.PageUrl,
             FileName = job.FileName,

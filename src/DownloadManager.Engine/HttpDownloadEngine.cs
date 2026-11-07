@@ -374,6 +374,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 return new AttemptResult(Complete: true, RestartFromZero: false);
             }
 
+            // A range from zero of an empty file has no byte to send, and the server says its total is 0.
+            // A provider's file is always asked for that way, so restarting would only ask the same again.
+            if (state.Bytes == 0 && serverTotal == 0 && state.Total is null or 0 && job.ExpectedTotalBytes is null or 0)
+            {
+                await using (new FileStream(state.PartPath, FileMode.Create, FileAccess.Write, FileShare.Read)) { }
+                state.Total = 0;
+                state.RecordedBytes = 0;
+                return new AttemptResult(Complete: true, RestartFromZero: false);
+            }
+
             if (state.Restarts++ < 2)
             {
                 return new AttemptResult(Complete: false, RestartFromZero: true);
@@ -504,6 +514,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         state.ETag = responseEtag ?? state.ETag;
         state.LastModified = responseLastModified ?? state.LastModified;
         state.ContentType = response.Content.Headers.ContentType?.ToString();
+        if (state.Bytes == 0) AdoptServerName(job, response);
         if (status == 206 || response.Headers.AcceptRanges.Contains("bytes")) job.ResumeSupported = true;
         else if (response.Headers.AcceptRanges.Contains("none")) job.ResumeSupported = false;
         await SaveCheckpointAsync(job, state, cancellationToken).ConfigureAwait(false);
@@ -2724,6 +2735,29 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         finally { response.Dispose(); }
     }
 
+    /// <summary>
+    /// The add asks the server for a name before the job exists. When that went unanswered the job has its
+    /// address's last part, which for a CDN link is only an id. The transfer's own first answer can still say
+    /// the real name, as a browser would take it. Asked once: a name the user gives later is theirs.
+    /// </summary>
+    private static void AdoptServerName(DownloadJob job, HttpResponseMessage response)
+    {
+        if (!job.NameFromAddress) return;
+        job.NameFromAddress = false;
+        var disposition = response.Content.Headers.TryGetValues("Content-Disposition", out var values) ? values.FirstOrDefault() : null;
+        if (FileNameResolver.FromContentDisposition(disposition) is not { } given) return;
+        var name = FileNameResolver.Sanitize(given);
+
+        // A name that repeats part of the query is no name: on a direct link, that is where the key is.
+        var query = Uri.TryCreate(job.EffectiveUrl, UriKind.Absolute, out var address) ? Uri.UnescapeDataString(address.Query) : string.Empty;
+        if (name == "download" || name == job.FileName || (name.Length >= 8 && query.Contains(name, StringComparison.OrdinalIgnoreCase))) return;
+
+        job.FileName = name;
+        var directory = Path.GetDirectoryName(job.FinalFilePath);
+        // The part file keeps its own name; the finished file takes this one, and a clash is settled when it lands.
+        job.FinalFilePath = string.IsNullOrEmpty(directory) ? string.Empty : Path.Combine(directory, name);
+    }
+
     private async Task<HttpResponseMessage> SendWithRedirectsAsync(
         DownloadJob job,
         long offset,
@@ -3192,6 +3226,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             }
 
             job.ResumeSupported = true;
+            if (!hasLocalData) AdoptServerName(job, response);
             return new SegmentedProbe
             {
                 Plan = new SegmentedPlan(

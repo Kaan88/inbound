@@ -1427,10 +1427,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var hidden = job.Dto is { } dto && JobAddress.IsHidden(dto);
         var input = new TextBox
         {
-            Text = job.Url,
+            Text = job.Dto is { } current ? JobAddress.RefreshStart(current) : job.Url,
             Header = "New download address",
+            PlaceholderText = hidden ? "Paste the new link, or leave empty to try the saved one" : string.Empty,
             AcceptsReturn = false,
         };
         var dialog = new ContentDialog
@@ -1445,13 +1447,14 @@ public sealed partial class MainWindow : Window
         };
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
-            string.IsNullOrWhiteSpace(input.Text))
+            (string.IsNullOrWhiteSpace(input.Text) && !hidden))
         {
             return;
         }
 
         // The address it already has stays usable: refusing that would strand a retry of a direct download.
-        var newAddress = input.Text.Trim();
+        // A hidden one isn't in the box, so an empty box asks for the same.
+        var newAddress = string.IsNullOrWhiteSpace(input.Text) ? job.Url : input.Text.Trim();
         var chosenDirect = false;
         if (newAddress != job.Url && LinkExtractor.IsWebLink(newAddress) && await ProviderAddAppliesAsync())
         {
@@ -1633,7 +1636,8 @@ public sealed partial class MainWindow : Window
             ("Queue", string.IsNullOrWhiteSpace(job.QueueName) ? "None" : job.QueueName),
             ("Source", job.IsProviderFile ? ProviderDisplayName(job.Dto?.RemoteProvider) : job.SourceText),
             ("Package", job.IsProviderFile ? _groups.FirstOrDefault(group => group.JobIds.Contains(job.Id))?.Name : null),
-            ("Address", job.IsProviderFile ? null : job.Url), ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
+            (job.Dto is { } shown ? JobAddress.Label(shown) : "Address", job.IsProviderFile || job.Dto is null ? null : JobAddress.Shown(job.Dto)),
+            ("Saved to", job.FinalFilePath), ("Last try", job.LastTryText),
         })
         {
             if (string.IsNullOrWhiteSpace(value)) continue;

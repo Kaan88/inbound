@@ -224,7 +224,6 @@ internal static class Program
                 log.Info);
             clipboardMonitor.Start();
 
-            var shownDownloads = new System.Collections.Concurrent.ConcurrentDictionary<Guid, byte>();
             var finishedQueueSounds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
             using var eventSounds = new CompletionSoundPlayer(log.Warn);
             void PlayEventSound(string key, SettingsDto settings)
@@ -259,37 +258,22 @@ internal static class Program
                         break;
                 }
             }, log.Warn);
+            using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
+            {
+                // Process launch has no WinForms affinity. Keep it off the engine's event path
+                // and independent of the tray synchronization context.
+                _ = Task.Run(() =>
+                {
+                    if (window.IsPackage) controller.OpenPackage(window.Id);
+                    else controller.OpenDownload(window.Id);
+                });
+            }, log.Warn);
             service.JobChanged += (_, e) =>
             {
                 var current = currentSettings;
-                // CLI callers remain headless. Interactive downloads get a separate
-                // per-job frontend; launching again activates the same job window.
                 var starting = (e.ChangeType == "added" && e.Job.StartMode == "startNow") ||
                     (e.ChangeType == "progress" && e.Job.State is "connecting" or "downloading");
                 if (e.ChangeType is "added" or "queued" || starting) finishedQueueSounds.TryRemove(e.Job.QueueId, out var previousQueueSound);
-                // Provider files start by themselves, often many at once, so they stay in the main list.
-                var opensWindows = e.Job.Source is not ("cli" or "remote");
-                // Package members share one package window instead of one window per file.
-                var package = opensWindows && (starting || e.ChangeType == "completed")
-                    ? service.FindPackageOf(e.Job.Id) : null;
-                if (package is { } packageId)
-                {
-                    var showCompletion = e.ChangeType == "completed" &&
-                        (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog) && service.IsPackageComplete(packageId);
-                    if ((starting && shownDownloads.TryAdd(packageId, 0)) || showCompletion)
-                        _ = Task.Run(() => controller.OpenPackage(packageId));
-                    if (showCompletion) shownDownloads.TryRemove(packageId, out byte _);
-                }
-                else if (opensWindows &&
-                    ((starting && shownDownloads.TryAdd(e.Job.Id, 0)) ||
-                     (e.ChangeType == "completed" && (e.Job.ShowCompletionDialog ?? current.ShowCompletionDialog))))
-                {
-                    // Process launch has no WinForms affinity. Keep it off the engine's
-                    // event path and independent of the tray synchronization context.
-                    _ = Task.Run(() => controller.OpenDownload(e.Job.Id));
-                }
-                if (e.ChangeType is "paused" or "cancelled" or "failed" or "completed" or "removed")
-                    shownDownloads.TryRemove(e.Job.Id, out var ignored);
                 if (e.ChangeType is "completed" or "failed" && e.Job.IsQueued && current.EventSoundFiles.ContainsKey("queueFinished") &&
                     service.GetSnapshot().Jobs.Where(job => job.IsQueued && job.QueueId == e.Job.QueueId)
                         .All(job => job.QueueRetryAt is null && job.State is ("completed" or "failed" or "cancelled")) &&
@@ -312,6 +296,7 @@ internal static class Program
 
             // Shutting down stops what is running, which isn't news about any package.
             downloadNotices.Dispose();
+            downloadWindows.Dispose();
             try
             {
                 pipe.StopAsync().GetAwaiter().GetResult();
