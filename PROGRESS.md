@@ -1,5 +1,60 @@
 # Progress — session handoff
 
+### Interruption matrix and regressions, against the mock and TestServer (2026-11-07)
+
+Nothing here used the real account. The real Host process was killed hard, by process, against the mock provider and `tools/TestServer`. CLI runs used a sandbox instance of their own, with binaries copied out of the repo.
+
+**Interruption matrix.** After each restart I checked: one create on the mock, one child job per file, every file's size and SHA-256 equal to the mock's bytes, and no `.part` or ` (1)` file left. New cells are in `HostKillMatrixTests`.
+
+| Kill point | Evidence | What I saw |
+|---|---|---|
+| During a submit the provider never got | `KilledDuringASubmitThatNeverArrived...`, new | The record on disk said `submitting`, and the mock had nothing. After restart the row said "Checking whether TorBox received it", sent nothing for the 60 s grace, then sent once. One item. With the restart rule changed to send again at once, the test failed. |
+| After the provider took a submit, before its answer was saved | `KilledAfterTheProviderTookASubmit...`, new; the mock's new `AcceptThenDelay` | The record said `submitting`, and the item was on the mock. After restart the job took that item's id at once. One create. |
+| Between status checks | `HostPipeRemoteTests.ScenarioJ_...`, existing | Same item, one submission. |
+| During a status check | `KilledDuringAStatusCheck...`, new | Same item id, one create. |
+| While links are requested | `KilledWhileLinksAreRequested...`, new | Both link requests were hanging, and no link had been given. After restart: the same two child jobs, both files equal. |
+| During a local provider transfer | `ScenarioJ_...`, existing; also seen live earlier | File equal, one submission. |
+| A package half done | `KilledWithAPackageHalfDone...`, new | One file of three finished, another past 64 KB. After restart: the same three child jobs. The finished file got no new link and kept its write time. The others were equal. |
+| During extraction | `RuntimeArchiveHostTests.KillingTheHostMidExtraction...`, existing, a local archive; `KilledDuringExtractionAndDuringArchiveCleanup...`, new, a provider package of 13 volumes and a text file beside them, with auto-extract and archive deletion on | UnRAR was running and went with the Host. The set's record on disk was not completed. The next Host ran it again (2 attempts) and wrote one copy of all 301 files, with the big file's hash equal and no staging left. |
+| During archive cleanup | the same new test | Killed when the first volume deletion was seen: 9 or 10 of 13 volumes were left, over five runs. The next Host finished: no volumes left, the set completed with archives deleted, the text file kept, all 14 downloads still completed, 13 marked as removed after extraction, and no new link asked for. |
+
+No defect showed in the matrix.
+
+**Ordinary HTTP, through the CLI and a sandbox Host against `tools/TestServer`:**
+- Segmented, 64 MB: 8 connections on the wire for the whole run. SHA-256 equal.
+- Pause and resume: the bytes stood still for 3 s while paused. SHA-256 equal.
+- Kill and resume: the Host was killed at 16.2 MB of 48 MB. The new Host went on from 10.1 MB, the last checkpoint. SHA-256 equal. A kill 1.7 s in started again from zero, because checkpoints come every 5 s.
+- Three redirects: SHA-256 equal.
+- Resume refused, from a server without ranges: after pause and resume it started from zero, as it must. SHA-256 equal.
+- Connections, from the server's own count of requests in flight: a provider file had at most 4, also after pause and resume. An ordinary download had 8. The TCP table showed one or two more on that port. Those were idle keep-alive connections of the API client and my script, which share the port with the mock. The provider file's SHA-256 equalled the mock's bytes.
+
+**Queues and scheduler, in a sandbox Host:**
+- A stopped queue with a limit of 1 held three downloads as queued. Start ran them one at a time. Stop paused the running one, its bytes stood still, and the next stayed queued.
+- A one-time schedule window fired. The queue started about 7 s into the start minute and stopped about 6 s into the stop minute. A download running at the stop was paused. When the queue started again it went on from 60 MB, and its SHA-256 was equal.
+- Resuming a download in a stopped queue puts it back as queued, to wait for the queue. That is the existing rule.
+- For the owner: `dm schedule list` shows days next to a one-time schedule, which doesn't use them.
+
+**Updater:**
+- `dm update check` in the sandbox says `notInstalled`, by design.
+- Check, download and signature checks are covered only by tests: 26 integration tests with Update in the name, and 2 manifest tests. All passed.
+- `scripts\apply-update.ps1` ran on a pretend install in a scratch folder, with `-NoStart` and no native host script in the package. A failure after the swap put the old app folder and `install.json` back and wrote a failed result. A clean run swapped in the new folder, kept the old one as the rollback copy, and wrote succeeded.
+- Not run: the rollback when a new version fails to start. Nothing installed was touched.
+
+**Chrome handoff:**
+- The native host finds its pipe from `DOWNLOADMANAGER_INSTANCE` and `DOWNLOADMANAGER_DATA`, the same way the Host does. I ran this build's native host with the sandbox variables and the extension's origin as its argument. I sent it framed messages on stdin, built as `extensions/chrome/src/background.ts` builds them.
+- `host.ping` answered.
+- A `handoff.request` with the TestServer's test cookie, a referrer and a Chrome user agent was acknowledged. The job file was on disk at the acknowledgement, without the cookie in clear. The same request id again came back as a duplicate of the same job. The server saw the cookie, the referrer and the user agent, and the file's SHA-256 was equal.
+- Refused: a `blob:` link (`invalid_url`), an unknown extension id (`untrusted_extension`), and `remote.add` and `job.cancel` sent from the extension side.
+- A handoff with no cookie was accepted, then failed on the server's 403, as designed.
+- `extensions/chrome` has no change on this branch since it left `main`. `origin/main` has one later commit there, 6a4f942, which this branch doesn't have.
+- **Not run:** the real browser path. Chrome would use the installed app's registration and reach the installed Host.
+
+**Changed:** 78b74e2 adds the matrix tests, the mock's `AcceptThenDelay`, and `SandboxHost.ProcessId`. 582b3bc adds `--cdn-bps` and `/admin/concurrency` to `tools/TestServer`. No product code changed. All suites passed on 582b3bc: Archives 293, Containers 183, Core 745, Engine 134, Integration 989, TorBox 314.
+
+**Bearing on the add flow, nothing built:** when a create's answer is lost, the row reads "Checking whether TorBox received it" for the whole 60 s grace before it sends again. Seen with the mock only.
+
+**A slip:** one mutation check used a relative path in .NET file calls. So it wrote to the main checkout's `RemoteJobRules.cs` instead of the worktree's, then put it back. `git status` there shows no change.
+
 ### Owner's second try in the sandbox (`0870d34`, 2026-11-07)
 
 Recorded as reported. Nothing is traced or fixed yet. See ROADMAP TB.F9 and TB.F11 to TB.F14.
