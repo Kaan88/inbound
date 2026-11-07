@@ -39,6 +39,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ContainerImport.cs" Link="WinUI\ContainerImport.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AutoOpen.cs" Link="WinUI\AutoOpen.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\NaturalStringComparer.cs" Link="WinUI\NaturalStringComparer.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\CrashLogText.cs" Link="WinUI\CrashLogText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\JobAddress.cs" Link="WinUI\JobAddress.cs" />

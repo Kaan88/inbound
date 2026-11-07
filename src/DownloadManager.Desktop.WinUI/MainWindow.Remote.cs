@@ -46,6 +46,7 @@ public sealed partial class MainWindow
         };
         state.PropertyChanged += OnRemoteStateChanged;
         SyncRemoteEntryPoints();
+        InitializeAutoOpen();
     }
 
     private void OnRemoteStateChanged(object? sender, PropertyChangedEventArgs e)
@@ -481,12 +482,16 @@ public sealed partial class MainWindow
         else if (early) ShowPassingStatus(RemoteText.EarlyChoice(all));
     }
 
-    /// <summary>A row nothing has been sent for yet, such as a copied link. Enter or the menu is the request, so nothing asks again.</summary>
+    /// <summary>
+    /// A row nothing has been sent for yet, such as a copied link. Enter or the menu is the request, so nothing asks
+    /// again, and its file choice may open by itself as it would after an add.
+    /// </summary>
     private async Task ApproveRemoteAsync(RemoteJobDto job)
     {
         var provider = RemoteText.ProviderName(job);
         var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, ApproveUncached = true });
         if (!result.Ok) await ShowMessageAsync(RemoteText.AddTo(job), RemoteText.Failure(result.Error, null, provider));
+        else if (result.Job is { } released) ArmAutoOpen([released]);
     }
 
     private async Task EnterLinkPasswordAsync(RemoteJobDto job)

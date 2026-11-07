@@ -3,6 +3,8 @@ using DownloadManager.Core.Providers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -13,6 +15,9 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 public sealed partial class MainWindow
 {
+    private readonly AutoOpenWatch _autoOpen = new();
+    private bool _isForeground;
+
     private enum AddressWay
     {
         Cancelled,
@@ -389,10 +394,14 @@ public sealed partial class MainWindow
 
         choice.ArchivePassword = null;
 
+        // Every job this add came to, new or found again, for what follows it on the list.
+        var jobs = new List<RemoteJobDto>();
         var folderLinks = 0;
         foreach (var pick in choice.Picks.Where(pick => pick.Line.Route == AddRoute.FolderLink))
         {
-            if (await AddFolderLinkAsync(pick.Line, choice, problems)) folderLinks++;
+            if (await AddFolderLinkAsync(pick.Line, choice, problems) is not { Ok: true, Job: { } folderJob } added) continue;
+            jobs.Add(folderJob);
+            if (!added.Existing) folderLinks++;
         }
 
         var sent = 0;
@@ -405,6 +414,7 @@ public sealed partial class MainWindow
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;
             var result = await _remote.AddAsync(AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files));
             pick.LinkPassword = null;
+            if (result is { Ok: true, Job: { } job }) jobs.Add(job);
 
             // A refusal is the end of it for this link. Nothing here tries it any other way.
             if (!result.Ok) problems.Add($"{name}: {RemoteText.Failure(result.Error, null, provider)}");
@@ -413,6 +423,72 @@ public sealed partial class MainWindow
         }
 
         await ReportAddAsync("Add links", downloads, sent + folderLinks, provider, messages, problems);
+        FollowAdd(jobs, direct.Count);
+    }
+
+    /// <summary>
+    /// The end of an add, once everything it had to say has been said: with one item and no direct download, its row
+    /// is selected and shown, and the file choice may open by itself for the one item that can ask.
+    /// </summary>
+    private void FollowAdd(IReadOnlyList<RemoteJobDto> jobs, int downloads)
+    {
+        if (AddFollowUp.RowToShow(jobs, downloads) is { } id) ShowRemoteRow(id);
+        ArmAutoOpen(jobs);
+    }
+
+    /// <summary>After an add, or Enter on a copied row: the input clock starts now, and the files may already be ready.</summary>
+    private void ArmAutoOpen(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        _autoOpen.Arm(jobs, DateTimeOffset.UtcNow);
+        CheckAutoOpen();
+    }
+
+    /// <summary>On arming and on every change to the jobs. The job is read again from the latest state just before it opens.</summary>
+    private void CheckAutoOpen()
+    {
+        if (!_autoOpen.IsArmed) return;
+        var popupOpen = Content?.XamlRoot is { } root && VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Any(popup => popup.Child is not ToolTip);
+        if (_autoOpen.Check(_remote.State.Jobs, DateTimeOffset.UtcNow, _isForeground, popupOpen) is not { } id) return;
+        if (_remote.State.Jobs.FirstOrDefault(job => job.Id == id) is { State: "awaitingSelection" } ready) _ = SelectRemoteFilesAsync(ready);
+    }
+
+    /// <summary>
+    /// Watches what disarms the file choice that opens by itself: any key or pointer press in the window, even one a
+    /// control handles, and the window going behind another.
+    /// </summary>
+    private void InitializeAutoOpen()
+    {
+        RootGrid.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler((_, _) => _autoOpen.Disarm()), handledEventsToo: true);
+        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => _autoOpen.Disarm()), handledEventsToo: true);
+        Activated += (_, args) =>
+        {
+            _isForeground = args.WindowActivationState != WindowActivationState.Deactivated;
+            if (!_isForeground) _autoOpen.Disarm();
+        };
+
+        // After the change has been taken in everywhere, never in the middle of it.
+        _remote.State.Jobs.CollectionChanged += (_, _) =>
+        {
+            if (_autoOpen.IsArmed) DispatcherQueue.TryEnqueue(CheckAutoOpen);
+        };
+    }
+
+    /// <summary>The row of a job just added: selected, in view and focused, on All Downloads if this view or the search hides it.</summary>
+    private void ShowRemoteRow(Guid id)
+    {
+        if (!_remoteRows.TryGetValue(id, out var row)) return;
+        if (!_visibleJobs.Contains(row))
+        {
+            if (!MatchesSearch(row)) _search = string.Empty;
+            _category = "all";
+            CategoryList.SelectedIndex = 0;
+        }
+
+        RebuildVisible(selectedId: id);
+        if (!_visibleJobs.Contains(row)) return;
+        JobsList.ScrollIntoView(row);
+        JobsList.UpdateLayout();
+        if (JobsList.ContainerFromItem(row) is Control item) item.Focus(FocusState.Keyboard);
     }
 
     /// <summary>
@@ -490,10 +566,10 @@ public sealed partial class MainWindow
         if (!result.Ok) problems.Add($"The archive password wasn't saved: {RemoteText.Failure(result.Error)}");
     }
 
-    /// <summary>A folder link refers to an item already on the account, so its files can be chosen before anything is added.</summary>
-    private async Task<bool> AddFolderLinkAsync(AddLine line, AddLinksChoice choice, List<string> problems)
+    /// <summary>A folder link refers to an item already on the account, so its files can be chosen before anything is added. Null when nothing was sent.</summary>
+    private async Task<RemoteAddResultDto?> AddFolderLinkAsync(AddLine line, AddLinksChoice choice, List<string> problems)
     {
-        if (line.Result is not { Provider: { } providerId, ItemKind: { } kind, ItemId: { } itemId } found) return false;
+        if (line.Result is not { Provider: { } providerId, ItemKind: { } kind, ItemId: { } itemId } found) return null;
         var provider = string.IsNullOrWhiteSpace(found.ProviderName) ? ProviderWordForAdding() : found.ProviderName;
         var name = RemoteText.AddLineWords(line, provider).Name;
         var answer = await RemoteFileSelectionDialog.AskAsync(
@@ -514,10 +590,10 @@ public sealed partial class MainWindow
         if (answer.CouldNotOpen)
         {
             problems.Add($"{name}: wasn't added, because another dialog was open. Add this link again.");
-            return false;
+            return null;
         }
 
-        if (answer.Choice is null && !answer.Later) return false;
+        if (answer.Choice is null && !answer.Later) return null;
 
         var added = await _remote.AddAsync(new RemoteAddRequestDto
         {
@@ -533,6 +609,6 @@ public sealed partial class MainWindow
         if (!added.Ok) problems.Add($"{name}: {RemoteText.Failure(added.Error, null, provider)}");
         else if (added.Existing) problems.Add(RemoteText.AlreadyListed(name, added.Note));
         else if (!string.IsNullOrWhiteSpace(added.Note)) problems.Add($"{name}: {UrlRedactor.HideAddresses(added.Note)}");
-        return added.Ok && !added.Existing;
+        return added;
     }
 }
