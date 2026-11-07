@@ -194,6 +194,8 @@ not as acceptance evidence.
   runs is the symptom of a missing/stale `.pri`.
 - Native-host registration is per user and must point at an absolute
   `DownloadManager.NativeHost.exe`; `scripts\register-native-host.ps1` does this.
+- A store zip or CRX unpacked by hand has no `key`, so its ID comes from its folder and the native
+  host is `forbidden`. That is not a release fault. Use `scripts\make-store-id-test.ps1`.
 - Never dump registry values containing cookies into committed files; redact.
 - The repo root has an explicit **Low mandatory integrity label** (agent sandbox setup); everything
   built here inherits it, and Windows runs Low-labelled exes at Low integrity. That is the real cause
