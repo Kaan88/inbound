@@ -10,6 +10,9 @@
 - Not verified: install of Setup 0.5.0, auto-update from 0.4.0 to 0.5.0.
 - Owner report: 0.4.0 can't update ("The update manifest signature is invalid."). The live manifest verifies against the built-in key; the installed settings' key is only its first line. Recorded as UP.B1; not fixed yet.
 - After the key was restored through the installed CLI (`settings set updatekeyfile`), the owner updated 0.4.0 to 0.5.0 from the app and reports it works. They noted the update progress window opens top-left and clipped: UI.R14, fix whenever.
+- Owner report: Options does not open in 0.5.0 (cast of StackPanel to Grid on the Extraction page): UI.B2. Fixed on the branch together with UP.B1 (hidden update boxes removed; a bad stored key is replaced by the built-in one).
+- Tests before any 0.5.1: Core 818, Engine 144, Integration 1086 of 1087, TorBox 321, Archives 309, Containers 183, extension 56, typecheck clean. The one failure, `Rar4PasswordsWorkAndAWrongOneIsReportedAsSuch(encryptedHeaders: True)`, timed out at 30 s under the full load and passed three runs alone in about 0.5 s. The suites ran before the hidden-box removal, which is WinUI-only; Core ran again after it (818). UI Automation check of the built app: 9 of 9.
+- The owner said not to start .exe files from the PowerShell tool, since a Windows warning pops up and the session hangs. Recorded in CLAUDE.local.md and memory; the check above was started from Bash.
 - The owner asked to note that spanned zips (`name.zip` with `name.z01`) are not recognised, since nothing on this PC can make one to test with. Recorded as ROADMAP A4.D.
 
 ### Owner's try of favorites and free space (2026-11-07)

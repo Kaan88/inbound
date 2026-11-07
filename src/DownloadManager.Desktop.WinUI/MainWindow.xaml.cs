@@ -3924,17 +3924,8 @@ public sealed partial class MainWindow : Window
                 Text = settings.PostDownloadCommand ?? string.Empty,
                 PlaceholderText = @"C:\Program Files\Scanner\scan.exe",
             };
-            var updateUrl = new TextBox { Header = "Update manifest URL (HTTPS)", Text = settings.UpdateManifestUrl ?? string.Empty };
-            var updateKey = new TextBox
-            {
-                Header = "Update public key (PEM)",
-                Text = settings.UpdatePublicKey ?? string.Empty,
-                AcceptsReturn = true,
-                Height = 96,
-                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"),
-                FontSize = 12,
-            };
-            var updateChannel = new TextBox { Header = "Update channel", Text = settings.UpdateChannel, HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 200 };
+            // The update feed, key and channel are not on any page, and Options leaves them as they are: hidden boxes
+            // once wrote them back, and the key's box kept only its first line (UP.B1). The CLI still sets them.
             var autoUpdate = new CheckBox
             {
                 Content = "Check for and install updates automatically while no downloads are running",
@@ -4283,9 +4274,6 @@ public sealed partial class MainWindow : Window
                 settings.ShowCompletionDialog = completionDialog.IsChecked == true;
                 settings.AutoResumeUnfinishedOnStartup = autoResume.IsChecked == true;
                 settings.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text) ? null : postDownload.Text.Trim();
-                settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(updateUrl.Text) ? null : updateUrl.Text.Trim();
-                settings.UpdatePublicKey = string.IsNullOrWhiteSpace(updateKey.Text) ? null : updateKey.Text.Trim();
-                settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text) ? "stable" : updateChannel.Text.Trim();
                 settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
                 settings.UpdateCheckIntervalHours = checkInterval;
                 var edited = favoriteRows.Where(entry => !string.IsNullOrWhiteSpace(entry.Folder.Text))
