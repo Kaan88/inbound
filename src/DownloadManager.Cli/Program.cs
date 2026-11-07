@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using DownloadManager.Contracts;
@@ -1852,7 +1853,25 @@ internal sealed class HostUnavailableException(string message) : Exception(messa
 
 internal sealed class CliClient : IAsyncDisposable
 {
+    private const uint HandleFlagInherit = 1;
+
     private readonly IpcClient _client;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int which);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+    /// <summary>Input, output and error. Nothing to do when one isn't there or can't be changed, as for a console's own.</summary>
+    private static void KeepStandardHandlesFromChildren()
+    {
+        foreach (var which in new[] { -10, -11, -12 })
+        {
+            SetHandleInformation(GetStdHandle(which), HandleFlagInherit, 0);
+        }
+    }
 
     private CliClient(IpcClient client)
     {
@@ -1891,6 +1910,10 @@ internal sealed class CliClient : IAsyncDisposable
                    ?? throw new HostUnavailableException("Could not find DownloadManager.Host.exe. Build or install the host first.");
         try
         {
+            // The Host would otherwise inherit this process's standard handles and hold a script's pipe open
+            // for as long as it runs, so `dm list | findstr` would never end. Not through the shell: that can
+            // put a security warning on the desktop and wait for it.
+            KeepStandardHandlesFromChildren();
             Process.Start(new ProcessStartInfo
             {
                 FileName = host,

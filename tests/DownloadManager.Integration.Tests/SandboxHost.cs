@@ -297,6 +297,24 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         return new CliResult(process.ExitCode, await output, await error);
     }
 
+    /// <summary>The CLI with its output on a pipe, as a script has it, allowed to start the Host itself.</summary>
+    /// <returns>Whether the pipe ended within the wait, with the Host left running.</returns>
+    public async Task<bool> CliStartingTheHostEndsItsOutputAsync(TimeSpan wait, params string[] arguments)
+    {
+        var info = Prepare(Executable("DownloadManager.Cli", "net10.0"));
+        info.RedirectStandardInput = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        foreach (var argument in arguments) info.ArgumentList.Add(argument);
+
+        using var process = Process.Start(info) ?? throw new InvalidOperationException("The CLI did not start.");
+        process.StandardInput.Close();
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        var both = Task.WhenAll(output, error);
+        return await Task.WhenAny(both, Task.Delay(wait)) == both;
+    }
+
     public Process StartNativeHost()
     {
         var info = Prepare(Executable("DownloadManager.NativeHost", "net10.0"));

@@ -561,6 +561,25 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Empty((await connection.AskAsync<RemoteListResult>(MessageTypes.RemoteList, new { })).Jobs);
     }
 
+    /// <summary>Seen live: a script reading `dm remote list` hung for as long as the Host the CLI had started went on running.</summary>
+    [Fact]
+    public async Task TheCliEndsItsOutputWhenItStartedTheHostItself()
+    {
+        await using var host = await StartHostAsync();
+        await host.StopAsync();
+
+        var ended = await host.CliStartingTheHostEndsItsOutputAsync(TimeSpan.FromSeconds(25), "host", "status");
+
+        // Whichever way that went, the Host it started is up, and it goes before the folder does.
+        Assert.Equal(0, (await host.RunCliAsync(null, "host", "shutdown")).ExitCode);
+        for (var i = 0; i < 100 && (await host.RunCliAsync(null, "host", "status")).ExitCode == 0; i++)
+        {
+            await Task.Delay(100);
+        }
+
+        Assert.True(ended, "The pipe was still open after the CLI had finished.");
+    }
+
     [Fact]
     public async Task ASlowCallHoldsOnlyItsOwnConnectionAndEndsWithItsClient()
     {
