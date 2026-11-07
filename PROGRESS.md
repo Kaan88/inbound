@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### UI.B4 tray focus fix; UI.B5 limits checked (2026-11-08)
+
+- Owner: "clicking tray popup does not bring the app into focus." Recorded and fixed as UI.B4 (foreground permission passed from the Host and the second launch to the running window). Not yet confirmed on screen.
+- Owner: "yes, check limits". Found by reading the code (UI.B5): the simultaneous-download limit works, but queue maximums also cap it; connections per download and the "global" speed limit are copied into each job when it is added, so changes don't reach existing or resumed downloads, and the speed limit applies to each download separately, not to the total. Not changed; it needs the owner's decisions.
+
 ### User reports and owner findings (2026-11-08)
 
 - Recorded in ROADMAP: UI.B3 (default folder not reaching Add Links; owner couldn't reproduce), UI.R15 (simultaneous downloads and connections as a main-window dropdown; check limits apply to resumed jobs), UI.R16 (speed presets in MB/s as a dropdown), UI.R17 (select all files in the download window), UI.R18 (shorten long links in the Add Links dropdown), and UI.R14 updated (update progress centred on the main window, or inline). Nothing built yet.
