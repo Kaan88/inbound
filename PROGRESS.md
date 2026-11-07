@@ -9,6 +9,7 @@ Recorded as reported. Nothing is traced or fixed yet. See ROADMAP TB.F9 and TB.F
 - **TB.F13:** Download in My TorBox should close the window. Answered in the conversation: it stayed open only so several items could be downloaded in a row, and nothing else depends on it.
 - **TB.F14:** "Local downloads created" with nothing on the list, and the status bar stuck at "Adding to TorBox...".
 - **Owner's go-ahead on the add flow:** "yes, build it. but I believe uncached magnets would only give file list after torbox completely finishes it, so unless we add bitorrent functionality just for file list, waiting for files is not needed as it can take too long." So: a torrent file shows its file choice when added, from its own file list, cached or not. A cached magnet does the same if TorBox's cache check gives its files. An uncached magnet downloads all files when TorBox is done, with no wait for a choice. The notice-line and Chrome hoster-link questions are still open, and neither is built.
+- **Owner's refinement, same day:** "have a checkbox for uncached magnet so when torbox finishes, it won't start download and wait for file selection, otherwise it'll download in full." So adding an uncached magnet offers a checkbox, off by default, to choose files when TorBox is done. Off means all files download when ready. On means the row waits as Choose files.
 
 ### Live scenario I and the WinUI walk on the real account (2026-11-07)
 
