@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Owner request: download locations and free space (2026-11-07)
+
+Passed on from a prospective Docker user: choosing the download location matters most. They want several saved locations with each one's free space, especially in Docker, where another download manager's folder browsing was poor. The default folder, last folder, category folders and Browse already exist; free space and saved favorites don't. Recorded as UI.R9 and UI.R10, with a note on D2 for a Host-side folder browser. A plan went to the owner; nothing is built yet.
+
+Also: the 0.5.0 release was in progress when the session ended. The version bump is uncommitted in the `torbox-addflow` worktree, and the last full test run's result was lost, so it has to run again.
+
 ### Owner's third try: add flow works, Import Torrent File's picker didn't open (2026-11-07, branch `torbox-addflow`)
 
 The owner tried the sandbox build of the merge `3519653`. The add flow worked: a cached item showed its file choice at once, and an uncached magnet's choice came later. Import Torrent File showed "The file picker couldn't open." The sandbox's processes ran elevated, and the older WinRT pickers fail there. All eleven pickers now use the Windows App SDK pickers (TB.F15). The UI builds. Not yet seen on screen in an elevated window. The owner asked for a release next.
