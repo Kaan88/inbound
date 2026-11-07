@@ -16,6 +16,9 @@ public enum ArchiveVolumeScheme
 
     /// <summary><c>name.001.rar</c>.</summary>
     ThreeDigit,
+
+    /// <summary><c>name.7z.001</c>, <c>name.zip.001</c> and the like: one archive cut into pieces, which 7-Zip joins.</summary>
+    Split,
 }
 
 /// <param name="BaseName">The name shared by the members, without the volume suffix.</param>
@@ -32,7 +35,10 @@ public sealed record ArchiveVolumeSet(
     IReadOnlyList<string> Members,
     IReadOnlyList<string> MissingVolumes);
 
-/// <summary>Groups the file names of one folder into RAR sets. Reads no files.</summary>
+/// <summary>
+/// Groups the file names of one folder into archive sets: RAR sets, split name.7z.001 sets, and single 7z, zip and
+/// tar files. Reads no files.
+/// </summary>
 public static partial class ArchiveVolumes
 {
     // A name such as report.123.rar + report.124.rar is far likelier to be two separate
@@ -61,10 +67,24 @@ public static partial class ArchiveVolumes
         var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var parts = new Dictionary<string, List<(string Digits, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        var splits = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var singles = new List<string>();
+        var otherSingles = new List<(string Stem, string Name)>();
 
         foreach (var name in names)
         {
+            if (SplitVolume().Match(name) is { Success: true } piece)
+            {
+                Add(splits, piece.Groups["base"].Value, (int.Parse(piece.Groups["number"].Value, CultureInfo.InvariantCulture), name));
+                continue;
+            }
+
+            if (ArchiveNames.StemOfSingle(name) is { } stemOfOther)
+            {
+                otherSingles.Add((stemOfOther, name));
+                continue;
+            }
+
             if (OldStyleVolume().Match(name) is { Success: true } volume)
             {
                 // Without an .rNN sibling, name.s01 is a season number or some other tool's file.
@@ -105,7 +125,9 @@ public static partial class ArchiveVolumes
         foreach (var (baseName, members) in oldStyle) sets.Add(BuildOldStyle(baseName, members));
         foreach (var (baseName, members) in parts) sets.AddRange(BuildPartSets(baseName, members));
         foreach (var (baseName, members) in threeDigit) sets.AddRange(BuildThreeDigit(baseName, members));
+        foreach (var (baseName, members) in splits) sets.Add(BuildSplit(baseName, members));
         foreach (var name in singles) sets.Add(new ArchiveVolumeSet(name[..^".rar".Length], ArchiveVolumeScheme.Single, name, [name], []));
+        foreach (var (stem, name) in otherSingles) sets.Add(new ArchiveVolumeSet(stem, ArchiveVolumeScheme.Single, name, [name], []));
 
         return sets
             .OrderBy(set => set.BaseName, StringComparer.OrdinalIgnoreCase)
@@ -207,6 +229,22 @@ public static partial class ArchiveVolumes
         }
     }
 
+    /// <summary>
+    /// Numbered from 001 by every tool that writes them. The names can't tell where a set ends; 7-Zip finds out when
+    /// it joins the parts.
+    /// </summary>
+    private static ArchiveVolumeSet BuildSplit(string baseName, List<(int Number, string Name)> members)
+    {
+        var ordered = members.OrderBy(member => member.Number).ToList();
+        var present = ordered.Select(member => member.Number).ToHashSet();
+        var missing = Enumerable.Range(1, Math.Max(ordered[^1].Number, 1))
+            .Where(number => !present.Contains(number))
+            .Select(number => string.Create(CultureInfo.InvariantCulture, $"{baseName}.{number:000}"))
+            .ToList();
+        var first = ordered[0].Number == 1 ? ordered[0].Name : null;
+        return new ArchiveVolumeSet(baseName, ArchiveVolumeScheme.Split, first, ordered.Select(member => member.Name).ToList(), missing);
+    }
+
     private static bool IsLetter(Match match, char letter) =>
         char.ToLowerInvariant(match.Groups["letter"].Value[0]) == letter;
 
@@ -224,4 +262,7 @@ public static partial class ArchiveVolumes
 
     [GeneratedRegex(@"^(?<base>.+)\.(?<number>\d{3})\.rar$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ThreeDigitVolume();
+
+    [GeneratedRegex(@"^(?<base>.+\.(?:7z|zip|rar|tar))\.(?<number>\d{3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SplitVolume();
 }

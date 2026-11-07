@@ -1324,27 +1324,30 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
     }
 
     [SevenZipFact]
-    public async Task OtherFormatsAreNeverClaimed()
+    public async Task ADownloadedZipExtractsByItselfAndOtherFilesAreLeftAlone()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
         await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { AutoExtract = true });
 
-        var zip = await run.DownloadAsync("package.zip", Text);
-        var seven = await run.DownloadAsync("package.7z", Text);
+        using var buffer = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var entry = zip.CreateEntry("data.txt").Open();
+            entry.Write(Text);
+        }
+
+        var archive = await run.DownloadAsync("package.zip", buffer.ToArray());
         var plain = await run.DownloadAsync("notes.txt", Text);
-        foreach (var job in new[] { zip, seven, plain }) await run.WaitForJobAsync(job.Id, "completed");
-        await Task.Delay(300);
+        foreach (var job in new[] { archive, plain }) await run.WaitForJobAsync(job.Id, "completed");
 
-        Assert.Empty(run.Archives.List());
+        var done = await run.WaitForStateAsync("completed");
+        Assert.Equal([archive.Id], done.JobIds);
+        Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
+        Assert.Single(run.Archives.List());
 
-        var byPath = await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = run.PathOf("package.zip") });
-        Assert.False(byPath.Ok);
-        Assert.Contains("not a RAR", byPath.Error);
-
-        var byJob = await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [seven.Id] });
+        var byJob = await run.Archives.ExtractAsync(new ArchiveExtractRequest { JobIds = [plain.Id] });
         Assert.False(byJob.Ok);
-        Assert.Contains("not a RAR", Assert.Single(byJob.Ignored).Reason);
-        Assert.Empty(run.Archives.List());
+        Assert.Contains("not an archive", Assert.Single(byJob.Ignored).Reason);
     }
 
     [SevenZipFact]

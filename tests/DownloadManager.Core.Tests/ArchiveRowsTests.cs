@@ -240,18 +240,25 @@ public sealed class ArchiveRowsTests
     [InlineData("a.part2.RAR", true)]
     [InlineData("a.r07", true)]
     [InlineData("a.z01", true)]
-    [InlineData("a.zip", false)]
+    [InlineData("a.zip", true)]
+    [InlineData("a.7z", true)]
+    [InlineData("a.tar.gz", true)]
+    [InlineData("a.TGZ", true)]
+    [InlineData("a.7z.001", true)]
+    [InlineData("a.zip.012", true)]
+    [InlineData("a.gz", false)]
+    [InlineData("a.mkv.001", false)]
     [InlineData("a.mp4", false)]
     [InlineData("rar", false)]
     [InlineData("", false)]
-    public void A_name_looks_like_a_rar_the_way_the_Host_decides(string name, bool expected)
-        => Assert.Equal(expected, ArchiveRules.LooksLikeRar(name));
+    public void A_name_looks_like_an_archive_the_way_the_Host_decides(string name, bool expected)
+        => Assert.Equal(expected, ArchiveRules.LooksLikeArchive(name));
 
     [Fact]
     public void Extract_says_why_it_cant_run()
     {
-        Assert.Equal("Extract (select a RAR download first)", ArchiveRules.Plan([], [], null, true).ExtractText);
-        Assert.Equal("Extract (no RAR archive selected)", ArchiveRules.Plan([File("a.mp4")], [], null, true).ExtractText);
+        Assert.Equal("Extract (select an archive download first)", ArchiveRules.Plan([], [], null, true).ExtractText);
+        Assert.Equal("Extract (no archive selected)", ArchiveRules.Plan([File("a.mp4")], [], null, true).ExtractText);
         Assert.Equal("Extract (the background Host isn't connected)", ArchiveRules.Plan([File("a.rar")], [], null, false).ExtractText);
         Assert.Equal("Extract (already extracted)", ArchiveRules.Plan([File("a.rar", Set("completed"))], [], null, true).ExtractText);
         Assert.Equal("Extract (already extracting)", ArchiveRules.Plan([File("a.rar", Set("extracting"))], [], null, true).ExtractText);

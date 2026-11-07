@@ -85,9 +85,16 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             staging = await StagingArea.PrepareAsync(request.StagingRoot, firstVolume, destination, cancellationToken);
 
             progress?.Report(new ExtractionProgress(ExtractionPhase.Extracting, 0));
-            var sent = probe.IsEncrypted ? secret : ToolPassword.None;
-            var run = await RunExtractAsync(tool, firstVolume, staging, sent, progress, cancellationToken);
-            if (run.ExitCode != 0) throw ExtractFailure(run, sent, probe.Version);
+            if (IsCompressedStream(probe.Version))
+            {
+                probe = await UnwrapStreamAsync(tool, firstVolume, probe, staging, destination, progress, cancellationToken);
+            }
+            else
+            {
+                var sent = probe.IsEncrypted ? secret : ToolPassword.None;
+                var run = await RunExtractAsync(tool, firstVolume, staging.PayloadFolder, sent, progress, cancellationToken);
+                if (run.ExitCode != 0) throw ExtractFailure(run, sent, probe.Version);
+            }
 
             // 7-Zip prints a percentage about every 200 ms and never a closing 100.
             progress?.Report(new ExtractionProgress(ExtractionPhase.Extracting, 100));
@@ -278,6 +285,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         }
 
         var missing = listing.MissingVolumes.ToList();
+        RequireWholeSplit(run, firstVolume);
         RequireListed(run, listing, missing.Count > 0);
         var allPresent = missing.Count == 0;
 
@@ -300,7 +308,9 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             volumesRead = SplitVolumes(firstVolume, listing.Volumes);
         }
 
-        var entries = listing.Entries;
+        // A compressed stream's listing has no names, or one taken from its header: what it holds is read after unpacking.
+        var stream = IsCompressedStream(listing.Type);
+        IReadOnlyList<ArchiveEntry> entries = stream ? [] : listing.Entries;
         return new ArchiveProbe
         {
             FirstVolume = firstVolume,
@@ -312,7 +322,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             VolumeNumber = listing.VolumeNumber,
             AllVolumesPresent = allPresent,
             MissingVolumes = missing,
-            ListingHasUnknownLines = listing.HasUnknownLines,
+            ListingHasUnknownLines = !stream && listing.HasUnknownLines,
             ListingHasRepeatedNames = listing.HasRepeatedNames,
             HoldsDataStreams = listing.HoldsDataStreams,
             VolumesRead = volumesRead,
@@ -334,6 +344,20 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         }
 
         return read;
+    }
+
+    /// <summary>
+    /// The names of a name.7z.001 set cannot say how many parts it has. 7-Zip joins what is there, so a set that ends
+    /// early reads as an archive cut short, which here means the next part has not arrived.
+    /// </summary>
+    private static void RequireWholeSplit(ToolRun run, string firstVolume)
+    {
+        if (!Has(Text(run), "Unexpected end of archive")) return;
+        var read = SplitVolumes(firstVolume, null);
+        if (read.Count == 0 || SplitNumber().Match(read[^1]) is not { Success: true } last) return;
+        var number = int.Parse(last.Groups["n"].Value, System.Globalization.CultureInfo.InvariantCulture) + 1;
+        var next = Path.GetFileName(read[^1][..last.Index]) + "." + number.ToString(System.Globalization.CultureInfo.InvariantCulture).PadLeft(last.Groups["n"].Value.Length, '0');
+        throw new ExtractionException(ExtractionFailureKind.MissingVolume, $"The set ends early: {next} is not there yet.", [next]);
     }
 
     private static bool HeadersLocked(ToolRun run) => Text(run).Contains("Cannot open encrypted archive", StringComparison.OrdinalIgnoreCase);
@@ -378,14 +402,77 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             cancellationToken);
     }
 
-    private Task<ToolRun> RunExtractAsync(string tool, string firstVolume, StagingArea staging, ToolPassword secret, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
+    /// <summary>gzip, bzip2, xz and the like hold one compressed file and no names or sizes 7-Zip can be sure of.</summary>
+    internal static bool IsCompressedStream(string format) =>
+        format.ToLowerInvariant() is "gzip" or "bzip2" or "xz" or "zstd" or "lzma" or "lzma86" or "z";
+
+    /// <summary>
+    /// A .tar.gz is two layers to 7-Zip. The compressed file is written beside the payload first, then a tar inside
+    /// is listed and checked like any archive before its files go into the payload. Anything else that comes out,
+    /// such as the log of a log.gz, is the one file extracted.
+    /// </summary>
+    private async Task<ArchiveProbe> UnwrapStreamAsync(
+        string tool, string firstVolume, ArchiveProbe outer, StagingArea staging, string destination,
+        IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
+    {
+        var layer = Path.Combine(staging.Folder, "layer");
+        Directory.CreateDirectory(layer);
+        var tarInside = ArchiveNames.IsCompressedTar(Path.GetFileName(firstVolume));
+        var run = await RunExtractAsync(tool, firstVolume, layer, ToolPassword.None, tarInside ? null : progress, cancellationToken);
+        if (run.ExitCode != 0) throw ExtractFailure(run, ToolPassword.None, outer.Version);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var written = Directory.GetFileSystemEntries(layer);
+        if (written.Length != 1 || !File.Exists(written[0]) || (File.GetAttributes(written[0]) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new ExtractionException(ExtractionFailureKind.Corrupted, "The compressed file did not hold the one file it should.");
+        }
+
+        var inner = written[0];
+        var innerName = Path.GetFileName(inner);
+        if (!tarInside)
+        {
+            File.Move(inner, Path.Combine(staging.PayloadFolder, innerName));
+            var single = new ArchiveProbe
+            {
+                FirstVolume = firstVolume,
+                Entries = [new ArchiveEntry(innerName, new FileInfo(Path.Combine(staging.PayloadFolder, innerName)).Length, ArchiveEntryKind.File, false)],
+                Version = outer.Version,
+                IsEncrypted = false,
+                HeadersEncrypted = false,
+                IsVolume = false,
+                AllVolumesPresent = true,
+                VolumesRead = [firstVolume],
+            };
+            ExtractionSafety.ValidateListing(single, _options.Limits);
+            return single;
+        }
+
+        var tar = await ProbeCoreAsync(tool, inner, ToolPassword.None, cancellationToken);
+        if (!string.Equals(tar.Version, "tar", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ExtractionException(ExtractionFailureKind.Corrupted, "The compressed file does not hold a tar archive.");
+        }
+
+        ExtractionSafety.ValidateListing(tar, _options.Limits);
+        var available = (_options.AvailableBytes ?? ExtractionSafety.AvailableBytes)(destination);
+        ExtractionSafety.CheckFreeSpace(tar.TotalListedSize, available, _options.Limits);
+
+        run = await RunExtractAsync(tool, inner, staging.PayloadFolder, ToolPassword.None, progress, cancellationToken);
+        if (run.ExitCode != 0) throw ExtractFailure(run, ToolPassword.None, tar.Version);
+        File.Delete(inner);
+
+        return tar with { FirstVolume = firstVolume, Version = "tar." + outer.Version.ToLowerInvariant(), VolumesRead = [firstVolume] };
+    }
+
+    private Task<ToolRun> RunExtractAsync(string tool, string firstVolume, string outputFolder, ToolPassword secret, IProgress<ExtractionProgress>? progress, CancellationToken cancellationToken)
     {
         var reader = new PercentReader(progress);
 
         // An always-empty staging folder, so -aoa never overwrites anything of ours. No -snl or -snh: links are
         // not created as links. -sns- keeps NTFS streams in the archive out. Progress comes on stdout alone.
         var arguments = new List<string> { "x", "-y", "-aoa", "-sns-", "-sccUTF-8", "-bso0", "-bse2", "-bsp1" };
-        arguments.Add("-o" + staging.PayloadFolder);
+        arguments.Add("-o" + outputFolder);
         arguments.Add(firstVolume);
 
         return ToolProcess.RunAsync(

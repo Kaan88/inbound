@@ -113,6 +113,66 @@ public sealed class OtherFormatTests : ExtractionTestBase
         Space.AssertSameAsSource();
     }
 
+    /// <summary>Wraps an archive already built into one compressed file, the way gzip and the rest do.</summary>
+    private static async Task<string> CompressAsync(string file, string type, string target)
+    {
+        var info = new ProcessStartInfo(RarTools.SevenZipPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "a", "-bso0", "-bsp0", "-t" + type, target, file }) info.ArgumentList.Add(argument);
+        using var process = Process.Start(info)!;
+        var errors = process.StandardError.ReadToEndAsync();
+        await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"7-Zip exited {process.ExitCode}: {await errors}");
+        return target;
+    }
+
+    [RequiresSevenZipTheory]
+    [InlineData("a.tar.gz", "gzip")]
+    [InlineData("a.tgz", "gzip")]
+    [InlineData("a.tar.bz2", "bzip2")]
+    [InlineData("a.tar.xz", "xz")]
+    public async Task ACompressedTarExtractsBothLayers(string name, string type)
+    {
+        Space.WriteStandardSource();
+        var tar = await BuildAsync("inner.tar");
+        var archive = await CompressAsync(tar, type, Space.Archive(name));
+        File.Delete(tar);
+
+        var result = await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        Assert.DoesNotContain(result.Files, file => file.FinalPath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase));
+        Space.AssertSameAsSource();
+    }
+
+    [RequiresSevenZipFact]
+    public async Task APlainGzipGivesItsOneFile()
+    {
+        var path = Space.WriteSource("log.txt", Encoding.ASCII.GetBytes("line one\nline two\n"));
+        var archive = await CompressAsync(path, "gzip", Space.Archive("log.txt.gz"));
+
+        var result = await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        var file = Assert.Single(result.Files);
+        Assert.Equal("line one\nline two\n", File.ReadAllText(file.FinalPath));
+    }
+
+    [RequiresSevenZipFact]
+    public async Task ASplitSetThatEndsEarlyWaitsForItsNextPart()
+    {
+        Space.WriteSource("big.bin", Workspace.RandomBytes(300 * 1024, 12));
+        var first = await BuildAsync("cut.7z", null, "-v100k", "-mx0") + ".001";
+        var parts = Directory.GetFiles(Space.Archives, "cut.7z.*").Order().ToList();
+        File.Delete(parts[^1]);
+
+        var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor().ExtractAsync(Request(first), null, CancellationToken.None));
+        Assert.Equal(ExtractionFailureKind.MissingVolume, failure.Kind);
+        Assert.Equal([Path.GetFileName(parts[^1])], failure.MissingVolumes);
+    }
+
     [RequiresSevenZipFact]
     public async Task AFileThatIsNotAnArchiveIsSaidToBeOne()
     {

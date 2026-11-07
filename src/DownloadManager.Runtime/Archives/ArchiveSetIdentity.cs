@@ -12,12 +12,13 @@ namespace DownloadManager.Runtime.Archives;
 internal static partial class ArchiveSetIdentity
 {
     /// <summary>
-    /// Whether a name could belong to a RAR set. Decides nothing by itself: the volume grouping does
-    /// that with the rest of the folder in view. Any other format is not claimed.
+    /// Whether a name could belong to an archive set: RAR, a split name.7z.001, or a single 7z, zip or tar. Decides
+    /// nothing by itself: the volume grouping does that with the rest of the folder in view.
     /// </summary>
     public static bool LooksLikeVolume(string? fileName) =>
         !string.IsNullOrEmpty(fileName) &&
-        (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) || OldStyleVolumeName().IsMatch(fileName));
+        (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) || OldStyleVolumeName().IsMatch(fileName) ||
+         SplitPieceName().IsMatch(fileName) || ArchiveNames.StemOfSingle(fileName) is not null);
 
     /// <summary>The first volume's name, present or not. A set missing its first has it as its first gap.</summary>
     public static string FirstName(ArchiveVolumeSet set) =>
@@ -49,6 +50,9 @@ internal static partial class ArchiveSetIdentity
 
     [GeneratedRegex(@"^(?<base>.+)\.part0*1\.rar$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FirstPartName();
+
+    [GeneratedRegex(@"\.(?:7z|zip|rar|tar)\.\d{3}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SplitPieceName();
 }
 
 /// <summary>What one folder holds right now: files on disk, and files that downloads there will bring.</summary>
@@ -166,7 +170,8 @@ internal static class VolumeHeaders
             var (length, ticks) = (info.Length, info.LastWriteTimeUtc.Ticks);
             if (Known.TryGetValue(path, out var seen) && seen.Length == length && seen.Ticks == ticks) return seen.Whole;
 
-            var whole = RarVolumeHeader.Read(path) == RarVolumeHeaderKind.NotAVolume;
+            // Only a RAR header says whether it is a volume; the grouping asks only about .rar names.
+            var whole = path.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) && RarVolumeHeader.Read(path) == RarVolumeHeaderKind.NotAVolume;
             if (Known.Count >= MostRemembered) Known.Clear();
             Known[path] = (length, ticks, whole);
             return whole;
