@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### Owner's remaining checks (2026-11-08)
+
+- Owner: the 0.5.2 list "all work" (UI.R9 to UI.R13, TB.F15, UI.R2 verified). TB.F9 and TB.F14 "fixed already"; the add flow (TB.F10, TB.F2) "also done and fixed"; hover info (UI.R7) done; smoothing (UI.R8) removed; update window placement (UI.R14) fixed. Edge and Firefox go with the extension work (EXT.E1).
+
 ### Owner's 0.5.3 check; extension requests (2026-11-08)
 
 - Owner on the 0.5.3 list: "all work as intended." Marked verified: UI.B4, UI.B5, UI.B6, UI.R15 to UI.R19, PERF.5 (option; follow-up still listed). UI.R6: "much better, they only move when digit count changes"; next step recorded. UI.R14 shows only on the next update.
