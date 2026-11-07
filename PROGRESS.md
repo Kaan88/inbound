@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### User reports and owner findings (2026-11-08)
+
+- Recorded in ROADMAP: UI.B3 (default folder not reaching Add Links; owner couldn't reproduce), UI.R15 (simultaneous downloads and connections as a main-window dropdown; check limits apply to resumed jobs), UI.R16 (speed presets in MB/s as a dropdown), UI.R17 (select all files in the download window), UI.R18 (shorten long links in the Add Links dropdown), and UI.R14 updated (update progress centred on the main window, or inline). Nothing built yet.
+
 ### PERF.4: what still wakes the hidden window (2026-11-08)
 
 - Owner: "Yes, trace it". Per-thread counters: two threads in the window process wake about 95 times a second each, whether the window is shown, minimised or closed to the tray, in installed, published and bin builds, with an empty test instance too.
