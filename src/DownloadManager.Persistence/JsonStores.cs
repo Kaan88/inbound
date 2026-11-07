@@ -700,6 +700,20 @@ public sealed class JsonSettingsStore : ISettingsStore
         ("programs", "Programs"), ("video", "Video"),
     ];
 
+    private static bool IsPublicKey(string pem)
+    {
+        try
+        {
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(pem);
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or CryptographicException)
+        {
+            return false;
+        }
+    }
+
     private static void Normalize(AppSettings settings)
     {
         settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
@@ -749,6 +763,12 @@ public sealed class JsonSettingsStore : ISettingsStore
             string.IsNullOrWhiteSpace(settings.UpdatePublicKey))
         {
             settings.UpdateManifestUrl = ReleaseUpdates.ManifestUrl;
+            settings.UpdatePublicKey = ReleaseUpdates.PublicKey;
+        }
+        else if (!string.IsNullOrWhiteSpace(settings.UpdatePublicKey) && !IsPublicKey(settings.UpdatePublicKey))
+        {
+            // Options in 0.4.0 and 0.5.0 saved only the key's first line, which no update could pass. A key that
+            // can't be read verifies nothing, so the built-in one takes its place.
             settings.UpdatePublicKey = ReleaseUpdates.PublicKey;
         }
         settings.UpdateManifestUrl = string.IsNullOrWhiteSpace(settings.UpdateManifestUrl)

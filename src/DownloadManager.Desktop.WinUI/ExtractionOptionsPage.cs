@@ -20,7 +20,8 @@ internal sealed class ExtractionOptionsPage
     private readonly RadioButtons _destination = new() { Header = "Extract to", ItemsSource = ArchiveForm.DestinationLabels };
     private readonly UIElement _folderRow;
     private readonly TextBox _folder;
-    private readonly Button _browseFolder;
+    /// <summary>Browse and the favorites button, which follow the folder box.</summary>
+    private readonly List<Button> _folderButtons;
     private readonly CheckBox _preserveFolders = new() { Content = "Keep the folders stored in the archive" };
     private readonly RadioButtons _conflict = new() { Header = "If a file with the same name is already there", ItemsSource = ArchiveForm.ConflictLabels };
     private readonly RadioButtons _archives = new() { Header = "After a successful extraction", ItemsSource = new[] { "Keep the archive files", "Delete the archive files" } };
@@ -46,7 +47,9 @@ internal sealed class ExtractionOptionsPage
         var (folderRow, folder) = window.FolderField("Extraction folder", null);
         _folderRow = folderRow;
         _folder = folder;
-        _browseFolder = ((Grid)folderRow).Children.OfType<Button>().First();
+        // The folder field may come wrapped with its favorites and free-space line, so look for the row's grid.
+        var grid = folderRow as Grid ?? ((Panel)folderRow).Children.OfType<Grid>().First();
+        _folderButtons = grid.Children.OfType<Button>().ToList();
         ((FrameworkElement)folderRow).Margin = new Thickness(28, 0, 0, 0);
 
         _fields = [_autoExtract, _destination, _preserveFolders, _conflict, _archives];
@@ -167,13 +170,16 @@ internal sealed class ExtractionOptionsPage
     private void SetFieldsEnabled(bool enabled)
     {
         foreach (var field in _fields) field.IsEnabled = enabled;
-        if (!enabled) _folder.IsEnabled = _browseFolder.IsEnabled = false;
+        if (!enabled) SetFolderEnabled(false);
     }
 
-    private void UpdateFolderRow()
+    private void UpdateFolderRow() =>
+        SetFolderEnabled(_saved is not null && _destination.SelectedIndex == ArchiveForm.DestinationFolderIndex);
+
+    private void SetFolderEnabled(bool enabled)
     {
-        var used = _saved is not null && _destination.SelectedIndex == ArchiveForm.DestinationFolderIndex;
-        _folder.IsEnabled = _browseFolder.IsEnabled = used;
+        _folder.IsEnabled = enabled;
+        foreach (var button in _folderButtons) button.IsEnabled = enabled;
     }
 
     private void ShowToolStatus()
