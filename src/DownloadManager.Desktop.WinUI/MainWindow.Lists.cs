@@ -39,6 +39,10 @@ public sealed partial class MainWindow
         _jobsHeader.ShowSort(key, ascending);
         RebuildVisible();
         SaveUiState();
+
+        // The list keeps its place on whichever row was at the top, which would hide the new first rows.
+        if (JobsList.SelectedItem is { } selected) JobsList.ScrollIntoView(selected);
+        else if (JobsList.Items.Count > 0) JobsList.ScrollIntoView(JobsList.Items[0]);
     }
 
     private void SaveColumnWidths()

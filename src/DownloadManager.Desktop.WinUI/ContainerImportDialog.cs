@@ -2,6 +2,7 @@ using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -189,6 +190,12 @@ internal sealed class ContainerImportDialog
         };
         AutomationProperties.SetName(hint, hint.Text);
         _send.Click += (_, _) => _ = SendAsync();
+
+        // A separate choice, so the dialog's first focus can't land on it and take a stray Enter. Tab and a click still reach it.
+        _send.GettingFocus += (_, args) =>
+        {
+            if (args.FocusState == FocusState.Programmatic && FindCloseButton() is { } close) args.TrySetNewFocusedElement(close);
+        };
         _stopSending.Click += (_, _) => _sendWait?.Cancel();
         _sendStatus.Text.MaxWidth = 610;
         _sendPanel.Children.Add(hint);
@@ -353,6 +360,30 @@ internal sealed class ContainerImportDialog
         _sendBusy.IsActive = false;
         _sendBusy.Visibility = Visibility.Collapsed;
         UpdateButtons();
+    }
+
+    /// <summary>An open dialog's buttons live in its popup, not under the dialog itself.</summary>
+    private Button? FindCloseButton()
+    {
+        if (_dialog?.XamlRoot is not { } root) return null;
+        foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(root))
+        {
+            if (popup.Child is { } child && Find(child) is { } found) return found;
+        }
+
+        return null;
+
+        static Button? Find(DependencyObject parent)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is Button { Name: "CloseButton" } button) return button;
+                if (Find(child) is { } found) return found;
+            }
+
+            return null;
+        }
     }
 
     private void ShowBusy(bool busy)

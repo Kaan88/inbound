@@ -77,6 +77,15 @@ public sealed class SelectionCommandsTests
     }
 
     [Fact]
+    public void A_package_row_alone_is_not_offered_as_something_to_group()
+    {
+        Assert.False(FileMenuRules.CanGroup(files: 3, localRows: 1));
+        Assert.False(FileMenuRules.CanGroup(files: 1, localRows: 1));
+        Assert.True(FileMenuRules.CanGroup(files: 2, localRows: 2));
+        Assert.True(FileMenuRules.CanGroup(files: 4, localRows: 2));
+    }
+
+    [Fact]
     public void The_Hosts_note_goes_ahead_of_the_rows_own_description()
     {
         var job = new DownloadManager.Contracts.JobDto { State = "completed", FileRemovedAfterExtraction = true, StatusNote = "Archive removed after extraction" };

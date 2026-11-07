@@ -79,7 +79,8 @@ internal sealed class PackageWindow : Window
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
-        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
+        // The chosen file's details are the longer of the two, and the list scrolls well in less room.
+        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
             _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 110 : 0 });
         var header = new StackPanel { Spacing = 2 };
         header.Children.Add(_title);

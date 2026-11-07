@@ -428,7 +428,12 @@ internal sealed class MyProviderWindow : Window
         _context.Ui.ProviderSortKey = _sortKey;
         _context.Ui.ProviderSortAscending = _sortAscending;
         _context.SaveUi();
-        if (_page is { } page) KeepingSelection(() => SortRows(page));
+        if (_page is not { } page) return;
+        KeepingSelection(() => SortRows(page));
+
+        // The list keeps its place on whichever row was at the top, which would hide the new first rows.
+        if (_list.SelectedItem is { } selected) _list.ScrollIntoView(selected);
+        else if (page.Rows.Count > 0) _list.ScrollIntoView(page.Rows[0]);
     }
 
     /// <summary>Puts a page in the order the header asks for. With no order asked for, it stays as the provider answered.</summary>

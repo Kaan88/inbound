@@ -238,6 +238,9 @@ internal static class Program
             using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
             {
                 var current = currentSettings;
+
+                // The kind only: a notice's title and message carry file names.
+                log.Info($"Download notice: {notice.Kind}");
                 switch (notice.Kind)
                 {
                     case DownloadNoticeKind.Completed:

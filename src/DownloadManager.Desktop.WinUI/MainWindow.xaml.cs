@@ -441,16 +441,18 @@ public sealed partial class MainWindow : Window
         Apply(FileOpenFolderItem, "Open Folder", plan.OpenReason);
         Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
-        Apply(FileDownloadNowItem, "Download Now", plan.LocalReason);
-        Apply(FileStopItem, "Stop Download", plan.LocalReason);
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+        Apply(FileDownloadNowItem, "Download Now", plan.LocalReason, rows.Any(row => row.CanResume));
+        Apply(FileStopItem, "Stop Download", plan.LocalReason, rows.Any(row => row.CanPause));
         Apply(FileRedownloadItem, "Redownload", plan.FileReason);
         Apply(FileRemoveItem, "Remove", plan.RemoveReason);
 
-        static void Apply(MenuFlyoutItem item, string text, string? reason)
+        static void Apply(MenuFlyoutItem item, string text, string? reason, bool canAct = true)
         {
             var label = FileMenuRules.Label(text, reason);
             if (item.Text != label) item.Text = label;
-            if (item.IsEnabled != (reason is null)) item.IsEnabled = reason is null;
+            var on = reason is null && canAct;
+            if (item.IsEnabled != on) item.IsEnabled = on;
         }
     }
 
@@ -910,15 +912,15 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(moveRename);
         _menuMoveRename = moveRename;
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Resume", MenuResume_Click));
-        flyout.Items.Add(CreateContextItem("Stop", MenuPause_Click));
+        flyout.Items.Add(_menuResume = CreateContextItem("Resume", MenuResume_Click));
+        flyout.Items.Add(_menuStop = CreateContextItem("Stop", MenuPause_Click));
         flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
         flyout.Items.Add(_menuRedownload = CreateContextItem("Redownload", MenuRedownload_Click));
         flyout.Items.Add(_menuRefreshUrl = CreateContextItem("Refresh Download Address…", MenuRefreshUrl_Click));
         flyout.Items.Add(new MenuFlyoutSeparator());
         _addToQueueMenu = new MenuFlyoutSubItem { Text = "Add to Queue" };
         flyout.Items.Add(_addToQueueMenu);
-        flyout.Items.Add(CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
+        flyout.Items.Add(_menuUnqueue = CreateContextItem("Remove from Queue", MenuDeleteFromQueue_Click));
         _priorityMenu = new MenuFlyoutSubItem { Text = "Priority" };
         foreach (var priority in new[] { JobPriorities.High, JobPriorities.Normal, JobPriorities.Low })
         {
@@ -935,7 +937,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuUngroup = CreateContextItem("Remove from Package", MenuUngroup_Click));
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
-        flyout.Items.Add(CreateContextItem("Properties", MenuProperties_Click));
+        flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
         AddRemoteContextItems(flyout);
         JobsList.ContextFlyout = flyout;
     }
@@ -957,6 +959,10 @@ public sealed partial class MainWindow : Window
     private MenuFlyoutItem? _menuCancelPackage;
     private MenuFlyoutItem? _menuRedownload;
     private MenuFlyoutItem? _menuRefreshUrl;
+    private MenuFlyoutItem? _menuResume;
+    private MenuFlyoutItem? _menuStop;
+    private MenuFlyoutItem? _menuUnqueue;
+    private MenuFlyoutItem? _menuProperties;
     private MenuFlyoutSubItem? _priorityMenu;
 
     private void JobsContextMenu_Opening(object? sender, object e)
@@ -964,14 +970,23 @@ public sealed partial class MainWindow : Window
         // Offer only what applies to the current selection.
         var selection = SelectedJobs;
         ShowContextItemsForSelection();
-        var removedReason = SelectedJob?.FileRemovedAfterExtraction == true ? FileMenuRules.FileRemovedReason : null;
-        SayIfNoFile(_menuOpen, "Open", removedReason);
-        SayIfNoFile(_menuOpenWith, "Open With…", removedReason);
-        SayIfNoFile(_menuOpenFolder, "Open Folder", removedReason);
-        SayIfNoFile(_menuMoveRename, "Move/Rename…", removedReason);
-        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && removedReason is null;
+
+        // The same words as the File menu: a package row has no one file for these to act on.
+        var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, SelectedJob?.FileRemovedAfterExtraction == true);
+        SayIfNoFile(_menuOpen, "Open", plan.OpenReason);
+        SayIfNoFile(_menuOpenWith, "Open With…", plan.OpenReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.OpenReason);
+        SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
+        if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
+        SayIfNoFile(_menuRedownload, "Redownload", plan.FileReason);
+        SayIfNoFile(_menuRefreshUrl, "Refresh Download Address…", plan.FileReason);
+        SayIfNoFile(_menuProperties, "Properties", plan.FileReason);
+        if (_menuResume is not null) _menuResume.IsEnabled = rows.Any(row => row.CanResume);
+        if (_menuStop is not null) _menuStop.IsEnabled = rows.Any(row => row.CanPause);
+        if (_menuUnqueue is not null) _menuUnqueue.IsEnabled = selection.Any(job => !string.IsNullOrEmpty(job.QueueText));
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
-        if (_menuGroup is not null) _menuGroup.Visibility = Show(selection.Count >= 2);
+        if (_menuGroup is not null) _menuGroup.Visibility = Show(FileMenuRules.CanGroup(selection.Count, rows.Count(row => !row.IsSideRow)));
         if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
         // A provider's file has no address of its own to edit or send again.

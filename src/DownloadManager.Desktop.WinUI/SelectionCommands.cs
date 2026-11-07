@@ -50,6 +50,11 @@ internal static class FileMenuRules
     }
 
     public static string Label(string text, string? reason) => reason is null ? text : $"{text} ({reason})";
+
+    /// <summary>Grouping takes two rows or more with files behind them. A package row alone holds several files, and is one already.</summary>
+    /// <param name="files">The files the selection stands for, a package's included.</param>
+    /// <param name="localRows">The selected rows that are files or packages.</param>
+    public static bool CanGroup(int files, int localRows) => files >= 2 && localRows >= 2;
 }
 
 /// <summary>What the Host says about a finished download beyond its state. It sits beside the state and never changes it.</summary>

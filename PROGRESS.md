@@ -1,11 +1,20 @@
 # Progress — session handoff
 
+### TB.F1 to TB.F8 looked at on real screens (2026-11-07)
+
+- Run in dark and light in a sandbox instance against the mock provider, with invented data only, with real mouse drags and clicks over sandbox windows at 100% scaling. **Seen working:** column resize, header sort and both surviving a UI restart, in the download list and My provider; the selection box with Ctrl, plain click, double-click and autoscroll; a provider file's progress window beside an ordinary one; the package window; deleting a package with a missing-volume set (no rows or records left, also after a restart, volumes stay on disk); a finished extraction row's menu; `Plain Album\` as the extracted folder's name on disk; a removed archive's note and dimmed Open; Import JD Container including the DLC refusal; the Import Download List and Redownload routing prompts; the Refresh Address refusal; a copied link held as waiting; live region status words through UIA; keyboard paths.
+- One notice per package, read from the real Host through a new log line that holds the notice's kind and no names: a package of four and a package with an archive set each gave one `Completed`. A failing package gave two `Failed`, the first failure and the closing count, as designed above. The balloons themselves were not seen.
+- Fixed from looking: Resume, Stop, Remove from Queue and the File menu's Download Now and Stop Download were on with nothing to act on. On a package row Open, Open With, Open Folder, Redownload, Refresh Address and Properties did nothing, and now dim with the File menu's reason. Group into Package no longer shows for a package row alone. A header sort kept the old top row in place, hiding the new first rows; it now shows the selection, or the top. The package window's two panes were equal, which cut off the file's details; they are now 1:2. The DLC refusal's first focus was on Open in JDownloader, so Enter would have sent the file; it is now on Cancel, and Tab reaches the button.
+- Evidence: `SelectionCommandsTests` for the group rule, undone once and failed; everything else is wiring seen on screen. Not checked: real 150% scaling (only the logical sizes 1280x720 and 900x560), balloons and sounds, Open in JDownloader (never pressed), and live TorBox.
+- Seen once and not again: the first drag of a run left a column's width unchanged, in one dark run with rows being added. Eight later first drags worked, including with active rows. No cause found.
+- A setting changed through the CLI doesn't reach a running UI's copy until it restarts, as My provider's default folder showed. Left as it is.
+
 ### TB.F1, TB.F3, TB.F4: progress details, list columns, selection box (2026-11-07)
 
 - TB.F1: the package window and a file's own window were written separately, so a package showed no figures per file and no segments. Both now use one `JobDetailsPanel`, and the package window shows it for the selected file, under the file list. My provider's Show progress opened the package window even for one file; that now opens the file's own window. A provider file still shows no address, on purpose: its address is a reference to the account's item, not something to read or send. Speed limiter and completion options stay in the file's own window, reached by double-click or Enter.
 - TB.F3: the download list and My provider's list have a header button per column that sorts, with a chevron, and a grip on each right edge that resizes. Widths and order are saved in `ui-state.json`. All View menu sorts share one path. Remote and archive rows stay on top. A reorder touching more than 64 rows swaps the list's source once instead of moving rows one by one. My provider sorts what is loaded so far, and Load more merges in. File trees keep their path order and have no header: they have only a name and a size, under an indent.
 - TB.F4: dragging a box selects rows in the download list and ticks them in file trees, with Ctrl to add. My provider's item list stays single-select, as it drives one detail pane. The arithmetic is in `RegionSelection`, the tree's rule in `RemoteFileTree.ChooseRows`.
-- Evidence: `ListColumnsAndRegionTests`; each of eight fixes was undone once and its test failed. Status: **unverified in the live UI**: none of it has been run or seen, in either theme. Pointer capture over list rows, the resize cursor, the chevrons and the package window's new layout are what to check first.
+- Evidence: `ListColumnsAndRegionTests`; each of eight fixes was undone once and its test failed. Seen on screen in both themes: see the entry above.
 
 ### TB.F7, TB.F2 wording: one notice per package, no quota claims (2026-11-07)
 
@@ -13,7 +22,7 @@
 - A failing package says at most two things: the first failure at once, and the closing count. Retrying starts this again. Extraction failures always show; a package's extraction success follows the notification setting.
 - The extraction line above the list holds a package's completions until its last set is done, and a CLI package opens one window when the main window is up.
 - Every quota, allowance and "count against" claim about a provider is gone from the add, approve and container screens and from the Host's status text. Limits the provider reports stay and read as its figures. The screens' shape is unchanged, pending TB.F9 and TB.F10.
-- Evidence: `DownloadNoticesTests`, `ProviderWordingTests`, `ArchiveRowsTests`. Status: **unverified in the live UI**: no balloon or sound was seen on screen, and the Host's mapping and the CLI package window have no test.
+- Evidence: `DownloadNoticesTests`, `ProviderWordingTests`, `ArchiveRowsTests`, and the real Host's notice log in the entry above. No balloon or sound was seen on screen, and the Host's mapping and the CLI package window have no test.
 
 ### TB.F5, TB.F6, TB.F8: extraction records and folders (2026-11-07)
 
