@@ -265,9 +265,10 @@ internal sealed record ArchivePlan(
 internal static partial class ArchiveRules
 {
     /// <summary>The Host decides for real; this is only for what the menus offer, and it matches the Host's test of a name.</summary>
-    public static bool LooksLikeRar(string? fileName)
+    public static bool LooksLikeArchive(string? fileName)
         => !string.IsNullOrEmpty(fileName) &&
-           (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) || OldStyleVolume().IsMatch(fileName));
+           (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) || OldStyleVolume().IsMatch(fileName) ||
+            OtherArchive().IsMatch(fileName));
 
     /// <param name="files">Selected files. A selected package row contributes all of its files.</param>
     /// <param name="otherSets">Sets that are selected by other means: a record's own row, or a selected package's.</param>
@@ -280,15 +281,15 @@ internal static partial class ArchiveRules
     {
         var sets = files.Select(file => file.Set).OfType<ArchiveSetDto>().Concat(otherSets)
             .GroupBy(set => set.Id).Select(group => group.First()).ToList();
-        var rarFiles = files.Where(file => file.Set is not null || LooksLikeRar(file.FileName)).ToList();
+        var archiveFiles = files.Where(file => file.Set is not null || LooksLikeArchive(file.FileName)).ToList();
         var listedSets = sets.Where(set => files.All(file => file.Set?.Id != set.Id)).ToList();
 
-        var jobIds = rarFiles.Where(file => file.Set is null || CanAskFor(file.Set)).Select(file => file.JobId).ToList();
+        var jobIds = archiveFiles.Where(file => file.Set is null || CanAskFor(file.Set)).Select(file => file.JobId).ToList();
         var ownSets = listedSets.Where(CanAskFor).ToList();
 
         var reason = !connected ? "the background Host isn't connected"
-            : files.Count == 0 && sets.Count == 0 ? "select a RAR download first"
-            : rarFiles.Count == 0 && sets.Count == 0 ? "no RAR archive selected"
+            : files.Count == 0 && sets.Count == 0 ? "select an archive download first"
+            : archiveFiles.Count == 0 && sets.Count == 0 ? "no archive selected"
             : jobIds.Count > 0 || ownSets.Count > 0 ? null
             : WhyNotAgain(sets);
 
@@ -298,14 +299,14 @@ internal static partial class ArchiveRules
 
         // Each asks the Host for the same thing: a failed set runs again, and a finished one only ever through Extract Again.
         var repeats = retry.Count > 0 && (reason is null
-            ? rarFiles.All(file => file.Set is { } set && retry.Contains(set)) && ownSets.All(retry.Contains)
+            ? archiveFiles.All(file => file.Set is { } set && retry.Contains(set)) && ownSets.All(retry.Contains)
             : sets.All(set => set.State == "completed"));
 
         return new ArchivePlan(
             reason,
             reason is null ? jobIds : [],
             reason is null ? ownSets : [],
-            PasswordFor(rarFiles, sets, packageAlone),
+            PasswordFor(archiveFiles, sets, packageAlone),
             retry,
             sets.Where(set => set.State is "waiting" or "extracting").ToList(),
             sets.Where(set => set.State != "extracting").ToList(),
@@ -358,20 +359,20 @@ internal static partial class ArchiveRules
     }
 
     private static ArchivePasswordTarget? PasswordFor(
-        IReadOnlyList<ArchiveSelectedFile> rarFiles,
+        IReadOnlyList<ArchiveSelectedFile> archiveFiles,
         IReadOnlyList<ArchiveSetDto> sets,
         (Guid Id, string Name)? packageAlone)
     {
         if (packageAlone is { } package) return PackageTarget(package.Id, package.Name, sets);
 
         // A run has its password already, and a finished set has no more use for one.
-        if (sets is [var one] && rarFiles.All(file => file.Set?.Id == one.Id))
+        if (sets is [var one] && archiveFiles.All(file => file.Set?.Id == one.Id))
         {
             return one.State is "completed" or "extracting" ? null : Target(one);
         }
 
         // A download with no record yet can still get a password in advance, by its file's path.
-        if (sets.Count == 0 && rarFiles is [{ FilePath.Length: > 0 } file] && Path.IsPathFullyQualified(file.FilePath))
+        if (sets.Count == 0 && archiveFiles is [{ FilePath.Length: > 0 } file] && Path.IsPathFullyQualified(file.FilePath))
         {
             return new ArchivePasswordTarget(null, null, file.FilePath, file.FileName, false, false, false);
         }
@@ -406,6 +407,10 @@ internal static partial class ArchiveRules
 
     [GeneratedRegex(@"\.[r-z]\d{2}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OldStyleVolume();
+
+    /// <summary>A single 7z, zip, tar or compressed tar, or a split name.7z.001 piece, as the Host's names say.</summary>
+    [GeneratedRegex(@"(?:\.7z|\.zip|\.tar|\.tar\.gz|\.tgz|\.tar\.bz2|\.tbz2?|\.tar\.xz|\.txz|\.tar\.zst|\.tzst|\.(?:7z|zip|rar|tar)\.\d{3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex OtherArchive();
 }
 
 internal enum ArchiveRowAction

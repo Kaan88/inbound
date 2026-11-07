@@ -1,10 +1,13 @@
 # Extracting archives
 
 Inbound can extract archives after they download, or when you ask, with the copy of 7-Zip that comes with
-it. Nothing else needs to be installed, and there is no program path to set. It handles single archives and
-split sets (`name.part01.rar`, or `name.rar` with `name.r00`), RAR4 and RAR5, and archives protected by a
-password, including ones with encrypted file names. A split set waits until every volume has arrived, and is
-extracted once. Automatic extraction is off until you turn it on, and archives are kept unless you choose
+it. Nothing else needs to be installed, and there is no program path to set. It recognises RAR (RAR4 and
+RAR5, single or split as `name.part01.rar` or `name.rar` with `name.r00`), 7z, zip, tar, compressed tars
+(`.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`, `.tar.zst`) and split sets cut into `name.7z.001`, `name.zip.001`,
+`name.rar.001` or `name.tar.001`. A compressed tar comes out as its files, not as a `.tar`. Archives protected
+by a password work, including ones with encrypted file names. A split set waits until every volume has
+arrived, and is extracted once. Names alone cannot tell how many pieces a `.001` set has, so if 7-Zip finds the
+set ends early, it waits for the next piece. Zip sets spanned as `name.zip` with `name.z01` are not recognised. Automatic extraction is off until you turn it on, and archives are kept unless you choose
 to delete them, which happens only after a verified success. Files go through a temporary folder next to
 their destination and appear only when the whole set has checked out, so a crash or restart cannot leave
 a half-extracted result: the set simply runs again. An archive that tries to write outside its folder, or

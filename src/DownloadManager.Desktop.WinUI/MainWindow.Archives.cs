@@ -448,7 +448,7 @@ public sealed partial class MainWindow
         string? file;
         try
         {
-            file = (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".rar"], multiple: false)).FirstOrDefault();
+            file = (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".rar", ".7z", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".zst", ".001"], multiple: false)).FirstOrDefault();
         }
         catch (Exception ex) when (ex is InvalidOperationException or COMException or UnauthorizedAccessException)
         {

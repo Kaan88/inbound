@@ -234,7 +234,7 @@ public sealed class ArchiveVolumesTests
     [InlineData("name.rar.part")]
     [InlineData("name.rar.0123456789abcdef.part")]
     [InlineData(".rar")]
-    [InlineData("name.part1.zip")]
+    [InlineData(".zip")]
     [InlineData("rar")]
     public void UnrelatedFilesAreNotArchives(string name)
     {
@@ -279,4 +279,45 @@ public sealed class ArchiveVolumesTests
         Assert.Equal("a", ArchiveVolumes.FindSet(names, "a.part2.rar")?.BaseName);
         Assert.Null(ArchiveVolumes.FindSet(names, "c.rar"));
     }
+
+    [Theory]
+    [InlineData("a.7z", "a")]
+    [InlineData("a.zip", "a")]
+    [InlineData("a.tar", "a")]
+    [InlineData("a.tar.gz", "a")]
+    [InlineData("a.TGZ", "a")]
+    [InlineData("a.tar.xz", "a")]
+    [InlineData("a.tar.bz2", "a")]
+    public void OtherSingleArchivesAreTheirOwnSet(string name, string stem)
+    {
+        var set = Only(name);
+        Assert.Equal(ArchiveVolumeScheme.Single, set.Scheme);
+        Assert.Equal(stem, set.BaseName);
+        Assert.Equal(name, set.FirstVolume);
+    }
+
+    [Fact]
+    public void ASplitSetIsInOrderAndNamesItsGaps()
+    {
+        var set = Only("b.7z.003", "b.7z.001", "b.7z.005");
+        Assert.Equal(ArchiveVolumeScheme.Split, set.Scheme);
+        Assert.Equal("b.7z", set.BaseName);
+        Assert.Equal("b.7z.001", set.FirstVolume);
+        Assert.Equal(["b.7z.001", "b.7z.003", "b.7z.005"], set.Members);
+        Assert.Equal(["b.7z.002", "b.7z.004"], set.MissingVolumes);
+    }
+
+    [Fact]
+    public void ASplitSetWithoutItsFirstWaitsForIt()
+    {
+        var set = Only("c.zip.002");
+        Assert.Null(set.FirstVolume);
+        Assert.Equal(["c.zip.001"], set.MissingVolumes);
+    }
+
+    [Theory]
+    [InlineData("movie.mkv.001")]
+    [InlineData("notes.gz")]
+    [InlineData("film.mp4")]
+    public void OtherNamesAreNotArchives(string name) => Assert.Empty(ArchiveVolumes.Group([name]));
 }

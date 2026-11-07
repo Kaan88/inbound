@@ -112,7 +112,7 @@ public sealed partial class ArchiveCoordinator
             var path = request.FilePath;
             if (!Path.IsPathFullyQualified(path)) return new ArchiveExtractResult { Ok = false, Error = "The file must be given as a full path." };
             if (!File.Exists(path)) ignored.Add(new ArchiveExtractIgnored { Item = path, Reason = "The file is not there." });
-            else if (!ArchiveSetIdentity.LooksLikeVolume(Path.GetFileName(path))) ignored.Add(new ArchiveExtractIgnored { Item = path, Reason = "This is not a RAR archive. Only RAR is supported." });
+            else if (!ArchiveSetIdentity.LooksLikeVolume(Path.GetFileName(path))) ignored.Add(new ArchiveExtractIgnored { Item = path, Reason = "This is not an archive Inbound extracts: RAR, 7z, zip, tar, or a split .001 set." });
             else targets.Add(Path.GetFullPath(path));
         }
 
@@ -120,7 +120,7 @@ public sealed partial class ArchiveCoordinator
         {
             var job = jobs.FirstOrDefault(candidate => candidate.Id == jobId);
             if (job is null) ignored.Add(new ArchiveExtractIgnored { Item = jobId.ToString(), Reason = "There is no such download." });
-            else if (!ArchiveSetIdentity.LooksLikeVolume(job.FileName)) ignored.Add(new ArchiveExtractIgnored { Item = job.FileName, Reason = "This is not a RAR archive. Only RAR is supported." });
+            else if (!ArchiveSetIdentity.LooksLikeVolume(job.FileName)) ignored.Add(new ArchiveExtractIgnored { Item = job.FileName, Reason = "This is not an archive Inbound extracts: RAR, 7z, zip, tar, or a split .001 set." });
             else targets.Add(job.FinalFilePath);
         }
 
@@ -131,7 +131,7 @@ public sealed partial class ArchiveCoordinator
             foreach (var job in jobs.Where(job => group.JobIds.Contains(job.Id)))
             {
                 if (ArchiveSetIdentity.LooksLikeVolume(job.FileName)) targets.Add(job.FinalFilePath);
-                else ignored.Add(new ArchiveExtractIgnored { Item = job.FileName, Reason = "This is not a RAR archive. Only RAR is supported." });
+                else ignored.Add(new ArchiveExtractIgnored { Item = job.FileName, Reason = "This is not an archive Inbound extracts: RAR, 7z, zip, tar, or a split .001 set." });
             }
 
             if (!string.IsNullOrEmpty(request.Password))
@@ -150,7 +150,7 @@ public sealed partial class ArchiveCoordinator
                 var name = Path.GetFileName(target);
                 if (view.FindSet(name) is not { } set)
                 {
-                    ignored.Add(new ArchiveExtractIgnored { Item = target, Reason = "This is not part of a RAR set." });
+                    ignored.Add(new ArchiveExtractIgnored { Item = target, Reason = "This is not part of an archive set." });
                     continue;
                 }
 
@@ -327,11 +327,11 @@ public sealed partial class ArchiveCoordinator
         if (!Path.IsPathFullyQualified(path)) return (Guid.Empty, "The file must be given as a full path.");
         var name = Path.GetFileName(path);
         var directory = Path.GetDirectoryName(path);
-        if (directory is null || !ArchiveSetIdentity.LooksLikeVolume(name)) return (Guid.Empty, "This is not a RAR archive. Only RAR is supported.");
+        if (directory is null || !ArchiveSetIdentity.LooksLikeVolume(name)) return (Guid.Empty, "This is not an archive Inbound extracts: RAR, 7z, zip, tar, or a split .001 set.");
 
         var jobs = _service.GetSnapshot().Jobs;
         var view = ArchiveDirectoryView.Read(directory, jobs, [name]);
-        if (view.FindSet(name) is not { } set) return (Guid.Empty, "This is not part of a RAR set.");
+        if (view.FindSet(name) is not { } set) return (Guid.Empty, "This is not part of an archive set.");
 
         var key = ArchiveSetIdentity.KeyFor(view.Directory, set);
         set = view.FindByKey(key) ?? set;

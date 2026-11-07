@@ -12,7 +12,7 @@ A4.B is in. The owner said to drop UnRAR and its program-path setting, then aske
 - `-sns-` keeps an archive's NTFS streams from being written, so archives carrying streams now extract (without them) instead of being refused.
 - 7-Zip has no switch for the mark of the web, so the download's zone is written onto the extracted files.
 
-Tests: Archives 291, Core 811 (the UnRAR-path tests are gone), 149 archive integration tests through a real Host. Next: A4.C, so 7z, zip and split .001 downloads are recognised as archives.
+Tests: Archives 291, Core 811 (the UnRAR-path tests are gone), 149 archive integration tests through a real Host. A4.C followed: 7z, zip, tar, compressed tars and split `.001` sets are recognised for automatic and manual extraction. A .tar.gz comes out as its files, through a checked inner tar. A split set 7-Zip finds cut short waits for its next piece. Tests: Archives 309, Core 818, 86 runtime archive integration tests, including a downloaded zip extracting by itself through a real Host. Spanned zip (`.z01`) is not recognised. The owner then reported the UI and TorBox tests done and asked for quick extraction tests, then push and release.
 
 ### UI.R9, UI.R10: favorite folders and free space (2026-11-07, branch `torbox-addflow`)
 
