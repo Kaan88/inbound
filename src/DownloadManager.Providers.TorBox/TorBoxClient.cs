@@ -96,8 +96,9 @@ public sealed class TorBoxClient :
 
     /// <summary>
     /// A complete list, or a failure. Calling a broken answer empty would let a lost submission look
-    /// absent, and that sends it again. Null is the one way of saying "nothing" other than an empty
-    /// list that the reference client accepts, along with a single item not wrapped in a list.
+    /// absent, and that sends it again. An empty list really is <c>data:[]</c>, on all three families
+    /// and the queue, so null isn't taken for one. The reference client also accepts a single item
+    /// not wrapped in a list.
     /// </summary>
     private static List<T> ReadList<T>(JsonDocument document, Func<JsonElement, T> read)
     {
@@ -105,7 +106,6 @@ public sealed class TorBoxClient :
         return data.ValueKind switch
         {
             JsonValueKind.Array => data.EnumerateArray().Select(read).ToList(),
-            JsonValueKind.Null => [],
             JsonValueKind.Object when data.TryGetProperty("id", out _) => [read(data)],
             _ => throw NotAList(),
         };
@@ -179,7 +179,12 @@ public sealed class TorBoxClient :
             foreach (var entry in data.EnumerateObject())
             {
                 if (entry.Value.ValueKind != JsonValueKind.Object) continue;
-                result[entry.Name] = new RemoteCacheHit(entry.Name, Text(entry.Value, "name"), Long(entry.Value, "size"));
+                var hit = new RemoteCacheHit(entry.Name, Text(entry.Value, "name"), Long(entry.Value, "size"));
+                result[entry.Name] = hit;
+
+                // Asked by one of an item's alternative hashes, the answer comes back under its main
+                // one. With one hash asked, that is the answer to it. With several it can't be told apart.
+                if (chunk.Length == 1) result[chunk[0]] = hit;
             }
         }
 

@@ -12,6 +12,9 @@ public static partial class TorBoxMapping
     /// <summary>
     /// The one table of TorBox states. Readiness never comes from here: an item is ready only when
     /// <c>download_present</c> is set together with <c>cached</c> or <c>download_finished</c>.
+    /// Seen on a real account: cached, completed, downloading, uploading, "uploading (no peers)" and
+    /// expired. An expired item keeps its file list, but its files can't be fetched and it doesn't come
+    /// back by waiting, so it counts as failed. The other words here come from the reference client.
     /// </summary>
     public static RemoteStage StageFromState(string? state)
     {
@@ -19,8 +22,13 @@ public static partial class TorBoxMapping
         if (string.IsNullOrEmpty(word)) return RemoteStage.Unknown;
         if (word.StartsWith("stalled", StringComparison.Ordinal)) return RemoteStage.Stalled;
         if (word.StartsWith("failed", StringComparison.Ordinal) || word.StartsWith("error", StringComparison.Ordinal)) return RemoteStage.Failed;
+
+        // A remark can follow the state in brackets, as in "uploading (no peers)".
+        var remark = word.IndexOf('(', StringComparison.Ordinal);
+        if (remark > 0) word = word[..remark].TrimEnd();
         return word switch
         {
+            "expired" => RemoteStage.Failed,
             "queued" or "pending" or "waiting" or "allocating" => RemoteStage.Queued,
             "metadl" or "metadata" or "checkingresumedata" or "checking" => RemoteStage.MetadataPending,
             "downloading" or "uploading" or "processing" or "paused" or "moving" or "compressing" or "repairing" or "extracting" => RemoteStage.Processing,

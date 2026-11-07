@@ -19,7 +19,7 @@ public sealed partial class TestServerHost
     {
         string[] methods = ["GET", "POST", "PUT", "DELETE"];
         _app.MapMethods("/torbox/v1/api/{**path}", methods, (HttpContext context, string path) => TorBox.HandleApiAsync(context, path));
-        _app.MapMethods("/torbox-cdn/{id}/{file}", ["GET", "HEAD"], (HttpContext context, string id, string file) => TorBox.HandleCdnAsync(context, id));
+        _app.MapMethods("/torbox-cdn/{id}", ["GET", "HEAD"], (HttpContext context, string id) => TorBox.HandleCdnAsync(context, id));
         _app.MapMethods("/hoster/{**path}", ["GET", "HEAD", "POST"], (HttpContext context) => TorBox.HandleHosterAsync(context));
     }
 }
@@ -46,6 +46,8 @@ public sealed record MockTorBoxState(string DownloadState)
     public static MockTorBoxState MetaData => new("metaDL") { ListsFiles = false };
     public static MockTorBoxState Stalled => new("stalled (no seeds)") { Progress = 0.1 };
     public static MockTorBoxState Failed(string? error = null) => new("failed") { Error = error };
+    /// <summary>As on a real account: finished once, not present any more, its file list still there and its eta meaningless.</summary>
+    public static MockTorBoxState Expired => new("expired") { Finished = true, Progress = 1, Eta = 1_576_416 };
     public static MockTorBoxState Downloading(double progress = 0.5, long? eta = 20) =>
         new("downloading") { Progress = progress, Eta = eta, Speed = 1_048_576 };
 }
@@ -170,8 +172,11 @@ public sealed record MockFault(MockFaultKind Kind)
 }
 
 /// <summary>
-/// Models what research found about the real service: the envelope, the 404 with success:true,
+/// Models what research found about the real service, and what the live project in
+/// tests/DownloadManager.TorBox.LiveTests reads again: the envelope, the 404 with success:true,
+/// FastAPI's own shape for a bad parameter or address, requestdl's 500 for anything it can't find,
 /// Retry-After on every response, rate limit headers, the CDN's headers and its empty 403 and 404.
+/// Still unseen, so still a guess: what a queued item looks like, and what a create answers.
 /// Routes are counted as "GET torrents/mylist"; the CDN counts as <see cref="CdnRoute"/>.
 /// </summary>
 public sealed partial class MockTorBox
@@ -183,6 +188,7 @@ public sealed partial class MockTorBox
     private readonly Lock _sync = new();
     private readonly List<MockTorBoxItem> _items = [];
     private readonly Dictionary<string, (string? Name, long? Size)> _cached = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _cachedAlternatives = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (List<MockTorBoxFile> Files, List<MockTorBoxState> States, bool Queued)> _scripts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _linkPasswords = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _torrentUploads = new(StringComparer.OrdinalIgnoreCase);
@@ -218,11 +224,14 @@ public sealed partial class MockTorBox
     public TimeSpan RateWindow { get; set; }
     public TimeSpan LinkLifetime { get; set; }
     public int ExpiredLinkStatus { get; set; }
+    /// <summary>Not what the real service does, which answers <c>data:[]</c>. Only for the client's tolerance of that older answer.</summary>
     public bool EmptyListIsNotFound { get; set; }
     public bool DuplicatesAreErrors { get; set; }
     public int? CdnBytesPerSecond { get; set; }
     public int AccountPlan { get; set; }
     public string? PremiumExpiresAt { get; set; }
+    /// <summary>The real field holds a date even with nothing wrong, so a date alone stops nothing.</summary>
+    public string? CooldownUntil { get; set; }
 
     /// <summary>Raised the moment a link stops working mid-transfer.</summary>
     public Action? LinkDied { get; set; }
@@ -234,6 +243,7 @@ public sealed partial class MockTorBox
         {
             _items.Clear();
             _cached.Clear();
+            _cachedAlternatives.Clear();
             _scripts.Clear();
             _linkPasswords.Clear();
             _torrentUploads.Clear();
@@ -268,10 +278,11 @@ public sealed partial class MockTorBox
             DuplicatesAreErrors = false;
             CdnBytesPerSecond = null;
             AccountPlan = 2;
-            PremiumExpiresAt = "2030-01-01T00:00:00.123456+00:00";
+            PremiumExpiresAt = "2030-01-01T00:00:00Z";
+            CooldownUntil = "2026-01-01T00:00:00Z";
             LinkDied = null;
-            AddHoster("Mega", ["mega.nz", "mega.co.nz"], @"^https?://(www\.)?mega\.(nz|co\.nz)/.+$");
-            AddHoster("Rapidgator", ["rapidgator.net"], @"^https?://(www\.)?rapidgator\.net/.+$", available: false, note: "Down for maintenance");
+            AddHoster("Mega", ["mega.nz", "mega.io", "mega.co.nz"], @"^https?://(?:[^./]+\.)*(mega\.nz|mega\.io|mega\.co\.nz)(/|$)");
+            AddHoster("Rapidgator", ["rapidgator.net", "rg.to"], @"^https?://(?:[^./]+\.)*(rapidgator\.net|rg\.to)(/|$)", available: false, note: "Down for maintenance");
         }
     }
 
@@ -318,6 +329,12 @@ public sealed partial class MockTorBox
         lock (_sync) _cached[hash] = (name, size);
     }
 
+    /// <summary>checkcached finds this other hash too, and answers under the item's main hash, as the real one does.</summary>
+    public void AddCachedAlternative(string alternative, string hash)
+    {
+        lock (_sync) _cachedAlternatives[alternative] = hash;
+    }
+
     /// <summary>What an item created from this hash will contain and how it will progress.</summary>
     public void ScriptSubmission(string hash, IEnumerable<MockTorBoxFile> files, IEnumerable<MockTorBoxState> states, bool queued = false)
     {
@@ -349,7 +366,7 @@ public sealed partial class MockTorBox
                 ["name"] = name,
                 ["domains"] = new JsonArray(domains.Select(domain => (JsonNode?)domain).ToArray()),
                 ["url"] = domains.Length > 0 ? $"https://{domains[0]}" : "https://no-domains.invalid",
-                ["icon"] = null,
+                ["icon"] = "https://icons.invalid/hoster.png",
                 ["status"] = available,
                 ["type"] = "hoster",
                 ["note"] = note,
@@ -478,15 +495,15 @@ public sealed partial class MockTorBox
     public void SeedSandbox()
     {
         AddItem(RemoteItemKind.Torrent, "Sample Torrent", [
-            MockTorBoxFile.Of(NextFileId(), "Sample Torrent/readme.txt", 4_096, 11),
-            MockTorBoxFile.Of(NextFileId(), "Sample Torrent/sub/video.bin", 8 * 1024 * 1024, 12),
-            MockTorBoxFile.Of(NextFileId(), "Sample Torrent/other/video.bin", 2 * 1024 * 1024, 13),
+            MockTorBoxFile.Of(0, "Sample Torrent/readme.txt", 4_096, 11),
+            MockTorBoxFile.Of(1, "Sample Torrent/sub/video.bin", 8 * 1024 * 1024, 12),
+            MockTorBoxFile.Of(2, "Sample Torrent/other/video.bin", 2 * 1024 * 1024, 13),
         ]);
-        AddItem(RemoteItemKind.Torrent, "Still Fetching", [MockTorBoxFile.Of(NextFileId(), "Still Fetching/a.bin", 1024, 14)],
+        AddItem(RemoteItemKind.Torrent, "Still Fetching", [MockTorBoxFile.Of(0, "Still Fetching/a.bin", 1024, 14)],
             MockTorBoxState.MetaData, MockTorBoxState.Downloading(0.2, 40), MockTorBoxState.Downloading(0.8, 15), MockTorBoxState.Ready);
-        AddItem(RemoteItemKind.WebDownload, "web-file.bin", [MockTorBoxFile.Of(NextFileId(), "web-file.bin/web-file.bin", 1024 * 1024, 15)]);
+        AddItem(RemoteItemKind.WebDownload, "web-file.bin", [MockTorBoxFile.Of(0, "web-file.bin/web-file.bin", 1024 * 1024, 15)]);
         AddItem(RemoteItemKind.WebDownload, "broken", [], MockTorBoxState.Failed("Hoster is down"));
-        AddItem(RemoteItemKind.Usenet, "Usenet Sample", [MockTorBoxFile.Of(NextFileId(), "Usenet Sample/part.bin", 512 * 1024, 16)]);
+        AddItem(RemoteItemKind.Usenet, "Usenet Sample", [MockTorBoxFile.Of(0, "Usenet Sample/part.bin", 512 * 1024, 16)]);
     }
 
     // ---- API ----------------------------------------------------------------------------------
@@ -621,9 +638,33 @@ public sealed partial class MockTorBox
     private static Answer Ok(JsonNode? data, string detail = "ok") => new(200, Envelope(true, null, detail, data));
     private static Answer Err(int status, string code, string detail) => new(status, Envelope(false, code, detail, null));
 
-    /// <summary>The real service really does answer a missing item like this: 404, success true.</summary>
-    private static Answer NotFound(string detail = "No items found for this user.") =>
-        new(404, Envelope(true, "ITEM_NOT_FOUND", detail, new JsonObject()));
+    /// <summary>The real service really does answer a missing item like this: 404, success true, and data null only for web downloads.</summary>
+    private static Answer NotFound(RemoteItemKind kind) => kind switch
+    {
+        RemoteItemKind.Torrent => new(404, Envelope(true, "ITEM_NOT_FOUND", "No torrents found for this user.", new JsonObject())),
+        RemoteItemKind.WebDownload => new(404, Envelope(true, "ITEM_NOT_FOUND", "No web downloads found for this user.", null)),
+        _ => new(404, Envelope(true, "ITEM_NOT_FOUND", "No Usenet downloads found for this user.", new JsonObject())),
+    };
+
+    /// <summary>A parameter that is missing or of the wrong type. FastAPI answers this, with no envelope and a list for detail.</summary>
+    private static Answer Validation(string type, string parameter, string message) => new(422, new JsonObject
+    {
+        ["detail"] = new JsonArray(new JsonObject
+        {
+            ["type"] = type,
+            ["loc"] = new JsonArray("query", parameter),
+            ["msg"] = message,
+            ["input"] = null,
+        }),
+    });
+
+    /// <summary>An address that isn't there. The real one doesn't use its documented ENDPOINT_NOT_FOUND here.</summary>
+    private static Answer NoSuchAddress() => new(404, new JsonObject { ["detail"] = "Not Found" });
+
+    /// <summary>What requestdl answers for an item not on the account, a file not in it, or an item that has expired.</summary>
+    private static Answer LinkFailure(RemoteItemKind kind) => Err(500, "DATABASE_ERROR", kind == RemoteItemKind.Usenet
+        ? "Failed to request usenet download. Please try again later."
+        : "There was an error processing your request. Please try again later.");
 
     private Answer? Authorize(HttpContext context, string route)
     {
@@ -632,17 +673,19 @@ public sealed partial class MockTorBox
         if (string.IsNullOrEmpty(header))
         {
             // requestdl can go by its token parameter alone; everything else needs the bearer header.
-            return isLinkRequest && context.Request.Query.ContainsKey("token")
+            return isLinkRequest
                 ? null
                 : new Answer(401, new JsonObject { ["detail"] = "Not authenticated" });
         }
 
         return header.StartsWith("Bearer ", StringComparison.Ordinal) && SameKey(header["Bearer ".Length..])
             ? null
-            : Err(403, "BAD_TOKEN", "The API key is not valid.");
+            : BadKey();
     }
 
-    /// <summary>Dashes don't matter, as far as the installed reference client shows.</summary>
+    private static Answer BadKey() => Err(403, "AUTH_ERROR", "An error occurred while verifying your token. Please try again.");
+
+    /// <summary>The API takes the key with or without dashes, and in either case, as read from the real one. The CDN doesn't: see <see cref="HandleCdnAsync"/>.</summary>
     private bool SameKey(string? candidate) =>
         candidate is not null &&
         candidate.Replace("-", string.Empty, StringComparison.Ordinal).Equals(
@@ -668,12 +711,12 @@ public sealed partial class MockTorBox
             case "GET usenet/requestdl": return RequestLink(RemoteItemKind.Usenet, "usenet_id", query);
             case "GET webdl/hosters": return Hosters();
             case "GET queued/getqueued": return Queued(query);
-            case "GET torrents/getqueued" or "GET webdl/getqueued" or "GET usenet/getqueued":
-                return Err(410, "DEPRECATED", "use /v1/api/queued/getqueued");
+            case "GET torrents/getqueued":
+                return Err(410, "DEPRECATED", "This endpoint is now deprecated. Please use /v1/api/queued/getqueued instead.");
             case "POST torrents/controltorrent": return await ControlAsync(context, route, RemoteItemKind.Torrent, "torrent_id").ConfigureAwait(false);
             case "POST webdl/controlwebdownload": return await ControlAsync(context, route, RemoteItemKind.WebDownload, "webdl_id").ConfigureAwait(false);
             case "POST usenet/controlusenetdownload": return await ControlAsync(context, route, RemoteItemKind.Usenet, "usenet_id").ConfigureAwait(false);
-            default: return Err(404, "ENDPOINT_NOT_FOUND", "No such endpoint.");
+            default: return NoSuchAddress();
         }
     }
 
@@ -684,15 +727,30 @@ public sealed partial class MockTorBox
             return Ok(new JsonObject
             {
                 ["id"] = 4242,
-                ["email"] = "someone@example.test",
+                ["auth_id"] = "mock-auth",
+                ["created_at"] = "2025-01-01T10:00:00Z",
+                ["updated_at"] = "2025-01-01T10:00:00Z",
                 ["plan"] = AccountPlan,
-                ["premium_expires_at"] = PremiumExpiresAt,
-                ["cooldown_until"] = null,
-                ["total_bytes_downloaded"] = 1_000_000,
+                ["total_downloaded"] = 3,
+                ["customer"] = "mock-customer",
                 ["is_subscribed"] = true,
-                ["created_at"] = "2025-01-01 10:00:00",
-                ["settings"] = new JsonObject(),
-            });
+                ["premium_expires_at"] = PremiumExpiresAt,
+                ["cooldown_until"] = CooldownUntil,
+                ["email"] = "someone@example.test",
+                ["user_referral"] = "mock-referral",
+                ["base_email"] = "someone@example.test",
+                ["total_bytes_downloaded"] = 1_000_000,
+                ["total_bytes_uploaded"] = 0,
+                ["torrents_downloaded"] = 2,
+                ["web_downloads_downloaded"] = 1,
+                ["usenet_downloads_downloaded"] = 0,
+                ["additional_concurrent_slots"] = 0,
+                ["long_term_seeding"] = false,
+                ["long_term_storage"] = false,
+                ["is_vendor"] = false,
+                ["vendor_id"] = null,
+                ["purchases_referred"] = 0,
+            }, "Successfully retrieved your user information.");
         }
     }
 
@@ -705,13 +763,13 @@ public sealed partial class MockTorBox
             {
                 if (!long.TryParse(query["id"], out var id))
                 {
-                    return Err(400, "INVALID_OPTION", "The id is not a number.");
+                    return Validation("int_parsing", "id", "Input should be a valid integer, unable to parse string as an integer");
                 }
 
                 var item = _items.FirstOrDefault(candidate => candidate.Id == id && candidate.Kind == kind && !candidate.InQueue);
                 if (item is null)
                 {
-                    return NotFound();
+                    return NotFound(kind);
                 }
 
                 var json = ItemJson(item);
@@ -720,12 +778,12 @@ public sealed partial class MockTorBox
                     item.Advance();
                 }
 
-                return Ok(json);
+                return Ok(json, ListWords(kind));
             }
 
             if (!fresh && _listSnapshots.TryGetValue(kind, out var snapshot))
             {
-                return Page(snapshot, query);
+                return Page(snapshot, query, kind);
             }
 
             var built = new JsonArray();
@@ -739,11 +797,18 @@ public sealed partial class MockTorBox
             }
 
             _listSnapshots[kind] = built;
-            return Page(built, query);
+            return Page(built, query, kind);
         }
     }
 
-    private Answer Page(JsonArray list, IQueryCollection query)
+    private static string ListWords(RemoteItemKind kind) => kind switch
+    {
+        RemoteItemKind.Torrent => "Torrent list retrieved successfully.",
+        RemoteItemKind.WebDownload => "web downloads list retrieved successfully.",
+        _ => "Usenet downloads list retrieved successfully.",
+    };
+
+    private Answer Page(JsonArray list, IQueryCollection query, RemoteItemKind? kind = null)
     {
         var offset = int.TryParse(query["offset"], out var parsedOffset) ? Math.Max(0, parsedOffset) : 0;
         var limit = int.TryParse(query["limit"], out var parsedLimit) ? Math.Clamp(parsedLimit, 0, 1000) : 1000;
@@ -753,7 +818,9 @@ public sealed partial class MockTorBox
             page.Add(node?.DeepClone());
         }
 
-        return page.Count == 0 && EmptyListIsNotFound ? NotFound() : Ok(page);
+        return page.Count == 0 && EmptyListIsNotFound
+            ? NotFound(kind ?? RemoteItemKind.Torrent)
+            : Ok(page, kind is { } family ? ListWords(family) : "Queued downloads list retrieved successfully.");
     }
 
     private static JsonObject ItemJson(MockTorBoxItem item)
@@ -794,6 +861,7 @@ public sealed partial class MockTorBox
             ["created_at"] = item.CreatedAt,
             ["updated_at"] = item.CreatedAt,
             ["download_state"] = state.DownloadState,
+            ["upload_speed"] = 0,
             ["progress"] = state.Progress,
             ["download_speed"] = state.Speed,
             ["eta"] = state.Eta,
@@ -814,6 +882,18 @@ public sealed partial class MockTorBox
             json["peers"] = 1;
             json["ratio"] = 0.5;
             json["tracker"] = null;
+            json["tracker_message"] = null;
+            json["torrent_file"] = false;
+            json["download_path"] = item.Hash;
+            json["availability"] = 0;
+            json["total_uploaded"] = 0;
+            json["total_downloaded"] = 0;
+            json["owner"] = "mock-auth";
+            json["seed_torrent"] = false;
+            json["allow_zipped"] = true;
+            json["long_term_seeding"] = false;
+            json["private"] = false;
+            // No real torrent has shown this field yet, on any of 144 items. How a failed one says why is a guess.
             if (state.Error is not null)
             {
                 json["error"] = state.Error;
@@ -822,7 +902,7 @@ public sealed partial class MockTorBox
         else
         {
             json["original_url"] = item.OriginalUrl;
-            json["download_id"] = "mock-download";
+            json["download_id"] = null;
             json["error"] = state.Error;
         }
 
@@ -856,15 +936,16 @@ public sealed partial class MockTorBox
             var array = new JsonArray();
             foreach (var hash in hashes.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (!_cached.TryGetValue(hash, out var hit))
+                var main = _cachedAlternatives.GetValueOrDefault(hash, hash);
+                if (!_cached.TryGetValue(main, out var hit))
                 {
                     continue;
                 }
 
-                var entry = new JsonObject { ["name"] = hit.Name, ["size"] = hit.Size, ["hash"] = hash.ToLowerInvariant() };
+                var entry = new JsonObject { ["name"] = hit.Name, ["size"] = hit.Size, ["hash"] = main.ToLowerInvariant() };
                 if (asObject)
                 {
-                    map[hash.ToLowerInvariant()] = entry;
+                    map[main.ToLowerInvariant()] = entry;
                 }
                 else
                 {
@@ -872,7 +953,7 @@ public sealed partial class MockTorBox
                 }
             }
 
-            return Ok(asObject ? map : array, "Found cached items.");
+            return Ok(asObject ? map : array, "Torrent cache status retrieved successfully.");
         }
     }
 
@@ -975,7 +1056,7 @@ public sealed partial class MockTorBox
         }
         else
         {
-            files = [MockTorBoxFile.Of(++_nextFileId, $"{name}/{name}.bin", 64 * 1024, (int)(_nextFileId % 1000) + 1)];
+            files = [MockTorBoxFile.Of(0, $"{name}/{name}.bin", 64 * 1024, (int)(++_nextFileId % 1000) + 1)];
             states = isCached
                 ? [MockTorBoxState.CachedReady]
                 : [MockTorBoxState.Queued, MockTorBoxState.Downloading(), MockTorBoxState.Ready];
@@ -1001,43 +1082,47 @@ public sealed partial class MockTorBox
         var token = query["token"].ToString();
         if (token.Length == 0)
         {
-            return Err(401, "NO_AUTH", "The token parameter is required.");
+            return Validation("missing", "token", "Field required");
+        }
+
+        if (!long.TryParse(query[idName], out var id))
+        {
+            return Validation("missing", idName, "Field required");
         }
 
         lock (_sync)
         {
             if (!SameKey(token))
             {
-                return Err(403, "BAD_TOKEN", "The API key is not valid.");
+                return BadKey();
             }
 
-            if (!long.TryParse(query[idName], out var id) ||
-                _items.FirstOrDefault(candidate => candidate.Id == id && candidate.Kind == kind) is not { } item)
-            {
-                return NotFound();
-            }
-
-            var files = item.Current.ListsFiles ? item.Files : [];
+            var item = _items.FirstOrDefault(candidate => candidate.Id == id && candidate.Kind == kind);
+            var files = item?.Current.ListsFiles == true ? item.Files : [];
             var file = long.TryParse(query["file_id"], out var fileId)
                 ? files.FirstOrDefault(candidate => candidate.Id == fileId)
                 : files.FirstOrDefault();
-            if (file is null)
+
+            // All the same on the real service, read for an item not on the account, a file not in it,
+            // and an expired item. An item still being fetched is unseen, and this is the guess for it.
+            if (item is null || file is null || !item.Current.Present)
             {
-                return NotFound("No file with that id on this item.");
+                return LinkFailure(kind);
             }
 
-            if (!item.Current.Present)
-            {
-                // Inferred: research has not seen what the real service answers here.
-                return Err(400, "DOWNLOAD_NOT_READY", "This item is not ready yet.");
-            }
-
-            var link = new MockCdnLink(Guid.NewGuid().ToString("D"), item, file, token, DateTimeOffset.UtcNow, _nextLinkDiesAfter);
+            var link = new MockCdnLink(Guid.NewGuid().ToString("D"), item, file, ApiKey, DateTimeOffset.UtcNow, _nextLinkDiesAfter);
             _nextLinkDiesAfter = null;
             _links[link.Uuid] = link;
             _issuedLinks.Add(link);
-            // The real link carries the account key as its token, which is what makes it a credential.
-            return Ok($"{_baseAddress()}/torbox-cdn/{link.Uuid}/{Uri.EscapeDataString(file.ShortName)}?token={Uri.EscapeDataString(token)}");
+            // The real link carries the account key as its token, which is what makes it a credential. It
+            // is the key with its dashes however it was asked for, and it has no file name in it.
+            var words = kind switch
+            {
+                RemoteItemKind.Torrent => "Torrent download requested successfully.",
+                RemoteItemKind.WebDownload => "Web download requested successfully.",
+                _ => "Usenet download requested successfully.",
+            };
+            return Ok($"{_baseAddress()}/torbox-cdn/{link.Uuid}?token={Uri.EscapeDataString(ApiKey)}", words);
         }
     }
 
@@ -1045,7 +1130,7 @@ public sealed partial class MockTorBox
     {
         lock (_sync)
         {
-            return Ok(new JsonArray(_hosters.Select(hoster => hoster.DeepClone()).ToArray()));
+            return Ok(new JsonArray(_hosters.Select(hoster => hoster.DeepClone()).ToArray()), "Hosters list and information retrieved successfully.");
         }
     }
 
@@ -1105,7 +1190,7 @@ public sealed partial class MockTorBox
             var item = _items.FirstOrDefault(candidate => candidate.Id == id && candidate.Kind == kind);
             if (item is null)
             {
-                return NotFound();
+                return NotFound(kind);
             }
 
             _items.Remove(item);
@@ -1157,7 +1242,8 @@ public sealed partial class MockTorBox
             return;
         }
 
-        if (!SameKey(context.Request.Query["token"]))
+        // Exact, unlike the API: the same link with the key's dashes taken out answers 403.
+        if (!string.Equals(context.Request.Query["token"], ApiKey, StringComparison.Ordinal))
         {
             context.Response.StatusCode = 403;
             return;
@@ -1196,7 +1282,7 @@ public sealed partial class MockTorBox
         response.Headers.AcceptRanges = "bytes";
         response.Headers.LastModified = lastModified;
         response.Headers.ContentDisposition = $"attachment; filename=\"{file.ShortName}\"";
-        response.ContentType = "application/octet-stream";
+        response.ContentType = file.MimeType ?? "application/octet-stream";
 
         var range = context.Request.Headers.Range.ToString();
         var ifRange = context.Request.Headers.IfRange.ToString();
@@ -1221,6 +1307,16 @@ public sealed partial class MockTorBox
         }
 
         link.AddRange(partial ? range : null);
+
+        // Seen live: an HTML file sent whole comes back rewritten by the CDN's edge, longer than the
+        // file and with no Content-Length. As a range, even a range from zero, it is untouched.
+        if (!partial && !HttpMethods.IsHead(context.Request.Method) && response.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            await response.Body.WriteAsync(content, context.RequestAborted).ConfigureAwait(false);
+            await response.WriteAsync("<script>added by the edge</script>", context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
         var length = end - start + 1;
         response.ContentLength = Math.Max(0, length);
         if (HttpMethods.IsHead(context.Request.Method) || length <= 0)

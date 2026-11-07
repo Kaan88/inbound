@@ -75,19 +75,32 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
         _key = "ffffffff-ffff-4fff-8fff-ffffffffffff";
         var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.GetAccountAsync());
         Assert.Equal(RemoteFailureKind.Authentication, failure.Kind);
-        Assert.Equal("BAD_TOKEN", failure.ProviderCode);
+        Assert.Equal("AUTH_ERROR", failure.ProviderCode);
     }
 
     /// <summary>
-    /// An assumption, not evidence: the mock strips dashes from both sides by itself, so this can't show
-    /// what TorBox does. The reference client always sends the key dashless, and whether the dashed
-    /// form is accepted too still needs one live read. See "Open" in PROGRESS.md.
+    /// Read from the real API, and read again by the live project: it takes the key as it is, without
+    /// dashes, or in capitals, so the key is sent as entered. The link it gives back always has the
+    /// dashes, and the CDN takes only that form.
     /// </summary>
     [Fact]
-    public async Task TheMockTakesAKeyWithoutDashes_AnAssumptionAboutTheRealOne()
+    public async Task TheApiTakesAnyFormOfTheKeyAndTheLinkCarriesTheDashedOne()
     {
-        _key = MockTorBox.DefaultApiKey.Replace("-", "");
-        Assert.True((await _client.GetAccountAsync()).Premium);
+        var item = OneFile();
+        var dashed = (await _client.ResolveLinkAsync(Ref(item), item.Files[0].Id.ToString())).Url;
+
+        foreach (var form in new[] { MockTorBox.DefaultApiKey.Replace("-", ""), MockTorBox.DefaultApiKey.ToUpperInvariant() })
+        {
+            _key = form;
+            Assert.True((await _client.GetAccountAsync()).Premium);
+            var link = (await _client.ResolveLinkAsync(Ref(item), item.Files[0].Id.ToString())).Url;
+            Assert.Equal(dashed.Query, link.Query);
+        }
+
+        using var asIssued = await _http.GetAsync(dashed);
+        Assert.Equal(HttpStatusCode.OK, asIssued.StatusCode);
+        using var withoutDashes = await _http.GetAsync(dashed.AbsoluteUri.Replace(MockTorBox.DefaultApiKey, MockTorBox.DefaultApiKey.Replace("-", "")));
+        Assert.Equal(HttpStatusCode.Forbidden, withoutDashes.StatusCode);
     }
 
     [Theory]
@@ -106,7 +119,14 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     [InlineData("failed", false, false, false, null, true, RemoteStage.Failed)]
     [InlineData("failed (hoster down)", false, false, false, null, true, RemoteStage.Failed)]
     [InlineData("downloading", false, false, false, "Hoster is down", true, RemoteStage.Failed)]
-    // Readiness comes first, as the reference client does. Still invented input: whether TorBox ever sends both is unconfirmed.
+    // The real words these are about, with the flags a real account shows them with.
+    [InlineData("expired", false, true, false, null, true, RemoteStage.Failed)]
+    [InlineData("uploading", true, true, true, null, true, RemoteStage.Ready)]
+    [InlineData("uploading (no peers)", true, true, true, null, true, RemoteStage.Ready)]
+    [InlineData("downloading", true, true, true, null, true, RemoteStage.Ready)]
+    [InlineData("uploading", false, false, false, null, true, RemoteStage.Processing)]
+    [InlineData("uploading (no peers)", false, false, false, null, true, RemoteStage.Processing)]
+    // Readiness comes first, as the reference client does. Invented input: none of 157 real items sent both.
     [InlineData("completed", true, true, false, "Hoster is down", true, RemoteStage.Ready)]
     [InlineData("completed", true, true, false, "Hoster is down", false, RemoteStage.Failed)]
     [InlineData("something new", false, false, false, null, true, RemoteStage.Unknown)]
@@ -303,8 +323,6 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     [InlineData("""{"success":true,"error":"ITEM_NOT_FOUND","detail":"No torrents found for this user.","data":{}}""", 404)]
     [InlineData("""{"detail":"No torrents found for this user."}""", 404)]
     [InlineData("""{"success":true,"error":null,"detail":"ok","data":[]}""", 200)]
-    // The reference client takes null as nothing. Whether TorBox ever sends it for an empty list still needs one live read.
-    [InlineData("""{"success":true,"error":null,"detail":"ok","data":null}""", 200)]
     public async Task OnlyWhatSaysItIsEmptyIsEmpty(string body, int status)
     {
         _mock.Fail("GET torrents/mylist", new MockFault(MockFaultKind.Respond) { Status = status, RawBody = body });
@@ -323,6 +341,8 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     [InlineData("""{"success":true,"error":null,"data":{}}""", 200, RemoteFailureKind.BadResponse)]
     [InlineData("""{"success":true,"error":null,"data":"later"}""", 200, RemoteFailureKind.BadResponse)]
     [InlineData("""{"success":true,"error":null}""", 200, RemoteFailureKind.BadResponse)]
+    // The real answer for nothing is data:[], read on all three families and the queue. Null says nothing, so nothing gets resent over it.
+    [InlineData("""{"success":true,"error":null,"detail":"ok","data":null}""", 200, RemoteFailureKind.BadResponse)]
     public async Task WhatDoesntSayItIsEmptyIsAFailedLook(string body, int status, RemoteFailureKind kind)
     {
         _mock.Fail("GET torrents/mylist", new MockFault(MockFaultKind.Respond) { Status = status, RawBody = body });
@@ -458,14 +478,28 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     // ---- Cache checks and submissions ---------------------------------------------------------
 
     [Fact]
+    public async Task ACacheCheckByAnAlternativeHashAnswersThatHash()
+    {
+        const string main = "1111222233334444555566667777888899990000";
+        const string other = "0123456789abcdef0123456789abcdef";
+        _mock.AddCached(main, "test_folder", 19);
+        _mock.AddCachedAlternative(other, main);
+
+        var hits = await _client.CheckCachedAsync(RemoteItemKind.WebDownload, [other]);
+
+        Assert.True(hits.ContainsKey(other));
+        Assert.Equal(19, hits[other].Size);
+    }
+
+    [Fact]
     public async Task CacheChecksReturnOnlyHits()
     {
-        _mock.AddCached("d984f67af9917b214cd8b6048ab5624c7df6a07a", "test_folder", 19);
-        var hits = await _client.CheckCachedAsync(RemoteItemKind.Torrent, ["D984F67AF9917B214CD8B6048AB5624C7DF6A07A", "ffffffffffffffffffffffffffffffffffffffff"]);
+        _mock.AddCached("1111222233334444555566667777888899990000", "test_folder", 19);
+        var hits = await _client.CheckCachedAsync(RemoteItemKind.Torrent, ["1111222233334444555566667777888899990000", "ffffffffffffffffffffffffffffffffffffffff"]);
         var hit = Assert.Single(hits);
         Assert.Equal("test_folder", hit.Value.Name);
         Assert.Equal(19, hit.Value.Size);
-        Assert.True(hits.ContainsKey("d984f67af9917b214cd8b6048ab5624c7df6a07a"));
+        Assert.True(hits.ContainsKey("1111222233334444555566667777888899990000"));
         Assert.Equal(1, _mock.Calls("POST torrents/checkcached"));
         Assert.Empty(await _client.CheckCachedAsync(RemoteItemKind.WebDownload, ["abc"]));
     }
@@ -609,6 +643,27 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
         Assert.Equal("DEPRECATED", body.RootElement.GetProperty("error").GetString());
     }
 
+    [Theory]
+    [InlineData("webdl/getqueued")]
+    [InlineData("usenet/getqueued")]
+    [InlineData("nothing/here")]
+    public async Task AnAddressThatIsNotThereAnswersWithNoEnvelope(string path)
+    {
+        using var response = await RawAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Not Found", body.RootElement.GetProperty("detail").GetString());
+        Assert.False(body.RootElement.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task ABadParameterIsRefusedAndItsListOfDetailsIsNotTakenForWords()
+    {
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.GetAsync(new RemoteItemRef("torbox", RemoteItemKind.Torrent, "abc"), fresh: true));
+        Assert.Equal(RemoteFailureKind.Rejected, failure.Kind);
+        Assert.Contains("422", failure.Message);
+    }
+
     [Fact]
     public async Task ALostAnswerStillLeavesTheItemAndOneSubmit()
     {
@@ -712,7 +767,7 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
         Assert.Equal(1, _mock.Calls($"GET {family}/requestdl"));
 
         using var noToken = await RawAsync($"{family}/requestdl?{idName}={item.Id}&file_id={item.Files[0].Id}");
-        Assert.Equal(HttpStatusCode.Unauthorized, noToken.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, noToken.StatusCode);
     }
 
     [Fact]
@@ -727,13 +782,17 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     }
 
     [Fact]
-    public async Task LinksForMissingThingsAreNotFound()
+    public async Task LinksForMissingThingsReadAsTheServiceErrorsTheRealOneAnswers()
     {
         var item = OneFile();
         var noFile = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.ResolveLinkAsync(Ref(item), "99999"));
-        Assert.Equal(RemoteFailureKind.NotFound, noFile.Kind);
+        Assert.Equal(RemoteFailureKind.ServiceError, noFile.Kind);
+        Assert.Equal("DATABASE_ERROR", noFile.ProviderCode);
         var noItem = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.ResolveLinkAsync(Ref(RemoteItemKind.Torrent, 1), "0"));
-        Assert.Equal(RemoteFailureKind.NotFound, noItem.Kind);
+        Assert.Equal(RemoteFailureKind.ServiceError, noItem.Kind);
+        var expired = OneFile(RemoteItemKind.Torrent, 1024, MockTorBoxState.Expired);
+        var noLonger = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.ResolveLinkAsync(Ref(expired), expired.Files[0].Id.ToString()));
+        Assert.Equal(RemoteFailureKind.ServiceError, noLonger.Kind);
     }
 
     [Fact]
@@ -741,7 +800,7 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     {
         var item = OneFile(RemoteItemKind.WebDownload, 1024, MockTorBoxState.Downloading());
         var refused = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.ResolveLinkAsync(Ref(item), item.Files[0].Id.ToString()));
-        Assert.Equal(RemoteFailureKind.Rejected, refused.Kind);
+        Assert.Equal(RemoteFailureKind.ServiceError, refused.Kind);
     }
 
     private async Task<(MockTorBoxFile File, Uri Link)> LinkAsync(int size = 100_000, int seed = 5)
@@ -818,7 +877,7 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     [Fact]
     public async Task AnUnknownUuidIsAnEmpty404()
     {
-        using var answer = await _http.GetAsync($"{_server.BaseAddress}/torbox-cdn/{Guid.NewGuid()}/a.bin?token={MockTorBox.DefaultApiKey}");
+        using var answer = await _http.GetAsync($"{_server.BaseAddress}/torbox-cdn/{Guid.NewGuid()}?token={MockTorBox.DefaultApiKey}");
         Assert.Equal(HttpStatusCode.NotFound, answer.StatusCode);
         Assert.Empty(await answer.Content.ReadAsByteArrayAsync());
     }

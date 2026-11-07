@@ -503,6 +503,60 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
+    /// <summary>
+    /// Seen live: the CDN rewrites an HTML file sent whole, so it arrives longer than the file and with
+    /// no Content-Length, and a provider's file then fails its check and loses its bytes. As a range it
+    /// is untouched, so a provider's job asks for one from the first byte.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnHtmlFileTheCdnWouldRewriteArrivesExact(bool withMd5)
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 1);
+        var file = MockTorBoxFile.Of(0, "Pack/page.html", 256, seed: 935, withMd5: withMd5);
+        file.MimeType = "text/html; charset=utf-8";
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
+
+        var added = await rig.AddAsync(item, file);
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State == "completed");
+
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.All(rig.Mock.IssuedLinks, link => Assert.NotEmpty(link.Ranges));
+    }
+
+    /// <summary>A real item's file ids run from 0, so two items share them. Each job still fetches its own file.</summary>
+    [Fact]
+    public async Task TwoItemsWithTheSameFileIdsAreTwoDownloads()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 1);
+        var one = MockTorBoxFile.Of(0, "One/a.bin", 64 * 1024, seed: 936);
+        var two = MockTorBoxFile.Of(0, "Two/a.bin", 64 * 1024, seed: 937);
+        var first = await rig.AddAsync(rig.Mock.AddItem(RemoteItemKind.Torrent, "One", [one]), one);
+        var second = await rig.AddAsync(rig.Mock.AddItem(RemoteItemKind.Torrent, "Two", [two]), two);
+
+        var firstDone = await rig.Ctx.WaitFor(first.Id, j => j.State == "completed");
+        var secondDone = await rig.Ctx.WaitFor(second.Id, j => j.State == "completed");
+
+        Assert.Equal(Sha256Of(one.Content), await Hashing.Sha256FileAsync(firstDone.FinalFilePath));
+        Assert.Equal(Sha256Of(two.Content), await Hashing.Sha256FileAsync(secondDone.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task AnExpiredItemFailsWithoutRetryingAndKeepsWhatWasDownloaded()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 1);
+        var file = MockTorBoxFile.Of(0, "Pack/a.bin", 64 * 1024, seed: 938);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file], MockTorBoxState.Expired);
+
+        var added = await rig.AddAsync(item, file);
+        var failed = await rig.Ctx.WaitFor(added.Id, j => j.State == "failed");
+
+        Assert.Contains("expired", failed.Failure!.Message);
+        Assert.False(failed.Failure.IsRetryable);
+        Assert.Equal(0, rig.Mock.Calls("GET torrents/requestdl"));
+    }
+
     [Theory]
     [InlineData(429)]
     [InlineData(503)]

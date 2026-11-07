@@ -458,6 +458,13 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         if (job.ExpectedTotalBytes is > 0 && responseTotal is > 0 && responseTotal != job.ExpectedTotalBytes)
         {
+            // A range from zero stands in for asking for the whole file, with nothing saved to judge
+            // it against, so it gets the same answer as a whole file of the wrong size: a fresh link.
+            if (status == 206 && state.Bytes == 0)
+            {
+                throw new DownloadEngineException(LinkAnsweredAnotherSize(job, responseTotal, status), isRetryable: false);
+            }
+
             throw new DownloadEngineException(ExpectedSizeMismatch(job, responseTotal.Value), isRetryable: false, discardLocalData: true);
         }
 
@@ -2860,7 +2867,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             request.Headers.Referrer = referrer;
         }
 
-        if (offset > 0 || rangeEnd is not null)
+        // A provider vouches for exact bytes, and a whole-file answer can arrive rewritten: TorBox's CDN
+        // adds to an HTML file sent whole, and sends the same file untouched as a range, even a range from zero.
+        var wantsExactBytes = !string.IsNullOrWhiteSpace(job.ResolvedUrl) || job.ExpectedTotalBytes is > 0;
+        if (offset == 0 && rangeEnd is null && wantsExactBytes)
+        {
+            request.Headers.Range = new RangeHeaderValue(0, null);
+        }
+        else if (offset > 0 || rangeEnd is not null)
         {
             request.Headers.Range = new RangeHeaderValue(offset, rangeEnd);
             if (includeValidators)
@@ -3702,11 +3716,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             return null;
         }
 
-        return new JobFailure(FailureKind.ExpiredUrl,
+        return LinkAnsweredAnotherSize(job, length, (int)response.StatusCode);
+    }
+
+    private static JobFailure LinkAnsweredAnotherSize(DownloadJob job, long? length, int status)
+        => new(FailureKind.ExpiredUrl,
             $"The link answered with {(length is null ? "a response of unknown size" : $"{length:N0} bytes")} " +
             $"instead of the expected {job.ExpectedTotalBytes:N0}-byte file. Anything already downloaded was kept.",
-            false, true, DateTimeOffset.UtcNow, (int)response.StatusCode);
-    }
+            false, true, DateTimeOffset.UtcNow, status);
 
     /// <summary>For a file whose bytes a provider vouched for: keeping them can only reach the same result.</summary>
     private async Task<DownloadResult> FailVerificationAsync(DownloadJob job, string problem, long? total)

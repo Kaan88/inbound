@@ -437,6 +437,23 @@ public sealed partial class RuntimeServiceTests
         Assert.Empty(rig.Mock.Submissions);
     }
 
+    /// <summary>Seen live: an expired item keeps its file list and never comes back, so it can't be waited for.</summary>
+    [Fact]
+    public async Task ScenarioA_AnExpiredItemFailsRatherThanWaitingForever()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [MockTorBoxFile.Of(0, "Pack/a.bin", Kb, 1)], MockTorBoxState.Expired);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents" });
+
+        await rig.RunAsync();
+
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.Contains("expired", failed.FailureMessage);
+        Assert.Empty(rig.Children());
+        Assert.Empty(rig.Mock.Submissions);
+    }
+
     [Fact]
     public async Task ScenarioA_AddingAnAttachedItemTwiceReturnsTheSameJob()
     {

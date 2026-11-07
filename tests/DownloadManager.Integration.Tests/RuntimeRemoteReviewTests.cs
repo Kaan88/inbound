@@ -19,7 +19,7 @@ public sealed partial class RuntimeServiceTests
     /// <summary>Whatever comes in place of a real list, once the submission has gone out.</summary>
     public static TheoryData<string> BrokenLists => new()
     {
-        "not json 404", "endpoint 404", "deprecated 410", "empty 404", "no reason", "a word for data", "empty object", "no data at all",
+        "not json 404", "endpoint 404", "deprecated 410", "empty 404", "no reason", "a word for data", "empty object", "no data at all", "null for data",
     };
 
     private static MockFault BrokenList(string which) => which switch
@@ -32,6 +32,7 @@ public sealed partial class RuntimeServiceTests
         "a word for data" => new MockFault(MockFaultKind.Respond) { Status = 200, RawBody = """{"success":true,"error":null,"data":"later"}""" },
         "empty object" => new MockFault(MockFaultKind.Respond) { Status = 200, RawBody = """{"success":true,"error":null,"data":{}}""" },
         "no data at all" => new MockFault(MockFaultKind.Respond) { Status = 200, RawBody = """{"success":true,"error":null}""" },
+        "null for data" => new MockFault(MockFaultKind.Respond) { Status = 200, RawBody = """{"success":true,"error":null,"detail":"ok","data":null}""" },
         _ => throw new ArgumentOutOfRangeException(nameof(which)),
     };
 

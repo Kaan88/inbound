@@ -66,6 +66,8 @@ public sealed class TorBoxClientTests
     [InlineData("completed", false, true, null, RemoteStage.Processing)]
     [InlineData("failed", false, false, null, RemoteStage.Failed)]
     [InlineData("downloading", false, false, "Hoster is down", RemoteStage.Failed)]
+    [InlineData("expired", true, false, null, RemoteStage.Failed)]
+    [InlineData("uploading (no peers)", false, false, null, RemoteStage.Processing)]
     [InlineData("something new", false, false, null, RemoteStage.Unknown)]
     public void StageNeedsBothFlagsToBeReady(string state, bool finished, bool present, string? error, RemoteStage expected)
     {
@@ -401,8 +403,8 @@ public sealed class TorBoxClientTests
     }
 
     [Theory]
-    [InlineData("magnet:?xt=urn:btih:D984F67AF9917B214CD8B6048AB5624C7DF6A07A&tr=x", "d984f67af9917b214cd8b6048ab5624c7df6a07a")]
-    [InlineData("magnet:?dn=a&xt=urn:btih:d984f67af9917b214cd8b6048ab5624c7df6a07a", "d984f67af9917b214cd8b6048ab5624c7df6a07a")]
+    [InlineData("magnet:?xt=urn:btih:1111222233334444555566667777888899990000&tr=x", "1111222233334444555566667777888899990000")]
+    [InlineData("magnet:?dn=a&xt=urn:btih:1111222233334444555566667777888899990000", "1111222233334444555566667777888899990000")]
     [InlineData("magnet:?xt=urn:btih:zzz", null)]
     [InlineData("magnet:?dn=only", null)]
     [InlineData("", null)]
