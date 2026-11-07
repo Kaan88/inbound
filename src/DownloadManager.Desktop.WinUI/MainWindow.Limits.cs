@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
-/// UI.R15, UI.R16: the toolbar's limit menus. Each holds common values and saves the setting at once; the Host
+/// UI.R15, UI.R16: the limit submenus under Downloads in the menu bar. Each holds common values and saves the setting at once; the Host
 /// applies it live (the speed cap to running downloads, connections to new and unstarted ones).
 /// </summary>
 public sealed partial class MainWindow
@@ -49,15 +49,16 @@ public sealed partial class MainWindow
     {
         if (_settings is not { } settings) return;
         var speed = settings.GlobalSpeedLimitBytesPerSecond is > 0 ? settings.GlobalSpeedLimitBytesPerSecond.Value : 0;
-        DownloadsLimitText.Text = settings.MaxConcurrentDownloads == 1 ? "1 download" : $"{settings.MaxConcurrentDownloads} downloads";
-        ConnectionsLimitText.Text = settings.DefaultConnections == 1 ? "1 connection" : $"{settings.DefaultConnections} connections";
-        SpeedLimitText.Text = speed == 0 ? "No speed limit" : SpeedText(speed);
+        // The current value sits in each submenu's name, so it shows without opening it.
+        DownloadsLimitMenu.Text = $"Simultaneous Downloads: {settings.MaxConcurrentDownloads}";
+        ConnectionsLimitMenu.Text = $"Connections per Download: {settings.DefaultConnections}";
+        SpeedLimitMenu.Text = speed == 0 ? "Speed Limit: None" : $"Speed Limit: {SpeedText(speed)}";
         Tick(DownloadsLimitMenu, settings.MaxConcurrentDownloads);
         Tick(ConnectionsLimitMenu, settings.DefaultConnections);
         Tick(SpeedLimitMenu, speed);
     }
 
-    private static void Tick(MenuFlyout menu, long value)
+    private static void Tick(MenuFlyoutSubItem menu, long value)
     {
         foreach (var item in menu.Items.OfType<RadioMenuFlyoutItem>())
             item.IsChecked = item.Tag is long tag && tag == value;

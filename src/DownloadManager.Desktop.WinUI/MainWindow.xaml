@@ -88,6 +88,11 @@
                 <MenuFlyoutSubItem x:Name="StartQueueMenu" Text="Start Queue" AccessKey="Q" />
                 <MenuFlyoutSubItem x:Name="StopQueueMenu" Text="Stop Queue" AccessKey="U" />
                 <MenuFlyoutSeparator />
+                <!-- UI.R15, UI.R16: the limits, each a submenu of common values; a choice applies at once. -->
+                <MenuFlyoutSubItem x:Name="DownloadsLimitMenu" Text="Simultaneous Downloads" AccessKey="M" />
+                <MenuFlyoutSubItem x:Name="ConnectionsLimitMenu" Text="Connections per Download" AccessKey="C" />
+                <MenuFlyoutSubItem x:Name="SpeedLimitMenu" Text="Speed Limit" AccessKey="P" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Scheduler…" AccessKey="H" Click="MenuScheduler_Click" />
                 <MenuFlyoutItem Text="Options…" AccessKey="T" Click="MenuOptions_Click" />
             </MenuBarItem>
@@ -201,32 +206,6 @@
                         <StackPanel>
                             <FontIcon Glyph="&#xE787;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
-                        </StackPanel>
-                    </Button>
-                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
-                    <!-- UI.R15, UI.R16: the three limits, each a menu of common values; changes apply at once. -->
-                    <Button x:Name="DownloadsLimitButton" AutomationProperties.Name="Simultaneous downloads" Style="{StaticResource InboundToolButtonStyle}"
-                            ToolTipService.ToolTip="How many downloads run at the same time">
-                        <Button.Flyout><MenuFlyout x:Name="DownloadsLimitMenu" Placement="Bottom" /></Button.Flyout>
-                        <StackPanel>
-                            <FontIcon Glyph="&#xE8FD;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
-                            <TextBlock x:Name="DownloadsLimitText" Text="Downloads" Style="{StaticResource InboundToolLabelStyle}" />
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="ConnectionsLimitButton" AutomationProperties.Name="Connections per download" Style="{StaticResource InboundToolButtonStyle}"
-                            ToolTipService.ToolTip="Connections for each new download, and for waiting ones that haven't started">
-                        <Button.Flyout><MenuFlyout x:Name="ConnectionsLimitMenu" Placement="Bottom" /></Button.Flyout>
-                        <StackPanel>
-                            <FontIcon Glyph="&#xE8CE;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
-                            <TextBlock x:Name="ConnectionsLimitText" Text="Connections" Style="{StaticResource InboundToolLabelStyle}" />
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="SpeedLimitButton" AutomationProperties.Name="Speed limit" Style="{StaticResource InboundToolButtonStyle}"
-                            ToolTipService.ToolTip="Total speed for all downloads together">
-                        <Button.Flyout><MenuFlyout x:Name="SpeedLimitMenu" Placement="Bottom" /></Button.Flyout>
-                        <StackPanel>
-                            <FontIcon Glyph="&#xEC4A;" FontSize="25" Foreground="{ThemeResource InboundIconNeutralBrush}" />
-                            <TextBlock x:Name="SpeedLimitText" Text="Speed" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
