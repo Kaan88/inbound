@@ -126,7 +126,7 @@ public sealed class RemoteJobRulesTests
         => Assert.Equal(TimeSpan.FromSeconds(60), RemoteJobRules.RateLimitHold(null));
 
     [Theory]
-    [InlineData(0, 0, 0, 0, 0, "Local downloads created")]
+    [InlineData(0, 0, 0, 0, 0, "Its downloads are no longer on the list")]
     [InlineData(3, 3, 0, 0, 0, "Completed")]
     [InlineData(3, 1, 1, 0, 1, "1 of 3 local downloads failed")]
     [InlineData(3, 1, 0, 1, 1, "Downloading locally")]
@@ -188,7 +188,7 @@ public sealed class RemoteJobRulesTests
     [InlineData(RemoteJobState.Waiting, RemoteStage.MetadataPending, "Waiting for P to list the files")]
     [InlineData(RemoteJobState.Waiting, RemoteStage.Processing, "Processing on P")]
     [InlineData(RemoteJobState.Waiting, RemoteStage.Stalled, "Stalled on P")]
-    [InlineData(RemoteJobState.LocalStarted, null, "Local downloads created")]
+    [InlineData(RemoteJobState.LocalStarted, null, "Its downloads are no longer on the list")]
     [InlineData(RemoteJobState.AwaitingSelection, null, "Ready to download. Choose the files.")]
     public void TheWordsForEachState(RemoteJobState state, RemoteStage? stage, string expected)
     {

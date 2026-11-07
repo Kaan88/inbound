@@ -125,6 +125,8 @@ public sealed partial class RuntimeServiceTests
 
         public RemoteLocalSummary? GetLocalSummary(Guid packageId) => inner.GetLocalSummary(packageId);
 
+        public int? CountLocalJobs(Guid remoteJobId) => inner.CountLocalJobs(remoteJobId);
+
         public async Task<RemoteJobsResult> AddRemoteJobsAsync(IReadOnlyList<RemoteJobRequest> requests, string packageKey, string? packageName = null, CancellationToken cancellationToken = default)
         {
             if (BeforeAdd is { } before) await before();
@@ -1453,6 +1455,60 @@ public sealed partial class RuntimeServiceTests
         await rig.RunAsync();
 
         Assert.Equal("None of the chosen files can be downloaded.", rig.View(job.Id).FailureMessage);
+    }
+
+    /// <summary>
+    /// TB.F14: adding again what had been downloaded, after its downloads were taken off the list, answered
+    /// with the old job, said "Local downloads created" and put nothing on the list.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddingAgainWhatLeftTheListStartsItAgain(bool magnet)
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Again/again.bin", 16 * Kb, 61);
+        RemoteAddRequest request;
+        if (magnet)
+        {
+            var hash = new string('7', 40);
+            rig.Mock.AddCached(hash);
+            rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.CachedReady]);
+            request = new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, Destination = rig.Destination };
+        }
+        else
+        {
+            var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Again", [file]);
+            request = new RemoteAddRequest { Input = $"https://torbox.app/download?id={item.Id}&type=torrents", Destination = rig.Destination };
+        }
+
+        var first = (await rig.Jobs.AddAsync(request)).Job!;
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(first.Id).State);
+        await rig.AssertCompletedAsync(file, "Again", "again.bin");
+
+        // While a download it made is on the list, it is the same job.
+        var same = await rig.Jobs.AddAsync(request);
+        Assert.True(same.Existing);
+        Assert.Equal(first.Id, same.Job!.Id);
+
+        var child = Assert.Single(rig.Children());
+        Assert.True((await rig.Ctx.Service.RemoveAsync(child.Id, deleteFile: true)).Ok);
+        Assert.Equal("Its downloads are no longer on the list", rig.View(first.Id).Status);
+
+        var again = await rig.Jobs.AddAsync(request);
+        Assert.False(again.Existing);
+        Assert.NotEqual(first.Id, again.Job!.Id);
+        Assert.Null(rig.Jobs.Find(first.Id));
+        await rig.RunAsync();
+
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(again.Job.Id).State);
+        Assert.Single(rig.Children());
+        await rig.AssertCompletedAsync(file, "Again", "again.bin");
+
+        // And it stays gone after a restart.
+        await rig.RestartAsync();
+        Assert.Equal([again.Job.Id], rig.Jobs.List().Select(job => job.Id));
     }
 
     [Fact]

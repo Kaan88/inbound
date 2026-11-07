@@ -124,9 +124,10 @@ public static class RemoteJobRules
     /// <summary>What the local jobs of a package are doing right now. No record holds this: it is read when asked.</summary>
     private static string LocalWords(RemoteLocalSummary? local)
     {
+        // Saved only once the downloads exist, so none left means they were taken off the list since.
         if (local is not { Total: > 0 } work)
         {
-            return "Local downloads created";
+            return "Its downloads are no longer on the list";
         }
 
         if (work.Completed == work.Total)

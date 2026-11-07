@@ -192,6 +192,16 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
         return added;
     }
 
+    /// <summary>The jobs a remote job made that are still on the list, wherever the user has put them since.</summary>
+    public int? CountLocalJobs(Guid remoteJobId)
+    {
+        var owner = remoteJobId.ToString("N");
+        lock (_sync)
+        {
+            return _jobs.Values.Count(runtime => string.Equals(runtime.Job.RemoteSource?.RemoteJobId, owner, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     /// <summary>The package's local jobs right now, for the words on its remote job.</summary>
     public RemoteLocalSummary? GetLocalSummary(Guid packageId)
     {

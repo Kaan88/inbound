@@ -596,8 +596,8 @@ public sealed class RemoteRowTextTests
         Assert.Equal("Processing on TorBox", RemoteText.Item(Item(), "TorBox", job, culture: CultureInfo.InvariantCulture).Status);
 
         var started = Job("localStarted");
-        started.Status = "Local downloads created";
-        Assert.Equal("Local downloads created", RemoteText.Item(Item(), "TorBox", started, culture: CultureInfo.InvariantCulture).Status);
+        started.Status = "Downloading locally";
+        Assert.Equal("Downloading locally", RemoteText.Item(Item(), "TorBox", started, culture: CultureInfo.InvariantCulture).Status);
         Assert.Equal("Paused locally", RemoteText.Item(Item(), "TorBox", started, "Paused locally", CultureInfo.InvariantCulture).Status);
     }
 

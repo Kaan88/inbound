@@ -17,6 +17,9 @@ public interface IRemoteJobHost
 
     /// <summary>What a package's local jobs are doing right now. Null when it has gone, or this host can't say.</summary>
     RemoteLocalSummary? GetLocalSummary(Guid packageId) => null;
+
+    /// <summary>How many local jobs this remote job made are still on the list. Null when this host can't say.</summary>
+    int? CountLocalJobs(Guid remoteJobId) => null;
 }
 
 /// <summary>A package's local jobs, counted by what they are doing.</summary>
@@ -529,10 +532,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         RemoteJobRecord saved;
         var existing = false;
         string? note = null;
+        IReadOnlyList<RemoteJobRecord> spent = [];
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (FindActiveTwinLocked(record) is { } twin)
+            (var found, spent) = FindTwinLocked(record);
+            if (found is { } twin)
             {
                 existing = true;
                 saved = twin;
@@ -568,9 +573,17 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 await _store.SaveAsync(record, CancellationToken.None).ConfigureAwait(false);
                 lock (_sync) _records[record.Id] = record;
                 saved = record;
+
+                // Only now, so a crash in between leaves the new one, which a later add finds first.
+                foreach (var old in spent) await ForgetAsync(old).ConfigureAwait(false);
             }
         }
         finally { _gate.Release(); }
+
+        if (!existing)
+        {
+            foreach (var old in spent) Removed?.Invoke(this, old.Id);
+        }
 
         Raise(saved);
         WakeLoop(saved.Provider);
@@ -615,17 +628,26 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         };
     }
 
-    private RemoteJobRecord? FindActiveTwinLocked(RemoteJobRecord record)
+    /// <summary>
+    /// The job already covering this input, if any. One whose downloads have all left the list since covers
+    /// nothing any more: it is spent, and adding the input again starts it again instead of naming it.
+    /// </summary>
+    private (RemoteJobRecord? Twin, IReadOnlyList<RemoteJobRecord> Spent) FindTwinLocked(RemoteJobRecord record)
     {
+        List<RemoteJobRecord> candidates;
         lock (_sync)
         {
-            return _records.Values.FirstOrDefault(other =>
+            candidates = _records.Values.Where(other =>
                 other.Provider == record.Provider &&
                 other.Kind == record.Kind &&
                 other.State is not (RemoteJobState.Failed or RemoteJobState.Removed) &&
                 ((record.PredictedHash is not null && string.Equals(other.PredictedHash, record.PredictedHash, StringComparison.OrdinalIgnoreCase)) ||
-                 (record.ItemId is not null && other.ItemId == record.ItemId)));
+                 (record.ItemId is not null && other.ItemId == record.ItemId))).ToList();
         }
+
+        // Outside the lock: the count takes the service's own.
+        var spent = candidates.Where(other => other.State == RemoteJobState.LocalStarted && _host.CountLocalJobs(other.Id) == 0).ToList();
+        return (candidates.Except(spent).FirstOrDefault(), spent);
     }
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
@@ -1099,23 +1121,29 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 return new RemoteActionResult(false, "That item is not on the list.");
             }
 
-            // Secrets go first, in a save of their own: a crash before the delete leaves nothing to find.
-            await _store.SaveAsync(record with
-            {
-                State = RemoteJobState.Removed,
-                ProtectedInput = null,
-                ProtectedTorrent = null,
-                ProtectedLinkPassword = null,
-                ProtectedArchivePassword = null,
-                NextCheckAt = null,
-            }, CancellationToken.None).ConfigureAwait(false);
-            lock (_sync) _records.Remove(id);
-            await DeleteQuietlyAsync(id).ConfigureAwait(false);
+            await ForgetAsync(record).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
 
         Removed?.Invoke(this, id);
         return new RemoteActionResult(true);
+    }
+
+    /// <summary>Takes a job off the list for good. Called under the gate.</summary>
+    private async Task ForgetAsync(RemoteJobRecord record)
+    {
+        // Secrets go first, in a save of their own: a crash before the delete leaves nothing to find.
+        await _store.SaveAsync(record with
+        {
+            State = RemoteJobState.Removed,
+            ProtectedInput = null,
+            ProtectedTorrent = null,
+            ProtectedLinkPassword = null,
+            ProtectedArchivePassword = null,
+            NextCheckAt = null,
+        }, CancellationToken.None).ConfigureAwait(false);
+        lock (_sync) _records.Remove(record.Id);
+        await DeleteQuietlyAsync(record.Id).ConfigureAwait(false);
     }
 
     /// <summary>
