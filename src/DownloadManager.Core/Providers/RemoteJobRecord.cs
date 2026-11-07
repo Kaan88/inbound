@@ -110,6 +110,8 @@ public sealed record RemoteJobRecord
     /// <summary>When a submitted item was first missing from everything the provider lists.</summary>
     public DateTimeOffset? MissingSince { get; init; }
     public int Resubmits { get; init; }
+    /// <summary>What the provider itself said when it last failed to take this, in clean words. Null if it said nothing.</summary>
+    public string? LastSubmitAnswer { get; init; }
 }
 
 /// <summary>

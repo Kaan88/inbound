@@ -148,6 +148,13 @@ public sealed record MockFault(MockFaultKind Kind)
     public static MockFault Error(string code, string detail = "Scripted failure.", int status = 200) =>
         new(MockFaultKind.Respond) { Status = status, Code = code, Detail = detail };
 
+    /// <summary>Real answers to a web download, captured from the service: nothing is created for any of them.</summary>
+    public static MockFault DeadWebLink { get; } = Error("DOWNLOAD_SERVER_ERROR", "There was an error scanning this link. It may not be online or it is inaccessible. Please try again later. Please make sure that this URL is for an item rather than a collection.", 500);
+    public static MockFault InvalidHosterLink { get; } = Error("DOWNLOAD_SERVER_ERROR", "This is not a valid link. Please provide a valid Mega link.", 500);
+    public static MockFault SiteTurnedOff { get; } = Error("TEMPORARILY_DISABLED", "The site you are trying to download from is temporarily disabled. You may view the status of supported sites at https://torbox.app/hosters.", 503);
+    public static MockFault SiteNotSupported { get; } = Error("UNSUPPORTED_SITE", "The site you are trying to download from is not supported.", 400);
+    public static MockFault NotALink { get; } = Error("INVALID_OPTION", "The link you provided is invalid. Please provide a valid link.", 400);
+
     public static MockFault Status5xx(int status = 500, string? code = "DATABASE_ERROR", string detail = "Scripted outage.") =>
         new(MockFaultKind.Respond) { Status = status, Code = code, Detail = detail };
 
@@ -191,6 +198,7 @@ public sealed partial class MockTorBox
     private readonly Dictionary<string, string> _cachedAlternatives = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (List<MockTorBoxFile> Files, List<MockTorBoxState> States, bool Queued)> _scripts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _linkPasswords = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MockFault> _refusedLinks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _torrentUploads = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FaultSlot> _faults = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _calls = new(StringComparer.Ordinal);
@@ -246,6 +254,7 @@ public sealed partial class MockTorBox
             _cachedAlternatives.Clear();
             _scripts.Clear();
             _linkPasswords.Clear();
+            _refusedLinks.Clear();
             _torrentUploads.Clear();
             _hosterRequests = 0;
             _faults.Clear();
@@ -382,6 +391,17 @@ public sealed partial class MockTorBox
     }
 
     /// <summary>Makes a route misbehave for its next <paramref name="times"/> calls. "*" means every API route.</summary>
+    /// <summary>The service's own refusal of one link, for a link that is dead or a site that's off. Nothing is created.</summary>
+    public void RefuseLink(string link, MockFault refusal)
+    {
+        lock (_sync) _refusedLinks[link] = refusal;
+    }
+
+    public void AcceptLink(string link)
+    {
+        lock (_sync) _refusedLinks.Remove(link);
+    }
+
     public void Fail(string route, MockFault fault, int times = int.MaxValue)
     {
         lock (_sync) _faults[route] = new FaultSlot(fault, times);
@@ -1020,6 +1040,11 @@ public sealed partial class MockTorBox
         lock (_sync)
         {
             _submissions.Add(new MockTorBoxSubmission("createwebdownload", link, null, password.Length > 0 ? password : null, name, onlyIfCached));
+            if (_refusedLinks.TryGetValue(link, out var refusal))
+            {
+                return Err(refusal.Status, refusal.Code!, refusal.Detail!);
+            }
+
             if (_linkPasswords.TryGetValue(link, out var wanted) && wanted != password)
             {
                 return Err(400, "UNKNOWN_ERROR", "This link is password protected.");

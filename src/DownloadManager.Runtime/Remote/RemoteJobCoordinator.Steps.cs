@@ -612,6 +612,7 @@ public sealed partial class RemoteJobCoordinator
         var now = _time.GetUtcNow();
         var message = Describe(entry, failure, submission.LinkPassword, submission.Link);
         var outcome = RemoteJobRules.AfterSubmitFailure(failure.Kind);
+        var said = failure.Kind == RemoteFailureKind.ServiceError ? Words(entry, failure.Message, 500, [submission.LinkPassword, submission.Link]) : null;
         var rateLimited = failure.Kind == RemoteFailureKind.RateLimited;
         var hold = RemoteJobRules.RateLimitHold(failure.RetryAfter);
         if (rateLimited)
@@ -642,6 +643,7 @@ public sealed partial class RemoteJobCoordinator
                     SubmittedAt = now,
                     FailureKind = failure.Kind,
                     FailureMessage = message,
+                    LastSubmitAnswer = said,
                     NextCheckAt = now,
                 },
                 RemoteSubmitOutcome.TryAgainLater => record with
@@ -735,7 +737,7 @@ public sealed partial class RemoteJobCoordinator
         if (record.Resubmits >= _options.MostResubmits)
         {
             await FailAsync(record.Id, RemoteFailureKind.ServiceError,
-                $"{entry.DisplayName} didn't list this after {record.Resubmits + 1} tries. It won't be sent again until you retry.").ConfigureAwait(false);
+                $"{entry.DisplayName} didn't list this after {record.Resubmits + 1} tries{(record.LastSubmitAnswer is { } last ? $", and last said: {last}" : ".")} It won't be sent again until you retry.").ConfigureAwait(false);
             return;
         }
 
@@ -847,6 +849,7 @@ public sealed partial class RemoteJobCoordinator
         FailureMessage = null,
         ConsecutiveFailures = 0,
         MissingSince = null,
+        LastSubmitAnswer = null,
     };
 
     // ---- Waiting -------------------------------------------------------------------------------

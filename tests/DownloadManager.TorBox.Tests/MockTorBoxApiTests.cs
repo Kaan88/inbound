@@ -163,6 +163,7 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     [InlineData("BOZO_NZB", RemoteFailureKind.Rejected)]
     [InlineData("LINK_OFFLINE", RemoteFailureKind.Rejected)]
     [InlineData("UNSUPPORTED_SITE", RemoteFailureKind.Rejected)]
+    [InlineData("TEMPORARILY_DISABLED", RemoteFailureKind.Rejected)]
     [InlineData("INVALID_OPTION", RemoteFailureKind.Rejected)]
     [InlineData("MISSING_REQUIRED_OPTION", RemoteFailureKind.Rejected)]
     [InlineData("TOO_MANY_OPTIONS", RemoteFailureKind.Rejected)]
@@ -183,6 +184,40 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
         Assert.Equal(expected, failure.Kind);
         Assert.Equal(code, failure.ProviderCode);
         Assert.Equal("A scripted reason.", failure.Message);
+    }
+
+    /// <summary>Captured from the real service: nothing is created, and the words are the only reason anyone gets.</summary>
+    [Fact]
+    public async Task ADeadWebLinkIsARefusalWithTheServicesOwnWords()
+    {
+        const string link = "https://hoster.example/dead";
+        _mock.RefuseLink(link, MockFault.DeadWebLink);
+
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() =>
+            _client.SubmitAsync(new RemoteSubmission { Kind = RemoteItemKind.WebDownload, Link = link }));
+
+        Assert.Equal(RemoteFailureKind.Rejected, failure.Kind);
+        Assert.Equal("DOWNLOAD_SERVER_ERROR", failure.ProviderCode);
+        Assert.Contains("error scanning this link", failure.Message);
+        Assert.Empty(await _client.ListAsync(RemoteItemKind.WebDownload, 0, 10, fresh: true));
+    }
+
+    [Fact]
+    public async Task TheSameCodeWithoutWordsOrElsewhereIsStillAServiceError()
+    {
+        _mock.Fail("POST webdl/createwebdownload", MockFault.Empty(500) with { Code = "DOWNLOAD_SERVER_ERROR" }, times: 1);
+        var noWords = await Assert.ThrowsAsync<RemoteProviderException>(() =>
+            _client.SubmitAsync(new RemoteSubmission { Kind = RemoteItemKind.WebDownload, Link = "https://hoster.example/a" }));
+        Assert.Equal(RemoteFailureKind.ServiceError, noWords.Kind);
+
+        _mock.Fail("POST torrents/createtorrent", MockFault.DeadWebLink, times: 1);
+        var torrent = await Assert.ThrowsAsync<RemoteProviderException>(() =>
+            _client.SubmitAsync(new RemoteSubmission { Kind = RemoteItemKind.Torrent, Link = "magnet:?xt=urn:btih:" + new string('a', 40) }));
+        Assert.Equal(RemoteFailureKind.ServiceError, torrent.Kind);
+
+        _mock.Fail("GET user/me", MockFault.DeadWebLink, times: 1);
+        var elsewhere = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.GetAccountAsync());
+        Assert.Equal(RemoteFailureKind.ServiceError, elsewhere.Kind);
     }
 
     [Theory]

@@ -252,7 +252,17 @@ public sealed class TorBoxClient :
 
         using (content)
         {
-            using var document = await SendAsync(HttpMethod.Post, path, content, true, cancellationToken).ConfigureAwait(false);
+            JsonDocument answer;
+            try
+            {
+                answer = await SendAsync(HttpMethod.Post, path, content, true, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RemoteProviderException ex) when (submission.Kind == RemoteItemKind.WebDownload)
+            {
+                throw TorBoxMapping.ForWebSubmission(ex);
+            }
+
+            using var document = answer;
             var data = Data(document);
             var id = data.ValueKind == JsonValueKind.Object ? TorBoxMapping.IdText(data, idField) ?? TorBoxMapping.IdText(data, "id") : null;
             var hash = data.ValueKind == JsonValueKind.Object ? Text(data, "hash") : null;

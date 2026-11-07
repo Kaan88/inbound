@@ -893,6 +893,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 FailureMessage = null,
                 ConsecutiveFailures = 0,
                 Resubmits = 0,
+                LastSubmitAnswer = null,
                 MissingSince = null,
                 NextCheckAt = _time.GetUtcNow(),
             };

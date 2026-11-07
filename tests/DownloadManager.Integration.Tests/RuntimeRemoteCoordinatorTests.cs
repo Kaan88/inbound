@@ -879,6 +879,63 @@ public sealed partial class RuntimeServiceTests
         await rig.AssertNothingLeakedAsync(link, "invented-fragment");
     }
 
+    /// <summary>The real service's answers to a dead link and to a site it has turned off. Each is sent once, and stops with the service's own words.</summary>
+    public static TheoryData<string, string> RealRefusals => new()
+    {
+        { nameof(MockFault.DeadWebLink), "error scanning this link" },
+        { nameof(MockFault.InvalidHosterLink), "not a valid link" },
+        { nameof(MockFault.SiteTurnedOff), "temporarily disabled" },
+        { nameof(MockFault.SiteNotSupported), "not supported" },
+        { nameof(MockFault.NotALink), "link you provided is invalid" },
+    };
+
+    [Theory]
+    [MemberData(nameof(RealRefusals))]
+    public async Task ScenarioD_ARealRefusalStopsAtOnceWithTheProvidersWordsAndIsNotSentAgain(string which, string words)
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (link, _, _) = rig.ScriptHoster("refused-real", MockTorBoxState.Ready);
+        rig.Mock.RefuseLink(link, (MockFault)typeof(MockFault).GetProperty(which)!.GetValue(null)!);
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+
+        var view = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, view.State);
+        Assert.Equal(RemoteFailureKind.Rejected, view.FailureKind);
+        Assert.Contains(words, view.Status);
+
+        for (var i = 0; i < 6; i++)
+        {
+            await rig.AdvanceAsync(65);
+        }
+
+        Assert.Equal(RemoteJobState.Failed, rig.View(job.Id).State);
+        Assert.Equal(1, rig.Mock.Calls(CreateWeb));
+        Assert.Empty(rig.Children());
+        Assert.Equal(0, rig.Mock.HosterRequests);
+        Assert.Empty(rig.Ctx.Service.GetSnapshot().Jobs);
+        await rig.AssertNothingLeakedAsync(link, "invented-fragment");
+    }
+
+    [Fact]
+    public async Task ScenarioD_ARetryAfterARefusalAsksAgainAndCanSucceed()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (link, _, _) = rig.ScriptHoster("back-online", MockTorBoxState.Ready);
+        rig.Mock.RefuseLink(link, MockFault.DeadWebLink);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.Failed, rig.View(job.Id).State);
+
+        rig.Mock.AcceptLink(link);
+        await rig.Jobs.RetryAsync(job.Id);
+        await rig.AdvanceAsync(65);
+
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        Assert.Equal(2, rig.Mock.Calls(CreateWeb));
+    }
+
     [Fact]
     public async Task ScenarioD_ARefusalThatQuotesTheLinkDoesNotPutItAnywhere()
     {
@@ -1772,6 +1829,27 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(1, rig.Mock.Calls(CreateWeb));
         Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
         Assert.Equal(item.Id.ToString(), rig.View(job.Id).ItemId);
+    }
+
+    /// <summary>A real outage is retried, since the item may have reached the provider. When that stops, what it said is what the user gets.</summary>
+    [Fact]
+    public async Task ScenarioJ_RepeatedProviderErrorsEndWithWhatTheProviderSaid()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (link, _, _) = rig.ScriptHoster("outage", MockTorBoxState.Ready);
+        rig.Mock.Fail(CreateWeb, MockFault.Status5xx(500, "UNKNOWN_ERROR", "The scripted reason."));
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, ApprovedUncached = true, Selection = RemoteSelectionMode.All });
+        await rig.RunAsync();
+        for (var i = 0; i < 20; i++)
+        {
+            await rig.AdvanceAsync(65);
+        }
+
+        var failed = rig.View(job.Id);
+        Assert.Equal(RemoteJobState.Failed, failed.State);
+        Assert.Contains("didn't list this", failed.Status);
+        Assert.Contains("The scripted reason.", failed.Status);
+        Assert.Equal(4, rig.Mock.Calls(CreateWeb));
     }
 
     [Fact]

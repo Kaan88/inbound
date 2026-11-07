@@ -143,7 +143,7 @@ public static partial class TorBoxMapping
             "ITEM_NOT_FOUND" => RemoteFailureKind.NotFound,
             // About this one input. The next link may well be fine, as the reference client assumes too.
             "DOWNLOAD_TOO_LARGE" or "PLAN_RESTRICTED_FEATURE" or
-            "BOZO_TORRENT" or "BOZO_NZB" or "LINK_OFFLINE" or "UNSUPPORTED_SITE" or "INVALID_OPTION" or "MISSING_REQUIRED_OPTION" or "TOO_MANY_OPTIONS" => RemoteFailureKind.Rejected,
+            "BOZO_TORRENT" or "BOZO_NZB" or "LINK_OFFLINE" or "UNSUPPORTED_SITE" or "TEMPORARILY_DISABLED" or "INVALID_OPTION" or "MISSING_REQUIRED_OPTION" or "TOO_MANY_OPTIONS" => RemoteFailureKind.Rejected,
             "DOWNLOAD_NOT_CACHED" => RemoteFailureKind.NotCached,
             "DUPLICATE_ITEM" => RemoteFailureKind.AlreadyExists,
             // The address went away, not the item: "not found" here would read as an empty account.
@@ -169,6 +169,17 @@ public static partial class TorBoxMapping
             : code ?? $"TorBox answered with status {(int)status}.";
         return new RemoteProviderException(kind, code, message, kind == RemoteFailureKind.RateLimited ? RateLimitWait(detail) : null);
     }
+
+    /// <summary>
+    /// A web download that TorBox can't take answers 500 DOWNLOAD_SERVER_ERROR, with its reason in words:
+    /// a dead link, a malformed one, a site that couldn't be read. Nothing is created, every time it was
+    /// tried, so this is a refusal of that link and not an outage. The same code elsewhere, or with no
+    /// words, says nothing about the link and stays what it was.
+    /// </summary>
+    public static RemoteProviderException ForWebSubmission(RemoteProviderException failure)
+        => failure is { Kind: RemoteFailureKind.ServiceError, ProviderCode: "DOWNLOAD_SERVER_ERROR" } && failure.Message != failure.ProviderCode
+            ? new RemoteProviderException(RemoteFailureKind.Rejected, failure.ProviderCode, failure.Message, inner: failure)
+            : failure;
 
     /// <summary>
     /// How long a rate limit answer with no usable Retry-After is worth. TorBox's words give the
