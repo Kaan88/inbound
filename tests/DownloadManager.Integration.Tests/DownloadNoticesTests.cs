@@ -221,6 +221,139 @@ public sealed class DownloadNoticesTests(ArchiveFileServer server)
         Assert.Contains(said, notice => notice.Kind == DownloadNoticeKind.Extraction && notice.Title == "Extraction complete");
     }
 
+    /// <summary>A download that stays running for as long as a test needs.</summary>
+    private async Task<JobDto> AddSlowAsync(ArchiveHarness run, string name, string packageKey)
+    {
+        var response = await run.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = server.Serve(name, new byte[8 * 1024 * 1024]),
+            DestinationDirectory = run.Downloads,
+            FileName = name,
+            StartMode = "startNow",
+            Source = "cli",
+            PackageKey = packageKey,
+            SpeedLimitBytesPerSecond = 16 * 1024,
+        });
+        Assert.True(response.Accepted, response.Error);
+        return response.Job!;
+    }
+
+    /// <summary>A file held back keeps the package open while the others finish.</summary>
+    private static async Task<(JobDto Held, List<JobDto> Done)> TwoDoneOneHeldAsync(ArchiveHarness run, string key)
+    {
+        var held = await run.DownloadAsync("held.bin", Bytes, "later", packageKey: key);
+        var done = new List<JobDto>();
+        foreach (var name in new[] { "one.bin", "two.bin" }) done.Add(await run.DownloadAsync(name, Bytes, packageKey: key));
+        foreach (var job in done) await run.WaitForJobAsync(job.Id, "completed");
+        return (held, done);
+    }
+
+    [Fact]
+    public async Task APackageWithACancelledFileSaysHowManyArrived()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var (held, _) = await TwoDoneOneHeldAsync(run, "one-cancelled");
+        await Task.Delay(300);
+        Assert.Empty(told.Said);
+
+        await run.Service.CancelAsync(held.Id);
+
+        var notice = Assert.Single(await told.WaitForAsync(1));
+        Assert.Equal(DownloadNoticeKind.Completed, notice.Kind);
+        Assert.EndsWith(": 2 of 3 files", notice.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task APackageWithAStoppedFileSaysHowManyArrivedAndThenThatItFinished()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var (held, _) = await TwoDoneOneHeldAsync(run, "one-stopped");
+        Assert.True((await run.Service.PauseAsync(held.Id)).Ok);
+
+        var first = Assert.Single(await told.WaitForAsync(1));
+        Assert.EndsWith(": 2 of 3 files", first.Message, StringComparison.Ordinal);
+
+        await run.Service.ResumeAsync(held.Id);
+        await run.WaitForJobAsync(held.Id, "completed");
+
+        var said = await told.WaitForAsync(2);
+        Assert.Equal(2, said.Count);
+        Assert.EndsWith(": 3 files", said[1].Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StoppingAndResumingAFileSaysNothingNewUntilAnotherFileChanges()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var slow = await AddSlowAsync(run, "slow.bin", "again");
+        var done = await run.DownloadAsync("done.bin", Bytes, packageKey: "again");
+        await run.WaitForJobAsync(done.Id, "completed");
+        Assert.True((await run.Service.PauseAsync(slow.Id)).Ok);
+        Assert.Single(await told.WaitForAsync(1));
+
+        // Going again and stopped again: nothing about the package has changed.
+        await run.WaitForJobAsync(slow.Id, "paused");
+        await run.Service.ResumeAsync(slow.Id);
+        await run.WaitForJobAsync(slow.Id, "downloading");
+        Assert.True((await run.Service.PauseAsync(slow.Id)).Ok);
+        await Task.Delay(400);
+        Assert.Single(told.Said);
+    }
+
+    [Fact]
+    public async Task CancellingAFileAlreadyToldAsStoppedSaysTheSameThingOnce()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var (held, _) = await TwoDoneOneHeldAsync(run, "stopped-then-cancelled");
+        Assert.True((await run.Service.PauseAsync(held.Id)).Ok);
+        Assert.Single(await told.WaitForAsync(1));
+
+        await run.Service.CancelAsync(held.Id);
+
+        await Task.Delay(400);
+        Assert.Single(told.Said);
+    }
+
+    [Fact]
+    public async Task CancellingAWholePackageSaysNothing()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var (held, done) = await TwoDoneOneHeldAsync(run, "all-cancelled");
+        var package = run.Service.FindPackageOf(done[0].Id);
+
+        await run.Service.CancelAsync(held.Id, cancelledByPackage: package);
+
+        await Task.Delay(400);
+        Assert.Empty(told.Said);
+    }
+
+    [Fact]
+    public async Task RemovingARunningFileFromAPackageSaysNothing()
+    {
+        await using var run = await ArchiveHarness.StartAsync(server);
+        using var told = new Told(run);
+
+        var running = await AddSlowAsync(run, "slow.bin", "removing");
+        var done = await run.DownloadAsync("small.bin", Bytes, packageKey: "removing");
+        await run.WaitForJobAsync(done.Id, "completed");
+        await run.WaitForJobAsync(running.Id, "downloading");
+
+        Assert.True((await run.Service.RemoveAsync(running.Id, deleteFile: false)).Ok);
+
+        await Task.Delay(400);
+        Assert.Empty(told.Said);
+    }
+
     [Fact]
     public async Task ADeletedPackageSaysNothingMore()
     {

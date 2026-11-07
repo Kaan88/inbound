@@ -367,11 +367,30 @@ public sealed partial class MainWindow
         if (_remoteContextSeparator is not null) _remoteContextSeparator.Visibility = Show(jobs.Count > 0 && FirstLocalRow is not null);
     }
 
-    /// <summary>Runs last. A selection of remote rows alone has nothing for the local items to act on.</summary>
+    /// <summary>
+    /// Runs last. A selection of remote rows alone has nothing for the local items to act on. A record's row
+    /// keeps the file commands for the download behind it, and leads to that download for the rest.
+    /// </summary>
     private void HideLocalContextItemsIfRemoteOnly()
     {
-        if (FirstLocalRow is not null || (SelectedRemoteRows.Count == 0 && SelectedArchiveRows.Count == 0)) return;
-        foreach (var item in _localContextItems) item.Visibility = Visibility.Collapsed;
+        var behind = ArchiveRules.DownloadsBehind(OnlySelectedRecords, _jobsById.ContainsKey).Count;
+        if (_menuRemove is not null) _menuRemove.Text = RecordDownload is null ? "Remove" : "Remove Download";
+        if (FirstLocalRow is null && (SelectedRemoteRows.Count > 0 || SelectedArchiveRows.Count > 0))
+        {
+            foreach (var item in _localContextItems) item.Visibility = Visibility.Collapsed;
+            if (RecordDownload is not null)
+            {
+                foreach (var item in _recordFileItems) item.Visibility = Visibility.Visible;
+            }
+        }
+
+        if (_menuShowDownload is not null)
+        {
+            _menuShowDownload.Text = behind == 1 ? "Show Download" : "Show Downloads";
+            _menuShowDownload.Visibility = behind > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (_separatorAfterOpen is not null && behind > 0) _separatorAfterOpen.Visibility = Visibility.Visible;
     }
 
     /// <summary>

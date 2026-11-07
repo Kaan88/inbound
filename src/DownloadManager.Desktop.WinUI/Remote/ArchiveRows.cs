@@ -308,6 +308,14 @@ internal static partial class ArchiveRules
             repeats);
     }
 
+    /// <summary>The downloads still on the list behind selected records' own rows, each once.</summary>
+    public static IReadOnlyList<Guid> DownloadsBehind(IReadOnlyList<ArchiveSetDto> records, Func<Guid, bool> isListed)
+        => records.SelectMany(set => set.JobIds).Where(isListed).Distinct().ToList();
+
+    /// <summary>The file that Open and its like act on from a record's row: one record, with one download behind it. A split archive's volumes have no one file to mean.</summary>
+    public static Guid? OnlyDownloadBehind(IReadOnlyList<ArchiveSetDto> records, Func<Guid, bool> isListed)
+        => records.Count == 1 && DownloadsBehind(records, isListed) is [var only] ? only : null;
+
     /// <summary>What a double-click or Enter does on a record's own row.</summary>
     public static ArchiveRowAction Primary(ArchiveSetDto set) =>
         set.NeedsPassword ? ArchiveRowAction.EnterPassword

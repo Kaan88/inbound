@@ -164,6 +164,14 @@ internal static class ListSort
     /// <summary>More rows out of place than this are replaced at once. One move at a time, a long list would crawl.</summary>
     public const int MostMovesInPlace = 64;
 
+    /// <summary>
+    /// Whether to swap a list's source rather than move rows. A swap sends the list to the top and rebuilds every row,
+    /// so it is only for a sort, whose caller says where to go next. Any other change, such as a row appearing above
+    /// a long list, puts every position out by one and still needs only one row moved.
+    /// </summary>
+    public static bool ReplacesWholeList<T>(bool sorting, IReadOnlyList<T> current, IReadOnlyList<T> target) where T : class
+        => sorting && target.Where((row, at) => at >= current.Count || !ReferenceEquals(current[at], row)).Count() > MostMovesInPlace;
+
     /// <summary>A click on another column starts in its usual direction, and a second click reverses it.</summary>
     public static (string Key, bool Ascending) Next(string currentKey, bool currentAscending, string clicked)
         => currentKey == clicked ? (clicked, !currentAscending) : (clicked, StartsAscending(clicked));

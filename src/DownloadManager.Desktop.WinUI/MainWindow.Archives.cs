@@ -194,12 +194,54 @@ public sealed partial class MainWindow
     private void ShowArchiveContextItems()
     {
         var remoteOnly = FirstLocalRow is null && SelectedRemoteRows.Count > 0 && SelectedArchiveRows.Count == 0;
-        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected, OnlyArchiveRowsSelected, offerPicking: !OnlyArchiveRowsSelected);
+
+        // Open Folder goes there already when the record's download has a file to show.
+        var needsArchiveFolder = OnlyArchiveRowsSelected && RecordDownload is not { FileRemovedAfterExtraction: false };
+        _contextArchiveMenu?.Apply(_remote.State.ArchivesSupported && !remoteOnly ? CurrentArchivePlan() : null, _remote.State.IsConnected, needsArchiveFolder, offerPicking: !OnlyArchiveRowsSelected);
     }
 
     private bool OnlyArchiveRowsSelected => FirstLocalRow is null && SelectedRemoteRows.Count == 0 && SelectedArchiveRows.Count > 0;
 
     private List<JobViewModel> SelectedArchiveRows => JobsList.SelectedItems.OfType<JobViewModel>().Where(row => row.IsArchiveRow).ToList();
+
+    private List<ArchiveSetDto> OnlySelectedRecords => OnlyArchiveRowsSelected ? SelectedArchiveRows.Select(row => row.ArchiveSet).OfType<ArchiveSetDto>().ToList() : [];
+
+    /// <summary>The download that a selected record's row can act on as its own, when the record has one on the list.</summary>
+    private JobViewModel? RecordDownload => ArchiveRules.OnlyDownloadBehind(OnlySelectedRecords, _jobsById.ContainsKey) is { } id ? _jobsById[id] : null;
+
+    /// <summary>The download that the context menu's file commands act on: the selected one, or the one behind a selected record.</summary>
+    private JobViewModel? CommandJob => SelectedJob ?? RecordDownload;
+
+    /// <summary>The Extractions view lists records, so a record's download lives on All Downloads, where it has every command.</summary>
+    private void ShowDownloadsOfSelectedRecords()
+    {
+        var rows = ArchiveRules.DownloadsBehind(OnlySelectedRecords, _jobsById.ContainsKey).Select(id => _jobsById[id]).ToList();
+        if (rows.Count == 0) return;
+
+        // A file in a closed package has no row until the package opens.
+        var closed = rows.Select(row => row.PackageId).OfType<Guid>().Distinct().Where(package => !_uiState.ExpandedPackages.Contains(package)).ToList();
+        if (closed.Count > 0)
+        {
+            _uiState.ExpandedPackages.AddRange(closed);
+            UiStateStore.Save(_uiState);
+        }
+
+        if (rows.Any(row => !MatchesSearch(row))) _search = string.Empty;
+        _category = "all";
+        CategoryList.SelectedIndex = 0;
+        RebuildVisible();
+
+        JobsList.SelectedItems.Clear();
+        foreach (var row in rows.Where(_visibleJobs.Contains)) JobsList.SelectedItems.Add(row);
+        if (JobsList.SelectedItems.Count > 0) JobsList.ScrollIntoView(JobsList.SelectedItems[0]);
+
+        // The menu is still closing, and it gives the focus back when it has. The row it came from has gone.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (JobsList.SelectedItems.Count > 0 && JobsList.ContainerFromItem(JobsList.SelectedItems[0]) is Control row) row.Focus(FocusState.Keyboard);
+            else JobsList.Focus(FocusState.Keyboard);
+        });
+    }
 
     private ArchivePlan CurrentArchivePlan()
     {

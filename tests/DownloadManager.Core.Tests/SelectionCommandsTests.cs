@@ -85,6 +85,41 @@ public sealed class SelectionCommandsTests
         Assert.True(FileMenuRules.CanGroup(files: 4, localRows: 2));
     }
 
+    private static DownloadManager.Contracts.ArchiveSetDto Record(params Guid[] jobs) => new() { Id = Guid.NewGuid(), JobIds = [.. jobs] };
+
+    [Fact]
+    public void A_record_with_its_one_download_on_the_list_acts_on_that_download()
+    {
+        var job = Guid.NewGuid();
+        Assert.Equal(job, ArchiveRules.OnlyDownloadBehind([Record(job)], id => id == job));
+    }
+
+    [Fact]
+    public void A_record_whose_download_is_gone_has_nothing_to_act_on()
+    {
+        var job = Guid.NewGuid();
+        Assert.Null(ArchiveRules.OnlyDownloadBehind([Record(job)], _ => false));
+        Assert.Empty(ArchiveRules.DownloadsBehind([Record(job)], _ => false));
+    }
+
+    [Fact]
+    public void A_split_archive_or_several_records_have_no_one_file_but_can_still_lead_to_their_downloads()
+    {
+        var (first, second, third) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+
+        Assert.Null(ArchiveRules.OnlyDownloadBehind([Record(first, second)], _ => true));
+        Assert.Equal([first, second], ArchiveRules.DownloadsBehind([Record(first, second)], _ => true));
+
+        Assert.Null(ArchiveRules.OnlyDownloadBehind([Record(first), Record(second)], _ => true));
+
+        // Two records selected, only one with a download left: a command on it would ignore the other.
+        Assert.Null(ArchiveRules.OnlyDownloadBehind([Record(first), Record(second)], id => id == first));
+        Assert.Equal([first, second, third], ArchiveRules.DownloadsBehind([Record(first, second), Record(second, third)], _ => true));
+
+        // The one volume left on the list is the one file.
+        Assert.Equal(second, ArchiveRules.OnlyDownloadBehind([Record(first, second)], id => id == second));
+    }
+
     [Fact]
     public void The_Hosts_note_goes_ahead_of_the_rows_own_description()
     {

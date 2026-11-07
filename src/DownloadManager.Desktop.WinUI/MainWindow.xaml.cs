@@ -542,7 +542,8 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void RebuildVisible(Guid? selectedId = null)
+    /// <param name="sorting">The rows are being put in a new order, and the caller then shows where the list should be.</param>
+    private void RebuildVisible(Guid? selectedId = null, bool sorting = false)
     {
         // Keep the whole (multi-)selection by id. Clearing the collection can leave the
         // ListView selecting row 0, so the selection is always rebuilt explicitly below.
@@ -593,8 +594,7 @@ public sealed partial class MainWindow : Window
         // Sync in place instead of Clear + Add: rows that stay keep their containers, so
         // progress bars do not replay from another row's value and nothing jumps.
         // A sort can put most of a long list out of place, and one move at a time would crawl.
-        var outOfPlace = target.Where((row, at) => at >= _visibleJobs.Count || !ReferenceEquals(_visibleJobs[at], row)).Count();
-        if (outOfPlace > ListSort.MostMovesInPlace)
+        if (ListSort.ReplacesWholeList(sorting, _visibleJobs, target))
         {
             _visibleJobs = new ObservableCollection<JobViewModel>(target);
             JobsList.ItemsSource = _visibleJobs;
@@ -893,6 +893,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuOpen = CreateContextItem("Open", MenuOpen_Click));
         flyout.Items.Add(_menuOpenWith = CreateContextItem("Open With…", MenuOpenWith_Click));
         flyout.Items.Add(_menuOpenFolder = CreateContextItem("Open Folder", MenuOpenFolder_Click));
+        flyout.Items.Add(_menuShowDownload = CreateContextItem("Show Download", (_, _) => ShowDownloadsOfSelectedRecords()));
         var moveRename = CreateContextItem("Move/Rename…", MenuMoveRename_Click);
         // The shortcut lives on the list, not the flyout item: invoking an accelerator of a
         // closed context flyout crashed WinUI natively (CoreMessagingXP 0xc000027b).
@@ -911,7 +912,7 @@ public sealed partial class MainWindow : Window
         JobsList.KeyboardAccelerators.Add(moveShortcut);
         flyout.Items.Add(moveRename);
         _menuMoveRename = moveRename;
-        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(_separatorAfterOpen = new MenuFlyoutSeparator());
         flyout.Items.Add(_menuResume = CreateContextItem("Resume", MenuResume_Click));
         flyout.Items.Add(_menuStop = CreateContextItem("Stop", MenuPause_Click));
         flyout.Items.Add(_menuCancelPackage = CreateContextItem("Cancel Package…", MenuCancelPackage_Click));
@@ -930,14 +931,17 @@ public sealed partial class MainWindow : Window
         }
         flyout.Items.Add(_priorityMenu);
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Remove", MenuRemove_Click));
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(CreateContextItem("Progress Details…", MenuProgressDetails_Click));
+        flyout.Items.Add(_menuRemove = CreateContextItem("Remove", MenuContextRemove_Click));
+        var separatorAfterRemove = new MenuFlyoutSeparator();
+        flyout.Items.Add(separatorAfterRemove);
+        var progressDetails = CreateContextItem("Progress Details…", MenuProgressDetails_Click);
+        flyout.Items.Add(progressDetails);
         flyout.Items.Add(_menuGroup = CreateContextItem("Group into Package…", MenuGroupSelected_Click));
         flyout.Items.Add(_menuUngroup = CreateContextItem("Remove from Package", MenuUngroup_Click));
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
+        _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuRemove, separatorAfterRemove, progressDetails, _menuProperties]);
         AddRemoteContextItems(flyout);
         JobsList.ContextFlyout = flyout;
     }
@@ -952,6 +956,12 @@ public sealed partial class MainWindow : Window
     private MenuFlyoutItem? _menuOpen;
     private MenuFlyoutItem? _menuOpenWith;
     private MenuFlyoutItem? _menuOpenFolder;
+    private MenuFlyoutItem? _menuShowDownload;
+    private MenuFlyoutItem? _menuRemove;
+    private MenuFlyoutSeparator? _separatorAfterOpen;
+
+    /// <summary>What a record's own row keeps for the one download behind it.</summary>
+    private readonly List<MenuFlyoutItemBase> _recordFileItems = [];
     private MenuFlyoutItem? _menuMoveRename;
     private MenuFlyoutItem? _menuGroup;
     private MenuFlyoutItem? _menuUngroup;
@@ -973,7 +983,7 @@ public sealed partial class MainWindow : Window
 
         // The same words as the File menu: a package row has no one file for these to act on.
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
-        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, SelectedJob?.FileRemovedAfterExtraction == true);
+        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true);
         SayIfNoFile(_menuOpen, "Open", plan.OpenReason);
         SayIfNoFile(_menuOpenWith, "Open With…", plan.OpenReason);
         SayIfNoFile(_menuOpenFolder, "Open Folder", plan.OpenReason);
@@ -1039,7 +1049,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuOpen_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        if (CommandJob is { } job)
         {
             await OpenJobAsync(job);
         }
@@ -1047,7 +1057,7 @@ public sealed partial class MainWindow : Window
 
     private void MenuOpenFolder_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { } job)
+        if (CommandJob is { } job)
         {
             OpenContainingFolder(job);
         }
@@ -1139,13 +1149,13 @@ public sealed partial class MainWindow : Window
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is { FileRemovedAfterExtraction: true } removed)
+        if (CommandJob is { FileRemovedAfterExtraction: true } removed)
         {
             ShowPassingStatus(JobNotes.NoFile(removed.StatusNote));
             return;
         }
 
-        if (SelectedJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
+        if (CommandJob is not { } job || string.IsNullOrWhiteSpace(job.FinalFilePath) ||
             !File.Exists(job.FinalFilePath))
         {
             await ShowMessageAsync("Open with", "The completed file was not found.");
@@ -1462,7 +1472,7 @@ public sealed partial class MainWindow : Window
     private void MenuProgressDetails_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedPackage is { } package) { OpenPackageWindow(package.Id); return; }
-        if (SelectedJob is not { } job) return;
+        if (CommandJob is not { } job) return;
         OpenDownloadWindow(job.Id);
     }
 
@@ -1605,7 +1615,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuProperties_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedJob is not { } job || _settings is null)
+        if (CommandJob is not { } job || _settings is null)
         {
             return;
         }
@@ -1905,6 +1915,14 @@ public sealed partial class MainWindow : Window
 
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);
     private void MenuResume_Click(object sender, RoutedEventArgs e) => ResumeButton_Click(sender, e);
+
+    /// <summary>On a record's row this is the download behind it. The record has a line of its own, and goes with its download.</summary>
+    private async void MenuContextRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (RecordDownload is { } job) await RunBulkActionAsync([job], id => _connection.RemoveAsync(id, deleteFile: false), "Remove");
+        else MenuRemove_Click(sender, e);
+    }
+
     private async void MenuRemove_Click(object sender, RoutedEventArgs e)
     {
         var selection = SelectedJobs;

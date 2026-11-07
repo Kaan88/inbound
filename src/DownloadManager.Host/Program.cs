@@ -309,6 +309,9 @@ internal static class Program
             if (!controller.ExitWasRequested) Application.Run(tray);
 
             log.Info("UI loop exited; shutting down.");
+
+            // Shutting down stops what is running, which isn't news about any package.
+            downloadNotices.Dispose();
             try
             {
                 pipe.StopAsync().GetAwaiter().GetResult();

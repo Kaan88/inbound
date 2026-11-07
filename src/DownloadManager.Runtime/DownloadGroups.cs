@@ -63,6 +63,12 @@ public sealed partial class DownloadManagerService
         lock (_sync) return _settings.DownloadGroups.FirstOrDefault(candidate => candidate.JobIds.Contains(jobId))?.Id;
     }
 
+    /// <summary>A removal has stopped this job and is on its way to taking it off the list.</summary>
+    public bool IsBeingRemoved(Guid jobId)
+    {
+        lock (_sync) return _jobs.TryGetValue(jobId, out var runtime) && runtime.CancelledForRemoval;
+    }
+
     /// <summary>
     /// True when the package has at least one job and all of them have finished. An id with no job
     /// says nothing about completion, so it neither counts as finished nor holds the package back.

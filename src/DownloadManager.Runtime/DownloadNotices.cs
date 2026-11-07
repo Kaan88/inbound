@@ -23,7 +23,9 @@ public sealed record DownloadNotice(DownloadNoticeKind Kind, string Title, strin
 /// <summary>
 /// Decides what the user is told when downloads and extractions end. A download on its own, or a package
 /// of one file, is told about file by file. A package of two or more gets one notice once nothing in it
-/// is still working, covering its files and its archive sets together.
+/// is still working, covering its files and its archive sets together. A file stopped or cancelled counts
+/// as no longer working, so the rest of the package isn't left waiting for it, and the notice says how many
+/// of its files arrived. Resuming and finishing a stopped file later ends in a notice of its own.
 /// <para>
 /// A failure in a package is told at once, because the user may want to act, but only the first one. The
 /// rest are counted into the closing notice, so a failing package says at most two things however many
@@ -47,6 +49,9 @@ public sealed class DownloadNotices : IDisposable
     /// <summary>Each outcome of each attempt once: progress and later saves repeat the same state. Guarded by <see cref="_sync"/>.</summary>
     private readonly Dictionary<Guid, string> _toldSets = [];
 
+    /// <summary>What each package last said when it closed with files stopped. Guarded by <see cref="_sync"/>.</summary>
+    private readonly Dictionary<Guid, string> _toldEarly = [];
+
     private sealed class PackageState
     {
         public bool DownloadsFinished { get; set; }
@@ -57,6 +62,12 @@ public sealed class DownloadNotices : IDisposable
 
         /// <summary>How many files the package had at its last failure. Fewer now means someone is removing them.</summary>
         public int JobsAtFailure { get; set; }
+
+        /// <summary>A file finished or was cancelled, so the package can close without every file having finished.</summary>
+        public bool MayCloseEarly { get; set; }
+
+        /// <summary>How many files the package had then. Fewer now means someone is removing them.</summary>
+        public int JobsWhenMarked { get; set; }
 
         public Dictionary<Guid, SetOutcome> Sets { get; } = [];
     }
@@ -110,6 +121,9 @@ public sealed class DownloadNotices : IDisposable
             // In a package of any size, the package's own completion speaks for it: a package built one add
             // at a time can have only this file so far.
             if (e.ChangeType == "completed" && _service.FindGroupOf(job.Id) is null) Tell(DownloadNoticeKind.Completed, "Download complete", job.FileName);
+
+            // A stop isn't marked: it can be undone, and stopping again would say the same thing twice.
+            if (e.ChangeType is "completed" or "cancelled" && _service.FindPackageOf(job.Id) is { } member) MarkMayCloseEarly(member);
             if (e.ChangeType == "failed")
             {
                 if (_service.FindPackageOf(job.Id) is { } package) MemberFailed(package, job);
@@ -118,6 +132,17 @@ public sealed class DownloadNotices : IDisposable
 
             SettleAll();
         });
+    }
+
+    private void MarkMayCloseEarly(Guid packageId)
+    {
+        var count = Look(packageId)?.Jobs.Count ?? 0;
+        lock (_sync)
+        {
+            var state = StateOf(packageId);
+            state.MayCloseEarly = true;
+            state.JobsWhenMarked = count;
+        }
     }
 
     private void MemberFailed(Guid packageId, JobDto job)
@@ -140,7 +165,12 @@ public sealed class DownloadNotices : IDisposable
 
     private void OnPackageFinished(object? sender, PackageCompletedEventArgs e) => Guarded(() =>
     {
-        lock (_sync) _examined[e.PackageId] = e.CompletedAt;
+        lock (_sync)
+        {
+            _examined[e.PackageId] = e.CompletedAt;
+            _toldEarly.Remove(e.PackageId);
+        }
+
         var jobs = e.JobIds.Select(_service.GetJob).OfType<JobDto>().ToList();
         if (jobs is [var only])
         {
@@ -222,7 +252,33 @@ public sealed class DownloadNotices : IDisposable
         }
 
         // Null is a package deleted meanwhile, which has nothing to say.
-        if (look is not null && Closing(look, state) is { } notice) Tell(notice);
+        if (look is null)
+        {
+            lock (_sync) _toldEarly.Remove(packageId);
+            return;
+        }
+
+        if (Closing(look, state) is { } notice && IsNewsIfEarly(packageId, look, state, notice)) Tell(notice);
+    }
+
+    /// <summary>A file's completion can reach here just after a stop has already closed the package with the same count.</summary>
+    private bool IsNewsIfEarly(Guid packageId, PackageLook look, PackageState state, DownloadNotice notice)
+    {
+        if (notice.Kind != DownloadNoticeKind.Completed || !ClosesEarly(look, state)) return true;
+        lock (_sync)
+        {
+            if (_toldEarly.TryGetValue(packageId, out var told) && told == notice.Message) return false;
+            _toldEarly[packageId] = notice.Message;
+            return true;
+        }
+    }
+
+    /// <summary>Some files arrived and the rest were stopped. Cancelling the whole package, or removing files, is something the user knows about.</summary>
+    private static bool ClosesEarly(PackageLook look, PackageState state)
+    {
+        var arrived = look.Jobs.Count(job => job.State == "completed");
+        return !state.DownloadsFinished && state.MayCloseEarly && arrived > 0 && arrived < look.Jobs.Count && look.Jobs.Count >= state.JobsWhenMarked &&
+               look.Jobs.All(job => job.CancelledByPackageId is null);
     }
 
     /// <summary>What the package is doing now. Null when it, or every file in it, has gone.</summary>
@@ -233,7 +289,8 @@ public sealed class DownloadNotices : IDisposable
         var jobs = group.JobIds.Select(_service.GetJob).OfType<JobDto>().ToList();
         if (jobs.Count == 0) return null;
 
-        var busy = jobs.Any(job => job.QueueRetryAt is not null || job.State is not ("completed" or "failed" or "cancelled" or "paused")) ||
+        // A file being removed reads as cancelled first, and is gone a moment later.
+        var busy = jobs.Any(job => job.QueueRetryAt is not null || job.State is not ("completed" or "failed" or "cancelled" or "paused") || _service.IsBeingRemoved(job.Id)) ||
                    (_archives?.List().Any(set => set.PackageId == packageId && set.IsStillWorking()) ?? false) ||
                    (jobs.All(job => job.State == "completed") && !CompletionWasExamined(packageId));
         return new PackageLook(group.Name, jobs, busy);
@@ -260,6 +317,8 @@ public sealed class DownloadNotices : IDisposable
         var extracted = state.Sets.Values.Count(set => set.Completed);
         var stopped = state.Sets.Count - extracted;
         var stoppedWords = $"{stopped} of {state.Sets.Count} archives {(stopped == 1 ? "wasn't" : "weren't")} extracted";
+        var closesEarly = ClosesEarly(look, state);
+        var files = closesEarly ? $"{look.Jobs.Count(job => job.State == "completed")} of {total} files" : $"{total} files";
 
         if (failed.Count > 0)
         {
@@ -271,15 +330,15 @@ public sealed class DownloadNotices : IDisposable
 
         if (stopped > 0)
         {
-            var words = state.DownloadsFinished ? $"{look.Name}: {total} files downloaded, but {stoppedWords}"
+            var words = state.DownloadsFinished || closesEarly ? $"{look.Name}: {files} downloaded, but {stoppedWords}"
                 : state.Sets.Count == 1 ? $"{state.Sets.Values.First().Name}: {state.Sets.Values.First().Words}"
                 : $"{look.Name}: {stoppedWords}";
             return new DownloadNotice(DownloadNoticeKind.Extraction, "Extraction stopped", words);
         }
 
-        if (state.DownloadsFinished)
+        if (state.DownloadsFinished || closesEarly)
         {
-            var words = extracted > 0 ? $"{look.Name}: {total} files, {Archives(extracted)} extracted" : $"{look.Name}: {total} files";
+            var words = extracted > 0 ? $"{look.Name}: {files}, {Archives(extracted)} extracted" : $"{look.Name}: {files}";
             return new DownloadNotice(DownloadNoticeKind.Completed, "Download complete", words);
         }
 

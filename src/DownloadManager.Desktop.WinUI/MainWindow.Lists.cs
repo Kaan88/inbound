@@ -37,7 +37,7 @@ public sealed partial class MainWindow
         _sortKey = key;
         _sortAscending = ascending;
         _jobsHeader.ShowSort(key, ascending);
-        RebuildVisible();
+        RebuildVisible(sorting: true);
         SaveUiState();
 
         // The list keeps its place on whichever row was at the top, which would hide the new first rows.

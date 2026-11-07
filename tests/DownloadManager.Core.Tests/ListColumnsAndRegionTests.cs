@@ -152,6 +152,44 @@ public sealed class ListColumnLayoutTests
 
 public sealed class ListSortTests
 {
+    private static List<string> Rows(int count) => Enumerable.Range(0, count).Select(index => $"row {index}").ToList();
+
+    [Fact]
+    public void A_row_appearing_above_a_long_list_keeps_the_list_and_its_place()
+    {
+        var current = Rows(100);
+        var target = current.Prepend("new row").ToList();
+
+        Assert.False(ListSort.ReplacesWholeList(sorting: false, current, target));
+    }
+
+    [Fact]
+    public void A_row_going_from_above_a_long_list_keeps_the_list_and_its_place()
+    {
+        var current = Rows(100);
+
+        Assert.False(ListSort.ReplacesWholeList(sorting: false, current, current.Skip(1).ToList()));
+    }
+
+    [Fact]
+    public void Only_a_sort_of_a_long_list_replaces_it()
+    {
+        var current = Rows(100);
+        var reversed = Enumerable.Reverse(current).ToList();
+
+        Assert.True(ListSort.ReplacesWholeList(sorting: true, current, reversed));
+        Assert.False(ListSort.ReplacesWholeList(sorting: false, current, reversed));
+    }
+
+    [Fact]
+    public void A_sort_of_a_short_list_moves_its_rows()
+    {
+        var current = Rows(ListSort.MostMovesInPlace);
+        var reversed = Enumerable.Reverse(current).ToList();
+
+        Assert.False(ListSort.ReplacesWholeList(sorting: true, current, reversed));
+    }
+
     [Fact]
     public void A_second_click_on_a_header_reverses_and_another_column_starts_in_its_usual_direction()
     {
