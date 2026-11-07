@@ -296,17 +296,10 @@ public sealed partial class MainWindow
 
     private async Task ImportTorrentFilesAsync()
     {
-        IReadOnlyList<Windows.Storage.StorageFile> files;
+        IReadOnlyList<string> files;
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker
-            {
-                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-            };
-            picker.FileTypeFilter.Add(".torrent");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            files = await picker.PickMultipleFilesAsync();
+            files = await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".torrent"], multiple: true);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
         {
@@ -314,7 +307,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        if (files.Count > 0) await ShowProviderAddAsync(AddFocus.TorrentFiles, files.Select(file => file.Path).ToList());
+        if (files.Count > 0) await ShowProviderAddAsync(AddFocus.TorrentFiles, files.ToList());
     }
 
     /// <summary>
@@ -328,15 +321,8 @@ public sealed partial class MainWindow
         string path;
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker
-            {
-                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-            };
-            foreach (var type in ContainerFiles.Types) picker.FileTypeFilter.Add(type);
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            if (await picker.PickSingleFileAsync() is not { } file) return;
-            path = file.Path;
+            if (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), ContainerFiles.Types, multiple: false) is not [var file]) return;
+            path = file;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
         {

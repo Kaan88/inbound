@@ -288,14 +288,7 @@ internal sealed class AddLinksDialog
             error.Show(string.Empty);
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker
-                {
-                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-                };
-                picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
-                if (await picker.PickSingleFolderAsync() is { } folder && box.IsEnabled) box.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(windowHandle) is { } folder && box.IsEnabled) box.Text = folder;
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
             {

@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -164,19 +164,13 @@ public sealed class SoundOptionsEditor
 
     private async Task PickFileAsync(Row row)
     {
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".wav");
-        picker.SuggestedStartLocation = PickerLocationId.MusicLibrary;
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_owner));
-
-        var file = await picker.PickSingleFileAsync();
-        if (file is null)
+        if (await Pickers.PickFilesAsync(WindowNative.GetWindowHandle(_owner), [".wav"], multiple: false, PickerLocationId.MusicLibrary) is not [var file])
         {
             return;
         }
 
         row.Mode.SelectedIndex = 2;
-        row.Path.Text = file.Path;
+        row.Path.Text = file;
         row.IsDirty = true;
     }
 

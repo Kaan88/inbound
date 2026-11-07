@@ -135,11 +135,7 @@ internal sealed class SettingsWindow : Window
         {
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker { ViewMode = Windows.Storage.Pickers.PickerViewMode.List };
-                picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder is not null) box.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), startInDownloads: false) is { } folder) box.Text = folder;
             }
             catch (Exception ex)
             {

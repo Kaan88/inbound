@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### Owner's third try: add flow works, Import Torrent File's picker didn't open (2026-11-07, branch `torbox-addflow`)
+
+The owner tried the sandbox build of the merge `3519653`. The add flow worked: a cached item showed its file choice at once, and an uncached magnet's choice came later. Import Torrent File showed "The file picker couldn't open." The sandbox's processes ran elevated, and the older WinRT pickers fail there. All eleven pickers now use the Windows App SDK pickers (TB.F15). The UI builds. Not yet seen on screen in an elevated window. The owner asked for a release next.
+
 ### TB.F11, TB.F12, TB.F13: direct links in Add Links, hidden addresses, My TorBox closes (2026-11-07, branch `torbox-addflow`)
 
 Traced against `tools/TestServer` and a fake CDN in the tests. No live run: the links the owner used had expired, and nothing was added to the account. Each new test fails with its fix undone.

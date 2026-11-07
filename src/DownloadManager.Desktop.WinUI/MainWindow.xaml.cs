@@ -1199,14 +1199,7 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker
-                {
-                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-                };
-                picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-                if (await picker.PickSingleFolderAsync() is { } folder) folderBox.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder) folderBox.Text = folder;
             }
             catch (Exception)
             {
@@ -2430,17 +2423,8 @@ public sealed partial class MainWindow : Window
             destinationPickerError.Visibility = Visibility.Collapsed;
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker
-                {
-                    ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-                };
-                picker.FileTypeFilter.Add("*");
-                var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder is not null)
-                    destinationBox.Text = folder.Path;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder)
+                    destinationBox.Text = folder;
             }
             catch (Exception ex)
             {

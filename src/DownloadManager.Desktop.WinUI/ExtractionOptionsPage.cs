@@ -2,7 +2,7 @@ using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage.Pickers;
+using Microsoft.Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -209,11 +209,7 @@ internal sealed class ExtractionOptionsPage
     {
         try
         {
-            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
-            picker.FileTypeFilter.Add(".exe");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_window));
-            var file = await picker.PickSingleFileAsync();
-            if (file is not null) _unrarPath.Text = file.Path;
+            if (await Pickers.PickFilesAsync(WindowNative.GetWindowHandle(_window), [".exe"], multiple: false, PickerLocationId.ComputerFolder) is [var file]) _unrarPath.Text = file;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
         {

@@ -445,17 +445,10 @@ public sealed partial class MainWindow
 
     private async Task ExtractFromDiskAsync()
     {
-        Windows.Storage.StorageFile? file;
+        string? file;
         try
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker
-            {
-                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads,
-            };
-            picker.FileTypeFilter.Add(".rar");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            file = await picker.PickSingleFileAsync();
+            file = (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".rar"], multiple: false)).FirstOrDefault();
         }
         catch (Exception ex) when (ex is InvalidOperationException or COMException or UnauthorizedAccessException)
         {
@@ -464,7 +457,7 @@ public sealed partial class MainWindow
         }
 
         if (file is null) return;
-        var result = await _remote.ExtractAsync(new ArchiveExtractRequest { FilePath = file.Path });
+        var result = await _remote.ExtractAsync(new ArchiveExtractRequest { FilePath = file });
         if (!result.Ok)
         {
             await ShowMessageAsync("Extract archive", RemoteText.Failure(result.Error));
