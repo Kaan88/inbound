@@ -443,6 +443,56 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AFolderLinkFromTheAddBoxAsksOnItsRowUnlessItHoldsOneFile()
+    {
+        // What the add box now sends for a folder link: the item by reference, to ask. Nothing is chosen in the add.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        using var commands = new RemoteCommands(rig.Box.Registry, rig.Jobs, rig.Time);
+        var many = rig.Mock.AddItem(RemoteItemKind.Torrent, "Many",
+            [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Many/a.bin", 4 * Kb, 90), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Many/b.bin", 4 * Kb, 91)]);
+        var one = MockTorBoxFile.Of(rig.Mock.NextFileId(), "One/only.bin", 4 * Kb, 92);
+        var single = rig.Mock.AddItem(RemoteItemKind.Torrent, "One", [one]);
+
+        async Task<RemoteJobDto> AddFolderAsync(MockTorBoxItem item)
+        {
+            var link = await commands.ClassifyAsync(new RemoteClassifyRequest { Text = $"https://torbox.app/download?id={item.Id}&type=torrents" });
+            Assert.Equal("folderLink", link.Kind);
+            var added = await commands.AddAsync(new RemoteAddRequestDto
+            {
+                Provider = link.Provider,
+                ItemKind = link.ItemKind,
+                ItemId = link.ItemId,
+                Destination = rig.Destination,
+                StartMode = "startNow",
+                ApproveUncached = true,
+                Selection = "ask",
+            });
+            Assert.True(added.Ok, added.Error);
+            Assert.False(added.Existing);
+            return added.Job!;
+        }
+
+        var asks = await AddFolderAsync(many);
+        var takes = await AddFolderAsync(single);
+        Assert.Equal("askWhenReady", asks.SelectionMode);
+        await rig.RunAsync();
+        await UntilSettledAsync(rig, asks.Id);
+        await UntilSettledAsync(rig, takes.Id);
+
+        Assert.Equal(RemoteJobState.AwaitingSelection, rig.View(asks.Id).State);
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(takes.Id).State);
+        await rig.AssertCompletedAsync(one, "One", "only.bin");
+        Assert.Single(rig.Children());
+        Assert.Empty(rig.Mock.Submissions);
+
+        // Adding it again while it asks is the same row, which is what lets its choice open by itself once more.
+        var again = await commands.AddAsync(new RemoteAddRequestDto { Provider = "torbox", ItemKind = "torrents", ItemId = many.Id.ToString(), Destination = rig.Destination, ApproveUncached = true, Selection = "ask" });
+        Assert.True(again.Existing);
+        Assert.Equal(asks.Id, again.Job!.Id);
+        Assert.Equal("awaitingSelection", again.Job.State);
+    }
+
+    [Fact]
     public async Task TheCommandsSayWhetherAMagnetIsCachedAndListItsFilesByTheirIds()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);

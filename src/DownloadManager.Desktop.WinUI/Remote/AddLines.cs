@@ -552,7 +552,8 @@ internal static partial class RemoteText
             {
                 case "folderLink":
                     word = "Folder link";
-                    details.Add($"Refers to an item on your {provider} account. You choose its files next.");
+                    // Its files are chosen on its row once it is listed, as for anything else that asks, so nothing is said of them here.
+                    details.Add($"Refers to an item on your {provider} account.");
                     AddNote(details, result.Note);
                     break;
                 case "magnet":
@@ -742,6 +743,14 @@ internal static partial class RemoteText
         return parts.Count == 0 ? string.Empty : $"Added {string.Join(" and ", parts)}.";
     }
 
+    /// <summary>
+    /// For something added again, by the name its row has, so it can be found: a folder link's line only knows the
+    /// item's number. Never "added": it was on the list already, and the Host's note says what of the new request it
+    /// didn't use.
+    /// </summary>
+    public static string AlreadyListed(RemoteJobDto? listed, string lineName, string? note)
+        => AlreadyListed(listed is null ? lineName : JobName(listed), note);
+
     /// <summary>For something added again. Never "added": it was on the list already, and the Host's note says what of the new request it didn't use.</summary>
     public static string AlreadyListed(string name, string? note)
     {
@@ -837,6 +846,25 @@ internal static class AddRequests
         FileIds = files?.FileIds?.ToList(),
         FilePaths = files?.FilePaths?.ToList(),
     };
+
+    /// <summary>
+    /// A folder link names an item already on the account. It is added to ask for its files, so they are chosen on its
+    /// row once the Host has the item, and one that holds a single file just downloads. Null when the line isn't one.
+    /// </summary>
+    public static RemoteAddRequestDto? ForFolderLink(AddLine line, string? destination, int queueId, bool startLater)
+        => line is { Route: AddRoute.FolderLink, Result: { Provider: { } provider, ItemKind: { } kind, ItemId: { } itemId } }
+            ? new()
+            {
+                Provider = provider,
+                ItemKind = kind,
+                ItemId = itemId,
+                Destination = destination,
+                QueueId = queueId,
+                StartMode = startLater ? "later" : "startNow",
+                ApproveUncached = true,
+                Selection = AddFileChoice.Later.Selection,
+            }
+            : null;
 
     public static RemoteContainerAddRequest ForContainer(Guid previewId, IReadOnlyList<int> entryIds, string? folder, int queueId) => new()
     {

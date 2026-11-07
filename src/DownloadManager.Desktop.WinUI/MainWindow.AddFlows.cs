@@ -394,35 +394,41 @@ public sealed partial class MainWindow
 
         choice.ArchivePassword = null;
 
-        // Every job this add came to, new or found again, for what follows it on the list.
-        var jobs = new List<RemoteJobDto>();
-        var folderLinks = 0;
-        foreach (var pick in choice.Picks.Where(pick => pick.Line.Route == AddRoute.FolderLink))
-        {
-            if (await AddFolderLinkAsync(pick.Line, choice, problems) is not { Ok: true, Job: { } folderJob } added) continue;
-            jobs.Add(folderJob);
-            if (!added.Existing) folderLinks++;
-        }
-
-        var sent = 0;
         var providerPicks = await ChooseFilesBeforeAddingAsync(choice, provider, problems);
 
+        // A folder link names an item already on the account. Nothing is asked here: its row asks for the files, as
+        // anything else that asks does, and a Cancel there leaves the row rather than nothing.
+        var picks = choice.Picks
+            .Where(pick => pick.Line.Route == AddRoute.FolderLink)
+            .Select(pick => (Pick: pick, Files: (AddFileChoice?)null, Folder: true))
+            .Concat(providerPicks.Select(provided => (provided.Pick, provided.Files, Folder: false)))
+            .ToList();
+
+        // Every job this add came to, new or found again, for what follows it on the list.
+        var jobs = new List<RemoteJobDto>();
+        var sent = 0;
+
         // Passing, like every other status: set directly it stayed until something else wrote there.
-        if (providerPicks.Count > 0) ShowPassingStatus($"Adding to {provider}…");
-        foreach (var (pick, files) in providerPicks)
+        if (picks.Count > 0) ShowPassingStatus($"Adding to {provider}…");
+        foreach (var (pick, files, folder) in picks)
         {
-            var name = RemoteText.AddLineWords(pick.Line, provider).Name;
-            var result = await _remote.AddAsync(AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files));
+            var request = folder
+                ? AddRequests.ForFolderLink(pick.Line, choice.Destination, choice.QueueId, choice.StartLater)
+                : AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files);
             pick.LinkPassword = null;
+            if (request is null) continue;
+            var name = RemoteText.AddLineWords(pick.Line, provider).Name;
+            var result = await _remote.AddAsync(request);
             if (result is { Ok: true, Job: { } job }) jobs.Add(job);
 
-            // A refusal is the end of it for this link. Nothing here tries it any other way.
+            // A refusal is the end of it for this link. Nothing here tries it any other way. Found again, it says what
+            // of this add it didn't use, such as a folder.
             if (!result.Ok) problems.Add($"{name}: {RemoteText.Failure(result.Error, null, provider)}");
-            else if (result.Existing) problems.Add(RemoteText.AlreadyListed(name, result.Note));
+            else if (result.Existing) problems.Add(RemoteText.AlreadyListed(result.Job, name, result.Note));
             else if (result.Job is not null) sent++;
         }
 
-        await ReportAddAsync("Add links", downloads, sent + folderLinks, provider, messages, problems);
+        await ReportAddAsync("Add links", downloads, sent, provider, messages, problems);
         FollowAdd(jobs, direct.Count);
     }
 
@@ -566,49 +572,4 @@ public sealed partial class MainWindow
         if (!result.Ok) problems.Add($"The archive password wasn't saved: {RemoteText.Failure(result.Error)}");
     }
 
-    /// <summary>A folder link refers to an item already on the account, so its files can be chosen before anything is added. Null when nothing was sent.</summary>
-    private async Task<RemoteAddResultDto?> AddFolderLinkAsync(AddLine line, AddLinksChoice choice, List<string> problems)
-    {
-        if (line.Result is not { Provider: { } providerId, ItemKind: { } kind, ItemId: { } itemId } found) return null;
-        var provider = string.IsNullOrWhiteSpace(found.ProviderName) ? ProviderWordForAdding() : found.ProviderName;
-        var name = RemoteText.AddLineWords(line, provider).Name;
-        var answer = await RemoteFileSelectionDialog.AskAsync(
-            Content.XamlRoot,
-            RootGrid.ActualTheme,
-            $"Choose files: {name}",
-            provider,
-            async token =>
-            {
-                var result = await _remote.GetItemsAsync(new RemoteItemRequest { Provider = providerId, Kind = kind, ItemId = itemId }, token);
-                if (!result.Ok) return new RemoteFilesToShow([], Error: RemoteText.Failure(result.Error, result.FailureKind, provider));
-                if (result.Items is not [var item]) return new RemoteFilesToShow([], Error: $"{provider} has no such item on your account.");
-                return new RemoteFilesToShow(item.Files ?? [], item.Stage != "ready", Title: string.IsNullOrWhiteSpace(item.Name) ? null : $"Choose files: {UrlRedactor.HideAddresses(item.Name)}");
-            },
-            primaryText: "Add",
-            closeText: "Skip this link",
-            laterText: "Add, choose later");
-        if (answer.CouldNotOpen)
-        {
-            problems.Add($"{name}: wasn't added, because another dialog was open. Add this link again.");
-            return null;
-        }
-
-        if (answer.Choice is null && !answer.Later) return null;
-
-        var added = await _remote.AddAsync(new RemoteAddRequestDto
-        {
-            Provider = providerId,
-            ItemKind = kind,
-            ItemId = itemId,
-            Destination = choice.Destination,
-            QueueId = choice.QueueId,
-            StartMode = choice.StartLater ? "later" : "startNow",
-            Selection = answer.Later ? "ask" : answer.Choice!.All ? "all" : "chosen",
-            FileIds = answer.Later || answer.Choice!.All ? null : answer.Choice.FileIds.ToList(),
-        });
-        if (!added.Ok) problems.Add($"{name}: {RemoteText.Failure(added.Error, null, provider)}");
-        else if (added.Existing) problems.Add(RemoteText.AlreadyListed(name, added.Note));
-        else if (!string.IsNullOrWhiteSpace(added.Note)) problems.Add($"{name}: {UrlRedactor.HideAddresses(added.Note)}");
-        return added;
-    }
 }

@@ -619,6 +619,18 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    public void Something_found_on_the_list_again_is_named_as_its_row_is_so_it_can_be_found()
+    {
+        // A folder link's line knows only the item's number; the row it was found as has the item's name.
+        var listed = new RemoteJobDto { Name = "Folder Link Demo", ProviderName = "TorBox", State = "awaitingSelection" };
+        Assert.Equal("Folder Link Demo: already on the list.", RemoteText.AlreadyListed(listed, "Torrent 133998005", null));
+        Assert.Equal("Folder Link Demo: already on the list. The folder given wasn't used.",
+            RemoteText.AlreadyListed(listed, "Torrent 133998005", "The folder given wasn't used."));
+        // Nothing came back to name it by: the line's own name is all there is.
+        Assert.Equal("Torrent 133998005: already on the list.", RemoteText.AlreadyListed(null, "Torrent 133998005", null));
+    }
+
+    [Fact]
     public void A_report_lists_every_problem_after_what_was_added()
     {
         var problems = Enumerable.Range(1, 12).Select(index => $"link {index}: refused.").ToList();
@@ -651,6 +663,28 @@ public sealed class AddLinesTests
         Assert.True(container.ApproveUncached);
         Assert.Equal([1, 4], container.EntryIds);
         Assert.Equal(2, container.QueueId);
+    }
+
+    [Fact]
+    public void AFolderLinkIsAddedToAskForItsFilesOnItsRow()
+    {
+        // Nothing is asked in the add any more: the item is listed, and its row asks, as anything else that asks does.
+        var folder = Line("https://torbox.app/download?id=133998001&type=torrents", Kind("folderLink"));
+
+        var add = AddRequests.ForFolderLink(folder, @"D:\In", 3, startLater: true);
+
+        Assert.NotNull(add);
+        Assert.Equal("ask", add.Selection);
+        Assert.Equal(("torbox", "torrents", "133998001"), (add.Provider, add.ItemKind, add.ItemId));
+        Assert.Null(add.Input);
+        Assert.Null(add.FileIds);
+        Assert.True(add.ApproveUncached);
+        Assert.Equal((@"D:\In", 3, "later"), (add.Destination, add.QueueId, add.StartMode));
+        Assert.Equal("startNow", AddRequests.ForFolderLink(folder, null, 0, startLater: false)!.StartMode);
+
+        // Only a line that names an item is one.
+        Assert.Null(AddRequests.ForFolderLink(Line(MagnetLink, Kind("magnet")), null, 0, false));
+        Assert.Null(AddRequests.ForFolderLink(Line("https://torbox.app/download?type=torrents", Kind("folderLink", result => result.ItemId = null)), null, 0, false));
     }
 
     // ---- Files chosen before adding -------------------------------------------------------------------
