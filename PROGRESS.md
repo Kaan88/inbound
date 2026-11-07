@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Memory, and the Docker and web UI plan (2026-11-07)
+
+- The owner asked for a Docker and web UI plan and how memory use is, since high memory is what they dislike in another download manager.
+- Measured, private bytes, build 0.5.1: the owner's idle copy has Host 31 MB and window 215 MB. In a test instance: Host 19 MB idle, 48 MB with 500 queued jobs, 69 to 72 MB (flat) while four 500 MB files downloaded from the local test server; window 233 to 235 MB with 504 rows, the same as empty. Not measured: long runs, real internet, thousands of jobs.
+- Plan in `docs/docker-webui-plan.md`; ROADMAP D.PLAN, PERF.1 to PERF.3. Waiting on four owner decisions listed in the plan.
+
 ### Release 0.5.1 (2026-11-07)
 
 - The owner asked for 0.5.1 with the UI.B2 and UP.B1 fixes, after proper tests (results under Release 0.5.0 below).
