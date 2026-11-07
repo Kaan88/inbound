@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### Owner's try of favorites and free space (2026-11-07)
+
+The owner said the features work. They reported two layout faults (UI.R11, UI.R12, both fixed and built, not yet seen on screen). They asked for three more things before 0.5.0: a bundled extractor (A4.B), a hoster status window (UI.R13) and hover info on the speed graph (UI.R7). They also asked that TorBox's API limits be respected. The hoster window reads the Host's cached list, and the client already paces on TorBox's rate-limit headers.
+
 ### UI.R9, UI.R10: favorite folders and free space (2026-11-07, branch `torbox-addflow`)
 
 Built; the owner tests it on screen and asked that no live or screen checks be run here.

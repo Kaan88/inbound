@@ -157,6 +157,7 @@ internal sealed class AddLinksDialog
             },
             Content = new ScrollViewer
             {
+                Padding = InboundTheme.DialogScrollPadding,
                 Content = panel,
                 MaxHeight = Math.Max(240, Math.Min(620, _themeRoot.ActualHeight - 200)),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,

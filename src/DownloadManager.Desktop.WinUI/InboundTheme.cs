@@ -10,6 +10,9 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 internal static class InboundTheme
 {
+    /// <summary>Room on the right of a dialog's scrolling content: WinUI draws the scrollbar over what it scrolls.</summary>
+    public static Thickness DialogScrollPadding { get; } = new(0, 0, 16, 0);
+
     public static Brush Brush(string key, ElementTheme theme)
     {
         var dictionaryKey = theme == ElementTheme.Light ? "Light"
