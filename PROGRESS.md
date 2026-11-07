@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+### Release 0.5.0 (2026-11-07)
+
+- The owner finished the UI and TorBox tests and asked for quick extraction tests, then push and release.
+- Published as v0.5.0 on `Kaan88/inbound`: the branch squashed onto `origin/main` as one commit (`1c2ceb0`, same tree as `bbc0a28`), main pushed, tag `v0.5.0`, five assets.
+- Checks: public key equals 0.4.0's, `releases/latest/download/manifest.json` says 0.5.0, the downloaded Setup matches SHA256SUMS. The tree held no token from the test credentials file. The package holds `app\tools\7-Zip`.
+- The tests before release: Archives 309, Core 818, 86 runtime archive integration tests. The full Engine and Integration suites were not run again after A4.C, which touched only archive and UI code.
+- The store extension stays 0.4.0. Since 0.4.0 its source has changed only in one message, for a refused extension ID; bump the version before the next store upload.
+- Not verified: install of Setup 0.5.0, auto-update from 0.4.0 to 0.5.0.
+
 ### Owner's try of favorites and free space (2026-11-07)
 
 The owner said the features work. They reported two layout faults (UI.R11, UI.R12, both fixed and built, not yet seen on screen). They asked for three more things before 0.5.0: a bundled extractor (A4.B), a hoster status window (UI.R13) and hover info on the speed graph (UI.R7). They also asked that TorBox's API limits be respected. The hoster window reads the Host's cached list, and the client already paces on TorBox's rate-limit headers.
