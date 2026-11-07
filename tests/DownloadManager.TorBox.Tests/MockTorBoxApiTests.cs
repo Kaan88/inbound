@@ -781,8 +781,48 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
         Assert.Equal((route, item.Id), _mock.Deleted.Single());
         Assert.Null(await _client.GetAsync(Ref(item), fresh: true));
 
-        var again = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.RemoveAsync(Ref(item)));
-        Assert.Equal(RemoteFailureKind.NotFound, again.Kind);
+        // Deleting what isn't there: TorBox says a database error for a torrent and "deleted" for the others.
+        // The client looks, so the torrent's reads as not found instead of as an outage.
+        if (kind == RemoteItemKind.Torrent)
+        {
+            var again = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.RemoveAsync(Ref(item)));
+            Assert.Equal(RemoteFailureKind.NotFound, again.Kind);
+        }
+        else
+        {
+            await _client.RemoveAsync(Ref(item));
+        }
+
+        Assert.Single(_mock.Deleted);
+    }
+
+    [Theory]
+    [InlineData("torrents/controltorrent", "torrent_id", 500, "DATABASE_ERROR")]
+    [InlineData("webdl/controlwebdownload", "webdl_id", 200, null)]
+    [InlineData("usenet/controlusenetdownload", "usenet_id", 200, null)]
+    public async Task DeletingAMissingItemAnswersAsTheRealServiceDid(string route, string idName, int status, string? code)
+    {
+        using var http = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_mock.ApiBase, route))
+        {
+            Content = new StringContent($$"""{"operation":"delete","{{idName}}":999999999}""", System.Text.Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", MockTorBox.DefaultApiKey);
+        using var response = await http.SendAsync(request);
+        Assert.Equal(status, (int)response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(code, body.RootElement.GetProperty("error").GetString());
+        Assert.Empty(_mock.Deleted);
+    }
+
+    [Fact]
+    public async Task AnOutageDeletingATorrentThatIsThereStaysAnOutage()
+    {
+        var item = OneFile();
+        _mock.Fail("POST torrents/controltorrent", MockFault.Status5xx(), times: 1);
+        var failure = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.RemoveAsync(Ref(item)));
+        Assert.Equal(RemoteFailureKind.ServiceError, failure.Kind);
+        Assert.NotNull(await _client.GetAsync(Ref(item), fresh: true));
     }
 
     // ---- Direct links and the CDN -------------------------------------------------------------

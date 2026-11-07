@@ -150,7 +150,7 @@ public sealed partial class ArchiveCoordinator
 
             if (!string.IsNullOrEmpty(request.Password))
             {
-                await SavePackagePasswordAsync(packageId, request.Password, cancellationToken).ConfigureAwait(false);
+                await SavePackagePasswordAsync(packageId, request.Password, keepExisting: false, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -253,7 +253,10 @@ public sealed partial class ArchiveCoordinator
         return result;
     }
 
-    public async Task<ArchiveActionResult> SetPasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
+    public Task<ArchiveActionResult> SetPasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
+        => SetPasswordAsync(request, keepExisting: false, cancellationToken);
+
+    private async Task<ArchiveActionResult> SetPasswordAsync(ArchiveSetPasswordRequest request, bool keepExisting, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (DescribeBadPassword(request.Password) is { } bad) return new ArchiveActionResult { Ok = false, Error = bad };
@@ -262,7 +265,10 @@ public sealed partial class ArchiveCoordinator
         {
             var group = _service.GetDownloadGroups().FirstOrDefault(candidate => candidate.Id == packageId);
             if (group is null) return new ArchiveActionResult { Ok = false, Error = "There is no such package." };
-            await SavePackagePasswordAsync(packageId, request.Password, cancellationToken).ConfigureAwait(false);
+            if (!await SavePackagePasswordAsync(packageId, request.Password, keepExisting, cancellationToken).ConfigureAwait(false))
+            {
+                return new ArchiveActionResult { Ok = true };
+            }
 
             // By its downloads too: a set may have been listed before its package was saved.
             var members = group.JobIds.ToHashSet();
@@ -321,15 +327,13 @@ public sealed partial class ArchiveCoordinator
 
     public async Task<string?> SetPackagePasswordAsync(Guid packageId, string? password, bool keepExisting = false, CancellationToken cancellationToken = default)
     {
-        if (keepExisting)
+        // Without the saved passwords read, an offer can't be told from a replacement, and the caller keeps its copy.
+        if (!_packagePasswordsLoaded)
         {
-            lock (_sync)
-            {
-                if (_packagePasswords.ContainsKey(packageId)) return null;
-            }
+            return "Archive extraction isn't running, so the password stays with this item for now.";
         }
 
-        return (await SetPasswordAsync(new ArchiveSetPasswordRequest { PackageId = packageId, Password = password }, cancellationToken).ConfigureAwait(false)).Error;
+        return (await SetPasswordAsync(new ArchiveSetPasswordRequest { PackageId = packageId, Password = password }, keepExisting, cancellationToken).ConfigureAwait(false)).Error;
     }
 
     private async Task<(Guid Id, string? Error)> RecordInAdvanceAsync(string path, CancellationToken cancellationToken)
@@ -366,16 +370,32 @@ public sealed partial class ArchiveCoordinator
         }
     }
 
-    private async Task SavePackagePasswordAsync(Guid packageId, string? password, CancellationToken cancellationToken)
+    /// <param name="keepExisting">Only an offer: a password the package has, or may have in a file that couldn't be read, stays.</param>
+    /// <returns>False when an offer was declined and nothing changed.</returns>
+    private async Task<bool> SavePackagePasswordAsync(Guid packageId, string? password, bool keepExisting, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Under the gate, so a password the user is saving right now is seen.
+            if (keepExisting)
+            {
+                lock (_sync)
+                {
+                    if (_packagePasswords.ContainsKey(packageId) || _unreadablePackagePasswords.Contains(packageId)) return false;
+                }
+            }
+
             if (string.IsNullOrEmpty(password))
             {
                 await _store.DeletePackagePasswordAsync(packageId, cancellationToken).ConfigureAwait(false);
-                lock (_sync) _packagePasswords.Remove(packageId);
-                return;
+                lock (_sync)
+                {
+                    _packagePasswords.Remove(packageId);
+                    _unreadablePackagePasswords.Remove(packageId);
+                }
+
+                return true;
             }
 
             var record = new ArchivePackagePassword
@@ -385,7 +405,13 @@ public sealed partial class ArchiveCoordinator
                 Stamp = _time.GetUtcNow(),
             };
             await _store.SavePackagePasswordAsync(record, cancellationToken).ConfigureAwait(false);
-            lock (_sync) _packagePasswords[packageId] = record;
+            lock (_sync)
+            {
+                _packagePasswords[packageId] = record;
+                _unreadablePackagePasswords.Remove(packageId);
+            }
+
+            return true;
         }
         finally
         {

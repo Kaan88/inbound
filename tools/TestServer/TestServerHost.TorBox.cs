@@ -1260,7 +1260,14 @@ public sealed partial class MockTorBox
             var item = _items.FirstOrDefault(candidate => candidate.Id == id && candidate.Kind == kind);
             if (item is null)
             {
-                return NotFound(kind);
+                // As the real service answered on 2026-11-07: never ITEM_NOT_FOUND here. A torrent
+                // that isn't there is a database error, and the others are "deleted".
+                return kind switch
+                {
+                    RemoteItemKind.Torrent => Err(500, "DATABASE_ERROR", "There was an error processing your request. Please try again later."),
+                    RemoteItemKind.WebDownload => Ok(null, "Web download deleted successfully."),
+                    _ => Ok(null, "Usenet download deleted successfully."),
+                };
             }
 
             _items.Remove(item);

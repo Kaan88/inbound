@@ -57,6 +57,12 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
     /// <summary>Guarded by <see cref="_sync"/>.</summary>
     private readonly Dictionary<Guid, ArchivePackagePassword> _packagePasswords = [];
 
+    /// <summary>Packages whose password files couldn't be read at the start. Guarded by <see cref="_sync"/>.</summary>
+    private readonly HashSet<Guid> _unreadablePackagePasswords = [];
+
+    /// <summary>Until the saved passwords are read, nothing here can tell whether a package already has one.</summary>
+    private volatile bool _packagePasswordsLoaded;
+
     /// <summary>Guarded by <see cref="_sync"/>.</summary>
     private readonly Dictionary<Guid, RunningExtraction> _running = [];
 
@@ -157,7 +163,10 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         {
             _settings = settings;
             foreach (var password in passwords.Where(password => packageIds.Contains(password.PackageId))) _packagePasswords[password.PackageId] = password;
+            _unreadablePackagePasswords.UnionWith(_store.UnreadablePackagePasswords);
         }
+
+        _packagePasswordsLoaded = true;
 
         foreach (var set in sets)
         {

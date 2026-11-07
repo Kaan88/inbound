@@ -1178,6 +1178,27 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AStaleSettingsSaveCannotPutAKeyBearingAddressBack()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, key: null);
+        var url = $"{_server.BaseAddress}/file/stale.bin?size=1024&seed=934&ref={MockKey}";
+        await rig.Ctx.Service.AddJobAsync(new AddJobRequest { Url = url, FileName = "stale.bin", DestinationDirectory = rig.Ctx.Destination, Source = "cli", StartMode = "later" });
+        // Options opens and takes its copy of the settings before the key is stored.
+        var stale = rig.Ctx.Service.GetSnapshot().Settings;
+        Assert.Contains(url, stale.RecentUrls);
+
+        await rig.Account.SetKeyAsync(MockKey);
+        await rig.Ctx.Service.ProtectStoredSecretsAsync();
+        Assert.Empty(rig.Ctx.Service.GetSnapshot().Settings.RecentUrls);
+
+        var saved = await rig.Ctx.Service.UpdateSettingsAsync(stale);
+        Assert.True(saved.Ok, saved.Error);
+        Assert.Empty(saved.Settings!.RecentUrls);
+        Assert.Empty(rig.Ctx.Service.GetSnapshot().Settings.RecentUrls);
+        await rig.AssertNoLinkOrKeyLeakedAsync();
+    }
+
+    [Fact]
     public async Task AKeyStoredWhileTheHostWasDownIsCleanedAtStartup()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "test-work", Guid.NewGuid().ToString("N"));

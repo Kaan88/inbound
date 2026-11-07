@@ -4,6 +4,7 @@ var port = 0;
 var withProxy = false;
 var withSocks5 = false;
 var withTorBox = false;
+int? cdnBytesPerSecond = null;
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] is "--port" or "-p" && i + 1 < args.Length && int.TryParse(args[i + 1], out var parsed))
@@ -25,6 +26,12 @@ for (var i = 0; i < args.Length; i++)
     {
         withTorBox = true;
     }
+
+    // Slows each connection to the mock CDN, so a run can watch how many a provider file uses.
+    if (args[i] == "--cdn-bps" && i + 1 < args.Length && int.TryParse(args[i + 1], out var bps) && bps > 0)
+    {
+        cdnBytesPerSecond = bps;
+    }
 }
 
 var host = await TestServerHost.StartAsync(port);
@@ -35,6 +42,7 @@ Console.WriteLine($"FTP listening at 127.0.0.1:{host.Ftp.Port} (ftpuser/ftppass)
 if (withTorBox)
 {
     host.TorBox.SeedSandbox();
+    host.TorBox.CdnBytesPerSecond = cdnBytesPerSecond;
     // Invented, like everything in the mock. Point a sandbox Host at it with DOWNLOADMANAGER_TORBOX_API.
     Console.WriteLine($"Mock TorBox API at {host.TorBox.ApiBase} (key {MockTorBox.DefaultApiKey})");
 }
