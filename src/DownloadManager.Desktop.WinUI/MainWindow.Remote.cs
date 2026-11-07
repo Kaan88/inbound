@@ -450,10 +450,15 @@ public sealed partial class MainWindow
         _ => Task.CompletedTask,
     };
 
+    /// <summary>
+    /// The provider's files for a row that asks. Before it is done, the choice can be made early, or left as all of
+    /// them, and the row goes on as it was. What was found of an earlier choice starts ticked.
+    /// </summary>
     private async Task SelectRemoteFilesAsync(RemoteJobDto job)
     {
         var provider = RemoteText.ProviderName(job);
-        var choice = await RemoteFileSelectionDialog.ShowAsync(
+        var early = job.State != "awaitingSelection";
+        var answer = await RemoteFileSelectionDialog.AskAsync(
             Content.XamlRoot,
             RootGrid.ActualTheme,
             $"Choose files: {RemoteText.JobRow(job, DateTimeOffset.Now).Name}",
@@ -462,12 +467,18 @@ public sealed partial class MainWindow
             {
                 var files = await _remote.GetFilesAsync(job.Id, token);
                 return files.Ok
-                    ? new RemoteFilesToShow(files.Files, files.Pending)
+                    ? new RemoteFilesToShow(files.Files, files.Pending, Chosen: early ? null : job.SelectedFileIds)
                     : new RemoteFilesToShow([], Error: files.Error ?? string.Empty);
-            });
-        if (choice is null) return;
-        var result = await _remote.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = choice.All, FileIds = choice.All ? null : choice.FileIds.ToList() });
+            },
+            laterText: early ? RemoteText.DownloadAllWhenReady : null,
+            laterWords: early ? "You can download all of them when it does." : null);
+        var choice = answer.Choice;
+        if (choice is null && !answer.Later) return;
+
+        var all = answer.Later || choice!.All;
+        var result = await _remote.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = all, FileIds = all ? null : choice!.FileIds.ToList() });
         if (!result.Ok) await ShowMessageAsync("Choose files", RemoteText.Failure(result.Error, null, provider));
+        else if (early) ShowPassingStatus(RemoteText.EarlyChoice(all));
     }
 
     /// <summary>A row nothing has been sent for yet, such as a copied link. Enter or the menu is the request, so nothing asks again.</summary>

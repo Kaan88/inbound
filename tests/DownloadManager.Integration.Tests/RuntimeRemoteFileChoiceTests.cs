@@ -141,6 +141,28 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(2, rig.Children().Count);
     }
 
+    [Fact]
+    public async Task AllChosenBeforeTheProviderIsDoneDownloadsWithoutAsking()
+    {
+        // "Download all when ready" on a row that would ask.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var hash = new string('7', 40);
+        MockTorBoxFile[] files = [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Soon/a.bin", 4 * Kb, 88), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Soon/b.bin", 4 * Kb, 89)];
+        rig.Mock.ScriptSubmission(hash, files, [MockTorBoxState.MetaData, MockTorBoxState.MetaData, MockTorBoxState.Ready]);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = "magnet:?xt=urn:btih:" + hash, ApprovedUncached = true, Selection = RemoteSelectionMode.AskWhenReady });
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.Waiting, rig.View(job.Id).State);
+        Assert.True((await rig.Jobs.GetFilesAsync(job.Id)).Pending);
+
+        Assert.True((await rig.Jobs.ChooseFilesAsync(job.Id, all: true, null)).Ok);
+        Assert.Equal(RemoteJobState.Waiting, rig.View(job.Id).State);
+        Assert.Equal(RemoteSelectionMode.All, rig.View(job.Id).SelectionMode);
+        await UntilSettledAsync(rig, job.Id);
+
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        Assert.Equal(2, rig.Children().Count);
+    }
+
     // ---- A magnet's files before it is added --------------------------------------------------------
 
     [Fact]

@@ -113,10 +113,17 @@ internal static class RemoteRules
     public static RemoteRowActions Actions(RemoteJobDto job) => new(
         // A look at a held copied link could submit it, so the Host refuses, and there is nothing to offer.
         CheckNow: !job.HeldForApproval && job.State is "intended" or "submissionUnknown" or "waiting" or "blocked" or "awaitingSelection",
-        SelectFiles: job.State == "awaitingSelection",
+        SelectFiles: job.State == "awaitingSelection" || CanChooseEarly(job),
         Approve: job.ApprovalNeeded && job.State == "intended",
         EnterLinkPassword: job.State == "failed" && job.FailureKind == "linkPasswordRequired",
         Retry: job.State is "failed" or "blocked");
+
+    /// <summary>
+    /// The files can be chosen before the provider is done: the job would ask for them, and nothing holds it back. A
+    /// copied link isn't added yet, and a folder link asks by default, so a held one is left out.
+    /// </summary>
+    public static bool CanChooseEarly(RemoteJobDto job)
+        => job is { HeldForApproval: false, ApprovalNeeded: false, SelectionMode: "askWhenReady" or "askIfCached", State: "intended" or "submitting" or "submissionUnknown" or "waiting" };
 
     /// <summary>The job that covers this item, or a failed one if that is all there is. An add creates a new job only past a failed one, so callers check for that.</summary>
     public static RemoteJobDto? JobFor(IEnumerable<RemoteJobDto> jobs, RemoteItemDto item)
@@ -197,7 +204,6 @@ internal static partial class RemoteText
         if (cause.Length > 0) parts.Add(cause);
         if (ProviderProgress(job.Progress, job.SpeedBytesPerSecond, job.EtaSeconds, provider, job.State == "waiting") is { Length: > 0 } progress) parts.Add(progress);
         if (job.ApprovalNeeded && job.State == "intended") parts.Add(job.HeldForApproval ? $"Enter adds it to {provider}." : $"Enter starts it on {provider}.");
-        if (job.State == "awaitingSelection") parts.Add("Choose the files.");
         if (NextCheck(job, now, format) is { Length: > 0 } next) parts.Add(next);
         var detail = string.Join(Separator, parts);
 
@@ -232,7 +238,7 @@ internal static partial class RemoteText
     {
         "failed" => job.FailureKind == "linkPasswordRequired" ? "Needs the link's password" : $"Failed on {provider}",
         "blocked" => $"{provider} account busy",
-        "awaitingSelection" => "Ready to download",
+        "awaitingSelection" => "Choose files",
         "intended" when job.HeldForApproval => "Copied link",
         // Nothing was sent: from the command line without its go-ahead, or saved before adding was the decision.
         "intended" when job.ApprovalNeeded => "Not started",
@@ -403,6 +409,15 @@ internal static partial class RemoteText
 
     /// <summary>The menu item and its message's title for a row nothing has been sent for yet.</summary>
     public static string AddTo(RemoteJobDto job) => $"Add to {ProviderName(job)}";
+
+    /// <summary>The file dialog's way past a list the provider doesn't have yet, for a row that would ask.</summary>
+    public const string DownloadAllWhenReady = "Download all when ready";
+
+    /// <summary>
+    /// Said in passing after a choice made before the provider is done. The row can't show it: an early "all" looks the
+    /// same as a hoster link's own.
+    /// </summary>
+    public static string EarlyChoice(bool all) => all ? "All files will download when ready." : "Your choice will download when ready.";
 
     public static string RemoveQuestion(IReadOnlyList<RemoteJobDto> jobs)
     {

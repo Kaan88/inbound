@@ -353,6 +353,43 @@ public sealed class RemoteRulesTests
         Assert.False(RemoteRules.CanDeleteFromProvider(unknown));
         Assert.False(RemoteRules.CanDeleteFromProvider(null));
     }
+
+    private static RemoteJobDto Asking(string state, string mode)
+    {
+        var job = Job(state);
+        job.SelectionMode = mode;
+        return job;
+    }
+
+    [Theory]
+    [InlineData("waiting", "askWhenReady", "SelectFiles")]
+    [InlineData("intended", "askIfCached", "SelectFiles")]
+    [InlineData("submitting", "askWhenReady", "SelectFiles")]
+    [InlineData("submissionUnknown", "askIfCached", "SelectFiles")]
+    [InlineData("waiting", "all", "CheckNow")]
+    [InlineData("waiting", "chosen", "CheckNow")]
+    [InlineData("intended", "all", "CheckNow")]
+    [InlineData("awaitingSelection", "askWhenReady", "SelectFiles")]
+    [InlineData("awaitingSelection", "chosen", "SelectFiles")]
+    [InlineData("failed", "askWhenReady", "Retry")]
+    [InlineData("blocked", "askWhenReady", "Retry")]
+    public void ARowThatWouldAskOffersItsFilesBeforeTheProviderIsDone(string state, string mode, string primary)
+        => Assert.Equal(Enum.Parse<RemoteRowAction>(primary), RemoteRules.Actions(Asking(state, mode)).Primary);
+
+    [Fact]
+    public void ACopiedLinkOrOneNotStartedIsAddedFirstEvenWhenItWouldAsk()
+    {
+        // A held folder link asks by default, and nobody has added it yet.
+        var held = Asking("intended", "askWhenReady");
+        held.ApprovalNeeded = true;
+        held.HeldForApproval = true;
+        Assert.False(RemoteRules.CanChooseEarly(held));
+        Assert.Equal(RemoteRowAction.Approve, RemoteRules.Actions(held).Primary);
+
+        held.HeldForApproval = false;
+        Assert.False(RemoteRules.CanChooseEarly(held));
+        Assert.Equal(RemoteRowAction.Approve, RemoteRules.Actions(held).Primary);
+    }
 }
 
 public sealed class RemoteRowTextTests
@@ -377,7 +414,7 @@ public sealed class RemoteRowTextTests
     [InlineData("waiting", "processing", "Processing on TorBox")]
     [InlineData("waiting", "stalled", "Stalled on TorBox")]
     [InlineData("waiting", "ready", "Ready to download")]
-    [InlineData("awaitingSelection", "ready", "Ready to download")]
+    [InlineData("awaitingSelection", "ready", "Choose files")]
     [InlineData("submitting", null, "Adding to TorBox…")]
     [InlineData("blocked", null, "TorBox account busy")]
     [InlineData("failed", null, "Failed on TorBox")]
@@ -495,6 +532,31 @@ public sealed class RemoteRowTextTests
         Assert.Contains("Enter starts it", row.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("approv", row.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Next check", row.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARowWaitingForAChoiceSaysChooseFilesAndNothingMoreUnlessSomethingIsMissing()
+    {
+        var job = Job("awaitingSelection", "ready");
+        job.Status = "Ready to download. Choose the files.";
+        var row = Row(job);
+        Assert.Equal("Choose files", row.Status);
+        Assert.Equal(string.Empty, row.Detail);
+
+        job.FailureMessage = "1 of the chosen files isn't in TorBox's list. Choose again.";
+        job.Status = job.FailureMessage;
+        row = Row(job);
+        Assert.Equal("Choose files", row.Status);
+        Assert.Equal("1 of the chosen files isn't in TorBox's list. Choose again.", row.Detail);
+        Assert.Equal(RemoteRowTone.Waiting, row.Tone);
+    }
+
+    [Fact]
+    public void AnEarlyChoiceIsSaidInPassingBecauseTheRowCantShowIt()
+    {
+        Assert.Equal("All files will download when ready.", RemoteText.EarlyChoice(all: true));
+        Assert.Equal("Your choice will download when ready.", RemoteText.EarlyChoice(all: false));
+        Assert.Equal("Download all when ready", RemoteText.DownloadAllWhenReady);
     }
 
     [Fact]

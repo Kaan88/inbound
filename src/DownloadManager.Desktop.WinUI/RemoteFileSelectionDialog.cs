@@ -6,7 +6,8 @@ using Microsoft.UI.Xaml.Controls;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>What a file selection dialog was given to show.</summary>
-internal sealed record RemoteFilesToShow(IReadOnlyList<RemoteFileDto> Files, bool Pending = false, string? Error = null, string? Title = null);
+/// <param name="Chosen">Ticked to begin with, such as what was found of an earlier choice. Null or empty ticks everything.</param>
+internal sealed record RemoteFilesToShow(IReadOnlyList<RemoteFileDto> Files, bool Pending = false, string? Error = null, string? Title = null, IReadOnlyList<string>? Chosen = null);
 
 /// <summary>What came of a file selection dialog: files chosen, or to be chosen once the provider knows them. Neither means it was cancelled, or with <paramref name="CouldNotOpen"/> that it never showed.</summary>
 internal sealed record RemoteFileAnswer(RemoteFileChoice? Choice, bool Later, bool CouldNotOpen = false);
@@ -30,7 +31,8 @@ internal static class RemoteFileSelectionDialog
         => (await AskAsync(root, theme, title, providerName, load, primaryText)).Choice;
 
     /// <param name="load">Reads the files. Runs while the dialog is open, on its own connection.</param>
-    /// <param name="laterText">Offered while the provider doesn't know the files yet, for going ahead and choosing them when it does. Null offers nothing.</param>
+    /// <param name="laterText">Offered while the provider doesn't know the files yet, for going ahead without them. Null offers nothing.</param>
+    /// <param name="laterWords">What that button does, said when there are no files to show. Null says it chooses them later.</param>
     public static async Task<RemoteFileAnswer> AskAsync(
         XamlRoot root,
         ElementTheme theme,
@@ -39,7 +41,8 @@ internal static class RemoteFileSelectionDialog
         Func<CancellationToken, Task<RemoteFilesToShow>> load,
         string primaryText = "Download selected",
         string closeText = "Cancel",
-        string? laterText = null)
+        string? laterText = null,
+        string? laterWords = null)
     {
         var tree = new RemoteFileTreeView { Height = 380 };
         var busy = new ProgressRing { IsActive = true, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
@@ -71,7 +74,8 @@ internal static class RemoteFileSelectionDialog
         {
             // This call is what throws when another dialog is open, and then nothing has been asked yet.
             var shown = dialog.ShowAsync();
-            _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterText, title => dialog.Title = title, closing.Token);
+            var laterSaid = laterText is null ? null : laterWords ?? $"Select \"{laterText}\" to choose them when it does.";
+            _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterSaid, title => dialog.Title = title, closing.Token);
             var answer = await shown;
             closing.Cancel();
             return new RemoteFileAnswer(answer == ContentDialogResult.Primary && tree.Tree.ChosenCount > 0 ? tree.Tree.Choice : null, answer == ContentDialogResult.Secondary);
@@ -91,7 +95,7 @@ internal static class RemoteFileSelectionDialog
         string providerName,
         Func<CancellationToken, Task<RemoteFilesToShow>> load,
         Action? offerLater,
-        string? laterText,
+        string? laterSaid,
         Action<string> setTitle,
         CancellationToken cancellationToken)
     {
@@ -111,9 +115,9 @@ internal static class RemoteFileSelectionDialog
             {
                 tree.ShowMessage(string.Empty);
                 offerLater?.Invoke();
-                status.Show(laterText is null
+                status.Show(laterSaid is null
                     ? $"{providerName} doesn't know the files yet. Try again when it does."
-                    : $"{providerName} doesn't know the files yet. Select \"{laterText}\" to choose them when it does.");
+                    : $"{providerName} doesn't know the files yet. {laterSaid}");
             }
             else if (result.Files.Count == 0)
             {
@@ -122,7 +126,8 @@ internal static class RemoteFileSelectionDialog
             }
             else
             {
-                tree.SetFiles(result.Files, chooseAll: true);
+                if (result.Chosen is { Count: > 0 } chosen) tree.SetFiles(result.Files, keep: chosen);
+                else tree.SetFiles(result.Files, chooseAll: true);
                 if (result.Pending) offerLater?.Invoke();
                 status.Show(result.Pending ? $"{providerName} is still working on this, so the list may change." : string.Empty);
             }
