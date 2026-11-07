@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Release 0.5.3 (2026-11-08)
+
+- Owner: "publish the build so I can test". Main commit 79b8884, tag v0.5.3, https://github.com/Kaan88/inbound/releases/tag/v0.5.3. Contents: everything since 0.5.2 (UI.B4, UI.B5, UI.B6, UI.B3, UI.R6, UI.R14 to UI.R19, PERF.5 option).
+- Checks: manifest signature verified with the release key (same as 0.3.0 onwards), the latest feed serves 0.5.3, the downloaded Setup matches SHA256SUMS, the package has 7-Zip, the credential-token scan found nothing, and the squashed main tree equals `torbox-addflow`.
+- Not done: the owner's on-screen checks.
+
 ### Extension request for later (2026-11-08)
 
 - Owner: an extension option to ask whether to save to a default folder set in the extension, or a custom location, probably as a popup from the existing menu; to do during the web UI and Docker work. Recorded as EXT.R1.
