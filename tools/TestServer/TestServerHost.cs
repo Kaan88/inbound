@@ -1127,6 +1127,22 @@ public sealed partial class TestServerHost : IAsyncDisposable
                 .ConfigureAwait(false);
         });
 
+        // Requests in flight, by route, so a run against the standalone server can tell data-carrying
+        // requests from idle keep-alive connections the TCP table also counts.
+        _app.MapGet("/admin/concurrency", () => Results.Json(new
+        {
+            peakFileRequests = PeakConcurrentFileRequests,
+            peakRangeRequests = PeakConcurrentRangeRequests,
+            peakCdnRequests = TorBox.PeakCdnConnections,
+        }));
+
+        _app.MapPost("/admin/concurrency/reset", () =>
+        {
+            ResetConcurrency();
+            TorBox.ResetCdnPeak();
+            return Results.Ok();
+        });
+
         _app.MapPost("/admin/reset", () =>
         {
             _content.Clear();
