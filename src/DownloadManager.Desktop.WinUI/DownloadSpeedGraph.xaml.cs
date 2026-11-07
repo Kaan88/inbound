@@ -26,6 +26,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private readonly Queue<(DateTimeOffset Time, double? Rate)> _samples = new();
     private int _seconds = 1800;
     private bool _expanded = true;
+    private bool _seen = true;
+    private bool _stale;
     private Storyboard? _transition;
 
     // Where the last drawing put things, for the hover layer.
@@ -71,6 +73,21 @@ public sealed partial class DownloadSpeedGraph : UserControl
     {
         get => _expanded;
         set => SetExpanded(value, animate: false);
+    }
+
+    /// <summary>
+    /// False while nobody can see the graph (window hidden or minimised, graph turned off): samples are still kept,
+    /// but nothing is drawn until it can be seen again, so a hidden window does no layout work every second.
+    /// </summary>
+    public bool IsSeen
+    {
+        get => _seen;
+        set
+        {
+            if (_seen == value) return;
+            _seen = value;
+            if (value && _stale) Draw();
+        }
     }
 
     public void AddSample(DateTimeOffset time, double? bytesPerSecond)
@@ -156,6 +173,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
     private void Draw()
     {
+        if (!_seen) { _stale = true; return; }
+        _stale = false;
         var now = _samples.LastOrDefault().Time;
         if (now == default) now = DateTimeOffset.Now;
         var start = now.AddSeconds(-_seconds);

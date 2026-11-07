@@ -69,6 +69,9 @@ public sealed partial class MainWindow : Window
                 ? null
                 : active.Where(job => now - job.LastUpdated <= TimeSpan.FromSeconds(10))
                     .Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
+            SpeedGraph.IsSeen = AppWindow.IsVisible
+                && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized }
+                && SpeedGraph.Visibility == Visibility.Visible;
             SpeedGraph.AddSample(now, rate);
         };
         _speedHistoryTimer.Start();
@@ -210,6 +213,7 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         Activate();
+        SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
     }
 
     public void RequestSettingsPage()
@@ -1507,6 +1511,7 @@ public sealed partial class MainWindow : Window
     private void MenuSpeedGraph_Click(object sender, RoutedEventArgs e)
     {
         SpeedGraph.Visibility = ShowSpeedGraphMenuItem.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+        SpeedGraph.IsSeen = ShowSpeedGraphMenuItem.IsChecked;
         SaveUiState();
     }
 
