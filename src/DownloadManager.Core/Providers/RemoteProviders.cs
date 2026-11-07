@@ -145,6 +145,10 @@ public sealed record RemoteHoster
     public long? DailyBandwidthLimit { get; init; }
     public long? DailyBandwidthUsed { get; init; }
     public long? PerLinkSizeLimit { get; init; }
+    /// <summary>The provider's picture for the site, an https address. Null when there is none.</summary>
+    public string? IconUrl { get; init; }
+    /// <summary>The provider's word for what the site is, such as hoster or stream.</summary>
+    public string? Type { get; init; }
 }
 
 /// <param name="Files">The item's files, when they were asked for and the provider listed them. Null otherwise.</param>

@@ -219,6 +219,24 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The first account's list of sites, from the hourly cache: a call only when it has gone stale. Null when no
+    /// provider has one.
+    /// </summary>
+    public async Task<(RemoteProviderEntry Entry, IReadOnlyList<RemoteHoster> Hosters, string? Problem, DateTimeOffset? FetchedAt)?> GetHosterListAsync(
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var work in _accounts.Values)
+        {
+            if (work.Hosters is not { } cache) continue;
+            if (work.Entry.AccountProblem() is { } problem) return (work.Entry, [], problem, null);
+            var (matchers, refreshProblem) = await cache.GetAsync(cancellationToken).ConfigureAwait(false);
+            return (work.Entry, matchers.Select(matcher => matcher.Hoster).ToList(), refreshProblem, cache.FetchedAt);
+        }
+
+        return null;
+    }
+
     /// <summary>A job changed. Raised after the change is saved, and outside the gate.</summary>
     public event EventHandler<RemoteJobView>? Changed;
 

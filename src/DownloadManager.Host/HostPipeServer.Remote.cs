@@ -11,7 +11,7 @@ public sealed partial class HostPipeServer
     /// away. Commands run one at a time per client: a frontend sends them on their own connection.
     /// </summary>
     private static bool WaitsOnProvider(string type) => type is
-        MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or
+        MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or MessageTypes.RemoteHosters or
         MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or
         MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd or
         // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
@@ -29,6 +29,7 @@ public sealed partial class HostPipeServer
             MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountSetKey or
             MessageTypes.RemoteAccountClearKey or MessageTypes.RemoteAccountValidate => MessageTypes.RemoteAccountResult,
             MessageTypes.RemoteClassify => MessageTypes.RemoteClassifyResult,
+            MessageTypes.RemoteHosters => MessageTypes.RemoteHostersResult,
             MessageTypes.RemoteAdd => MessageTypes.RemoteAddResult,
             MessageTypes.RemoteList => MessageTypes.RemoteListResult,
             MessageTypes.RemoteItemGet => MessageTypes.RemoteItemResult,
@@ -54,6 +55,7 @@ public sealed partial class HostPipeServer
                 MessageTypes.RemoteAccountClearKey => await remote.ClearKeyAsync(Payload<RemoteAccountRequest>(message), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteAccountValidate => await remote.ValidateAsync(Payload<RemoteAccountRequest>(message), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteClassify => await remote.ClassifyAsync(message.GetPayload<RemoteClassifyRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteHosters => await remote.GetHostersAsync(cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteAdd => await remote.AddAsync(message.GetPayload<RemoteAddRequestDto>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteList => remote.List(),
                 MessageTypes.RemoteItemGet => await remote.GetItemsAsync(message.GetPayload<RemoteItemRequest>(), cancellationToken).ConfigureAwait(false),

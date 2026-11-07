@@ -460,3 +460,34 @@ public sealed class RemoteChangedDto
     public Guid? JobId { get; set; }
     public RemoteAccountDto? Account { get; set; }
 }
+
+/// <summary>
+/// The sites a provider downloads from, as the Host last fetched them. The Host keeps the list for about an hour, so
+/// asking costs no provider call while it's fresh.
+/// </summary>
+public sealed class RemoteHostersResult
+{
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public string? Provider { get; set; }
+    public string? ProviderName { get; set; }
+    /// <summary>Set when the list couldn't be refreshed, and what's shown is older or empty.</summary>
+    public string? Problem { get; set; }
+    public DateTimeOffset? FetchedAt { get; set; }
+    public List<RemoteHosterDto> Hosters { get; set; } = new();
+}
+
+public sealed class RemoteHosterDto
+{
+    public string Name { get; set; } = string.Empty;
+    public List<string> Domains { get; set; } = new();
+    public bool Available { get; set; }
+    public string? Type { get; set; }
+    public string? IconUrl { get; set; }
+    public string? Note { get; set; }
+    public int? DailyLinkLimit { get; set; }
+    public int? DailyLinksUsed { get; set; }
+    public long? DailyBandwidthLimit { get; set; }
+    public long? DailyBandwidthUsed { get; set; }
+    public long? PerLinkSizeLimit { get; set; }
+}

@@ -278,6 +278,8 @@ public sealed partial class MainWindow
             Add($"Browse My {RemoteText.ProviderName(account)}…", "B", (_, _) => OpenProviderWindow(account.Provider));
         }
 
+        if (browsable.Count > 0) Add($"{RemoteText.ProviderName(browsable[0])} Hosters…", "H", (_, _) => HosterWindow.Show(_remote));
+
         Add("Import JD Container…", "J", async (_, _) => await ImportJdContainerAsync());
 
         // Dimmed with nothing waiting, because then there is nothing for it to do.

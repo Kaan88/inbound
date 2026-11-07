@@ -126,6 +126,11 @@ internal sealed class RemoteClient : IAsyncDisposable
         => Feed(await SlowAsync(MessageTypes.RemoteAccountValidate, new RemoteAccountRequest { Provider = provider },
             MessageTypes.RemoteAccountResult, FailedAccount, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>The provider's list of sites, from the Host's hourly cache.</summary>
+    public Task<RemoteHostersResult> GetHostersAsync(CancellationToken cancellationToken = default)
+        => SlowAsync(MessageTypes.RemoteHosters, new { }, MessageTypes.RemoteHostersResult,
+            error => new RemoteHostersResult { Error = RemoteText.Failure(error) }, cancellationToken);
+
     // ---- remote.classify, add, list, item, files, select, retry, checkNow, remove, deleteRemote ----
 
     /// <param name="withFiles">For adding: a magnet or a .torrent file also says which files it holds, when that can be known.</param>

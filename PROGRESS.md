@@ -4,6 +4,8 @@
 
 The owner said the features work. They reported two layout faults (UI.R11, UI.R12, both fixed and built, not yet seen on screen). They asked for three more things before 0.5.0: a bundled extractor (A4.B), a hoster status window (UI.R13) and hover info on the speed graph (UI.R7). They also asked that TorBox's API limits be respected. The hoster window reads the Host's cached list, and the client already paces on TorBox's rate-limit headers.
 
+UI.R13 is built. `remote.hosters` returns the first account's cached host list with when it was read. The window shows each host's icon (https only), up or down, today's links and bandwidth against the limits, the per-file limit and notes, with search and a "Down only" filter. A pipe test checks that a second open inside the hour makes no provider call. Not seen on screen yet: the owner tests it.
+
 ### UI.R9, UI.R10: favorite folders and free space (2026-11-07, branch `torbox-addflow`)
 
 Built; the owner tests it on screen and asked that no live or screen checks be run here.
