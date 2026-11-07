@@ -152,9 +152,9 @@ public static class RemoteJobRules
     public static string StatusText(RemoteJobRecord record, string providerName, RemoteLocalSummary? local = null) => record.State switch
     {
         RemoteJobState.Intended when record.HeldForApproval =>
-            $"Copied from the clipboard. Nothing has been sent to {providerName}. Approve it to go ahead.",
+            $"Copied from the clipboard. Nothing has been sent to {providerName}.",
         RemoteJobState.Intended when record.ApprovalNeeded =>
-            $"Not cached on {providerName}. Approve it to have {providerName} fetch it.",
+            $"Not cached on {providerName}, so it wasn't started.",
         RemoteJobState.Intended when record.FailureMessage is { } problem => problem,
         RemoteJobState.Intended when record.Cached => $"Cached on {providerName}",
         RemoteJobState.Intended => $"Checking {providerName}...",

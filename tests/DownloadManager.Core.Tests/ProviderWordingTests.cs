@@ -26,16 +26,46 @@ public sealed partial class ProviderWordingTests
     [GeneratedRegex(@"\b(quota|allowance)\b|count against", RegexOptions.IgnoreCase)]
     private static partial Regex Claim();
 
+    /// <summary>Adding is the decision, so nothing on screen or in the tray waits for, or speaks of, an approval.</summary>
+    [GeneratedRegex(@"approv", RegexOptions.IgnoreCase)]
+    private static partial Regex Approval();
+
     [Fact]
     public void No_text_about_a_provider_claims_a_quota_or_an_allowance()
+        => Assert.Empty(LiteralsMatching(Claim(), Places));
+
+    [Fact]
+    public void Nothing_shown_asks_for_or_mentions_an_approval()
+    {
+        // The command line keeps --approve-uncached on purpose, so it isn't read here. The tray's words are.
+        var shown = Places.Where(place => !place.Contains("Cli", StringComparison.Ordinal)).Append("src/DownloadManager.Host").ToArray();
+
+        Assert.Empty(LiteralsMatching(Approval(), shown));
+    }
+
+    [Fact]
+    public void The_words_for_a_row_nothing_was_sent_for_say_what_Enter_does()
+    {
+        var held = new DownloadManager.Contracts.RemoteJobDto { Name = "x", ProviderName = "TorBox", State = "intended", ApprovalNeeded = true, HeldForApproval = true };
+        var notStarted = new DownloadManager.Contracts.RemoteJobDto { Name = "x", ProviderName = "TorBox", State = "intended", ApprovalNeeded = true };
+        foreach (var row in new[] { DownloadManager.Desktop.WinUI.RemoteText.JobRow(held, DateTimeOffset.Now), DownloadManager.Desktop.WinUI.RemoteText.JobRow(notStarted, DateTimeOffset.Now) })
+        {
+            Assert.StartsWith("Enter ", row.Detail, StringComparison.Ordinal);
+            Assert.Contains("TorBox", row.Detail, StringComparison.Ordinal);
+            Assert.DoesNotContain("limit", row.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotMatch(Claim(), row.Detail);
+        }
+    }
+
+    private static List<string> LiteralsMatching(Regex words, IEnumerable<string> places)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "DownloadManager.slnx"))) directory = directory.Parent;
         Assert.NotNull(directory);
 
         var read = 0;
-        var claims = new List<string>();
-        foreach (var place in Places)
+        var found = new List<string>();
+        foreach (var place in places)
         {
             var full = Path.Combine(directory.FullName, place);
             var files = File.Exists(full) ? [full] : Directory.EnumerateFiles(full, "*.cs", SearchOption.AllDirectories).ToArray();
@@ -44,29 +74,12 @@ public sealed partial class ProviderWordingTests
                 read++;
                 foreach (var line in File.ReadLines(file).Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)))
                 {
-                    claims.AddRange(StringLiteral().Matches(line).Where(literal => Claim().IsMatch(literal.Value)).Select(literal => $"{Path.GetFileName(file)}: {literal.Value}"));
+                    found.AddRange(StringLiteral().Matches(line).Where(literal => words.IsMatch(literal.Value)).Select(literal => $"{Path.GetFileName(file)}: {literal.Value}"));
                 }
             }
         }
 
         Assert.True(read >= 10, $"Only {read} files were read, so the places above have moved.");
-        Assert.Empty(claims);
-    }
-
-    [Fact]
-    public void The_approval_words_say_what_happens_and_nothing_about_limits()
-    {
-        var job = new DownloadManager.Contracts.RemoteJobDto { Name = "x", ProviderName = "TorBox", HeldForApproval = true };
-        foreach (var words in new[]
-        {
-            DownloadManager.Desktop.WinUI.RemoteText.ApproveExplanation("TorBox"),
-            DownloadManager.Desktop.WinUI.RemoteText.ApproveQuestion(job),
-            DownloadManager.Desktop.WinUI.RemoteText.ApproveQuestion(new DownloadManager.Contracts.RemoteJobDto { Name = "x", ProviderName = "TorBox" }),
-        })
-        {
-            Assert.DoesNotContain("limit", words, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotMatch(Claim(), words);
-            Assert.Contains("TorBox", words, StringComparison.Ordinal);
-        }
+        return found;
     }
 }

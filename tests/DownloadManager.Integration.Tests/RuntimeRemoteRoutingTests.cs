@@ -79,7 +79,10 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(RemoteJobState.Intended, job.State);
         Assert.True(job.ApprovalNeeded);
         Assert.True(job.HeldForApproval);
-        Assert.Contains("Approve", job.Status);
+        Assert.Contains("Nothing has been sent", job.Status);
+        Assert.DoesNotContain("approv", job.Status, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Press Enter on it", outcome.Words);
+        Assert.DoesNotContain("approv", outcome.Words, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cached", job.Status, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(rig.Ctx.Service.GetSnapshot().Jobs);
 

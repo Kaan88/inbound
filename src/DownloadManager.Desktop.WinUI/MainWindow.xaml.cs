@@ -476,6 +476,13 @@ public sealed partial class MainWindow : Window
         timer.Start();
     }
 
+    /// <summary>Puts the counts back now, rather than when a passing line's time is up.</summary>
+    private void EndPassingStatus()
+    {
+        _passingStatus = null;
+        UpdateStatusText();
+    }
+
     private void UpdateStatusText()
     {
         var active = _jobsById.Values.Count(j => j.State is "connecting" or "downloading" or "verifying");
@@ -2948,7 +2955,10 @@ public sealed partial class MainWindow : Window
             : destinationBox.Text.Trim();
         var added = await AddOrdinaryLinksAsync(urls, keepPackage.IsChecked == true, destination, startMode.SelectedIndex == 1 ? "later" : "now", queueId, conflictBox.SelectedIndex);
         await RefreshAsync();
-        await ShowMessageAsync("Add links", added.Summary);
+
+        // The new rows say a clean add. Only one that failed or was already queued needs an OK.
+        if (added.NeedsSaying) await ShowMessageAsync("Add links", added.Summary);
+        else if (RemoteText.AddedWords(added.Accepted, 0, string.Empty) is { Length: > 0 } words) ShowPassingStatus(words);
     }
 
     /// <summary>Says why this ordinary dialog opened when the reason is a saved key that can't be read.</summary>
@@ -2966,6 +2976,9 @@ public sealed partial class MainWindow : Window
         public string Summary => $"Added {Accepted} of {Requested} downloads" +
             (Duplicates > 0 ? $" ({Duplicates} already queued)" : string.Empty) +
             (Failed > 0 ? $"; {Failed} failed. {FirstError}" : ".");
+
+        /// <summary>A link failed or was already queued. Anything else the new rows say for themselves.</summary>
+        public bool NeedsSaying => Failed > 0 || Duplicates > 0;
     }
 
     /// <summary>One <c>job.add</c> per link, in a package of their own when asked. Only for links nothing says should go through a provider.</summary>
@@ -4730,6 +4743,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>A message that may be a long list, such as every link an add refused, so it scrolls rather than being cut off.</summary>
     private async Task ShowMessageAsync(string title, string message)
     {
         var dialog = new ContentDialog
@@ -4737,7 +4751,13 @@ public sealed partial class MainWindow : Window
             XamlRoot = Content.XamlRoot,
             RequestedTheme = RootGrid.ActualTheme,
             Title = title,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            Content = new ScrollViewer
+            {
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+                MaxHeight = Math.Max(160, Math.Min(480, RootGrid.ActualHeight - 240)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
             CloseButtonText = "OK",
         };
 

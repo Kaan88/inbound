@@ -88,8 +88,8 @@ public sealed class CopiedLinks(DownloadManagerService service, RemoteJobCoordin
 
         var provider = added.Job.ProviderName;
         return new CopiedLinkOutcome("Copied link is waiting", classified.Kind == RemoteInputKind.FolderLink
-            ? $"This link is to an item on your {provider} account. It is on the list, waiting for your approval."
-            : $"{provider} handles this link. It is on the list, waiting for your approval. Nothing has been sent.");
+            ? $"This link is to an item on your {provider} account. It is on the list. Press Enter on it to add it."
+            : $"{provider} handles this link. It is on the list, and nothing has been sent. Press Enter on it to add it to {provider}.");
     }
 
     private static CopiedLinkOutcome CouldNotCheck(string provider, string why)

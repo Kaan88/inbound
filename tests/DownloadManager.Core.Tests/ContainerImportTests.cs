@@ -325,214 +325,52 @@ public sealed class ContainerImportTests
 
     // ---- Outcomes -----------------------------------------------------------------------------------
 
-    private static RemoteJobDto Job(string state = "waiting", bool approval = false, Action<RemoteJobDto>? change = null)
-    {
-        var job = new RemoteJobDto { Id = Guid.NewGuid(), Provider = "fetcher", ProviderName = Provider, State = state, Status = "Waiting for Fetcher", ApprovalNeeded = approval, Name = "part1.rar" };
-        change?.Invoke(job);
-        return job;
-    }
+    private static RemoteJobDto Job(string state = "waiting") => new() { Id = Guid.NewGuid(), Provider = "fetcher", ProviderName = Provider, State = state, Status = "Waiting for Fetcher", Name = "part1.rar" };
 
     private static ContainerOutcomes Outcomes(bool leftOut, params RemoteContainerAddOutcomeDto[] outcomes)
         => new(new RemoteContainerAddResult { Ok = outcomes.Any(outcome => outcome.Ok), JobsLeftOut = leftOut, Outcomes = [.. outcomes] }, id => $"entry {id}");
 
     [Fact]
-    public void Entries_left_out_of_a_full_answer_read_as_added_and_never_as_failed_or_removed()
+    public void Entries_left_out_of_a_full_answer_count_as_added_and_never_as_failed()
     {
-        var id = Guid.NewGuid();
-        var outcomes = Outcomes(true, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = id });
+        var outcomes = Outcomes(true, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = Guid.NewGuid() });
 
-        outcomes.Refresh([], Now);
-        var view = outcomes.Views()[0];
-
-        Assert.Equal("Added", view.Word);
-        Assert.False(view.IsProblem);
         Assert.Equal(1, outcomes.AddedCount);
-        Assert.DoesNotContain("Removed", view.Word, StringComparison.Ordinal);
-        Assert.StartsWith("Added 1.", outcomes.Summary(Provider), StringComparison.Ordinal);
+        Assert.Equal(1, outcomes.NewCount);
+        Assert.Empty(outcomes.Problems);
+        Assert.Equal("Added 1 item for Fetcher.", outcomes.Summary(Provider));
     }
 
     [Fact]
-    public void Once_the_list_has_been_read_a_left_out_entry_shows_its_job_and_can_be_approved()
+    public void Nothing_asks_after_adding_and_only_what_wasnt_added_or_was_there_already_is_listed()
     {
-        var job = Job("intended", approval: true);
-        var outcomes = Outcomes(true, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id });
-
-        outcomes.Refresh([job], Now);
-
-        Assert.Equal(1, outcomes.WaitingCount);
-        var view = outcomes.Views()[0];
-        Assert.Equal("Not cached, needs Fetcher to fetch it", view.Word);
-        Assert.True(view.ShowBox);
-        Assert.Equal(false, view.Checked);
-        Assert.Contains("Tick it to let Fetcher fetch this.", view.Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_job_that_was_on_the_list_and_has_gone_reads_as_removed()
-    {
-        var job = Job();
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job });
-
-        outcomes.Refresh([job], Now);
-        outcomes.Refresh([], Now);
-
-        Assert.Equal("Removed from the list", outcomes.Views()[0].Word);
-    }
-
-    [Fact]
-    public void The_replys_own_job_is_used_until_the_list_catches_up()
-    {
-        var job = Job("intended", approval: true);
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job });
-
-        outcomes.Refresh([], Now);
-
-        Assert.Equal(1, outcomes.WaitingCount);
-    }
-
-    [Fact]
-    public void Approval_is_never_assumed_and_only_what_was_ticked_goes()
-    {
-        var first = Job("intended", approval: true);
-        var second = Job("intended", approval: true);
-        var outcomes = Outcomes(false,
-            new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = first.Id, Job = first },
-            new RemoteContainerAddOutcomeDto { EntryId = 2, Ok = true, JobId = second.Id, Job = second });
-        outcomes.Refresh([first, second], Now);
-
-        Assert.Empty(outcomes.ToApprove);
-        outcomes.Toggle(1, true);
-        Assert.Equal([second.Id], outcomes.ToApprove);
-
-        outcomes.SetAllApproved(true);
-        Assert.Equal(2, outcomes.ApprovedCount);
-
-        // No longer waiting means no longer approved, so nothing goes twice.
-        first.ApprovalNeeded = false;
-        first.State = "waiting";
-        outcomes.Refresh([first, second], Now);
-        Assert.Equal([second.Id], outcomes.ToApprove);
-
-        // If it comes back to waiting, it starts unticked again.
-        first.ApprovalNeeded = true;
-        first.State = "intended";
-        outcomes.Refresh([first, second], Now);
-        Assert.Equal([second.Id], outcomes.ToApprove);
-    }
-
-    [Fact]
-    public void What_a_package_s_local_files_say_is_asked_once_however_many_of_its_jobs_are_listed()
-    {
-        var package = Guid.NewGuid();
-        var jobs = Enumerable.Range(0, 50).Select(_ => Job("localStarted", change: job => job.PackageId = package)).ToList();
-        var loner = Job("localStarted");
-        var outcomes = Outcomes(false, [.. jobs.Append(loner).Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
-        var asked = 0;
-
-        outcomes.Refresh([.. jobs, loner], Now, _ =>
-        {
-            asked++;
-            return "Downloading here";
-        });
-        Assert.Equal(2, asked);
-
-        // Once per reading, because the answer changes with what the files are doing.
-        outcomes.Refresh([.. jobs, loner], Now, _ =>
-        {
-            asked++;
-            return "Done here";
-        });
-        Assert.Equal(4, asked);
-    }
-
-    [Fact]
-    public async Task Stopping_approvals_leaves_the_rest_unsent()
-    {
-        var waiting = Enumerable.Range(0, 5).Select(_ => Job("intended", approval: true)).ToList();
-        var outcomes = Outcomes(false, [.. waiting.Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
-        outcomes.Refresh(waiting, Now);
-        outcomes.SetAllApproved(true);
-        using var closing = new CancellationTokenSource();
-        var asked = new List<Guid>();
-        var progress = new List<int>();
-
-        await outcomes.ApproveChosenAsync(
-            (id, _) =>
-            {
-                asked.Add(id);
-                if (asked.Count == 2) closing.Cancel();
-                return Task.FromResult<string?>(null);
-            },
-            progress.Add,
-            closing.Token);
-
-        Assert.Equal(2, asked.Count);
-        Assert.Equal([1, 2], progress);
-    }
-
-    [Fact]
-    public async Task Approvals_all_go_and_a_refusal_shows_on_its_own_line_and_a_call_cut_off_by_closing_is_no_failure()
-    {
-        var waiting = Enumerable.Range(0, 3).Select(_ => Job("intended", approval: true)).ToList();
-        var outcomes = Outcomes(false, [.. waiting.Select((job, index) => new RemoteContainerAddOutcomeDto { EntryId = index, Ok = true, JobId = job.Id, Job = job })]);
-        outcomes.Refresh(waiting, Now);
-        outcomes.SetAllApproved(true);
-        var sent = 0;
-
-        await outcomes.ApproveChosenAsync((id, _) => Task.FromResult(id == waiting[1].Id ? "Refused here." : null), count => sent = count, CancellationToken.None);
-
-        Assert.Equal(3, sent);
-        Assert.Single(outcomes.Views(), view => view.Detail.Contains("Refused here.", StringComparison.Ordinal));
-
-        using var closing = new CancellationTokenSource();
-        closing.CancelAfter(TimeSpan.FromMilliseconds(50));
-        sent = 0;
-        await outcomes.ApproveChosenAsync(async (_, token) =>
-        {
-            await Task.Delay(Timeout.Infinite, token);
-            return null;
-        }, count => sent = count, closing.Token);
-        Assert.Equal(0, sent);
-    }
-
-    [Fact]
-    public void An_entry_that_wasnt_added_says_why_comes_first_and_cant_be_approved()
-    {
-        var job = Job();
+        var job = Job("intended");
         var outcomes = Outcomes(false,
             new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job },
-            new RemoteContainerAddOutcomeDto { EntryId = 2, Error = "Fetcher couldn't be reached." });
+            new RemoteContainerAddOutcomeDto { EntryId = 2, Error = "Fetcher couldn't be reached." },
+            new RemoteContainerAddOutcomeDto { EntryId = 3, Ok = true, Existing = true, JobId = job.Id, Job = job, Note = "The folder given wasn't used." });
 
-        outcomes.Refresh([job], Now);
-        var failed = outcomes.Views()[0];
+        Assert.Equal(2, outcomes.AddedCount);
+        Assert.Equal(1, outcomes.NewCount);
+        Assert.Equal(["entry 2: Fetcher couldn't be reached.", "entry 3: already on the list. The folder given wasn't used."], outcomes.Problems);
+        Assert.Equal("Added 1 item for Fetcher.", outcomes.Summary(Provider));
+        Assert.DoesNotContain(outcomes.Problems, line => line.Contains("approv", StringComparison.OrdinalIgnoreCase));
+    }
 
-        Assert.Equal("entry 2", failed.Name);
-        Assert.Equal("Not added", failed.Word);
-        Assert.Equal("Fetcher couldn't be reached.", failed.Detail);
-        Assert.True(failed.IsProblem);
-        Assert.False(failed.ShowBox);
-        Assert.StartsWith("Added 1 of 2.", outcomes.Summary(Provider), StringComparison.Ordinal);
+    [Fact]
+    public void Every_entry_that_wasnt_added_is_listed_however_many_there_are()
+    {
+        var outcomes = Outcomes(false, [.. Enumerable.Range(1, 40).Select(id => new RemoteContainerAddOutcomeDto { EntryId = id, Error = "No." })]);
+
+        Assert.Equal(40, outcomes.Problems.Count);
+        Assert.Equal("entry 40: No.", outcomes.Problems[^1]);
     }
 
     [Fact]
     public void All_failing_says_so()
     {
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Error = "No." }, new RemoteContainerAddOutcomeDto { EntryId = 2, Error = "No." });
-        Assert.Equal("None of these were added.", outcomes.Summary(Provider));
-        Assert.Equal(0, outcomes.AddedCount);
-    }
-
-    [Fact]
-    public void One_already_on_the_list_says_so_with_the_Hosts_note()
-    {
-        var job = Job();
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, Existing = true, JobId = job.Id, Job = job, Note = "The folder given wasn't used." });
-
-        outcomes.Refresh([job], Now);
-        var detail = outcomes.Views()[0].Detail;
-
-        Assert.Contains("It was already on the list.", detail, StringComparison.Ordinal);
-        Assert.Contains("The folder given wasn't used.", detail, StringComparison.Ordinal);
+        Assert.Equal("None of these were added.", Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Error = "No." }, new RemoteContainerAddOutcomeDto { EntryId = 2, Error = "No." }).Summary(Provider));
+        Assert.Equal("This wasn't added.", Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Error = "No." }).Summary(Provider));
     }
 
     [Fact]
@@ -541,11 +379,13 @@ public sealed class ContainerImportTests
         var job = Job();
         var twin = new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, Existing = true, JobId = job.Id, Job = job };
         var fresh = new RemoteContainerAddOutcomeDto { EntryId = 2, Ok = true, JobId = job.Id, Job = job };
+        var refused = new RemoteContainerAddOutcomeDto { EntryId = 4, Error = "No." };
 
-        Assert.StartsWith("It was already on the list.", Outcomes(false, twin).Summary(Provider), StringComparison.Ordinal);
-        Assert.StartsWith("These were already on the list.", Outcomes(false, twin, new RemoteContainerAddOutcomeDto { EntryId = 3, Ok = true, Existing = true, JobId = job.Id, Job = job }).Summary(Provider), StringComparison.Ordinal);
-        Assert.StartsWith("Added 1 of 2.", Outcomes(false, twin, fresh).Summary(Provider), StringComparison.Ordinal);
-        Assert.StartsWith("Added 1.", Outcomes(false, fresh).Summary(Provider), StringComparison.Ordinal);
+        Assert.Equal("It was already on the list.", Outcomes(false, twin).Summary(Provider));
+        Assert.Equal("These were already on the list.", Outcomes(false, twin, new RemoteContainerAddOutcomeDto { EntryId = 3, Ok = true, Existing = true, JobId = job.Id, Job = job }).Summary(Provider));
+        Assert.Equal("Nothing new was added.", Outcomes(false, twin, refused).Summary(Provider));
+        Assert.Equal("Added 1 item for Fetcher.", Outcomes(false, twin, fresh).Summary(Provider));
+        Assert.Equal(0, Outcomes(false, twin).NewCount);
     }
 
     [Fact]
@@ -555,56 +395,7 @@ public sealed class ContainerImportTests
         var note = "This is already on the list, so the folder given here wasn't used.";
         var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, Existing = true, JobId = job.Id, Job = job, Note = note });
 
-        outcomes.Refresh([job], Now);
-        var detail = outcomes.Views()[0].Detail;
-
-        Assert.Contains(note, detail, StringComparison.Ordinal);
-        Assert.DoesNotContain(RemoteText.ContainerExisting, detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_link_password_points_to_the_list_because_a_row_here_has_nowhere_safe_to_keep_one()
-    {
-        var job = Job("failed", change: failed => failed.FailureKind = "linkPasswordRequired");
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job });
-
-        outcomes.Refresh([job], Now);
-
-        Assert.Contains("select the item and press Enter", outcomes.Views()[0].Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_failed_approval_is_said_on_its_row_and_cleared_when_it_goes_through()
-    {
-        var job = Job("intended", approval: true);
-        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = job.Id, Job = job });
-        outcomes.Refresh([job], Now);
-
-        outcomes.ShowProblem(job.Id, "Fetcher refused this.");
-        Assert.Contains("Fetcher refused this.", outcomes.Views()[0].Detail, StringComparison.Ordinal);
-        Assert.True(outcomes.Views()[0].IsProblem);
-
-        outcomes.ShowProblem(job.Id, null);
-        Assert.DoesNotContain("refused", outcomes.Views()[0].Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Local_status_is_asked_for_only_when_a_job_has_local_files()
-    {
-        var waiting = Job();
-        var local = Job("localStarted");
-        var asked = new List<Guid>();
-        var outcomes = Outcomes(false,
-            new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, JobId = waiting.Id },
-            new RemoteContainerAddOutcomeDto { EntryId = 2, Ok = true, JobId = local.Id });
-
-        outcomes.Refresh([waiting, local], Now, job =>
-        {
-            asked.Add(job.Id);
-            return "Downloading locally";
-        });
-
-        Assert.Equal([local.Id], asked);
+        Assert.Equal([$"entry 1: {note}"], outcomes.Problems);
     }
 
     // ---- Never looking at the file -----------------------------------------------------------------

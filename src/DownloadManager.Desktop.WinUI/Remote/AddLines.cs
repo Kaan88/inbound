@@ -503,18 +503,6 @@ internal sealed record AddLineView(
     string ToolTip,
     string AccessibleName);
 
-/// <summary>What the Host says about something just added, while it is still worth watching in the dialog.</summary>
-/// <param name="NeedsFiles">Ready, and waiting for the user to choose among its files, which is done from the download list.</param>
-internal sealed record AddOutcomeView(
-    string Word,
-    string Detail,
-    bool NeedsApproval,
-    bool NeedsLinkPassword,
-    bool NeedsFiles,
-    bool IsChecking,
-    bool IsProblem,
-    string AccessibleName);
-
 internal static partial class RemoteText
 {
     public const string ClassifyLost = "The background Host didn't answer, so this wasn't checked. Nothing was sent. Try again.";
@@ -745,54 +733,58 @@ internal static partial class RemoteText
             : $"{chosen} of {lines.Count} selected. {stuck} can't be added as {(stuck == 1 ? "it is" : "they are")}.", false);
     }
 
-    /// <param name="job">Null once it has gone from the list.</param>
-    /// <param name="note">What the Host said when it was added, such as that it was already there.</param>
-    public static AddOutcomeView AddOutcome(RemoteJobDto? job, string name, string? note, DateTimeOffset now, IFormatProvider? culture = null, string? localStatus = null)
+    /// <summary>The words after an add that went through, empty when nothing new was added. The rows on the list say the rest.</summary>
+    public static string AddedWords(int downloads, int items, string provider)
     {
-        if (job is null) return new AddOutcomeView("Removed from the list", string.Empty, false, false, false, false, false, $"{name}, removed from the list");
-
-        var provider = ProviderName(job);
-        var row = JobRow(job, now, culture);
-
-        // The Host works its words out when the job changes, and local files finish without that.
-        if (job.State == "localStarted" && !string.IsNullOrEmpty(localStatus)) row = row with { Status = localStatus };
-        var needsApproval = job is { State: "intended", ApprovalNeeded: true };
-        var cached = job.Cached && job.State != "failed";
-        var word = needsApproval ? $"Not cached, needs {provider} to fetch it"
-            : cached ? $"Cached on {provider}"
-            : row.Status;
-        var parts = new List<string>();
-        if (cached && row.Status != word && job.State is not ("intended" or "submitting")) parts.Add($"{row.Status}.");
-        if (!needsApproval && row.Detail.Length > 0) parts.Add(row.Detail);
-        if (!string.IsNullOrWhiteSpace(note)) parts.Add(UrlRedactor.HideAddresses(note));
-        var detail = string.Join(" ", parts);
-        var checking = job is { State: "intended" or "submissionUnknown", ApprovalNeeded: false, Cached: false };
-        return new AddOutcomeView(
-            word,
-            detail,
-            needsApproval,
-            job is { State: "failed", FailureKind: "linkPasswordRequired" },
-            job.State == "awaitingSelection",
-            checking,
-            job.State == "failed",
-            detail.Length > 0 ? $"{name}, {word}, {detail}" : $"{name}, {word}");
+        var parts = new List<string>(2);
+        if (downloads > 0) parts.Add(downloads == 1 ? "1 download" : $"{downloads} downloads");
+        if (items > 0) parts.Add(items == 1 ? $"1 item for {provider}" : $"{items} items for {provider}");
+        return parts.Count == 0 ? string.Empty : $"Added {string.Join(" and ", parts)}.";
     }
 
-    public static string AddOutcomeSummary(IReadOnlyCollection<AddOutcomeView> rows, string provider)
+    /// <summary>For something added again. Never "added": it was on the list already, and the Host's note says what of the new request it didn't use.</summary>
+    public static string AlreadyListed(string name, string? note)
     {
-        var waiting = rows.Count(row => row.NeedsApproval);
-        var checking = rows.Count(row => row.IsChecking);
-        if (checking > 0) return $"Asking {provider} about {(checking == 1 ? "1 item" : $"{checking} items")}…";
-        if (waiting > 0) return waiting == 1 ? "1 item is waiting for your approval." : $"{waiting} items are waiting for your approval.";
-        if (rows.Any(row => row.NeedsLinkPassword)) return "An item needs its link password.";
-        return rows.Any(row => row.NeedsFiles)
-            ? "Ready. Close this and choose the files from the download list: select the item and press Enter."
-            : "Nothing here needs you now. These carry on in the download list.";
+        var said = string.IsNullOrWhiteSpace(note) ? null : UrlRedactor.HideAddresses(note).Trim();
+        return said is null || !said.Contains("already on the list", StringComparison.OrdinalIgnoreCase)
+            ? $"{name}: already on the list.{(said is null ? string.Empty : $" {said}")}"
+            : $"{name}: {said}";
     }
 
-    public static string ApproveExplanation(string provider)
-        => $"{provider} fetches what isn't cached on your account. Nothing is sent to {provider} until you approve it. Anything you leave stays on the list as not cached, and you can approve it there later.";
+    /// <summary>
+    /// What a whole add comes to when it needs saying: everything that went wrong or was there already, each on
+    /// its own line and none left out, after what was added.
+    /// </summary>
+    /// <param name="added">From <see cref="AddedWords"/>.</param>
+    public static string AddReport(string added, IReadOnlyList<string> messages, IReadOnlyList<string> problems)
+    {
+        var lines = new List<string>(messages);
+        if (added.Length > 0) lines.Add(added);
+        lines.AddRange(problems);
+        return string.Join(Environment.NewLine, lines);
+    }
+}
 
-    public static string CacheHint(string provider)
-        => $"Adding asks {provider} whether each of these is cached. Anything that isn't waits for your approval, and {provider} fetches nothing before that.";
+/// <summary>What the Host is asked to add. Adding is the decision, so each request carries the go-ahead and nothing waits for a second yes.</summary>
+internal static class AddRequests
+{
+    public static RemoteAddRequestDto ForLine(AddLine line, string? destination, int queueId, bool startLater, string? linkPassword) => new()
+    {
+        Input = line.Input,
+        Destination = destination,
+        QueueId = queueId,
+        StartMode = startLater ? "later" : "startNow",
+        LinkPassword = linkPassword,
+        ApproveUncached = true,
+    };
+
+    public static RemoteContainerAddRequest ForContainer(Guid previewId, IReadOnlyList<int> entryIds, string? folder, int queueId) => new()
+    {
+        PreviewId = previewId,
+        EntryIds = [.. entryIds],
+        Destination = folder,
+        StartMode = "startNow",
+        QueueId = queueId,
+        ApproveUncached = true,
+    };
 }

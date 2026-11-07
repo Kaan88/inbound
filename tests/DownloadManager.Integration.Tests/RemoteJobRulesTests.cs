@@ -197,6 +197,18 @@ public sealed class RemoteJobRulesTests
     }
 
     [Fact]
+    public void ARowNothingWasSentForSaysSoAndAsksForNoApproval()
+    {
+        var held = new RemoteJobRecord { Id = Guid.NewGuid(), Provider = "p", Kind = RemoteItemKind.WebDownload, State = RemoteJobState.Intended, ApprovalNeeded = true, HeldForApproval = true };
+        var notCached = held with { HeldForApproval = false };
+
+        Assert.Equal("Copied from the clipboard. Nothing has been sent to P.", RemoteJobRules.StatusText(held, "P"));
+        Assert.Equal("Not cached on P, so it wasn't started.", RemoteJobRules.StatusText(notCached, "P"));
+        Assert.DoesNotContain("approv", RemoteJobRules.StatusText(held, "P"), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("approv", RemoteJobRules.StatusText(notCached, "P"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void AnUnknownStateShowsAsItself()
     {
         var record = new RemoteJobRecord { Id = Guid.NewGuid(), Provider = "p", Kind = RemoteItemKind.Torrent, State = RemoteJobState.Waiting, Stage = RemoteStage.Unknown, RawState = "brand new word" };

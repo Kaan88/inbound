@@ -249,177 +249,50 @@ internal sealed class ContainerPicks
 }
 
 /// <summary>
-/// What became of each entry, and the approval anything uncached needs. An entry the Host added is never
-/// reported as a failure: with <see cref="RemoteContainerAddResult.JobsLeftOut"/> the reply has its id and no
-/// job, and the job turns up in the state once <c>remote.list</c> has been read. Nothing here touches the UI.
+/// What became of each entry. Adding was the decision, so nothing here asks anything more: the jobs are on
+/// the download list, and only what wasn't added, or was there already, needs saying. An entry the Host added
+/// is never reported as a failure: with <see cref="RemoteContainerAddResult.JobsLeftOut"/> the reply has its id
+/// and no job. Nothing here touches the UI.
 /// </summary>
 internal sealed class ContainerOutcomes
 {
-    private readonly List<Line> _lines;
+    private readonly List<(RemoteContainerAddOutcomeDto Outcome, string Name)> _lines;
 
     public ContainerOutcomes(RemoteContainerAddResult result, Func<int, string> nameOf)
     {
-        // What wasn't added comes first, because a long list would otherwise hide it.
-        _lines = result.Outcomes.OrderBy(outcome => outcome.Ok).Select(outcome => new Line(outcome, nameOf(outcome.EntryId))).ToList();
+        _lines = result.Outcomes.Select(outcome => (outcome, nameOf(outcome.EntryId))).ToList();
     }
 
     public int Count => _lines.Count;
 
+    /// <summary>Saved by the Host, as new jobs or as ones already on the list.</summary>
     public int AddedCount => _lines.Count(line => line.Outcome.Ok);
 
-    public int WaitingCount => _lines.Count(line => line.Current.NeedsApproval);
+    /// <summary>New on the list. Something that was there already is never called added.</summary>
+    public int NewCount => _lines.Count(line => line.Outcome is { Ok: true, Existing: false });
 
-    public int ApprovedCount => _lines.Count(line => line.Current.NeedsApproval && line.Approved);
-
-    public IReadOnlyList<Guid> ToApprove => _lines.Where(line => line is { JobId: not null, Approved: true } && line.Current.NeedsApproval).Select(line => line.JobId!.Value).ToList();
-
-    /// <summary>
-    /// Reads the jobs again. What a job's local files say is asked for only when it has any, and once per
-    /// package: every job of a package has the same answer, and a container's links can share one.
-    /// </summary>
-    public void Refresh(IEnumerable<RemoteJobDto> jobs, DateTimeOffset now, Func<RemoteJobDto, string?>? localStatus = null, IFormatProvider? culture = null)
-    {
-        var byId = new Dictionary<Guid, RemoteJobDto>();
-        foreach (var job in jobs) byId[job.Id] = job;
-
-        var byPackage = new Dictionary<Guid, string?>();
-        Func<RemoteJobDto, string?>? onePerPackage = localStatus is null ? null : job =>
-        {
-            if (job.PackageId is not { } package) return localStatus(job);
-            if (!byPackage.TryGetValue(package, out var words)) byPackage[package] = words = localStatus(job);
-            return words;
-        };
-        foreach (var line in _lines) line.Refresh(byId, now, onePerPackage, culture);
-    }
-
-    /// <summary>
-    /// Sends the ticked approvals one at a time. Once <paramref name="cancellationToken"/> is cancelled nothing
-    /// more goes, so what hasn't been sent stays waiting on the list.
-    /// </summary>
-    /// <param name="approve">Sends one. Returns what went wrong, or null.</param>
-    /// <param name="sent">How many have gone so far.</param>
-    public async Task ApproveChosenAsync(Func<Guid, CancellationToken, Task<string?>> approve, Action<int> sent, CancellationToken cancellationToken)
-    {
-        var count = 0;
-        foreach (var jobId in ToApprove)
-        {
-            if (cancellationToken.IsCancellationRequested) return;
-            try
-            {
-                ShowProblem(jobId, await approve(jobId, cancellationToken));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return;
-            }
-
-            sent(++count);
-        }
-    }
-
-    public IReadOnlyList<ContainerRowView> Views() => _lines.Select(line => line.View()).ToList();
-
-    public void Toggle(int index, bool approved)
-    {
-        if (index >= 0 && index < _lines.Count && _lines[index].Current.NeedsApproval) _lines[index].Approved = approved;
-    }
-
-    public void SetAllApproved(bool approved)
-    {
-        foreach (var line in _lines.Where(line => line.Current.NeedsApproval)) line.Approved = approved;
-    }
-
-    /// <summary>What went wrong with an approval, or null when it went through.</summary>
-    public void ShowProblem(Guid jobId, string? words)
-    {
-        foreach (var line in _lines.Where(line => line.JobId == jobId)) line.Problem = words;
-    }
+    /// <summary>One line for each entry that wasn't added or was there already, all of them, in the file's order.</summary>
+    public IReadOnlyList<string> Problems => _lines
+        .Where(line => !line.Outcome.Ok || line.Outcome.Existing)
+        .Select(line => line.Outcome.Ok
+            ? RemoteText.AlreadyListed(line.Name, line.Outcome.Note)
+            : $"{line.Name}: {RemoteText.Failure(line.Outcome.Error)}")
+        .ToList();
 
     public string Summary(string provider)
     {
         if (_lines.Count == 0) return string.Empty;
-        var added = AddedCount;
-        if (added == 0) return _lines.Count == 1 ? "This wasn't added." : "None of these were added.";
-        var twins = _lines.Count(line => line.Outcome.Ok && line.Outcome.Existing);
-        var first = twins == added ? (twins == 1 ? "It was already on the list." : "These were already on the list.")
-            : added == _lines.Count && twins == 0 ? $"Added {added}."
-            : $"Added {added - twins} of {_lines.Count}.";
-        var views = _lines.Where(line => line.Outcome.Ok).Select(line => line.Current).ToList();
-        return $"{first} {RemoteText.AddOutcomeSummary(views, provider)}";
+        if (NewCount > 0) return RemoteText.AddedWords(0, NewCount, provider);
+        if (AddedCount == 0) return _lines.Count == 1 ? "This wasn't added." : "None of these were added.";
+        if (AddedCount == _lines.Count) return _lines.Count == 1 ? "It was already on the list." : "These were already on the list.";
+        return "Nothing new was added.";
     }
 
     public override string ToString() => "[container outcomes]";
-
-    private sealed class Line
-    {
-        private readonly string _name;
-        private bool _seen;
-
-        public Line(RemoteContainerAddOutcomeDto outcome, string name)
-        {
-            Outcome = outcome;
-            _name = name;
-            JobId = outcome.JobId ?? outcome.Job?.Id;
-            Current = outcome.Ok
-                ? new AddOutcomeView(RemoteText.ContainerAddedWord, RemoteText.ContainerAddedDetail, false, false, false, false, false, $"{name}, {RemoteText.ContainerAddedWord}")
-                : new AddOutcomeView(RemoteText.ContainerNotAddedWord, RemoteText.Failure(outcome.Error), false, false, false, false, true, $"{name}, {RemoteText.ContainerNotAddedWord}, {RemoteText.Failure(outcome.Error)}");
-        }
-
-        public RemoteContainerAddOutcomeDto Outcome { get; }
-        public Guid? JobId { get; }
-        public AddOutcomeView Current { get; private set; }
-        public bool Approved { get; set; }
-        public string? Problem { get; set; }
-        private string? ProviderName { get; set; }
-
-        public void Refresh(Dictionary<Guid, RemoteJobDto> jobs, DateTimeOffset now, Func<RemoteJobDto, string?>? localStatus, IFormatProvider? culture)
-        {
-            if (!Outcome.Ok) return;
-            RemoteJobDto? job = null;
-            if (JobId is { } id && jobs.TryGetValue(id, out var found))
-            {
-                job = found;
-                _seen = true;
-            }
-
-            // Not on the list yet: the reply's own copy will do, and with none the entry is still saved.
-            job ??= _seen ? null : Outcome.Job;
-            if (job is null && !_seen) return;
-
-            var local = job is { State: "localStarted" } ? localStatus?.Invoke(job) : null;
-            // The Host's own words about a twin already say so, and saying it twice reads as two things.
-            var note = Outcome.Existing && Outcome.Note?.Contains("already on the list", StringComparison.OrdinalIgnoreCase) != true
-                ? Joined(RemoteText.ContainerExisting, Outcome.Note)
-                : Outcome.Note;
-            Current = RemoteText.AddOutcome(job, _name, note, now, culture, local);
-            if (job is not null) ProviderName = RemoteText.ProviderName(job);
-            if (!Current.NeedsApproval) Approved = false;
-        }
-
-        public ContainerRowView View()
-        {
-            var current = Current;
-            var parts = new List<string>();
-            if (current.Detail.Length > 0) parts.Add(current.Detail);
-            if (current.NeedsApproval) parts.Add($"Tick it to let {ProviderName} fetch this.");
-            if (current.NeedsLinkPassword) parts.Add("Enter it from the download list: select the item and press Enter.");
-            if (!string.IsNullOrEmpty(Problem)) parts.Add(Problem);
-            var detail = string.Join(" ", parts);
-            var spoken = detail.Length > 0 && !current.AccessibleName.EndsWith(detail, StringComparison.Ordinal) ? $"{_name}, {current.Word}, {detail}" : current.AccessibleName;
-            return new ContainerRowView(_name, current.Word, detail, current.IsProblem || !string.IsNullOrEmpty(Problem), current.NeedsApproval, current.NeedsApproval, Approved, false, 0, spoken);
-        }
-
-        private static string Joined(string first, string? second) => string.IsNullOrWhiteSpace(second) ? first : $"{first} {second}";
-    }
 }
 
 internal static partial class RemoteText
 {
-    public const string ContainerAddedWord = "Added";
-    public const string ContainerAddedDetail = "It is saved, and the download list has it.";
-    public const string ContainerNotAddedWord = "Not added";
-    public const string ContainerExisting = "It was already on the list.";
-
     /// <summary>A host name or a package's comment has no full stop of its own, so one running into the next sentence reads as one sentence.</summary>
     public static string ContainerDetail(IReadOnlyList<string> parts)
     {
@@ -440,8 +313,6 @@ internal static partial class RemoteText
     public static string ContainerReadFailure(string error) => error is HostLost or HostTooSlow ? ContainerReadLost : error;
 
     public static string ContainerSendFailure(string error) => error is HostLost or HostTooSlow ? ContainerSendLost : error;
-
-    public static string ApprovalsSending(int sent, int total) => $"Approving: {sent} of {total} sent. Stopping leaves the rest waiting on the download list.";
 
     /// <param name="fileName">Only the file's name. Nothing looks at the file on this side.</param>
     public static ContainerReadView ContainerRead(RemoteContainerPreviewResult preview, string fileName, IFormatProvider? culture = null)

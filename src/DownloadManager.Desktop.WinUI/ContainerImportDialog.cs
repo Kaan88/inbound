@@ -148,15 +148,6 @@ internal sealed class ContainerImportDialog
         _listPanel.Children.Add(buttons);
         _listPanel.Children.Add(_rows);
 
-        var cacheHint = new TextBlock
-        {
-            Text = RemoteText.CacheHint(_provider),
-            TextWrapping = TextWrapping.Wrap,
-            FontSize = 12,
-            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _themeRoot),
-        };
-        AutomationProperties.SetName(cacheHint, cacheHint.Text);
-        _addPanel.Children.Add(cacheHint);
         _addPanel.Children.Add(_destinationRow);
         _addPanel.Children.Add(_destinationError.Text);
 
@@ -290,10 +281,7 @@ internal sealed class ContainerImportDialog
         UpdateButtons();
         try
         {
-            // No approval goes with this. Whether something is cached is known only once it is added, so that comes next, unticked.
-            var result = await _remote.AddFromContainerAsync(
-                new RemoteContainerAddRequest { PreviewId = previewId, EntryIds = ids, Destination = folder, StartMode = "startNow", QueueId = _queueId },
-                _closing.Token);
+            var result = await _remote.AddFromContainerAsync(AddRequests.ForContainer(previewId, ids, folder, _queueId), _closing.Token);
 
             // Every entry the Host says anything about has its line, whichever way it went.
             if (result.Outcomes.Count > 0)
@@ -431,131 +419,5 @@ internal sealed class ContainerImportDialog
             ? ContentDialogButton.None
             : canAdd || canRead ? ContentDialogButton.Primary : ContentDialogButton.Close;
         dialog.CloseButtonText = _isAdding ? "Stop adding" : _isSending ? "Stop and close" : "Cancel";
-    }
-
-    /// <summary>
-    /// What became of each entry, live, with the approval anything uncached needs before work starts on it, in
-    /// the same words as Add Links' second step. Closing this loses nothing: the same jobs are on the main list,
-    /// and approvals not yet sent aren't sent, so those jobs stay waiting there.
-    /// </summary>
-    public static async Task ShowOutcomesAsync(
-        XamlRoot root,
-        ElementTheme theme,
-        RemoteClient remote,
-        ContainerOutcomes outcomes,
-        string provider,
-        FrameworkElement themeRoot,
-        Func<RemoteJobDto, string?> localStatus)
-    {
-        var state = remote.State;
-        var status = new StatusLine("Add status");
-        status.Text.MaxWidth = 640;
-        var explanation = new TextBlock { Text = RemoteText.ApproveExplanation(provider), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(explanation, explanation.Text);
-        var approveAll = new CheckBox { Content = "Approve all", Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(approveAll, "Approve all of these");
-        var rows = new ContainerRowList { Height = 320, ListName = "What became of each link" };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = root,
-            RequestedTheme = theme,
-            Title = outcomes.AddedCount > 0 ? $"Added for {provider}" : "Nothing was added",
-            Content = new StackPanel { Spacing = 10, MinWidth = 640, Children = { status.Text, explanation, approveAll, rows } },
-            CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
-            IsPrimaryButtonEnabled = false,
-            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
-        };
-        dialog.Resources["ContentDialogMaxWidth"] = 760d;
-
-        using var closing = new CancellationTokenSource();
-        Task? approving = null;
-        var sending = false;
-        var sent = 0;
-        var toSend = 0;
-        void Refresh()
-        {
-            outcomes.Refresh(state.Jobs, DateTimeOffset.Now, localStatus);
-            rows.Apply(outcomes.Views());
-            status.Show(sending ? RemoteText.ApprovalsSending(sent, toSend) : outcomes.Summary(provider));
-            var waiting = outcomes.WaitingCount;
-            explanation.Visibility = waiting > 0 ? Visibility.Visible : Visibility.Collapsed;
-            approveAll.Visibility = waiting >= 2 ? Visibility.Visible : Visibility.Collapsed;
-            approveAll.IsChecked = waiting > 0 && outcomes.ApprovedCount == waiting;
-
-            // Stays off the screen until there is something it could approve.
-            dialog.PrimaryButtonText = waiting > 0 ? "Approve selected" : string.Empty;
-            dialog.IsPrimaryButtonEnabled = !sending && outcomes.ApprovedCount > 0;
-            dialog.CloseButtonText = sending ? "Stop approving" : "Close";
-            rows.IsLocked = sending;
-            approveAll.IsEnabled = !sending;
-
-            // Stopping takes a deliberate press or Esc, not a second Enter.
-            dialog.DefaultButton = sending
-                ? ContentDialogButton.None
-                : dialog.IsPrimaryButtonEnabled ? ContentDialogButton.Primary : ContentDialogButton.Close;
-        }
-
-        rows.RowToggled += (index, approved) =>
-        {
-            outcomes.Toggle(index, approved);
-            Refresh();
-        };
-        approveAll.Click += (_, _) =>
-        {
-            outcomes.SetAllApproved(approveAll.IsChecked == true);
-            Refresh();
-        };
-        dialog.PrimaryButtonClick += (sender, args) =>
-        {
-            // Stays open: the rows follow what happens next, and the buttons stay honest about it.
-            args.Cancel = true;
-            if (sending) return;
-            sending = true;
-            sent = 0;
-            toSend = outcomes.ToApprove.Count;
-            Refresh();
-            approving = SendAsync();
-
-            async Task SendAsync()
-            {
-                // The timer shows how far it got: a long list goes faster than anyone could read or hear it.
-                await outcomes.ApproveChosenAsync(
-                    async (jobId, token) =>
-                    {
-                        var result = await remote.RetryAsync(new RemoteRetryRequest { JobId = jobId, ApproveUncached = true }, token);
-                        return result.Ok ? null : RemoteText.Failure(result.Error, null, provider);
-                    },
-                    count => sent = count,
-                    closing.Token);
-
-                sending = false;
-                if (!closing.IsCancellationRequested) Refresh();
-            }
-        };
-
-        // A timer rather than each change: a large import changes many jobs a second, and a long list needn't follow every one.
-        var watch = dialog.DispatcherQueue.CreateTimer();
-        watch.Interval = TimeSpan.FromSeconds(Math.Max(1, outcomes.Count / 500));
-        watch.Tick += (_, _) => Refresh();
-
-        outcomes.Refresh(state.Jobs, DateTimeOffset.Now, localStatus);
-        rows.SetRows(outcomes.Views());
-        Refresh();
-        watch.Start();
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is open over this window. These are on the main list all the same.
-        }
-        finally
-        {
-            watch.Stop();
-            closing.Cancel();
-            if (approving is { } stopping) await stopping;
-        }
     }
 }

@@ -1,4 +1,3 @@
-using System.Collections.Specialized;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 using Microsoft.UI.Xaml;
@@ -9,8 +8,8 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// Adding through a provider: which way each input goes, and what happens after the add dialog closes.
-/// <c>remote.add</c> only saves the intent, and the Host finds out whether something is cached after
-/// that, so the answer and the approval it may need come in a second step that watches the jobs.
+/// Adding is the decision: <c>remote.add</c> saves the intent with the go-ahead, and the rows on the
+/// download list follow it from there. Nothing asks again after an add, except for a choice of files.
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -363,16 +362,16 @@ public sealed partial class MainWindow
 
         if (answer.Outcomes is not { } outcomes) return;
         if (outcomes.AddedCount > 0 && answer.Folder is { } folder) RememberFolder(folder);
-        await ContainerImportDialog.ShowOutcomesAsync(Content.XamlRoot, RootGrid.ActualTheme, _remote, outcomes, provider, RootGrid, LocalStatusOf);
+        var problems = outcomes.Problems;
+        await ReportAddAsync("Import JD Container", 0, outcomes.NewCount, provider, problems.Count > 0 && outcomes.NewCount == 0 ? [outcomes.Summary(provider)] : [], problems);
     }
-
-    private sealed record RemoteAdded(string Name, RemoteAddResultDto Result);
 
     private async Task RunAddChoiceAsync(AddLinksChoice choice)
     {
         var provider = ProviderWordForAdding();
         var problems = new List<string>();
         var messages = new List<string>();
+        var downloads = 0;
 
         // Ordinary links first, the same way as always.
         var direct = choice.Picks.Where(pick => pick.Line.Route == AddRoute.Direct).Select(pick => pick.Line.Input).ToList();
@@ -380,7 +379,10 @@ public sealed partial class MainWindow
         {
             var added = await AddOrdinaryLinksAsync(direct, choice.KeepPackage, choice.Destination, choice.StartLater ? "later" : "now", choice.QueueId, choice.ConflictIndex);
             await RefreshAsync();
-            messages.Add(added.Summary);
+
+            // Its own summary only when one failed or was already queued. A clean add is a count with the rest.
+            if (added.NeedsSaying) messages.Add(added.Summary);
+            else downloads = added.Accepted;
             await SetPackagePasswordAsync(choice, added, problems);
         }
 
@@ -392,40 +394,46 @@ public sealed partial class MainWindow
             if (await AddFolderLinkAsync(pick.Line, choice, problems)) folderLinks++;
         }
 
-        var sent = new List<RemoteAdded>();
+        var sent = 0;
         var providerPicks = choice.Picks.Where(pick => pick.Line.Route == AddRoute.Provider).ToList();
-        if (providerPicks.Count > 0) StatusText.Text = $"Adding to {provider}…";
+
+        // Passing, like every other status: set directly it stayed until something else wrote there.
+        if (providerPicks.Count > 0) ShowPassingStatus($"Adding to {provider}…");
         foreach (var pick in providerPicks)
         {
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;
-            var result = await _remote.AddAsync(new RemoteAddRequestDto
-            {
-                Input = pick.Line.Input,
-                Destination = choice.Destination,
-                QueueId = choice.QueueId,
-                StartMode = choice.StartLater ? "later" : "startNow",
-                LinkPassword = pick.LinkPassword,
-            });
+            var result = await _remote.AddAsync(AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword));
             pick.LinkPassword = null;
 
             // A refusal is the end of it for this link. Nothing here tries it any other way.
             if (!result.Ok) problems.Add($"{name}: {RemoteText.Failure(result.Error, null, provider)}");
-            else if (result.Job is not null) sent.Add(new RemoteAdded(name, result));
+            else if (result.Existing) problems.Add(RemoteText.AlreadyListed(name, result.Note));
+            else if (result.Job is not null) sent++;
         }
 
-        if (sent.Count > 0) await ShowAddOutcomesAsync(sent, provider);
+        await ReportAddAsync("Add links", downloads, sent + folderLinks, provider, messages, problems);
+    }
 
-        var addedCount = sent.Count + folderLinks;
-        var addedWords = addedCount == 1 ? $"Added 1 item for {provider}." : $"Added {addedCount} items for {provider}.";
-        if (addedCount > 0 && messages.Count == 0 && problems.Count == 0)
+    /// <summary>
+    /// The end of every add. A clean one says so in passing, and the new rows say the rest. Anything refused or
+    /// already there is listed in full, in a message. Either way nothing is left in the status bar after it.
+    /// </summary>
+    private async Task ReportAddAsync(string title, int downloads, int items, string provider, IReadOnlyList<string> messages, IReadOnlyList<string> problems)
+    {
+        var added = RemoteText.AddedWords(downloads, items, provider);
+        if (messages.Count > 0 || problems.Count > 0)
         {
-            ShowPassingStatus(addedWords);
-            return;
+            await ShowMessageAsync(title, RemoteText.AddReport(added, messages, problems));
+            EndPassingStatus();
         }
-
-        if (addedCount > 0) messages.Add(addedWords);
-        messages.AddRange(problems.Take(5));
-        if (messages.Count > 0) await ShowMessageAsync("Add links", string.Join(Environment.NewLine, messages));
+        else if (added.Length > 0)
+        {
+            ShowPassingStatus(added);
+        }
+        else
+        {
+            EndPassingStatus();
+        }
     }
 
     /// <summary>The package exists once its first job does, so this is the one moment <c>archive.setPassword</c> can take it.</summary>
@@ -484,202 +492,8 @@ public sealed partial class MainWindow
             FileIds = answer.Later || answer.Choice!.All ? null : answer.Choice.FileIds.ToList(),
         });
         if (!added.Ok) problems.Add($"{name}: {RemoteText.Failure(added.Error, null, provider)}");
+        else if (added.Existing) problems.Add(RemoteText.AlreadyListed(name, added.Note));
         else if (!string.IsNullOrWhiteSpace(added.Note)) problems.Add($"{name}: {UrlRedactor.HideAddresses(added.Note)}");
-        return added.Ok;
-    }
-
-    /// <summary>
-    /// What the provider says about what was just added, live, with the approval anything uncached needs
-    /// before work starts on it. Closing this loses nothing: the same jobs are on the main list.
-    /// </summary>
-    private async Task ShowAddOutcomesAsync(IReadOnlyList<RemoteAdded> added, string provider)
-    {
-        var state = _remote.State;
-        var rows = added.Select(item => new OutcomeRow(item.Name, item.Result, provider, RootGrid, LocalStatusOf)).ToList();
-        var explanation = new TextBlock { Text = RemoteText.ApproveExplanation(provider), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(explanation, explanation.Text);
-        var approveAll = new CheckBox { Content = "Approve all", Visibility = Visibility.Collapsed };
-        AutomationProperties.SetName(approveAll, "Approve all of these");
-        var status = new StatusLine("Add status");
-        var list = new StackPanel { Spacing = 10 };
-        foreach (var row in rows) list.Children.Add(row.Root);
-        var panel = new StackPanel
-        {
-            Spacing = 10,
-            MinWidth = 560,
-            Children = { status.Text, explanation, approveAll, new ScrollViewer { Content = list, MaxHeight = 320, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } },
-        };
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            RequestedTheme = RootGrid.ActualTheme,
-            Title = $"Added for {provider}",
-            Content = panel,
-            PrimaryButtonText = "Approve selected",
-            CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Close,
-            IsPrimaryButtonEnabled = false,
-            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
-        };
-        dialog.Resources["ContentDialogMaxWidth"] = 720d;
-
-        void Refresh()
-        {
-            foreach (var row in rows) row.Update(state);
-            var waiting = rows.Where(row => row.View.NeedsApproval).ToList();
-            status.Show(RemoteText.AddOutcomeSummary(rows.Select(row => row.View).ToList(), provider));
-            explanation.Visibility = waiting.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            approveAll.Visibility = waiting.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
-            approveAll.IsChecked = waiting.Count > 0 && waiting.All(row => row.Approved);
-            var approving = waiting.Any(row => row.Approved);
-            var withPassword = rows.Any(row => row.HasPasswordTyped);
-            dialog.IsPrimaryButtonEnabled = approving || withPassword;
-            // Enter takes the default button, so it only means the action while the action can run.
-            dialog.DefaultButton = dialog.IsPrimaryButtonEnabled ? ContentDialogButton.Primary : ContentDialogButton.Close;
-            dialog.PrimaryButtonText = withPassword ? approving ? "Approve and retry" : "Retry with this password" : "Approve selected";
-        }
-
-        NotifyCollectionChangedEventHandler onJobs = (_, _) => Refresh();
-        approveAll.Click += (_, _) =>
-        {
-            foreach (var row in rows.Where(row => row.View.NeedsApproval)) row.Approved = approveAll.IsChecked == true;
-            Refresh();
-        };
-        foreach (var row in rows) row.Changed += Refresh;
-
-        var sending = false;
-        dialog.PrimaryButtonClick += (sender, args) =>
-        {
-            // Stays open: the rows follow what happens next, and the buttons stay honest about it.
-            args.Cancel = true;
-            if (sending) return;
-            sending = true;
-            dialog.IsPrimaryButtonEnabled = false;
-            _ = SendAsync();
-
-            async Task SendAsync()
-            {
-                foreach (var row in rows)
-                {
-                    var approve = row.View.NeedsApproval && row.Approved;
-                    var password = row.View.NeedsLinkPassword ? row.TakePassword() : null;
-                    if (!approve && password is null) continue;
-                    var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = row.JobId, ApproveUncached = approve ? true : null, LinkPassword = password });
-                    password = null;
-                    row.ShowProblem(result.Ok ? null : RemoteText.Failure(result.Error, null, provider));
-                }
-
-                sending = false;
-                Refresh();
-            }
-        };
-
-        // The local files behind an item finish without any word about the item, so its words are looked at again.
-        var localWatch = DispatcherQueue.CreateTimer();
-        localWatch.Interval = TimeSpan.FromSeconds(1);
-        localWatch.Tick += (_, _) => Refresh();
-        localWatch.Start();
-        state.Jobs.CollectionChanged += onJobs;
-        Refresh();
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is open over this window. These are on the main list all the same.
-        }
-        finally
-        {
-            localWatch.Stop();
-            state.Jobs.CollectionChanged -= onJobs;
-            foreach (var row in rows) row.ClearPassword();
-        }
-    }
-
-    /// <summary>One item in the second step: its words, an approval, and a password when the site turns out to want one.</summary>
-    private sealed class OutcomeRow
-    {
-        private readonly string _name;
-        private readonly string? _note;
-        private readonly string _provider;
-        private readonly FrameworkElement _themeRoot;
-        private readonly Func<RemoteJobDto, string?> _localStatus;
-        private readonly TextBlock _nameText = new() { TextTrimming = TextTrimming.CharacterEllipsis };
-        private readonly TextBlock _word = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
-        private readonly TextBlock _detail = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
-        private readonly CheckBox _approve;
-        private readonly PasswordBox _password;
-        private readonly StatusLine _problem = new("Problem");
-        private string? _problemWords;
-
-        public OutcomeRow(string name, RemoteAddResultDto result, string provider, FrameworkElement themeRoot, Func<RemoteJobDto, string?> localStatus)
-        {
-            _localStatus = localStatus;
-            _name = name;
-            _note = result.Note;
-            _provider = provider;
-            _themeRoot = themeRoot;
-            JobId = result.Job!.Id;
-            _nameText.Text = name;
-            _approve = new CheckBox { Content = $"Let {provider} fetch this", Visibility = Visibility.Collapsed };
-            AutomationProperties.SetName(_approve, $"Let {provider} fetch {name}");
-            _approve.Click += (_, _) => Changed?.Invoke();
-            _password = new PasswordBox
-            {
-                Header = "The password the site set for this link. It isn't an archive password.",
-                PasswordRevealMode = PasswordRevealMode.Hidden,
-                Visibility = Visibility.Collapsed,
-                MaxWidth = 360,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            AutomationProperties.SetName(_password, $"Link password for {name}");
-            _password.PasswordChanged += (_, _) => Changed?.Invoke();
-            Root = new StackPanel { Spacing = 2, Children = { _nameText, _word, _detail, _approve, _password, _problem.Text } };
-            View = RemoteText.AddOutcome(result.Job, name, _note, DateTimeOffset.Now);
-        }
-
-        public event Action? Changed;
-
-        public Guid JobId { get; }
-        public StackPanel Root { get; }
-        public AddOutcomeView View { get; private set; }
-
-        public bool Approved
-        {
-            get => _approve.IsChecked == true;
-            set => _approve.IsChecked = value;
-        }
-
-        public bool HasPasswordTyped => View.NeedsLinkPassword && _password.Password.Length > 0;
-
-        public string? TakePassword()
-        {
-            var password = _password.Password;
-            _password.Password = string.Empty;
-            return password.Length > 0 ? password : null;
-        }
-
-        public void ClearPassword() => _password.Password = string.Empty;
-
-        public void ShowProblem(string? words) => _problemWords = words;
-
-        public void Update(RemoteState state)
-        {
-            var job = state.Jobs.FirstOrDefault(candidate => candidate.Id == JobId);
-            View = RemoteText.AddOutcome(job, _name, _note, DateTimeOffset.Now, localStatus: job is null ? null : _localStatus(job));
-            _word.Text = View.Word;
-            _detail.Text = View.Detail;
-            _detail.Visibility = View.Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            _detail.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _themeRoot);
-            if (View.IsProblem) _word.Foreground = InboundTheme.Brush("InboundErrorTextBrush", _themeRoot);
-            else _word.ClearValue(TextBlock.ForegroundProperty);
-            AutomationProperties.SetName(_nameText, View.AccessibleName);
-            _approve.Visibility = View.NeedsApproval ? Visibility.Visible : Visibility.Collapsed;
-            if (!View.NeedsApproval) _approve.IsChecked = false;
-            _password.Visibility = View.NeedsLinkPassword ? Visibility.Visible : Visibility.Collapsed;
-            if (!View.NeedsLinkPassword) _password.Password = string.Empty;
-            _problem.Show(_problemWords ?? string.Empty, isProblem: true);
-        }
+        return added.Ok && !added.Existing;
     }
 }

@@ -339,7 +339,8 @@ public sealed partial class MainWindow
         // Everything already there is for local rows.
         _localContextItems.AddRange(flyout.Items);
         _menuRemoteSelectFiles = CreateContextItem("Select Files…", async (_, _) => { if (SelectedRemoteJobs is [var job]) await SelectRemoteFilesAsync(job); });
-        _menuRemoteApprove = CreateContextItem("Approve…", async (_, _) => { if (SelectedRemoteJobs is [var job]) await ApproveRemoteAsync(job); });
+        // Named for the selected row's provider when the menu opens.
+        _menuRemoteApprove = CreateContextItem("Add", async (_, _) => { if (SelectedRemoteJobs is [var job]) await ApproveRemoteAsync(job); });
         _menuRemoteLinkPassword = CreateContextItem("Enter Link Password…", async (_, _) => { if (SelectedRemoteJobs is [var job]) await EnterLinkPasswordAsync(job); });
         _menuRemoteRetry = CreateContextItem("Retry", async (_, _) => await RetryRemoteAsync(SelectedRemoteJobs));
         _menuRemoteCheckNow = CreateContextItem("Check Now", async (_, _) => await CheckRemoteNowAsync(SelectedRemoteJobs));
@@ -361,7 +362,12 @@ public sealed partial class MainWindow
         var actions = jobs.Select(RemoteRules.Actions).ToList();
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
         if (_menuRemoteSelectFiles is not null) _menuRemoteSelectFiles.Visibility = Show(actions is [{ SelectFiles: true }]);
-        if (_menuRemoteApprove is not null) _menuRemoteApprove.Visibility = Show(actions is [{ Approve: true }]);
+        if (_menuRemoteApprove is not null)
+        {
+            _menuRemoteApprove.Visibility = Show(actions is [{ Approve: true }]);
+            if (jobs is [var one]) _menuRemoteApprove.Text = RemoteText.AddTo(one);
+        }
+
         if (_menuRemoteLinkPassword is not null) _menuRemoteLinkPassword.Visibility = Show(actions is [{ EnterLinkPassword: true }]);
         if (_menuRemoteRetry is not null) _menuRemoteRetry.Visibility = Show(actions.Any(action => action.Retry));
         if (_menuRemoteCheckNow is not null) _menuRemoteCheckNow.Visibility = Show(actions.Any(action => action.CheckNow));
@@ -464,12 +470,12 @@ public sealed partial class MainWindow
         if (!result.Ok) await ShowMessageAsync("Choose files", RemoteText.Failure(result.Error, null, provider));
     }
 
+    /// <summary>A row nothing has been sent for yet, such as a copied link. Enter or the menu is the request, so nothing asks again.</summary>
     private async Task ApproveRemoteAsync(RemoteJobDto job)
     {
         var provider = RemoteText.ProviderName(job);
-        if (!await ConfirmAsync($"Start this on {provider}?", RemoteText.ApproveQuestion(job), "Approve")) return;
         var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, ApproveUncached = true });
-        if (!result.Ok) await ShowMessageAsync("Approve", RemoteText.Failure(result.Error, null, provider));
+        if (!result.Ok) await ShowMessageAsync(RemoteText.AddTo(job), RemoteText.Failure(result.Error, null, provider));
     }
 
     private async Task EnterLinkPasswordAsync(RemoteJobDto job)
@@ -519,7 +525,7 @@ public sealed partial class MainWindow
             if (!result.Ok) problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Retry", string.Join(Environment.NewLine, problems.Take(5)));
+        if (problems.Count > 0) await ShowMessageAsync("Retry", string.Join(Environment.NewLine, problems));
     }
 
     private async Task CheckRemoteNowAsync(IReadOnlyList<RemoteJobDto> jobs)
@@ -533,7 +539,7 @@ public sealed partial class MainWindow
             else problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Check Now", string.Join(Environment.NewLine, problems.Take(5)));
+        if (problems.Count > 0) await ShowMessageAsync("Check Now", string.Join(Environment.NewLine, problems));
         else if (asked > 0) ShowPassingStatus(asked == 1 ? "Checking now…" : $"Checking {asked} items now…");
     }
 
@@ -580,7 +586,7 @@ public sealed partial class MainWindow
             if (!result.Ok) problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
         }
 
-        if (problems.Count > 0) await ShowMessageAsync("Remove from list", string.Join(Environment.NewLine, problems.Take(5)));
+        if (problems.Count > 0) await ShowMessageAsync("Remove from list", string.Join(Environment.NewLine, problems));
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primary)

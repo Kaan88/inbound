@@ -274,7 +274,7 @@ public sealed class RemoteRulesTests
     }
 
     [Fact]
-    public void AHeldCopiedLinkOffersApprovalAndDoesNotClaimToKnowItIsUncached()
+    public void AHeldCopiedLinkIsAddedByEnterAndDoesNotClaimToKnowItIsUncached()
     {
         var job = Job("intended", approval: true);
         job.HeldForApproval = true;
@@ -286,13 +286,16 @@ public sealed class RemoteRulesTests
         Assert.False(actions.CheckNow);
 
         var row = RemoteText.JobRow(job, DateTimeOffset.UtcNow);
-        Assert.Equal("Waiting for approval", row.Status);
+        Assert.Equal("Copied link", row.Status);
+        Assert.Equal("Enter adds it to TorBox.", row.Detail);
+        Assert.Equal("Add to TorBox", RemoteText.AddTo(job));
         Assert.DoesNotContain("cached", row.Detail, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("cached", RemoteText.ApproveQuestion(job), StringComparison.OrdinalIgnoreCase);
 
+        // One the command line added without its go-ahead, or one saved before adding was the decision.
         job.HeldForApproval = false;
-        Assert.Contains("Not cached", RemoteText.JobRow(job, DateTimeOffset.UtcNow).Status);
-        Assert.Contains("isn't cached", RemoteText.ApproveQuestion(job));
+        row = RemoteText.JobRow(job, DateTimeOffset.UtcNow);
+        Assert.Equal("Not started", row.Status);
+        Assert.Equal("Enter starts it on TorBox.", row.Detail);
     }
 
     [Fact]
@@ -480,7 +483,7 @@ public sealed class RemoteRowTextTests
     }
 
     [Fact]
-    public void AnUncachedItemSaysItIsWaitingForApproval()
+    public void AnItemNothingWasSentForSaysEnterStartsIt()
     {
         var job = Job("intended");
         job.ApprovalNeeded = true;
@@ -488,8 +491,9 @@ public sealed class RemoteRowTextTests
 
         var row = Row(job);
 
-        Assert.Equal("Not cached on TorBox", row.Status);
-        Assert.Contains("Approve", row.Detail, StringComparison.Ordinal);
+        Assert.Equal("Not started", row.Status);
+        Assert.Contains("Enter starts it", row.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("approv", row.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Next check", row.Detail, StringComparison.Ordinal);
     }
 
@@ -498,7 +502,6 @@ public sealed class RemoteRowTextTests
     {
         var job = Job("intended");
 
-        Assert.Contains("starts work on TorBox", RemoteText.ApproveQuestion(job), StringComparison.Ordinal);
         Assert.Contains("doesn't touch TorBox", RemoteText.RemoveQuestion([job]), StringComparison.Ordinal);
         Assert.Contains("Some Name", RemoteText.RemoveQuestion([job]), StringComparison.Ordinal);
         Assert.Contains("these 2 items", RemoteText.RemoveQuestion([job, job]), StringComparison.Ordinal);

@@ -599,121 +599,57 @@ public sealed class AddLinesTests
 
     // ---- What comes after adding -------------------------------------------------------------------
 
-    private static RemoteJobDto Job(string state, Action<RemoteJobDto>? configure = null)
+    [Fact]
+    public void A_clean_add_is_a_count_and_nothing_is_said_when_nothing_was_added()
     {
-        var job = new RemoteJobDto { Id = Guid.NewGuid(), Provider = "torbox", ProviderName = "TorBox", State = state, Kind = "torrents" };
-        configure?.Invoke(job);
-        return job;
+        Assert.Equal("Added 1 item for TorBox.", RemoteText.AddedWords(0, 1, "TorBox"));
+        Assert.Equal("Added 3 items for TorBox.", RemoteText.AddedWords(0, 3, "TorBox"));
+        Assert.Equal("Added 1 download.", RemoteText.AddedWords(1, 0, "TorBox"));
+        Assert.Equal("Added 2 downloads and 1 item for TorBox.", RemoteText.AddedWords(2, 1, "TorBox"));
+        Assert.Equal(string.Empty, RemoteText.AddedWords(0, 0, "TorBox"));
     }
 
     [Fact]
-    public void NotCachedAsksForApproval()
+    public void Something_added_again_is_never_called_added_and_the_Hosts_note_is_kept()
     {
-        var view = RemoteText.AddOutcome(Job("intended", job => job.ApprovalNeeded = true), "x", null, DateTimeOffset.Now);
-
-        Assert.Equal("Not cached, needs TorBox to fetch it", view.Word);
-        Assert.True(view.NeedsApproval);
-        Assert.False(view.IsChecking);
+        Assert.Equal("x: already on the list.", RemoteText.AlreadyListed("x", null));
+        Assert.Equal("x: already on the list. The folder given wasn't used.", RemoteText.AlreadyListed("x", "The folder given wasn't used."));
+        Assert.Equal("x: This is already on the list, so the folder given wasn't used.", RemoteText.AlreadyListed("x", "This is already on the list, so the folder given wasn't used."));
+        Assert.DoesNotContain("Added", RemoteText.AlreadyListed("x", "The file choice wasn't used."), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WhatLocalFilesAreDoingReplacesTheWordSavedWithTheItem()
+    public void A_report_lists_every_problem_after_what_was_added()
     {
-        var job = Job("localStarted", job => { job.Cached = true; job.Status = "Downloading locally"; });
+        var problems = Enumerable.Range(1, 12).Select(index => $"link {index}: refused.").ToList();
 
-        var view = RemoteText.AddOutcome(job, "x", null, DateTimeOffset.Now, localStatus: "Completed");
+        var words = RemoteText.AddReport(RemoteText.AddedWords(0, 2, "TorBox"), ["Added 1 of 2 downloads; 1 failed. Not found."], problems);
+        var lines = words.Split(Environment.NewLine);
 
-        Assert.Contains("Completed", view.Detail);
-        Assert.DoesNotContain("Downloading locally", view.Detail);
-        Assert.DoesNotContain("Downloading locally", view.AccessibleName);
+        Assert.Equal(14, lines.Length);
+        Assert.Equal("Added 1 of 2 downloads; 1 failed. Not found.", lines[0]);
+        Assert.Equal("Added 2 items for TorBox.", lines[1]);
+        Assert.Equal("link 12: refused.", lines[^1]);
+        Assert.Equal(["link 1: refused."], RemoteText.AddReport(string.Empty, [], ["link 1: refused."]).Split(Environment.NewLine));
     }
 
     [Fact]
-    public void CachedStaysSaidOnceItIsReadyAndSaysWhatComesNext()
+    public void Adding_is_the_decision_so_every_add_carries_the_go_ahead()
     {
-        var ready = RemoteText.AddOutcome(Job("awaitingSelection", job => job.Cached = true), "x", null, DateTimeOffset.Now);
-        Assert.Equal("Cached on TorBox", ready.Word);
-        Assert.Contains("Ready to download", ready.Detail);
-        Assert.True(ready.NeedsFiles);
-        Assert.Contains("choose the files", RemoteText.AddOutcomeSummary([ready], "TorBox"));
+        var line = new AddLine("magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567");
 
-        var local = RemoteText.AddOutcome(Job("localStarted", job => { job.Cached = true; job.Status = "Downloading locally"; }), "x", null, DateTimeOffset.Now);
-        Assert.Equal("Cached on TorBox", local.Word);
-        Assert.Contains("Downloading locally", local.Detail);
-    }
+        var add = AddRequests.ForLine(line, @"D:\In", 3, startLater: true, linkPassword: null);
+        Assert.True(add.ApproveUncached);
+        Assert.Equal(line.Input, add.Input);
+        Assert.Equal(@"D:\In", add.Destination);
+        Assert.Equal(3, add.QueueId);
+        Assert.Equal("later", add.StartMode);
+        Assert.Equal("startNow", AddRequests.ForLine(line, null, 0, startLater: false, linkPassword: null).StartMode);
 
-    [Theory]
-    [InlineData("intended")]
-    [InlineData("submitting")]
-    [InlineData("waiting")]
-    public void CachedSaysSo(string state)
-    {
-        var view = RemoteText.AddOutcome(Job(state, job => job.Cached = true), "x", null, DateTimeOffset.Now);
-
-        Assert.Equal("Cached on TorBox", view.Word);
-        Assert.False(view.NeedsApproval);
-        Assert.False(view.IsChecking);
-    }
-
-    [Fact]
-    public void BeforeTheHostHasLookedItIsStillBeingChecked()
-    {
-        var view = RemoteText.AddOutcome(Job("intended"), "x", null, DateTimeOffset.Now);
-
-        Assert.Equal("Checking TorBox…", view.Word);
-        Assert.True(view.IsChecking);
-    }
-
-    [Fact]
-    public void AFailureShowsTheRealCauseAndOffersNoOtherRoute()
-    {
-        var view = RemoteText.AddOutcome(Job("failed", job => { job.FailureKind = "rejected"; job.FailureMessage = "Hoster is down"; }), "x", null, DateTimeOffset.Now);
-
-        Assert.Equal("Failed on TorBox", view.Word);
-        Assert.Contains("Hoster is down", view.Detail);
-        Assert.True(view.IsProblem);
-        Assert.False(view.NeedsApproval);
-        Assert.False(view.NeedsLinkPassword);
-    }
-
-    [Fact]
-    public void ALinkPasswordFailureAsksForOne()
-    {
-        var view = RemoteText.AddOutcome(Job("failed", job => job.FailureKind = "linkPasswordRequired"), "x", null, DateTimeOffset.Now);
-
-        Assert.True(view.NeedsLinkPassword);
-    }
-
-    [Fact]
-    public void AJobThatLeftTheListSaysSo()
-        => Assert.Equal("Removed from the list", RemoteText.AddOutcome(null, "x", null, DateTimeOffset.Now).Word);
-
-    [Fact]
-    public void WhatTheHostSaidOnAddingIsShown()
-    {
-        var view = RemoteText.AddOutcome(Job("waiting"), "x", "This is already on the list.", DateTimeOffset.Now);
-
-        Assert.Contains("already on the list", view.Detail);
-    }
-
-    [Fact]
-    public void TheWordingSaysNothingIsSentBeforeApproval()
-    {
-        var words = RemoteText.ApproveExplanation("TorBox");
-
-        Assert.Contains("Nothing is sent to TorBox until you approve it", words);
-    }
-
-    [Fact]
-    public void TheOutcomeSummaryFollowsTheRows()
-    {
-        var checking = RemoteText.AddOutcome(Job("intended"), "x", null, DateTimeOffset.Now);
-        var waiting = RemoteText.AddOutcome(Job("intended", job => job.ApprovalNeeded = true), "x", null, DateTimeOffset.Now);
-        var cached = RemoteText.AddOutcome(Job("waiting", job => job.Cached = true), "x", null, DateTimeOffset.Now);
-
-        Assert.Equal("Asking TorBox about 1 item…", RemoteText.AddOutcomeSummary([checking, waiting], "TorBox"));
-        Assert.Equal("1 item is waiting for your approval.", RemoteText.AddOutcomeSummary([waiting, cached], "TorBox"));
-        Assert.StartsWith("Nothing here needs you", RemoteText.AddOutcomeSummary([cached], "TorBox"));
+        var container = AddRequests.ForContainer(Guid.NewGuid(), [1, 4], null, 2);
+        Assert.True(container.ApproveUncached);
+        Assert.Equal([1, 4], container.EntryIds);
+        Assert.Equal(2, container.QueueId);
     }
 
     // ---- Helpers ------------------------------------------------------------------------------------

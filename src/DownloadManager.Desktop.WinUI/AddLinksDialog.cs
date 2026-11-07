@@ -54,7 +54,6 @@ internal sealed class AddLinksDialog
     private readonly StatusLine _status = new("Links status");
     private readonly TextBox _paste;
     private readonly CheckBox _selectAll = new() { Content = "Select all", Visibility = Visibility.Collapsed };
-    private readonly TextBlock _cacheHint;
     private readonly StackPanel _directOptions = new() { Spacing = 10 };
     private readonly CheckBox _keepPackage = new() { Content = "Keep as one package", IsChecked = true };
     private readonly StackPanel _archivePanel = new() { Spacing = 4, Visibility = Visibility.Collapsed };
@@ -80,15 +79,6 @@ internal sealed class AddLinksDialog
         };
         ScrollViewer.SetVerticalScrollBarVisibility(_paste, ScrollBarVisibility.Auto);
         AutomationProperties.SetName(_paste, focus == AddFocus.Magnet ? "Magnet links" : "Links");
-        _cacheHint = new TextBlock
-        {
-            Text = RemoteText.CacheHint(provider),
-            TextWrapping = TextWrapping.Wrap,
-            FontSize = 12,
-            Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", themeRoot),
-            Visibility = Visibility.Collapsed,
-        };
-        AutomationProperties.SetName(_cacheHint, _cacheHint.Text);
         AutomationProperties.SetName(_archivePassword, "Archive password for this package");
     }
 
@@ -139,7 +129,6 @@ internal sealed class AddLinksDialog
         panel.Children.Add(_status.Text);
         panel.Children.Add(_selectAll);
         panel.Children.Add(new ScrollViewer { Content = _list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        panel.Children.Add(_cacheHint);
         panel.Children.Add(destinationRow);
         panel.Children.Add(destinationError.Text);
         panel.Children.Add(startRow);
@@ -373,8 +362,6 @@ internal sealed class AddLinksDialog
         _selectAll.Visibility = lines.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
         _selectAll.IsEnabled = lines.Any(AddLineSession.CanSelect);
         _selectAll.IsChecked = AddLineSession.SelectAllState(lines);
-
-        _cacheHint.Visibility = lines.Any(line => line.IsSelected && line.Route == AddRoute.Provider) ? Visibility.Visible : Visibility.Collapsed;
 
         var direct = lines.Count(line => line.IsSelected && line.Route == AddRoute.Direct);
         _directOptions.Opacity = direct > 0 ? 1 : 0.6;
