@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### PERF.4: idle check on installed 0.5.2 (2026-11-08)
+
+- Owner: "do the idle check". 30 minutes, window hidden, read-only sampling, compared with the 0.5.1 run: Host CPU 3.0 s to 0.08 s, Host reads 17,910 to 0, Host other I/O 35,821 to 3, Host context switches 12/s to 0.8/s; window CPU 16.1 s to 3.0 s. No writes from either process.
+- Still open: the hidden window averages 202 context switches/s (was 212); the cause isn't traced yet. Details in ROADMAP PERF.4.
+
 ### Release 0.5.2 (2026-11-07)
 
 - Owner: "Release 0.5.2". Contents: the PERF.4 idle fixes. Main commit 0ba1f74, tag v0.5.2, https://github.com/Kaan88/inbound/releases/tag/v0.5.2.
