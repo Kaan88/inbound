@@ -114,6 +114,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     public void UpdateHostConnectionLimit(int limit)
         => _hostLimiter.UpdateLimit(limit);
 
+    /// <summary>All transfers draw on this one budget as well as their own, so N downloads share the cap.</summary>
+    public void UpdateSharedSpeedLimit(long? bytesPerSecond)
+        => Volatile.Write(ref _sharedSpeedLimit, bytesPerSecond is > 0 ? bytesPerSecond.Value : 0);
+
+    public long SharedSpeedLimit => Volatile.Read(ref _sharedSpeedLimit);
+
+    private long _sharedSpeedLimit;
+    private TransferRateLimiter? _sharedRateLimiter;
+
+    private TransferRateLimiter SharedRateLimiter =>
+        LazyInitializer.EnsureInitialized(ref _sharedRateLimiter, () => new TransferRateLimiter(() => Volatile.Read(ref _sharedSpeedLimit)));
+
     public int HostConnectionLimit => _hostLimiter.Limit;
 
     public int HostConnectionPeak => _hostLimiter.Peak;
@@ -580,6 +592,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 }
 
                 await state.RateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
+                await SharedRateLimiter.WaitAsync(read, cancellationToken).ConfigureAwait(false);
                 await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 state.Bytes += read;
                 bytesThisResponse += read;
@@ -3508,6 +3521,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         }
 
                         await run.RateLimiter.WaitAsync(allowed, cancellationToken).ConfigureAwait(false);
+                        await SharedRateLimiter.WaitAsync(allowed, cancellationToken).ConfigureAwait(false);
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
                                 buffer.AsMemory(0, allowed),

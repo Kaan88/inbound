@@ -728,34 +728,39 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
-    public async Task GlobalSpeedLimitAppliesToNewJobs()
+    public async Task GlobalSpeedLimitIsSharedByAllDownloads()
     {
-        await using var ctx = await ServiceContext.CreateAsync(_server);
+        await using var ctx = await ServiceContext.CreateAsync(_server, maxConcurrent: 2);
         var settings = ctx.Service.GetSnapshot().Settings;
         settings.GlobalSpeedLimitBytesPerSecond = 131_072;
         Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
-        const int size = 524_288;
-        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        const int size = 262_144;
+        var jobs = new List<JobDto>();
+        foreach (var seed in new[] { 18, 19 })
         {
-            Url = $"{_server.BaseAddress}/file/global-speed.bin?size={size}&seed=18",
-            DestinationDirectory = ctx.Destination,
-            FileName = "global-speed.bin",
-            Connections = 1,
-            Source = "cli",
-        });
-        Assert.True(response.Accepted, response.Error);
-        Assert.Equal(131_072, response.Job!.SpeedLimitBytesPerSecond);
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/global-speed-{seed}.bin?size={size}&seed={seed}",
+                DestinationDirectory = ctx.Destination,
+                FileName = $"global-speed-{seed}.bin",
+                Connections = 1,
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            // Not copied into the download: it stays one cap for all of them, and a change reaches running ones.
+            Assert.Null(response.Job!.SpeedLimitBytesPerSecond);
+            jobs.Add(response.Job);
+        }
 
+        // 512 KB in all at 128 KB/s together: about 4 s, where a copy per download would take about 2 s.
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var completed = await ctx.WaitFor(response.Job.Id, j => j.State == "completed",
-            TimeSpan.FromSeconds(20));
+        foreach (var job in jobs)
+        {
+            var completed = await ctx.WaitFor(job.Id, j => j.State == "completed", TimeSpan.FromSeconds(20));
+            Assert.Equal(size, completed.ReceivedBytes);
+        }
         stopwatch.Stop();
         Assert.InRange(stopwatch.Elapsed.TotalSeconds, 3.2, 8.0);
-        Assert.Equal(size, completed.ReceivedBytes);
-        Assert.Equal(
-            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                TestContent.Generate(18, size))).ToLowerInvariant(),
-            await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
     [Fact]

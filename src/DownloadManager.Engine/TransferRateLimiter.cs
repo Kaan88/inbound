@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace DownloadManager.Core;
 
-/// <summary>One shared budget per transfer, including all of its range workers.</summary>
+/// <summary>One budget per transfer, including all of its range workers, or one for all transfers together.</summary>
 internal sealed class TransferRateLimiter(Func<long?> readLimit)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -13,6 +13,8 @@ internal sealed class TransferRateLimiter(Func<long?> readLimit)
 
     public async Task WaitAsync(int bytes, CancellationToken cancellationToken)
     {
+        // No cap is the common case: skip the gate, so uncapped transfers never queue behind each other.
+        if (readLimit().GetValueOrDefault() <= 0) return;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
