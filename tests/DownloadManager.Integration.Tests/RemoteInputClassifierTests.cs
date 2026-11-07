@@ -155,6 +155,24 @@ public sealed class RemoteInputClassifierTests : IDisposable
         Assert.DoesNotContain("INVENTED", result.ToString());
     }
 
+    [Theory]
+    [InlineData("https://files.invalid", RemoteInputKind.Unsupported)]
+    [InlineData("https://files.invalid/", RemoteInputKind.Unsupported)]
+    [InlineData("https://www.files.invalid/", RemoteInputKind.Unsupported)]
+    [InlineData("https://files.invalid/#!abc!def", RemoteInputKind.HosterLink)]
+    [InlineData("https://files.invalid/?d=abc", RemoteInputKind.HosterLink)]
+    [InlineData("https://files.invalid/a", RemoteInputKind.HosterLink)]
+    public void ASitesOwnAddressIsNotALinkToAFile(string link, RemoteInputKind expected)
+    {
+        var provider = Provider(hosters: [RemoteHosterMatcher.Create(Hoster("Files", null!, domains: "files.invalid"))!]);
+        var result = Classify(link, provider);
+        Assert.Equal(expected, result.Kind);
+        if (expected == RemoteInputKind.Unsupported)
+        {
+            Assert.Contains("the address of Files", result.Reason);
+        }
+    }
+
     [Fact]
     public void AHosterThatIsDownIsStillAHosterLinkAndSaysSo()
     {
