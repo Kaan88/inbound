@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+### Owner's second try in the sandbox (`0870d34`, 2026-11-07)
+
+Recorded as reported. Nothing is traced or fixed yet. See ROADMAP TB.F9 and TB.F11 to TB.F14.
+- **TB.F11:** three direct TorBox links added through Add Links opened three separate windows. One file kept the link's id as its name, an empty text file failed, and a Download complete window opened for a single file of the package.
+- **TB.F12, security:** the Download complete window's Address box shows a direct link with its token, which is the account key. The progress window masks it. The owner also pasted three such links into the conversation, so the key has been seen there too. Rotating it after testing is already an open item.
+- **TB.F9, now a confirmed bug:** one torrent file could not be added and its box stayed stuck. Another was added, but Approve never became clickable. Choosing files is broken. **The owner wants** a torrent file's file choice shown first, when it is added, cached or not. File choice comes before downloading.
+- **TB.F13:** Download in My TorBox should close the window. Answered in the conversation: it stayed open only so several items could be downloaded in a row, and nothing else depends on it.
+- **TB.F14:** "Local downloads created" with nothing on the list, and the status bar stuck at "Adding to TorBox...".
+
 ### Live scenario I and the WinUI walk on the real account (2026-11-07)
 
 Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window, driven by UI Automation and the real mouse, with real pixels read after checking the window was in front. Both themes. I added only freely licensed test files and deleted them all afterwards. The account is back to its earlier counts, with an empty queue.
