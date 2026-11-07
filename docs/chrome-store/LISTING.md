@@ -21,6 +21,18 @@ know. So the app has to learn the ID before anyone can test the listing. The Ite
 The ID stays the same when you upload new versions of this item. Deleting the item and adding it again
 gives a new one.
 
+## Testing before the listing is public
+
+Do not unpack the zip or the CRX and load that folder. The store package has no `key`, so Chrome gives
+it an ID from its folder, and the app refuses it. Chrome reports `Access to the specified native
+messaging host is forbidden`, and this is not a fault in the package or in Setup. The store's own
+install does not have this problem, because the store signs the package with the store's key.
+
+- To test the package you uploaded: run `scripts\make-store-id-test.ps1`, remove any other copy in
+  `chrome://extensions`, and use Load unpacked on `artifacts\chrome-store\store-id-test`. It has the
+  same files plus the store's public key, so it runs under the store ID. Never upload that folder.
+- To use the extension day to day: Load unpacked on the `extension` folder in the app's install folder.
+
 ## Account
 
 - One-time registration fee; the payment screen shows the amount. 2-Step Verification is required.

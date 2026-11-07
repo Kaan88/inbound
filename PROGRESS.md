@@ -505,6 +505,22 @@ Everything here is against the mock. No live call was made and no scenario is ve
 - Evidence: `RuntimePackageTests`, `PackageRulesTests`. Undoing 14 of these changes one at a time made their tests fail (queue actions and sizes were not checked this way).
 - Not verified: the WinUI changes were built but not looked at on screen, in either theme. CLI commands and the pipe coalescing have no automated test. `AddJobAsync` is still one job and up to two settings writes per link for Add Links; only the provider batch path has one commit.
 
+### Store package unpacked by hand is refused (2026-11-07)
+
+- Owner report: Setup 0.4.0 "does not work with the store extension", with a "signature error", after unpacking the packaged extension because the listing is not public yet.
+- Cause: a store package has no `key`, so a copy loaded unpacked gets an ID from its folder, and the native host's `allowed_origins` refuses it. Setup 0.4.0 is correct and needs no change. The extension then said "Update the desktop app", which was wrong advice for this case.
+- Evidence, in Chrome for Testing 156 from a normal terminal, against the owner's installed Setup 0.4.0 (real registry value read through WMI, manifest lists both IDs; local Setup hash equals the published asset):
+  - Store CRX's code under the store ID (key added): `connected: true`, `dm.ping` ok, "Connected to the desktop app."
+  - The CRX and the zip unpacked unchanged: IDs `eahiead…` and `dpjlmpm…`, `Access to the specified native messaging host is forbidden.`
+  - The CRX's three signatures verify, and it differs from the uploaded zip only by `update_url` and `_metadata`.
+- Owner's detail: the error appears in the Inbound notification, only when a download is triggered; Setup's own extension works and only Google's package does not. Reproduced with a real download and automatic sending on: the raw CRX shows "Inbound unavailable: Update the Inbound Download Manager desktop app. The installed version does not recognise this extension. This download stays in Chrome."
+- Real download under the store ID, against a separate app instance (`DOWNLOADMANAGER_INSTANCE` + `DOWNLOADMANAGER_DATA`): "Sent to Inbound", Chrome's copy removed, job completed with all bytes.
+- The owner confirmed the "signature error" was this "does not recognise this extension" notification (2026-11-07). No signature check was involved.
+- Fix: the extension now names the refused ID and what to do, and still says to update the app when an accepted ID is refused. `scripts\make-store-id-test.ps1` makes a folder that runs the uploaded package under the store ID. New tests tie the store key, manifest key, `.iss`, registration script and extension to `BrowserBridge`.
+- Fix evidence: extension 56/56, typecheck, Integration 139/139. In the same browser, the uploaded zip through the new script runs as `olhbcdb…` and shows "Connected to the desktop app."; a keyless build of this source shows the new message with its ID, in Settings and in the notification on a real download.
+- Trap: Chrome for Testing saves downloads the extension leaves in Chrome to the user's real Downloads folder, and a separate instance also opens its own window and tray icon.
+- Not verified: a real store install (the listing is not public). The new message is not in the package under review. **Bump the extension version before the next store upload**, since this source differs from the uploaded 0.4.0.
+
 ### Repository clean-up and media panel removal (2026-11-06)
 
 - Removed from the extension at the owner's decision: media detection, in-page panel, popup card, Settings option, playlist fetching and badge. The extension now makes no network requests of its own. Right-click on links, images, video and audio, Download All, automatic sending and the Delete gesture remain. The app still downloads stream addresses it is given.
