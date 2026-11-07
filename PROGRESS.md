@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Owner's 0.5.3 check; extension requests (2026-11-08)
+
+- Owner on the 0.5.3 list: "all work as intended." Marked verified: UI.B4, UI.B5, UI.B6, UI.R15 to UI.R19, PERF.5 (option; follow-up still listed). UI.R6: "much better, they only move when digit count changes"; next step recorded. UI.R14 shows only on the next update.
+- Owner: make the extension more complete (status, pause, delete) beside the folder question: EXT.R2. Regression: the extension doesn't catch downloads reliably, for example TorBox's Direct Download button: EXT.B1; the test needs the owner's Edge signed in to TorBox. Both to work on during the web UI and Docker work, as agreed.
+
 ### Release 0.5.3 (2026-11-08)
 
 - Owner: "publish the build so I can test". Main commit 79b8884, tag v0.5.3, https://github.com/Kaan88/inbound/releases/tag/v0.5.3. Contents: everything since 0.5.2 (UI.B4, UI.B5, UI.B6, UI.B3, UI.R6, UI.R14 to UI.R19, PERF.5 option).
