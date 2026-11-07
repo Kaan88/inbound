@@ -207,12 +207,16 @@ public sealed partial class MainWindow : Window
         return accelerator;
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
     public void ShowFromTray()
     {
         AppWindow.Show();
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         Activate();
+        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
         SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
     }
 

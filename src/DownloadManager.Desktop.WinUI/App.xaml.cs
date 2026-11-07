@@ -5,6 +5,11 @@ namespace DownloadManager.Desktop.WinUI;
 
 public partial class App : Application
 {
+    private const int AnyProcess = -1;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
     private readonly EventWaitHandle _showEvent;
     private readonly EventWaitHandle _settingsEvent;
     private readonly bool _secondaryInstance;
@@ -85,6 +90,9 @@ public partial class App : Application
         HostLauncher.EnsureStarted();
         if (_secondaryInstance)
         {
+            // This launch came from a click, so it may take the foreground; the running window may not unless
+            // it is allowed to, and without this Windows leaves it behind (UI.B4).
+            AllowSetForegroundWindow(AnyProcess);
             (openSettings ? _settingsEvent : _showEvent).Set();
             Exit();
             return;
