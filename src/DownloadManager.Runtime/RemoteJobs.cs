@@ -667,6 +667,9 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             {
                 return result;
             }
+
+            // Never the address: the kind and the status are all that says why.
+            _log?.Invoke($"Job {job.Id}: the link was refused ({failure.Kind}, HTTP {failure.HttpStatus?.ToString() ?? "none"}), so asking for a fresh one, {refreshes + 1} of {MaxLinkRefreshesPerRun}.");
         }
     }
 
@@ -784,6 +787,7 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             ClampConnectionsLocked(job, uri, resolution.MaxConnections ?? int.MaxValue);
         }
 
+        _log?.Invoke($"Job {job.Id}: {source.Provider} gave a link for this run, with {job.RequestedConnections} connections at most.");
         return null;
     }
 
