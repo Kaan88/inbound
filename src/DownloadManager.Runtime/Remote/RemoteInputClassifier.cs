@@ -398,7 +398,7 @@ public static class RemoteInputClassifier
                 var mayRunPattern = onPatterns.Elapsed < LongestOnPatterns;
                 if (matcher.Matches(input, host, mayRunPattern))
                 {
-                    // A site's own address names no file. TorBox's cache goes by the exact text, so sending one
+                    // A site's own address names no file. A provider's cache can go by the exact text, so sending one
                     // can bring back whatever somebody once got for it: 9 GB of a stranger's file, when tried.
                     if (uri.AbsolutePath is "" or "/" && uri.Query.Length == 0 && uri.Fragment.Length == 0)
                     {
