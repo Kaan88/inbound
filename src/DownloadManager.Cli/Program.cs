@@ -1597,6 +1597,12 @@ internal static partial class Program
                 case "clipboard":
                     settings.ClipboardMonitoring = ParseBool(value);
                     break;
+                case "usecategoryfolders":
+                    settings.UseCategoryFolders = ParseBool(value);
+                    break;
+                case "closewindowcompletely":
+                    settings.CloseWindowCompletely = ParseBool(value);
+                    break;
                 case "browserintegration":
                     settings.BrowserIntegrationEnabled = ParseBool(value);
                     break;

@@ -1272,6 +1272,66 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task FoldersByCategoryCanBeTurnedOff()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        Assert.True(settings.UseCategoryFolders);
+        settings.DefaultDownloadDirectory = ctx.Destination;
+        settings.CategoryFolders["documents"] = Path.Combine(ctx.Destination, "Docs");
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task<string> FolderForAsync(string name)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=1024&seed=61", FileName = name, StartMode = "later", Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!.DestinationDirectory;
+        }
+
+        Assert.Equal(Path.Combine(ctx.Destination, "Docs"), await FolderForAsync("on.pdf"));
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.UseCategoryFolders = false;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.False(ctx.Service.GetSnapshot().Settings.UseCategoryFolders);
+        Assert.Equal(ctx.Destination, await FolderForAsync("off.pdf"));
+        // The folders themselves are kept for when it is turned back on.
+        Assert.Equal(Path.Combine(ctx.Destination, "Docs"), ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
+    }
+
+    [Fact]
+    public async Task CategoryFolderChangesOnlyWhenTheAddAsksToRememberIt()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        var chosen = Path.Combine(ctx.Destination, "Docs from Options");
+        settings.CategoryFolders["documents"] = chosen;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task AddAsync(string name, bool? remember, string folder)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=1024&seed=60", FileName = name, CategoryId = "documents",
+                DestinationDirectory = folder, RememberDestination = remember, StartMode = "later",
+            });
+            Assert.True(response.Accepted, response.Error);
+        }
+
+        // A re-add, an import or another client that doesn't say: the Options folder stays.
+        await AddAsync("unsaid.pdf", null, Path.Combine(ctx.Destination, "elsewhere"));
+        await AddAsync("declined.pdf", false, Path.Combine(ctx.Destination, "elsewhere"));
+        Assert.Equal(chosen, ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
+
+        // Remember ticked in Add URL: it becomes the category's folder.
+        var remembered = Path.Combine(ctx.Destination, "remembered");
+        await AddAsync("asked.pdf", true, remembered);
+        Assert.Equal(remembered, ctx.Service.GetSnapshot().Settings.CategoryFolders["documents"]);
+    }
+
+    [Fact]
     public async Task CategoryValidationRejectsAmbiguousRulesAndStaleRemovalWithoutChangingDefinitions()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);

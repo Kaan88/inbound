@@ -652,11 +652,16 @@ public sealed partial class DownloadManagerService
         {
             lock (_sync)
             {
+                // UI.B6: a category's folder changes only when the add asks for it. Re-adds, imports and other
+                // clients that don't say leave the Options value alone; the manual-download folder is still remembered.
                 if (!string.IsNullOrWhiteSpace(request.CategoryId))
                 {
-                    var custom = _settings.CustomCategories.FirstOrDefault(category => category.Id == categoryId);
-                    if (custom is not null) custom.DestinationDirectory = destination;
-                    else _settings.CategoryFolders[categoryId!] = destination;
+                    if (request.RememberDestination == true)
+                    {
+                        var custom = _settings.CustomCategories.FirstOrDefault(category => category.Id == categoryId);
+                        if (custom is not null) custom.DestinationDirectory = destination;
+                        else _settings.CategoryFolders[categoryId!] = destination;
+                    }
                 }
                 else _settings.LastDestinationDirectory = destination;
                 _settings.RecentDestinationDirectories = DownloadFolders.Remember(_settings.RecentDestinationDirectories, destination);
@@ -1217,6 +1222,8 @@ public sealed partial class DownloadManagerService
             DefaultDownloadDirectory = directory,
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
+            UseCategoryFolders = settings.UseCategoryFolders,
+            CloseWindowCompletely = settings.CloseWindowCompletely,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             ConnectionProfiles = settings.ConnectionProfiles
                 .Where(profile => !string.IsNullOrWhiteSpace(profile.Pattern))
@@ -3987,6 +3994,8 @@ public sealed partial class DownloadManagerService
             return Path.GetFullPath(requested.Trim());
         }
 
+        // Folders by category can be turned off in Options; then everything goes to the download folder.
+        useCategoryFolder &= _settings.UseCategoryFolders;
         var category = categoryId ?? FileCategories.For(fileName);
         var customFolder = _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
         if (useCategoryFolder && !string.IsNullOrWhiteSpace(customFolder)) return Path.GetFullPath(customFolder);
@@ -4228,6 +4237,8 @@ public sealed partial class DownloadManagerService
             DefaultDownloadDirectory = settings.DefaultDownloadDirectory,
             MaxConcurrentDownloads = settings.MaxConcurrentDownloads,
             DefaultConnections = settings.DefaultConnections,
+            UseCategoryFolders = settings.UseCategoryFolders,
+            CloseWindowCompletely = settings.CloseWindowCompletely,
             MaxConnectionsPerHost = settings.MaxConnectionsPerHost,
             ConnectionProfiles = settings.ConnectionProfiles
                 .Select(profile => new ConnectionProfileDto
