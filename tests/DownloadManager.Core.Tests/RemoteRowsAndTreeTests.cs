@@ -390,6 +390,99 @@ public sealed class RemoteRulesTests
         Assert.False(RemoteRules.CanChooseEarly(held));
         Assert.Equal(RemoteRowAction.Approve, RemoteRules.Actions(held).Primary);
     }
+
+    // ---- Several rows at once ----------------------------------------------------------------------
+
+    private static RemoteJobDto Copied()
+    {
+        var job = Job("intended", approval: true);
+        job.HeldForApproval = true;
+        return job;
+    }
+
+    [Fact]
+    public void EnterOnSeveralRowsAddsThemAllOrChoosesTheirFilesInTurnAndLeavesAMixAlone()
+    {
+        Assert.Equal(RemoteRowAction.None, RemoteRules.EnterFor([]));
+
+        // One row: its own next step, whatever it is.
+        Assert.Equal(RemoteRowAction.Retry, RemoteRules.EnterFor([Job("failed", failureKind: "rejected")]));
+        Assert.Equal(RemoteRowAction.CheckNow, RemoteRules.EnterFor([Job("waiting")]));
+
+        Assert.Equal(RemoteRowAction.Approve, RemoteRules.EnterFor([Copied(), Copied(), Job("intended", approval: true)]));
+        Assert.Equal(RemoteRowAction.SelectFiles, RemoteRules.EnterFor([Job("awaitingSelection"), Job("awaitingSelection"), Asking("waiting", "askWhenReady")]));
+
+        // Several waiting for different things, or for anything else, are left alone.
+        Assert.Equal(RemoteRowAction.None, RemoteRules.EnterFor([Copied(), Job("awaitingSelection")]));
+        Assert.Equal(RemoteRowAction.None, RemoteRules.EnterFor([Job("failed", failureKind: "rejected"), Job("blocked")]));
+        Assert.Equal(RemoteRowAction.None, RemoteRules.EnterFor([Job("waiting"), Job("waiting")]));
+    }
+
+    [Fact]
+    public void AMenuItemStandsForSeveralRowsOnlyWhenEveryOneTakesIt()
+    {
+        Assert.True(RemoteRules.AllCan([Copied(), Copied()], actions => actions.Approve));
+        Assert.False(RemoteRules.AllCan([Copied(), Job("waiting")], actions => actions.Approve));
+        Assert.False(RemoteRules.AllCan([], actions => actions.Approve));
+        Assert.True(RemoteRules.AllCan([Job("awaitingSelection"), Asking("waiting", "askIfCached")], actions => actions.SelectFiles));
+        Assert.False(RemoteRules.AllCan([Job("awaitingSelection"), Copied()], actions => actions.SelectFiles));
+
+        // Adding several names their provider only when they share one.
+        var elsewhere = Copied();
+        elsewhere.Provider = "fetcher";
+        elsewhere.ProviderName = "Fetcher";
+        Assert.Equal("Add to TorBox", RemoteText.AddTo([Copied(), Copied()]));
+        Assert.Equal("Add", RemoteText.AddTo([Copied(), elsewhere]));
+    }
+
+    [Fact]
+    public void DownloadAllFilesIsForSeveralRowsWaitingForAChoiceAndCoversOnlyThose()
+    {
+        var ready = Job("awaitingSelection");
+        var other = Job("awaitingSelection");
+        var early = Asking("waiting", "askWhenReady");
+
+        Assert.False(RemoteRules.OffersDownloadAll([ready]));
+        Assert.False(RemoteRules.OffersDownloadAll([ready, early]));
+        Assert.True(RemoteRules.OffersDownloadAll([ready, other, early, Copied()]));
+        Assert.Equal([ready, other], RemoteRules.TakingAllFiles([ready, early, other, Copied()]));
+        Assert.Equal("All files of 2 items will download.", RemoteText.AllFilesTaken(2));
+        Assert.Equal("All its files will download.", RemoteText.AllFilesTaken(1));
+    }
+
+    [Fact]
+    public async Task SeveralRowsFilesAreChosenOneAfterAnotherAndCancelEndsIt()
+    {
+        var first = Job("awaitingSelection");
+        var dealtWith = Job("awaitingSelection");
+        var gone = Job("awaitingSelection");
+        var third = Job("awaitingSelection");
+        var fourth = Job("awaitingSelection");
+        var now = new Dictionary<Guid, RemoteJobDto> { [first.Id] = first, [dealtWith.Id] = Job("localStarted"), [third.Id] = third, [fourth.Id] = fourth };
+        var asked = new List<Guid>();
+
+        // One was dealt with elsewhere meanwhile and one has left the list: both are passed over. Cancel on "third"
+        // ends it, so the last is never asked.
+        var answers = new Queue<bool>([true, false]);
+        await RemoteRules.WalkFileChoicesAsync([first.Id, dealtWith.Id, gone.Id, third.Id, fourth.Id], id => now.GetValueOrDefault(id), job =>
+        {
+            asked.Add(job.Id);
+            return Task.FromResult(answers.Dequeue());
+        });
+
+        Assert.Equal([first.Id, third.Id], asked);
+    }
+
+    [Fact]
+    public void AWalkGoesDownTheListWhateverOrderTheRowsWereClickedIn()
+    {
+        var top = Job("awaitingSelection");
+        var middle = Job("awaitingSelection");
+        var bottom = Job("awaitingSelection");
+        var elsewhere = Job("awaitingSelection");
+
+        Assert.Equal([top.Id, middle.Id, bottom.Id, elsewhere.Id], RemoteRules.InListOrder([bottom, elsewhere, top, middle], [Guid.NewGuid(), top.Id, middle.Id, Guid.NewGuid(), bottom.Id]));
+    }
 }
 
 public sealed class RemoteRowTextTests

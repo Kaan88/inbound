@@ -119,6 +119,53 @@ internal static class RemoteRules
         Retry: job.State is "failed" or "blocked");
 
     /// <summary>
+    /// What Enter does with these rows selected: one row's own next step, or, for several, the one thing they all wait
+    /// for when that is being added (copied links, sent together) or a file choice (one dialog after another). Several
+    /// rows waiting for different things are left alone.
+    /// </summary>
+    public static RemoteRowAction EnterFor(IReadOnlyList<RemoteJobDto> jobs) => jobs switch
+    {
+        [] => RemoteRowAction.None,
+        [var one] => Actions(one).Primary,
+        _ when AllCan(jobs, actions => actions.Approve) => RemoteRowAction.Approve,
+        _ when AllCan(jobs, actions => actions.SelectFiles) => RemoteRowAction.SelectFiles,
+        _ => RemoteRowAction.None,
+    };
+
+    /// <summary>Whether every one of these rows takes this, so one menu item can stand for all of them.</summary>
+    public static bool AllCan(IReadOnlyList<RemoteJobDto> jobs, Func<RemoteRowActions, bool> takes) => jobs.Count > 0 && jobs.All(job => takes(Actions(job)));
+
+    /// <summary>The rows "Download All Files" covers: those waiting for a file choice. Each takes all of its files.</summary>
+    public static IReadOnlyList<RemoteJobDto> TakingAllFiles(IReadOnlyList<RemoteJobDto> jobs) => jobs.Where(job => job.State == "awaitingSelection").ToList();
+
+    /// <summary>"Download All Files" is for several rows at once. One row's own file dialog does the same for it.</summary>
+    public static bool OffersDownloadAll(IReadOnlyList<RemoteJobDto> jobs) => TakingAllFiles(jobs).Count >= 2;
+
+    /// <summary>
+    /// Several rows' file choices, one after another in the order given. Each row is read again just before its turn,
+    /// so one dealt with meanwhile is passed over. A choice left unanswered, such as Cancel, ends the walk, and the
+    /// rows after it go on waiting.
+    /// </summary>
+    /// <param name="current">The row's job as it is now. Null once it has left the list.</param>
+    /// <param name="choose">False when nothing was answered.</param>
+    public static async Task WalkFileChoicesAsync(IReadOnlyList<Guid> order, Func<Guid, RemoteJobDto?> current, Func<RemoteJobDto, Task<bool>> choose)
+    {
+        foreach (var id in order)
+        {
+            if (current(id) is not { } job || !Actions(job).SelectFiles) continue;
+            if (!await choose(job)) return;
+        }
+    }
+
+    /// <summary>A selection comes in the order of clicking. A walk goes down the list instead, with anything not in it last.</summary>
+    public static IReadOnlyList<Guid> InListOrder(IReadOnlyList<RemoteJobDto> jobs, IReadOnlyList<Guid> list)
+    {
+        var position = new Dictionary<Guid, int>();
+        for (var i = 0; i < list.Count; i++) position.TryAdd(list[i], i);
+        return jobs.Select(job => job.Id).OrderBy(id => position.TryGetValue(id, out var index) ? index : int.MaxValue).ToList();
+    }
+
+    /// <summary>
     /// The files can be chosen before the provider is done: the job would ask for them, and nothing holds it back. A
     /// copied link isn't added yet, and a folder link asks by default, so a held one is left out.
     /// </summary>
@@ -408,7 +455,14 @@ internal static partial class RemoteText
     // ---- Dialogs --------------------------------------------------------------------------------
 
     /// <summary>The menu item and its message's title for a row nothing has been sent for yet.</summary>
-    public static string AddTo(RemoteJobDto job) => $"Add to {ProviderName(job)}";
+    public static string AddTo(RemoteJobDto job) => AddTo([job]);
+
+    /// <summary>The same for several rows, named for their provider when they share one.</summary>
+    public static string AddTo(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var providers = jobs.Select(ProviderName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return providers.Count == 1 ? $"Add to {providers[0]}" : "Add";
+    }
 
     /// <summary>The file dialog's way past a list the provider doesn't have yet, for a row that would ask.</summary>
     public const string DownloadAllWhenReady = "Download all when ready";
@@ -418,6 +472,12 @@ internal static partial class RemoteText
     /// same as a hoster link's own.
     /// </summary>
     public static string EarlyChoice(bool all) => all ? "All files will download when ready." : "Your choice will download when ready.";
+
+    /// <summary>The menu item that takes every file of several rows waiting for a choice.</summary>
+    public const string DownloadAllFiles = "Download All Files";
+
+    /// <summary>Said in passing once "Download All Files" was taken, for how many rows the Host took it.</summary>
+    public static string AllFilesTaken(int rows) => rows == 1 ? "All its files will download." : $"All files of {rows} items will download.";
 
     public static string RemoveQuestion(IReadOnlyList<RemoteJobDto> jobs)
     {

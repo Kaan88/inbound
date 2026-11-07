@@ -26,6 +26,7 @@ public sealed partial class MainWindow
     private readonly List<MenuFlyoutItemBase> _remoteContextItems = [];
     private readonly List<MenuFlyoutItemBase> _remoteTasksItems = [];
     private MenuFlyoutItem? _menuRemoteSelectFiles;
+    private MenuFlyoutItem? _menuRemoteDownloadAll;
     private MenuFlyoutItem? _menuRemoteApprove;
     private MenuFlyoutItem? _menuRemoteLinkPassword;
     private MenuFlyoutItem? _menuRemoteRetry;
@@ -343,9 +344,11 @@ public sealed partial class MainWindow
     {
         // Everything already there is for local rows.
         _localContextItems.AddRange(flyout.Items);
-        _menuRemoteSelectFiles = CreateContextItem("Select Files…", async (_, _) => { if (SelectedRemoteJobs is [var job]) await SelectRemoteFilesAsync(job); });
-        // Named for the selected row's provider when the menu opens.
-        _menuRemoteApprove = CreateContextItem("Add", async (_, _) => { if (SelectedRemoteJobs is [var job]) await ApproveRemoteAsync(job); });
+        // For several rows, one dialog after another.
+        _menuRemoteSelectFiles = CreateContextItem("Select Files…", async (_, _) => await WalkFileChoicesAsync(SelectedRemoteJobs));
+        _menuRemoteDownloadAll = CreateContextItem(RemoteText.DownloadAllFiles, async (_, _) => await DownloadAllFilesAsync(SelectedRemoteJobs));
+        // Named for the selected rows' provider when the menu opens.
+        _menuRemoteApprove = CreateContextItem("Add", async (_, _) => await ApproveRemoteAsync(SelectedRemoteJobs));
         _menuRemoteLinkPassword = CreateContextItem("Enter Link Password…", async (_, _) => { if (SelectedRemoteJobs is [var job]) await EnterLinkPasswordAsync(job); });
         _menuRemoteRetry = CreateContextItem("Retry", async (_, _) => await RetryRemoteAsync(SelectedRemoteJobs));
         _menuRemoteCheckNow = CreateContextItem("Check Now", async (_, _) => await CheckRemoteNowAsync(SelectedRemoteJobs));
@@ -353,7 +356,7 @@ public sealed partial class MainWindow
         _menuRemoteRemove = CreateContextItem("Remove from List…", async (_, _) => await RemoveRemoteAsync(SelectedRemoteJobs));
         _menuRemoteRemove.KeyboardAcceleratorTextOverride = "Del";
         _remoteContextSeparator = new MenuFlyoutSeparator();
-        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteRemove, _remoteContextSeparator];
+        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteRemove, _remoteContextSeparator];
         for (var i = 0; i < items.Length; i++) flyout.Items.Insert(i, items[i]);
         _remoteContextItems.AddRange(items);
     }
@@ -366,11 +369,12 @@ public sealed partial class MainWindow
         var jobs = SelectedRemoteJobs;
         var actions = jobs.Select(RemoteRules.Actions).ToList();
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
-        if (_menuRemoteSelectFiles is not null) _menuRemoteSelectFiles.Visibility = Show(actions is [{ SelectFiles: true }]);
+        if (_menuRemoteSelectFiles is not null) _menuRemoteSelectFiles.Visibility = Show(RemoteRules.AllCan(jobs, action => action.SelectFiles));
+        if (_menuRemoteDownloadAll is not null) _menuRemoteDownloadAll.Visibility = Show(RemoteRules.OffersDownloadAll(jobs));
         if (_menuRemoteApprove is not null)
         {
-            _menuRemoteApprove.Visibility = Show(actions is [{ Approve: true }]);
-            if (jobs is [var one]) _menuRemoteApprove.Text = RemoteText.AddTo(one);
+            _menuRemoteApprove.Visibility = Show(RemoteRules.AllCan(jobs, action => action.Approve));
+            _menuRemoteApprove.Text = RemoteText.AddTo(jobs);
         }
 
         if (_menuRemoteLinkPassword is not null) _menuRemoteLinkPassword.Visibility = Show(actions is [{ EnterLinkPassword: true }]);
@@ -438,28 +442,55 @@ public sealed partial class MainWindow
                 e.Handled = true;
                 _ = RemoveSideRowsAsync();
                 break;
-            case Windows.System.VirtualKey.Enter when FirstLocalRow is null && jobs.Count == 1:
+            case Windows.System.VirtualKey.Enter when FirstLocalRow is null:
                 e.Handled = true;
-                _ = RunRemotePrimaryAsync(jobs[0]);
+                _ = RunRemoteEnterAsync(jobs);
                 break;
         }
     }
 
-    private Task RunRemotePrimaryAsync(RemoteJobDto job) => RemoteRules.Actions(job).Primary switch
+    /// <summary>Enter on remote rows: one row's next step, or, for several, adding them all or choosing their files in turn.</summary>
+    private Task RunRemoteEnterAsync(IReadOnlyList<RemoteJobDto> jobs) => RemoteRules.EnterFor(jobs) switch
     {
-        RemoteRowAction.SelectFiles => SelectRemoteFilesAsync(job),
-        RemoteRowAction.Approve => ApproveRemoteAsync(job),
-        RemoteRowAction.EnterLinkPassword => EnterLinkPasswordAsync(job),
-        RemoteRowAction.Retry => RetryRemoteAsync([job]),
-        RemoteRowAction.CheckNow => CheckRemoteNowAsync([job]),
+        RemoteRowAction.SelectFiles => WalkFileChoicesAsync(jobs),
+        RemoteRowAction.Approve => ApproveRemoteAsync(jobs),
+        RemoteRowAction.EnterLinkPassword => EnterLinkPasswordAsync(jobs[0]),
+        RemoteRowAction.Retry => RetryRemoteAsync(jobs),
+        RemoteRowAction.CheckNow => CheckRemoteNowAsync(jobs),
         _ => Task.CompletedTask,
     };
 
+    private Task RunRemotePrimaryAsync(RemoteJobDto job) => RunRemoteEnterAsync([job]);
+
+    /// <summary>Several rows' files, one dialog after another down the list, each row as it is by its turn. Cancel ends it.</summary>
+    private Task WalkFileChoicesAsync(IReadOnlyList<RemoteJobDto> jobs)
+        => RemoteRules.WalkFileChoicesAsync(
+            RemoteRules.InListOrder(jobs, _visibleJobs.Select(row => row.Id).ToList()),
+            id => _remote.State.Jobs.FirstOrDefault(job => job.Id == id),
+            SelectRemoteFilesAsync);
+
+    /// <summary>Every selected row that waits for a file choice takes all of its files, with nothing asked.</summary>
+    private async Task DownloadAllFilesAsync(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var problems = new List<string>();
+        var taken = 0;
+        foreach (var job in RemoteRules.TakingAllFiles(jobs))
+        {
+            var result = await _remote.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = true });
+            if (result.Ok) taken++;
+            else problems.Add(RemoteText.Refused(RemoteText.JobRow(job, DateTimeOffset.Now).Name, result.Error, RemoteText.ProviderName(job)));
+        }
+
+        if (problems.Count > 0) await ShowMessageAsync(RemoteText.DownloadAllFiles, string.Join(Environment.NewLine, problems));
+        else if (taken > 0) ShowPassingStatus(RemoteText.AllFilesTaken(taken));
+    }
+
     /// <summary>
     /// The provider's files for a row that asks. Before it is done, the choice can be made early, or left as all of
-    /// them, and the row goes on as it was. What was found of an earlier choice starts ticked.
+    /// them, and the row goes on as it was. What was found of an earlier choice starts ticked. False when nothing was
+    /// answered: Cancel, or a dialog that couldn't open.
     /// </summary>
-    private async Task SelectRemoteFilesAsync(RemoteJobDto job)
+    private async Task<bool> SelectRemoteFilesAsync(RemoteJobDto job)
     {
         var provider = RemoteText.ProviderName(job);
         var early = job.State != "awaitingSelection";
@@ -478,24 +509,33 @@ public sealed partial class MainWindow
             laterText: early ? RemoteText.DownloadAllWhenReady : null,
             laterWords: early ? "You can download all of them when it does." : null);
         var choice = answer.Choice;
-        if (choice is null && !answer.Later) return;
+        if (choice is null && !answer.Later) return false;
 
         var all = answer.Later || choice!.All;
         var result = await _remote.SelectAsync(new RemoteSelectRequest { JobId = job.Id, All = all, FileIds = all ? null : choice!.FileIds.ToList() });
         if (!result.Ok) await ShowMessageAsync("Choose files", RemoteText.Failure(result.Error, null, provider));
         else if (early) ShowPassingStatus(RemoteText.EarlyChoice(all));
+        return true;
     }
 
     /// <summary>
-    /// A row nothing has been sent for yet, such as a copied link. Enter or the menu is the request, so nothing asks
-    /// again, and its file choice may open by itself as it would after an add.
+    /// Rows nothing has been sent for yet, such as copied links, sent together. Enter or the menu is the request, so
+    /// nothing asks again, and a file choice may open by itself as it would after an add: when one of them can ask.
     /// </summary>
-    private async Task ApproveRemoteAsync(RemoteJobDto job)
+    private async Task ApproveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)
     {
-        var provider = RemoteText.ProviderName(job);
-        var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, ApproveUncached = true });
-        if (!result.Ok) await ShowMessageAsync(RemoteText.AddTo(job), RemoteText.Failure(result.Error, null, provider));
-        else if (result.Job is { } released) ArmAutoOpen([released]);
+        var released = new List<RemoteJobDto>();
+        var problems = new List<string>();
+        foreach (var job in jobs.Where(job => RemoteRules.Actions(job).Approve))
+        {
+            var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, ApproveUncached = true });
+            if (!result.Ok) problems.Add(RemoteText.Refused(RemoteText.JobRow(job, DateTimeOffset.Now).Name, result.Error, RemoteText.ProviderName(job)));
+            else if (result.Job is { } sent) released.Add(sent);
+        }
+
+        // As after an add: whatever has to be said first, then the clock for opening by itself starts.
+        if (problems.Count > 0) await ShowMessageAsync(RemoteText.AddTo(jobs), string.Join(Environment.NewLine, problems));
+        if (released.Count > 0) ArmAutoOpen(released);
     }
 
     private async Task EnterLinkPasswordAsync(RemoteJobDto job)
