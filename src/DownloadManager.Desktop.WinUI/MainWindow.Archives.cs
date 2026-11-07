@@ -303,6 +303,9 @@ public sealed partial class MainWindow
         if (ArchiveRowsInView().SequenceEqual(_visibleJobs.Where(row => row.IsArchiveRow))) UpdateButtons();
         else RebuildVisible();
         SyncArchiveNotice(sets);
+
+        // A selected row of these is quoted on the status bar, and they change in place, as remote rows do.
+        UpdateStatusText();
     }
 
     private void ShowArchiveState(JobViewModel job)

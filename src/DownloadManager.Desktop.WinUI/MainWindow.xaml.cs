@@ -26,10 +26,8 @@ public sealed partial class MainWindow : Window
     private SettingsWindow? _settingsWindow;
     private bool _pendingSettingsOpen;
     private string _category = "all";
-    private static readonly TimeSpan PassingStatusTime = TimeSpan.FromSeconds(5);
     private string _search = string.Empty;
-    private string? _passingStatus;
-    private DateTimeOffset _passingStatusUntil;
+    private readonly PassingLine _passing;
     private string _sortKey = "added";
     private bool _sortAscending;
     private bool _toolbarLarge = true;
@@ -47,6 +45,10 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+
+        // Its one timer is kept with it for the window's life. See PassingLine for why that matters.
+        _passing = new PassingLine(tick => new DispatcherOneShot(DispatcherQueue, PassingLine.Time, tick));
+        _passing.Ended += UpdateStatusText;
         RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
             ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
             : ElementTheme.Default;
@@ -461,25 +463,19 @@ public sealed partial class MainWindow : Window
     /// <summary>A message about something just done. The usual counts come back by themselves.</summary>
     private void ShowPassingStatus(string words)
     {
-        _passingStatus = words;
-        _passingStatusUntil = DateTimeOffset.UtcNow + PassingStatusTime;
+        _passing.Show(words);
         StatusText.Text = words;
         StatusAnnouncer.Text = words;
 
         // A set name replaces the text for a screen reader, so the words have to be the name.
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(StatusAnnouncer, words);
         LiveRegion.Announce(StatusAnnouncer);
-        var timer = DispatcherQueue.CreateTimer();
-        timer.IsRepeating = false;
-        timer.Interval = PassingStatusTime;
-        timer.Tick += (_, _) => UpdateStatusText();
-        timer.Start();
     }
 
     /// <summary>Puts the counts back now, rather than when a passing line's time is up.</summary>
     private void EndPassingStatus()
     {
-        _passingStatus = null;
+        _passing.End();
         UpdateStatusText();
     }
 
@@ -508,11 +504,7 @@ public sealed partial class MainWindow : Window
             StatusText.Text = $"{side.FileName}: {side.Description}";
         }
 
-        if (_passingStatus is { } passing)
-        {
-            if (DateTimeOffset.UtcNow < _passingStatusUntil) StatusText.Text = passing;
-            else _passingStatus = null;
-        }
+        if (_passing.Words is { } passing) StatusText.Text = passing;
 
         if (_status?.StateDirectory is { } stateDirectory)
         {

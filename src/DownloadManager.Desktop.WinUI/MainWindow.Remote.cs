@@ -89,6 +89,10 @@ public sealed partial class MainWindow
 
         if (changed || _search.Length > 0) RebuildVisible();
         SyncRemoteEntryPoints();
+
+        // The status bar quotes a selected row like these, and they change in place: otherwise it kept the words
+        // the row had when it was chosen, such as a "Next check" long past under a row that says Choose files.
+        UpdateStatusText();
     }
 
     /// <summary>All of them on All Downloads, one provider's in its own view, nothing anywhere else.</summary>
