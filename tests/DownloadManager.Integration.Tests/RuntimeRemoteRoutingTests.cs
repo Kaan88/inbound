@@ -384,7 +384,7 @@ public sealed partial class RuntimeServiceTests
         // Only a job still being held changes: after that, the first choice stands and the reply says so.
         var again = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = link, Destination = Path.Combine(rig.Destination, "other") });
         Assert.True(again.Existing);
-        Assert.Contains("destination", again.Note);
+        Assert.Contains("the folder given here wasn't used", again.Note);
         Assert.Equal(folder, again.Job!.Destination);
     }
 

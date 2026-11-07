@@ -104,7 +104,7 @@ internal sealed class MyProviderWindow : Window
                     <ColumnDefinition Width="86" />
                     <ColumnDefinition Width="190" />
                     <ColumnDefinition Width="70" />
-                    <ColumnDefinition Width="40" />
+                    <ColumnDefinition Width="58" />
                     <ColumnDefinition Width="82" />
                     <ColumnDefinition Width="82" />
                 </Grid.ColumnDefinitions>
@@ -251,6 +251,7 @@ internal sealed class MyProviderWindow : Window
 
         var escape = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         escape.Invoked += (_, args) => { args.Handled = true; Close(); };
+        _root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         _root.KeyboardAccelerators.Add(escape);
         var refresh = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.F5 };
         refresh.Invoked += (_, args) =>
@@ -430,8 +431,15 @@ internal sealed class MyProviderWindow : Window
         _context.SaveUi();
         if (_page is not { } page) return;
         KeepingSelection(() => SortRows(page));
+        ShowWhereTheOrderPuts(page);
 
-        // The list keeps its place on whichever row was at the top, which would hide the new first rows.
+        // One that is reading already goes on by itself when it ends, and starting another here would cancel it.
+        if (_loads == 0 && RemoteItemSort.NeedsTheRest(_sortKey, page.HasMore, page.Rows.Count)) _ = LoadAsync(page, fresh: false, more: true);
+    }
+
+    /// <summary>The list keeps its place on whichever row was at the top, which would hide the new first rows.</summary>
+    private void ShowWhereTheOrderPuts(KindPage page)
+    {
         if (_list.SelectedItem is { } selected) _list.ScrollIntoView(selected);
         else if (page.Rows.Count > 0) _list.ScrollIntoView(page.Rows[0]);
     }
@@ -487,7 +495,11 @@ internal sealed class MyProviderWindow : Window
         UpdateEmptyState();
         if (!page.Loaded) _ = LoadAsync(page, fresh: false, more: false);
         else if (page.LoadFailure is { } failure) _status.Show(failure, isProblem: true);
-        else _status.Show(Counted(page));
+        else
+        {
+            _status.Show(Counted(page));
+            if (_loads == 0 && RemoteItemSort.NeedsTheRest(_sortKey, page.HasMore, page.Rows.Count)) _ = LoadAsync(page, fresh: false, more: true);
+        }
     }
 
     private void RefreshPage()
@@ -503,6 +515,7 @@ internal sealed class MyProviderWindow : Window
         page.Load = load;
         BeginLoad();
         _status.Show($"Asking {_name}…");
+        var readTheRest = false;
         try
         {
             var result = await _client.GetItemsAsync(new RemoteItemRequest
@@ -533,9 +546,11 @@ internal sealed class MyProviderWindow : Window
                 Apply(page, result.Items, more);
                 SortRows(page);
             });
+            if (onShow && more && _sortKey is not null) ShowWhereTheOrderPuts(page);
             if (onShow) _status.Show(result.Items.Count == 0 && !more ? string.Empty : Counted(page));
             UpdateEmptyState();
             if (onShow && !more && _selected is not null) RenderDetail(readFiles: true);
+            readTheRest = onShow && RemoteItemSort.NeedsTheRest(_sortKey, page.HasMore, result.Items.Count);
         }
         catch (OperationCanceledException)
         {
@@ -545,6 +560,8 @@ internal sealed class MyProviderWindow : Window
         {
             EndLoad();
         }
+
+        if (readTheRest && !_closed && page.Load == load) _ = LoadAsync(page, fresh: false, more: true);
     }
 
     private string Counted(KindPage page)

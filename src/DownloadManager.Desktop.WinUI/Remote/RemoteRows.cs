@@ -63,6 +63,12 @@ internal sealed record RemoteItemView(
 /// <summary>The order of My provider's list by a column. A provider gives no size or date for some items, and those stay at the end.</summary>
 internal static class RemoteItemSort
 {
+    /// <summary>
+    /// A column's order means little over part of a list: with fifty of a hundred and fifty items read, "most files" could only
+    /// say so of those fifty. A page that came back empty ends it even if the provider says there is more.
+    /// </summary>
+    public static bool NeedsTheRest(string? sortKey, bool hasMore, int lastPageCount) => sortKey is not null && hasMore && lastPageCount > 0;
+
     public static IEnumerable<T> Order<T>(IEnumerable<T> rows, Func<T, RemoteItemDto> item, Func<T, RemoteItemView> view, string key, bool ascending) => key switch
     {
         "type" => ListSort.Order(rows, row => view(row).Type, NaturalStringComparer.Instance, ascending),

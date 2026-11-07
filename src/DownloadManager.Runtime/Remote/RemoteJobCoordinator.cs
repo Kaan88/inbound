@@ -593,22 +593,25 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// <summary>Adding what is already on the list returns that job as it is. Whoever asked for something different should hear so.</summary>
     private static string? WhatATwinIgnores(RemoteAddRequest request, RemoteJobRecord twin)
     {
-        var ignored = new List<string>();
+        var folder = false;
         if (!string.IsNullOrWhiteSpace(request.Destination) &&
             !string.Equals(request.Destination.TrimEnd('\\', '/'), twin.Destination?.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
         {
-            ignored.Add("destination");
+            folder = true;
         }
 
-        if (request.Selection is { } selection && (selection != twin.SelectionMode ||
-            (selection == RemoteSelectionMode.Chosen && request.FileIds?.SequenceEqual(twin.SelectedFileIds) != true)))
+        var files = request.Selection is { } selection && (selection != twin.SelectionMode ||
+            (selection == RemoteSelectionMode.Chosen && request.FileIds?.SequenceEqual(twin.SelectedFileIds) != true));
+
+        const string AnotherFolder = "To use another folder, remove it from the list and add it again.";
+        const string ChooseFiles = "Its files can still be chosen from the list.";
+        return (folder, files) switch
         {
-            ignored.Add("file choice");
-        }
-
-        return ignored.Count == 0
-            ? null
-            : $"This is already on the list, so the {string.Join(" and ", ignored)} given here weren't used. Choose its files with remote select, or remove it and add it again to use another folder.";
+            (true, true) => $"This is already on the list, so the folder and file choice given here weren't used. {ChooseFiles} {AnotherFolder}",
+            (true, false) => $"This is already on the list, so the folder given here wasn't used. {AnotherFolder}",
+            (false, true) => $"This is already on the list, so the file choice given here wasn't used. {ChooseFiles}",
+            _ => null,
+        };
     }
 
     private RemoteJobRecord? FindActiveTwinLocked(RemoteJobRecord record)

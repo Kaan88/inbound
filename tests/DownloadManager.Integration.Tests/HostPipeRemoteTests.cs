@@ -919,7 +919,8 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         var again = await host.RunCliAsync(link, "remote", "add", "-", "--dest", Path.Combine(host.Destination, "other"));
         Assert.Equal(0, again.ExitCode);
         Assert.Contains("Already on the list", again.Output);
-        Assert.Contains("destination", again.Output);
+        Assert.Contains("so the folder given here wasn't used", again.Output);
+        Assert.DoesNotContain("remote select", again.Output);
         Assert.Contains(id, again.Output);
 
         // job.add stays what it is, a direct request, because a browser handoff is made of those.

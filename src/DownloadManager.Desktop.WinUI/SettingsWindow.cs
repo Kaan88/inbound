@@ -81,6 +81,7 @@ internal sealed class SettingsWindow : Window
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
         Closed += (_, _) => _closed.TrySetResult();
+        _root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         _root.KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Escape, () => Close()));
     }
 

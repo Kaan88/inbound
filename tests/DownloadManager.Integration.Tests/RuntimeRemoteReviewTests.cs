@@ -687,7 +687,8 @@ public sealed partial class RuntimeServiceTests
         });
         Assert.True(other.Existing);
         Assert.Equal(job.Id, other.Job!.Id);
-        Assert.Contains("destination and file choice", other.Note);
+        Assert.Contains("the folder and file choice given here weren't used", other.Note);
+        Assert.DoesNotContain("remote select", other.Note);
     }
 
     // ---- Defaults by input ----------------------------------------------------------------------------

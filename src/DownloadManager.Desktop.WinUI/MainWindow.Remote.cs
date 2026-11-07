@@ -39,7 +39,11 @@ public sealed partial class MainWindow
     {
         var state = _remote.State;
         state.Jobs.CollectionChanged += (_, _) => SyncRemoteRows();
-        state.Accounts.CollectionChanged += (_, _) => SyncRemoteEntryPoints();
+        state.Accounts.CollectionChanged += (_, _) =>
+        {
+            SyncRemoteEntryPoints();
+            ShowProviderSources();
+        };
         state.PropertyChanged += OnRemoteStateChanged;
         SyncRemoteEntryPoints();
     }
@@ -113,6 +117,12 @@ public sealed partial class MainWindow
             ? $"Nothing is waiting for {ProviderDisplayName(_category[RemoteWaitingTag.Length..])}.\nItems show here until their files start downloading."
             : _category == ArchiveSetsTag ? ArchiveSetsEmptyText
             : DefaultEmptyText;
+    }
+
+    /// <summary>The rows are drawn before the accounts arrive, when all there is to call a provider is its id.</summary>
+    private void ShowProviderSources()
+    {
+        foreach (var job in _jobsById.Values) ShowProviderSource(job);
     }
 
     /// <summary>Says which account a local file came from, and its package, because one file alone gets no package row.</summary>

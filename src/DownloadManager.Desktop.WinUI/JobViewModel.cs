@@ -105,7 +105,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
         Remaining = job.EstimatedRemaining;
-        EtaText = FormatDuration(job.EstimatedRemaining);
+        EtaText = DurationText.TimeLeft(job.EstimatedRemaining);
         DetailText = job.Failure?.Message is { Length: > 0 } failure
             ? failure
             : job.Url;
@@ -216,7 +216,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         SizeText = TotalSize > 0 ? FormatBytes(TotalSize) : string.Empty;
         SpeedText = BytesPerSecond > 0 ? $"{FormatBytes((long)BytesPerSecond)}/s" : string.Empty;
         Remaining = summary.EstimatedRemaining;
-        EtaText = FormatDuration(summary.EstimatedRemaining);
+        EtaText = DurationText.TimeLeft(summary.EstimatedRemaining);
         ProgressPercent = summary.Progress is { } progress ? Math.Clamp(progress * 100, 0, 100) : 0;
         ProgressVisibility = summary.State is "active" or "paused" && ProgressPercent > 0 ? Visibility.Visible : Visibility.Collapsed;
         CanPause = PackageRules.PauseTargets(dtos).Count > 0;
@@ -461,18 +461,6 @@ public sealed class JobViewModel : INotifyPropertyChanged
         }
 
         return index == 0 ? $"{bytes} {units[index]}" : $"{value:0.0} {units[index]}";
-    }
-
-    private static string FormatDuration(TimeSpan? duration)
-    {
-        if (duration is null || duration <= TimeSpan.Zero)
-        {
-            return string.Empty;
-        }
-
-        return duration.Value.TotalHours >= 1
-            ? $"{(int)duration.Value.TotalHours}h {duration.Value.Minutes}m"
-            : $"{Math.Max(1, duration.Value.Minutes)}m {duration.Value.Seconds}s";
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

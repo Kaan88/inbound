@@ -184,7 +184,7 @@ internal sealed class ContainerPicks
 
         // Goes as Add Links does: what would most likely fail, or that nobody can vouch for, waits for the user to tick it.
         var warned = selectable && entry.Kind == "hosterLink" && !string.IsNullOrWhiteSpace(reason);
-        var detail = string.Join(" ", details);
+        var detail = RemoteText.ContainerDetail(details);
         var where = group is null ? string.Empty : $", in {group}";
         var spoken = detail.Length > 0 ? $"{name}{where}, {word}, {detail}" : $"{name}{where}, {word}";
         var view = new ContainerRowView(name, word, detail, !selectable || cantTell || warned, true, selectable, false, false, group is null ? 0 : 1, spoken);
@@ -208,7 +208,7 @@ internal sealed class ContainerPicks
         var comment = UrlRedactor.HideAddresses(package.Comment);
         if (!string.IsNullOrWhiteSpace(comment)) parts.Add(comment);
         if (package.HasArchivePassword) parts.Add($"{StatesArchivePassword}.");
-        return string.Join(" ", parts);
+        return RemoteText.ContainerDetail(parts);
     }
 
     public override string ToString() => "[container picks]";
@@ -340,7 +340,10 @@ internal sealed class ContainerOutcomes
         if (_lines.Count == 0) return string.Empty;
         var added = AddedCount;
         if (added == 0) return _lines.Count == 1 ? "This wasn't added." : "None of these were added.";
-        var first = added == _lines.Count ? $"Added {added}." : $"Added {added} of {_lines.Count}.";
+        var twins = _lines.Count(line => line.Outcome.Ok && line.Outcome.Existing);
+        var first = twins == added ? (twins == 1 ? "It was already on the list." : "These were already on the list.")
+            : added == _lines.Count && twins == 0 ? $"Added {added}."
+            : $"Added {added - twins} of {_lines.Count}.";
         var views = _lines.Where(line => line.Outcome.Ok).Select(line => line.Current).ToList();
         return $"{first} {RemoteText.AddOutcomeSummary(views, provider)}";
     }
@@ -384,7 +387,10 @@ internal sealed class ContainerOutcomes
             if (job is null && !_seen) return;
 
             var local = job is { State: "localStarted" } ? localStatus?.Invoke(job) : null;
-            var note = Outcome.Existing ? Joined(RemoteText.ContainerExisting, Outcome.Note) : Outcome.Note;
+            // The Host's own words about a twin already say so, and saying it twice reads as two things.
+            var note = Outcome.Existing && Outcome.Note?.Contains("already on the list", StringComparison.OrdinalIgnoreCase) != true
+                ? Joined(RemoteText.ContainerExisting, Outcome.Note)
+                : Outcome.Note;
             Current = RemoteText.AddOutcome(job, _name, note, now, culture, local);
             if (job is not null) ProviderName = RemoteText.ProviderName(job);
             if (!Current.NeedsApproval) Approved = false;
@@ -413,6 +419,20 @@ internal static partial class RemoteText
     public const string ContainerAddedDetail = "It is saved, and the download list has it.";
     public const string ContainerNotAddedWord = "Not added";
     public const string ContainerExisting = "It was already on the list.";
+
+    /// <summary>A host name or a package's comment has no full stop of its own, so one running into the next sentence reads as one sentence.</summary>
+    public static string ContainerDetail(IReadOnlyList<string> parts)
+    {
+        var words = new System.Text.StringBuilder();
+        for (var i = 0; i < parts.Count; i++)
+        {
+            if (i > 0) words.Append(parts[i - 1].TrimEnd().EndsWith('.') ? " " : " · ");
+            words.Append(parts[i]);
+        }
+
+        return words.ToString();
+    }
+
     public const string ContainerReadLost = "The background Host didn't answer, so this file wasn't read. Nothing was added. Try again.";
     public const string ContainerSendLost = "The background Host didn't answer, so it isn't known whether JDownloader got this file. Look in JDownloader before trying again.";
 

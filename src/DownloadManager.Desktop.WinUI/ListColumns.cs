@@ -40,7 +40,7 @@ internal static class ListColumnSets
             new ListColumn("type", "Type", 86, 40),
             new ListColumn("status", "Status", 190, 60),
             new ListColumn("size", "Size", 70, 40),
-            new ListColumn("files", "Files", 40, 30),
+            new ListColumn("files", "Files", 58, 30),
             new ListColumn("added", "Added", 82, 40),
             new ListColumn("expires", "Expires", 82, 40),
         ],

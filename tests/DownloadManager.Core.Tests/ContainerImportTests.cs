@@ -536,6 +536,33 @@ public sealed class ContainerImportTests
     }
 
     [Fact]
+    public void What_was_already_on_the_list_isnt_counted_as_added()
+    {
+        var job = Job();
+        var twin = new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, Existing = true, JobId = job.Id, Job = job };
+        var fresh = new RemoteContainerAddOutcomeDto { EntryId = 2, Ok = true, JobId = job.Id, Job = job };
+
+        Assert.StartsWith("It was already on the list.", Outcomes(false, twin).Summary(Provider), StringComparison.Ordinal);
+        Assert.StartsWith("These were already on the list.", Outcomes(false, twin, new RemoteContainerAddOutcomeDto { EntryId = 3, Ok = true, Existing = true, JobId = job.Id, Job = job }).Summary(Provider), StringComparison.Ordinal);
+        Assert.StartsWith("Added 1 of 2.", Outcomes(false, twin, fresh).Summary(Provider), StringComparison.Ordinal);
+        Assert.StartsWith("Added 1.", Outcomes(false, fresh).Summary(Provider), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_Host_note_that_already_says_so_isnt_said_twice()
+    {
+        var job = Job();
+        var note = "This is already on the list, so the folder given here wasn't used.";
+        var outcomes = Outcomes(false, new RemoteContainerAddOutcomeDto { EntryId = 1, Ok = true, Existing = true, JobId = job.Id, Job = job, Note = note });
+
+        outcomes.Refresh([job], Now);
+        var detail = outcomes.Views()[0].Detail;
+
+        Assert.Contains(note, detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(RemoteText.ContainerExisting, detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_link_password_points_to_the_list_because_a_row_here_has_nowhere_safe_to_keep_one()
     {
         var job = Job("failed", change: failed => failed.FailureKind = "linkPasswordRequired");

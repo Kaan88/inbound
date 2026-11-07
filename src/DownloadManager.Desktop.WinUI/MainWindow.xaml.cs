@@ -128,6 +128,8 @@ public sealed partial class MainWindow : Window
         InitializeArchiveUi();
         _remote.Start();
 
+        // Otherwise WinUI floats a shortcut's name over the window whenever the pointer rests on the root.
+        RootGrid.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
             Windows.System.VirtualKey.N,
             Windows.System.VirtualKeyModifiers.Control,

@@ -173,6 +173,7 @@ internal sealed class PackageWindow : Window
             _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
         };
+        _root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         _root.KeyboardAccelerators.Add(Escape());
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
