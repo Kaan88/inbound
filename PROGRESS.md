@@ -5,6 +5,8 @@
 - Owner: "Yes, trace it". Per-thread counters: two threads in the window process wake about 95 times a second each, whether the window is shown, minimised or closed to the tray, in installed, published and bin builds, with an empty test instance too.
 - They aren't .NET threads (dotnet-stack, installed into the scratchpad, run against a test instance only). Their start address is in `nvwgf2umx.dll`, the NVIDIA Direct3D driver, which WinUI loads for drawing. Not caused by Inbound's timers.
 - Option for the owner: end the window process when it is closed to the tray and start it again from the tray. That removes these wake-ups and the window's memory while closed, but reopening takes a fresh start. Not built.
+- Owner: "whatever debugger you need, install it." Installed WinDbg (winget `Microsoft.WinDbg`). cdb, noninvasive, on a test instance: both threads wait in a loop inside the NVIDIA driver, with nothing else on their stacks.
+- Owner: "make closing completely a future goal/idea to try." Recorded as PERF.5. Owner asked whether RivaTuner could be the cause: RivaTuner and Afterburner are running and `RTSSHooks64.dll` is loaded in the window, but it isn't on these threads' stacks. A comparison with RivaTuner excluded for the window would settle it.
 
 ### PERF.4: idle check on installed 0.5.2 (2026-11-08)
 
