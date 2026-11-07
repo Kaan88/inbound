@@ -185,6 +185,7 @@ Build: snapshot `f6aebae`, from `feature/torbox-integration` plus `torbox-winui`
 **Live tests (owner, 2026-11-07):** allowed unattended, including adding, caching, magnets, torrents and deleting from the TorBox account: "files there don't matter if deleted". Local files, the installed app, pushing and releasing are not covered.
 
 **Add flow (owner, 2026-11-07):** TB.F10 waits for the owner's answer on the proposal, which is local at `notes-local/add-flow-proposal-2026-11-07.md`. Everything else continues. Questions for the owner: is the proposal right overall; should a line above the list appear when two or more items wait (recommended yes); and should hoster links clicked in Chrome go straight to TorBox (recommended yes) or wait like copied links.
+**Owner's answer (2026-11-07, about 12:30):** "I like the proposal but I'd like to test first." Read as: the owner tries a sandbox build with the TB.F1 to TB.F8 fixes before TB.F10 is built. A new sandbox copy is made from `0870d34`. TB.F10 and TB.F9 stay unbuilt until the owner has tested. The two smaller questions, about the notice line and Chrome hoster links, are still open.
 
 ### Open for the owner (recorded 2026-11-06, for later)
 
