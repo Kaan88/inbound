@@ -358,7 +358,7 @@ internal sealed class MyProviderWindow : Window
         folder.Children.Add(new TextBlock { Text = "Destination folder", VerticalAlignment = VerticalAlignment.Center });
         AddAt(folder, _destination, column: 1);
         AddAt(folder, _browse, column: 2);
-        AddAt(detail, folder, row: 5);
+        AddAt(detail, (FrameworkElement)FolderChooser.Attach(folder, _destination), row: 5);
         AddAt(detail, _destinationHint.Text, row: 6);
         AddAt(_root, detail, row: 2);
 

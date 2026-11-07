@@ -49,6 +49,9 @@ public sealed partial class MainWindow : Window
         // Its one timer is kept with it for the window's life. See PassingLine for why that matters.
         _passing = new PassingLine(tick => new DispatcherOneShot(DispatcherQueue, PassingLine.Time, tick));
         _passing.Ended += UpdateStatusText;
+        FolderChooser.Measure = paths => _connection.GetFolderSpaceAsync(paths);
+        FolderChooser.Settings = () => _settings;
+        FolderChooser.SaveFavorites = SaveFavoritesAsync;
         RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
             ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
             : ElementTheme.Default;
@@ -2442,6 +2445,8 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(browseDestination, 1);
         destinationRow.Children.Add(destinationBox);
         destinationRow.Children.Add(browseDestination);
+        long? knownSize = null;
+        var destinationField = FolderChooser.Attach(destinationRow, destinationBox, () => knownSize, out var refreshSpace);
         var descriptionBox = new TextBox { Header = "Description (optional)" };
         var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
         categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (from file type)" });
@@ -2585,6 +2590,8 @@ public sealed partial class MainWindow : Window
                 if (metadataClosed || generation != metadataGeneration) return;
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
                 var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
+                knownSize = metadata.TotalBytes;
+                refreshSpace();
                 var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
                 metadataText.Text = $"{size} · {metadata.ContentType ?? "Type unknown"}" + (serverName is null ? string.Empty : $"\nServer name: {serverName}");
                 if (!nameEdited && serverName is not null)
@@ -2642,7 +2649,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(nameBox);
         panel.Children.Add(categoryBox);
         panel.Children.Add(new TextBlock { Text = "Destination folder" });
-        panel.Children.Add(destinationRow);
+        panel.Children.Add(destinationField);
         panel.Children.Add(destinationPickerError);
         panel.Children.Add(rememberFolder);
         panel.Children.Add(new Expander { Header = "Create a category", Content = categoryPanel, HorizontalAlignment = HorizontalAlignment.Stretch });
@@ -2839,7 +2846,10 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 10 };
         AddUnreadableKeyNotice(panel);
         panel.Children.Add(pasteBox);
-        panel.Children.Add(destinationBox);
+        var batchDestinationRow = new Grid { ColumnSpacing = 8 };
+        batchDestinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        batchDestinationRow.Children.Add(destinationBox);
+        panel.Children.Add(FolderChooser.Attach(batchDestinationRow, destinationBox));
         panel.Children.Add(startMode);
         panel.Children.Add(queueBox);
         panel.Children.Add(conflictBox);
@@ -4038,6 +4048,55 @@ public sealed partial class MainWindow : Window
                 categoryRows.Add(row);
             }
 
+            // Favorite folders: name and folder per row, in order. The star beside a folder box saves at once, so OK
+            // keeps any saved meanwhile and drops only the rows removed here.
+            var favoritesAtOpen = settings.FavoriteFolders.Select(favorite => favorite.Path).ToList();
+            var favoriteRows = new List<(TextBox Name, TextBox Folder, UIElement Row)>();
+            var favoritesPanel = new StackPanel { Spacing = 8 };
+            void ShowFavoriteRows()
+            {
+                favoritesPanel.Children.Clear();
+                foreach (var entry in favoriteRows) favoritesPanel.Children.Add(entry.Row);
+                if (favoriteRows.Count == 0) favoritesPanel.Children.Add(SettingsWindow.Hint("No favorites yet."));
+            }
+            void AddFavoriteRow(string name, string path)
+            {
+                var nameBox = new TextBox { Header = "Name", Text = name, Width = 160, VerticalAlignment = VerticalAlignment.Bottom };
+                var (folderRow, folderBox) = window.FolderField("Folder", path, favorites: false);
+                var up = new Button { Content = new FontIcon { Glyph = "\uE70E", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                var down = new Button { Content = new FontIcon { Glyph = "\uE70D", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                var remove = new Button { Content = new FontIcon { Glyph = "\uE74D", FontSize = 12 }, VerticalAlignment = VerticalAlignment.Bottom };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(up, "Move up");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(down, "Move down");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove favorite");
+                ToolTipService.SetToolTip(up, "Move up");
+                ToolTipService.SetToolTip(down, "Move down");
+                ToolTipService.SetToolTip(remove, "Remove");
+                var line = new Grid { ColumnSpacing = 8 };
+                foreach (var width in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto, GridLength.Auto })
+                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+                var cells = new UIElement[] { nameBox, folderRow, up, down, remove };
+                for (var i = 0; i < cells.Length; i++) { Grid.SetColumn((FrameworkElement)cells[i], i); line.Children.Add(cells[i]); }
+                var entry = (nameBox, folderBox, (UIElement)line);
+                void Move(int by)
+                {
+                    var at = favoriteRows.IndexOf(entry);
+                    var to = at + by;
+                    if (at < 0 || to < 0 || to >= favoriteRows.Count) return;
+                    favoriteRows.RemoveAt(at);
+                    favoriteRows.Insert(to, entry);
+                    ShowFavoriteRows();
+                }
+                up.Click += (_, _) => Move(-1);
+                down.Click += (_, _) => Move(1);
+                remove.Click += (_, _) => { favoriteRows.Remove(entry); ShowFavoriteRows(); };
+                favoriteRows.Add(entry);
+            }
+            foreach (var favorite in settings.FavoriteFolders) AddFavoriteRow(favorite.Name, favorite.Path);
+            ShowFavoriteRows();
+            var addFavorite = new Button { Content = "Add favorite" };
+            addFavorite.Click += (_, _) => { AddFavoriteRow(string.Empty, string.Empty); ShowFavoriteRows(); };
+
             var customCategoryEditors = new List<(CategoryDefinitionDto Category, TextBox Name, TextBox Extensions, TextBox Folder)>();
             var customCategoryControls = new List<UIElement>();
             var stagedCategoryRemovals = new HashSet<string>(StringComparer.Ordinal);
@@ -4084,6 +4143,10 @@ public sealed partial class MainWindow : Window
                 saveTo.Add(SettingsWindow.Section("Custom categories"));
                 saveTo.AddRange(customCategoryControls);
             }
+            saveTo.Add(SettingsWindow.Section("Favorite folders"));
+            saveTo.Add(SettingsWindow.Hint("Named folders offered first by the star button beside every folder box. A name left empty becomes the folder's own name."));
+            saveTo.Add(favoritesPanel);
+            saveTo.Add(addFavorite);
             window.AddPage("Save to", "\uE8B7", saveTo.ToArray());
             window.AddPage("Downloads", "\uE896",
                 SettingsWindow.Section("When a download finishes"), completionDialog, notify, sound, postDownload);
@@ -4218,6 +4281,12 @@ public sealed partial class MainWindow : Window
                 settings.UpdateChannel = string.IsNullOrWhiteSpace(updateChannel.Text) ? "stable" : updateChannel.Text.Trim();
                 settings.AutoCheckUpdates = autoUpdate.IsChecked == true;
                 settings.UpdateCheckIntervalHours = checkInterval;
+                var edited = favoriteRows.Where(entry => !string.IsNullOrWhiteSpace(entry.Folder.Text))
+                    .Select(entry => new FavoriteFolderDto { Name = entry.Name.Text.Trim(), Path = entry.Folder.Text.Trim() }).ToList();
+                var savedMeanwhile = (_settings?.FavoriteFolders ?? new()).Where(favorite =>
+                    !favoritesAtOpen.Contains(favorite.Path, StringComparer.OrdinalIgnoreCase) &&
+                    !edited.Any(row => string.Equals(row.Path, favorite.Path, StringComparison.OrdinalIgnoreCase)));
+                settings.FavoriteFolders = edited.Concat(savedMeanwhile).ToList();
                 settings.CategoryFolders = categoryBoxes
                     .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
                     .ToDictionary(pair => pair.Key, pair => pair.Value.Text.Trim(), StringComparer.OrdinalIgnoreCase);
@@ -4383,6 +4452,18 @@ public sealed partial class MainWindow : Window
             await ShowMessageAsync("Queue file order", result.Error ?? "Could not save the file order.");
     }
 
+    /// <summary>Saves the favorites list onto the Host's latest settings, so nothing else a client changed is undone.</summary>
+    private async Task<string?> SaveFavoritesAsync(List<FavoriteFolderDto> favorites)
+    {
+        var current = await _connection.RefreshAsync();
+        var updated = CloneSettings(current.Settings);
+        updated.FavoriteFolders = favorites;
+        var result = (await _connection.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
+        if (!result.Ok) return result.Error ?? "Couldn't save the favorites.";
+        _settings = result.Settings;
+        return null;
+    }
+
     private static SettingsDto CloneSettings(SettingsDto source)
         => new()
         {
@@ -4458,6 +4539,8 @@ public sealed partial class MainWindow : Window
             FfmpegPath = source.FfmpegPath,
             Theme = source.Theme,
             LastDestinationDirectory = source.LastDestinationDirectory,
+            RecentDestinationDirectories = new List<string>(source.RecentDestinationDirectories),
+            FavoriteFolders = source.FavoriteFolders.Select(favorite => new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path }).ToList(),
             RecentUrls = new List<string>(source.RecentUrls),
             LastUpdateCheck = source.LastUpdateCheck,
             PostDownloadCommand = source.PostDownloadCommand,

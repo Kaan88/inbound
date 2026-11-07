@@ -45,7 +45,7 @@ internal sealed class ContainerImportDialog
     private readonly ProgressRing _sendBusy = new() { IsActive = false, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
     private readonly StatusLine _sendStatus = new("JDownloader status");
     private readonly CancellationTokenSource _closing = new();
-    private readonly Grid _destinationRow;
+    private readonly UIElement _destinationRow;
     private readonly TextBox _destination;
     private readonly StatusLine _destinationError;
     private ContentDialog? _dialog;
