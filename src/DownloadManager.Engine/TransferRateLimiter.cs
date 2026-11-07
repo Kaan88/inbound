@@ -29,7 +29,9 @@ internal sealed class TransferRateLimiter(Func<long?> readLimit)
                     _lastTimestamp = now;
                 }
                 if (limit <= 0) return;
-                _creditBytes = Math.Min(_maximumBurstBytes,
+                // A wait can take far longer than asked: Windows timers tick about every 15 ms. The credit has
+                // to hold what that wait earned, or the cap falls well short with small reads, as over TLS.
+                _creditBytes = Math.Min(Math.Max(_maximumBurstBytes, limit / 10),
                     _creditBytes + (now - _lastTimestamp) * (double)limit / Stopwatch.Frequency);
                 _lastTimestamp = now;
                 if (_creditBytes >= bytes)
