@@ -130,6 +130,8 @@ public enum MockFaultKind
     Respond,
     /// <summary>Do the work and record it, then drop the connection before answering.</summary>
     AcceptThenAbort,
+    /// <summary>Do the work and record it, then wait before answering: the answer is on its way when the caller dies.</summary>
+    AcceptThenDelay,
     /// <summary>Drop the connection without doing anything.</summary>
     Abort,
     /// <summary>Wait, then carry on normally.</summary>
@@ -180,6 +182,7 @@ public sealed record MockFault(MockFaultKind Kind)
     public static MockFault Abort { get; } = new(MockFaultKind.Abort);
     public static MockFault DeadLink(string body = "This link has expired.") => new(MockFaultKind.DeadLink) { RawBody = body };
     public static MockFault Delay(TimeSpan delay) => new(MockFaultKind.Delay) { DelayFor = delay };
+    public static MockFault AcceptThenDelay(TimeSpan delay) => new(MockFaultKind.AcceptThenDelay) { DelayFor = delay };
 }
 
 /// <summary>
@@ -581,6 +584,11 @@ public sealed partial class MockTorBox
         {
             context.Abort();
             return;
+        }
+
+        if (fault?.Kind == MockFaultKind.AcceptThenDelay)
+        {
+            await Task.Delay(fault.DelayFor, context.RequestAborted).ConfigureAwait(false);
         }
 
         await WriteAsync(context, answer).ConfigureAwait(false);

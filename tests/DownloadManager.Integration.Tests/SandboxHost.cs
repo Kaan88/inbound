@@ -40,6 +40,9 @@ internal sealed partial class SandboxHost : IAsyncDisposable
     public string PipeName { get; private set; } = string.Empty;
     public int? LastExitCode { get; private set; }
 
+    /// <summary>The running Host's process id, for a test that has to kill it from another thread at an exact moment.</summary>
+    public int? ProcessId => _process?.Id;
+
     /// <summary>Every frame the Host has sent, on any connection, as text with JSON escapes undone.</summary>
     public IReadOnlyList<string> Frames
     {
