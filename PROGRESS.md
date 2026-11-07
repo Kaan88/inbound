@@ -1,5 +1,31 @@
 # Progress — session handoff
 
+### Live scenario I and the WinUI walk on the real account (2026-11-07)
+
+Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window, driven by UI Automation and the real mouse, with real pixels read after checking the window was in front. Both themes. I added only freely licensed test files and deleted them all afterwards. The account is back to its earlier counts, with an empty queue.
+
+- **I, RSDF and CCF from real inputs: passed live, through the real Import JD Container dialog.** I built an RSDF and CCF 5.0, 3.0 and 0.7-1.0 files with the app's own format code in a scratch tool outside the repo. So this shows the reader agrees with the writer. No file from other software was tried.
+  - The dialog listed each link with its kind and reasons. A direct link or a MEGA link shows its host only.
+  - An unticked link was not sent. An uncached link put nothing on the account until I approved it. A cached magnet went on without asking.
+  - Every file that arrived had the size and md5 its source publishes, or the size TorBox reports where it gives no md5.
+  - Package boxes, a package comment, a stated archive password used with no prompt, and a wrong stated password asked for on the row all worked.
+  - A real .dlc is not read locally, by the documented decision. The dialog says so and offers JDownloader. I didn't press that, and JDownloader was not started.
+- **My TorBox with the real list: passed live.** 146 items: Load more, scrolling, every column sort both ways, resize by the real mouse kept after reopening, a 292-file tree, box selection by the real mouse with Ctrl, wheel scrolling.
+- **Rows while an item processes: passed live.** Two uncached items, one per theme. "Processing on TorBox" with a note that files come later, then Downloading locally, then Completed. The main list matched. Pressing Download all while it processed made no second download.
+- **Progress details for a real provider download: passed live.** Three cached items at a speed limit. The package window, the segment table and Pause all and Resume all worked. No address is in the window. The files had 0 bad torrent pieces. The window for one file of a package was not opened during a transfer.
+- **Extraction row commands on real data: passed live, except the four that open Explorer or another app.** Those I left alone, since they open windows outside the sandbox.
+- **Fixed, all seen only with real data:**
+  - The Time left column said "1m 59s" for 59 seconds, and anything under a minute had "1m" in front. `Time_left_says_what_is_left`.
+  - A column sort in My TorBox ordered only the 50 items read so far. It now reads the rest first, and shows the first rows of the order. `A_sorted_list_reads_the_rest_of_the_account_and_stops_when_there_is_no_more`.
+  - The Files header read "F..." with the sort arrow on show.
+  - WinUI floated a shortcut's name, "Esc" or "Ctrl+N", over the windows when the pointer rested. `No_window_lets_WinUI_float_a_shortcuts_name_over_it`.
+  - After a start, rows said "From torbox" until redrawn. They now take the account's name when it arrives.
+  - Adding again what is on the list said "the destination given here weren't used. Choose its files with remote select" in the window, said "already on the list" twice, and counted it as "Added 2". The words are plain now, said once, and it says they were already on the list.
+  - A host name or a package comment ran into the next sentence in the import dialog.
+  - Each new test failed with its fix undone. Suites: Archives 293, Containers 183, Core 745, Engine 134, Integration 983, TorBox 314, all passed.
+- **For the owner, nothing changed:** 25 of 165 items have an Expires date in the past and are still cached, and a link was still given for one. The column shows the old date with no hint. In the package window, the segment table needs a scroll when the archive password panel is on show.
+- **Bearing on the add flow, nothing built:** A container magnet or folder link stops at "Choose the files", and the dialog's "Close this and choose" shows while another row still processes. An approved web link reads "Checking TorBox" for about 65 s while it waits its turn. A folder link to a one-file web item still asks for a file choice. Re-adding with another folder doesn't use the folder.
+
 ### Live scenarios F, G and H, with TB.F6 and TB.F7 on real data (2026-11-07)
 
 Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window read through UI Automation. I added only freely licensed test files and one link of the owner's, and deleted all of it afterwards. The account is back to its earlier counts, with an empty queue.
