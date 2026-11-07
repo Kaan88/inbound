@@ -39,6 +39,18 @@
 - Evidence: `RuntimeArchiveTests`, `RuntimeArchiveReviewTests`, `RemoteJobRulesTests`, `ArchiveRowsTests`. Status: **unverified in the live UI**.
 
 
+### Owner's first try of TorBox in a sandbox copy (2026-11-07)
+
+Build: snapshot `f6aebae`, from `feature/torbox-integration` plus `torbox-winui` at `e5a4113`, real TorBox, the owner's own account. Tracked as ROADMAP TB.F1 to TB.F9. Causes are not traced yet, so the wording below is what the owner reported.
+
+**Worked, owner-reported, not acceptance evidence:** TorBox's own links; browsing files; a mega link through caching, downloading and extraction, "pretty much perfectly"; extraction from a direct TorBox link. Live scenarios A to J are still not run as a set.
+
+**Quota wording, corrected.** The app says fetching "uses your account's quota" or "may count against your limits". The owner says there isn't really a quota and asked for the source. There is none for that claim: it was an assumption stated as fact. The brief mentions quotas only in general terms (failure causes, testing care) and asks for confirmation before submitting uncached content. The API research shows a 300 request rate limit and per-hoster daily limits, nothing saying a fetch uses up an account quota.
+
+**Live tests (owner, 2026-11-07):** allowed unattended, including adding, caching, magnets, torrents and deleting from the TorBox account: "files there don't matter if deleted". Local files, the installed app, pushing and releasing are not covered.
+
+**Add flow (owner, 2026-11-07):** TB.F10 waits for the owner's answer on the proposal, which is local at `notes-local/add-flow-proposal-2026-11-07.md`. Everything else continues. Questions for the owner: is the proposal right overall; should a line above the list appear when two or more items wait (recommended yes); and should hoster links clicked in Chrome go straight to TorBox (recommended yes) or wait like copied links.
+
 ### Open for the owner (recorded 2026-11-06, for later)
 
 - **Chrome Web Store:** submitted by the owner on 2026-11-06 (Item ID `olhbcdbjdnfoiinllnlpandggadfabfm`). Once approved, install from the store and check it connects to the app. See ROADMAP EXT.S2.
