@@ -63,7 +63,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.DoesNotContain(Secret, run.StateText());
     }
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Rar4PasswordsWorkAndAWrongOneIsReportedAsSuch(bool encryptedHeaders)
@@ -83,7 +83,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task APasswordGivenBeforeTheFileExistsIsUsedWhenItArrives()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -101,7 +101,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task APackagePasswordCoversItsSetsAndOneThatRefusesItStillAsks()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -305,7 +305,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(1, run.Archives.List().Single().Attempts);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AnOldStyleSetArrivingBackToFrontWaitsAndExtractsOnce()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -335,7 +335,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Single(run.Archives.List());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ALastVolumeOnlyTheToolKnowsIsMissingIsNamedAndARealDownloadOfItRunsTheSet()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -356,7 +356,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AGapInTheNamesIsNamedAndNothingRunsUntilItIsFilled()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -377,7 +377,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AFailedVolumeLeavesTheSetWaitingAndItsRetryRunsIt()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -398,7 +398,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task APackageThatFinishedWhileNothingListenedIsPickedUpOnceAtTheNextStart()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -422,7 +422,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TwoRequestsAtOnceClaimOneSetOnce()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -445,7 +445,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
     /// A kill at every save the coordinator makes, from the first record to the last, with archive
     /// deletion on so every step exists. Whatever the moment, the next start ends in one good copy.
     /// </summary>
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AKillAtEveryDurableStepRecoversToExactlyOneCopy()
     {
         var reached = 0;
@@ -480,13 +480,13 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Fail("The run never finished within the steps tried.");
     }
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [InlineData("rename")]
     [InlineData("overwrite")]
     [InlineData("skip")]
     public async Task AKillBetweenTwoMovesIsUndoneSoNoPolicyDuplicatesOutput(string policy)
     {
-        var inner = new UnrarExtractor(new UnrarExtractorOptions { ToolPath = ArchiveTools.UnrarPath });
+        var inner = new SevenZipExtractor(new SevenZipExtractorOptions { ToolPath = ArchiveTools.SevenZipPath });
         FreezableStore? store = null;
         CrashingExtractor? crash = null;
         var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => crash! };
@@ -516,10 +516,10 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(policy == "overwrite" ? Text : UserText, File.ReadAllBytes(run.PathOf("mine.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AKillAfterSuccessIsRecordedKeepsTheOutputAndFinishesTheCleanup()
     {
-        var inner = new UnrarExtractor(new UnrarExtractorOptions { ToolPath = ArchiveTools.UnrarPath });
+        var inner = new SevenZipExtractor(new SevenZipExtractorOptions { ToolPath = ArchiveTools.SevenZipPath });
         FreezableStore? store = null;
         CrashingExtractor? crash = null;
         var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => crash! };
@@ -544,10 +544,10 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Empty(run.StagingFolders());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AKillDuringExtractionWipesStagingGoesBackToWaitingAndRunsAgain()
     {
-        var inner = new UnrarExtractor(new UnrarExtractorOptions { ToolPath = ArchiveTools.UnrarPath });
+        var inner = new SevenZipExtractor(new SevenZipExtractorOptions { ToolPath = ArchiveTools.SevenZipPath });
         FreezableStore? store = null;
         CrashingExtractor? crash = null;
         var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => crash! };
@@ -560,7 +560,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
             report => report is { Phase: ExtractionPhase.Extracting, Percent: 0 },
             atCrash: () =>
             {
-                // What a killed UnRAR leaves: the file at its full size, with a tail of zeros.
+                // What a killed extractor leaves: the file at its full size, with a tail of zeros.
                 var staging = Assert.Single(run.StagingFolders());
                 File.WriteAllBytes(Path.Combine(staging, "payload", "data.txt"), new byte[Text.Length]);
                 seenExtracting = run.Archives.List().Single().State == "extracting";
@@ -592,9 +592,9 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         var killed = 0;
         var options = new ArchiveCoordinatorOptions
         {
-            ExtractorFactory = _ => new UnrarExtractor(new UnrarExtractorOptions
+            ExtractorFactory = _ => new SevenZipExtractor(new SevenZipExtractorOptions
             {
-                ToolPath = ArchiveTools.UnrarPath,
+                ToolPath = ArchiveTools.SevenZipPath,
                 ToolStarted = process =>
                 {
                     if (process.StartInfo.ArgumentList[0] == "x" && Interlocked.Exchange(ref killed, 1) == 0)
@@ -623,7 +623,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ACleanHostStopDuringExtractionLeavesItWaitingToRunAgain()
     {
         var fake = new FakeExtractor { HoldUntilCancelled = true };
@@ -645,7 +645,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ARestartWhileVolumesAreStillComingKeepsWaitingAndRunsWhenTheyArrive()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -667,7 +667,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
     // ----- Cancel, retry, remove -----
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task CancelStopsTheRunKeepsTheArchiveAndOnlyARetryStartsItAgain()
     {
         var fake = new FakeExtractor { HoldUntilCancelled = true };
@@ -697,9 +697,9 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         ArchiveHarness? started = null;
         var options = new ArchiveCoordinatorOptions
         {
-            ExtractorFactory = _ => new UnrarExtractor(new UnrarExtractorOptions
+            ExtractorFactory = _ => new SevenZipExtractor(new SevenZipExtractorOptions
             {
-                ToolPath = ArchiveTools.UnrarPath,
+                ToolPath = ArchiveTools.SevenZipPath,
                 ToolStarted = process =>
                 {
                     if (process.StartInfo.ArgumentList[0] != "x") return;
@@ -724,7 +724,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Empty(run.StagingFolders());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task RemoveForgetsTheRecordAndItsPasswordAndNoFile()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -752,7 +752,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await run.WaitForFailureAsync("passwordRequired");
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ARunningSetCannotBeRemoved()
     {
         var fake = new FakeExtractor { HoldUntilCancelled = true };
@@ -766,7 +766,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Single(run.Archives.List());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ARemovedDownloadTakesAnUnaskedSetWithIt()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -827,7 +827,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(!deleteFiles, File.Exists(run.PathOf("w.part1.rar")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AFinishedSetGoesWithItsLastDownloadAndWhatItExtractedStays()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -934,7 +934,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         { "hardlink", RarBuilder.Rar5Raw(RarBuilder.Rar5Link("hard", 4, "other.txt")) },
     };
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [MemberData(nameof(HostileArchives))]
     public async Task UnsafeEntriesAreRefusedAndNothingIsWritten(string name, byte[] bytes)
     {
@@ -951,7 +951,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(run.Root)!, "up.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ACorruptedArchiveIsReportedAndKept()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -971,7 +971,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
     [InlineData(ExtractionFailureKind.MissingVolume, "missingVolume", "Missing volume", false)]
     [InlineData(ExtractionFailureKind.Corrupted, "corrupted", "Corrupted archive", false)]
     [InlineData(ExtractionFailureKind.UnsupportedVersion, "unsupportedVersion", "Unsupported archive version", false)]
-    [InlineData(ExtractionFailureKind.ToolUnavailable, "toolUnavailable", "UnRAR unavailable", false)]
+    [InlineData(ExtractionFailureKind.ToolUnavailable, "toolUnavailable", "7-Zip missing", false)]
     [InlineData(ExtractionFailureKind.DiskSpace, "diskSpace", "Not enough disk space", false)]
     [InlineData(ExtractionFailureKind.Permission, "permission", "Permission refused", false)]
     [InlineData(ExtractionFailureKind.UnsafePath, "unsafePath", "Unsafe archive", false)]
@@ -992,7 +992,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
     // ----- Settings: each one has to change what happens -----
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [InlineData("rename", "from the archive")]
     [InlineData("overwrite", "from the archive")]
     [InlineData("skip", "the user's own file")]
@@ -1025,7 +1025,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         }
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AnOverwriteNextToTheArchiveCannotReplaceTheArchive()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1040,7 +1040,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("self (1).rar")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TheDestinationSettingDecidesWhereFilesGo()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1069,7 +1069,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Empty(Directory.EnumerateDirectories(chosen));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TurningOffFolderStructureFlattensTheOutput()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1082,7 +1082,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(["a.txt", "b.txt", "tree.rar"], run.AllFiles());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task KeepingFolderStructureIsTheDefault()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1094,7 +1094,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.True(File.Exists(run.PathOf(@"deep\down\a.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task ArchivesAreDeletedOnlyWhenAskedAndOnlyAfterSuccessAndOnlyTheirOwn()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1124,7 +1124,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Hash(payload), Hash(File.ReadAllBytes(run.PathOf("big.bin"))));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AnArchiveIsKeptWhenItHoldsAFileThatWasSkipped()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1140,7 +1140,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Contains("kept", done.Note);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AutoExtractIsOffByDefaultAndAFinishedDownloadJustSaysDownloaded()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1158,7 +1158,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(["plain.rar"], run.AllFiles());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TurningAutoExtractOnRunsWhatFinishesNextAndNotWhatFinishedBefore()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1177,7 +1177,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal("downloaded", run.Archives.List().Single(set => set.Name == "before").State);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task FilesFromBeforeThisFeatureRanStayOutOfTheListUntilAskedFor()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1198,7 +1198,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await run.WaitForStateAsync("completed");
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task SettingsSurviveARestartAndAnOptionsSave()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1206,7 +1206,6 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         var updated = await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate
         {
             AutoExtract = true,
-            UnrarPath = ArchiveTools.UnrarPath,
             Destination = "folder",
             Folder = folder,
             PreserveFolders = false,
@@ -1222,7 +1221,6 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
         var settings = run.Archives.GetSettings().Settings;
         Assert.True(settings.AutoExtract);
-        Assert.Equal(ArchiveTools.UnrarPath, settings.UnrarPath);
         Assert.Equal("folder", settings.Destination);
         Assert.Equal(folder, settings.Folder);
         Assert.False(settings.PreserveFolders);
@@ -1231,68 +1229,54 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
     }
 
     [Theory]
-    [InlineData("relative\\unrar.exe", null, null)]
-    [InlineData("C:\\tools\\unrar.txt", null, null)]
-    [InlineData(null, "somewhere", null)]
-    [InlineData(null, null, "sideways")]
-    public async Task BadSettingsAreRefusedAndChangeNothing(string? tool, string? destination, string? conflict)
+    [InlineData("somewhere", null, null)]
+    [InlineData(null, "sideways", null)]
+    [InlineData("folder", null, "relative\\folder")]
+    public async Task BadSettingsAreRefusedAndChangeNothing(string? destination, string? conflict, string? folder)
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
         var before = JsonSerializer.Serialize(run.Archives.GetSettings().Settings);
 
-        var result = await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { UnrarPath = tool, Destination = destination, ConflictPolicy = conflict });
+        var result = await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { Destination = destination, ConflictPolicy = conflict, Folder = folder });
 
         Assert.False(result.Ok);
         Assert.False(string.IsNullOrEmpty(result.Error));
         Assert.Equal(before, JsonSerializer.Serialize(run.Archives.GetSettings().Settings));
     }
 
-    [UnrarFact]
-    public async Task TheUnrarPathSettingDecidesWhichToolRunsAndTheStatusTellsTheTruth()
+    [SevenZipFact]
+    public async Task WithoutTheBundled7ZipExtractionFailsPlainlyAndTheStatusSaysSo()
     {
-        // Looks nowhere else, so what the setting says is all there is.
-        var options = new ArchiveCoordinatorOptions { ProgramFilesDirectories = [], PathVariable = string.Empty };
+        var options = new ArchiveCoordinatorOptions { SevenZipPath = Path.Combine(Path.GetTempPath(), "inbound-no-7zip", "7z.exe") };
         await using var run = await ArchiveHarness.StartAsync(_server, options, useMachineTool: true);
 
         var none = run.Archives.GetSettings().Tool;
         Assert.False(none.Found);
-        Assert.Contains("not found", none.Message);
+        Assert.Contains("missing", none.Message);
 
         var archive = run.WriteFile("once.rar", OneFileRar());
         await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = archive });
         var failed = await run.WaitForFailureAsync("toolUnavailable");
-        Assert.Contains("UnRAR", failed.FailureMessage);
+        Assert.Contains("7-Zip", failed.FailureMessage);
+        Assert.Equal(["once.rar"], run.AllFiles());
+    }
 
-        var absent = (await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { UnrarPath = Path.Combine(run.Root, "nothing.exe") })).Tool;
-        Assert.False(absent.Found);
-        Assert.False(absent.ConfiguredPathFound);
-        Assert.Contains("does not exist", absent.Message);
+    [SevenZipFact]
+    public async Task TheBundled7ZipIsFoundAndExtracts()
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server, useMachineTool: true);
+        var tool = run.Archives.GetSettings().Tool;
+        Assert.True(tool.Found);
+        Assert.Equal(ArchiveTools.SevenZipPath, tool.Path);
+        Assert.Contains("7-Zip", tool.Message);
 
-        var copy = Path.Combine(run.Root, "my tools", "MyUnrar.exe");
-        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
-        File.Copy(ArchiveTools.UnrarPath, copy);
-        var chosen = (await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { UnrarPath = copy })).Tool;
-        Assert.True(chosen.Found);
-        Assert.True(chosen.ConfiguredPathFound);
-        Assert.Equal(copy, chosen.Path);
-
-        await run.Archives.RetryAsync(failed.Id);
+        var archive = run.WriteFile("once.rar", OneFileRar());
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = archive });
         await run.WaitForStateAsync("completed");
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
     }
 
-    [UnrarFact]
-    public async Task TheDefaultToolIsFoundOnTheMachineAndReportedAsSuch()
-    {
-        await using var run = await ArchiveHarness.StartAsync(_server, useMachineTool: true);
-        var tool = run.Archives.GetSettings().Tool;
-
-        Assert.True(tool.Found);
-        Assert.Null(tool.ConfiguredPath);
-        Assert.Contains(tool.Path!, tool.Message);
-    }
-
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TooLittleDiskSpaceStopsTheRunBeforeAnythingIsWritten()
     {
         var options = new ArchiveCoordinatorOptions { AvailableBytes = _ => 16 };
@@ -1306,7 +1290,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(0, run.ToolRuns);
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task TheLimitsOnAnArchiveAreApplied()
     {
         var options = new ArchiveCoordinatorOptions { Limits = new ExtractionLimits { MaxEntries = 1 } };
@@ -1322,7 +1306,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
     // ----- What it claims -----
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task AnOrdinarySingleRarExtractsThroughAnExplicitRequestByJob()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1339,7 +1323,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Equal(Text, File.ReadAllBytes(run.PathOf("data.txt")));
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task OtherFormatsAreNeverClaimed()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1363,7 +1347,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Empty(run.Archives.List());
     }
 
-    [UnrarFact]
+    [SevenZipFact]
     public async Task APathThatIsNotAbsoluteOrNotThereIsRefused()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);
@@ -1376,7 +1360,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.False((await run.Archives.ExtractAsync(new ArchiveExtractRequest())).Ok);
     }
 
-    [UnrarTheory]
+    [SevenZipTheory]
     [InlineData(1, 1)]
     [InlineData(2, 2)]
     public async Task ExtractionsAreBoundedOneAtATimeByDefault(int limit, int expectedPeak)

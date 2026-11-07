@@ -43,8 +43,6 @@ public sealed class ArchiveSettings
     /// <summary>When this feature first ran. Older downloads are history and appear only when asked for by name.</summary>
     public DateTimeOffset TrackSince { get; set; }
 
-    public string? UnrarPath { get; set; }
-
     public ArchiveDestinationMode DestinationMode { get; set; } = ArchiveDestinationMode.NextToArchive;
 
     public string? ChosenFolder { get; set; }

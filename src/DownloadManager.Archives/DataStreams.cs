@@ -13,7 +13,7 @@ internal static class DataStreams
 
     /// <summary>
     /// The first stream that should not be there, or null. The zone mark is expected only when the archive itself has
-    /// one, because then -om has just written it. Any other copy came out of the archive and says what the archive wants it to.
+    /// one, because then extraction has just written it. Any other copy came out of the archive and says what the archive wants it to.
     /// </summary>
     public static string? FindUnexpected(string path, bool zoneAllowed)
     {
@@ -27,6 +27,34 @@ internal static class DataStreams
 
         return null;
     }
+
+    /// <summary>The ZoneId in a file's mark of the web, or null when it has none or it can't be read.</summary>
+    public static int? ReadZoneId(string path)
+    {
+        if (!OperatingSystem.IsWindows() || !HasZoneIdentifier(path)) return null;
+        try
+        {
+            foreach (var line in File.ReadAllLines(path + ":Zone.Identifier"))
+            {
+                var text = line.Trim();
+                if (text.StartsWith("ZoneId=", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(text["ZoneId=".Length..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var zone))
+                {
+                    return zone;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // Unreadable counts as none.
+        }
+
+        return null;
+    }
+
+    /// <summary>Marks a file as coming from a zone, without the addresses the archive's own mark may carry.</summary>
+    public static void WriteZone(string path, int zoneId) =>
+        File.WriteAllText(path + ":Zone.Identifier", "[ZoneTransfer]" + Environment.NewLine + $"ZoneId={zoneId}" + Environment.NewLine);
 
     public static bool HasZoneIdentifier(string path) =>
         Named(path).Any(stream => string.Equals(stream, ZoneIdentifier, StringComparison.OrdinalIgnoreCase));

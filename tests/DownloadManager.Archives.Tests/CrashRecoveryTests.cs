@@ -30,7 +30,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         RestoreWorld(saved, Space.Root);
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ACrashMidFinalizeIsUndoneSoARetryUnderRenameWritesNoSecondCopy()
     {
         var archive = BuildThreeFiles();
@@ -57,7 +57,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
             Directory.EnumerateFiles(Space.Destination).Select(file => Path.GetFileName(file)!).Order(StringComparer.Ordinal));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ACrashMidOverwritePutsTheOriginalBack()
     {
         var archive = BuildThreeFiles();
@@ -74,7 +74,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Assert.False(File.Exists(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ALineACrashCutShortDoesNotStopRecovery()
     {
         var archive = BuildThreeFiles();
@@ -87,7 +87,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Assert.Empty(Directory.EnumerateFiles(Space.Destination));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AFailedCommitTakesThePlacedFilesBackOut()
     {
         var archive = BuildThreeFiles();
@@ -112,7 +112,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Space.AssertNoStagingLeft();
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task ACommitRunsOnceTheFilesAreInPlaceAndThenStagingGoes()
     {
         var archive = BuildThreeFiles();
@@ -135,7 +135,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Space.AssertNoStagingLeft();
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task DiscardingAFinishedAttemptLeavesItsFiles()
     {
         var archive = BuildThreeFiles();
@@ -148,7 +148,7 @@ public sealed class CrashRecoveryTests : ExtractionTestBase
         Assert.True(File.Exists(Space.Output("a.txt")));
     }
 
-    [RequiresUnrarFact]
+    [RequiresSevenZipFact]
     public async Task AnOverwriteDoesNotReplaceAFileItWasToldToKeep()
     {
         var bytes = RarBuilder.Rar5(("self.rar", Content), ("other.txt", Content));

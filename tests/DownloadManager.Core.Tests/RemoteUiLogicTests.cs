@@ -282,48 +282,14 @@ public sealed class RemoteTextTests
     }
 
     [Fact]
-    public void AToolThatIsFoundShowsTheHostsWords()
+    public void TheToolStatusIsTheHostsWords()
     {
-        var (text, problem) = RemoteText.ToolStatus(new ArchiveToolStatusDto { Found = true, Path = "C:\\u.exe", Message = "Using the UnRAR found at C:\\u.exe." }, null);
+        var found = RemoteText.ToolStatus(new ArchiveToolStatusDto { Found = true, Path = "C:\\x\\7z.exe", Message = "Extraction uses the 7-Zip that comes with Inbound." });
+        Assert.Equal(("Extraction uses the 7-Zip that comes with Inbound.", false), found);
 
-        Assert.Equal("Using the UnRAR found at C:\\u.exe.", text);
-        Assert.False(problem);
-    }
-
-    [Fact]
-    public void NoToolSaysWhatToDo()
-    {
-        var (text, problem) = RemoteText.ToolStatus(new ArchiveToolStatusDto { Message = "UnRAR was not found. Install WinRAR or set the path to UnRAR.exe." }, string.Empty);
-
-        Assert.True(problem);
-        Assert.Contains("Install WinRAR", text);
-        Assert.Contains("can't run", text);
-    }
-
-    [Fact]
-    public void AChosenPathThatIsGoneIsAProblemEvenWithAnotherCopyInUse()
-    {
-        var (text, problem) = RemoteText.ToolStatus(new ArchiveToolStatusDto
-        {
-            Found = true,
-            ConfiguredPath = "C:\\gone.exe",
-            ConfiguredPathFound = false,
-            Message = "The chosen UnRAR path does not exist, so the UnRAR at C:\\u.exe is used instead.",
-        }, "C:\\gone.exe");
-
-        Assert.True(problem);
-        Assert.Contains("C:\\u.exe is used instead", text);
-        Assert.Contains("Choose UnRAR.exe again", text);
-    }
-
-    [Fact]
-    public void ATypedPathIsNotClaimedToBeFoundBeforeTheHostLooks()
-    {
-        var tool = new ArchiveToolStatusDto { Found = true, ConfiguredPath = "C:\\u.exe", ConfiguredPathFound = true, Message = "Using the chosen UnRAR at C:\\u.exe." };
-
-        Assert.Contains("hasn't been checked", RemoteText.ToolStatus(tool, "D:\\other.exe").Text);
-        Assert.Contains("look", RemoteText.ToolStatus(tool, "  ").Text);
-        Assert.Contains("Using the chosen", RemoteText.ToolStatus(tool, "c:\\U.exe").Text);
+        var missing = RemoteText.ToolStatus(new ArchiveToolStatusDto { Message = "The bundled 7-Zip is missing. Repair or reinstall Inbound." });
+        Assert.True(missing.IsProblem);
+        Assert.Contains("reinstall", missing.Text);
     }
 }
 
@@ -332,7 +298,6 @@ public sealed class ArchiveFormTests
     private static ArchiveSettingsDto Saved() => new()
     {
         AutoExtract = false,
-        UnrarPath = "C:\\WinRAR\\UnRAR.exe",
         Destination = "nextToArchive",
         Folder = "D:\\Out",
         PreserveFolders = true,
@@ -348,7 +313,6 @@ public sealed class ArchiveFormTests
         var form = ArchiveForm.FromSettings(new ArchiveSettingsDto
         {
             AutoExtract = true,
-            UnrarPath = null,
             Destination = "folder",
             Folder = "D:\\Out",
             PreserveFolders = false,
@@ -356,7 +320,7 @@ public sealed class ArchiveFormTests
             DeleteArchives = true,
         });
 
-        Assert.Equal(new ArchiveFormValues(true, string.Empty, 2, "D:\\Out", false, 2, true), form);
+        Assert.Equal(new ArchiveFormValues(true, 2, "D:\\Out", false, 2, true), form);
     }
 
     [Fact]
@@ -382,8 +346,6 @@ public sealed class ArchiveFormTests
 
         Assert.NotNull(update);
         Assert.True(update.AutoExtract);
-        Assert.Null(update.UnrarPath);
-        Assert.False(update.ClearUnrarPath);
         Assert.Null(update.Destination);
         Assert.Null(update.Folder);
         Assert.Null(update.PreserveFolders);
@@ -396,7 +358,6 @@ public sealed class ArchiveFormTests
     {
         var update = ArchiveForm.Changes(Saved(), Form() with
         {
-            UnrarPath = " D:\\tools\\UnRAR.exe ",
             DestinationIndex = 1,
             PreserveFolders = false,
             ConflictIndex = 1,
@@ -404,31 +365,10 @@ public sealed class ArchiveFormTests
         }, out _);
 
         Assert.NotNull(update);
-        Assert.Equal("D:\\tools\\UnRAR.exe", update.UnrarPath);
         Assert.Equal("subfolder", update.Destination);
         Assert.False(update.PreserveFolders);
         Assert.Equal("overwrite", update.ConflictPolicy);
         Assert.True(update.DeleteArchives);
-    }
-
-    [Fact]
-    public void EmptyingThePathGoesBackToLookingForIt()
-    {
-        var update = ArchiveForm.Changes(Saved(), Form() with { UnrarPath = "  " }, out _);
-
-        Assert.NotNull(update);
-        Assert.True(update.ClearUnrarPath);
-        Assert.Null(update.UnrarPath);
-    }
-
-    [Theory]
-    [InlineData("UnRAR.exe")]
-    [InlineData("C:\\WinRAR\\UnRAR.bat")]
-    [InlineData("..\\UnRAR.exe")]
-    public void APathThatCanNotBeAProgramIsRefusedBeforeSending(string path)
-    {
-        Assert.Null(ArchiveForm.Changes(Saved(), Form() with { UnrarPath = path }, out var error));
-        Assert.Contains("full path", error);
     }
 
     [Fact]

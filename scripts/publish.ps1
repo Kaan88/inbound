@@ -157,7 +157,10 @@ $required = @(
     "DownloadManager.Desktop.WinUI.pri",
     "app.ico",
     "DownloadManager.NativeHost.exe",
-    "DownloadManager.Cli.exe"
+    "DownloadManager.Cli.exe",
+    "tools\7-Zip\7z.exe",
+    "tools\7-Zip\7z.dll",
+    "tools\7-Zip\License.txt"
 )
 foreach ($file in $required) {
     if (-not (Test-Path (Join-Path $Output $file))) {

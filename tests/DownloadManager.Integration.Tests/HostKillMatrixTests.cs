@@ -372,7 +372,7 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
 
     /// <summary>
     /// A split archive and a file beside it, from the provider, extracted by itself with the archives
-    /// set to go afterwards. Killed once while UnRAR runs and once the moment the first volume is
+    /// set to go afterwards. Killed once while 7-Zip runs and once the moment the first volume is
     /// deleted. The kill during the run leaves no completed record; the next Host runs it again;
     /// the kill during the deletes is finished by the next Host; the file beside it stays; and no
     /// download is fetched again or failed for its file being gone.
@@ -404,19 +404,19 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
             Selection = "all",
         })).Job!;
 
-        // The first kill, with UnRAR busy.
-        var before = Process.GetProcessesByName("UnRAR").Select(process => process.Id).ToHashSet();
+        // The first kill, with 7-Zip busy.
+        var before = Process.GetProcessesByName("7z").Select(process => process.Id).ToHashSet();
         await Until(() => connection.Events.Any(message => message.Type == ArchiveMessageTypes.Changed &&
             message.GetPayload<ArchiveChangedDto>().Set is { State: "extracting", Phase: "extracting" or "verifying" or "finalizing" }) &&
-            Process.GetProcessesByName("UnRAR").Any(process => !before.Contains(process.Id)), "UnRAR to be running", 120);
+            Process.GetProcessesByName("7z").Any(process => !before.Contains(process.Id)), "7-Zip to be running", 120);
         var linksAfterDownload = Mock.IssuedLinks.Count;
         var phase = connection.Events.Where(message => message.Type == ArchiveMessageTypes.Changed).Select(message => message.GetPayload<ArchiveChangedDto>().Set).Last(dto => dto is not null)!;
         long bigSoFar;
         try { bigSoFar = Directory.EnumerateFiles(host.Destination, "big.bin", SearchOption.AllDirectories).Sum(path => new FileInfo(path).Length); }
         catch (IOException) { bigSoFar = -1; }
         await host.KillAsync();
-        output.WriteLine($"Killed during extraction with UnRAR running, at phase {phase.Phase}, {phase.Percent}%, {bigSoFar} bytes of big.bin written so far.");
-        await Until(() => !Process.GetProcessesByName("UnRAR").Any(process => !before.Contains(process.Id)), "UnRAR to go with the Host", 10);
+        output.WriteLine($"Killed during extraction with 7-Zip running, at phase {phase.Phase}, {phase.Percent}%, {bigSoFar} bytes of big.bin written so far.");
+        await Until(() => !Process.GetProcessesByName("7z").Any(process => !before.Contains(process.Id)), "7-Zip to go with the Host", 10);
         var setFile = Assert.Single(Directory.GetFiles(Path.Combine(host.DataDirectory, "archive", "sets"), "*.json"));
         Assert.NotEqual("completed", await SavedStateAsync(setFile));
 

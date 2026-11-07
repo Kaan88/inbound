@@ -131,32 +131,9 @@ internal static partial class RemoteText
         return $"{name} accepted this key.";
     }
 
-    /// <summary>Says whether UnRAR is there and, when it isn't, what to do. A path not saved yet hasn't been looked at.</summary>
-    public static (string Text, bool IsProblem) ToolStatus(ArchiveToolStatusDto tool, string? typedPath)
-    {
-        var typed = typedPath?.Trim() ?? string.Empty;
-        var saved = tool.ConfiguredPath?.Trim() ?? string.Empty;
-        if (!string.Equals(typed, saved, StringComparison.OrdinalIgnoreCase))
-        {
-            return typed.Length == 0
-                ? ("Select Apply to go back to looking for UnRAR on this computer.", false)
-                : ("This path hasn't been checked yet. Select Apply to check it.", false);
-        }
-
-        // The Host's words say which copy is in use, or that there is none.
-        var words = UrlRedactor.RedactText(tool.Message);
-        if (!tool.Found)
-        {
-            var next = saved.Length == 0
-                ? "Extraction can't run until then."
-                : "Choose UnRAR.exe again, or install WinRAR and empty this box to look for it on this computer. Extraction can't run until then.";
-            return ($"{words} {next}", true);
-        }
-
-        return saved.Length > 0 && !tool.ConfiguredPathFound
-            ? ($"{words} Choose UnRAR.exe again, or empty this box to stop asking for that path.", true)
-            : (words, false);
-    }
+    /// <summary>Says whether the bundled 7-Zip is there, in the Host's words, which are about the Host's copy.</summary>
+    public static (string Text, bool IsProblem) ToolStatus(ArchiveToolStatusDto tool)
+        => (UrlRedactor.RedactText(tool.Message), !tool.Found);
 
     private static string Day(DateTimeOffset value, IFormatProvider culture)
         => value.ToLocalTime().ToString("D", culture);

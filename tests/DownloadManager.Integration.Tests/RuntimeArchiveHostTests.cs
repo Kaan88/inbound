@@ -265,7 +265,7 @@ public sealed class RuntimeArchiveHostTests
     private static readonly byte[] Text = Encoding.ASCII.GetBytes("from the archive");
 
     /// <summary>
-    /// The password crosses a real pipe from a client to a real Host and on to UnRAR. Whatever comes
+    /// The password crosses a real pipe from a client to a real Host and on to 7-Zip. Whatever comes
     /// back, and whatever lands on disk, it must not be there. The only frame allowed to hold it is
     /// the request this client itself sent, which is not read here.
     /// </summary>
@@ -345,7 +345,7 @@ public sealed class RuntimeArchiveHostTests
         var status = await host.CliAsync(null, "archive", "status");
         Assert.Equal(0, status.Code);
         Assert.Contains("auto-extract: off", status.Output);
-        Assert.Contains("UnRAR", status.Output);
+        Assert.Contains("extractor: ", status.Output);
 
         var settings = await host.CliAsync(null, "archive", "settings", "--conflict", "skip", "--auto-extract", "on", "--archives", "keep", "--preserve-folders", "on", "--destination", "next");
         Assert.Equal(0, settings.Code);
@@ -407,7 +407,7 @@ public sealed class RuntimeArchiveHostTests
     }
 
     /// <summary>
-    /// The real thing: UnRAR busy, the Host killed. The tool dies with it, the next Host wipes
+    /// The real thing: 7-Zip busy, the Host killed. The tool dies with it, the next Host wipes
     /// staging and runs the set again, and exactly one copy of everything comes out.
     /// </summary>
     [ArchiveHostFact]
@@ -423,7 +423,7 @@ public sealed class RuntimeArchiveHostTests
         var archive = Path.Combine(host.Downloads, "huge.rar");
         await File.WriteAllBytesAsync(archive, built["huge.rar"]);
 
-        var before = Process.GetProcessesByName("UnRAR").Select(process => process.Id).ToHashSet();
+        var before = Process.GetProcessesByName("7z").Select(process => process.Id).ToHashSet();
         var asked = await host.RequestAsync<ArchiveExtractResult>(ArchiveMessageTypes.Extract, new ArchiveExtractRequest { FilePath = archive });
         Assert.True(asked.Ok, asked.Error);
 
@@ -437,9 +437,9 @@ public sealed class RuntimeArchiveHostTests
         await host.KillAsync();
 
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
-        while (Process.GetProcessesByName("UnRAR").Any(process => !before.Contains(process.Id)))
+        while (Process.GetProcessesByName("7z").Any(process => !before.Contains(process.Id)))
         {
-            Assert.True(DateTimeOffset.UtcNow < deadline, "UnRAR kept running after the Host died.");
+            Assert.True(DateTimeOffset.UtcNow < deadline, "7-Zip kept running after the Host died.");
             await Task.Delay(50);
         }
 

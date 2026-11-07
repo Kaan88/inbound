@@ -93,7 +93,7 @@ public sealed record ArchiveProbe
     /// <summary>Empty when <see cref="HeadersEncrypted"/> is set and no password was given.</summary>
     public required IReadOnlyList<ArchiveEntry> Entries { get; init; }
 
-    /// <summary>Format version as the tool states it, such as <c>5</c>. Crafted RAR4 files can state <c>1.5</c>.</summary>
+    /// <summary>The format as 7-Zip names it, such as <c>Rar5</c>, <c>Rar</c> for RAR4, <c>7z</c> or <c>zip</c>.</summary>
     public required string Version { get; init; }
 
     public required bool IsVolume { get; init; }

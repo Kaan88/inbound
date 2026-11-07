@@ -8,7 +8,7 @@ namespace DownloadManager.Archives;
 
 internal sealed record ToolInvocation(string ToolPath, IReadOnlyList<string> Arguments)
 {
-    /// <summary>Written once, then cleared. Stdin is closed either way, because an open one hangs UnRAR at a prompt.</summary>
+    /// <summary>Written once, then cleared. Stdin is closed either way, because an open one hangs the tool at a prompt.</summary>
     public byte[]? StandardInput { get; init; }
 
     /// <summary>Characters of stdout to keep. Null keeps only a tail, for a run whose output is read as it arrives.</summary>
@@ -27,7 +27,7 @@ internal sealed record ToolRun(int ExitCode, string Output, string Errors);
 /// Runs the tool with an argument list and no shell. Both pipes are always drained and only a
 /// bounded amount is kept, so a noisy process can neither hang on a full pipe nor grow memory.
 /// </summary>
-internal static class UnrarProcess
+internal static class ToolProcess
 {
     private const int TailCharacters = 32 * 1024;
     private static readonly TimeSpan PumpGrace = TimeSpan.FromSeconds(5);
@@ -58,7 +58,7 @@ internal static class UnrarProcess
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or FileNotFoundException)
         {
             if (invocation.StandardInput is { } unused) CryptographicOperations.ZeroMemory(unused);
-            throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, $"UnRAR could not be started: {exception.GetType().Name}.");
+            throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, $"The extractor could not be started: {exception.GetType().Name}.");
         }
 
         // If this process dies, the tool goes with it. Left running it would keep writing into a
@@ -92,7 +92,7 @@ internal static class UnrarProcess
 
                 if (!exited.IsCompleted && Stopwatch.GetElapsedTime(Volatile.Read(ref lastActivity)) > invocation.StallTimeout)
                 {
-                    throw new ExtractionException(ExtractionFailureKind.Unknown, $"UnRAR produced no output for {invocation.StallTimeout.TotalSeconds:0} seconds and was stopped.");
+                    throw new ExtractionException(ExtractionFailureKind.Unknown, $"The extractor produced no output for {invocation.StallTimeout.TotalSeconds:0} seconds and was stopped.");
                 }
             }
 
