@@ -746,6 +746,15 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         },
     };
 
+    [Fact]
+    public async Task AMissingVolumeIsSaidOnceInTheSetsWords()
+    {
+        await using var run = await ArchiveHarness.StartAsync(_server, FailsOnMissingVolume());
+        var (_, _, failed) = await FailOnAMissingVolumeAsync(run);
+
+        Assert.Equal("Missing volume: w.part3.rar", failed.StateText);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

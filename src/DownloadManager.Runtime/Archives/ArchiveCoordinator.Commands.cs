@@ -709,7 +709,10 @@ public sealed partial class ArchiveCoordinator
                     ExtractionFailureKind.Cancelled => "Extraction cancelled",
                     _ => "Extraction failed",
                 };
-                return string.IsNullOrEmpty(set.FailureMessage) ? label : $"{label}: {set.FailureMessage}";
+                if (string.IsNullOrEmpty(set.FailureMessage)) return label;
+
+                // The tool's reason can start with the same label. Once is enough.
+                return set.FailureMessage.StartsWith($"{label}: ", StringComparison.OrdinalIgnoreCase) ? set.FailureMessage : $"{label}: {set.FailureMessage}";
         }
     }
 

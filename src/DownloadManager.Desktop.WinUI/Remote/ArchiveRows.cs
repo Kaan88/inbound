@@ -43,7 +43,7 @@ internal static partial class ArchiveText
         var lines = sets.Take(MostNamesInText).Select(set => $"{set.Name}: {FullWithNote(set)}").ToList();
         if (sets.Count > MostNamesInText) lines.Add($"and {sets.Count - MostNamesInText} more");
         var tip = string.Join(Environment.NewLine, lines);
-        return new ArchiveRowView(text, tip, tone, sets.Any(set => set.NeedsPassword), text.Length == 0 ? string.Empty : $"Extraction: {text}. {string.Join(". ", lines)}");
+        return new ArchiveRowView(text, tip, tone, sets.Any(set => set.NeedsPassword), text.Length == 0 ? string.Empty : $"Extraction: {text}. {string.Join(". ", lines.Select(line => line.TrimEnd('.')))}");
     }
 
     /// <summary>The Host's whole sentence for a set, with any address taken out.</summary>
@@ -75,12 +75,12 @@ internal static partial class ArchiveText
         var running = sets.FirstOrDefault(set => set.State == "extracting");
         if (running is not null) return (Label(running).Text, RemoteRowTone.Active);
 
-        var failed = sets.Count(set => set.State == "failed" && set.FailureKind != "cancelled");
+        var failed = sets.Count(set => set.State == "failed" && set.FailureKind != "cancelled" && !IsWaitingForNamedParts(set));
         if (failed > 0) return (failed == 1 ? "1 extraction problem" : $"{failed} extraction problems", RemoteRowTone.Failed);
 
         var done = sets.Count(set => set.State == "completed");
         if (done == sets.Count) return ("Extraction completed", RemoteRowTone.Done);
-        if (sets.Any(set => set.State == "waiting")) return ("Waiting for extraction", RemoteRowTone.Waiting);
+        if (sets.Any(set => set.State == "waiting" || IsWaitingForNamedParts(set))) return ("Waiting for extraction", RemoteRowTone.Waiting);
         if (done > 0) return ($"Extracted {done} of {sets.Count}", RemoteRowTone.Neutral);
         if (sets.All(set => set.State == "downloaded")) return ("Downloaded", RemoteRowTone.Neutral);
         return (string.Empty, RemoteRowTone.Neutral);
@@ -120,6 +120,7 @@ internal static partial class ArchiveText
                 return ("Extraction completed", RemoteRowTone.Done);
 
             case "failed":
+                if (IsWaitingForNamedParts(set)) return ($"Waiting: {Parts(set.MissingVolumes)} missing", RemoteRowTone.Waiting);
                 return set.FailureKind switch
                 {
                     "passwordRequired" => ("Password required", RemoteRowTone.Waiting),
@@ -140,6 +141,14 @@ internal static partial class ArchiveText
                 return (Full(set), RemoteRowTone.Neutral);
         }
     }
+
+    /// <summary>
+    /// A set whose last volume wasn't chosen can't be told from a whole one until the tool runs and names it,
+    /// so it stops rather than waits. It goes on by itself once that part arrives, the same as a set with
+    /// a part missing from its middle, so it reads the same as one.
+    /// </summary>
+    private static bool IsWaitingForNamedParts(ArchiveSetDto set)
+        => set is { State: "failed", FailureKind: "missingVolume", MissingVolumes.Count: > 0 };
 
     private static string ToolTip(ArchiveSetDto set)
     {

@@ -58,6 +58,43 @@ public sealed class ArchiveRowsTests
     }
 
     [Fact]
+    public void A_last_volume_named_by_the_tool_reads_like_any_other_part_being_waited_for()
+    {
+        var stopped = Set("failed", "missingVolume", change: s => s.MissingVolumes = ["a.part3.rar"]);
+        var inTheMiddle = Set("waiting", change: s => s.MissingVolumes = ["a.part2.rar"]);
+
+        var view = ArchiveText.Set(stopped);
+        Assert.Equal("Waiting: part3 missing", view.Text);
+        Assert.Equal(ArchiveText.Set(inTheMiddle).Tone, view.Tone);
+
+        // It is still a stopped set underneath, so it can still be run again by hand.
+        Assert.Equal([stopped], ArchiveRules.Plan([], [stopped], null, true).Retry);
+
+        // Named by nothing, there is nothing to say it is waiting for.
+        Assert.Equal("Missing volume", ArchiveText.Set(Set("failed", "missingVolume")).Text);
+    }
+
+    [Fact]
+    public void A_package_with_a_last_volume_missing_is_waiting_and_has_no_problem()
+    {
+        var stopped = Set("failed", "missingVolume", change: s => s.MissingVolumes = ["a.part3.rar"]);
+        var view = ArchiveText.Package([stopped, Set("completed")])!;
+        Assert.Equal("Waiting for extraction", view.Text);
+        Assert.Equal(RemoteRowTone.Waiting, view.Tone);
+
+        Assert.Equal("1 extraction problem", ArchiveText.Package([Set("failed", "corrupted"), Set("completed")])!.Text);
+    }
+
+    [Fact]
+    public void A_package_is_spoken_without_a_doubled_full_stop()
+    {
+        var words = "Password required: This archive needs a password.";
+        var view = ArchiveText.Package([Set("failed", "passwordRequired", words), Set("failed", "passwordRequired", words)])!;
+        Assert.DoesNotContain("..", view.AccessibleText, StringComparison.Ordinal);
+        Assert.Contains("movie: Password required: This archive needs a password. movie:", view.AccessibleText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_set_asking_for_a_password_has_the_row_action_and_another_failure_does_not()
     {
         Assert.True(ArchiveText.Set(Set("failed", "passwordRequired")).NeedsPassword);
