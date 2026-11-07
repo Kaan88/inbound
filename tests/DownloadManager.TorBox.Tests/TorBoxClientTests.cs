@@ -94,6 +94,16 @@ public sealed class TorBoxClientTests
         Assert.Equal(expectedSize, item.Size);
     }
 
+    /// <summary>A real item seeding after its transfer: the row read "about 23h 59m left" while the wait was a minute.</summary>
+    [Theory]
+    [InlineData(true, null)]
+    [InlineData(false, 86_393L)]
+    public void AFinishedTransferHasNoTimeLeft(bool finished, long? expected)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse($$"""{"id":1,"download_state":"uploading (no peers)","download_finished":{{(finished ? "true" : "false")}},"download_present":false,"eta":86393,"size":5,"files":[]}""");
+        Assert.Equal(expected, TorBoxMapping.Item(RemoteItemKind.Torrent, document.RootElement).EtaSeconds);
+    }
+
     [Fact]
     public void FlagsWithoutFilesAreNotReady()
     {

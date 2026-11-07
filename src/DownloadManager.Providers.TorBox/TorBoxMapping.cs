@@ -95,7 +95,8 @@ public static partial class TorBoxMapping
             RawState = state,
             Progress = Math.Clamp(Double(element, "progress") ?? 0, 0, 1),
             SpeedBytesPerSecond = Long(element, "download_speed") ?? 0,
-            EtaSeconds = Long(element, "eta") is { } eta && eta < NoEstimateSeconds ? eta : null,
+            // Once the transfer has finished, the real figure counts down about 24 hours of seeding, not what is left to wait.
+            EtaSeconds = !finished && Long(element, "eta") is { } eta && eta < NoEstimateSeconds ? eta : null,
             CreatedAt = Date(element, "created_at"),
             UpdatedAt = Date(element, "updated_at"),
             ExpiresAt = Date(element, "expires_at"),
