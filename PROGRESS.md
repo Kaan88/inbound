@@ -1,5 +1,21 @@
 # Progress — session handoff
 
+### Five review claims checked, against the code, the mock and the real API (2026-11-07)
+
+Independent reviewers made five claims. I checked each against the code and reproduced each with a test before fixing it. Each new test failed with the fixes taken out and passed with them in. Nothing here touches the add flow (TB.F9, TB.F10).
+
+| Claim | Verdict | Cause and fix |
+|---|---|---|
+| A stale settings save puts back a recent address that holds the stored key | Real | The settings save copied the client's recent addresses as they came. The store's own filter only knows provider hosts. The save now drops any address that holds a stored key, the same rule the scrub uses. Test: `AStaleSettingsSaveCannotPutAKeyBearingAddressBack`. |
+| Two jobs can reach one provider item and both download it | Real | Only the add checked for a twin, and it skips failed jobs and compares only fields already set. Adopting an item found by hash, a submission answered with an item id, and a retry that keeps its item id now check, under the gate, for another job that is not failed and holds the same item. Such a job fails with words saying another job brings the files, and a retry is refused with them. Tests: `ACopiedMagnetApprovedLaterDoesntDownloadAnItemAnotherJobBrings`, `RetryingAFailedJobWhoseItemAnotherJobNowBringsIsRefused`. |
+| Delete from TorBox fails for an item already gone, and a client leaving can split the delete | Real, and the real API differs from the mock | The filter let a not-found answer escape as an error. It now counts as removed. Once the provider has deleted, the local removal no longer takes the client's token. **Seen live** with ids not on the account: deleting a torrent answers 500 `DATABASE_ERROR`, and deleting a web or usenet download answers 200 "deleted successfully". Never `ITEM_NOT_FOUND`, which the mock taught. The TorBox client now looks the item up after a service error on delete, and reads it as not found only when the look says it is gone. An outage on an item that is there stays an outage. The mock now answers missing deletes as the real service did. Tests: `DeletingAnItemAlreadyGoneFromTheProviderTakesTheJobOff`, `AClientLeavingOnceTheProviderDeletedStillTakesTheJobOff`, `DeletingAMissingItemAnswersAsTheRealServiceDid`, `AnOutageDeletingATorrentThatIsThereStaysAnOutage`. |
+| A retry during a running submission step sends the old password or approval | Real | The step sent the link password and the cached-only flag from the record it started with. It now sends them from the record as saved in the move to Submitting. Test: `APasswordGivenWhileALookIsWaitingIsTheOneSent`. |
+| An offered package password can replace the user's | Real | The keep-existing check ran outside the gate and only against memory. It now runs under the gate. A password file held open at the start is remembered and counts as a password. An archive side whose saved passwords were never read refuses offers, so the remote job keeps its copy. Tests: `AnOfferNeverReplacesAPasswordWhoseFileWasHeldOpenAtTheStart`, `AnArchiveSideThatCouldNotStartTakesNoPasswordOffers`. |
+
+**Bears on the add flow, for the owner, not built:** adding the same thing again after its job failed makes a new job instead of reviving the failed one. That is still the case.
+
+**Not checked:** the race fixes are proved with the mock only; the delete of an item that exists was seen live in earlier stages, not again here. No sandbox Host ran in this stage.
+
 ### Comparison with JDownloader's TorBox support, read only (2026-11-07)
 
 JDownloader was not run this round, and its logs and settings were not read. Its side comes from the earlier bytecode reading of its two TorBox plugins, its container classes and its extraction code. Today I checked that both TorBox plugin files on disk still have the SHA-256 that reading was pinned to, so it still applies to the installed copy. Nothing in its side was seen running. This app's side says for each statement whether it was seen live in the stages above, read from code, or seen with the mock only. The installed JDownloader is a reference for suggestions, not a parity target. No code changed in this stage.
