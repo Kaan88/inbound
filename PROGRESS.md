@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### PERF.4: what still wakes the hidden window (2026-11-08)
+
+- Owner: "Yes, trace it". Per-thread counters: two threads in the window process wake about 95 times a second each, whether the window is shown, minimised or closed to the tray, in installed, published and bin builds, with an empty test instance too.
+- They aren't .NET threads (dotnet-stack, installed into the scratchpad, run against a test instance only). Their start address is in `nvwgf2umx.dll`, the NVIDIA Direct3D driver, which WinUI loads for drawing. Not caused by Inbound's timers.
+- Option for the owner: end the window process when it is closed to the tray and start it again from the tray. That removes these wake-ups and the window's memory while closed, but reopening takes a fresh start. Not built.
+
 ### PERF.4: idle check on installed 0.5.2 (2026-11-08)
 
 - Owner: "do the idle check". 30 minutes, window hidden, read-only sampling, compared with the 0.5.1 run: Host CPU 3.0 s to 0.08 s, Host reads 17,910 to 0, Host other I/O 35,821 to 3, Host context switches 12/s to 0.8/s; window CPU 16.1 s to 3.0 s. No writes from either process.
