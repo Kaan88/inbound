@@ -95,6 +95,14 @@ public sealed class HostConnection : IAsyncDisposable
         => RequestAsync(MessageTypes.JobRemove, new JobActionRequest { JobIds = ids.ToList(), DeleteFile = deleteFile },
             TimeSpan.FromSeconds(30 + 2 * ids.Count), cancellationToken);
 
+    /// <summary>Free space at these folders, measured by the Host. Each folder answers within about two seconds.</summary>
+    public async Task<FolderSpaceResult?> GetFolderSpaceAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(MessageTypes.FolderSpace, new FolderSpaceRequest { Paths = paths.ToList() },
+            TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        return reply.Type == MessageTypes.FolderSpaceResult ? reply.GetPayload<FolderSpaceResult>() : null;
+    }
+
     public Task<IpcMessage> UpdateSettingsAsync(SettingsDto settings, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings },
             TimeSpan.FromSeconds(10), cancellationToken);

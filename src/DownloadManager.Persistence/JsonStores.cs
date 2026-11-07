@@ -809,6 +809,8 @@ public sealed class JsonSettingsStore : ISettingsStore
             settings.CategoryFoldersRoot = root;
         }
 
+        settings.FavoriteFolders = DownloadFolders.Normalize(settings.FavoriteFolders);
+        settings.RecentDestinationDirectories = DownloadFolders.NormalizeRecent(settings.RecentDestinationDirectories);
         settings.RecentUrls ??= new List<string>();
         settings.RecentUrls = settings.RecentUrls
             .Where(value => !string.IsNullOrWhiteSpace(value) &&

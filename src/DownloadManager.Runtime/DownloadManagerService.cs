@@ -156,6 +156,29 @@ public sealed partial class DownloadManagerService
         StartSchedulerLoop();
     }
 
+    /// <summary>
+    /// Free and total space at each folder, measured here on the Host's side, where the files are written. Each folder
+    /// has its own time limit, so one drive that doesn't answer leaves the others measured.
+    /// </summary>
+    public async Task<FolderSpaceResult> GetFolderSpaceAsync(FolderSpaceRequest request, CancellationToken cancellationToken)
+    {
+        var paths = (request.Paths ?? new()).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToList();
+        var measured = await Task.WhenAll(paths.Select(path => FolderSpaceMeter.MeasureAsync(path, TimeSpan.FromSeconds(2), cancellationToken)))
+            .ConfigureAwait(false);
+        return new FolderSpaceResult
+        {
+            Ok = true,
+            Folders = paths.Select((path, index) => new FolderSpaceDto
+            {
+                Path = path,
+                FreeBytes = measured[index].FreeBytes,
+                TotalBytes = measured[index].TotalBytes,
+                InsideContainer = measured[index].InsideContainer,
+            }).ToList(),
+        };
+    }
+
     public SnapshotDto GetSnapshot()
     {
         lock (_sync)
@@ -634,6 +657,7 @@ public sealed partial class DownloadManagerService
                     else _settings.CategoryFolders[categoryId!] = destination;
                 }
                 else _settings.LastDestinationDirectory = destination;
+                _settings.RecentDestinationDirectories = DownloadFolders.Remember(_settings.RecentDestinationDirectories, destination);
             }
             settingsChanged = true;
         }
@@ -1224,6 +1248,14 @@ public sealed partial class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            // Host-owned: a client's copy may be older than the last add. A folder a client remembers as the last
+            // one, as a provider's add does, goes on it.
+            RecentDestinationDirectories = !string.IsNullOrWhiteSpace(settings.LastDestinationDirectory) &&
+                                           !string.Equals(settings.LastDestinationDirectory, _settings.LastDestinationDirectory, StringComparison.OrdinalIgnoreCase)
+                ? DownloadFolders.Remember(_settings.RecentDestinationDirectories, settings.LastDestinationDirectory)
+                : new List<string>(_settings.RecentDestinationDirectories),
+            FavoriteFolders = DownloadFolders.Normalize((settings.FavoriteFolders ?? new()).Select(favorite =>
+                new FavoriteFolder { Name = favorite.Name, Path = favorite.Path })),
             // A client's copy can predate a key being stored, so the same rule as the scrub applies to every save.
             RecentUrls = (settings.RecentUrls ?? new List<string>()).Where(url => !HoldsProviderSecret(url)).ToList(),
             CategoryFolders = new Dictionary<string, string>(
@@ -4189,6 +4221,9 @@ public sealed partial class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
+            RecentDestinationDirectories = new List<string>(settings.RecentDestinationDirectories ?? new List<string>()),
+            FavoriteFolders = (settings.FavoriteFolders ?? new()).Select(favorite =>
+                new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path }).ToList(),
             RecentUrls = new List<string>(settings.RecentUrls ?? new List<string>()),
             DownloadGroups = MapGroups(settings.DownloadGroups),
             CustomCategories = settings.CustomCategories.Select(category => new CategoryDefinitionDto { Id = category.Id, Name = category.Name,

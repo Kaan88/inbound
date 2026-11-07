@@ -42,6 +42,8 @@ public static class MessageTypes
     public const string SettingsGet = "settings.get";
     public const string SettingsUpdate = "settings.update";
     public const string SettingsResult = "settings.result";
+    public const string FolderSpace = "folders.space";
+    public const string FolderSpaceResult = "folders.spaceResult";
     public const string QueueAction = "queue.action";
     public const string GroupAction = "group.action";
     public const string GroupActionResult = "group.actionResult";

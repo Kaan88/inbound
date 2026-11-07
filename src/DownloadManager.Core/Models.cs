@@ -451,6 +451,13 @@ public sealed class ConnectionProfile
     public int MaxConnections { get; set; } = 8;
 }
 
+/// <summary>A saved download folder with the user's name for it, such as "Movies".</summary>
+public sealed class FavoriteFolder
+{
+    public string Name { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+}
+
 public sealed class DownloadCategory
 {
     public string Id { get; set; } = string.Empty;
@@ -540,6 +547,12 @@ public sealed class AppSettings
 
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
+
+    /// <summary>Folders recently downloaded to, newest first, at most <see cref="DownloadFolders.MaxRecent"/>.</summary>
+    public List<string> RecentDestinationDirectories { get; set; } = new();
+
+    /// <summary>Named folders the user saved, in their order, offered first wherever a folder is chosen.</summary>
+    public List<FavoriteFolder> FavoriteFolders { get; set; } = new();
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

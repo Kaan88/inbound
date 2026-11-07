@@ -67,7 +67,7 @@ internal static partial class Program
             {
                 if (optionArgs.Length == 0)
                 {
-                    Console.Error.WriteLine("usage: add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--direct] [--wait]");
+                    Console.Error.WriteLine("usage: add <url> [--dest DIR | --to FAVORITE] [--name NAME] [--category ID] [--start now|later] [--priority high|normal|low] [--package KEY] [--package-name NAME] [--direct] [--wait]");
                     return 2;
                 }
 
@@ -84,10 +84,17 @@ internal static partial class Program
                     return 2;
                 }
 
+                var (dest, destError) = await DestinationAsync(client, args).ConfigureAwait(false);
+                if (destError is not null)
+                {
+                    Console.Error.WriteLine(destError);
+                    return 2;
+                }
+
                 var request = new AddJobRequest
                 {
                     Url = optionArgs[0],
-                    DestinationDirectory = GetOption(args, "--dest"),
+                    DestinationDirectory = dest,
                     FileName = GetOption(args, "--name"),
                     CategoryId = GetOption(args, "--category"),
                     StartMode = GetOption(args, "--start") ?? "now",
@@ -466,6 +473,8 @@ internal static partial class Program
                 return await SiteAsync(client, args, json).ConfigureAwait(false);
             case "settings":
                 return await SettingsAsync(client, args, json).ConfigureAwait(false);
+            case "folders":
+                return await FoldersAsync(client, json).ConfigureAwait(false);
             case "host":
             {
                 var sub = optionArgs.FirstOrDefault()?.ToLowerInvariant();
@@ -1144,7 +1153,13 @@ internal static partial class Program
         int? queueId = int.TryParse(GetOption(args, "--queue"), out var parsedQueue)
             ? parsedQueue
             : null;
-        var destination = GetOption(args, "--dest");
+        var (destination, destinationError) = await DestinationAsync(client, args).ConfigureAwait(false);
+        if (destinationError is not null)
+        {
+            Console.Error.WriteLine(destinationError);
+            return 2;
+        }
+
         var conflict = GetOption(args, "--conflict")?.ToLowerInvariant();
         if (conflict is not null && conflict is not ("rename" or "overwrite" or "fail"))
         {
@@ -1392,6 +1407,70 @@ internal static partial class Program
         }
 
         return result.Ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// <c>--dest DIR</c>, or <c>--to NAME</c> for a favorite folder by its name. Neither leaves the folder to the Host.
+    /// </summary>
+    private static async Task<(string? Folder, string? Error)> DestinationAsync(CliClient client, string[] args)
+    {
+        var dest = GetOption(args, "--dest");
+        var to = GetOption(args, "--to");
+        if (to is null) return (dest, null);
+        if (dest is not null) return (null, "Use --dest or --to, not both.");
+        var favorites = (await client.SnapshotAsync().ConfigureAwait(false)).Settings.FavoriteFolders;
+        var match = favorites.FirstOrDefault(favorite => string.Equals(favorite.Name, to.Trim(), StringComparison.OrdinalIgnoreCase));
+        return match is not null
+            ? (match.Path, null)
+            : (null, favorites.Count == 0
+                ? $"No favorite folder is named \"{to}\". There are no favorites yet; add them in Options or with the star beside a folder box."
+                : $"No favorite folder is named \"{to}\". Favorites: {string.Join(", ", favorites.Select(favorite => favorite.Name))}.");
+    }
+
+    /// <summary>Favorite, default and recent folders, each with the free space the Host measures for it.</summary>
+    private static async Task<int> FoldersAsync(CliClient client, bool json)
+    {
+        var settings = (await client.SnapshotAsync().ConfigureAwait(false)).Settings;
+        var rows = new List<(string Kind, string Name, string Path)>();
+        foreach (var favorite in settings.FavoriteFolders) rows.Add(("favorite", favorite.Name, favorite.Path));
+        if (!string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory)) rows.Add(("default", "", settings.DefaultDownloadDirectory));
+        foreach (var recent in settings.RecentDestinationDirectories) rows.Add(("recent", "", recent));
+        var reply = await client.RequestAsync(MessageTypes.FolderSpace, new FolderSpaceRequest { Paths = rows.Select(row => row.Path).ToList() })
+            .ConfigureAwait(false);
+        var measured = reply.Type == MessageTypes.FolderSpaceResult ? reply.GetPayload<FolderSpaceResult>().Folders : new List<FolderSpaceDto>();
+        FolderSpaceDto? SpaceOf(string path) => measured.FirstOrDefault(folder => string.Equals(folder.Path, path.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (json)
+        {
+            PrintJson(rows.Select(row => new
+            {
+                kind = row.Kind,
+                name = row.Name.Length == 0 ? null : row.Name,
+                path = row.Path,
+                freeBytes = SpaceOf(row.Path)?.FreeBytes,
+                totalBytes = SpaceOf(row.Path)?.TotalBytes,
+                insideContainer = SpaceOf(row.Path)?.InsideContainer ?? false,
+            }));
+            return 0;
+        }
+
+        foreach (var row in rows)
+        {
+            var space = SpaceOf(row.Path);
+            var free = space?.FreeBytes is { } bytes
+                ? $"{SizeText(bytes)} free" + (space.TotalBytes is { } total ? $" of {SizeText(total)}" : "")
+                : "space unknown";
+            if (space?.InsideContainer == true) free += "  (not on a mounted volume)";
+            var label = row.Name.Length > 0 ? $"{row.Kind} \"{row.Name}\"" : row.Kind;
+            Console.WriteLine($"{label,-24} {row.Path}  {free}");
+        }
+
+        return 0;
+    }
+
+    private static string SizeText(long bytes)
+    {
+        const double Kb = 1024, Mb = Kb * 1024, Gb = Mb * 1024, Tb = Gb * 1024;
+        return bytes >= Tb ? $"{bytes / Tb:N1} TB" : bytes >= Gb ? $"{bytes / Gb:N1} GB" : bytes >= Mb ? $"{bytes / Mb:N0} MB" : $"{bytes / Kb:N0} KB";
     }
 
     private static async Task<int> SettingsAsync(CliClient client, string[] args, bool json)
@@ -1783,10 +1862,11 @@ internal static partial class Program
             Download Manager CLI
 
             Usage:
-              dm add <url> [--dest DIR] [--name NAME] [--category ID] [--start now|later] [--direct] [--wait]
+              dm add <url> [--dest DIR | --to FAVORITE] [--name NAME] [--category ID] [--start now|later] [--direct] [--wait]
                           [--connections N] [--header "Name: value"] [--sha256 HEX]
                           [--conflict rename|overwrite|fail] [--priority high|normal|low]
-              dm add-batch <pattern> [--dest DIR] [--start now|later] [--direct] [--wait] [--yes]
+              dm folders [--json]   favorite, default and recent folders with free space
+              dm add-batch <pattern> [--dest DIR | --to FAVORITE] [--start now|later] [--direct] [--wait] [--yes]
                           [--connections N] [--queue ID] [--conflict rename|overwrite|fail]
                           [--priority high|normal|low]
               dm list [--json]

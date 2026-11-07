@@ -125,7 +125,7 @@ internal sealed class SettingsWindow : Window
     public static TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.72, FontSize = 12 };
 
     /// <summary>A folder text box with a Browse… button that opens the folder picker over this window.</summary>
-    public (UIElement Row, TextBox Box) FolderField(string header, string? text, string? placeholder = null, bool inlineLabel = false)
+    public (UIElement Row, TextBox Box) FolderField(string header, string? text, string? placeholder = null, bool inlineLabel = false, bool favorites = true)
     {
         var box = new TextBox { Header = inlineLabel ? null : header, Text = text ?? string.Empty, PlaceholderText = placeholder ?? string.Empty };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, header);
@@ -156,7 +156,7 @@ internal sealed class SettingsWindow : Window
         row.Children.Add(box);
         Grid.SetColumn(browse, offset + 1);
         row.Children.Add(browse);
-        return (row, box);
+        return (favorites ? FolderChooser.Attach(row, box) : row, box);
     }
 
     public static NumberBox Number(string header, double? value, double min, double max, string? placeholder = null) => new()

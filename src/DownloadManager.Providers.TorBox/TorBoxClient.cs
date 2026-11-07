@@ -25,6 +25,7 @@ public sealed class TorBoxClient :
     /// <summary>The window is about a minute. Anything much later isn't a window, so nothing waits for it.</summary>
     private static readonly TimeSpan LongestBudgetWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan LongestBudgetWait = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan BudgetResetMargin = TimeSpan.FromMilliseconds(250);
 
     private readonly HttpClient _http;
     private readonly Func<string?> _key;
@@ -510,7 +511,10 @@ public sealed class TorBoxClient :
     private async Task WaitForBudgetAsync(CancellationToken cancellationToken)
     {
         var until = new DateTimeOffset(Interlocked.Read(ref _budgetExhaustedUntilTicks), TimeSpan.Zero);
-        var wait = until - _time.GetUtcNow();
+        if (until.UtcTicks == 0) return;
+        // The reset time comes rounded and timers can wake a little early, so waking exactly on it can still land
+        // in the used-up window. A quarter second past it is clear of that.
+        var wait = until + BudgetResetMargin - _time.GetUtcNow();
         if (wait > TimeSpan.Zero)
         {
             await Task.Delay(wait > LongestBudgetWait ? LongestBudgetWait : wait, _time, cancellationToken).ConfigureAwait(false);

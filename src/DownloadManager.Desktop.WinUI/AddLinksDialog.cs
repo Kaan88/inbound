@@ -270,7 +270,7 @@ internal sealed class AddLinksDialog
     }
 
     /// <summary>A folder box with Browse and the line that says what is wrong with it. Used wherever a provider's work gets a destination.</summary>
-    internal static (Grid Row, TextBox Box, StatusLine Error) DestinationRow(string initial, IntPtr windowHandle)
+    internal static (UIElement Row, TextBox Box, StatusLine Error) DestinationRow(string initial, IntPtr windowHandle)
     {
         var box = new TextBox { Header = "Destination folder", Text = initial };
         AutomationProperties.SetName(box, "Destination folder");
@@ -307,7 +307,7 @@ internal sealed class AddLinksDialog
         Grid.SetColumn(browse, 1);
         row.Children.Add(box);
         row.Children.Add(browse);
-        return (row, box, error);
+        return (FolderChooser.Attach(row, box), box, error);
     }
 
     private string? TakeLinkPassword(AddLine line)

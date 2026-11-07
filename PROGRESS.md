@@ -1,5 +1,17 @@
 # Progress — session handoff
 
+### UI.R9, UI.R10: favorite folders and free space (2026-11-07, branch `torbox-addflow`)
+
+Built; the owner tests it on screen and asked that no live or screen checks be run here.
+- **Host:**
+  - Settings gain `FavoriteFolders` (name and path, normalized, at most 50) and a Host-owned `RecentDestinationDirectories` (newest first, five), which a client's old copy can't undo.
+  - A new `folders.space` request measures each folder on the Host's side, with a 2 s limit per folder.
+  - On Linux each folder is measured on its own mount, not `/`, and a container folder that isn't on a mounted volume is flagged.
+- **Window:** a star button beside every folder box (Add URL, batch, Add Links, container import, My TorBox, Options) lists favorites and recent folders with free space, and saves or removes the typed folder. A line under the box shows its free space. Add URL warns when the checked size won't fit. Options > Save to has the favorites list, with rename, reorder and remove, and doesn't undo favorites saved from a star while it's open.
+- **CLI:** `dm folders [--json]`, and `--to FAVORITE` on `add` and `add-batch`.
+- **Tests:** 9 Core and 4 Integration tests are new.
+- **Fixed along the way:** `TheClientWaitsOutAnUsedUpBudgetInsteadOfHittingTheLimit` failed about two runs in three. The reset time is rounded down to the millisecond and timers can wake early, so the client could call just before the window ended. It now waits 250 ms past the reset; the TorBox suite then passed five runs in a row.
+
 ### Owner request: download locations and free space (2026-11-07)
 
 Passed on from a prospective Docker user: choosing the download location matters most. They want several saved locations with each one's free space, especially in Docker, where another download manager's folder browsing was poor. The default folder, last folder, category folders and Browse already exist; free space and saved favorites don't. Recorded as UI.R9 and UI.R10, with a note on D2 for a Host-side folder browser. A plan went to the owner; nothing is built yet.

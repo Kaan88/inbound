@@ -78,6 +78,38 @@ public sealed class JobDto
     public Guid? CancelledByPackageId { get; set; }
 }
 
+public sealed class FavoriteFolderDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+}
+
+/// <summary>Asks the Host how much room there is at these folders, measured where the files would be written.</summary>
+public sealed class FolderSpaceRequest
+{
+    public List<string> Paths { get; set; } = new();
+}
+
+public sealed class FolderSpaceDto
+{
+    public string Path { get; set; } = string.Empty;
+    /// <summary>Null when it couldn't be measured, for example a drive that didn't answer in time.</summary>
+    public long? FreeBytes { get; set; }
+    public long? TotalBytes { get; set; }
+    /// <summary>
+    /// True when the Host runs in a container and this folder isn't on a mounted volume, so files written there are
+    /// lost when the container is rebuilt.
+    /// </summary>
+    public bool InsideContainer { get; set; }
+}
+
+public sealed class FolderSpaceResult
+{
+    public bool Ok { get; set; }
+    public List<FolderSpaceDto> Folders { get; set; } = new();
+    public string? Error { get; set; }
+}
+
 public sealed class CategoryDefinitionDto
 {
     public string Id { get; set; } = string.Empty;
@@ -192,6 +224,9 @@ public sealed class SettingsDto
     public bool AllowSystemCompletionActions { get; set; }
     public string Theme { get; set; } = "System";
     public string? LastDestinationDirectory { get; set; }
+    /// <summary>Host-owned: folders recently downloaded to, newest first. A client's copy is ignored on save.</summary>
+    public List<string> RecentDestinationDirectories { get; set; } = new();
+    public List<FavoriteFolderDto> FavoriteFolders { get; set; } = new();
     public List<string> RecentUrls { get; set; } = new();
     public Dictionary<string, string> CategoryFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<CategoryDefinitionDto> CustomCategories { get; set; } = new();

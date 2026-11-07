@@ -429,6 +429,12 @@ public sealed partial class HostPipeServer
                         }).ConfigureAwait(false);
                     break;
 
+                case MessageTypes.FolderSpace:
+                    await Reply(client, message, MessageTypes.FolderSpaceResult,
+                        await _service.GetFolderSpaceAsync(message.GetPayload<FolderSpaceRequest>(), cancellationToken).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
                     await Reply(client, message, MessageTypes.SettingsResult,
