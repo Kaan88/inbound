@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### Release 0.5.1 (2026-11-07)
+
+- The owner asked for 0.5.1 with the UI.B2 and UP.B1 fixes, after proper tests (results under Release 0.5.0 below).
+- Published as v0.5.1 on `Kaan88/inbound`: main `460c11f`, the same tree as branch `ab142d7`, tag `v0.5.1`, five assets. Same signing key; manifest signature verified; the live feed says 0.5.1; the downloaded Setup matches SHA256SUMS; the package holds 7-Zip. No token from the test credentials file in the tree.
+- After the version bump: Core 818 and 65 update, release, bridge and settings integration tests.
+- Not verified: install of Setup 0.5.1, auto-update from 0.5.0 to 0.5.1, Options on screen by the owner.
+
 ### Release 0.5.0 (2026-11-07)
 
 - The owner finished the UI and TorBox tests and asked for quick extraction tests, then push and release.
