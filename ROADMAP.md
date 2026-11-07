@@ -396,6 +396,7 @@ searching the account.
 | PERF.1 | Close the window process with the window | proposed, owner decision 2026-11-07 | - | Measured: the WinUI window holds 215 to 235 MB private whether the list is empty or has 504 rows, and closing only hides it. The Host holds 19 MB idle, 48 MB with 500 jobs, about 70 MB during four parallel downloads. Ending the UI process on close would save about 215 MB while in the tray; reopening costs a start. |
 | PERF.2 | Soak test | proposed 2026-11-07 | - | 8 hours of downloads and 5,000 jobs in a test instance, Host and UI memory every minute, to find growth. |
 | PERF.3 | GC settings | proposed 2026-11-07 | PERF.2 | Heap limit and conserve-memory for the server image, the Host's GC mode; only with before-and-after numbers. |
+| PERF.4 | Idle resource use comes first | owner priority, 2026-11-07 | - | Owner: "I care more about idle resource usage than 200 mb." Idle cost, meaning what Inbound uses while nothing downloads, matters more to the owner than the window's 215 MB (PERF.1, which they set aside). To measure in a test instance, Host and window idle for 30 minutes, in the tray and with the window open: CPU time, timer wake-ups, disk writes (state saves, logs), network requests (update checks, TorBox polling, hoster list), thread and handle counts. Then remove what runs with nothing to do. |
 
 ## Cross-cutting tasks
 
