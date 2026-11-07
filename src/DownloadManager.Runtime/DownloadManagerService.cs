@@ -1299,12 +1299,43 @@ public sealed partial class DownloadManagerService
                     Settings = MapSettings(_settings),
                 };
         }
+        // UI.B5: the default queue has its own maximum, and the lower one wins, so a raised overall limit did
+        // nothing for queued downloads. Where the default queue matched the old overall limit, and this request
+        // leaves it alone, it follows the new one.
+        if (next.MaxConcurrentDownloads != _settings.MaxConcurrentDownloads &&
+            next.Queues.FirstOrDefault(queue => queue.Id == next.DefaultQueueId) is { } defaultQueue &&
+            _settings.Queues.FirstOrDefault(queue => queue.Id == defaultQueue.Id) is { } before &&
+            before.MaxConcurrentDownloads == _settings.MaxConcurrentDownloads &&
+            defaultQueue.MaxConcurrentDownloads == before.MaxConcurrentDownloads)
+        {
+            defaultQueue.MaxConcurrentDownloads = next.MaxConcurrentDownloads;
+        }
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
+        List<JobRuntime> reconnected;
         lock (_sync)
         {
+            // What each unstarted download would have got from the old default, read before the settings change.
+            var unstarted = _settings.DefaultConnections == next.DefaultConnections
+                ? []
+                : _jobs.Values.Where(IsUnstartedForConnections)
+                    .Select(runtime => (Runtime: runtime, Uri: Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var uri) ? uri : null))
+                    .Where(item => item.Uri is not null)
+                    .Select(item => (item.Runtime, item.Uri, Old: Math.Clamp(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(item.Uri!)), 1, 32)))
+                    .ToList();
             _settings = next;
+            reconnected = [];
+            // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
+            // (not what the old default gave it) keeps it; provider downloads keep their provider's cap.
+            foreach (var (runtime, uri, previous) in unstarted)
+            {
+                if (runtime.Job.RequestedConnections != previous) continue;
+                var connections = Math.Clamp(Math.Min(next.DefaultConnections, EffectiveConnectionLimit(uri!)), 1, 32);
+                if (connections == runtime.Job.RequestedConnections) continue;
+                runtime.Job.RequestedConnections = connections;
+                reconnected.Add(runtime);
+            }
             var queueNames = next.Queues.ToDictionary(q => q.Id, q => q.Name);
             foreach (var runtime in _jobs.Values)
             {
@@ -1322,6 +1353,11 @@ public sealed partial class DownloadManagerService
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(next));
         _ftpEngine?.UpdateFfmpegPath(next.FfmpegPath);
         UpdateSleepPrevention();
+        foreach (var runtime in reconnected)
+        {
+            await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            Raise(runtime, "updated");
+        }
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -3907,7 +3943,14 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    private int EffectiveConnectionLimit(Uri uri)
+    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
+    private static bool IsUnstartedForConnections(JobRuntime runtime) =>
+        runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
+        runtime.Job.ReceivedBytes == 0 &&
+        !runtime.Starting && runtime.Runner is null or { IsCompleted: true } &&
+        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null;
+
+        private int EffectiveConnectionLimit(Uri uri)
     {
         var limit = _settings.MaxConnectionsPerHost;
         var profile = _settings.ConnectionProfiles

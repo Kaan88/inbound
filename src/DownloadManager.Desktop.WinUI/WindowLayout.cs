@@ -70,6 +70,78 @@ internal static class WindowLayout
         titleBar.ButtonInactiveForegroundColor = inactive;
     }
 
+    /// <summary>
+    /// Puts a window in the middle of the visible main Inbound window, which may belong to another process of this
+    /// app (the update window runs on its own), or in the middle of its screen's work area when none is showing.
+    /// </summary>
+    public static void CenterOnMainWindow(Window window)
+    {
+        var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var size = window.AppWindow.Size;
+        var target = MainWindowBounds(own);
+        if (target is null)
+        {
+            var area = DisplayArea.GetFromWindowId(window.AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+            target = new RectInt32(area.X, area.Y, area.Width, area.Height);
+        }
+        var bounds = target.Value;
+        var x = bounds.X + (bounds.Width - size.Width) / 2;
+        var y = bounds.Y + (bounds.Height - size.Height) / 2;
+        // Never off the screen the main window is on.
+        var screen = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Primary).WorkArea;
+        x = Math.Clamp(x, screen.X, Math.Max(screen.X, screen.X + screen.Width - size.Width));
+        y = Math.Clamp(y, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - size.Height));
+        window.AppWindow.Move(new PointInt32(x, y));
+    }
+
+    /// <summary>The largest visible, not minimised top-level window of another process running this same program.</summary>
+    private static RectInt32? MainWindowBounds(nint own)
+    {
+        var self = Environment.ProcessId;
+        var exe = Environment.ProcessPath;
+        RectInt32? best = null;
+        EnumWindows((hwnd, _) =>
+        {
+            if (hwnd == own || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == self) return true;
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                if (!string.Equals(process.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return true;
+            }
+            if (!GetWindowRect(hwnd, out var rect)) return true;
+            var candidate = new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+            if (best is not { } current || candidate.Width * candidate.Height > current.Width * current.Height) best = candidate;
+            return true;
+        }, 0);
+        return best;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    private delegate bool EnumWindowsProc(nint hwnd, nint parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, nint parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(nint hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(nint hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(nint hwnd, out NativeRect rect);
+
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint hwnd);
 }

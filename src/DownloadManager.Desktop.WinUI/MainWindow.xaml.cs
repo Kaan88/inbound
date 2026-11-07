@@ -75,6 +75,7 @@ public sealed partial class MainWindow : Window
             SpeedGraph.AddSample(now, rate);
         };
         _speedHistoryTimer.Start();
+        InitializeLimitMenus();
         RootGrid.ActualThemeChanged += (_, _) =>
         {
             DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
@@ -267,6 +268,7 @@ public sealed partial class MainWindow : Window
     {
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
+        UpdateLimitButtons();
         _groups = snapshot.Settings.DownloadGroups;
         RefreshCustomCategories();
         _status = snapshot.Status;
@@ -1408,6 +1410,8 @@ public sealed partial class MainWindow : Window
             }
 
             _settings = result.Settings;
+
+            UpdateLimitButtons();
             RefreshQueueMenus();
             await RefreshAsync();
         }
@@ -2320,6 +2324,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        await RefreshSettingsAsync();
         var providerAdd = await ProviderAddAppliesAsync();
         var urlBox = new ComboBox
         {
@@ -2332,6 +2337,10 @@ public sealed partial class MainWindow : Window
         {
             urlBox.Items.Add(recent);
         }
+        // UI.R18: a very long link would make the list as wide as the screen. Cut it short; the tooltip has it all.
+        urlBox.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(
+            "<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+            "<TextBlock Text='{Binding}' MaxWidth='560' TextTrimming='CharacterEllipsis' ToolTipService.ToolTip='{Binding}' /></DataTemplate>");
         // With no recent addresses the list would open as an empty strip over the dialog.
         urlBox.DropDownOpened += (_, _) => { if (urlBox.Items.Count == 0) urlBox.IsDropDownOpen = false; };
         // Like other download managers, start from a link already on the clipboard.
@@ -2508,6 +2517,7 @@ public sealed partial class MainWindow : Window
                 var result = reply.GetPayload<SettingsResult>();
                 if (!result.Ok) throw new InvalidOperationException(result.Error ?? "Could not create category.");
                 _settings = result.Settings;
+                UpdateLimitButtons();
                 RefreshCustomCategories();
                 var option = new ComboBoxItem { Content = category.Name, Tag = category.Id };
                 categoryBox.Items.Add(option);
@@ -3061,6 +3071,7 @@ public sealed partial class MainWindow : Window
     {
         var snapshot = await _connection.RefreshAsync();
         _settings = snapshot.Settings;
+        UpdateLimitButtons();
         var panel = new StackPanel { Spacing = 8 };
         var action = string.Empty;
         var actionQueue = 0;
@@ -3253,6 +3264,8 @@ public sealed partial class MainWindow : Window
         }
 
         _settings = result.Settings;
+
+        UpdateLimitButtons();
         await RefreshAsync();
         await ShowQueuesAsync();
     }
@@ -3423,6 +3436,8 @@ public sealed partial class MainWindow : Window
         }
 
         _settings = result.Settings;
+
+        UpdateLimitButtons();
         await RefreshAsync();
         return true;
     }
@@ -3443,6 +3458,7 @@ public sealed partial class MainWindow : Window
     {
         var snapshot = await _connection.RefreshAsync();
         _settings = snapshot.Settings;
+        UpdateLimitButtons();
 
         var settings = CloneSettings(_settings);
         var panel = new StackPanel { Spacing = 8 };
@@ -3871,6 +3887,8 @@ public sealed partial class MainWindow : Window
         }
 
         _settings = result.Settings;
+
+        UpdateLimitButtons();
         await RefreshAsync();
         return true;
     }
@@ -4465,6 +4483,7 @@ public sealed partial class MainWindow : Window
         var result = (await _connection.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
         if (!result.Ok) return result.Error ?? "Couldn't save the favorites.";
         _settings = result.Settings;
+        UpdateLimitButtons();
         return null;
     }
 
@@ -4600,6 +4619,8 @@ public sealed partial class MainWindow : Window
             }
 
             _settings = result.Settings;
+
+            UpdateLimitButtons();
             await RefreshAsync();
         }
         catch (Exception ex)
