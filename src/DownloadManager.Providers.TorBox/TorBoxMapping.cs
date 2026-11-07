@@ -9,12 +9,16 @@ namespace DownloadManager.Providers.TorBox;
 /// <summary>Turns TorBox's responses into provider-neutral values. Fields are read tolerantly: any can be absent.</summary>
 public static partial class TorBoxMapping
 {
+    /// <summary>The real service's word for no estimate: exactly 100 days, on every item with nothing to go by yet.</summary>
+    private const long NoEstimateSeconds = 8_640_000;
+
     /// <summary>
     /// The one table of TorBox states. Readiness never comes from here: an item is ready only when
     /// <c>download_present</c> is set together with <c>cached</c> or <c>download_finished</c>.
-    /// Seen on a real account: cached, completed, downloading, uploading, "uploading (no peers)" and
-    /// expired. An expired item keeps its file list, but its files can't be fetched and it doesn't come
-    /// back by waiting, so it counts as failed. The other words here come from the reference client.
+    /// Seen on a real account: cached, completed, downloading, uploading, "uploading (no peers)", expired,
+    /// metaDL, checking, checkingResumeData and "stalled (no seeds)". An expired item keeps its file list,
+    /// but its files can't be fetched and it doesn't come back by waiting, so it counts as failed. The other
+    /// words here come from the reference client.
     /// </summary>
     public static RemoteStage StageFromState(string? state)
     {
@@ -85,12 +89,13 @@ public static partial class TorBoxMapping
             Name = Text(element, "name") ?? "",
             Hash = Text(element, "hash"),
             AlternativeHashes = alternatives,
-            Size = Long(element, "size") ?? 0,
+            // While the service doesn't know yet, the real answer is 0 or -1.
+            Size = Math.Max(0, Long(element, "size") ?? 0),
             Stage = stage,
             RawState = state,
             Progress = Math.Clamp(Double(element, "progress") ?? 0, 0, 1),
             SpeedBytesPerSecond = Long(element, "download_speed") ?? 0,
-            EtaSeconds = Long(element, "eta"),
+            EtaSeconds = Long(element, "eta") is { } eta && eta < NoEstimateSeconds ? eta : null,
             CreatedAt = Date(element, "created_at"),
             UpdatedAt = Date(element, "updated_at"),
             ExpiresAt = Date(element, "expires_at"),

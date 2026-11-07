@@ -61,6 +61,8 @@ public sealed class TorBoxClientTests
     [Theory]
     [InlineData("downloading", false, false, null, RemoteStage.Processing)]
     [InlineData("metaDL", false, false, null, RemoteStage.MetadataPending)]
+    [InlineData("checking", false, false, null, RemoteStage.MetadataPending)]
+    [InlineData("checkingResumeData", false, false, null, RemoteStage.MetadataPending)]
     [InlineData("stalled (no seeds)", false, false, null, RemoteStage.Stalled)]
     [InlineData("completed", true, false, null, RemoteStage.Processing)]
     [InlineData("completed", false, true, null, RemoteStage.Processing)]
@@ -77,6 +79,19 @@ public sealed class TorBoxClientTests
             """;
         using var document = System.Text.Json.JsonDocument.Parse(json);
         Assert.Equal(expected, TorBoxMapping.Item(RemoteItemKind.WebDownload, document.RootElement).Stage);
+    }
+
+    /// <summary>Real items that don't know yet: 100 days and a size of -1, which the row read as "about 2400h 0m left".</summary>
+    [Theory]
+    [InlineData(8_640_000, -1, null, 0)]
+    [InlineData(8_639_999, 5, 8_639_999L, 5)]
+    [InlineData(1967, 32_330_558, 1967L, 32_330_558)]
+    public void NoEstimateAndNoSizeAreNotFigures(long eta, long size, long? expectedEta, long expectedSize)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse($$"""{"id":1,"download_state":"checking","eta":{{eta}},"size":{{size}},"files":[]}""");
+        var item = TorBoxMapping.Item(RemoteItemKind.Torrent, document.RootElement);
+        Assert.Equal(expectedEta, item.EtaSeconds);
+        Assert.Equal(expectedSize, item.Size);
     }
 
     [Fact]

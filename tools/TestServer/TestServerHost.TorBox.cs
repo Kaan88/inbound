@@ -39,17 +39,21 @@ public sealed record MockTorBoxState(string DownloadState)
     public string? Error { get; init; }
     /// <summary>False while the provider doesn't know yet what the item contains.</summary>
     public bool ListsFiles { get; init; } = true;
+    /// <summary>What the item's own size says, when that isn't the files'. The real service answers 0 or -1 before it knows.</summary>
+    public long? ReportedSize { get; init; }
 
     public static MockTorBoxState Ready => new("completed") { Present = true, Finished = true, Progress = 1 };
     public static MockTorBoxState CachedReady => new("cached") { Present = true, Finished = true, Cached = true, Progress = 1 };
     public static MockTorBoxState Queued => new("queued") { ListsFiles = false };
-    public static MockTorBoxState MetaData => new("metaDL") { ListsFiles = false };
-    public static MockTorBoxState Stalled => new("stalled (no seeds)") { Progress = 0.1 };
+    /// <summary>As seen on real items: 100 days is its word for no estimate, and the files appear only when it has finished.</summary>
+    public static MockTorBoxState MetaData => new("metaDL") { ListsFiles = false, Eta = 8_640_000, ReportedSize = 0 };
+    public static MockTorBoxState Checking => new("checking") { ListsFiles = false, Eta = 8_640_000, ReportedSize = -1 };
+    public static MockTorBoxState Stalled => new("stalled (no seeds)") { Progress = 0.1, ListsFiles = false, Eta = 8_640_000 };
     public static MockTorBoxState Failed(string? error = null) => new("failed") { Error = error };
     /// <summary>As on a real account: finished once, not present any more, its file list still there and its eta meaningless.</summary>
     public static MockTorBoxState Expired => new("expired") { Finished = true, Progress = 1, Eta = 1_576_416 };
     public static MockTorBoxState Downloading(double progress = 0.5, long? eta = 20) =>
-        new("downloading") { Progress = progress, Eta = eta, Speed = 1_048_576 };
+        new("downloading") { Progress = progress, Eta = eta, Speed = 1_048_576, ListsFiles = false };
 }
 
 public sealed class MockTorBoxFile
@@ -876,7 +880,7 @@ public sealed partial class MockTorBox
             ["server"] = 7,
             ["hash"] = item.Hash,
             ["name"] = item.Name,
-            ["size"] = item.Files.Sum(file => file.Size),
+            ["size"] = state.ReportedSize ?? item.Files.Sum(file => file.Size),
             ["active"] = !state.Finished,
             ["created_at"] = item.CreatedAt,
             ["updated_at"] = item.CreatedAt,
@@ -1059,6 +1063,11 @@ public sealed partial class MockTorBox
         var existing = _items.FirstOrDefault(item => item.Kind == kind &&
             (item.Hash.Equals(hash, StringComparison.OrdinalIgnoreCase) ||
              item.AlternativeHashes.Contains(hash, StringComparer.OrdinalIgnoreCase)));
+        if (existing is { InQueue: true })
+        {
+            return Err(400, "DIFF_ISSUE", "Download already queued.");
+        }
+
         if (existing is not null)
         {
             return DuplicatesAreErrors
@@ -1097,9 +1106,10 @@ public sealed partial class MockTorBox
 
     private static Answer Created(MockTorBoxItem item, string idField, string detail)
     {
-        var data = new JsonObject { ["hash"] = item.Hash, ["auth_id"] = "mock-auth" };
-        data[item.InQueue ? "queued_id" : idField] = item.Id;
-        return Ok(data, detail);
+        // The real answers: no item id and no auth id while it waits for a slot.
+        return item.InQueue
+            ? Ok(new JsonObject { ["hash"] = item.Hash, ["name"] = item.Name, ["queued_id"] = item.Id }, "Torrent queued successfully.")
+            : Ok(new JsonObject { ["hash"] = item.Hash, ["auth_id"] = "mock-auth", [idField] = item.Id }, detail);
     }
 
     private Answer RequestLink(RemoteItemKind kind, string idName, IQueryCollection query)
@@ -1180,7 +1190,8 @@ public sealed partial class MockTorBox
                     RemoteItemKind.WebDownload => "webdl",
                     _ => "usenet",
                 };
-                if (type.Length > 0 && !type.TrimEnd('s').Equals(word, StringComparison.OrdinalIgnoreCase))
+                // The real filter takes only these exact words. Any other answers an empty list.
+                if (type.Length > 0 && !type.Equals(word, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -1188,11 +1199,14 @@ public sealed partial class MockTorBox
                 list.Add(new JsonObject
                 {
                     ["id"] = item.Id,
-                    ["auth_id"] = "mock-auth",
+                    ["created_at"] = item.CreatedAt,
+                    ["magnet"] = item.Magnet,
+                    ["torrent_file"] = null,
                     ["hash"] = item.Hash,
                     ["name"] = item.Name,
                     ["type"] = word,
-                    ["created_at"] = item.CreatedAt,
+                    ["name_override"] = null,
+                    ["seed_torrent_override"] = null,
                 });
             }
 
