@@ -238,6 +238,14 @@ public sealed partial class MainWindow : Window
         // in the background host; Exit is an explicit tray/menu action.
         SaveUiState(sender);
         args.Cancel = true;
+        // PERF.5 option: end the window's process, so the GPU driver's threads and the window's memory go with it.
+        // The Host keeps downloading; the tray, a second launch or a download window starts it again.
+        if (_settings?.CloseWindowCompletely == true)
+        {
+            sender.Hide();
+            Application.Current.Exit();
+            return;
+        }
         sender.Hide();
     }
 
@@ -1330,6 +1338,7 @@ public sealed partial class MainWindow : Window
                 FileName = job.FileName,
                 CategoryId = job.CategoryId,
                 ConflictPolicy = "rename",
+                RememberDestination = false,
                 Source = "api",
             });
             var add = reply.GetPayload<AddJobResponse>();
@@ -1877,6 +1886,7 @@ public sealed partial class MainWindow : Window
                     FileName = entry.FileName,
                     CategoryId = entry.CategoryId,
                     DestinationDirectory = entry.DestinationDirectory,
+                    RememberDestination = false,
                     Description = entry.Description,
                     QueueId = entry.QueueId,
                     Connections = entry.RequestedConnections > 0 ? entry.RequestedConnections : null,
@@ -2484,8 +2494,8 @@ public sealed partial class MainWindow : Window
             var fileName = string.IsNullOrWhiteSpace(nameBox.Text) ? Uri.UnescapeDataString(new Uri(url).AbsolutePath) : nameBox.Text;
             var category = (categoryBox.SelectedItem as ComboBoxItem)?.Tag as string
                 ?? FileCategories.For(fileName, _settings.CustomCategories);
-            var folder = _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory;
-            if (string.IsNullOrWhiteSpace(folder)) _settings.CategoryFolders.TryGetValue(category, out folder);
+            var folder = _settings.UseCategoryFolders ? _settings.CustomCategories.FirstOrDefault(item => item.Id == category)?.DestinationDirectory : null;
+            if (_settings.UseCategoryFolders && string.IsNullOrWhiteSpace(folder)) _settings.CategoryFolders.TryGetValue(category, out folder);
             changingDestination = true;
             destinationBox.Text = string.IsNullOrWhiteSpace(folder) ? _settings.DefaultDownloadDirectory : folder;
             changingDestination = false;
@@ -3913,6 +3923,9 @@ public sealed partial class MainWindow : Window
         }
         if (_settings is null) return;
 
+        // UI.B6: from the Host's current settings; the window's copy can be stale (folders remembered by an add,
+        // changes from the CLI), and Options would show and save the old values.
+        await RefreshSettingsAsync();
         var settings = CloneSettings(_settings);
         var window = new SettingsWindow(RootGrid.ActualTheme);
         _settingsWindow = window;
@@ -3945,6 +3958,9 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
+            var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = settings.CloseWindowCompletely };
+            ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
+            var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
             var postDownload = new TextBox
             {
                 Header = "Run this program after each download (optional)",
@@ -4159,10 +4175,20 @@ public sealed partial class MainWindow : Window
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
+                SettingsWindow.Section("Window"), closeCompletely,
                 SettingsWindow.Section("Capturing downloads"), integration, clipboard);
-            var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"),
-                SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder.") };
+            var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
+                SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.") };
             saveTo.AddRange(categoryRows);
+            void ShowCategoryFoldersEnabled()
+            {
+                foreach (var row in categoryRows.OfType<Control>()) row.IsEnabled = useCategoryFolders.IsChecked == true;
+                foreach (var row in categoryRows.OfType<Panel>()) foreach (var control in row.Children.OfType<Control>()) control.IsEnabled = useCategoryFolders.IsChecked == true;
+                foreach (var box in categoryBoxes.Values) box.IsEnabled = useCategoryFolders.IsChecked == true;
+            }
+            useCategoryFolders.Checked += (_, _) => ShowCategoryFoldersEnabled();
+            useCategoryFolders.Unchecked += (_, _) => ShowCategoryFoldersEnabled();
+            ShowCategoryFoldersEnabled();
             if (customCategoryControls.Count > 0)
             {
                 saveTo.Add(SettingsWindow.Section("Custom categories"));
@@ -4294,6 +4320,8 @@ public sealed partial class MainWindow : Window
                 settings.GlobalSpeedLimitBytesPerSecond = limit;
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;
+                settings.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                settings.UseCategoryFolders = useCategoryFolders.IsChecked == true;
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
                 settings.NotifyOnCompletion = notify.IsChecked == true;
@@ -4329,6 +4357,12 @@ public sealed partial class MainWindow : Window
                     return (update.Error ?? "The host rejected the settings.", -1);
 
                 _settings = update.Settings;
+                UpdateLimitButtons();
+                // UI.B6: a new default folder moves the category folders that sat under the old one. Show what the
+                // Host saved, or the boxes keep the old paths and the next OK writes them back.
+                directory.Text = update.Settings.DefaultDownloadDirectory;
+                foreach (var (category, box) in categoryBoxes)
+                    box.Text = update.Settings.CategoryFolders.TryGetValue(category, out var saved) ? saved : string.Empty;
                 var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
                 await RefreshAsync();
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
@@ -4493,6 +4527,8 @@ public sealed partial class MainWindow : Window
             DefaultDownloadDirectory = source.DefaultDownloadDirectory,
             MaxConcurrentDownloads = source.MaxConcurrentDownloads,
             DefaultConnections = source.DefaultConnections,
+            UseCategoryFolders = source.UseCategoryFolders,
+            CloseWindowCompletely = source.CloseWindowCompletely,
             MaxConnectionsPerHost = source.MaxConnectionsPerHost,
             GlobalSpeedLimitBytesPerSecond = source.GlobalSpeedLimitBytesPerSecond,
             Proxy = new ProxyDto

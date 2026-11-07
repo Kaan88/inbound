@@ -1,5 +1,20 @@
 # Progress — session handoff
 
+### Extension request for later (2026-11-08)
+
+- Owner: an extension option to ask whether to save to a default folder set in the extension, or a custom location, probably as a popup from the existing menu; to do during the web UI and Docker work. Recorded as EXT.R1.
+
+### Two options: folders by category (UI.R19), closing ends the window (PERF.5) (2026-11-08)
+
+- Owner: "make folders by category an option. make closing the window as part of perf changes an option and implement but make note of more investigation in the future."
+- Both are in Options (and the CLI), off/on as before by default. Test instance: closing with the option on ended the window process, the Host kept running, and a new start showed the window. Further investigation for PERF.5 is listed in ROADMAP.
+- Tests before these options: all suites passed except the known flaky TEST.1; the new folder and settings tests (24) pass.
+- Tests with these options: Core 818 passed; Integration 1,090 of 1,091, the one failure the load-sensitive RAR password test (30 s timeout), which passed alone in under a second.
+
+### UI.B6: folders in Options (2026-11-08)
+
+- Owner report recorded and fixed as UI.B6: category folders follow a new default only when they were still under the old one; Options now shows what was saved, loads fresh settings when it opens, and adds no longer change category folders unless asked. Folder and category tests (61) pass; not checked on screen.
+
 ### Limits moved to the Downloads menu; UI.R6 tabular digits (2026-11-08)
 
 - Owner: "I meant a dropdown, like under downloads menu on the toolbar. this is ugly. also, did counter font fix happened?" The limit buttons left the toolbar; they are submenus under Downloads with the value in each name (checked on a test instance with UI Automation). UI.R6 hadn't been done; now all unstyled text uses same-width digits. Neither is checked on screen.
