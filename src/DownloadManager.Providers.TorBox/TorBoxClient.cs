@@ -323,7 +323,31 @@ public sealed class TorBoxClient :
 
         var payload = new Dictionary<string, object> { ["operation"] = "delete", [idName] = id };
         using var body = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var document = await SendAsync(HttpMethod.Post, path, body, false, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var document = await SendAsync(HttpMethod.Post, path, body, false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.ServiceError)
+        {
+            // Seen live: deleting a torrent that isn't on the account answers 500 DATABASE_ERROR, never
+            // ITEM_NOT_FOUND. Only a look tells that from a real outage.
+            var gone = false;
+            try
+            {
+                gone = await GetAsync(item, fresh: true, cancellationToken).ConfigureAwait(false) is null;
+            }
+            catch (RemoteProviderException)
+            {
+                // The look failed too, so the outage is the answer.
+            }
+
+            if (!gone)
+            {
+                throw;
+            }
+
+            throw new RemoteProviderException(RemoteFailureKind.NotFound, ex.ProviderCode, "This item is not on your TorBox account.");
+        }
     }
 
     /// <summary>A link carries the key, so it must be encrypted, unless the whole API is a local test server.</summary>

@@ -180,6 +180,12 @@ public interface IArchiveStore
     /// </summary>
     IReadOnlyCollection<Guid> UnreadableSets => [];
 
+    /// <summary>
+    /// Packages whose password files are there but could not be read by the last <see cref="LoadPackagePasswordsAsync"/>.
+    /// Such a package may have a password the user gave, so an offered one must not replace it.
+    /// </summary>
+    IReadOnlyCollection<Guid> UnreadablePackagePasswords => [];
+
     /// <summary>Null when none was ever saved.</summary>
     Task<ArchiveSettings?> LoadSettingsAsync(CancellationToken cancellationToken = default);
 

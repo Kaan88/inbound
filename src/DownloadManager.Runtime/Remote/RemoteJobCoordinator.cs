@@ -872,7 +872,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             await ChangePacingAsync(work, pacing => pacing with { CreationStoppedReason = null, RateLimitedUntil = null }).ConfigureAwait(false);
         }
 
-        return await ActAsync(id, record =>
+        string? refusal = null;
+        var retried = await ActAsync(id, record =>
         {
             if (record.State is not (RemoteJobState.Failed or RemoteJobState.Blocked))
             {
@@ -885,10 +886,18 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             // The item failed on the provider, and a better one under the same hash may exist by now.
             // Something submitted can be looked for again by its hash, and absent then is absent.
             var looksByHash = canSubmit && !submitsAgain && record.PredictedHash is not null && record.FailureKind == RemoteFailureKind.Rejected;
+            var keptItem = submitsAgain || looksByHash ? null : record.ItemId;
+            // Its item may have been added again as another job since this one failed, and that one brings its files.
+            if (keptItem is not null && OtherHolderLocked(record, keptItem) is not null)
+            {
+                refusal = AlreadyBroughtByAnother;
+                return null;
+            }
+
             return record with
             {
                 State = submitsAgain ? RemoteJobState.Intended : RemoteJobState.Waiting,
-                ItemId = submitsAgain || looksByHash ? null : record.ItemId,
+                ItemId = keptItem,
                 ProtectedLinkPassword = password ?? record.ProtectedLinkPassword,
                 ApprovedUncached = approveUncached ?? record.ApprovedUncached,
                 ApprovalNeeded = false,
@@ -901,6 +910,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 NextCheckAt = _time.GetUtcNow(),
             };
         }, "Only a failed or blocked item can be retried.", cancellationToken).ConfigureAwait(false);
+        return refusal is null ? retried : new RemoteActionResult(false, refusal);
     }
 
     /// <summary>
@@ -1151,12 +1161,17 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         {
             await remover.RemoveAsync(new RemoteItemRef(view.Provider, view.Kind, itemId), cancellationToken).ConfigureAwait(false);
         }
-        catch (RemoteProviderException ex) when (ex.Kind != RemoteFailureKind.NotFound)
+        catch (RemoteProviderException ex) when (ex.Kind == RemoteFailureKind.NotFound)
+        {
+            // Already gone from the provider, such as deleted on its site: what was asked for is true.
+        }
+        catch (RemoteProviderException ex)
         {
             return new RemoteActionResult(false, Describe(entry, ex));
         }
 
-        return await RemoveAsync(id, cancellationToken).ConfigureAwait(false);
+        // The item is gone now, so a client leaving can't be allowed to keep the job on the list.
+        return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>The item's files as they are now, with their safe paths. Nothing is invented while the provider doesn't know them.</summary>

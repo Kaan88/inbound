@@ -469,7 +469,6 @@ public sealed partial class RemoteJobCoordinator
             return;
         }
 
-        var password = SecretProtector.UnprotectRemoteLinkPassword(record.ProtectedLinkPassword);
         if (record.Kind == RemoteItemKind.WebDownload && entry.TransferPolicy.CreationSpacing > TimeSpan.Zero)
         {
             // Reserved before the request, and not given back: a request that fails may still count against the limit.
@@ -484,13 +483,16 @@ public sealed partial class RemoteJobCoordinator
             return;
         }
 
+        // A retry can give a password or an approval while the looks above were waiting on the
+        // network. What is sent is what the record holds now, so the newer answer counts.
+        var password = SecretProtector.UnprotectRemoteLinkPassword(submitting.ProtectedLinkPassword);
         await SendAsync(work, record.Id, submitter, new RemoteSubmission
         {
             Kind = record.Kind,
             Link = link,
             TorrentFile = torrent,
             LinkPassword = password,
-            OnlyIfCached = !record.ApprovedUncached,
+            OnlyIfCached = !submitting.ApprovedUncached,
         }, hash, pass, cancellationToken).ConfigureAwait(false);
     }
 
@@ -581,6 +583,12 @@ public sealed partial class RemoteJobCoordinator
 
             if (result.Ref is { } reference)
             {
+                // A provider can answer with the item it already had, and another job may bring that one.
+                if (OtherHolderLocked(record, reference.ItemId) is not null)
+                {
+                    return BroughtByAnother(record) with { PredictedHash = result.Hash ?? hash };
+                }
+
                 return Settled(record) with
                 {
                     State = RemoteJobState.Waiting,
@@ -794,16 +802,19 @@ public sealed partial class RemoteJobCoordinator
         {
             case FindKind.Found:
                 var item = found.Item!;
-                var adopted = await UpdateAsync(record.Id, latest => RemoteJobRules.IsPolled(latest.State)
-                    ? Settled(latest) with
-                    {
-                        State = RemoteJobState.Waiting,
-                        ItemId = item.Ref.ItemId,
-                        PredictedHash = item.Hash ?? latest.PredictedHash,
-                        NextCheckAt = now,
-                    }
-                    : null).ConfigureAwait(false);
-                if (adopted is not null)
+                var adopted = await UpdateAsync(record.Id, latest => !RemoteJobRules.IsPolled(latest.State)
+                    ? null
+                    // Another job brings this item's files already, and two would download them twice.
+                    : OtherHolderLocked(latest, item.Ref.ItemId) is not null
+                        ? BroughtByAnother(latest)
+                        : Settled(latest) with
+                        {
+                            State = RemoteJobState.Waiting,
+                            ItemId = item.Ref.ItemId,
+                            PredictedHash = item.Hash ?? latest.PredictedHash,
+                            NextCheckAt = now,
+                        }).ConfigureAwait(false);
+                if (adopted is { State: RemoteJobState.Waiting })
                 {
                     await ApplyItemAsync(work, record.Id, item, cancellationToken).ConfigureAwait(false);
                 }
@@ -841,6 +852,35 @@ public sealed partial class RemoteJobCoordinator
                 }
                 : null;
         });
+
+    /// <summary>
+    /// Another job on the list, not failed, that already holds this item. Called inside an update, so
+    /// under the gate: nothing can take the item between the look and the change.
+    /// </summary>
+    private RemoteJobRecord? OtherHolderLocked(RemoteJobRecord record, string itemId)
+    {
+        lock (_sync)
+        {
+            return _records.Values.FirstOrDefault(other =>
+                other.Id != record.Id &&
+                other.Provider == record.Provider &&
+                other.Kind == record.Kind &&
+                other.State is not (RemoteJobState.Failed or RemoteJobState.Removed) &&
+                other.ItemId == itemId);
+        }
+    }
+
+    internal const string AlreadyBroughtByAnother =
+        "This item is already on the list as another job, which brings its files. Remove this one, or remove that one and retry this.";
+
+    private static RemoteJobRecord BroughtByAnother(RemoteJobRecord record) => record with
+    {
+        State = RemoteJobState.Failed,
+        FailureKind = RemoteFailureKind.Rejected,
+        FailureMessage = AlreadyBroughtByAnother,
+        ApprovalNeeded = false,
+        NextCheckAt = null,
+    };
 
     private static RemoteJobRecord Settled(RemoteJobRecord record) => record with
     {

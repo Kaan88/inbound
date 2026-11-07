@@ -15,8 +15,11 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
     private readonly string _packagesDirectory = Path.Combine(paths.Root, "archive", "packages");
     private readonly ArchiveStoreOptions _options = options ?? new ArchiveStoreOptions();
     private IReadOnlyCollection<Guid> _unreadableSets = [];
+    private IReadOnlyCollection<Guid> _unreadablePackagePasswords = [];
 
     public IReadOnlyCollection<Guid> UnreadableSets => _unreadableSets;
+
+    public IReadOnlyCollection<Guid> UnreadablePackagePasswords => _unreadablePackagePasswords;
 
     public async Task<ArchiveSettings?> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {
@@ -71,11 +74,15 @@ public sealed class JsonArchiveStore(StoragePaths paths, Action<string>? log = n
     public async Task<IReadOnlyList<ArchivePackagePassword>> LoadPackagePasswordsAsync(CancellationToken cancellationToken = default)
     {
         var passwords = new List<ArchivePackagePassword>();
+        var unreadable = new List<Guid>();
+        _unreadablePackagePasswords = unreadable;
         if (!Directory.Exists(_packagesDirectory)) return passwords;
         foreach (var file in Directory.EnumerateFiles(_packagesDirectory, "*.json"))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if ((await ReadAsync<ArchivePackagePassword>(file, cancellationToken).ConfigureAwait(false)).Value is { } password)
+            var read = await ReadAsync<ArchivePackagePassword>(file, cancellationToken).ConfigureAwait(false);
+            if (read.HeldOpen && Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var heldId)) unreadable.Add(heldId);
+            if (read.Value is { } password)
             {
                 passwords.Add(password);
             }

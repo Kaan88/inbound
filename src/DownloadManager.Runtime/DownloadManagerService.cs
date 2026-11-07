@@ -1209,7 +1209,8 @@ public sealed partial class DownloadManagerService
             AllowSystemCompletionActions = settings.AllowSystemCompletionActions,
             Theme = settings.Theme,
             LastDestinationDirectory = settings.LastDestinationDirectory,
-            RecentUrls = new List<string>(settings.RecentUrls ?? new List<string>()),
+            // A client's copy can predate a key being stored, so the same rule as the scrub applies to every save.
+            RecentUrls = (settings.RecentUrls ?? new List<string>()).Where(url => !HoldsProviderSecret(url)).ToList(),
             CategoryFolders = new Dictionary<string, string>(
                 settings.CategoryFolders ?? new Dictionary<string, string>(),
                 StringComparer.OrdinalIgnoreCase),

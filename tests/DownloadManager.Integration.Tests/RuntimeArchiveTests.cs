@@ -189,6 +189,58 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         Assert.Contains("no such package", await run.Archives.SetPackagePasswordAsync(Guid.NewGuid(), Secret));
     }
 
+    [Fact]
+    public async Task AnOfferNeverReplacesAPasswordWhoseFileWasHeldOpenAtTheStart()
+    {
+        var tool = new FakeExtractor();
+        var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool };
+        await using var run = await ArchiveHarness.StartAsync(_server, options);
+        var job = await run.DownloadAsync("held.rar", Text, packageKey: "held-package");
+        await run.WaitForJobAsync(job.Id, "completed");
+        var package = run.Service.FindGroupOf(job.Id)!.Value;
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, Secret));
+        var file = Path.Combine(run.Paths.Root, "archive", "packages", $"{package:N}.json");
+        var saved = File.ReadAllText(file);
+
+        // A scanner has the user's password file at the next start, so it isn't read then.
+        await run.Archives.ShutdownAsync();
+        using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await run.StartCoordinatorAsync(options, _ => new JsonArchiveStore(run.Paths, null, new ArchiveStoreOptions { ReadAttempts = 2, ReadRetryDelay = TimeSpan.FromMilliseconds(1) }));
+        }
+
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, "Another-Pw", keepExisting: true));
+        Assert.Equal(saved, File.ReadAllText(file));
+    }
+
+    [Fact]
+    public async Task AnArchiveSideThatCouldNotStartTakesNoPasswordOffers()
+    {
+        var tool = new FakeExtractor();
+        var options = new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool };
+        await using var run = await ArchiveHarness.StartAsync(_server, options);
+        var job = await run.DownloadAsync("unstarted.rar", Text, packageKey: "unstarted-package");
+        await run.WaitForJobAsync(job.Id, "completed");
+        var package = run.Service.FindGroupOf(job.Id)!.Value;
+        Assert.Null(await run.Archives.SetPackagePasswordAsync(package, Secret));
+        var file = Path.Combine(run.Paths.Root, "archive", "packages", $"{package:N}.json");
+        var saved = File.ReadAllText(file);
+
+        // The archive settings are held open, so the start fails, as the Host then logs and carries on.
+        await run.Archives.ShutdownAsync();
+        var settings = Path.Combine(run.Paths.Root, "archive", "settings.json");
+        using (new FileStream(settings, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await Assert.ThrowsAsync<IOException>(() => run.StartCoordinatorAsync(options, _ => new JsonArchiveStore(run.Paths, null, new ArchiveStoreOptions { ReadAttempts = 2, ReadRetryDelay = TimeSpan.FromMilliseconds(1) })));
+        }
+
+        await run.Archives.ShutdownAsync();
+
+        // A remote job's offer is refused, so it keeps its own copy, and the user's password stays.
+        Assert.NotNull(await run.Archives.SetPackagePasswordAsync(package, "Another-Pw", keepExisting: true));
+        Assert.Equal(saved, File.ReadAllText(file));
+    }
+
     /// <summary>Puts one file next to the archive, as an extraction would.</summary>
     private sealed class WritingExtractor(string name, byte[] bytes) : IArchiveExtractor
     {
