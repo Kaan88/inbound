@@ -8,6 +8,7 @@
 - The tests before release: Archives 309, Core 818, 86 runtime archive integration tests. The full Engine and Integration suites were not run again after A4.C, which touched only archive and UI code.
 - The store extension stays 0.4.0. Since 0.4.0 its source has changed only in one message, for a refused extension ID; bump the version before the next store upload.
 - Not verified: install of Setup 0.5.0, auto-update from 0.4.0 to 0.5.0.
+- The owner asked to note that spanned zips (`name.zip` with `name.z01`) are not recognised, since nothing on this PC can make one to test with. Recorded as ROADMAP A4.D.
 
 ### Owner's try of favorites and free space (2026-11-07)
 
