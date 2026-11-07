@@ -1,5 +1,45 @@
 # Progress — session handoff
 
+### Live scenarios E and J, and killing the Host during a provider file (2026-11-07)
+
+Run in a sandbox Host on the real API, with the key set through `dm remote key set`. On screen means the real WinUI window read through UI Automation. Only freely licensed test files were added, and all of them are deleted again: the account is back at 144 and 13.
+
+- **E, cached magnet and cached .torrent: passed live, by CLI and on screen.** Multi-file items, not on the account before. By CLI the row reached file choice in about 1.7 s, and on screen in 2.9 s. The file count and bytes equal the torrent. Chosen files completed, sizes equal, and torrent pieces or md5 equal where the file is big enough to check.
+- **E, uncached magnet and uncached .torrent: passed live, by CLI and on screen.** The row waits for approval and nothing is on the account until then. After approval: about 60 to 120 s to file choice for files of 2.6 to 3.9 GB. Chosen files completed with sizes equal. These small files fit inside one torrent piece, so their content was compared only through the full-file checks below. One item on the account each time.
+- **Some uncached items never finish on TorBox's side.** Three public domain items from one site stayed `checking` or stalled at about 84% for over 37 minutes. Their rows stayed waiting, and they could be removed. That is TorBox's or the source's state, not a fault found in the app.
+- **J, restart while TorBox works: passed live.** The Host and UI were killed hard, by process, in three places:
+  - **During the create request.** The row was `submitting`. TorBox did receive it. After restart the row said it was checking, found the item within seconds, and there was one item and no second create.
+  - **While TorBox processed an item.** Same item id after restart, one item on the account, monitoring went on and the local download started.
+  - **While the item was in TorBox's queue.** It came back queued, with one queue entry and nothing on the list.
+- **Not seen in J:** a kill at the exact moment TorBox reported `downloading` with progress above 0 on an item that then finished. The kill landed at `checkingResumeData`. Earlier items were killed during `metaDL`, `checking` and a stall, and kept their ids.
+- **Killing the Host during a local provider file: passed live.** Four files, killed once or twice each:
+  - 571 MB at 8 MB/s: killed at 194.8 MB, resumed from 194.1 MB. All 1088 torrent pieces correct.
+  - 2.94 GB without a limit: killed at 2.78 GB, resumed from 2.73 GB. All 11217 pieces correct, and SHA-256 equal to the distributor's checksum file.
+  - 4.1 MB at 400 KB/s: killed at 2.5 MB, resumed from 2.0 MB. md5 equal to TorBox's.
+  - 276 MB, killed twice in the first 5 s: restarted from about zero, as nothing had been checkpointed yet. All pieces correct.
+- **TorBox gave no md5 for a large file I could test.** On the account, files with an md5 are either 4 MB or smaller, or 20 GB or larger. So large files were checked against torrent pieces and the distributor's checksum.
+- **Five defects fixed, each with a test that failed with the fix undone:**
+  - c2a3859: a row read "about 2400h 0m left". TorBox answers `eta` 8640000 when it has no estimate, and `size` 0 or -1. Seen gone on a new build, with the row on a real stalled item.
+  - e2b7996: a row read "about 23h 59m left" while TorBox seeded, with about a minute to wait. Seen gone on a new build.
+  - aa946fa: a Host started by the CLI kept the CLI's output open, so `dm ... | x` hung while that Host lived. Tested through a real CLI and Host; `dm` in the sandbox scripts now reads files, so not separately seen with the live scripts.
+  - c8e05fe: a speed limit gave far less than its figure on small reads. 8 MB/s gave about 2 MB/s on a real provider download, and about 1 MB/s in the test. Seen at 7.77 MB/s on a new build. This holds for any HTTPS download, not only providers.
+  - 9b02022: a magnet that was removed from the queue failed with words about folder links. Tested with the mock; the wrong words were seen live, the new words were not.
+- **The mock is corrected** to what the real service does: no files until the item finishes, the queued create's answer, "Download already queued", and the exact queue filter word.
+- **For the add flow, nothing built (TB.F9, TB.F10):**
+  - TB.F9 is not only .torrent. A cached magnet behaves the same. The Host reaches file choice by itself in under 3 s. The "Added for TorBox" box stays open saying "Ready. Close this and choose the files from the download list: select the item and press Enter." The chooser does not open by itself. After Close, Enter on the row opens it, with everything ticked.
+  - An uncached item behaves the same once ready. The same box was still open at 98 and 118 s and changed to the same words.
+  - `files[]` stayed empty through `metaDL`, `checking`, `checkingResumeData`, `downloading`, `processing`, `uploading (no peers)` and `stalled (no seeds)`. It appears at `completed` or `cached`. So files can't be listed early for an uncached item.
+  - A .torrent shows its real size at once. A magnet shows 0, then -1, then the real size at `downloading`.
+  - Creating an uncached .torrent: 200, about 4.3 s, "Torrent Added Successfully", `data` holds `hash`, `torrent_id`, `auth_id`. Asking again: 200, about 0.6 s, "Found Cached Torrent. Using Cached Torrent.", same id.
+  - With 3 active items on a plan with no extra slots, a 4th create: 200, "Torrent queued successfully.", `data` holds `hash`, `name`, `queued_id`. Asking again: 400 `DIFF_ISSUE`, "Download already queued.", `data` null. The Host handles both.
+  - **TorBox did not start a queued item by itself when slots were free.** One entry waited 16 minutes and another 14 minutes with free slots. Longer was not tried. `queued/controlqueued` with `start` started one at once, and the Host picked it up within seconds. With `delete` it left the queue, and the row failed after its grace, with no second create. The app has no command for either.
+  - In the UI a queued row reads only "Waiting for TorBox", the same words as waiting for metadata. The CLI status says "Added to TorBox queue". Removing it with delete-from-provider is refused, in plain words that say to do it on TorBox's site.
+- **Not changed, for the owner or a later stage:**
+  - `DownloadManager.NativeHost` and the WinUI app start the Host the same way the CLI did. The native host may hold its pipe the same way. Not proven.
+  - Two tests failed once each, then passed again: `Rar4HeaderPasswordRightWrongAndMissing` (1 in about 14 runs, wrong password read as corrupted) and `TheClientWaitsOutAnUsedUpBudgetInsteadOfHittingTheLimit` (2 in about 8 runs, a timing race with the mock is likely). Neither looks tied to these changes, and neither cause is proven.
+- **One slip on the owner's desktop.** My first CLI fix started the Host through the shell. A test then put a real "Open File - Security Warning" box on the desktop for about 7 minutes, because the build carries the repo's Low label. I stopped that CLI by process id and dropped that approach. Nothing was opened.
+- All suites on the last commits: Archives 293, Containers 183, Core 722, Engine 134, Integration 982, TorBox 314.
+
 ### Live scenarios A to D against the real TorBox account (2026-11-07)
 
 Run in a sandbox Host on the real API, with the key set through `dm remote key set`. All Host traffic went through a local proxy that logged each destination, and a poll of the Host's TCP connections ran beside it. On screen means the real WinUI window read through UI Automation. Screenshots of it came out black, so no pixels were seen.
