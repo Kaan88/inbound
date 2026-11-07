@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Release 0.5.2 (2026-11-07)
+
+- Owner: "Release 0.5.2". Contents: the PERF.4 idle fixes. Main commit 0ba1f74, tag v0.5.2, https://github.com/Kaan88/inbound/releases/tag/v0.5.2.
+- Checks: manifest signature verified with the release public key (same key as 0.3.0 onwards), the latest feed serves 0.5.2, the downloaded Setup hash matches SHA256SUMS, the package contains 7-Zip, and the credential-token scan of the tree found nothing. The squashed main tree is identical to `torbox-addflow`.
+- Not yet done: updating the installed app to 0.5.2 and a 30-minute idle measurement on it.
+
 ### PERF.4: idle fixes (2026-11-07, branch `torbox-addflow`)
 
 - Tray refreshes on job and setting changes instead of every second, and checks browser integration only when its menu opens. Clipboard polling runs only while monitoring is on. The speed graph draws only while it can be seen.
