@@ -35,7 +35,7 @@ internal static class FileMenuRules
     /// <param name="singleFile">The selection's first local row is a file, which is what Open and its like act on.</param>
     /// <param name="package">The selection's first local row is a package.</param>
     /// <param name="sideRows">Selected rows with no local download behind them: remote jobs and archive records.</param>
-    /// <param name="removableSideRows">Those of them that Remove can take off the list. An archive still extracting can't go.</param>
+    /// <param name="removableSideRows">Those of them that Delete can take off the list. An archive still extracting can't go.</param>
     /// <param name="fileRemoved">That file's archive was removed after extraction.</param>
     public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false)
     {

@@ -198,8 +198,7 @@ internal sealed class MyProviderWindow : Window
         _destinationHint = new StatusLine("Destination note");
         _status = new StatusLine($"My {_name} status");
 
-        var theme = UiStateStore.Load().DarkMode;
-        _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
+        AppTheme.Track(_root);
         Title = $"My {_name} — Inbound Download Manager";
         WindowLayout.SetMinimumSize(this, WindowMinimumWidth, WindowMinimumHeight);
         WindowLayout.ResizeForDpi(this, 1000, 720);
@@ -264,9 +263,6 @@ internal sealed class MyProviderWindow : Window
         RenderDetail();
         if (_tabs.Items.Count > 0) _tabs.SelectedItem = _tabs.Items[0];
     }
-
-    /// <summary>Follows the main window, whose theme the status colors in this list come from.</summary>
-    internal void UseTheme(ElementTheme theme) => _root.RequestedTheme = theme;
 
     public void ShowWindow()
     {
@@ -942,7 +938,7 @@ internal sealed class MyProviderWindow : Window
         };
         try
         {
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {

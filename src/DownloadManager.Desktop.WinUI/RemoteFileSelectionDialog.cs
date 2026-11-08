@@ -70,21 +70,17 @@ internal static class RemoteFileSelectionDialog
         tree.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = tree.Tree.ChosenCount > 0;
 
         using var closing = new CancellationTokenSource();
-        try
+        // Refused at once, without showing, when another dialog is open over this window (UI.B8); nothing has been
+        // asked yet then, so nothing is loaded either.
+        var shown = DialogGuard.ShowAsync(dialog);
+        if (shown.IsCompleted && shown.Result is null) return new RemoteFileAnswer(null, false, CouldNotOpen: true);
         {
-            // This call is what throws when another dialog is open, and then nothing has been asked yet.
-            var shown = dialog.ShowAsync();
             var laterSaid = laterText is null ? null : laterWords ?? $"Select \"{laterText}\" to choose them when it does.";
             _ = FillAsync(tree, busy, status, providerName, load, laterText is null ? null : () => dialog.SecondaryButtonText = laterText, laterSaid, title => dialog.Title = title, closing.Token);
             var answer = await shown;
             closing.Cancel();
+            if (answer is null) return new RemoteFileAnswer(null, false, CouldNotOpen: true);
             return new RemoteFileAnswer(answer == ContentDialogResult.Primary && tree.Tree.ChosenCount > 0 ? tree.Tree.Choice : null, answer == ContentDialogResult.Secondary);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is already open over this window.
-            closing.Cancel();
-            return new RemoteFileAnswer(null, false, CouldNotOpen: true);
         }
     }
 
