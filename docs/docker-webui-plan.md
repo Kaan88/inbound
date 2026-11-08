@@ -7,6 +7,13 @@ built on `webui`, 2026-11-08, in the next section. D3 (the image, compose and th
 the section after that. ROADMAP D1 to D4 and PERF.1 to PERF.3
 track it.
 
+The same server program also runs on Windows as the desktop app's **web bridge** (D8, 2026-11-09,
+`docs/plans/remote-management.md`): `DownloadManager.Server.exe --bridge`, started by the Host when Options, Web UI
+is ticked. It has no engine of its own and passes each browser connection to the Host's pipe; its differences from
+the server (no setup page, the window's one-time ticket, options on standard input, exit codes) are in
+`docs/ipc-protocol.md` under "The web bridge on Windows". Code shared by both: `WebFront.cs` (the endpoints, with
+an `IEnvelopeBackend`: the server's dispatcher or the bridge's `Bridge/PipeBackend.cs`) and `Auth/`.
+
 ## D2: what was built (2026-11-08)
 
 - **Sign-in** (`src/DownloadManager.Server/Auth`), on by default. One user. The password is set on the setup page the

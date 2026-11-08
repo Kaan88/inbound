@@ -1,7 +1,9 @@
 # Web UI in the Windows app (D8) and remote management (D9): design
 
 Status: agreed with the owner 2026-11-09 (decisions below), after three reviews (security, the code,
-simplicity). Being built.
+simplicity). Being built. Built so far: section 2 (web-role rights) and the Host and bridge parts of section 1
+(bridge mode, `webui.*`, the supervisor; see "Section 1 as built" below). Not yet: the Options page, the firewall
+button, publish and Setup shipping the bridge, the web UI's `hostKind` texts and host switcher.
 
 Owner, 2026-11-08: "put webui to installer too. have it be possible to enable webui from desktop app. like how
 qbittorrent does." and "since host is separate, like transmission, have desktop or webui be able to connect to each
@@ -53,6 +55,48 @@ about 8 to 10 MB in Setup, to be measured, plus the 0.3 MB web UI).
 - A port in use, or any other start failure, comes back to Options and the tray from the bridge's exit code.
 - Idle with the bridge running is measured early (Kestrel keeps a 1 s housekeeping timer; ASP.NET Core's HTTP.sys
   server is the fallback if that is too costly).
+
+#### Section 1 as built (2026-11-09)
+
+The protocol is in `docs/ipc-protocol.md` ("The web UI's own settings" and "The web bridge on Windows").
+
+- `DownloadManager.Server.exe --bridge` (`src/DownloadManager.Server/Bridge`): options as one JSON line on standard
+  input (nothing on the command line, no password at all: the bridge reads the hash from `auth.json`), `ready` on
+  standard output, the reason on standard error, exit codes 0 stopped, 1 crashed, 2 refused, 3 port in use, 4 port
+  not allowed. Standard input closing stops it. The endpoints are the server's, moved into `WebFront.cs` with the
+  dispatcher or the pipe behind them; sign-in is the server's with `/api/auth/setup` left out and
+  `GET /api/auth/ticket` added.
+- The Host (`src/DownloadManager.Runtime/WebUi`, `src/DownloadManager.Host/WebBridgeLauncher.cs` and the other
+  `WebUi`-linked files): `webui.json`, the five pipe commands and `webui.changed`, and `WebUiSupervisor`, which starts
+  the bridge when the box is ticked (or at Host start when it was), restarts it on a port, names or password change,
+  restarts it after a crash (1, 2, 4... s, at most 60; a tray notice after 5 short runs), stops it and ends the web
+  sessions when the box is cleared, and stops it before the Host exits. A port in use or not allowed sets `failed`
+  with the bridge's words and a tray notice, without retrying.
+- Firewall: the Host reads the rules through `HNetCfg.FwPolicy2` (no program started, the same in every Windows
+  language) instead of parsing `netsh` output. While the rule is missing or unreadable, the bridge listens on
+  127.0.0.1 and ::1 only; `webui.recheck` (the window calls it after adding the rule) restarts it on every address.
+  A process below medium integrity is refused the read (`unknown`): builds in this repository are, the installed app
+  is not.
+- "Open in browser": `webui.openTicket` first checks in the TCP table that the listener on the port is the bridge
+  the Host started (exclusive address use stops another account sharing the port), then makes a ticket with the
+  run's random key.
+- Where the bridge program is: next to the Host or in its `web` folder (`bridgePath` in `webui.status`). Shipping it
+  there is part of the publish and Setup work.
+
+Idle, measured 2026-11-09 on this PC with a test instance (`DOWNLOADMANAGER_INSTANCE`, data under `artifacts\`,
+Release build, no window and no browser connected), over 2 minutes after 30 s or more of rest. CPU is the process's
+total processor time; switches are the sum of its threads' context switches (`Win32_PerfRawData_PerfProc_Thread`;
+threads that ended in between drop out, so these are lower bounds).
+
+| | Host CPU | Host switches | Bridge CPU | Bridge switches |
+| --- | --- | --- | --- | --- |
+| Web UI off | 0 ms | 63 | no process | no process |
+| Web UI on, no browser | 31 ms | 91 | 47 ms | 743 (about 6 a second) |
+
+With the box off the Host has no bridge process, no listening port and no ASP.NET Core module loaded (it does not
+reference the ASP.NET Core framework at all; the sign-in file code is linked in as source). The bridge's switches
+are Kestrel's 1 s heartbeat and the runtime's own threads: small, but not nothing, which is one more reason the box
+is off by default.
 
 ### 2. Web-role rights in the Host (the security core)
 
