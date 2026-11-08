@@ -62,6 +62,29 @@ public sealed class OtherFormatTests : ExtractionTestBase
         Space.AssertSameAsSource();
     }
 
+    /// <summary>
+    /// Some Windows tools (PowerShell 5.1's Compress-Archive among them) write zip names with backslashes between folders.
+    /// 7-Zip reads those as folders on Linux too (checked with 7-Zip 26.04 for zips marked as made on Windows and on
+    /// Unix), so the listing never shows a backslash and the server extracts them like any other.
+    /// </summary>
+    [RequiresSevenZipFact]
+    public async Task AZipWithBackslashesBetweenFoldersExtractsIntoThoseFolders()
+    {
+        var archive = Space.Archive("backslashes.zip");
+        await using (var file = File.Create(archive))
+        using (var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            await using var entry = await zip.CreateEntry("dir" + (char)92 + "sub" + (char)92 + "a.txt").OpenAsync();
+            await entry.WriteAsync(Encoding.UTF8.GetBytes("hello"));
+        }
+
+        var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
+        Assert.DoesNotContain(probe.Entries, item => item.Path.Contains((char)92) && !OperatingSystem.IsWindows());
+
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(Space.Destination, "dir", "sub", "a.txt")));
+    }
+
     [RequiresSevenZipFact]
     public async Task A7zWithHiddenNamesNeedsItsPasswordAndTakesAnyCharacters()
     {

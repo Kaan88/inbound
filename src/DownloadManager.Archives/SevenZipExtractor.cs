@@ -79,23 +79,7 @@ public static class SevenZipTool
         : $"Extraction uses 7-Zip at {path}.";
 
     /// <summary>The first <paramref name="name"/> in a folder of the <c>PATH</c> value, or null.</summary>
-    internal static string? FindOnPath(string name, string? path)
-    {
-        foreach (var directory in (path ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try
-            {
-                var candidate = Path.Combine(directory.Trim(), name);
-                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
-            }
-            catch (ArgumentException)
-            {
-                // A PATH entry with characters a path can't hold names nothing.
-            }
-        }
-
-        return null;
-    }
+    internal static string? FindOnPath(string name, string? path) => ProgramSearch.FindOnPath(name, path);
 }
 
 /// <summary>
