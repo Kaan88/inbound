@@ -1,4 +1,5 @@
 import { connectionProblem } from "./connection-problem";
+import { actionsFor, latestJobs, type JobAction, type JobSummary } from "./job-list";
 
 interface Settings {
   enabled: boolean;
@@ -7,27 +8,17 @@ interface Settings {
   notifications: boolean;
 }
 
-interface JobSummary {
-  id: string;
-  fileName: string;
-  state: string;
-  receivedBytes: number;
-  totalBytes?: number;
-  progress?: number;
-  bytesPerSecond?: number;
-  estimatedRemaining?: string | number | null;
-  failure?: { message?: string };
-}
-
 interface Status {
   ok: boolean;
   extensionVersion?: string;
   enabled?: boolean;
   autoIntercept?: boolean;
+  automaticSending?: boolean;
   connected?: boolean;
   lastError?: string;
   pauseUntil?: number;
   settings?: Settings;
+  leftInBrowser?: Array<{ fileName: string; reason: string; at: number }>;
   jobs?: JobSummary[];
 }
 
@@ -133,18 +124,79 @@ function stateLabel(state: string): string {
 }
 
 let pauseActive = false;
+// The list is redrawn every second, so a Delete being confirmed is remembered here: job id -> "delete the file too".
+const confirmingDelete = new Map<string, boolean>();
+let shownJobs: JobSummary[] = [];
+
+const ACTION_LABELS: Record<JobAction, string> = { pause: "Pause", resume: "Resume", retry: "Retry", remove: "Delete" };
+
+async function runJobAction(job: JobSummary, action: JobAction, deleteFile = false): Promise<void> {
+  clearError();
+  try {
+    const result = (await chrome.runtime.sendMessage({ type: "dm.jobAction", action, jobId: job.id, deleteFile })) as { ok?: boolean; error?: string };
+    if (!result?.ok) showError(result?.error || "The app did not do that.");
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error));
+  }
+  confirmingDelete.delete(job.id);
+  await pollJobs();
+}
+
+function actionRow(job: JobSummary): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "job-actions";
+  const label = job.fileName || "this download";
+  if (confirmingDelete.has(job.id)) {
+    const option = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = confirmingDelete.get(job.id) === true;
+    box.addEventListener("change", () => confirmingDelete.set(job.id, box.checked));
+    option.append(box, "Delete the file too");
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.textContent = "Delete";
+    confirm.title = `Remove ${label} from Inbound`;
+    confirm.addEventListener("click", () => void runJobAction(job, "remove", confirmingDelete.get(job.id) === true));
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "quiet";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { confirmingDelete.delete(job.id); renderJobs(shownJobs); });
+    row.append(option, confirm, cancel);
+    return row;
+  }
+  for (const action of actionsFor(job)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = ACTION_LABELS[action];
+    button.title = `${ACTION_LABELS[action]} ${label}`;
+    button.addEventListener("click", () => {
+      if (action === "remove") {
+        // Delete asks first, with "Delete the file too" unticked.
+        confirmingDelete.set(job.id, false);
+        renderJobs(shownJobs);
+      } else {
+        void runJobAction(job, action);
+      }
+    });
+    row.append(button);
+  }
+  return row;
+}
 
 function renderJobs(jobs: JobSummary[]): void {
+  shownJobs = latestJobs(jobs);
   jobsList.replaceChildren();
-  if (!jobs.length) {
+  if (!shownJobs.length) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = "No recent downloads.";
+    empty.textContent = "No downloads.";
     jobsList.append(empty);
     return;
   }
 
-  for (const job of jobs.slice(0, 8)) {
+  for (const job of shownJobs) {
     const item = document.createElement("li");
     const name = document.createElement("span");
     name.className = "name";
@@ -188,7 +240,35 @@ function renderJobs(jobs: JobSummary[]): void {
       item.append(progress);
     }
 
+    item.append(actionRow(job));
     jobsList.append(item);
+  }
+}
+
+function renderLeftInBrowser(notes: Status["leftInBrowser"]): void {
+  const card = document.getElementById("leftCard") as HTMLElement;
+  const list = document.getElementById("leftList") as HTMLUListElement;
+  // Only recent ones: an old note would explain a download nobody is wondering about any more.
+  const recent = (notes ?? []).filter((note) => Date.now() - note.at < 30 * 60 * 1000).slice(0, 3);
+  card.classList.toggle("hidden", recent.length === 0);
+  list.replaceChildren(...recent.map((note) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = note.fileName;
+    item.append(name, `: ${note.reason}`);
+    return item;
+  }));
+}
+
+async function pollJobs(): Promise<void> {
+  try {
+    const result = (await chrome.runtime.sendMessage({ type: "dm.jobs" })) as { ok?: boolean; jobs?: JobSummary[] };
+    if (Array.isArray(result?.jobs)) {
+      renderJobs(result.jobs);
+    }
+  } catch {
+    // The worker may be restarting; the manual Refresh button still works.
   }
 }
 
@@ -226,6 +306,17 @@ async function refresh(): Promise<void> {
 
     getApp.classList.toggle("hidden", !enabled || connected);
     pauseActive = !!status.pauseUntil && status.pauseUntil > Date.now();
+
+    // EXT.B1: whether downloads are caught automatically is always in view, with the way to turn it on.
+    const autoState = document.getElementById("autoState") as HTMLSpanElement;
+    const automatic = status.automaticSending ?? (enabled && !!status.settings?.autoIntercept);
+    autoState.dataset.on = String(automatic && !pauseActive);
+    autoState.textContent = !automatic
+      ? "Automatic sending: off"
+      : pauseActive ? "Automatic sending: paused" : "Automatic sending: on";
+    (document.getElementById("autoTurnOn") as HTMLButtonElement).classList.toggle("hidden", automatic);
+    renderLeftInBrowser(status.leftInBrowser);
+
     const pauseButton = document.getElementById("pauseCatching") as HTMLButtonElement;
     pauseButton.textContent = pauseActive
       ? `Resume catching (${Math.ceil((status.pauseUntil! - Date.now()) / 60000)} min left)`
@@ -235,6 +326,7 @@ async function refresh(): Promise<void> {
       : "Let the browser handle downloads for the next 5 minutes.";
 
     renderJobs(status.jobs ?? []);
+    void pollJobs();
   } catch (error) {
     statusDot.className = "dot bad";
     statusLabel.textContent = "Extension not ready";
@@ -247,19 +339,8 @@ async function refresh(): Promise<void> {
 document.addEventListener("DOMContentLoaded", () => {
   void refresh();
 
-  const liveTimer = window.setInterval(async () => {
-    try {
-      const result = (await chrome.runtime.sendMessage({ type: "dm.jobs" })) as {
-        ok?: boolean;
-        jobs?: JobSummary[];
-      };
-      if (Array.isArray(result?.jobs)) {
-        renderJobs(result.jobs);
-      }
-    } catch {
-      // The worker may be restarting; the manual Refresh button still works.
-    }
-  }, 1000);
+  // Only while the popup is open.
+  const liveTimer = window.setInterval(() => void pollJobs(), 1000);
   window.addEventListener("unload", () => window.clearInterval(liveTimer));
 
   (document.getElementById("refresh") as HTMLButtonElement).addEventListener("click", () => {
@@ -293,6 +374,10 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
     }
+  });
+
+  (document.getElementById("autoTurnOn") as HTMLButtonElement).addEventListener("click", () => {
+    void chrome.runtime.openOptionsPage();
   });
 
   (document.getElementById("options") as HTMLButtonElement).addEventListener("click", () => {

@@ -5,6 +5,7 @@
   "description": "Inbound Download Manager Chrome extension",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:firefox": "node scripts/build.mjs --target firefox",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.cjs"
