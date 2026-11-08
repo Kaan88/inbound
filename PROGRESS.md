@@ -1,5 +1,24 @@
 # Progress — session handoff
 
+### Owner answers to the open questions (2026-11-08, asked in chat)
+
+To build (each recorded in ROADMAP):
+- **PERF.5:** "Closing the window ends it" on by default.
+- **Remove menu items:** drop Remove from the right-click and File menus ("just delete? seems remove seems redundant"); Delete and Shift+Delete stay.
+- **UI.B8:** guard every dialog with the shared helper, not only delete.
+- **UI.R23:** the Statistics window gets a Close button. The settings' Theme value becomes the theme source (System, Light or Dark; System follows Windows); View > Dark Mode sets it.
+- **UI.R24:** the Host keeps the speed graph's last hour, so it survives a closed window.
+- **Download all links:** Save in shows the app's default folder, like the folder window.
+- **UI.R21:** a changed connection count also reaches running TorBox, protected and FTP downloads ("Apply to all").
+- **Full queues:** moving a running download into a full queue sends the queue's newest extra download back to Queued, the same rule as settings and queue changes.
+- **Web UI sessions** survive a server restart (same 24 h idle / 7 day lengths).
+- **Pairing:** an extension's token can revoke itself, so Unpair also removes it on the server.
+- **Docker:** default PUID/PGID 1000; Dependabot opens update PRs for the digest-pinned base images.
+- **TorBox:** keep one small archive in the account for live extraction checks, kept out of any test cleanup ("yes add one and airlock it").
+
+Kept as they are: CLI downloads get no completion window while the window is closed; no cap on segment retries while bytes arrive; downloads that can't resume keep running when the simultaneous limit drops; no separate per-host default for TorBox ("don't seperate hosters, options changes for all"); media downloads count under the per-host limit; program-running settings stay refused on a network server; the setup code for a first remote setup; minimum password 8; tokens don't expire; any Firefox extension may try to pair (the code is the credential); the This PC / Server pick is per download; a failed target leaves the download in the browser; root (PUID=0) refused; FFmpeg not in the image; a lost `secrets.key` stops the server; no extraction where the hard-link check can't run. Close button: the owner never needed two clicks (TEST.4 is a script-only effect).
+Later: a live expiring-link check with a real TorBox download (only the mock so far); the arm64 image; the second 8-hour soak runs without anything waiting for it.
+
 ### `webui` merged; owner answers (2026-11-08)
 
 - `webui` (D2 web UI with sign-in and pairing, D3 Docker image and compose, the extension's server transport, D4 on the VM) merged into `dev`. The extension's folder and batch windows conflicted (the EXT.B2 gate against the This PC / Server choice) and were combined by hand. A review of that merge found real gaps, now fixed: the target radios stayed live during a folder pick or a send (a local folder could go into a server request), the server folder list could stay open during a send, and a request for a server unpaired meanwhile went to this PC with its server folder (now refused).
