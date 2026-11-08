@@ -36,6 +36,8 @@ export class Store {
   theme = $state<Theme>(readTheme());
   toasts = $state<Toast[]>([]);
   signInRequired = $state(true);
+  /** A download the list should select and scroll to (set after an add or "Select existing"; the list clears it). */
+  revealId = $state<string | null>(null);
   private client: ProtocolClient | null = null;
   private toastId = 0;
 

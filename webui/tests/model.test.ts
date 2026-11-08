@@ -131,7 +131,9 @@ describe('add lines', () => {
   });
 
   it('never sends a provider link directly', () => {
-    for (const kind of ['magnet', 'torrentFile', 'hosterLink', 'folderLink']) expect(routeOf(line('x', { kind }))).toBe('provider');
+    for (const kind of ['magnet', 'torrentFile', 'hosterLink']) expect(routeOf(line('x', { kind }))).toBe('provider');
+    expect(routeOf(line('x', { kind: 'folderLink', itemId: '1', itemKind: 'torrent', provider: 'p' }))).toBe('provider');
+    expect(routeOf(line('x', { kind: 'folderLink' }))).toBe('none');
     expect(routeOf(line('https://a/b', { kind: 'ordinaryLink' }))).toBe('direct');
     expect(routeOf(line('https://a/b', { kind: 'providerDirectLink' }))).toBe('direct');
     expect(routeOf(line('https://a/b', { kind: 'brandNewKind' }))).toBe('none');
