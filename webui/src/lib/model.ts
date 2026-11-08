@@ -13,6 +13,8 @@ export interface Model {
   remoteJobs: Record<string, RemoteJob>;
   accounts: RemoteAccount[];
   archives: Record<string, ArchiveSet>;
+  /** True once the server has answered archive.list, even with no sets. */
+  archivesAnswered: boolean;
   /** Grows with each snapshot, so views can tell a fresh start from an update. */
   snapshots: number;
   exiting: boolean;
@@ -28,6 +30,7 @@ export function emptyModel(): Model {
     remoteJobs: {},
     accounts: [],
     archives: {},
+    archivesAnswered: false,
     snapshots: 0,
     exiting: false,
   };
@@ -123,6 +126,7 @@ export function apply(model: Model, message: Envelope): boolean {
       const sets: Record<string, ArchiveSet> = {};
       for (const set of result?.sets ?? []) sets[set.id] = set;
       model.archives = sets;
+      model.archivesAnswered = true;
       return true;
     }
 

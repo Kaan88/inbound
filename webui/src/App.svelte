@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from './components/Icon.svelte';
+  import SpeedGraph from './components/SpeedGraph.svelte';
   import { speed } from './lib/format';
+  import { countJobs, statusBarText } from './lib/list';
+  import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
-  import { counts, views, type ViewKey } from './lib/views';
+  import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
   import AddLinks from './screens/AddLinks.svelte';
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
@@ -18,8 +21,7 @@
     if (key === 'queues') return { kind: 'queues' };
     if (key === 'settings') return { kind: 'settings' };
     if (key === 'provider') return { kind: 'provider' };
-    const view = (['all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions'] as ViewKey[]).find((v) => v === key);
-    return { kind: 'list', view: view ?? 'all' };
+    return { kind: 'list', view: parseViewKey(key) ?? 'all' };
   }
 
   let screen = $state<Screen>(parse(location.hash));
@@ -40,8 +42,12 @@
   const count = $derived(counts(store.model));
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
   const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
-  const active = $derived(Object.values(store.model.jobs).filter((job) => job.state === 'downloading').length);
+  const listCounts = $derived(countJobs(Object.values(store.model.jobs)));
   const current = $derived(screen.kind === 'list' ? screen.view : screen.kind);
+  const categories = $derived(categoryList(store.model.settings?.customCategories ?? []));
+  const statusText = $derived(screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
+  // The Host answers archive.list, or has no extraction to show.
+  const showExtractions = $derived(store.model.archivesAnswered);
 
   const connectionText: Record<string, string> = {
     connecting: 'Connecting…', open: 'Connected', reconnecting: 'Reconnecting…', signedOut: 'Signed out',
@@ -57,8 +63,8 @@
   const themeNow = $derived(themes.find((t) => t.key === store.theme) ?? themes[0]);
 </script>
 
-{#snippet link(href: string, key: string, icon: string, label: string, n?: number)}
-  <a {href} class="flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" aria-current={current === key ? 'page' : undefined}>
+{#snippet link(href: string, key: string, icon: string, label: string, n?: number, indent = 0)}
+  <a {href} class="flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style={indent ? `padding-left: ${12 + indent * 16}px` : undefined} aria-current={current === key ? 'page' : undefined}>
     <Icon name={icon} size={16} class="shrink-0 text-icon-neutral" />
     <span class="min-w-0 flex-1 truncate">{label}</span>
     {#if n}<span class="tabular text-[12px] text-muted">{n}</span>{/if}
@@ -73,7 +79,7 @@
       <label class="relative ml-2 min-w-0 max-w-sm flex-1">
         <span class="sr-only">Search the list</span>
         <Icon name="search" size={15} class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
-        <input class="field h-8 pl-7" type="search" placeholder="Search" bind:value={search} />
+        <input id="list-search" class="field h-8 pl-7" type="search" placeholder="Search" title="Search (Ctrl+F). F3 goes to the next row." bind:value={search} />
       </label>
     {:else}
       <span class="flex-1"></span>
@@ -96,16 +102,23 @@
   <div class="relative flex min-h-0 flex-1">
     {#if drawer}<button class="fixed inset-0 z-20 bg-black/30 md:hidden" aria-label="Close the menu" onclick={() => (drawer = false)}></button>{/if}
     <nav aria-label="Views" class="z-30 w-60 shrink-0 overflow-y-auto border-r border-divider bg-chrome p-2 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-xl max-md:transition-transform {drawer ? '' : 'max-md:-translate-x-full'}">
-      <button class="btn-primary mb-3 w-full justify-center" onclick={() => { adding = true; drawer = false; }}><Icon name="add" size={16} /> Add links</button>
-      <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Downloads</p>
-      {#each views as view (view.key)}
-        {@render link(`#/${view.key}`, view.key, view.key === 'all' ? 'download' : view.key === 'finished' ? 'check' : view.key === 'failed' ? 'alert' : view.key === 'active' ? 'play' : view.key === 'queued' ? 'queue' : 'pause', view.label, count[view.key])}
+      <button class="btn-primary mb-3 w-full justify-center" onclick={() => { adding = true; drawer = false; }}><Icon name="add" size={16} /> Add URL</button>
+      <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>
+      {@render link(viewHash('all'), 'all', 'download', 'All Downloads', count.all)}
+      {#each categories as category (category.key)}
+        {@render link(viewHash(category.key), category.key, 'folder', category.label, count[category.key], 1)}
       {/each}
-      {#if store.has('remote')}{@render link('#/remote', 'remote', 'cloud', `Waiting at ${providerName}`, count.remote)}{/if}
-      {@render link('#/extractions', 'extractions', 'archive', 'Extractions', count.extractions)}
-      <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
-      {@render link('#/queues', 'queues', 'calendar', 'Queues and scheduler')}
+      <div class="my-2 border-t border-divider"></div>
+      {@render link(viewHash('unfinished'), 'unfinished', 'queue', 'Unfinished', count.unfinished)}
+      {@render link(viewHash('active'), 'active', 'play', 'Active', count.active, 1)}
+      {@render link(viewHash('queued'), 'queued', 'pause', 'Queued', count.queued, 1)}
+      {@render link(viewHash('failed'), 'failed', 'alert', 'Failed', count.failed, 1)}
+      {@render link(viewHash('finished'), 'finished', 'check', 'Finished', count.finished)}
+      {#if showExtractions}{@render link('#/extractions', 'extractions', 'archive', 'Extractions', count.extractions)}{/if}
+      {@render link('#/queues', 'queues', 'calendar', 'Queues')}
+      {#if store.has('remote')}{@render link('#/remote', 'remote', 'cloud', count.remote > 0 ? `Waiting for ${providerName} (${count.remote})` : `Waiting for ${providerName}`)}{/if}
       {#if store.has('remote')}{@render link('#/provider', 'provider', 'key', `My ${providerName}`)}{/if}
+      <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
       {@render link('#/settings', 'settings', 'settings', 'Settings')}
     </nav>
 
@@ -124,10 +137,11 @@
     </main>
   </div>
 
+  <SpeedGraph />
+
   <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-divider bg-chrome px-3 text-[12px] text-muted">
-    <span class="tabular">{active} downloading</span>
-    <span class="tabular">{speed(totalSpeed)}</span>
-    {#if store.model.status}<span class="tabular hidden sm:inline">{store.model.status.totalJobs} in the list</span>{/if}
+    <span class="tabular min-w-0 truncate" title={statusText}>{statusText}</span>
+    <span class="tabular shrink-0">{speed(totalSpeed)}</span>
     <span class="flex-1"></span>
     {#if store.model.hello}<span class="hidden sm:inline">Server {store.model.hello.hostVersion}</span>{/if}
   </footer>

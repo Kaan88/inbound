@@ -93,10 +93,10 @@ describe('views', () => {
     const rows = buildRows(model, 'all', '', new Set());
     expect(rows.map((r) => r.kind)).toEqual(['job', 'package']);
     const pack = rows.find((r) => r.kind === 'package');
-    expect(pack && pack.kind === 'package' && pack.summary).toMatchObject({ state: 'downloading', done: 1, count: 2, progress: 75 });
+    expect(pack && pack.kind === 'package' && pack.summary).toMatchObject({ state: 'active', completedCount: 1, memberCount: 2, progress: 0.75 });
 
     const open = buildRows(model, 'all', '', new Set(['g']));
-    expect(open.map((r) => r.id)).toEqual(['solo', 'package:g', 'b', 'a']);
+    expect(open.map((r) => r.id)).toEqual(['solo', 'package:g', 'a', 'b']);
     // Selecting the package selects its files.
     expect(selectedJobIds(open, new Set(['package:g'])).sort()).toEqual(['a', 'b']);
 
