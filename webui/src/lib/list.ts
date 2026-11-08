@@ -3,7 +3,7 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveShort, archiveTone, bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
-import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteJob } from './types';
+import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
 // ---- Words for a download's cells ----
 
@@ -24,7 +24,7 @@ export function waitingText(job: Job): string | null {
 /** The Host's words about a download beyond its state; null when it has nothing to say. */
 export function jobNote(job: Job): string | null {
   if (waitingText(job) !== null) return job.fileRemovedAfterExtraction ? removedWords : null;
-  if (job.statusNote?.trim()) return job.statusNote;
+  if (job.statusNote?.trim()) return hideAddresses(job.statusNote, job);
   return job.fileRemovedAfterExtraction ? removedWords : null;
 }
 
@@ -405,6 +405,13 @@ function ms(value: string | undefined): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
+/** Web addresses in a text, for a download whose own address stays hidden: the site only, as the desktop's UrlRedactor does. */
+export function hideAddresses(text: string, job: Job): string {
+  const hidden = job.addressHidden === true || isProviderFile(job);
+  if (!hidden) return text;
+  return text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)]+/gi, (url) => (url.toLowerCase().startsWith('remote:') ? 'a provider link' : siteOnly(url) || 'a direct link'));
+}
+
 function shownAddress(job: Job): string {
   if (isProviderFile(job)) return '';
   return job.addressHidden ? (siteOnly(job.url) || 'A direct link') : job.url;
@@ -425,11 +432,11 @@ export function jobView(job: Job, set?: ArchiveSet): RowView {
   const eta = timeSpanSeconds(job.estimatedRemaining);
   const p = percent(job) ?? 0;
   const note = jobNote(job);
-  const own = job.description ?? job.pageUrl;
+  const own = job.description ?? (job.pageUrl && (job.addressHidden || isProviderFile(job)) ? siteOnly(job.pageUrl) : job.pageUrl);
   const barStates = ['downloading', 'connecting', 'retryWaiting', 'verifying', 'paused'];
   const updated = job.completedAt ?? job.updatedAt;
   return {
-    name: job.fileName || (job.addressHidden ? '' : job.url),
+    name: job.fileName || (job.addressHidden || isProviderFile(job) ? '' : job.url),
     queue: queueText(job),
     queueTip: job.isQueued === false ? 'Not in a queue' : queueName(job),
     size: total > 0 ? total : 0,
@@ -696,13 +703,25 @@ export function archiveRemovable(set: ArchiveSet): boolean {
   return set.state !== 'extracting';
 }
 
+/** Failed with nothing new to ask for, or completed while its archives are still there (Extract Again). */
 export function archiveCanRetry(set: ArchiveSet): boolean {
-  return set.state === 'failed' ? !set.needsPassword || set.hasPassword : false;
+  if (set.state === 'failed') return !set.needsPassword || set.hasPassword;
+  return set.state === 'completed' && !set.archivesDeleted;
+}
+
+export function archiveRetryText(sets: readonly ArchiveSet[]): string {
+  const retry = sets.filter(archiveCanRetry);
+  return retry.length > 0 && retry.every((set) => set.state === 'completed') ? 'Extract Again…' : 'Retry Extraction';
+}
+
+export function archivePasswordText(set: ArchiveSet | null): string {
+  return set?.needsPassword ? 'Enter Archive Password…' : 'Archive Password…';
 }
 
 /** What a double-click or Enter does on a record's own row. */
-export function archivePrimary(set: ArchiveSet): 'password' | 'retry' | 'none' {
+export function archivePrimary(set: ArchiveSet): 'password' | 'copyFolder' | 'retry' | 'none' {
   if (set.needsPassword) return 'password';
+  if (set.state === 'completed' && set.destination?.trim()) return 'copyFolder';
   return archiveCanRetry(set) ? 'retry' : 'none';
 }
 
@@ -768,4 +787,29 @@ export function graphCeiling(peak: number): number {
   let ceiling = 64 * 1024;
   while (ceiling < peak * 1.1) ceiling *= 2;
   return ceiling;
+}
+
+// ---- The sidebar's provider entries (SyncRemoteEntryPoints) ----
+
+export interface ProviderEntry {
+  provider: string;
+  name: string;
+  waiting: number;
+  showWaiting: boolean;
+  showBrowse: boolean;
+}
+
+/** "Waiting for X" shows with a usable key or while rows are left; "My X" only when the account can browse its catalog. */
+export function providerEntries(accounts: readonly RemoteAccount[], remoteJobs: readonly RemoteJob[]): ProviderEntry[] {
+  return accounts.map((account) => {
+    const waiting = remoteJobs.filter((job) => job.state !== 'localStarted' && job.state !== 'removed' && job.provider?.toLowerCase() === account.provider.toLowerCase()).length;
+    const usable = account.hasKey && !account.keyUnreadable;
+    return {
+      provider: account.provider,
+      name: account.providerName,
+      waiting,
+      showWaiting: usable || waiting > 0,
+      showBrowse: usable && account.itemKinds.length > 0 && account.capabilities.some((c) => c.toLowerCase() === 'catalog'),
+    };
+  });
 }

@@ -73,7 +73,6 @@ export function tone(state: string): Tone {
     case 'downloading':
     case 'connecting':
     case 'verifying':
-    case 'assembling':
       return 'active';
     case 'completed':
       return 'done';
@@ -82,7 +81,6 @@ export function tone(state: string): Tone {
     case 'paused':
     case 'queued':
     case 'retryWaiting':
-    case 'waiting':
       return 'waiting';
     default:
       return 'neutral';

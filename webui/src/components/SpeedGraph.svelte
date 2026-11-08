@@ -15,9 +15,9 @@
 
   function readOpen(): boolean {
     try {
-      return localStorage.getItem('inbound.speedGraph') === 'open';
+      return localStorage.getItem('inbound.speedGraph') !== 'closed';
     } catch {
-      return false;
+      return true;
     }
   }
 
@@ -30,7 +30,17 @@
     }
   }
 
+  // A timer runs only while the graph is open and the page is showing, so a closed graph or a hidden tab costs nothing.
+  let visible = $state(typeof document === 'undefined' ? true : !document.hidden);
   onMount(() => {
+    const changed = () => (visible = !document.hidden);
+    document.addEventListener('visibilitychange', changed);
+    return () => document.removeEventListener('visibilitychange', changed);
+  });
+  $effect(() => {
+    if (!open || !visible) return;
+    // Time that went by unsampled shows as a gap.
+    if (history.samples.length > 0) history.add(null);
     const timer = setInterval(() => {
       history.add(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
       version++;

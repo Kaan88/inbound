@@ -7,7 +7,7 @@
   import ProgressBar from '../components/ProgressBar.svelte';
   import { archiveTone, speed } from '../lib/format';
   import {
-    archiveCanRetry, archivePrimary, archiveRemovable, archiveRemoveText, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
+    archiveCanRetry, archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, archiveRemoveText, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
     downloadChoices, emptyText, isTypingTarget, leftExtractingText, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
     pauseTargets, planFileMenu, priorityTargets, queueText, remoteActions, remoteEnterAction, remoteInProviderQueue, remoteRemoveText, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
@@ -213,8 +213,10 @@
     else if (row.kind === 'package') toggleExpanded(row.group.id);
     else if (row.kind === 'remote') void runRemote(remoteEnterAction([row.remote]), [row.remote], true);
     else if (row.kind === 'archive') {
-      if (archivePrimary(row.set) === 'retry') void store.attempt('archive.retry', { setId: row.set.id }, 'Extraction asked for again.');
-      else passwordFor = row.set;
+      const primary = archivePrimary(row.set);
+      if (primary === 'retry') void store.attempt('archive.retry', { setId: row.set.id }, 'Extraction asked for again.');
+      else if (primary === 'password') passwordFor = row.set;
+      else if (primary === 'copyFolder') void copy(row.set.destination ?? '', 'Folder path copied.');
     }
   }
 
@@ -386,6 +388,7 @@
       for (const job of jobs) await store.attempt('remote.remove', { jobId: job.id });
       for (const set of sets) await store.attempt('archive.remove', { setId: set.id });
       selected = new Set();
+      if (left) store.toast(left);
     };
     if (jobs.length > 0 && sets.length > 0) {
       confirm = { title: 'Remove from list?', text: `${remoteRemoveText(jobs)} ${archiveRemoveText(sets)}`, ok: 'Remove from list', onok: run };
@@ -395,6 +398,23 @@
       confirm = { title: 'Remove extraction record?', text: archiveRemoveText(sets), ok: 'Remove Record', onok: run };
     }
     if (left && jobs.length + sets.length === 0) store.toast(left);
+  }
+
+  /** A download still waiting in the provider's own queue comes out of it; nothing else is deleted. */
+  function askDequeue(jobs: RemoteJob[]) {
+    const queued = jobs.filter(remoteInProviderQueue);
+    if (queued.length === 0) return;
+    const provider = queued[0].providerName;
+    const what = queued.length === 1 ? `'${queued[0].name ?? queued[0].displayHost ?? 'this item'}'` : `these ${queued.length} items`;
+    confirm = {
+      title: `Remove from ${provider}'s queue?`,
+      text: `Take ${what} out of your ${provider} queue and off this list? ${provider} hasn't started them, so nothing else is deleted.`,
+      ok: 'Remove from queue',
+      onok: async () => {
+        for (const job of queued) await store.attempt('remote.deleteRemote', { jobId: job.id, confirmed: true });
+        selected = new Set();
+      },
+    };
   }
 
   async function answer(ok: boolean) {
@@ -486,7 +506,7 @@
   }
 
   function queueMenu(action: 'start' | 'stop'): MenuItem[] {
-    return queues.map((queue) => ({ label: `${action === 'start' ? 'Start' : 'Stop'} ${queue.name} download queue`, onselect: () => void queueAction(action, queue.id) }));
+    return queues.map((queue) => ({ label: `${action === 'start' ? 'Start' : 'Stop'} ${queue.name} download queue`, disabled: action === 'start' ? queue.isRunning : !queue.isRunning, onselect: () => void queueAction(action, queue.id) }));
   }
 
   function rowMenuItems(): MenuItem[] {
@@ -508,6 +528,7 @@
         { label: 'Retry', hidden: !actions.some((a) => a.retry), onselect: () => void runRemote('retry', remote.filter((j) => remoteActions(j).retry)) },
         { label: 'Check Now', hint: 'F5', hidden: !actions.some((a) => a.checkNow), onselect: () => void runRemote('checkNow', remote.filter((j) => remoteActions(j).checkNow)) },
         { label: `Start Now on ${name}`, hidden: !queuedHere, onselect: () => void each(remote, 'remote.startQueued', (j) => ({ jobId: j.id }), 'Started at the provider.') },
+        { label: 'Remove from Queue…', hidden: !queuedHere, onselect: () => askDequeue(remote) },
         { label: 'Details…', hidden: remote.length !== 1, onselect: () => (remoteOpen = remote[0]) },
         { label: 'Remove from List…', hint: 'Delete', onselect: () => void removeSideRows() },
       );
@@ -518,8 +539,9 @@
       const only = sets.length === 1 ? sets[0] : null;
       if (items.length) items.push({ separator: true });
       items.push(
-        { label: 'Archive Password…', hidden: !only, onselect: () => (passwordFor = only) },
-        { label: 'Retry Extraction', hidden: !sets.some(archiveCanRetry), onselect: () => void each(sets.filter(archiveCanRetry), 'archive.retry', (s) => ({ setId: s.id }), 'Extraction asked for again.') },
+        { label: archivePasswordText(only), hidden: !only, onselect: () => (passwordFor = only) },
+        { label: archiveRetryText(sets), hidden: !sets.some(archiveCanRetry), onselect: () => void each(sets.filter(archiveCanRetry), 'archive.retry', (s) => ({ setId: s.id }), 'Extraction asked for again.') },
+        { label: 'Copy Folder Path', hidden: !(only?.state === 'completed' && only.destination), onselect: () => void copy(only?.destination ?? '', 'Folder path copied.') },
         { label: 'Cancel Extraction', hidden: !sets.some((s) => s.state === 'extracting' || s.state === 'waiting'), onselect: () => void each(sets.filter((s) => s.state === 'extracting' || s.state === 'waiting'), 'archive.cancel', (s) => ({ setId: s.id }), 'Extraction cancelled.') },
         { label: 'Remove Extraction Record…', hint: 'Delete', disabled: !sets.some(archiveRemovable), onselect: () => void removeSideRows() },
       );
@@ -920,7 +942,7 @@
   <Dialog title={nameDialog.title} onclose={() => (nameDialog = null)}>
     <form id="package-name-form" onsubmit={(event) => { event.preventDefault(); void submitName(); }}>
       <label class="label" for="package-name">Package name</label>
-      <input id="package-name" class="field" maxlength="100" bind:value={nameText} autocomplete="off" />
+      <input id="package-name" class="field" maxlength="100" bind:value={nameText} autocomplete="off" onfocus={(event) => event.currentTarget.select()} />
     </form>
     {#snippet footer()}
       <button class="btn-primary" type="submit" form="package-name-form" disabled={!nameText.trim()}>OK</button>

@@ -309,6 +309,8 @@ export interface ArchiveSet {
   phase?: string;
   percent?: number;
   destination?: string;
+  /** The archives were deleted after extracting, so extracting again could only fail. */
+  archivesDeleted?: boolean;
   note?: string;
   packageId?: string;
   jobIds: string[];
