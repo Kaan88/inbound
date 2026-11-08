@@ -98,8 +98,29 @@ public sealed class ServerAuth
             fromEnvironment = true;
             if (!await PasswordHash.VerifyAsync(password, store.Password, cancellationToken).ConfigureAwait(false))
             {
-                store.SetPassword(await PasswordHash.CreateAsync(password, options.Time.GetUtcNow(), "environment", cancellationToken).ConfigureAwait(false));
-                log.Info("The sign-in password was set from the environment.");
+                var record = await PasswordHash.CreateAsync(password, options.Time.GetUtcNow(), "environment", cancellationToken).ConfigureAwait(false);
+                if (store.Password is null)
+                {
+                    store.SetPassword(record);
+                    log.Info("The sign-in password was set from the environment.");
+                }
+                else
+                {
+                    // Like a change on the Account page: someone who knew the old password may have paired an extension
+                    // too. The tokens go first, so a failed save can't leave the new password with the old pairings.
+                    int unpaired;
+                    try
+                    {
+                        unpaired = store.RemoveAllTokens();
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        throw new ServerStartException(
+                            $"The sign-in password changed in the environment, but the paired browsers in {store.Path} can't be removed ({ex.GetType().Name}).");
+                    }
+                    store.SetPassword(record);
+                    log.Info($"The sign-in password was changed from the environment; saved sessions end and {unpaired} paired browser(s) were removed.");
+                }
             }
         }
 
