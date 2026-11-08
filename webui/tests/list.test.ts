@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  archiveHasOwnRow, archivePrimary, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
+  archiveCanRetry, archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
   graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
   priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
@@ -430,7 +430,8 @@ describe('provider and archive rows', () => {
   it('runs an archive row\'s main action', () => {
     expect(archivePrimary(set({ needsPassword: true, state: 'failed' }))).toBe('password');
     expect(archivePrimary(set({ state: 'failed' }))).toBe('retry');
-    expect(archivePrimary(set({ state: 'completed' }))).toBe('none');
+    expect(archivePrimary(set({ state: 'completed', archivesDeleted: true }))).toBe('none');
+    expect(archivePrimary(set({ state: 'completed', destination: 'D:/x' }))).toBe('copyFolder');
   });
 
   it('puts a record on the list as a row of its own only when none of its files are there', () => {
@@ -502,5 +503,45 @@ describe('speed graph', () => {
     expect(graphCeiling(0)).toBe(64 * 1024);
     expect(graphCeiling(100 * 1024)).toBe(128 * 1024);
     expect(graphCeiling(5 * 1024 * 1024)).toBeGreaterThanOrEqual(5 * 1024 * 1024);
+  });
+});
+
+describe('review fixes', () => {
+  const set = (extra: Partial<ArchiveSet>): ArchiveSet => ({
+    id: 's', name: 'Set', directory: '/d', firstVolume: 'a.rar', state: 'completed', stateText: 'Extracted', needsPassword: false, hasPassword: false, volumes: [],
+    missingVolumes: [], downloadingVolumes: [], failedVolumes: [], jobIds: [], updatedAt: '2026-11-01T10:00:00Z', ...extra,
+  });
+
+  it('hides addresses in notes and description for a hidden or provider download', () => {
+    const hidden = job('h', 'failed', { addressHidden: true, statusNote: 'Failed at https://cdn.example.org/a/b?token=1 today', pageUrl: 'https://page.example.net/x?k=2' });
+    expect(hideAddresses('see https://cdn.example.org/a?t=1', hidden)).toBe('see cdn.example.org');
+    const view = jobView(hidden);
+    expect(view.description).not.toContain('token');
+    expect(view.description).not.toContain('?k=2');
+    expect(view.description).toContain('page.example.net');
+    const plain = job('p', 'failed', { statusNote: 'see https://cdn.example.org/a?t=1' });
+    expect(jobView(plain).description).toContain('?t=1');
+  });
+
+  it('never names a provider file by its remote address', () => {
+    expect(jobView(job('r', 'queued', { url: 'remote://torbox/9', fileName: '' })).name).toBe('');
+  });
+
+  it('offers Extract Again for a completed set that still has its archives', () => {
+    const done = set({ state: 'completed' });
+    expect(archiveCanRetry(done)).toBe(true);
+    expect(archiveCanRetry({ ...done, archivesDeleted: true })).toBe(false);
+    expect(archiveRetryText([done])).toBe('Extract Again…');
+    expect(archiveRetryText([set({ state: 'failed' })])).toBe('Retry Extraction');
+    expect(archivePasswordText(set({ needsPassword: true }))).toBe('Enter Archive Password…');
+    expect(archivePasswordText(set({}))).toBe('Archive Password…');
+  });
+
+  it('shows provider entries by the desktop gating', () => {
+    const account = (hasKey: boolean, catalog: boolean) => ({ provider: 'torbox', providerName: 'TorBox', capabilities: catalog ? ['catalog'] : [], itemKinds: catalog ? ['torrent'] : [], hasKey, keyUnreadable: false, premium: false });
+    expect(providerEntries([account(false, false)], [])).toEqual([{ provider: 'torbox', name: 'TorBox', waiting: 0, showWaiting: false, showBrowse: false }]);
+    const left = { provider: 'torbox', state: 'waiting' } as RemoteJob;
+    expect(providerEntries([account(false, false)], [left])[0]).toMatchObject({ waiting: 1, showWaiting: true, showBrowse: false });
+    expect(providerEntries([account(true, true)], [])[0]).toMatchObject({ showWaiting: true, showBrowse: true });
   });
 });

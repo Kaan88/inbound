@@ -3,7 +3,7 @@
   import Icon from './components/Icon.svelte';
   import SpeedGraph from './components/SpeedGraph.svelte';
   import { speed } from './lib/format';
-  import { countJobs, statusBarText } from './lib/list';
+  import { countJobs, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
@@ -40,7 +40,7 @@
   });
 
   const count = $derived(counts(store.model));
-  const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
+  const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
   const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
   const listCounts = $derived(countJobs(Object.values(store.model.jobs)));
   const current = $derived(screen.kind === 'list' ? screen.view : screen.kind);
@@ -116,8 +116,12 @@
       {@render link(viewHash('finished'), 'finished', 'check', 'Finished', count.finished)}
       {#if showExtractions}{@render link('#/extractions', 'extractions', 'archive', 'Extractions', count.extractions)}{/if}
       {@render link('#/queues', 'queues', 'calendar', 'Queues')}
-      {#if store.has('remote')}{@render link('#/remote', 'remote', 'cloud', count.remote > 0 ? `Waiting for ${providerName} (${count.remote})` : `Waiting for ${providerName}`)}{/if}
-      {#if store.has('remote')}{@render link('#/provider', 'provider', 'key', `My ${providerName}`)}{/if}
+      {#if store.has('remote')}
+        {#each providers as entry (entry.provider)}
+          {#if entry.showWaiting}{@render link('#/remote', 'remote', 'cloud', entry.waiting > 0 ? `Waiting for ${entry.name} (${entry.waiting})` : `Waiting for ${entry.name}`)}{/if}
+          {#if entry.showBrowse}{@render link('#/provider', 'provider', 'key', `My ${entry.name}`)}{/if}
+        {/each}
+      {/if}
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
       {@render link('#/settings', 'settings', 'settings', 'Settings')}
     </nav>
