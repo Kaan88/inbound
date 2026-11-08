@@ -78,7 +78,8 @@ open_and_time() { # $1 label, $2 repeat, $3 option (CSV only), $4 jobs,
 }
 
 close_window() { # posts WM_CLOSE, as the close button does, until the window is off screen (option off) or its
-  # process has ended (option on). A posted WM_CLOSE is ignored the first time in these runs, so it is repeated.
+  # process has ended (option on). `host open` also opens Options, which took the first WM_CLOSE in earlier runs
+  # (TEST.4); soak-hide-window.ps1 now closes it before the main window. The retry stays as a safety net.
   local try check
   [ "$1" = on ] && check=-Gone || check=-Hidden
   sleep 3
