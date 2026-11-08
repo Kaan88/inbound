@@ -857,6 +857,21 @@ test('EXT.E1: on Firefox a download from a container tab carries that container\
   });
 });
 
+test('EXT.E1: Download All from a Firefox container tab sends the container cookies', async () => {
+  const { harness } = firefoxChrome();
+  const queries = containerCookies(harness);
+  harness.chrome.cookies.getAllCookieStores = async () => [
+    { id: 'firefox-default', tabIds: [3] }, { id: 'firefox-container-1', tabIds: [9] }];
+  await withBackground(harness, async () => {
+    const sent = sendRuntimeMessage(harness, { type: 'dm.confirmBatch', tabId: 9, pageUrl: 'https://site.test/list',
+      urls: [{ url: 'https://site.test/a.zip' }], startMode: 'now' }, ownPage('batch.html'));
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.headers.Cookie, 'session=work-account');
+    assert.ok(queries.length > 0 && queries.every(query => query.storeId === 'firefox-container-1'));
+    assert.equal((await sent).ok, true);
+  });
+});
+
 test('EXT.E1: on Firefox without access to the site a download stays in the browser, untouched', async () => {
   const { harness, log } = firefoxChrome();
   const asked = [];
