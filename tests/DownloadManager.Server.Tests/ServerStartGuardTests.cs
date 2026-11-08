@@ -122,6 +122,34 @@ public sealed class ServerStartGuardTests
         Assert.NotNull(AesGcmSecretProtector.OpenForDataFolder(Path.Combine(work, "first.key"), data, discardUnreadable: false));
     }
 
+    [Fact]
+    public void DiscardingOnceHoldsOnLaterStartsWhileOldBlobsStayButANewForeignKeyStillRefuses()
+    {
+        // Review finding: blobs that are never rewritten (a kept ProtectedUrl, a quarantined file) made every later start
+        // refuse again after the one start with the discard variable.
+        var work = ServerHarness.NewWork();
+        var data = Directory.CreateDirectory(Path.Combine(work, "data")).FullName;
+        var purpose = Encoding.UTF8.GetBytes("Test.Purpose.v1");
+        var old = AesGcmSecretProtector.OpenOrCreate(Path.Combine(work, "old.key"));
+        File.WriteAllText(Path.Combine(data, "jobs.json"), JsonSerializer.Serialize(new { url = old.Protect("a", purpose) }));
+        Directory.CreateDirectory(Path.Combine(data, "corrupt"));
+        File.WriteAllText(Path.Combine(data, "corrupt", "job.json"), JsonSerializer.Serialize(new { url = old.Protect("b", purpose) }));
+
+        // The key file is lost: once with the discard choice, then without it.
+        var keyFile = Path.Combine(data, AesGcmSecretProtector.DefaultFileName);
+        Assert.Throws<SecretKeyMismatchException>(() => AesGcmSecretProtector.OpenForDataFolder(keyFile, data, discardUnreadable: false));
+        Assert.NotNull(AesGcmSecretProtector.OpenForDataFolder(keyFile, data, discardUnreadable: true));
+        Assert.True(File.Exists(keyFile + AesGcmSecretProtector.DiscardedFileSuffix));
+        var current = AesGcmSecretProtector.OpenForDataFolder(keyFile, data, discardUnreadable: false);
+        File.WriteAllText(Path.Combine(data, "settings.json"), JsonSerializer.Serialize(new { password = current.Protect("c", purpose) }));
+        Assert.NotNull(AesGcmSecretProtector.OpenForDataFolder(keyFile, data, discardUnreadable: false));
+
+        // A later mix-up with a key that was never discarded is refused as before.
+        var other = AesGcmSecretProtector.OpenOrCreate(Path.Combine(work, "other.key"));
+        File.WriteAllText(Path.Combine(data, "queues.json"), JsonSerializer.Serialize(new { secret = other.Protect("d", purpose) }));
+        Assert.Throws<SecretKeyMismatchException>(() => AesGcmSecretProtector.OpenForDataFolder(keyFile, data, discardUnreadable: false));
+    }
+
     private static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
