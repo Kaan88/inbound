@@ -7,6 +7,7 @@ import {
   archiveHasOwnRow, archiveView, builtInCategories, categoryOf, defaultSort, jobView, naturalCompare, packageView, remoteView, searchText,
   sortRows, summarizeGroup, type GroupSummary, type RowView, type SortState,
 } from './list';
+import { isRow } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteJob } from './types';
 
 export type StateView = 'all' | 'unfinished' | 'active' | 'queued' | 'failed' | 'finished' | 'remote' | 'extractions';
@@ -68,10 +69,6 @@ export type Row =
   | { kind: 'job'; id: string; job: Job; depth: 0 | 1; packageId?: string; view: RowView };
 
 export type { SortKey, SortState } from './list';
-
-function isRow(remote: RemoteJob): boolean {
-  return remote.state !== 'localStarted' && remote.state !== 'removed';
-}
 
 /** The package a job is listed in, when that package has at least two files on the list. */
 function packagesOf(model: Model): Map<string, DownloadGroup> {
@@ -141,7 +138,8 @@ export function buildRows(model: Model, view: ViewKey, search: string, expanded:
     const members = group.jobIds.map((id) => model.jobs[id]).filter((m): m is Job => !!m).sort((a, b) => naturalCompare(a.fileName, b.fileName));
     if (members.length < 2) continue;
     if (!members.some(matches)) continue;
-    top.push({ group, members, v: packageView(group, members) });
+    const memberSets = [...new Set(members.map((m) => sets.get(m.id)).filter((set): set is ArchiveSet => !!set))];
+    top.push({ group, members, v: packageView(group, members, memberSets) });
   }
   for (const job of Object.values(model.jobs)) {
     if (inPackage.has(job.id) || !matches(job)) continue;

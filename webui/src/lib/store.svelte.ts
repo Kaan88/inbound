@@ -43,6 +43,10 @@ export class Store {
   revealId = $state<string | null>(null);
   /** A download the list screen should open (from a toast's Show). */
   showJob = $state<string | null>(null);
+  /** Counts every saved or cleared provider key, so screens drop what they read with the old key. */
+  keyEpoch = $state(0);
+  /** The Settings page to open next (a provider's account page, from My provider). */
+  settingsPage = $state<string | null>(null);
   private client: ProtocolClient | null = null;
   private toastId = 0;
 

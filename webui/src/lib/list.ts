@@ -2,7 +2,9 @@
 // rule of the same name (JobViewModel, DownloadGroupSummary, PackageRules, SelectionCommands, ListSort, DurationText),
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
-import { archiveShort, archiveTone, bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
+import { bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
 // ---- Words for a download's cells ----
@@ -435,6 +437,7 @@ export function jobView(job: Job, set?: ArchiveSet): RowView {
   const own = job.description ?? (job.pageUrl && (job.addressHidden || isProviderFile(job)) ? siteOnly(job.pageUrl) : job.pageUrl);
   const barStates = ['downloading', 'connecting', 'retryWaiting', 'verifying', 'paused'];
   const updated = job.completedAt ?? job.updatedAt;
+  const archive = set ? archiveRowView(set) : null;
   return {
     name: job.fileName || (job.addressHidden || isProviderFile(job) ? '' : job.url),
     queue: queueText(job),
@@ -452,17 +455,18 @@ export function jobView(job: Job, set?: ArchiveSet): RowView {
     lastTry: ms(updated),
     lastTryText: lastTryText(updated),
     description: describe(note, own),
-    extraction: set ? archiveShort(set) : '',
-    extractionTone: set ? archiveTone(set) : blankTone,
-    extractionTip: set?.stateText ?? '',
+    extraction: archive?.text ?? '',
+    extractionTone: archive?.tone ?? blankTone,
+    extractionTip: archive?.tooltip ?? '',
     created: ms(job.createdAt),
     detail: job.failure?.message ? job.failure.message : shownAddress(job),
   };
 }
 
 /** A package's cells, as JobViewModel.UpdatePackage shows them. */
-export function packageView(group: DownloadGroup, members: readonly Job[]): RowView {
+export function packageView(group: DownloadGroup, members: readonly Job[], sets: ArchiveSet[] = []): RowView {
   const summary = summarizeGroup(members);
+  const archive = packageArchiveView(sets);
   const state = summary.state === 'active' ? 'downloading' : summary.state;
   const word = state === 'downloading' && members.some(isProviderFile) ? 'Downloading locally' : stateWord(state);
   const total = summary.totalBytes ?? summary.receivedBytes;
@@ -487,36 +491,36 @@ export function packageView(group: DownloadGroup, members: readonly Job[]): RowV
     lastTry: latest,
     lastTryText: members.length === 0 ? '' : lastTryText(latest),
     description: `${summary.memberCount} files`,
-    extraction: '',
-    extractionTone: blankTone,
-    extractionTip: '',
+    extraction: archive?.text ?? '',
+    extractionTone: archive?.tone ?? blankTone,
+    extractionTip: archive?.tooltip ?? '',
     created: first,
     detail: `${summary.memberCount} files`,
   };
 }
 
-/** A provider's job on the list: its stage in words, never a local figure. */
-export function remoteView(remote: RemoteJob): RowView {
-  const tone: Tone = remote.state === 'failed' ? 'failed' : remote.state === 'blocked' || remote.state === 'awaitingSelection' || remote.approvalNeeded ? 'waiting' : 'active';
-  const detail = `${remote.providerName}${remote.stage ? `: ${remote.stage}` : ''}${remote.progress > 0 && remote.progress < 1 ? ` ${Math.round(remote.progress * 100)}% (provider's)` : ''}${remote.failureMessage ? ` · ${remote.failureMessage}` : ''}`;
+/** A provider's job on the list (JobViewModel.UpdateRemote): its stage in words, never a local figure. */
+export function remoteView(remote: RemoteJob, now: Date = new Date()): RowView {
+  const row = jobRow(remote, now);
   return {
-    name: remote.name ?? remote.displayHost ?? 'Waiting at the provider',
+    name: row.name,
     queue: '', queueTip: '', size: 0, sizeText: '',
-    status: remote.status,
-    statusTone: tone,
-    statusTip: remote.failureMessage ?? remote.notes?.join(' ') ?? '',
+    status: row.status,
+    statusTone: row.tone,
+    statusTip: row.tooltip,
     bar: null, eta: null, etaText: '', rate: 0, rateText: '',
     lastTry: ms(remote.updatedAt),
     lastTryText: lastTryText(remote.updatedAt),
-    description: detail,
+    description: row.detail,
     extraction: '', extractionTone: blankTone, extractionTip: '',
     created: ms(remote.createdAt),
-    detail,
+    detail: row.detail,
   };
 }
 
-/** An extraction record whose files are not on the list. The status stays blank: the Extraction column says the rest. */
+/** An extraction record whose files are not on the list (JobViewModel.UpdateArchiveRow). The status stays blank: the Extraction column says the rest. */
 export function archiveView(set: ArchiveSet): RowView {
+  const archive = archiveRowView(set);
   return {
     name: set.name,
     queue: '', queueTip: '', size: 0, sizeText: '',
@@ -524,18 +528,21 @@ export function archiveView(set: ArchiveSet): RowView {
     bar: null, eta: null, etaText: '', rate: 0, rateText: '',
     lastTry: ms(set.updatedAt),
     lastTryText: lastTryText(set.updatedAt),
-    description: set.stateText,
-    extraction: archiveShort(set),
-    extractionTone: archiveTone(set),
-    extractionTip: set.stateText,
+    description: fullText(set),
+    extraction: archive.text,
+    extractionTone: archive.tone,
+    extractionTip: archive.tooltip,
     created: ms(set.createdAt ?? set.updatedAt),
-    detail: set.stateText,
+    detail: archive.tooltip,
   };
 }
 
-/** The words searched for a row: the desktop's MatchesSearch plus the address and details. */
+/**
+ * The words searched for a row: the desktop's MatchesSearch plus the address and details, and the status tooltip, which
+ * for a provider's row holds the Host's own longer words for its state.
+ */
 export function searchText(view: RowView, job?: Job): string {
-  const parts = [view.name, view.status, view.extraction, view.description, view.detail];
+  const parts = [view.name, view.status, view.extraction, view.description, view.detail, view.statusTip];
   if (job && !job.addressHidden && !isProviderFile(job)) parts.push(job.url);
   return parts.join('\n').toLocaleLowerCase();
 }
@@ -635,37 +642,20 @@ export function selectAfterClick(selected: ReadonlySet<string>, ids: readonly st
 
 // ---- Provider rows ----
 
-export interface RemoteActions {
-  checkNow: boolean;
-  selectFiles: boolean;
-  approve: boolean;
-  enterLinkPassword: boolean;
-  retry: boolean;
-}
-
 export type RemoteAction = 'none' | 'selectFiles' | 'approve' | 'enterLinkPassword' | 'retry' | 'checkNow';
 
-/** What the Host would take for a job right now. */
-export function remoteActions(job: RemoteJob): RemoteActions {
-  return {
-    checkNow: !job.heldForApproval && ['intended', 'submissionUnknown', 'waiting', 'blocked', 'awaitingSelection'].includes(job.state),
-    selectFiles: job.state === 'awaitingSelection',
-    approve: job.approvalNeeded && job.state === 'intended',
-    enterLinkPassword: job.state === 'failed' && job.failureKind === 'linkPasswordRequired',
-    retry: job.state === 'failed' || job.state === 'blocked',
-  };
-}
-
-function primary(actions: RemoteActions): RemoteAction {
+/** RemoteRowActions.Primary: one row's next step. */
+function primary(job: RemoteJob): RemoteAction {
+  const actions = actionsOf(job);
   return actions.selectFiles ? 'selectFiles' : actions.approve ? 'approve' : actions.enterLinkPassword ? 'enterLinkPassword' : actions.retry ? 'retry' : actions.checkNow ? 'checkNow' : 'none';
 }
 
-/** What Enter does with these rows: one row's next step, or for several the one thing they all wait for. */
+/** What Enter does with these rows (RemoteRules.EnterFor): one row's next step, or for several the one thing they all wait for. */
 export function remoteEnterAction(jobs: readonly RemoteJob[]): RemoteAction {
   if (jobs.length === 0) return 'none';
-  if (jobs.length === 1) return primary(remoteActions(jobs[0]));
-  if (jobs.every((job) => remoteActions(job).approve)) return 'approve';
-  if (jobs.every((job) => remoteActions(job).selectFiles)) return 'selectFiles';
+  if (jobs.length === 1) return primary(jobs[0]);
+  if (jobs.every((job) => actionsOf(job).approve)) return 'approve';
+  if (jobs.every((job) => actionsOf(job).selectFiles)) return 'selectFiles';
   return 'none';
 }
 
@@ -674,55 +664,26 @@ export function offersDownloadAll(jobs: readonly RemoteJob[]): boolean {
   return jobs.filter((job) => job.state === 'awaitingSelection').length >= 2;
 }
 
-export function remoteInProviderQueue(job: RemoteJob): boolean {
-  return job.state === 'waiting' && job.stage === 'queued';
-}
-
-export function remoteRemoveText(jobs: readonly RemoteJob[]): string {
-  const providers = [...new Set(jobs.map((job) => job.providerName))];
-  const provider = providers.length === 1 ? providers[0] : 'the provider';
-  const what = jobs.length === 1 ? `'${jobs[0].name ?? jobs[0].displayHost ?? 'this item'}'` : `these ${jobs.length} items`;
-  return `Take ${what} off this list? This doesn't touch ${provider}: anything on your account stays there, and this app just stops watching it.`;
-}
-
-export function archiveRemoveText(sets: readonly ArchiveSet[]): string {
-  return sets.length === 1
-    ? `Forget the extraction record for "${sets[0].name}", and any archive password saved for it? No file is deleted, neither the archive nor what was extracted.`
-    : `Forget the extraction records for these ${sets.length} archives, and any archive passwords saved for them? No file is deleted, neither the archives nor what was extracted.`;
-}
-
-export function leftExtractingText(count: number): string | null {
-  if (count <= 0) return null;
-  return count === 1
-    ? 'An archive that is still extracting stays on the list. Cancel the extraction first.'
-    : 'Archives that are still extracting stay on the list. Cancel the extractions first.';
-}
-
 /** An extraction can be taken off the list unless it is still running. */
 export function archiveRemovable(set: ArchiveSet): boolean {
   return set.state !== 'extracting';
 }
 
-/** Failed with nothing new to ask for, or completed while its archives are still there (Extract Again). */
-export function archiveCanRetry(set: ArchiveSet): boolean {
-  if (set.state === 'failed') return !set.needsPassword || set.hasPassword;
-  return set.state === 'completed' && !set.archivesDeleted;
-}
-
 export function archiveRetryText(sets: readonly ArchiveSet[]): string {
-  const retry = sets.filter(archiveCanRetry);
+  const retry = sets.filter(canRetry);
   return retry.length > 0 && retry.every((set) => set.state === 'completed') ? 'Extract Again…' : 'Retry Extraction';
 }
 
-export function archivePasswordText(set: ArchiveSet | null): string {
-  return set?.needsPassword ? 'Enter Archive Password…' : 'Archive Password…';
+/** The password item says what the plan's target is waiting for. */
+export function archivePasswordText(needed: boolean): string {
+  return needed ? 'Enter Archive Password…' : 'Archive Password…';
 }
 
-/** What a double-click or Enter does on a record's own row. */
+/** What a double-click or Enter does on a record's own row (ArchiveRules.Primary). The web can't open a folder, so it copies its path. */
 export function archivePrimary(set: ArchiveSet): 'password' | 'copyFolder' | 'retry' | 'none' {
   if (set.needsPassword) return 'password';
   if (set.state === 'completed' && set.destination?.trim()) return 'copyFolder';
-  return archiveCanRetry(set) ? 'retry' : 'none';
+  return canRetry(set) ? 'retry' : 'none';
 }
 
 /** A set is on the list as a row of its own when none of its files are there. */
@@ -802,14 +763,13 @@ export interface ProviderEntry {
 /** "Waiting for X" shows with a usable key or while rows are left; "My X" only when the account can browse its catalog. */
 export function providerEntries(accounts: readonly RemoteAccount[], remoteJobs: readonly RemoteJob[]): ProviderEntry[] {
   return accounts.map((account) => {
-    const waiting = remoteJobs.filter((job) => job.state !== 'localStarted' && job.state !== 'removed' && job.provider?.toLowerCase() === account.provider.toLowerCase()).length;
-    const usable = account.hasKey && !account.keyUnreadable;
+    const waiting = remoteJobs.filter((job) => isRow(job) && sameProvider(job.provider, account.provider)).length;
     return {
       provider: account.provider,
-      name: account.providerName,
+      name: providerNameOf(account),
       waiting,
-      showWaiting: usable || waiting > 0,
-      showBrowse: usable && account.itemKinds.length > 0 && account.capabilities.some((c) => c.toLowerCase() === 'catalog'),
+      showWaiting: showsWaiting(account, remoteJobs),
+      showBrowse: canBrowse(account),
     };
   });
 }

@@ -1,7 +1,7 @@
 // Numbers and words as the desktop app shows them (docs/design-guidelines.md): 1024-based KB/MB/GB, unknown values
 // left blank, status text in the state's color.
 
-import type { ArchiveSet, Job } from './types';
+import type { Job } from './types';
 
 const units = ['B', 'KB', 'MB', 'GB', 'TB'];
 
@@ -119,47 +119,3 @@ export function siteOf(url: string): string {
   }
 }
 
-export function archiveTone(set: ArchiveSet): Tone {
-  switch (set.state) {
-    case 'extracting':
-      return 'active';
-    case 'completed':
-      return 'done';
-    case 'failed':
-      return set.failureKind === 'cancelled' ? 'neutral' : 'failed';
-    case 'waiting':
-      return 'waiting';
-    default:
-      return 'neutral';
-  }
-}
-
-/** What a set's unfinished parts do when none of them runs, as the Host words it (UI.R23); null while any part runs. */
-export function unfinishedShort(set: ArchiveSet): string | null {
-  const has = (list: string[] | undefined, name: string) => (list ?? []).some((item) => item.toLowerCase() === name.toLowerCase());
-  const kinds = new Set<string>();
-  for (const name of set.downloadingVolumes) {
-    if (has(set.pausedVolumes, name)) kinds.add('paused');
-    else if (has(set.heldVolumes, name)) kinds.add('held');
-    else if (has(set.queuedVolumes, name)) kinds.add('queued');
-    else return null;
-  }
-  if (kinds.size === 0) return null;
-  if (kinds.size > 1) return 'Parts not downloading';
-  if (kinds.has('paused')) return 'Parts paused';
-  return kinds.has('held') ? 'Parts not started' : 'Parts waiting to download';
-}
-
-export function archiveShort(set: ArchiveSet): string {
-  switch (set.state) {
-    case 'downloading': return unfinishedShort(set) ?? 'Downloading parts';
-    case 'downloaded': return 'Not extracted';
-    case 'waiting': return set.needsPassword && !set.hasPassword ? 'Needs password' : 'Waiting';
-    case 'extracting': return set.percent !== undefined && set.percent !== null ? `Extracting ${set.percent}%` : 'Extracting';
-    case 'completed': return 'Extracted';
-    case 'failed':
-      if (set.needsPassword) return set.failureKind === 'wrongPassword' ? 'Wrong password' : 'Needs password';
-      return set.failureKind === 'cancelled' ? 'Cancelled' : 'Extraction failed';
-    default: return set.stateText;
-  }
-}

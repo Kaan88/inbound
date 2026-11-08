@@ -11,14 +11,20 @@
     nextRowKey, proxyTypes, validateForm, type ArchiveValues, type OptionsForm, type OptionsPage,
   } from '../lib/settingsRules';
   import { tickUntil } from '../lib/ticker';
+  import { providerNameOf } from '../lib/remote';
   import { store, type Theme } from '../lib/store.svelte';
   import type { ArchiveSettings, Settings } from '../lib/types';
+  import ProviderAccount from './ProviderAccount.svelte';
 
   // Options: one draft for every page, saved together by OK or Apply and dropped by Cancel, like the desktop's window.
   // Sign-in and paired browsers act at once (they are not settings of the download manager).
-  type PageEntry = { key: OptionsPage; label: string };
+  // A provider's account page is `provider:<id>`, one for each account the server has. Its buttons act at once.
+  type Page = OptionsPage | `provider:${string}`;
+  type PageEntry = { key: Page; label: string };
 
-  let page = $state<OptionsPage>('general');
+  // My provider can ask for its account page.
+  let page = $state<Page>((store.settingsPage as Page | null) ?? 'general');
+  store.settingsPage = null;
   let form = $state<OptionsForm | null>(null);
   let baseline = '';
   let themeChoice = $state<Theme>(store.theme);
@@ -44,11 +50,13 @@
     { key: 'proxy', label: 'Proxy' },
     { key: 'logins', label: 'Site logins' },
     { key: 'updates', label: 'Updates' },
+    ...(store.has('remote') ? store.model.accounts.map((account) => ({ key: `provider:${account.provider}` as Page, label: `${providerNameOf(account)} account` })) : []),
     ...(archiveState === 'ready' || archiveState === 'failed' ? [{ key: 'extraction' as OptionsPage, label: 'Extraction' }] : []),
     { key: 'signin', label: 'Sign-in and browsers' },
   ]);
   $effect(() => {
-    if (!pages.some((p) => p.key === page)) page = 'general';
+    // An account page waits for the accounts to arrive before it counts as gone.
+    if (!pages.some((p) => p.key === page) && !(page.startsWith('provider:') && store.model.accounts.length === 0)) page = 'general';
   });
 
   const dirty = $derived(
@@ -540,6 +548,9 @@
       {:else}
         <p class="text-muted">Reading the extraction settings…</p>
       {/if}
+    {:else if page.startsWith('provider:')}
+      {@const account = store.model.accounts.find((candidate) => `provider:${candidate.provider}` === page)}
+      {#if account}<ProviderAccount {account} />{:else}<p class="text-[13px] text-muted">This provider is not on the server any more.</p>{/if}
     {:else if page === 'signin'}
       <h1 class="mb-3 text-[18px] font-semibold">Sign-in</h1>
       {#if !store.signInRequired}
