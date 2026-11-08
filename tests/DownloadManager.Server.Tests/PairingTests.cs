@@ -147,6 +147,36 @@ public sealed class PairingTests
     }
 
     [Fact]
+    public async Task ChangingThePasswordInTheEnvironmentUnpairsEveryBrowser()
+    {
+        var work = ServerHarness.NewWork();
+        string token;
+        await using (var server = await AuthServer.StartAsync(change: options => options with { Password = new SecretValue("the first env password") }, work: work))
+        {
+            using var user = new AuthClient(server.Base);
+            Assert.Equal(HttpStatusCode.OK, (await user.PostAsync("/api/auth/signin", new { password = "the first env password" })).StatusCode);
+            token = await PairAsync(server, await NewCodeAsync(user));
+        }
+
+        // The same password on the next start keeps the pairing.
+        await using (var server = await AuthServer.StartAsync(change: options => options with { Password = new SecretValue("the first env password") }, work: work))
+        {
+            using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+            Assert.Equal(HttpStatusCode.OK, (await extension.IpcAsync(MessageTypes.HostPing, new { }, token)).Status);
+        }
+
+        // A rotated secret ends it, as a change on the Account page does.
+        await using (var server = await AuthServer.StartAsync(change: options => options with { Password = new SecretValue("the rotated env password") }, work: work))
+        {
+            using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
+            Assert.Equal(HttpStatusCode.Unauthorized, (await extension.IpcAsync(MessageTypes.HostPing, new { }, token)).Status);
+            Assert.Empty(AuthStore.Open(server.Data).Tokens());
+        }
+
+        Directory.Delete(work, recursive: true);
+    }
+
+    [Fact]
     public async Task ExtensionOriginsGetCorsOnTheirTwoPathsAndFirefoxOnlyWithAToken()
     {
         await using var server = await AuthServer.StartAsync();
