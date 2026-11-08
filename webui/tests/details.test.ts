@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addressLabel, barValue, cancelTargets, categoryChoices, categoryOf, completionFrom, detailRows, failureLabel, fileToShow, hasOwnAddress,
   heading, looksLikeArchive, mergeSegments, moveTarget, noticeFor, noticeText, packageActionNotice, packageFigures, pauseTargets,
-  programModeOf, redownloadRefusal, refreshStart, resumeTargets, segmentRows, shownAddress, showsArchiveSection, speedLimitFrom,
+  programModeOf, clock, displaySource, hideAddresses, sortedByName, updateRates, redownloadRefusal, refreshStart, resumeTargets, segmentRows, shownAddress, showsArchiveSection, speedLimitFrom,
   speedLimitText, splitPath, stemLength,
 } from '../src/lib/details';
 import type { Job, Segment } from '../src/lib/types';
@@ -119,11 +119,66 @@ describe('segments (D2)', () => {
 
   it('words the table rows like the desktop', () => {
     const segments = mergeSegments([segment(0, 1023, 512), segment(1024, 2047, 1024)], [{ id: 'c', host: 'h', state: 'x', rangeStart: 0, receivedBytes: 512, bytesPerSecond: 2048, startedAt: '' }], { totalBytes: 2048, receivedBytes: 0 });
-    const rows = segmentRows(segments, [{ id: 'c', host: 'h', state: 'x', rangeStart: 0, receivedBytes: 512, bytesPerSecond: 2048, startedAt: '' }]);
+    const live = [{ id: 'c', host: 'h', state: 'x', rangeStart: 0, receivedBytes: 512, bytesPerSecond: 2048, startedAt: '' }];
+    const rates = new Map<number, number>();
+    updateRates(segments, live, rates);
+    const rows = segmentRows(segments, live, rates);
     expect(rows[0]).toMatchObject({ number: 1, percent: 50, downloaded: '512 B / 1.00 KB', speed: '2.00 KB/s', info: 'Receiving data…' });
     expect(rows[1]).toMatchObject({ number: 2, percent: 100, speed: '—', info: 'Complete' });
     const idle = segmentRows(mergeSegments([segment(0, 99, 0)], [], { totalBytes: 100, receivedBytes: 0 }), []);
     expect(idle[0].info).toBe('Waiting');
+  });
+});
+
+describe('review fixes', () => {
+  it('moves the smoothed speed only when updateRates is called, never when rows are drawn', () => {
+    const segments: Segment[] = [{ start: 0, end: 99, completed: 10, isComplete: false, fraction: 0.1 }];
+    const live = [{ id: 'c', host: 'h', state: 'x', rangeStart: 0, receivedBytes: 10, bytesPerSecond: 1000, startedAt: '' }];
+    const rates = new Map<number, number>();
+    updateRates(segments, live, rates);
+    expect(rates.get(0)).toBe(1000);
+    segmentRows(segments, live, rates);
+    segmentRows(segments, live, rates);
+    expect(rates.get(0)).toBe(1000);
+    updateRates(segments, [{ ...live[0], bytesPerSecond: 2000 }], rates);
+    expect(rates.get(0)).toBe(1250);
+  });
+
+  it('does not take a plain .t10 or .s99 file for an archive part', () => {
+    expect(looksLikeArchive('notes.t10')).toBe(false);
+    expect(looksLikeArchive('report.s99')).toBe(false);
+    expect(looksLikeArchive('movie.z01')).toBe(true);
+    expect(looksLikeArchive('movie.r07')).toBe(true);
+  });
+
+  it('accepts a speed that starts with a point', () => {
+    expect(speedLimitFrom(true, '.5')).toEqual({ ok: true, bytesPerSecond: 512 });
+  });
+
+  it('sorts package files plainly, like the desktop', () => {
+    const names = sortedByName([job({ id: '1', fileName: 'file2' }), job({ id: '2', fileName: 'File10' }), job({ id: '3', fileName: 'a' })]).map((j) => j.fileName);
+    expect(names).toEqual(['a', 'File10', 'file2']);
+  });
+
+  it('shows time left as a clock', () => {
+    expect(clock(0)).toBe('00:00:00');
+    expect(clock(3725)).toBe('01:02:05');
+    expect(clock(86400 + 61)).toBe('1d 00:01:01');
+    expect(detailRows(job({ state: 'downloading', totalBytes: 100, receivedBytes: 50, estimatedRemaining: '00:00:05' })).find((r) => r.label === 'Time left')?.value).toBe('00:00:05');
+  });
+
+  it('takes the percent from the byte counts', () => {
+    const rows = detailRows(job({ state: 'downloading', totalBytes: 1000, receivedBytes: 250, progress: 0.9 }));
+    expect(rows.find((r) => r.label === 'Downloaded')?.value).toContain('(25.00%)');
+  });
+
+  it('hides web addresses in notes and words the source like the desktop', () => {
+    expect(hideAddresses('Moved to https://cdn.example.com/a?token=1 today')).toBe('Moved to a web address today');
+    expect(hideAddresses(undefined)).toBe('');
+    expect(displaySource('chromeContextMenu')).toBe('Browser menu');
+    expect(displaySource('chromeAuto')).toBe('Browser');
+    expect(displaySource('cli')).toBe('CLI');
+    expect(displaySource('web')).toBe('App');
   });
 });
 

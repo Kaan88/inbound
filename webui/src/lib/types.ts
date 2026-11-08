@@ -197,6 +197,9 @@ export interface Settings {
   downloadGroups: DownloadGroup[];
   excludedFileExtensions: string[];
   excludedHosts: string[];
+  notifyOnCompletion?: boolean;
+  showCompletionDialog?: boolean;
+  customCategories?: { id: string; name: string }[];
   [key: string]: unknown;
 }
 

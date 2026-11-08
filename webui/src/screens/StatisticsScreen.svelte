@@ -11,6 +11,11 @@
   let reading = false;
 
   async function read() {
+    if (store.connection !== 'open') {
+      stats = null;
+      problem = 'Live statistics unavailable while the Host is disconnected.';
+      return;
+    }
     if (reading || document.visibilityState === 'hidden') return;
     reading = true;
     try {
@@ -23,8 +28,13 @@
     }
   }
 
-  onMount(() => {
+  // Reads at once on mount and again when the connection comes back.
+  $effect(() => {
+    void store.connection;
     void read();
+  });
+
+  onMount(() => {
     const timer = setInterval(() => void read(), 2000);
     document.addEventListener('visibilitychange', read);
     return () => {

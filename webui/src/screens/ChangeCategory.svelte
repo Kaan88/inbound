@@ -7,7 +7,7 @@
   // Change category for one or more downloads (D7). Existing files stay in their current folders.
   let { jobs, onclose }: { jobs: Job[]; onclose: () => void } = $props();
 
-  const choices = $derived(categoryChoices(store.model.settings?.customCategories as { id: string; name: string }[] | undefined));
+  const choices = $derived(categoryChoices(store.model.settings?.customCategories));
   let chosen = $state('');
   let busy = $state(false);
 

@@ -23,6 +23,12 @@
   let deleteFile = $state(false);
   let details = $state<string | null>(null);
   let packageOpen = $state<string | null>(null);
+  // A package with just one listed file opens that file's own window (ProgressDetailRules.OnlyFile).
+  function openPackage(group: { id: string; jobIds: string[] }) {
+    const listed = group.jobIds.filter((id) => store.model.jobs[id]);
+    if (listed.length === 1) details = listed[0];
+    else packageOpen = group.id;
+  }
   let remoteOpen = $state<RemoteJob | null>(null);
   let passwordFor = $state<ArchiveSet | null>(null);
 
@@ -245,7 +251,7 @@
           <Icon name="package" size={16} class="shrink-0 text-icon-media" />
           <span class="truncate font-semibold" title={row.group.name}>{row.group.name}</span>
           <span class="shrink-0 text-[11px] text-muted">{summary.done}/{summary.count}</span>
-          <button class="shrink-0 rounded border border-divider px-1.5 text-[11px] hover:bg-hover" onclick={(event) => { event.stopPropagation(); packageOpen = row.group.id; }}>Progress details</button>
+          <button class="shrink-0 rounded border border-divider px-1.5 text-[11px] hover:bg-hover" onclick={(event) => { event.stopPropagation(); openPackage(row.group); }}>Progress details</button>
         </span>
         <span class="cell-size tabular text-right">{bytes(summary.totalBytes)}</span>
         <span class="cell-status min-w-0">

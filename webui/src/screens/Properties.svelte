@@ -3,7 +3,7 @@
   import Dialog from '../components/Dialog.svelte';
   import { bytes, dateTime, stateWord } from '../lib/format';
   import {
-    addressLabel, canForce, categoryChoices, categoryOf, completionFrom, hasOwnAddress, programModeOf, shownAddress, systemActions,
+    addressLabel, canForce, displaySource, hideAddresses, categoryChoices, categoryOf, completionFrom, hasOwnAddress, programModeOf, shownAddress, systemActions,
     type ProgramMode,
   } from '../lib/details';
   import { store } from '../lib/store.svelte';
@@ -13,7 +13,7 @@
   let { job, onclose }: { job: Job; onclose: () => void } = $props();
 
   const settings = $derived(store.model.settings);
-  const choices = $derived(categoryChoices(settings?.customCategories as { id: string; name: string }[] | undefined));
+  const choices = $derived(categoryChoices(settings?.customCategories));
   // The boxes start from the download as it is when the dialog opens.
   const first = untrack(() => job);
   const startCategory = categoryOf(first);
@@ -21,6 +21,7 @@
   const programAllowed = store.has('tray');
   const finished = first.state === 'completed';
   const packageName = $derived(store.model.groups.find((group) => group.jobIds.includes(job.id))?.name);
+  const providerName = $derived(store.model.accounts.find((a) => a.provider === job.remoteProvider)?.providerName ?? job.remoteProvider ?? '');
   const queue = $derived(job.queueName || 'None');
 
   let description = $state(first.description ?? '');
@@ -37,10 +38,10 @@
     [
       ['File', job.fileName],
       ['Status', stateWord(job.state)],
-      ['Note', job.statusNote],
-      ['Size', bytes(job.totalBytes ?? job.receivedBytes)],
+      ['Note', hideAddresses(job.statusNote)],
+      ['Size', job.totalBytes !== undefined && job.totalBytes !== null && job.totalBytes >= 0 ? bytes(job.totalBytes) : 'Unknown'],
       ['Queue', queue],
-      ['Source', job.isRemote ? job.remoteProvider : job.source],
+      ['Source', job.isRemote ? providerName : displaySource(job.source)],
       ['Package', job.isRemote ? packageName : undefined],
       [addressLabel(job), hasOwnAddress(job) ? shownAddress(job) : undefined],
       ['Saved to', job.finalFilePath],
