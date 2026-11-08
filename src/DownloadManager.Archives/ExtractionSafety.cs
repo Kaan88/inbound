@@ -321,10 +321,41 @@ public static partial class ExtractionSafety
 
     private static uint HardLinkCount(string path)
     {
+        if (OperatingSystem.IsLinux()) return UnixHardLinkCount(path);
         if (!OperatingSystem.IsWindows()) return 1;
         using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return GetFileInformationByHandle(handle, out var information) ? information.NumberOfLinks : 1;
     }
+
+    /// <summary>
+    /// .NET has no way to ask for a link count, and on Linux a tar can carry hard links the listing might not admit to,
+    /// so this asks the C library. <c>struct stat</c> differs by architecture: x64 has a 64-bit <c>st_nlink</c> at 16,
+    /// arm64 (the generic layout) a 32-bit one at 20. Another architecture, or a failed call, counts as one link, as a
+    /// failed call does on Windows.
+    /// </summary>
+    internal static uint UnixHardLinkCount(string path)
+    {
+        var buffer = new byte[256];
+        try
+        {
+            if (lstat(path, buffer) != 0) return 1;
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return 1;
+        }
+
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => (uint)Math.Min(BitConverter.ToUInt64(buffer, 16), uint.MaxValue),
+            Architecture.Arm64 => BitConverter.ToUInt32(buffer, 20),
+            _ => 1,
+        };
+    }
+
+    // Big enough for struct stat on every Linux architecture (x64 144 bytes, arm64 128).
+    [DllImport("libc", SetLastError = true)]
+    private static extern int lstat(string path, byte[] buffer);
 
     // Pack 4 because the native FILETIME fields are two DWORDs, not an 8-aligned long.
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

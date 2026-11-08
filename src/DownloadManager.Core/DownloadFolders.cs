@@ -9,7 +9,7 @@ public static class DownloadFolders
     /// <summary>Trimmed, without empty paths or repeats, each with a name: its own, or the folder's last part.</summary>
     public static List<FavoriteFolder> Normalize(IEnumerable<FavoriteFolder>? favorites)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(PathNames.Comparer);
         var result = new List<FavoriteFolder>();
         foreach (var favorite in favorites ?? [])
         {
@@ -40,7 +40,7 @@ public static class DownloadFolders
 
     public static List<string> NormalizeRecent(IEnumerable<string>? recent)
         => (recent ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim())
-            .DistinctBy(TrimEnd, StringComparer.OrdinalIgnoreCase).Take(MaxRecent).ToList();
+            .DistinctBy(TrimEnd, PathNames.Comparer).Take(MaxRecent).ToList();
 
     private static string TrimEnd(string path)
     {

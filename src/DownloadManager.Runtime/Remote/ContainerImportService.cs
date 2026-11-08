@@ -317,9 +317,13 @@ public sealed class ContainerImportService : IDisposable
             return "Only files on a drive of this computer can be opened, not ones on a network path.";
         }
 
-        if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] is not ('\\' or '/') || path.Any(char.IsControl))
+        if (OperatingSystem.IsWindows()
+                ? path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] is not ('\\' or '/') || path.Any(char.IsControl)
+                : !Path.IsPathFullyQualified(path) || path.Any(char.IsControl))
         {
-            return "The file has to be given by its full path, starting with a drive.";
+            return OperatingSystem.IsWindows()
+                ? "The file has to be given by its full path, starting with a drive."
+                : "The file has to be given by its full path, starting with /.";
         }
 
         return ContainerExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
