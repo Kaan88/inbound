@@ -7,7 +7,7 @@
   import { newUuid } from '../lib/ids';
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
-    applyForm, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, isUnsupportedReply,
+    applyForm, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, heldLeave, isUnsupportedReply,
     nextRowKey, proxyTypes, validateForm, type ArchiveValues, type OptionsForm, type OptionsPage,
   } from '../lib/settingsRules';
   import { tickUntil } from '../lib/ticker';
@@ -196,18 +196,21 @@
     document.addEventListener('click', guardLinks, true);
     return () => document.removeEventListener('click', guardLinks, true);
   });
-  // Browser Back or Forward while there are unsaved changes: put the page address back and ask first.
+  // Browser Back or Forward while there are unsaved changes: put the page address back and ask first. The shell asks
+  // this guard before it swaps the screen (a listener of its own here would run after the shell's).
   $effect(() => {
     if (!dirty) return;
-    const back = (event: HashChangeEvent) => {
-      const to = new URL(event.newURL).hash;
-      if (to === '#/settings' || leaveTo) return;
-      event.stopImmediatePropagation(); // the shell would otherwise swap the screen before the question is answered
+    const guard = (event: HashChangeEvent) => {
+      const to = heldLeave(event.newURL, true, leaveTo !== null);
+      if (to === null) return false;
       history.pushState(null, '', event.oldURL);
-      leaveTo = to || '#/all';
+      leaveTo = to;
+      return true;
     };
-    addEventListener('hashchange', back, true);
-    return () => removeEventListener('hashchange', back, true);
+    store.leaveGuard = guard;
+    return () => {
+      if (store.leaveGuard === guard) store.leaveGuard = null;
+    };
   });
   $effect(() => {
     if (!dirty) return;

@@ -331,7 +331,7 @@ export function passwordDone(target: ArchivePasswordTarget, cleared: boolean): s
   return `Archive password saved for "${target.name}".`;
 }
 
-export const extractAgainQuestion = 'This extracts the archive again. The Extraction page in Settings decides what happens to files that are already there.';
+export const extractAgainQuestion = 'This extracts the archive again. The Extraction page in Options decides what happens to files that are already there.';
 
 export function removeQuestion(sets: ArchiveSet[]): string {
   return sets.length === 1
