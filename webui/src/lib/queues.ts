@@ -141,6 +141,8 @@ export interface ScheduleDraft {
   isNew: boolean;
   /** The saved copy this draft started from, to notice a change made elsewhere. */
   baseline: Schedule | null;
+  /** The queue's retry limit when the form opened (null = unlimited); saved only when the form changes it. */
+  retryInitial: number | null;
 }
 
 function runOptions(schedule: Schedule, retryLimit: number | undefined): RunOptions {
@@ -160,7 +162,7 @@ export function newScheduleDraft(queueId: number, id: string, retryLimit: number
     timedStartEnabled: true, startOnHostStartup: false,
     openFileWhenDone: false, exitWhenDone: false, shutdownWhenDone: false, shutdownMode: 'shutdown', forceShutdown: false,
   };
-  return { schedule, options: runOptions(schedule, retryLimit), isNew: true, baseline: null };
+  return { schedule, options: runOptions(schedule, retryLimit), isNew: true, baseline: null, retryInitial: retryLimit ?? null };
 }
 
 export function editScheduleDraft(schedule: Schedule, retryLimit: number | undefined): ScheduleDraft {
@@ -169,6 +171,7 @@ export function editScheduleDraft(schedule: Schedule, retryLimit: number | undef
     options: runOptions(schedule, retryLimit),
     isNew: false,
     baseline: JSON.parse(JSON.stringify(schedule)) as Schedule,
+    retryInitial: retryLimit ?? null,
   };
 }
 

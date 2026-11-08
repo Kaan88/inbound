@@ -75,7 +75,7 @@
   let origin = $state<Record<string, number>>({});
   let errors = $state<Record<string, string>>({});
   let saving = $state<string | null>(null);
-  let removing = $state<{ schedule: Schedule } | null>(null);
+  let removing = $state<{ schedule: Schedule; baseline: Schedule } | null>(null);
 
   const retryOf = (queueId: number) => queues.find((q) => q.id === queueId)?.retryLimit;
 
@@ -105,14 +105,16 @@
     errors[id] = '';
     saving = id;
     const value = checked.schedule;
+    // The retry limit belongs to a queue: it is written only when this form changed it, and to the queue the schedule targets.
     const retry = checked.retryLimit;
+    const retryChanged = retry !== draft.retryInitial;
     // Rebased on the latest settings: only this schedule and its queue's retry limit change.
     const ok = await store.saveSettings((settings) => {
       const index = settings.schedules.findIndex((s) => s.id === value.id);
       if (index >= 0) settings.schedules[index] = { ...settings.schedules[index], ...value };
       else settings.schedules.push(value);
       for (const queue of settings.queues) {
-        if (queue.id !== value.queueId) continue;
+        if (!retryChanged || queue.id !== value.queueId) continue;
         if (retry === null) delete queue.retryLimit;
         else queue.retryLimit = retry;
       }
@@ -124,8 +126,9 @@
   async function confirmRemove() {
     if (!removing) return;
     const id = removing.schedule.id;
-    const draft = drafts[id] ?? editScheduleDraft(removing.schedule, undefined);
-    const conflict = scheduleConflict(schedules, { ...draft, baseline: removing.schedule, isNew: false }, true);
+    // The copy taken when the dialog opened: a change or removal made elsewhere since then is refused.
+    const snapshot = removing.baseline;
+    const conflict = scheduleConflict(schedules, { isNew: false, schedule: snapshot, baseline: snapshot }, true);
     removing = null;
     if (conflict) { store.toast(conflict.error, 'error'); return; }
     const ok = await store.saveSettings((settings) => { settings.schedules = settings.schedules.filter((s) => s.id !== id); }, 'Schedule removed.');
@@ -179,7 +182,7 @@
                     {#if schedule.lastRunAt}<p class="hint">Last ran {dateTime(schedule.lastRunAt)}{schedule.lastRunError ? `: ${schedule.lastRunError}` : ''}</p>{/if}
                   </div>
                   {#if !drafts[schedule.id]}<button class="btn" onclick={() => openEdit(schedule)}>Edit</button>{/if}
-                  <button class="btn-danger" onclick={() => (removing = { schedule })}>Remove</button>
+                  <button class="btn-danger" onclick={() => (removing = { schedule, baseline: JSON.parse(JSON.stringify(schedule)) as Schedule })}>Remove</button>
                 </div>
                 {#if drafts[schedule.id]}
                   <ScheduleEditor bind:draft={drafts[schedule.id]} {queues} error={errors[schedule.id] ?? ''} busy={saving === schedule.id} onsave={() => saveDraft(schedule.id)} oncancel={() => closeDraft(schedule.id)} />
@@ -193,7 +196,7 @@
               </div>
             {/each}
             {#if schedulesOf(schedules, queue.id).length === 0 && newDraftsOf(queue.id).length === 0}
-              <p class="hint">No schedules. A schedule starts and stops this queue at set times.</p>
+              <p class="hint">No schedules yet. Click New schedule to add one.</p>
             {/if}
           </div>
         </div>
