@@ -4071,7 +4071,7 @@ public sealed partial class DownloadManagerService
 
     /// <summary>
     /// Running downloads whose count a changed default may follow (UI.R21): the user's own HTTP downloads, provider
-    /// (TorBox) jobs and protected (pasted provider) links. Not FTP: an FTP download is one connection by design
+    /// jobs and protected (pasted provider) links. Not FTP: an FTP download is one connection by design
     /// (the FTP engine has no segments), so for a running one the change is a
     /// no-op and its record is left as it is.
     /// </summary>
