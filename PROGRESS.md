@@ -1,5 +1,25 @@
 # Progress — session handoff
 
+### D1b: the server for Linux and Docker (branch `stream-b`, 2026-11-08)
+
+- What it is: a new program, `src\DownloadManager.Server`, that runs the same download engine, queues, archives, containers and TorBox provider as the Windows Host, without any Windows part. Clients reach it over HTTP instead of the named pipe: a WebSocket at `/api/ws` that speaks exactly the pipe's messages (hello, snapshot, then events), `POST /api/ipc` for one request and one answer, and `/health`. The page at `/` is a labelled placeholder until the web UI (D2).
+- Folder browsing for the web UI: two new messages, `folders.browse` and `folders.create`, list and make folders only under `DOWNLOADMANAGER_ROOTS` (default `/downloads`). Every path is resolved through its links before the check, so a link that points out of a root is refused. The desktop Host doesn't offer them (it has a folder dialog).
+- Safety until sign-in exists: the server won't listen beyond this machine unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and then logs a warning. A browser request must come from the server's own page and name it by IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`, so another web page can't drive it, not even one that points its own name at the server. Anyone who can reach the port can still do everything; that is in `docs\docker-webui-plan.md`.
+- What replaces the Windows parts on Linux: secrets (site logins, proxy password, TorBox key) are sealed with AES-256-GCM and a key file `secrets.key` in the data folder, made readable by its owner only; a backup of the data folder must keep that file. 7-Zip is the official `7zz`, found on PATH or through `DOWNLOADMANAGER_7ZIP`. The tool and its children are killed on cancel and when the server exits. FFmpeg is found on PATH. Names that differ only in capitals are two files on Linux, so they are compared that way there; Windows is unchanged. Free space is measured on the mount that holds the folder.
+- Bugs the Linux run found and fixed: 7-Zip for Linux read a password with a trailing carriage return, so every password was wrong; the extraction check for hard links did nothing on Linux (it now asks the C library); container files and the bridge to another download manager only took drive paths.
+- Tests: new `DownloadManager.Server.Tests`, 30 pass on Windows and on Linux (protocol over the WebSocket and POST, folder browsing with links and `..`, the origin and host-name check, the loopback rule, the key file). Tests that need Windows itself (the Windows Host and its pipe, drive letters, NTFS streams, share locks, junctions, Explorer, the updater) are marked `Platform=Windows`; the rest run on both.
+- Linux run, on the owner's test VM in the .NET 10 SDK container, `--filter "Platform!=Windows"`: Core 817 of 817, Engine 147 of 147, Archives 252 passed and 52 skipped (those need WinRAR's Rar.exe to build test archives), Containers 183 of 183, TorBox 321 of 321, Server 30 of 30, Integration 1,047 passed and 7 skipped (Rar.exe). No failures.
+- Windows run: Core 824, Engine 147, Archives 314, Containers 187, TorBox 321, Server 30, Integration 1,111; all pass (the flaky TEST.1 failed once in an earlier run of this branch and passed in the final one).
+- Not done: no web UI, Docker files or sign-in (D2, D3). No manual run of the desktop app (nothing on screen changed). A directory `fsync` after extraction renames is still Windows-only. The review agent named in CLAUDE.md wasn't available to this run.
+
+#### Questions for the owner (D1b)
+
+- A job's download folder isn't limited to `DOWNLOADMANAGER_ROOTS` on the server; only the folder browser is. With no sign-in, anyone on the network could already do anything, so this waits for D2. Should the server then refuse destinations outside the roots? (Recommended yes.)
+- A browser may only reach the server by IP address, `localhost` or a name listed in `DOWNLOADMANAGER_HOSTS` (against DNS rebinding). Opening it as `http://nas.local:8080` needs that name listed. Fine, or should D2's sign-in replace this rule?
+- The default address is `0.0.0.0:8080` (what Docker needs), and it refuses to start there without `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` until sign-in exists. Keep that, or default to loopback?
+- On Linux, extraction refuses a file name with a backslash (it would become a folder on Windows) and allows names that differ only in capitals. Keep?
+- The Linux build output still carries the Windows `7z.exe` next to the server. Drop it from the Linux publish in D3?
+
 ### D1a: the Host's protocol without a pipe (branch `stream-b`, 2026-11-08)
 
 - What changed: every command, the hello, the snapshot (including its fallback when it is too large for a frame) and every broadcast (download events, update progress, package changes with their 100 ms debounce, provider changes, archive changes, "Host exiting") moved out of the pipe server into `src\DownloadManager.Runtime\Ipc\HostCommandDispatcher.cs` (and `.Remote.cs`). It has no transport, so the Docker server (D1b) can put a WebSocket under the same code.

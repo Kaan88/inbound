@@ -31,6 +31,46 @@ changes `postDownloadCommand`, `ffmpegPath`, `updateManifestUrl`, `updatePublicK
 `allowSystemCompletionActions`, and a `job.update` that sets a completion program; sending those values back
 unchanged is fine. The desktop Host can do all of these.
 
+### The server's transports (D1b)
+
+`DownloadManager.Server`, the headless Host for Linux and Docker, serves the same envelopes over HTTP:
+
+- `GET /api/ws` is a WebSocket. Each text message carries exactly one envelope, as JSON, with no length prefix (the
+  WebSocket frames it). Binary messages and messages over 8 MB close the connection. On connect the server sends
+  `server.hello` and `jobs.snapshot`, then replies and events, exactly as on the pipe, and the one-command-at-a-time
+  rule below holds per WebSocket.
+- `POST /api/ipc` takes one envelope as the request body and answers with the one reply envelope. There is no hello,
+  no snapshot and no events. A request with another version gets `server.incompatible` back. It is for short-lived
+  clients that needn't hold a connection.
+- `GET /health` answers `{"status":"ok","version":...}` and is the only path a health check needs.
+- A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
+  origin, and must name the server by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else
+  gets 403. A request without `Origin` (curl, scripts, tests) is not checked. There is no sign-in yet (D2), so the
+  server refuses to listen beyond loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set.
+
+The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
+request, update itself or run programs a client names, so those commands answer as described above.
+
+### Folder browsing: `folders.*`
+
+Only a Host whose hello lists `folders` answers these; the desktop Host doesn't (it has a folder dialog) and replies
+with `error` "Folder browsing is not available here." Both requests reply with `folders.browseResult`
+(`FolderBrowseResult` in `FolderBrowseDtos.cs`).
+
+- `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden and unreadable
+  folders left out, at most 2,000 (then `truncated: true`). An empty or missing `path` lists the allowed roots. The
+  reply carries `path` (with links resolved), `parent` (null at a root), `roots`, `folders` (`name`, `path`),
+  `freeBytes` and `totalBytes` of the mount that holds the folder.
+- `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
+  new folder. A name with a slash, a leading or trailing space or a trailing dot, `.`, `..`, a colon, a control
+  character, more than 255 bytes, a character or device name Windows can't keep (`<>"|?*`, `CON`) or the app's own
+  working-folder names is refused, as is a name already taken. These are the rules an extracted file's name meets,
+  so a folder made here can also be shared to Windows.
+- The roots are `DOWNLOADMANAGER_ROOTS` (`/downloads` by default; several separated by `:` or `;`). Every path is
+  resolved component by component, following links, before it is checked, so a link inside a root that points out
+  of it is refused, and so is `..` used to climb out. A link inside a root that stays inside is listed and works.
+  A refusal is `ok: false` with an `error`, never a listing.
+
 ## One command at a time per connection
 
 The Host handles a connection's commands strictly in order, and each waits for the one before it.
