@@ -273,6 +273,19 @@ public sealed class HostHelloDto
     public List<string> Capabilities { get; set; } = new();
 }
 
+/// <summary>
+/// PERF.7: what a client on the hello pipe asks for. Both default to true, which is what the main pipe gives everyone.
+/// A one-command client (the CLI) wants neither; the browser bridge wants events but no snapshot.
+/// </summary>
+public sealed class ClientHelloDto
+{
+    /// <summary>Send <c>jobs.snapshot</c> after <c>server.hello</c>. A client that asks <c>jobs.query</c> when it needs the list sets false.</summary>
+    public bool Snapshot { get; set; } = true;
+
+    /// <summary>Send this connection the broadcasts (<c>job.event</c>, <c>host.exiting</c> and the rest).</summary>
+    public bool Events { get; set; } = true;
+}
+
 public sealed class IncompatibleDto
 {
     public int MinVersion { get; set; }

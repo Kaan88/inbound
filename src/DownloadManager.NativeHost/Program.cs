@@ -151,7 +151,7 @@ internal static class Program
     {
         try
         {
-            var client = await IpcClient.ConnectAsync(TimeSpan.FromMilliseconds(800)).ConfigureAwait(false);
+            var client = await ConnectAsync().ConfigureAwait(false);
             await ConsumeGreetingAsync(client).ConfigureAwait(false);
             log("Connected to an existing host.");
             return client;
@@ -192,7 +192,7 @@ internal static class Program
             await Task.Delay(250).ConfigureAwait(false);
             try
             {
-                var client = await IpcClient.ConnectAsync(TimeSpan.FromMilliseconds(800)).ConfigureAwait(false);
+                var client = await ConnectAsync().ConfigureAwait(false);
                 await ConsumeGreetingAsync(client).ConfigureAwait(false);
                 log("Connected to the newly started host.");
                 return client;
@@ -207,6 +207,13 @@ internal static class Program
         return null;
     }
 
+    /// <summary>
+    /// PERF.7: no snapshot. The extension never reads one from this bridge (the popup asks <c>jobs.query</c>), and with
+    /// thousands of downloads it is megabytes per handoff. The events stay: the extension keeps the latest jobs from them.
+    /// </summary>
+    private static Task<IpcClient> ConnectAsync()
+        => IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = true }, TimeSpan.FromMilliseconds(800));
+
     private static async Task ConsumeGreetingAsync(IpcClient client)
     {
         var hello = await client.ReadAsync().ConfigureAwait(false);
@@ -220,7 +227,7 @@ internal static class Program
             throw new InvalidDataException($"The host speaks protocol {hello.V}.");
         }
 
-        await client.ReadAsync().ConfigureAwait(false); // initial snapshot
+        if (client.SnapshotFollowsHello) await client.ReadAsync().ConfigureAwait(false); // an older Host's snapshot
     }
 
     private static async Task TrySendErrorAsync(string code, string message, Action<string> log)

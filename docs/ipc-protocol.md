@@ -12,6 +12,14 @@ page gives the framing rules, the remote provider messages and the archive messa
 - Each message has `v` (protocol version), `type`, `id`, and on replies `replyTo` with the id of the request, plus `payload`.
 - JSON uses camelCase names and leaves out null values. Unknown fields are ignored.
 - On connect the Host sends `server.hello` and then `jobs.snapshot`. After that a client gets replies to its own requests and events meant for everyone.
+- A second pipe, `\\.\pipe\DownloadManager-<hash>-hello`, with the same ACL, is for clients that want less (PERF.7).
+  There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool }`, both
+  true when left out. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
+  broadcasts only if `events` is true; replies always come. Any other first frame closes the connection, and one on
+  another protocol version gets `server.hello` and `server.incompatible`. The CLI asks for neither (a command that
+  needs the list sends `jobs.query`), and the native host asks for events only. The main pipe is unchanged. A Host
+  older than this has no hello pipe, so a client that finds only the main pipe connects there and reads the snapshot
+  as before. The desktop UI's windows stay on the main pipe.
 
 The protocol version is **1**. It changes only for a change that existing clients can't ignore. New
 abilities arrive as new message types and new optional fields, and clients ignore message types they
