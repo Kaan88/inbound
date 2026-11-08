@@ -33,8 +33,9 @@ public sealed record PlatformCapabilities
     public bool SupportsProgramSettings { get; init; }
 
     /// <summary>
-    /// Folders on the Host's own disk can be listed for a client that can't show a dialog there. Nothing reads this
-    /// yet: the server's folder listing (D1b) is what it is for.
+    /// Folders on the Host's own disk can be listed and created for a client that can't show a dialog there:
+    /// <c>folders.browse</c> and <c>folders.create</c>, under the server's allowed roots only (<see cref="FolderBrowser"/>).
+    /// The hello then offers <c>folders</c>.
     /// </summary>
     public bool SupportsFolderBrowse { get; init; }
 

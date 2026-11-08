@@ -44,6 +44,11 @@ public static class MessageTypes
     public const string SettingsResult = "settings.result";
     public const string FolderSpace = "folders.space";
     public const string FolderSpaceResult = "folders.spaceResult";
+    /// <summary>Lists folders under the server's allowed roots. Only where the hello offers <c>folders</c>.</summary>
+    public const string FoldersBrowse = "folders.browse";
+    public const string FoldersBrowseResult = "folders.browseResult";
+    /// <summary>Creates a folder under the server's allowed roots; answered with <see cref="FoldersBrowseResult"/> for the new folder.</summary>
+    public const string FoldersCreate = "folders.create";
     public const string QueueAction = "queue.action";
     public const string GroupAction = "group.action";
     public const string GroupActionResult = "group.actionResult";
