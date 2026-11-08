@@ -157,6 +157,8 @@ internal static class Program
             // Attaches to the service, so it must exist before anything can finish.
             var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
             var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
+            // D8: what the web bridge's uploads (.torrent, containers) are referred to by. Nothing is read until one is named.
+            remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
             service.DirectAddresses = remoteJobs;
             service.InitializeAsync().GetAwaiter().GetResult();

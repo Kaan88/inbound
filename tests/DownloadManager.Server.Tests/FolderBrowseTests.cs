@@ -46,6 +46,28 @@ public sealed class FolderBrowseTests : IDisposable
     }
 
     [Fact]
+    public void ArchiveFilesAreListedOnlyWhenAskedForAndHiddenOnesAreLeftOut()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "Movies"));
+        File.WriteAllText(Path.Combine(Root, "set.part1.rar"), "x");
+        File.WriteAllText(Path.Combine(Root, "Backup.ZIP"), "xy");
+        File.WriteAllText(Path.Combine(Root, "readme.txt"), "x");
+        var hidden = Path.Combine(Root, OperatingSystem.IsWindows() ? "hidden.7z" : ".hidden.7z");
+        File.WriteAllText(hidden, "x");
+        if (OperatingSystem.IsWindows()) File.SetAttributes(hidden, FileAttributes.Hidden);
+        var browser = new FolderBrowser([Root]);
+
+        Assert.Empty(browser.Browse(Root).Files);
+        var listing = browser.Browse(Root, FolderBrowseFiles.Archives);
+        Assert.True(listing.Ok, listing.Error);
+        Assert.Equal(["Backup.ZIP", "set.part1.rar"], listing.Files.Select(file => file.Name));
+        Assert.Equal(2, listing.Files[0].Size);
+        Assert.Equal(["Movies"], listing.Folders.Select(folder => folder.Name));
+        Assert.False(browser.Browse(Outside, FolderBrowseFiles.Archives).Ok);
+        Assert.False(browser.Browse(Root, "everything").Ok);
+    }
+
+    [Fact]
     public void DotDotOutOfARootIsRefusedAndSoIsAnyPathOutsideIt()
     {
         var browser = new FolderBrowser([Root]);
@@ -174,6 +196,43 @@ public sealed class FolderBrowseTests : IDisposable
         var escape = await server.AskAsync<FolderBrowseResult>(MessageTypes.FoldersCreate, new FolderCreateRequest { Parent = Path.Combine(server.Root, ".."), Name = "planted" });
         Assert.False(escape.Ok);
         Assert.False(Directory.Exists(Path.Combine(server.Work, "planted")));
+    }
+
+    [Fact]
+    public void AnArchiveLinkIsListedOnlyWhenItLeadsInsideTheRoots()
+    {
+        Directory.CreateDirectory(Root);
+        var outsideFile = Path.Combine(Outside, "secret.rar");
+        File.WriteAllText(outsideFile, "x");
+        var insideFile = Path.Combine(Root, "real.zip");
+        File.WriteAllText(insideFile, "x");
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(Root, "out.rar"), outsideFile);
+            File.CreateSymbolicLink(Path.Combine(Root, "in.zip"), insideFile);
+        }
+        catch (Exception ex) when (OperatingSystem.IsWindows() && ex is IOException or UnauthorizedAccessException)
+        {
+            return; // no symbolic links without Developer Mode or elevation
+        }
+
+        var listing = new FolderBrowser([Root]).Browse(Root, FolderBrowseFiles.Archives);
+        Assert.Equal(["in.zip", "real.zip"], listing.Files.Select(file => file.Name));
+    }
+
+    [Fact]
+    public async Task OverTheServerTheArchiveFilesAndTheSpeedHistoryAreAnswered()
+    {
+        await using var server = await ServerHarness.StartAsync();
+        File.WriteAllText(Path.Combine(server.Root, "film.7z"), "x");
+        var listing = await server.AskAsync<FolderBrowseResult>(MessageTypes.FoldersBrowse,
+            new FolderBrowseRequest { Path = server.Root, Files = FolderBrowseFiles.Archives });
+        Assert.True(listing.Ok, listing.Error);
+        Assert.Equal("film.7z", Assert.Single(listing.Files).Name);
+
+        var history = await server.AskAsync<SpeedHistoryDto>(MessageTypes.SpeedHistoryGet, new { });
+        Assert.Equal(1, history.IntervalSeconds);
+        Assert.NotEmpty(history.BytesPerSecond);
     }
 
     /// <summary>Windows needs Developer Mode or elevation for a symbolic link; without either the case is skipped there.</summary>

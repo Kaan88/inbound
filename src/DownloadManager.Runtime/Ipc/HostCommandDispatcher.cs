@@ -103,6 +103,8 @@ public sealed partial class HostCommandDispatcher
         if (platform.SupportsOpenUi) capabilities.Add("openUi");
         if (platform.SupportsShutdown) capabilities.Add("shutdown");
         if (platform.SupportsCompletionActions) capabilities.Add("completionActions");
+        // archive.* is answered (extraction started). Whether 7-Zip is there now is archive.settings.get's tool.
+        if (rights.Archives is not null) capabilities.Add("archives");
         return capabilities;
     }
 
@@ -641,7 +643,7 @@ public sealed partial class HostCommandDispatcher
         }
 
         var browse = message.Payload is null ? new FolderBrowseRequest() : message.GetPayload<FolderBrowseRequest>();
-        return await Task.Run(() => folders.Browse(browse.Path), cancellationToken).ConfigureAwait(false);
+        return await Task.Run(() => folders.Browse(browse.Path, browse.Files), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

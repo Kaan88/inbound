@@ -60,6 +60,11 @@ public enum DownloadSource
     CliBatch,
     /// <summary>UI.B14: CLI import of a list. Headless and without per-job completion windows, like <see cref="CliBatch"/>.</summary>
     CliImport,
+    /// <summary>
+    /// D8: added from a browser on another device (the web UI, or a hand-off through the web bridge). Opens no progress
+    /// or completion window on this PC's screen, since nobody there asked for it.
+    /// </summary>
+    Web,
 }
 
 public enum StartMode

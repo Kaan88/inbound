@@ -21,8 +21,9 @@ public sealed class ServerProtocolTests
         Assert.Equal(Protocol.Version, helloDto.ProtocolVersion);
         Assert.Contains("folders", helloDto.Capabilities);
         Assert.DoesNotContain("tray", helloDto.Capabilities);
-        // D8 added names after these for the desktop Host; the server has none of them, so its list is as it was.
-        Assert.Equal(["jobs", "settings", "handoff", "status", "folders"], helloDto.Capabilities.Where(name => name != "remote"));
+        // D8 added names after these for the desktop Host; the server has none of them, so its list is as it was, and then
+        // "archives", for the extraction it answers.
+        Assert.Equal(["jobs", "settings", "handoff", "status", "folders", "archives"], helloDto.Capabilities.Where(name => name != "remote"));
         Assert.Equal(HostKinds.Server, helloDto.HostKind);
 
         var snapshot = await client.ReadAsync();

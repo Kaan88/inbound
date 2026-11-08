@@ -8,7 +8,8 @@ namespace DownloadManager.Runtime.Ipc;
 /// <c>folders.browse</c> and <c>folders.create</c> for a Host whose clients can't show a folder dialog on its disk. Only
 /// folders under the allowed roots are reachable. Every path is resolved first, links and <c>..</c> included, the way
 /// the file system itself would (as <c>realpath</c> does), and the root check and the listing use that resolved path,
-/// so a link inside a root that points outside it leads nowhere. Files are never listed.
+/// so a link inside a root that points outside it leads nowhere. Files are listed only when asked for, and then only
+/// archive files (<see cref="FolderBrowseFiles.Archives"/>), under the same rules as the folders.
 /// </summary>
 public sealed class FolderBrowser
 {
@@ -34,8 +35,13 @@ public sealed class FolderBrowser
     /// <inheritdoc cref="PathRoots.Parse"/>
     public static List<string> ParseRoots(string? value, string fallback) => PathRoots.Parse(value, fallback);
 
-    public FolderBrowseResult Browse(string? path)
+    public FolderBrowseResult Browse(string? path) => Browse(path, null);
+
+    /// <param name="files">Null for folders only; <see cref="FolderBrowseFiles.Archives"/> for the archive files too.</param>
+    public FolderBrowseResult Browse(string? path, string? files)
     {
+        var archives = string.Equals(files, FolderBrowseFiles.Archives, StringComparison.Ordinal);
+        if (files is not null && !archives) return Failed("Only archive files can be listed.");
         if (string.IsNullOrWhiteSpace(path))
         {
             return new FolderBrowseResult
@@ -52,6 +58,7 @@ public sealed class FolderBrowser
         // Kept sorted while listing and cut at MaxFolders, so a truncated listing really holds the first ones by name
         // (as the contract says), not whichever the file system happened to return first.
         var folders = new SortedSet<FolderEntryDto>(ByName);
+        var found = new SortedSet<FolderFileDto>(FileByName);
         var truncated = false;
         try
         {
@@ -76,6 +83,23 @@ public sealed class FolderBrowser
                     folders.Remove(folders.Max!);
                 }
             }
+
+            if (archives)
+            {
+                foreach (var file in new DirectoryInfo(real).EnumerateFiles("*", options))
+                {
+                    if (!OperatingSystem.IsWindows() && file.Name.StartsWith('.')) continue;
+                    if (!ArchiveNames.IsChooserName(file.Name)) continue;
+                    // As for folders: a link is listed only when what it leads to is inside the roots.
+                    if (file.LinkTarget is not null && Allowed(file.FullName) is null) continue;
+                    found.Add(new FolderFileDto { Name = file.Name, Path = file.FullName, Size = file.Length });
+                    if (found.Count > MaxFolders)
+                    {
+                        truncated = true;
+                        found.Remove(found.Max!);
+                    }
+                }
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
@@ -90,6 +114,7 @@ public sealed class FolderBrowser
             Parent = _roots.IsRoot(real) ? null : Path.GetDirectoryName(real),
             Roots = Roots.ToList(),
             Folders = folders.ToList(),
+            Files = found.ToList(),
             Truncated = truncated,
             FreeBytes = space.FreeBytes,
             TotalBytes = space.TotalBytes,
@@ -124,6 +149,11 @@ public sealed class FolderBrowser
 
     /// <summary>Case-insensitive first, so "audio" sits next to "Audio"; then exact, so two such names keep one order.</summary>
     private static readonly Comparer<FolderEntryDto> ByName = Comparer<FolderEntryDto>.Create((left, right) =>
+        StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0
+            ? order
+            : StringComparer.Ordinal.Compare(left.Name, right.Name));
+
+    private static readonly Comparer<FolderFileDto> FileByName = Comparer<FolderFileDto>.Create((left, right) =>
         StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0
             ? order
             : StringComparer.Ordinal.Compare(left.Name, right.Name));

@@ -521,11 +521,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default,
         PathRoots? sourceRoots = null)
     {
-        text = Resolve(text);
+        var upload = ResolveUpload(text);
+        text = upload ?? text;
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
-            var read = await ReadTorrentFileAsync(text!.Trim(), sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
+            // An upload's reference can name only the upload folder's own file, so the caller's folders don't apply to it.
+            var read = await ReadTorrentFileAsync(text!.Trim(), upload is not null ? null : sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
             return read.Bytes is null
                 ? new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = read.Error }
                 : RemoteInputClassifier.ClassifyTorrent(read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), withFiles: true);
@@ -769,7 +771,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
-        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved };
+        var upload = ResolveUpload(request.Input);
+        if (upload is not null) request = request with { Input = upload };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
@@ -821,7 +824,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 }, null, classification.Kind);
 
             case RemoteInputKind.TorrentFile:
-                var read = await ReadTorrentFileAsync(request.Input!.Trim(), request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
+                // As in ClassifyWithFilesAsync: an upload's reference names nothing outside the upload folder.
+                var read = await ReadTorrentFileAsync(request.Input!.Trim(), upload is not null ? null : request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
                 return read.Bytes is null
                     ? (null, read.Error, classification.Kind)
                     : BuildTorrentRecord(request, read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
@@ -865,13 +869,17 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     public PathRoots? DestinationRoots { get; set; }
 
     /// <summary>
-    /// On a server, turns a reference to a file a client uploaded (the server's own form, such as <c>upload:…</c>) into
-    /// that file's path, or gives null for anything else. The client then never learns where the server keeps it.
+    /// Turns a reference to a file a browser uploaded (<see cref="UploadFolder"/>, <c>upload:…</c>) into that file's path,
+    /// or gives null for anything else. The client then never learns where the Host keeps it. Set on a server, and on the
+    /// desktop Host for its web sessions' uploads.
     /// </summary>
     public Func<string, string?>? ResolveReference { get; set; }
 
-    private string? Resolve(string? text) =>
-        text is not null && ResolveReference is { } resolve && resolve(text.Trim()) is { } path ? path : text;
+    private string? Resolve(string? text) => ResolveUpload(text) ?? text;
+
+    /// <summary>The uploaded file a reference names (<see cref="ResolveReference"/>), or null when the text isn't one.</summary>
+    public string? ResolveUpload(string? text) =>
+        text is not null && ResolveReference is { } resolve ? resolve(text.Trim()) : null;
 
     private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, PathRoots? roots, CancellationToken cancellationToken)
     {

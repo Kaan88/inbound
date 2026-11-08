@@ -2,8 +2,9 @@
   import Icon from './Icon.svelte';
 
   // The Add button: Add URL on the button itself, and the other ways in under the arrow, in the desktop's order.
-  export type AddKind = 'url' | 'links' | 'magnet' | 'torrent' | 'list';
-  let { onpick, onexport, canTorrent = true }: { onpick: (kind: AddKind) => void; onexport: () => void; canTorrent?: boolean } = $props();
+  export type AddKind = 'url' | 'links' | 'magnet' | 'torrent' | 'container' | 'list';
+  // canProvider: the server has a provider (remote.*); a torrent file and a container's links can only go there.
+  let { onpick, onexport, canProvider = true }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean } = $props();
 
   let open = $state(false);
 
@@ -17,6 +18,7 @@
     { kind: 'links', label: 'Add links' },
     { kind: 'magnet', label: 'Add magnet' },
     { kind: 'torrent', label: 'Import torrent file' },
+    { kind: 'container', label: 'Import container file' },
     { kind: 'list', label: 'Import download list' },
   ];
 </script>
@@ -31,7 +33,7 @@
   {#if open}
     <ul class="card absolute left-0 right-0 z-40 mt-1 overflow-hidden py-1 shadow-lg" role="menu">
       {#each items as item (item.kind)}
-        {#if item.kind !== 'torrent' || canTorrent}
+        {#if (item.kind !== 'torrent' && item.kind !== 'container') || canProvider}
           <li role="none"><button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={() => pick(item.kind)}><span>{item.label}</span>{#if item.hint}<span class="text-[11px] text-muted">{item.hint}</span>{/if}</button></li>
         {/if}
       {/each}

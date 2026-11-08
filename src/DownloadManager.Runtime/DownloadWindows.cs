@@ -11,7 +11,8 @@ public sealed record DownloadWindowRequest(Guid Id, bool IsPackage);
 /// starts, and its completion window when it finishes. A package of any size gets one window when its first file
 /// starts, and its completion window once the whole package has finished and settled, never one per file: a
 /// package built one add at a time can have only its first file when that file starts or finishes. Downloads the
-/// CLI added (one add, a batch or an import) stay headless, and a provider's files start by themselves, often many at once, so they stay in the list.
+/// CLI added (one add, a batch or an import) stay headless, a provider's files start by themselves, often many at once,
+/// so they stay in the list, and nobody at this PC asked for one added from another device (D8, <c>web</c>).
 /// </summary>
 public sealed class DownloadWindows : IDisposable
 {
@@ -40,7 +41,7 @@ public sealed class DownloadWindows : IDisposable
         _service.PackageCompleted -= OnPackageCompleted;
     }
 
-    public static bool OpensWindows(JobDto job) => job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote");
+    public static bool OpensWindows(JobDto job) => job.Source is not ("cli" or "cliBatch" or "cliImport" or "remote" or "web");
 
     private bool ShowsCompletion(JobDto job) => job.ShowCompletionDialog ?? _showCompletionByDefault();
 

@@ -528,7 +528,7 @@ public sealed class RemoteCommands : IDisposable
 
     public async Task<RemoteContainerPreviewResult> ContainerPreviewAsync(RemoteContainerPreviewRequest request, CancellationToken cancellationToken = default)
     {
-        var preview = await _containers.PreviewAsync(request.Path, cancellationToken).ConfigureAwait(false);
+        var preview = await _containers.PreviewAsync(request.Path, cancellationToken, request.FileName).ConfigureAwait(false);
         // A browser on another device can't hand it on (HostCommandDispatcher refuses remote.container.sendToJd there).
         if (_jobRoots is not null) preview.CanSendToJd = false;
         preview.Error = Safe(preview.Error);
