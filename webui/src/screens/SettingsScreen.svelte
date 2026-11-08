@@ -2,6 +2,7 @@
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
   import { dateTime } from '../lib/format';
+  import { loginNeedsPassword, loginPasswordMessage } from '../lib/settingsRules';
   import { tickUntil } from '../lib/ticker';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSettings, Settings, SiteLogin } from '../lib/types';
@@ -20,6 +21,31 @@
   let page = $state<Page>('general');
   let draft = $state<Settings | null>(null);
   let speedKb = $state<number | null>(null);
+
+  /** Puts back the Downloads page's fields only; the other pages keep what was typed on them. */
+  function resetGeneral() {
+    const settings = store.model.settings;
+    if (!settings || !draft) return;
+    const saved = JSON.parse(JSON.stringify(settings)) as Settings;
+    draft.defaultDownloadDirectory = saved.defaultDownloadDirectory;
+    draft.useCategoryFolders = saved.useCategoryFolders;
+    draft.maxConcurrentDownloads = saved.maxConcurrentDownloads;
+    draft.defaultConnections = saved.defaultConnections;
+    draft.maxConnectionsPerHost = saved.maxConnectionsPerHost;
+    draft.autoResumeUnfinishedOnStartup = saved.autoResumeUnfinishedOnStartup;
+    draft.allowLocalNetwork = saved.allowLocalNetwork;
+    draft.browserIntegrationEnabled = saved.browserIntegrationEnabled;
+    speedKb = saved.globalSpeedLimitBytesPerSecond ? Math.round(saved.globalSpeedLimitBytesPerSecond / 1024) : null;
+  }
+
+  /** Puts back the Proxy page's fields only. */
+  function resetProxy() {
+    const settings = store.model.settings;
+    if (!settings || !draft) return;
+    draft.proxy = JSON.parse(JSON.stringify(settings.proxy)) as Settings['proxy'];
+    proxyPassword = '';
+    clearProxyPassword = false;
+  }
 
   function reset() {
     const settings = store.model.settings;
@@ -46,7 +72,7 @@
       settings.allowLocalNetwork = d.allowLocalNetwork;
       settings.browserIntegrationEnabled = d.browserIntegrationEnabled;
     });
-    if (ok) reset();
+    if (ok) resetGeneral();
   }
 
   // Favorite folders
@@ -67,6 +93,11 @@
   async function saveLogin() {
     if (!login) return;
     const value = $state.snapshot(login) as SiteLogin;
+    const original = store.model.settings?.siteLogins.find((l) => l.id === value.id);
+    if (loginNeedsPassword(original, value.site, value.username, value.password)) {
+      store.toast(loginPasswordMessage, 'error');
+      return;
+    }
     const ok = await store.saveSettings((s) => {
       const index = s.siteLogins.findIndex((l) => l.id === value.id);
       const entry: SiteLogin = { id: value.id, site: value.site.trim(), username: value.username.trim(), hasPassword: value.hasPassword, password: value.password || undefined };
@@ -86,11 +117,7 @@
       s.proxy = { mode: p.mode, address: p.address?.trim() || undefined, username: p.username?.trim() || undefined, hasPassword: p.hasPassword,
         password: proxyPassword || undefined, clearPassword: clearProxyPassword && !proxyPassword };
     }, 'Proxy saved.');
-    if (ok) {
-      proxyPassword = '';
-      clearProxyPassword = false;
-      reset();
-    }
+    if (ok) resetProxy();
   }
 
   // Extraction (archive.settings.*)
@@ -221,7 +248,7 @@
         <label class="flex items-center gap-2 text-[13px] sm:col-span-2"><input type="checkbox" bind:checked={draft.autoResumeUnfinishedOnStartup} /> Resume unfinished downloads when the server starts</label>
         <label class="flex items-center gap-2 text-[13px] sm:col-span-2"><input type="checkbox" bind:checked={draft.allowLocalNetwork} /> Allow downloads from addresses on the local network</label>
         <label class="flex items-center gap-2 text-[13px] sm:col-span-2"><input type="checkbox" bind:checked={draft.browserIntegrationEnabled} /> Accept downloads sent by a paired browser</label>
-        <div class="flex justify-end gap-2 sm:col-span-2"><button class="btn-primary" type="submit">Save</button><button class="btn" type="button" onclick={reset}>Undo changes</button></div>
+        <div class="flex justify-end gap-2 sm:col-span-2"><button class="btn-primary" type="submit">Save</button><button class="btn" type="button" onclick={resetGeneral}>Undo changes</button></div>
       </form>
     {:else if page === 'folders'}
       <h1 class="mb-3 text-[18px] font-semibold">Favorite folders</h1>
@@ -287,7 +314,7 @@
           <input id="proxy-pass" class="field" type="password" bind:value={proxyPassword} disabled={draft.proxy.mode !== 'manual'} autocomplete="new-password" placeholder={draft.proxy.hasPassword ? 'Leave empty to keep it' : ''} />
           {#if draft.proxy.hasPassword}<label class="mt-1 flex items-center gap-2 text-[12px]"><input type="checkbox" bind:checked={clearProxyPassword} /> Remove the saved password</label>{/if}
         </div>
-        <div class="flex justify-end gap-2 sm:col-span-2"><button class="btn-primary" type="submit">Save</button><button class="btn" type="button" onclick={reset}>Undo changes</button></div>
+        <div class="flex justify-end gap-2 sm:col-span-2"><button class="btn-primary" type="submit">Save</button><button class="btn" type="button" onclick={resetProxy}>Undo changes</button></div>
       </form>
     {:else if page === 'extraction'}
       <h1 class="mb-3 text-[18px] font-semibold">Extraction</h1>
