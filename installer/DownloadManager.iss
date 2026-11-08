@@ -101,7 +101,8 @@ Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extensi
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
 Type: files; Name: "{app}\INSTALL.txt"
-; The window writes its start-up trace beside its exe. Setup didn't install it, so it is named here.
+; Before 0.6.0 the window wrote its start-up trace beside its exe (now in the logs folder). Setup didn't
+; install it, so an upgraded install's copy is named here.
 Type: files; Name: "{app}\app\ui-trace.log"
 Type: filesandordirs; Name: "{app}\native-host"
 Type: filesandordirs; Name: "{app}\app-rollback"

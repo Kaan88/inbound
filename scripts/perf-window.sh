@@ -23,10 +23,9 @@ setup() { # $1 name: copies binaries and starts a Host for a fresh instance
   cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$INST/bin/host/desktop"
   cp -r "$ROOT/src/DownloadManager.Cli/bin/Release/net10.0" "$INST/bin/cli"
   cp -r "$ROOT/tools/TestServer/bin/Release/net10.0" "$INST/bin/testserver"
-  rm -f "$INST/bin/host/desktop/ui-trace.log"
   export DOWNLOADMANAGER_INSTANCE="perf-window-$name-$$"
   export DOWNLOADMANAGER_DATA=$(cygpath -w "$INST/data")
-  C="$INST/bin/cli/DownloadManager.Cli.exe"; WIN_BIN=$(cygpath -w "$INST/bin"); TRACE="$INST/bin/host/desktop/ui-trace.log"
+  C="$INST/bin/cli/DownloadManager.Cli.exe"; WIN_BIN=$(cygpath -w "$INST/bin"); TRACE="$INST/data/logs/ui-trace.log"
   # Adding a download asks its server for the file's name, so the jobs point at a local TestServer that answers.
   "$INST/bin/testserver/TestServer.exe" --port "$PORT" >/dev/null 2>&1 &
   "$INST/bin/host/DownloadManager.Host.exe" --background >/dev/null 2>&1 &
