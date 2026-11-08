@@ -162,7 +162,7 @@ export function packageNameFor(urls: string[]): string | undefined {
 export function findExisting(jobs: Iterable<Job>, url: string): Job | undefined {
   const wanted = url.trim().toLowerCase();
   for (const job of jobs) {
-    if (job.url.toLowerCase() === wanted && job.state !== 'cancelled') return job;
+    if (job.url && job.url.toLowerCase() === wanted && job.state !== 'cancelled') return job;
   }
 
   return undefined;

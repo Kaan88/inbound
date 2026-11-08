@@ -1,10 +1,26 @@
 // What the add dialog shows and ticks, in the desktop's words and with its defaults (AddLines.cs, AddLinksDialog.cs):
 // extraction of links from text, the ticks, the summary line, each line's words, and the file choice. No DOM here.
 
-import { routeOf, type AddLine } from './addlines';
+import { removeInputs, routeOf, type AddLine } from './addlines';
+
+export { removeInputs };
 import type { ClassifyResult, RemoteFile } from './types';
 
-const TRAILING = /[.,;)\]}!?]+$/;
+const TRAILING = /[.,;!?]+$/;
+const BRACKETS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+/** Trailing punctuation goes; a closing bracket goes only when nothing in the link opened it (a wiki address ends in one). */
+export function trimLink(link: string): string {
+  let out = link;
+  for (;;) {
+    const before = out;
+    out = out.replace(TRAILING, '');
+    const last = out.slice(-1);
+    const open = BRACKETS[last];
+    if (open && out.split(last).length - 1 > out.split(open).length - 1) out = out.slice(0, -1);
+    if (out === before) return out;
+  }
+}
 
 /**
  * Links and magnets anywhere in pasted text, in the order they appear, trailing punctuation trimmed and each once
@@ -15,7 +31,7 @@ export function extractInputs(text: string | null | undefined): string[] {
   const seen = new Set<string>();
   const found: string[] = [];
   for (const match of text.matchAll(/(?:(?:https?|ftp):\/\/|magnet:)[^\s"'<>`]+/gi)) {
-    const input = match[0].replace(TRAILING, '');
+    const input = trimLink(match[0]);
     if (!/^(?:(?:https?|ftp):\/\/.|magnet:.)/i.test(input) || seen.has(input)) continue;
     seen.add(input);
     found.push(input);
@@ -263,10 +279,10 @@ export function fileChoiceFrom(line: AddLine, chosenIds: Set<string>): FileChoic
   const choosable = files.filter((file) => file.selectable !== false);
   if (chosenIds.size === choosable.length) return { selection: 'all' };
   if (line.result?.kind !== 'torrentFile') return { selection: 'chosen', fileIds: [...chosenIds] };
-  return {
-    selection: 'chosen',
-    filePaths: files.filter((file) => chosenIds.has(file.fileId) && file.relativePath).map((file) => ({ path: file.relativePath!, size: file.size })),
-  };
+  const picked = files.filter((file) => chosenIds.has(file.fileId));
+  // A torrent file goes by path and size; if the server gave a path to none or only some, the ids carry it instead.
+  if (picked.some((file) => !file.relativePath)) return { selection: 'chosen', fileIds: picked.map((file) => file.fileId) };
+  return { selection: 'chosen', filePaths: picked.map((file) => ({ path: file.relativePath!, size: file.size })) };
 }
 
 // ---- The words after an add ----
@@ -302,19 +318,4 @@ export function alreadyListed(name: string, note?: string | null): string {
 /** The destination for a provider's work has to be a full path on the server. */
 export function isFullPath(folder: string): boolean {
   return /^(?:[a-z]:[\\/]|\\\\|\/)/i.test(folder.trim());
-}
-
-/** The pasted text without the links that were handled, so adding again sends only the rest. Other text is kept as typed. */
-export function removeInputs(text: string, handled: Iterable<string>): string {
-  const gone = [...handled];
-  const kept: string[] = [];
-  for (const original of text.split(/\r?\n/)) {
-    let line = original;
-    for (const input of gone) line = line.split(input).join('');
-    // A line that held only handled links disappears; a blank line the user typed stays.
-    if (original.trim() && !line.trim()) continue;
-    kept.push(line.trimEnd());
-  }
-
-  return kept.join('\n');
 }

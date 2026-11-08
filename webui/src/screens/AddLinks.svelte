@@ -55,6 +55,8 @@
   let choosing = $state<{ line: AddLine; name: string; files: RemoteFile[]; picked: Set<string> } | null>(null);
   let chosenResolve: ((answer: FileChoice | null) => void) | null = null;
 
+  $effect(() => { destination; destinationError = ''; });
+
   const many = $derived(lines.length > 1);
   const summary = $derived(addSummary(lines, text.trim().length > 0, mode === 'magnet'));
   const ticked = $derived(lines.filter((line) => line.selected && canSelect(line)).length);
@@ -63,8 +65,9 @@
   const showChooseLater = $derived(lines.some(chooseLaterApplies));
   const ready = $derived(!typing && !adding && canAdd(lines));
   const title = $derived(mode === 'links' && seed.length === 1 ? 'Add link' : mode === 'magnet' ? 'Add magnet' : mode === 'torrent' ? 'Import torrent file' : mode === 'imported' ? 'Import download list' : 'Add links');
-  const showPaste = $derived(mode === 'links' || mode === 'magnet');
-  const showUpload = $derived(remoteOn && (mode === 'torrent' || mode === 'links'));
+  const single = $derived(mode === 'links' && seed.length > 0);
+  const showPaste = $derived((mode === 'links' && !single) || mode === 'magnet');
+  const showUpload = $derived(remoteOn && (mode === 'torrent' || (mode === 'links' && !single)));
 
   function pwOf(input: string): Passwords {
     return passwords[input] ?? { has: false, archive: '', site: '', same: false };
@@ -248,7 +251,12 @@
   interface RemoteAdded { ok: boolean; existing?: boolean; note?: string; job?: { id: string; name?: string; displayHost?: string } }
 
   async function setPackagePassword(firstJobId: string | undefined, problems: string[]) {
-    if (!archivePassword || !firstJobId) return;
+    if (!archivePassword) return;
+    if (!firstJobId) {
+      problems.push("The archive password wasn't saved, because no download of these links was added.");
+      return;
+    }
+
     // The package exists once its first job does; the list of packages follows a moment later.
     let group = store.model.groups.find((g) => g.jobIds.includes(firstJobId));
     for (let wait = 0; !group && wait < 10; wait++) {
@@ -286,7 +294,7 @@
     let sent = 0;
     const jobs: string[] = [];
     // The folder is remembered for manual downloads only when it isn't just the default one.
-    const remember = folder && folder !== settings?.defaultDownloadDirectory ? undefined : false;
+    const remember = !!folder && folder !== settings?.defaultDownloadDirectory;
 
     // Ordinary links first, one job.add each.
     const direct = picks.filter((line) => routeOf(line) === 'direct');
@@ -513,6 +521,7 @@
       </div>
     </div>
 
+    {#if mode === 'links' && !single}
     <fieldset class="mt-4 space-y-2 {directTicked.length ? '' : 'opacity-60'}" disabled={directTicked.length === 0}>
       <legend class="mb-1 text-[12px] text-muted">For ordinary links</legend>
       <div>
@@ -537,6 +546,7 @@
         {/if}
       {/if}
     </fieldset>
+    {/if}
   {/if}
   </div>
 
