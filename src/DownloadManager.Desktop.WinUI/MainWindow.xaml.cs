@@ -391,7 +391,8 @@ public sealed partial class MainWindow : Window
         UpdateStatusText();
         UpdateButtons();
 
-        // Preserve notifications for headless jobs when the main UI is already open.
+        // Preserve notifications for headless jobs when the main UI is already open. Only a single CLI add: a CLI
+        // batch or import ("cliBatch", "cliImport") opens no completion window per job (UI.B14).
         if (changeType == "completed" && job.Source == "cli" && (job.ShowCompletionDialog ?? _settings?.ShowCompletionDialog) == true)
         {
             // A package opens one window, when its last file is done, as the Host does for the other sources.
