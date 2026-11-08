@@ -36,22 +36,27 @@ let held = false;
 let finished = false;
 // There is no request to confirm (no id, expired, or the worker could not be reached).
 let unavailable = false;
+// dm.getHandoff has not answered yet: the target and its folder are not known, so Download and Choose...
+// wait. Sending now would go to This PC whatever the default target is.
+let loading = true;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const successBox = document.getElementById("success") as HTMLParagraphElement;
 // EXT.B2: Send and Choose... exclude each other; the buttons are drawn from this state only.
 const gate = new FormGate(renderButtons);
+renderButtons();
 
 function renderButtons(): void {
-  confirmButton.disabled = unavailable || finished || !gate.canSend;
-  browseDestinationButton.disabled = !gate.canPick;
+  confirmButton.disabled = loading || unavailable || finished || !gate.canSend;
+  browseDestinationButton.disabled = loading || !gate.canPick;
   // Keep in browser during a send could keep the file in the browser and add it to the app too.
   keepButton.disabled = gate.sending;
-  setTargetChoiceEnabled(targetChoice, gate.canPick);
+  setTargetChoiceEnabled(targetChoice, !loading && gate.canPick);
 }
 
 function markUnavailable(message: string): void {
   showError(message);
   unavailable = true;
+  loading = false;
   renderButtons();
 }
 
@@ -104,6 +109,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (held) holdWorker();
     keepButton.classList.toggle("hidden", !held);
     cancelButton.classList.toggle("hidden", held);
+    loading = false;
+    renderButtons();
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
     void fitWindowToContent().catch(() => undefined);
   } catch (error) {
@@ -112,7 +119,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (unavailable || finished || !gate.canSend) return;
+  if (loading || unavailable || finished || !gate.canSend) return;
   // The server's folder list stays shut while a send runs: a folder picked then would not be the one sent.
   serverFolders.close();
   await gate.send(sendToApp);
@@ -234,6 +241,7 @@ function useTarget(offered: OfferedTarget): void {
 
 browseDestinationButton.addEventListener("click", async () => {
   // This PC: the desktop app's folder dialog. The server: its own folders, listed here.
+  if (loading) return;
   if (target === "server") {
     if (!gate.canPick) return;
     if (serverFolders.isOpen) serverFolders.close();
