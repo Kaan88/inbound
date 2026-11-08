@@ -116,7 +116,8 @@ public sealed partial class HostCommandDispatcher
         if (options?.Events ?? true) _sessions[client.Id] = client;
         // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
         // starting meanwhile does not take this one for a running copy and quit. Registered first and read after,
-        // and NotifyExitingAsync sets it before it reads the sessions: a session either sees it here or is told there.
+        // and NotifyExitingAsync sets it before it reads the sessions: a registered session either sees it here or is
+        // told there; one without events learns it from host.openUi's answer.
         if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
         {
             await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
@@ -469,6 +470,14 @@ public sealed partial class HostCommandDispatcher
                     {
                         await Reply(client, message, MessageTypes.HostActionResult,
                             new HostActionResult { Ok = false, Message = "Opening the desktop UI is not available here." }).ConfigureAwait(false);
+                        break;
+                    }
+
+                    // UI.B12: a Host that is exiting opens no window and says so, so a starting copy that asked does not
+                    // take it for a running one, whatever its client.hello asked for.
+                    if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
+                    {
+                        await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
                         break;
                     }
 
