@@ -16,7 +16,10 @@ track it.
   a fresh server first over the network can't claim it. Sessions: 256-bit ids in an `HttpOnly`, `SameSite=Strict`
   cookie (`Secure` over HTTPS; `X-Forwarded-*` believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY` lists by
   address or network), 24 hours idle
-  and 7 days at most, kept in memory as hashes; sign-out and a password change end them and close their WebSockets.
+  and 7 days at most, kept as hashes; sign-out and a password change end them and close their WebSockets. Since
+  2026-11-08 they survive a restart (owner: "Survive restarts too"): `<data>/sessions.json`, hashes only, atomic and
+  mode 600, last-use times written at most every 10 minutes; a password changed while the server was down drops them.
+  Evidence: `SessionPersistenceTests` (5).
   Wrong tries make the client address wait 1, 2, 4 ... seconds up to 5 minutes; a try counts as wrong from its start,
   so a burst of parallel guesses gets one check, and an IPv6 client counts by its /64. A password change also unpairs
   the extensions unless the user keeps them. Only `/health`, the sign-in page and
@@ -26,7 +29,9 @@ track it.
   signed-in browser. Evidence: `AuthTests` (11) in Server.Tests.
 - **Browser pairing:** Settings, Sign-in and browsers, "Pair a browser" shows an 8-character code for ten minutes,
   once. The extension sends it to `POST /api/pair` and gets a long token (only its hash is kept), listed by name with
-  when it was paired and last used, and removable. The token works only on `POST /api/ipc` and only for the
+  when it was paired and last used, and removable. The extension's Unpair calls `DELETE /api/pair/self` with its
+  own token, which removes that token's record only and answers 204 (`PairSelfTests`, 3; documented in
+  `docs/ipc-protocol.md`). The token works only on `POST /api/ipc` (and that call) and only for the
   extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
   never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
   (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side is

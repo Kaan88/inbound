@@ -187,19 +187,5 @@ public sealed class AuthStore
         LastUsedAt = token.LastUsedAt,
     };
 
-    private void Save()
-    {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(_file, Json);
-        var temp = _path + ".tmp";
-        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None };
-        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        using (var stream = new FileStream(temp, options))
-        {
-            stream.Write(bytes);
-            stream.Flush(flushToDisk: true);
-        }
-
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        File.Move(temp, _path, overwrite: true);
-    }
+    private void Save() => AtomicFile.Write(_path, JsonSerializer.SerializeToUtf8Bytes(_file, Json));
 }
