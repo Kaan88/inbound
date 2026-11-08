@@ -231,7 +231,7 @@ public sealed class LiveLinkRefreshTests(ITestOutputHelper output)
         Assert.Equal("completed", done.State);
         Assert.Equal(2, rig.Broker.Prepared);
         Assert.Equal(403, Assert.Single(rig.Broker.Failures).HttpStatus);
-        Assert.True(done.RequestedConnections <= 4);
+        Assert.True(done.RequestedConnections <= LiveAccount.Client().TransferPolicy.MaxConnectionsPerFile);
         Assert.Equal(pick.File.Size, new FileInfo(done.FinalFilePath).Length);
         Assert.Equal(pick.File.Md5, Md5Of(done.FinalFilePath), ignoreCase: true);
         AssertNoSecretLeft(rig);
@@ -273,7 +273,7 @@ public sealed class LiveLinkRefreshTests(ITestOutputHelper output)
         Assert.Equal(3, rig.Broker.Prepared);
         Assert.Equal(403, Assert.Single(rig.Broker.Failures).HttpStatus);
         Assert.True(lowest >= stopped.ReceivedBytes * 9 / 10, $"Went back to {lowest} from {stopped.ReceivedBytes}.");
-        Assert.True(done.RequestedConnections <= 4);
+        Assert.True(done.RequestedConnections <= LiveAccount.Client().TransferPolicy.MaxConnectionsPerFile);
         Assert.Equal(pick.File.Size, new FileInfo(done.FinalFilePath).Length);
         Assert.Equal(pick.File.Md5, Md5Of(done.FinalFilePath), ignoreCase: true);
         AssertNoSecretLeft(rig);

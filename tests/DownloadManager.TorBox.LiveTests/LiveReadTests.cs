@@ -389,23 +389,31 @@ public sealed class LiveReadTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>The API takes any form of the key, but the link has only one, and the CDN takes only that.</summary>
+    /// <summary>
+    /// The API takes any form of the key, but the link has only one, and the CDN takes only that. Which form it is
+    /// changed: until 2026-11-08 every link carried the key with its dashes; on 2026-11-08 a torrent link asked for
+    /// without dashes carried it without them (a web download's still had them), and the CDN then refused the
+    /// dashed form. So the app uses a link exactly as TorBox gives it, and its logs mask every form of the key.
+    /// </summary>
     [LiveFact]
-    public async Task ALinkCarriesTheKeyWithItsDashesHoweverItWasAskedFor()
+    public async Task ALinkCarriesTheKeyInOneFormAndTheCdnTakesOnlyThatForm()
     {
         var key = LiveAccount.Key!;
         var dashless = key.Replace("-", string.Empty, StringComparison.Ordinal);
         var target = (await LiveAccount.FetchableFilesAsync()).First();
 
         var askedWithout = (await LiveAccount.Client(dashless).ResolveLinkAsync(target.Item.Ref, target.File.FileId)).Url;
-        Assert.True(askedWithout.Query == "?token=" + key, "The link's query isn't only the key with its dashes.");
+        var withDashes = askedWithout.Query == "?token=" + key;
+        Assert.True(withDashes || askedWithout.Query == "?token=" + dashless, "The link's query isn't only the key, in one of its forms.");
+        Say($"the link carried the key {(withDashes ? "with" : "without")} its dashes");
 
         using (var good = await LiveAccount.CdnAsync(askedWithout, "bytes=0-0"))
         {
             Assert.Equal(HttpStatusCode.PartialContent, good.StatusCode);
         }
 
-        foreach (var query in new[] { "token=" + dashless, "token=00000000-0000-4000-8000-000000000000", string.Empty })
+        var otherForm = withDashes ? dashless : key;
+        foreach (var query in new[] { "token=" + otherForm, "token=00000000-0000-4000-8000-000000000000", string.Empty })
         {
             using var refused = await LiveAccount.CdnAsync(LiveAccount.WithQuery(askedWithout, query), "bytes=0-0");
             Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
@@ -414,15 +422,16 @@ public sealed class LiveReadTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The policy is ours, from TorBox's support pages. This shows four really do work at once on one
-    /// link, each answering its own range. The CDN wasn't seen refusing more, so this doesn't claim it would.
+    /// The policy is ours: 16 since TB.L1 (owner, 2026-11-08, after measuring; it was 4, from TorBox's support
+    /// pages). This shows that many really do work at once on one link, each answering its own range. The CDN
+    /// wasn't seen refusing more, so this doesn't claim it would.
     /// </summary>
     [LiveFact]
-    public async Task FourConnectionsWorkAtOnceOnOneLink()
+    public async Task TheCapsConnectionsWorkAtOnceOnOneLink()
     {
         var client = LiveAccount.Client();
         var connections = client.TransferPolicy.MaxConnectionsPerFile;
-        Assert.Equal(4, connections);
+        Assert.Equal(16, connections);
         const long spacing = 4 * 1024 * 1024;
         var target = (await LiveAccount.FetchableFilesAsync()).FirstOrDefault(pair => pair.File.Size >= spacing * connections);
         if (target.Item is null)
