@@ -75,8 +75,11 @@
     archiveBase = JSON.stringify(archiveForm);
   }
 
+  let archiveBusy = $state(false);
   async function loadArchive() {
-    archiveState = 'loading';
+    // A retry keeps the page it is on; only the first read hides the page.
+    if (archiveState !== 'failed' && archiveState !== 'ready') archiveState = 'loading';
+    archiveBusy = true;
     archiveError = '';
     try {
       const result = await store.ask<{ settings?: ArchiveSettings; tool?: { found: boolean; path?: string; message: string } }>('archive.settings.get', {});
@@ -88,6 +91,8 @@
       const text = error instanceof Error ? error.message : String(error);
       archiveError = text;
       archiveState = isUnsupportedReply(text) ? 'unsupported' : 'failed';
+    } finally {
+      archiveBusy = false;
     }
   }
   onMount(() => void loadArchive());
@@ -135,7 +140,7 @@
       // What the server kept (a moved default folder moves the category folders under it), not what was typed.
       loadForm();
       if (extractionProblem) {
-        message = extractionProblem;
+        message = `The other settings were saved. The extraction settings were not: ${extractionProblem}`;
         page = 'extraction';
         return false;
       }
@@ -183,6 +188,19 @@
     document.addEventListener('click', guardLinks, true);
     return () => document.removeEventListener('click', guardLinks, true);
   });
+  // Browser Back or Forward while there are unsaved changes: put the page address back and ask first.
+  $effect(() => {
+    if (!dirty) return;
+    const back = (event: HashChangeEvent) => {
+      const to = new URL(event.newURL).hash;
+      if (to === '#/settings' || leaveTo) return;
+      event.stopImmediatePropagation(); // the shell would otherwise swap the screen before the question is answered
+      history.pushState(null, '', event.oldURL);
+      leaveTo = to || '#/all';
+    };
+    addEventListener('hashchange', back, true);
+    return () => removeEventListener('hashchange', back, true);
+  });
   $effect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -196,9 +214,10 @@
     cancel();
   }
 
-  async function toggleNotify(on: boolean) {
+  async function toggleNotify(on: boolean, box: HTMLInputElement) {
     if (on && !(await askNotifyPermission())) {
       notifyChoice = false;
+      box.checked = false; // the state stays false, so Svelte would not untick the box itself
       message = notifySupported()
         ? 'This browser did not allow notifications. Allow them for this site in the browser, then tick the box again.'
         : "This browser can't show notifications for this page.";
@@ -396,7 +415,7 @@
       <div class="grid max-w-xl gap-3">
         {@render section('When a download finishes')}
         <div>
-          <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={notifyChoice} disabled={!notifySupported()} onchange={(event) => void toggleNotify(event.currentTarget.checked)} /> Show a notification when a download finishes</label>
+          <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={notifyChoice} disabled={!notifySupported()} onchange={(event) => void toggleNotify(event.currentTarget.checked, event.currentTarget)} /> Show a notification when a download finishes</label>
           <p class="hint mt-1">This browser only, while this page is open. The browser asks to allow notifications when you turn it on.</p>
         </div>
         <div>
@@ -411,7 +430,7 @@
         <div><label class="label" for="set-concurrent">Maximum simultaneous downloads</label><input id="set-concurrent" class="field" type="number" min="1" max="16" required bind:value={form.maxConcurrentDownloads} aria-invalid={form.maxConcurrentDownloads === null ? 'true' : undefined} /></div>
         <div><label class="label" for="set-connections">Connections per download</label><input id="set-connections" class="field" type="number" min="1" max="32" required bind:value={form.defaultConnections} aria-invalid={form.defaultConnections === null ? 'true' : undefined} /></div>
         <div><label class="label" for="set-host">Connections per site</label><input id="set-host" class="field" type="number" min="1" max="64" required bind:value={form.maxConnectionsPerHost} aria-invalid={form.maxConnectionsPerHost === null ? 'true' : undefined} /></div>
-        <div><label class="label" for="set-speed">Total speed limit, all downloads (KB/s)</label><input id="set-speed" class="field" type="number" min="1" placeholder="Unlimited" bind:value={form.speedKb} /></div>
+        <div><label class="label" for="set-speed">Total speed limit, all downloads (KB/s)</label><input id="set-speed" class="field" type="number" min="1" max="10000000" placeholder="Unlimited" bind:value={form.speedKb} /></div>
         <p class="hint sm:col-span-2">Leave the speed limit empty for unlimited.</p>
         <div class="sm:col-span-2">
           {@render section('Per-site limits')}
@@ -479,7 +498,7 @@
       <h1 class="mb-3 text-[18px] font-semibold">Extraction</h1>
       {#if archiveState === 'failed'}
         <p class="tone-failed mb-2 text-[13px]" role="alert">Couldn't read the extraction settings. {archiveError}</p>
-        <button class="btn" type="button" onclick={() => void loadArchive()}>Try again</button>
+        <button class="btn" type="button" disabled={archiveBusy} onclick={() => void loadArchive()}>{archiveBusy ? 'Reading the extraction settings...' : 'Try again'}</button>
       {:else if archiveForm}
         <div class="grid max-w-xl gap-3">
           {@render section('When a download finishes')}
@@ -570,10 +589,12 @@
 </div>
 
 <footer class="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-divider bg-chrome px-4 py-2.5">
-  <p class="min-w-0 flex-1 text-[13px] {message ? 'tone-failed' : 'text-muted'}" role="alert">{message || (dirty ? 'You have changes that are not saved.' : '')}</p>
+  <div class="min-w-0 flex-1 text-[13px]">
+    {#if message}<p class="tone-failed" role="alert">{message}</p>{:else if dirty}<p class="text-muted" role="status">You have changes that are not saved.</p>{/if}
+  </div>
   <button class="btn-primary min-w-20" type="button" disabled={saving} onclick={() => void ok()}>OK</button>
   <button class="btn min-w-20" type="button" onclick={cancel}>Cancel</button>
-  <button class="btn min-w-20" type="button" disabled={saving || !dirty} onclick={() => void save()}>Apply</button>
+  <button class="btn min-w-20" type="button" disabled={saving} onclick={() => void save()}>Apply</button>
 </footer>
 </div>
 
