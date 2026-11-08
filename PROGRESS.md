@@ -1,5 +1,35 @@
 # Progress — session handoff
 
+### A1: fair host connections, limits that apply live, TEST.1 (2026-11-08, branch `stream-a`)
+
+- **UI.B7 (implemented, automated tests):** the per-host connection cap is now shared fairly. One gate per host with
+  a limit that can change while connections are out (the old `host|limit` keys let old plus new connections run
+  together). A free connection goes to the waiting job with the fewest; a job below its fair share
+  (`max(1, limit / jobs on the host)`) asks the job furthest above it to give one back. Segment workers take a
+  connection before a range; when asked, they stop at the last byte written, hand the rest of the range back and
+  save the checkpoint at once, then wait for a connection again. Nothing new goes into the checkpoint: a kill between
+  the hand-back and the save leaves the previous checkpoint, which only means fetching a few bytes again. Probes,
+  single streams and HLS/DASH fragments never give a connection back. Fragments now count under the cap, one at a
+  time per job; measured cost is under 1 µs per request, so they stay in.
+- A job that waits with no connection shows "Waiting for a connection to <host>" (host name only) in WinUI and the
+  CLI, through the runtime-only `WaitingForHost` (not saved) and `JobDto.WaitingForHost` (added field, no protocol bump).
+- **UI.R21 (implemented, automated tests; not checked on screen):** a lower simultaneous limit, overall or a
+  queue's, sends the newest excess back to Queued with its data (reverse of the start order). Left running, and
+  counted in the excess so an older job isn't stopped instead: jobs whose server can't resume or hasn't said, jobs
+  verifying or finishing, and jobs muxing. A provider job asks for one fresh link on its next run without using its
+  dead-link refresh budget. A changed default connection count reaches running segmented downloads of the user's own:
+  more connections add workers through the existing range-splitting path; fewer let the extra workers stop after
+  their current range.
+- **TEST.1 (fixed):** the cause was UI.B7 itself. The mock CDN now holds the two big files (`MockTorBox.HoldFile`,
+  `Release`, `ReleaseAll`) so only the small one can finish. 20 of 20 passes after the change, and another 20 of 20
+  after the final runtime fix (log: `artifacts\test1\runs.log`, not tracked).
+- Tests: Core 826 passed, Engine 150 passed, Integration 1,096 passed (no failures, no reruns); the six
+  `HostKillMatrixTests` passed again run on their own. New tests: `FairHostConnectionLimiterTests` (8),
+  Engine `HostFairnessTests` (4, with `ConnectionCountChangesApplyToARunningSegmentedJob`), Integration
+  `RuntimeConcurrencyLimitTests` (5).
+- Not done: the owner's scenario on a test build (3 TorBox downloads, raise to 6, lower to 2); a running job moved
+  into a full queue isn't sent back (only settings saves and queue changes trigger the check).
+
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
 - Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.

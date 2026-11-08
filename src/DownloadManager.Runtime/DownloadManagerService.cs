@@ -3984,7 +3984,6 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
     /// <summary>
     /// Running HTTP downloads of the user's own, whose count a changed default may follow. Provider and protected
     /// links keep the cap set when their run began, as unstarted ones do.
@@ -3995,6 +3994,7 @@ public sealed partial class DownloadManagerService
         runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null &&
         !runtime.Job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
     private static bool IsUnstartedForConnections(JobRuntime runtime) =>
         runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
         runtime.Job.ReceivedBytes == 0 &&
