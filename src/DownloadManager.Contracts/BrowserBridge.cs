@@ -14,6 +14,13 @@ public static class BrowserBridge
     public const string StoreExtensionOrigin = "chrome-extension://" + StoreExtensionId + "/";
     public const string UnpackedExtensionOrigin = "chrome-extension://" + UnpackedExtensionId + "/";
 
+    // Chrome and Edge each look the native-messaging host up under their own HKCU key. Both keys hold
+    // the path of the same manifest file, so the Chrome Web Store build works in either browser.
+    public const string ChromeNativeHostKeyPath = @"Software\Google\Chrome\NativeMessagingHosts\" + NativeHostName;
+    public const string EdgeNativeHostKeyPath = @"Software\Microsoft\Edge\NativeMessagingHosts\" + NativeHostName;
+
+    public static IReadOnlyList<string> NativeHostKeyPaths { get; } = [ChromeNativeHostKeyPath, EdgeNativeHostKeyPath];
+
     // Extension IDs are case-sensitive; Chrome always reports them in lower case.
     public static bool IsTrustedExtensionId(string? extensionId) =>
         string.Equals(extensionId, StoreExtensionId, StringComparison.Ordinal) ||

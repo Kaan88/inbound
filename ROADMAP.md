@@ -172,8 +172,8 @@ and external shell handoff checks remain open.
   grabber G2–G4 removed by owner decision and out of scope.
 - Phase 11: in progress (FTP auth/resume, hooks, CLI, profiles, settings
   transfer, repair, upgrade/uninstall, and the installer-only updater including
-  notifications/gating verified; final UI audit remains. Other browsers are
-  explicitly out of scope (C3).
+  notifications/gating verified; final UI audit remains. Edge is a required,
+  supported browser (EDGE.1); Firefox is required and comes last (FF.1).
 - Phases 6, 12: in progress/pending; see `PROGRESS.md` for the handoff.
 
 ## Phase 0 — Baseline and setup (done)

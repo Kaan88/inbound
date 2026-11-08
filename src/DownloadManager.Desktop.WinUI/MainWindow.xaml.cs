@@ -2305,7 +2305,7 @@ public sealed partial class MainWindow : Window
         await ShowMessageAsync("Inbound Download Manager",
             $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
             "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
-            "and a Chrome Manifest V3 bridge.");
+            "and a Manifest V3 browser bridge.");
     }
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -3953,7 +3953,7 @@ public sealed partial class MainWindow : Window
             };
             var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
-            var integration = new CheckBox { Content = "Capture downloads from Chrome", IsChecked = settings.BrowserIntegrationEnabled };
+            var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = settings.BrowserIntegrationEnabled };
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
