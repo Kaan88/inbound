@@ -31,6 +31,14 @@
     return list;
   });
 
+  // Recently used destinations that are not favorites, as the desktop's folder menu lists them.
+  const recent = $derived.by(() => {
+    const same = (path: string) => path.replace(/[\/]+$/, '').toLowerCase();
+    const saved = favorites.map((f) => same(f.path));
+    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !saved.includes(same(path)));
+    return list;
+  });
+
   const isFavorite = $derived(!!listing?.path && (store.model.settings?.favoriteFolders ?? []).some((f) => f.path === listing!.path));
 
   async function browse(path: string | null | undefined) {
@@ -116,6 +124,14 @@
           </li>
         {/each}
       </ul>
+      {#if recent.length}
+        <h3 class="label mt-3">Recent</h3>
+        <ul class="space-y-0.5">
+          {#each recent as path (path)}
+            <li><button class="w-full truncate rounded px-2 py-1.5 text-left font-mono text-[12px] hover:bg-hover" title={path} onclick={() => browse(path)}>{path}</button></li>
+          {/each}
+        </ul>
+      {/if}
       {#if listing?.roots?.length}
         <h3 class="label mt-3">Allowed folders</h3>
         <ul class="space-y-0.5">

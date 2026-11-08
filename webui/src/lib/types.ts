@@ -48,6 +48,9 @@ export interface Job {
   canCancel?: boolean;
   /** Set on a file a package's Cancel stopped; Resume on the package brings all of them back only if every file has it. */
   cancelledByPackageId?: string;
+  startMode?: string;
+  conflictPolicy?: string;
+  expectedSha256?: string;
 }
 
 export interface DownloadGroup {

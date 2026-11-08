@@ -1,13 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AddMenu, { type AddKind } from './components/AddMenu.svelte';
   import Icon from './components/Icon.svelte';
   import SpeedGraph from './components/SpeedGraph.svelte';
+  import { serializeList } from './lib/addflow';
+  import { opensAddUrl } from './lib/keys';
+  import type { ClassifyResult } from './lib/types';
   import { speed } from './lib/format';
   import { countJobs, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
   import AddLinks from './screens/AddLinks.svelte';
+  import AddUrl from './screens/AddUrl.svelte';
+  import ImportList from './screens/ImportList.svelte';
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
   import SettingsScreen from './screens/SettingsScreen.svelte';
@@ -26,7 +32,31 @@
 
   let screen = $state<Screen>(parse(location.hash));
   let drawer = $state(false);
-  let adding = $state(false);
+  // Which add dialog is open: Add URL, the many-inputs dialog (optionally with lines already answered), or the list import.
+  type Adding = { kind: 'url' } | { kind: 'many'; mode: 'links' | 'magnet' | 'torrent' | 'imported'; seed?: { input: string; result: ClassifyResult }[] } | { kind: 'list' };
+  let adding = $state<Adding | null>(null);
+
+  function openAdd(kind: AddKind) {
+    drawer = false;
+    adding = kind === 'url' ? { kind: 'url' } : kind === 'list' ? { kind: 'list' } : { kind: 'many', mode: kind };
+  }
+
+  // Download the list as a file; the browser's own Save dialog says where it goes.
+  function exportList() {
+    drawer = false;
+    const text = serializeList(Object.values(store.model.jobs));
+    const count = (JSON.parse(text) as unknown[]).length;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    link.download = 'download-manager-list.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    store.toast(`Exported ${count} download${count === 1 ? '' : 's'}.`);
+  }
+
+  function keydown(event: KeyboardEvent) {
+    if (opensAddUrl(event) && !adding) { event.preventDefault(); openAdd('url'); }
+  }
   let search = $state('');
 
   onMount(() => {
@@ -71,6 +101,8 @@
   </a>
 {/snippet}
 
+<svelte:window onkeydown={keydown} />
+
 <div class="flex h-dvh flex-col bg-surface text-text">
   <header class="flex h-12 shrink-0 items-center gap-2 border-b border-divider bg-chrome px-3">
     <button class="btn-icon md:hidden" aria-label="Menu" aria-expanded={drawer} onclick={() => (drawer = !drawer)}><Icon name="menu" size={18} /></button>
@@ -102,7 +134,7 @@
   <div class="relative flex min-h-0 flex-1">
     {#if drawer}<button class="fixed inset-0 z-20 bg-black/30 md:hidden" aria-label="Close the menu" onclick={() => (drawer = false)}></button>{/if}
     <nav aria-label="Views" class="z-30 w-60 shrink-0 overflow-y-auto border-r border-divider bg-chrome p-2 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-xl max-md:transition-transform {drawer ? '' : 'max-md:-translate-x-full'}">
-      <button class="btn-primary mb-3 w-full justify-center" onclick={() => { adding = true; drawer = false; }}><Icon name="add" size={16} /> Add URL</button>
+      <AddMenu onpick={openAdd} onexport={exportList} canTorrent={store.has('remote')} />
       <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>
       {@render link(viewHash('all'), 'all', 'download', 'All Downloads', count.all)}
       {#each categories as category (category.key)}
@@ -130,7 +162,7 @@
       {#if !store.model.settings}
         <div class="flex h-full items-center justify-center text-[13px] text-muted">{connectionText[store.connection]}</div>
       {:else if screen.kind === 'list'}
-        <ListScreen view={screen.view} {search} onadd={() => (adding = true)} />
+        <ListScreen view={screen.view} {search} onadd={() => openAdd('url')} />
       {:else if screen.kind === 'queues'}
         <QueuesScreen />
       {:else if screen.kind === 'provider'}
@@ -151,7 +183,13 @@
   </footer>
 </div>
 
-{#if adding}<AddLinks onclose={() => (adding = false)} />{/if}
+{#if adding?.kind === 'url'}
+  <AddUrl onclose={() => (adding = null)} onprovider={(input, result) => (adding = { kind: 'many', mode: 'links', seed: [{ input, result }] })} />
+{:else if adding?.kind === 'many'}
+  <AddLinks mode={adding.mode} seed={adding.seed} onclose={() => (adding = null)} />
+{:else if adding?.kind === 'list'}
+  <ImportList onclose={() => (adding = null)} onreview={(seed) => (adding = { kind: 'many', mode: 'imported', seed })} />
+{/if}
 
 <div class="pointer-events-none fixed bottom-10 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2" aria-live="polite">
   {#each store.toasts as toast (toast.id)}
