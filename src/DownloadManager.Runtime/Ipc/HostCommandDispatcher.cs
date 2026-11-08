@@ -283,6 +283,12 @@ public sealed partial class HostCommandDispatcher
                 return;
             }
 
+            if (WebUiMessageTypes.IsRequest(message.Type))
+            {
+                await AnswerWebUiAsync(client, rights, message, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             switch (message.Type)
             {
                 case MessageTypes.HostPing:

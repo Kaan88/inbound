@@ -14,13 +14,16 @@ public sealed class ServerLog : IHostLog
     private readonly object _gate = new();
     private readonly string _directory;
     private readonly bool _console;
+    private readonly string _fileName;
     private string? _currentDate;
     private string? _currentPath;
 
-    public ServerLog(string directory, bool console = true)
+    /// <param name="fileName">The daily file's name before the date: <c>server</c>, or <c>web-bridge</c> in the desktop Host's logs.</param>
+    public ServerLog(string directory, bool console = true, string fileName = "server")
     {
         _directory = directory;
         _console = console;
+        _fileName = fileName;
         Directory.CreateDirectory(_directory);
     }
 
@@ -56,7 +59,7 @@ public sealed class ServerLog : IHostLog
                 if (_currentDate != date || _currentPath is null)
                 {
                     _currentDate = date;
-                    _currentPath = Path.Combine(_directory, $"server-{date}.log");
+                    _currentPath = Path.Combine(_directory, $"{_fileName}-{date}.log");
                 }
 
                 File.AppendAllText(_currentPath, line + Environment.NewLine, new UTF8Encoding(false));

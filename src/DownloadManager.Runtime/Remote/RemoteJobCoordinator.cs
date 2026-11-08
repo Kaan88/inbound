@@ -521,7 +521,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default,
         PathRoots? sourceRoots = null)
     {
-        text = Resolve(text);
+        var resolved = Resolve(text);
+        // A reference to an upload is the coordinator's own file, not a path the caller chose: its roots don't apply.
+        if (!ReferenceEquals(resolved, text)) sourceRoots = null;
+        text = resolved;
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
@@ -769,7 +772,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
-        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved };
+        // An upload's reference names the coordinator's own file, so the caller's source roots don't apply to it.
+        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved, SourceRoots = null };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
