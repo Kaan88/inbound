@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-04)
+## Current status (2026-11-08, release 0.5.3)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
@@ -36,7 +36,7 @@ only updater (check/download/install/rollback/notifications/gating), the WinUI
 scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
-Edge/Firefox integration is explicitly out of scope (C3);
+Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1), built with the extension work;
 HLS master/media assembly including AES-128 (single and rotating keys) and
 alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
 byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
@@ -45,8 +45,8 @@ explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
 VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
 credential boundaries, and expired-URL refresh are verified.
-TorBox/account-provider work, unrar, and Linux/Docker/web UI are explicitly
-deferred (ROADMAP A1–A5/D1–D4). The installer package is built, but install
+TorBox and archive extraction ship in 0.5.x. The headless server, web UI and Docker image (ROADMAP D1–D4) are in
+progress; the plan is `docs\docker-webui-plan.md`. The installer package is built, but install
 smoke testing, sign-in behavior, and clean-environment install/upgrade acceptance
 remain unverified. Installer safety changes are under validation: Setup uses
 Windows Restart Manager rather than force-killing by process name; sign-in
