@@ -1,6 +1,6 @@
 # UI.R6: read-only UIA check that the main list's live counters (Size, Time left, Transfer rate) and their headers share
 # a right edge. Attaches to a running UI whose path contains -PathPart; starts nothing. Use a test instance only.
-param([string]$PathPart = 'worktrees\stream-a2')
+param([Parameter(Mandatory)][string]$PathPart)
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" | Where-Object { $_.ExecutablePath -like "*$PathPart*" } | Select-Object -First 1
