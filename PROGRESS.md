@@ -29,6 +29,26 @@
   `RuntimeConcurrencyLimitTests` (5).
 - Not done: the owner's scenario on a test build (3 TorBox downloads, raise to 6, lower to 2); a running job moved
   into a full queue isn't sent back (only settings saves and queue changes trigger the check).
+- **Review fixes (same day):** seven reviewer findings checked against the code; six were real and are fixed, and one is
+  only partly fixed:
+  - A segment worker waiting for a connection now gives up once nothing is left that it could take (no free range,
+    none long enough to split). Before, a job with every byte fetched could wait for another job to free a
+    connection. New Engine test `AWorkerWithNothingLeftStopsWaitingForAConnection` fails without the fix.
+  - Connection churn on a shared host: a job below its share that gives a connection back keeps it for 250 ms
+    while nobody waiting is short of theirs. A media job's next fragment, or a worker's next range, gets it back
+    without making the other job yield, abort a response and flush its file. Anyone waiting below their share
+    still gets it at once. Three new Core tests; the main one fails with the window off.
+  - A late progress report from a requeued transfer still counts its bytes, but no longer sets the job back to
+    Downloading or Connecting, or saves that state (checked in the lowering test).
+  - While a yield is pending, a failed file write or checkpoint save is no longer taken for a yield. No test:
+    the engine has no way to make a write fail on cue.
+  - The limiter's cancel registration now lives on the waiting side, so a grant can't race its creation and leave
+    it on the job's token.
+  - Partly fixed: FTP now records whether the server took REST, so an FTP job that has resumed once can be
+    requeued. A first FTP run stays above the limit, because a server that refuses REST makes the engine start
+    over from zero. HLS/DASH detected through the engine's phase or the description now counts as resumable.
+- Tests after the fixes: Core 830 passed, Engine 151 passed, Integration 1,096 passed, no failures and no reruns.
+  TEST.1 then passed 10 of 10 runs in a row (appended to `artifacts	est1uns.log`).
 
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
@@ -39,7 +59,8 @@
 
 #### Questions for the owner (2026-11-08 run)
 
-- (none yet)
+- UI.R21: should a lower limit also requeue an FTP download that has never resumed? Today it keeps running, because
+  a server that refuses REST would make it start again from zero.
 
 ### Owner's remaining checks (2026-11-08)
 
