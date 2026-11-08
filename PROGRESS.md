@@ -5,7 +5,9 @@
 - Owner, 2026-11-08: "put a link to my firefox addon page to setup" (ROADMAP EXT.S3). `INSTALL.txt` names the Chrome Web Store page and the Firefox Add-ons page, and Setup's last page has two unticked boxes that open them. The README and `docs/browser-integration.md` link them too.
 - The Firefox page is not public: AMO's API answers "Authentication credentials were not provided" for the slug `inbound-download-manager` (a slug that doesn't exist gives "Not found"), so the add-on exists but is unlisted or awaiting review. The owner was told how to submit a listed version.
 - Versions: app 0.6.1, extension 0.5.1.
-- Every Windows suite passed (`artifacts\campaign61108-061\`): Core 895, Engine 162, Integration 1,269, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 44, svelte-check 0 errors.
+- `scripts/install.ps1` writes the same two links into its `INSTALL.txt` (found by the Haiku review of the release commit, which also found a garbled evidence path here).
+- `scripts/publish.ps1` without `-SelfContained` failed since REV.3: such a publish carries no WinUI language files, so the check for the English ones always threw. The check now runs only for a self-contained publish, which Setup and the update package use.
+- Every Windows suite passed (`artifacts\campaign\20261108-061\`): Core 895, Engine 162, Integration 1,269, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 44, svelte-check 0 errors.
 
 ### After 0.6.0: password boxes, Firefox popup size, target switch (2026-11-08, `dev`)
 
