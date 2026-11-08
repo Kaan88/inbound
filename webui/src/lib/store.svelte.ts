@@ -2,6 +2,7 @@
 
 import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
+import { justCompleted, notifyEnabled, showCompleted } from './notify';
 import type { Settings } from './types';
 
 export type Theme = 'system' | 'dark' | 'light';
@@ -64,7 +65,11 @@ export class Store {
   }
 
   private receive(message: Envelope): void {
+    const event = message.type === 'job.event' ? (message.payload as { job?: { id?: string } } | undefined)?.job : undefined;
+    const before = event?.id ? this.model.jobs[event.id]?.state : undefined;
     apply(this.model, message);
+    const job = event?.id ? this.model.jobs[event.id] : undefined;
+    if (job && justCompleted(before, job.state) && notifyEnabled()) showCompleted(job.fileName);
     if (message.type === 'jobs.snapshot') void this.afterSnapshot();
   }
 

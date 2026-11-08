@@ -4,7 +4,7 @@
   import FolderPicker from './FolderPicker.svelte';
 
   // A folder on the server: typed (and checked by the server when you leave the box) or chosen with Browse….
-  let { value = $bindable(''), label, id, hint = '', disabled = false }: { value?: string; label: string; id: string; hint?: string; disabled?: boolean } = $props();
+  let { value = $bindable(''), label, id, hint = '', disabled = false, placeholder = '' }: { value?: string; label: string; id: string; hint?: string; disabled?: boolean; placeholder?: string } = $props();
 
   let picking = $state(false);
   let problem = $state('');
@@ -24,7 +24,7 @@
 <div>
   <label class="label" for={id}>{label}</label>
   <div class="flex gap-2">
-    <input {id} class="field font-mono" bind:value onblur={check} {disabled} spellcheck="false" autocomplete="off" aria-invalid={problem ? 'true' : undefined} />
+    <input {id} class="field font-mono" bind:value onblur={check} {disabled} {placeholder} spellcheck="false" autocomplete="off" aria-invalid={problem ? 'true' : undefined} />
     <button class="btn shrink-0" type="button" onclick={() => (picking = true)} {disabled}>Browse…</button>
   </div>
   {#if problem}<p class="mt-1 text-[12px] text-error" role="alert">{problem}</p>{:else if hint}<p class="hint mt-1">{hint}</p>{/if}
