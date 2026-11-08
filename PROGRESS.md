@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### D1b merged into `dev` (2026-11-08)
+
+- `stream-b` (the headless server and its Linux replacements, with review fixes) merged. Conflicts: the spanned-zip grouping now uses the OS-aware name comparer from D1b, the service keeps stream-c's `NativeHostState` next to D1b's `Roots`, and the server no longer sets the old `NativeHostRegistered` property (unset reads as not registered).
+- Full Windows run after the merge, all green: Core 869, Engine 155, Integration 1,215, TorBox 323, Archives 336, Containers 187, Server 41. Logs: `artifacts\campaign\20261108-merged-d1b\`.
+- Next: branch `webui` (D2 web UI with sign-in and pairing, D3 Docker, the extension's server transport, D4 on the test VM).
+
 ### Streams A1, A2 and C merged into `dev` (2026-11-08)
 
 - Merged after each stream's review fixes: `stream-a` (A1), `stream-a2` (A2), `stream-c` (extension). Only PROGRESS and ROADMAP conflicted, plus one stream-c command (`settings.downloadFolders`) that was added to the old pipe server; it now lives in `HostCommandDispatcher` with the other commands.
