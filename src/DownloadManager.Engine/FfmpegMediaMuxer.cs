@@ -128,27 +128,5 @@ public sealed class FfmpegMediaMuxer : IMediaMuxer
 
     /// <summary>The first FFmpeg in the folders of a <c>PATH</c> value. Linux programs have no extension: an image installs /usr/bin/ffmpeg.</summary>
     internal static string? FindOnPath(string? path)
-    {
-        var name = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        path ??= string.Empty;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            string candidate;
-            try
-            {
-                candidate = Path.Combine(directory.Trim(), name);
-            }
-            catch (ArgumentException)
-            {
-                continue;
-            }
-
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
+        => ProgramSearch.FindOnPath(OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg", path);
 }
