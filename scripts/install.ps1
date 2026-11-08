@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.6.2",
+    [string]$Version = "0.6.3",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
