@@ -72,6 +72,13 @@
   - EXT.B3, checked after the release: Firefox 159 with a test profile caught a download, and the installed native host handed it to a 0.6.0 test Host, which finished it. In the owner's first attempt the 0.5.3 Host was shut down 7.5 s after the request, which closed the bridge, and a closed bridge is reported as "unavailable". The second attempt's answer is not in the logs. Still to see: the owner's own Firefox once 0.6.0 is installed.
   - TEST.3: `scripts\register-test-native-host.ps1` registers a test build for Chrome for Testing only (the Chromium key) and refuses when another test holds the key (`artifacts\evidence\dev-final\test3-register\run.txt`).
   - D1 marked implemented, as planned for 0.6.0.
+  - Run on test builds (evidence in `artifacts\evidence\dev-final\`):
+    - UI.B7, the owner's scenario: six downloads on one host. Raising the limit from 3 to 6 got all six transferring. Lowering it to 2 sent the four newest back to Queued with their data kept.
+    - UI.R20: real Shift+Delete ticks "Delete from disk"; Delete and the toolbar don't.
+    - UI.R6: the Size, Time left and Transfer rate values share a right edge with their headers.
+    - TEST.3: a Chrome for Testing handoff went through the test registration, and Chrome's key was unchanged.
+  - TorBox live, read-only: 45 of 45 pass after updating three tests that expected the old cap of 4, and one that expected the old key form in links. TorBox now gives a torrent link the key without dashes when asked that way (TB.L3), which doesn't affect the app.
+  - TB.S1's queue read checked live; Start now and Remove couldn't be, with nothing queued. TB.S2 is blocked: no password-protected hoster link.
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 
