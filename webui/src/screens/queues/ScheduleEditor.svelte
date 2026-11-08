@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DAY_NAMES, ALL_DAYS, selectedDays, toggleDay, type ScheduleDraft } from '../../lib/queues';
+  import { DAY_NAMES, ALL_DAYS, tickedDays, toggleDay, type ScheduleDraft } from '../../lib/queues';
   import type { Queue } from '../../lib/types';
 
   // One schedule's form, in the desktop Scheduler's order: Queue, Schedule name, Enable schedule, Start/Stop time, Days,
@@ -14,14 +14,21 @@
   }: { draft: ScheduleDraft; queues: Queue[]; error: string; busy?: boolean; onsave: () => void; oncancel: () => void } = $props();
 
   const uid = $props.id();
-  const picked = $derived(selectedDays(draft.schedule.days));
+  const picked = $derived(tickedDays(draft.schedule.days));
+  function queueChanged() {
+    // Like the desktop: the retry fields follow the chosen queue.
+    const limit = queues.find((q) => q.id === draft.schedule.queueId)?.retryLimit;
+    draft.options.retryEnabled = limit != null;
+    draft.options.retryLimit = String(limit ?? 3);
+    draft.retryInitial = limit ?? null;
+  }
   const everyDay = $derived(picked.size === DAY_NAMES.length);
 </script>
 
 <form class="mt-2 grid gap-3 rounded-md border border-divider bg-chrome p-3 sm:grid-cols-2" onsubmit={(event) => { event.preventDefault(); onsave(); }}>
   <div>
     <label class="label" for="{uid}-queue">Queue</label>
-    <select id="{uid}-queue" class="field" bind:value={draft.schedule.queueId} disabled={queues.length <= 1}>
+    <select id="{uid}-queue" class="field" bind:value={draft.schedule.queueId} onchange={queueChanged} disabled={queues.length <= 1}>
       {#each queues as queue (queue.id)}<option value={queue.id}>{queue.name}</option>{/each}
     </select>
   </div>

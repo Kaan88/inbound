@@ -5,7 +5,7 @@
   import { newUuid } from '../lib/ids';
   import {
     checkScheduleDraft, defaultMoveTarget, downloadsText, editScheduleDraft, isMember, newScheduleDraft, orderedQueues,
-    queueStartedText, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
+    queueStartedText, retryConflict, scheduleConflict, scheduleSummary, schedulesOf, type QueuePolicy, type ScheduleDraft,
   } from '../lib/queues';
   import { store } from '../lib/store.svelte';
   import type { Queue, Schedule } from '../lib/types';
@@ -102,12 +102,16 @@
     if ('error' in checked) { errors[id] = checked.error; return; }
     const conflict = scheduleConflict(schedules, draft);
     if (conflict) { errors[id] = conflict.error; return; }
+    const retry = checked.retryLimit;
+    // The retry limit belongs to a queue: it is written only when this form changed it, and to the queue the schedule targets.
+    const retryChanged = retry !== draft.retryInitial;
+    if (retryChanged) {
+      const clash = retryConflict(queues.find((q) => q.id === checked.schedule.queueId), draft);
+      if (clash) { errors[id] = clash.error; return; }
+    }
     errors[id] = '';
     saving = id;
     const value = checked.schedule;
-    // The retry limit belongs to a queue: it is written only when this form changed it, and to the queue the schedule targets.
-    const retry = checked.retryLimit;
-    const retryChanged = retry !== draft.retryInitial;
     // Rebased on the latest settings: only this schedule and its queue's retry limit change.
     const ok = await store.saveSettings((settings) => {
       const index = settings.schedules.findIndex((s) => s.id === value.id);
