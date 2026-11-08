@@ -172,10 +172,19 @@ public sealed class HostPipeServer
                 else
                 {
                     options = first.Payload is null ? new ClientHelloDto() : first.GetPayload<ClientHelloDto>();
+                    if (!_dispatcher.OffersRole(options.Role))
+                    {
+                        var role = options.Role ?? string.Empty;
+                        _log.Warn($"A client on the hello pipe asked for the role '{(role.Length > 32 ? role[..32] : role)}', which this Host doesn't offer; closed.");
+                        return;
+                    }
                 }
             }
 
             await _dispatcher.OpenSessionAsync(client, options, serverToken).ConfigureAwait(false);
+            // Close() (HostCommandDispatcher.CloseSessions) ends the reads as well as the writes.
+            using var session = CancellationTokenSource.CreateLinkedTokenSource(serverToken, client.Closing);
+            serverToken = session.Token;
             writerTask = client.RunWriterAsync(serverToken);
             if (incompatible is not null && _dispatcher.RejectIfIncompatible(client, incompatible))
             {
@@ -238,7 +247,22 @@ public sealed class HostPipeServer
 
     private sealed class PipeClientSession(NamedPipeServerStream pipe, IHostLog log) : QueuedClientSession(log)
     {
+        private readonly CancellationTokenSource _closing = new();
+
         public Stream Stream => pipe;
+
+        /// <summary>
+        /// Cancelled by <see cref="Close"/>: the Host ends this connection at once, the writer too, so a client that has
+        /// stopped reading can't hold it open. What was still queued is not sent.
+        /// </summary>
+        public CancellationToken Closing => _closing.Token;
+
+        public override void Close()
+        {
+            base.Close();
+            try { _closing.Cancel(); }
+            catch (ObjectDisposedException) { /* already gone */ }
+        }
 
         protected override Task WriteFrameAsync(IpcMessage message, CancellationToken cancellationToken)
             => IpcFraming.WriteAsync(pipe, message, cancellationToken);
@@ -254,6 +278,7 @@ public sealed class HostPipeServer
                 // best effort
             }
 
+            _closing.Dispose();
             await base.DisposeAsync().ConfigureAwait(false);
         }
     }

@@ -51,6 +51,12 @@ public abstract class QueuedClientSession : IClientSession, IAsyncDisposable
     /// <summary>No more frames are taken. The writer still sends what is already queued, then ends.</summary>
     public void Complete() => _channel.Writer.TryComplete();
 
+    /// <summary>
+    /// Takes no more frames. A transport that can also stop reading overrides this and calls the base; without that its
+    /// reader ends when the client goes away.
+    /// </summary>
+    public virtual void Close() => Complete();
+
     /// <summary>Sends the queue in order until <see cref="Complete"/>, cancellation or the client going away.</summary>
     public async Task RunWriterAsync(CancellationToken cancellationToken)
     {

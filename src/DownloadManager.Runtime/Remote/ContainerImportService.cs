@@ -51,6 +51,7 @@ public sealed class ContainerImportService : IDisposable
     private readonly Action<string>? _log;
     private readonly Lazy<JDownloaderBridge> _bridge;
     private readonly PathRoots? _roots;
+    private readonly PathRoots? _jobRoots;
     private readonly Lock _sync = new();
     private readonly Dictionary<Guid, HeldPreview> _held = [];
     private bool _disposed;
@@ -63,9 +64,11 @@ public sealed class ContainerImportService : IDisposable
         TimeProvider? timeProvider = null,
         Action<string>? log = null,
         JDownloaderBridge? bridge = null,
-        PathRoots? roots = null)
+        PathRoots? roots = null,
+        PathRoots? jobRoots = null)
     {
         _roots = roots;
+        _jobRoots = jobRoots;
         _providers = providers;
         _jobs = jobs;
         _options = options ?? new ContainerImportOptions();
@@ -315,7 +318,7 @@ public sealed class ContainerImportService : IDisposable
     {
         if (RefusePath(path) is { } refused) return refused;
         if (_roots is null) return null;
-        if (_roots.Allowed(path) is not { } inside) return "That file is outside the folders this server may use.";
+        if (_roots.Allowed(path) is not { } inside) return _roots.OutsideFileText();
         path = inside;
         return null;
     }
@@ -470,6 +473,8 @@ public sealed class ContainerImportService : IDisposable
                 ArchivePasswordOffered = true,
                 Placement = entry.Group.Placement,
                 NameHint = entry.Name,
+                SourceRoots = _jobRoots,
+                DestinationRoots = _jobRoots,
             }, cancellationToken).ConfigureAwait(false);
             if (result.Job is { } added)
             {

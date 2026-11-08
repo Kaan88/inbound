@@ -14,11 +14,19 @@ public sealed partial class HttpDownloadEngine : IConnectionTelemetrySource
 
     private async Task<HttpResponseMessage> SendTrackedAsync(DownloadJob job, HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        // Every request of such a download, a playlist's segments and each redirect included, before anything is sent.
+        if (job.PublicNetworkOnly && request.RequestUri is { } target && NetworkAddresses.IsLocalTarget(target))
+        {
+            throw new DownloadEngineException(
+                new JobFailure(FailureKind.Forbidden, LocalNetworkRefused, false, false, DateTimeOffset.UtcNow),
+                isRetryable: false);
+        }
+
         var connection = new LiveConnection(this, job.Id, request);
         _connections[connection.Id] = connection;
         try
         {
-            var response = await CurrentClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            var response = await CurrentClient(job).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             connection.Headers(response);
             response.Content = new TrackedContent(response.Content, connection);
             return response;

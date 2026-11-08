@@ -61,6 +61,39 @@ public sealed class HostHelloPipeTests
 
     [Trait("Platform", "Windows")]
     [Fact]
+    public async Task A_web_session_gets_fewer_rights_and_an_unknown_role_is_closed()
+    {
+        await using var host = await SandboxHost.StartAsync(NoApi);
+
+        await using (var unknown = await HelloPipeAsync(host))
+        {
+            await IpcFraming.WriteAsync(unknown, IpcMessage.Create(MessageTypes.ClientHello, new ClientHelloDto { Role = "admin" }));
+            Assert.Null(await ReadAsync(unknown));
+        }
+
+        await using var pipe = await HelloPipeAsync(host);
+        await IpcFraming.WriteAsync(pipe, IpcMessage.Create(MessageTypes.ClientHello, new ClientHelloDto { Role = ClientRoles.Web, Snapshot = false, Events = false }));
+        var hello = (await ReadAsync(pipe))!.GetPayload<HostHelloDto>();
+        Assert.Equal(HostKinds.Windows, hello.HostKind);
+        Assert.Contains("folders", hello.Capabilities);
+        Assert.DoesNotContain("openUi", hello.Capabilities);
+        Assert.DoesNotContain("programSettings", hello.Capabilities);
+
+        var add = IpcMessage.Create(MessageTypes.JobAdd, new AddJobRequest
+        {
+            Url = "http://127.0.0.1:9/web.bin",
+            DestinationDirectory = host.Destination,
+            FileName = "web.bin",
+            StartMode = "later",
+        });
+        await IpcFraming.WriteAsync(pipe, add);
+        var reply = (await ReadAsync(pipe))!.GetPayload<AddJobResponse>();
+        Assert.False(reply.Accepted);
+        Assert.Equal("local_network", reply.ErrorCode);
+    }
+
+    [Trait("Platform", "Windows")]
+    [Fact]
     public async Task Asking_for_events_only_gets_the_events_but_no_snapshot()
     {
         await using var host = await SandboxHost.StartAsync(NoApi);
