@@ -3,13 +3,13 @@
 #   invoke:<AutomationId or Name>   Invoke/toggle/select the first match in any of the UI's windows
 #   expand:<Name>                   expand a menu item or expander;  collapse:<Name>
 #   select:<Name>                   select a list item (sidebar view, list row, Options page)
-#   click:<Name>                    left-click the middle of an element (or 120 px in); needs the window in front
-#   right:<Name>                    right-click the middle of an element (context menus); needs the window in front
+#   click:<Name>                    left-click the middle of an element (or 120 px in); only with the test UI in front
+#   right:<Name>                    right-click the middle of an element (context menus); only with the test UI in front
 #   key:<ESC|ENTER|TAB|DELETE|SHIFTDELETE|DOWN|UP>  real key input to the foreground test window
 #   front                           bring the main window to the front (and nudge its size so it paints)
 #   nudge                           resize every normal window of the UI by one pixel and back, so each paints
 #   set:<AutomationId or Name>=<text>  set the value of an edit box (or the edit inside a combo box)
-#   closewin:<title start>          close a secondary window (never the main one) with WM_CLOSE
+#   closewin:<title start>          close a secondary window (never the main one) with WM_CLOSE; the title start is required
 #   focus:<AutomationId or Name>     move keyboard focus to an element through UI Automation
 #   wait:<ms>                       pause
 #   capture:<name>                  PrintWindow every visible window of the UI into -OutDir (see ui-capture.ps1)
@@ -43,6 +43,11 @@ public static class UiDriveNative {
   public static string Title(IntPtr h) { var s = new StringBuilder(512); GetWindowText(h, s, 512); return s.ToString(); }
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  public struct POINT { public int X, Y; }
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+  public static IntPtr WindowFromPoint(int x, int y) { POINT p; p.X = x; p.Y = y; return WindowFromPoint(p); }
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
+  public static IntPtr Root(IntPtr h) { return h == IntPtr.Zero ? h : GetAncestor(h, 2); }
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   public struct RECT { public int Left, Top, Right, Bottom; }
@@ -93,24 +98,36 @@ function MainHwnd {
     }
     return (Get-Process -Id $procId).MainWindowHandle
 }
+function Test-TitleBarButton($e) {
+    # A window's own Minimize, Maximize and Close: by their automation ids, or any button inside a title bar.
+    if ($e.Current.AutomationId -in @('Minimize', 'Maximize', 'Close', 'Restore')) { return $true }
+    $parent = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($e)
+    return $parent -and $parent.Current.ControlType -eq [System.Windows.Automation.ControlType]::TitleBar
+}
 function Find-Element([string]$key) {
     # "~text" matches a name that starts with text (names with characters that don't survive the command line).
-    # The title bar's Minimize, Maximize and Close never match by name: a dialog's Close would otherwise hide the window.
+    # The title bar's buttons never match, by id, name or "~" prefix: a Close there would hide or end the window.
     $prefix = $key.StartsWith('~')
     $text = if ($prefix) { $key.Substring(1) } else { $key }
-    $titleBar = @('Minimize', 'Maximize', 'Close')
+    if (-not $text) { return $null }
     $fallback = $null
     foreach ($w in TopWindows) {
         foreach ($e in $w.FindAll($Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
             $c = $e.Current
-            $byId = -not $prefix -and $c.AutomationId -eq $text -and $c.AutomationId -notin $titleBar
-            $byName = if ($prefix) { $c.Name -and $c.Name.StartsWith($text) } else { $c.Name -eq $text -and $c.AutomationId -notin $titleBar }
+            $byId = -not $prefix -and $c.AutomationId -eq $text
+            $byName = if ($prefix) { $c.Name -and $c.Name.StartsWith($text) } else { $c.Name -eq $text }
             if (-not ($byId -or $byName)) { continue }
+            if (Test-TitleBarButton $e) { continue }
             if (-not $c.IsOffscreen) { return $e }
             if (-not $fallback) { $fallback = $e }
         }
     }
     return $fallback
+}
+function Test-TestUiInFront {
+    $fg = [UiDriveNative]::GetForegroundWindow()
+    foreach ($h in AllHandles) { if ($h -eq $fg) { return $true } }
+    return $false
 }
 function Pattern($el, $pattern) {
     $p = $null
@@ -135,6 +152,8 @@ foreach ($step in $Do) {
         }
         'closewin' {
             # WM_CLOSE to a secondary window whose title starts with the argument; never the main window.
+            # An empty argument would match every title, so it is refused.
+            if (-not $arg) { Write-Output 'CLOSEWIN skipped: no title given'; continue }
             $mainHwnd = MainHwnd
             foreach ($h in AllHandles) {
                 if ($h -eq $mainHwnd) { continue }
@@ -202,10 +221,20 @@ foreach ($step in $Do) {
             if ($p) { $p.Collapse(); Write-Output "COLLAPSE $arg" } else { Write-Output "COLLAPSE $arg MISSING" }
         }
         { $_ -in 'right', 'click' } {
+            # Real mouse input lands on whatever window is under the cursor, so only with the test UI in front, and
+            # only on an element that is on screen and has a size (Find-Element can fall back to an offscreen one).
+            if (-not (Test-TestUiInFront)) { Write-Output "$($verb.ToUpper()) $arg skipped: the test UI is not in front"; continue }
             $el = Find-Element $arg
             if (-not $el) { Write-Output "$($verb.ToUpper()) $arg MISSING"; continue }
             $r = $el.Current.BoundingRectangle
-            [UiDriveNative]::SetCursorPos([int]($r.Left + [Math]::Min(120, $r.Width / 2)), [int]($r.Top + $r.Height / 2)) | Out-Null
+            if ($el.Current.IsOffscreen -or $r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) {
+                Write-Output "$($verb.ToUpper()) $arg skipped: offscreen or no size"; continue
+            }
+            $x = [int]($r.Left + [Math]::Min(120, $r.Width / 2)); $y = [int]($r.Top + $r.Height / 2)
+            # The point itself must belong to the test UI: another window can overlap the element.
+            $atPoint = [UiDriveNative]::Root([UiDriveNative]::WindowFromPoint($x, $y))
+            if (-not (@(AllHandles) -contains $atPoint)) { Write-Output "$($verb.ToUpper()) $arg skipped: another window is at that point"; continue }
+            [UiDriveNative]::SetCursorPos($x, $y) | Out-Null
             Start-Sleep -Milliseconds 100
             $down, $up = if ($verb -eq 'right') { 0x0008, 0x0010 } else { 0x0002, 0x0004 }
             [UiDriveNative]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
@@ -213,10 +242,7 @@ foreach ($step in $Do) {
             Write-Output "$($verb.ToUpper()) $arg"
         }
         'key' {
-            $owned = $false
-            $fg = [UiDriveNative]::GetForegroundWindow()
-            foreach ($h in AllHandles) { if ($h -eq $fg) { $owned = $true } }
-            if (-not $owned) { Write-Output "KEY $arg skipped: the test UI is not in front"; continue }
+            if (-not (Test-TestUiInFront)) { Write-Output "KEY $arg skipped: the test UI is not in front"; continue }
             switch ($arg) {
                 'ESC' { [UiDriveNative]::Key(0x1B, $false, $false) }
                 'ENTER' { [UiDriveNative]::Key(0x0D, $false, $false) }
