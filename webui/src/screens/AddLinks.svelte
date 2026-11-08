@@ -20,6 +20,10 @@
   let packageName = $state('');
   let linkPassword = $state('');
   let archivePassword = $state('');
+  // Off until ticked: the site's password and the archive's are often different (owner, 2026-11-08).
+  let sameForBoth = $state(false);
+  // A tick hidden with the hoster lines or the Links tab doesn't come back ticked.
+  $effect(() => { if (!(tab === 'links' && hasHoster)) sameForBoth = false; });
   let checking = $state(false);
   let adding = $state(false);
   let addedRemote = $state<string[]>([]);
@@ -116,7 +120,7 @@
             : { input: line.input };
           const result = await store.ask<{ ok: boolean; job?: { id: string } }>('remote.add', {
             ...payload, destination: destination || undefined, queueId, startMode,
-            linkPassword: r.kind === 'hosterLink' && linkPassword ? linkPassword : undefined,
+            linkPassword: r.kind === 'hosterLink' ? (sameForBoth ? archivePassword : linkPassword) || undefined : undefined,
             archivePassword: archivePassword || undefined,
           });
           if (result.job) remoteIds.push(result.job.id);
@@ -131,6 +135,10 @@
     addedRemote = remoteIds;
     // A retry must not send the lines that were already added a second time.
     if (failures.length) ({ lines, text } = withoutAdded(lines, text, done));
+    // Out of the boxes once sent, whatever came of it.
+    linkPassword = '';
+    archivePassword = '';
+    sameForBoth = false;
     summary = `${ok} added${failures.length ? `, ${failures.length} not added` : ''}.`;
     if (failures.length) store.toast(failures.slice(0, 3).join(' '), 'error');
     if (ok) store.toast(`Added ${ok} link${ok === 1 ? '' : 's'}.`);
@@ -287,16 +295,19 @@
           <input id="add-package" class="field" bind:value={packageName} placeholder="Optional" />
         </div>
       {/if}
-      {#if tab === 'links' && hasHoster}
-        <div>
-          <label class="label" for="add-link-password">Link password (the site's, for hoster links)</label>
-          <input id="add-link-password" class="field" type="password" bind:value={linkPassword} autocomplete="off" />
-        </div>
-      {/if}
       {#if remoteOn}
         <div>
-          <label class="label" for="add-archive-password">Archive password</label>
-          <input id="add-archive-password" class="field" type="password" bind:value={archivePassword} autocomplete="off" placeholder="If the archives need one" />
+          <label class="label" for="add-archive-password">Archive password (used when the archives are extracted)</label>
+          <input id="add-archive-password" class="field" type="password" bind:value={archivePassword} autocomplete="off" placeholder="Optional" />
+          {#if tab === 'links' && hasHoster}
+            <label class="mt-1 flex items-center gap-2 text-[12px]"><input type="checkbox" bind:checked={sameForBoth} onchange={() => { if (sameForBoth) linkPassword = ''; }} /> Use it as the site password too</label>
+          {/if}
+        </div>
+      {/if}
+      {#if tab === 'links' && hasHoster && !(remoteOn && sameForBoth)}
+        <div>
+          <label class="label" for="add-link-password">Site password (only if the link's page asks for one)</label>
+          <input id="add-link-password" class="field" type="password" bind:value={linkPassword} autocomplete="off" placeholder="Optional" />
         </div>
       {/if}
     </div>

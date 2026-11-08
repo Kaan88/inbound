@@ -682,6 +682,16 @@ public sealed class AddLinesTests
         Assert.Equal("later", add.StartMode);
         Assert.Equal("startNow", AddRequests.ForLine(line, null, 0, startLater: false, linkPassword: null).StartMode);
 
+        // The site's password and the archive's are typed apart and go out apart (owner, 2026-11-08). Neither is
+        // offered in place of the other: one used for both was typed into both by the user's own tick.
+        var both = AddRequests.ForLine(line, null, 0, false, linkPassword: "site-pw", archivePassword: "archive-pw");
+        Assert.Equal("site-pw", both.LinkPassword);
+        Assert.Equal("archive-pw", both.ArchivePassword);
+        var archiveOnly = AddRequests.ForLine(line, null, 0, false, linkPassword: null, archivePassword: "archive-pw");
+        Assert.Null(archiveOnly.LinkPassword);
+        Assert.Equal("archive-pw", archiveOnly.ArchivePassword);
+        Assert.Null(AddRequests.ForLine(line, null, 0, false, linkPassword: "site-pw").ArchivePassword);
+
         var container = AddRequests.ForContainer(Guid.NewGuid(), [1, 4], null, 2);
         Assert.True(container.ApproveUncached);
         Assert.Equal([1, 4], container.EntryIds);

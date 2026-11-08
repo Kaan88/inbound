@@ -1070,6 +1070,17 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true, settings };
     }
 
+    case "dm.setDefaultTarget": {
+      // The popup's This PC / Server switch (owner, 2026-11-08): changes where downloads go and nothing else.
+      if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
+      const wanted: TargetId = message.target === "server" ? "server" : "local";
+      if (wanted === "server" && !server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
+      settings = { ...settings, defaultTarget: wanted };
+      await chrome.storage.local.set({ settings });
+      updateBadge();
+      return { ok: true, automaticTarget: automaticTarget(settings.defaultTarget, server !== null) };
+    }
+
     case "dm.pauseCatching": {
       pauseUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
       await chrome.storage.local.set({ pauseUntil });

@@ -6,15 +6,19 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace DownloadManager.Desktop.WinUI;
 
-/// <summary>One chosen line. The password leaves its box only for the one message that carries it.</summary>
-internal sealed class AddLinksPick(AddLine line, string? linkPassword, bool linkPasswordForArchives = false)
+/// <summary>
+/// One chosen line. The passwords leave their boxes only for the one message that carries them. The site's password and
+/// the archive password are typed separately and never stand in for each other (owner, 2026-11-08).
+/// </summary>
+internal sealed class AddLinksPick(AddLine line, string? linkPassword = null, string? archivePassword = null)
 {
     public AddLine Line { get; } = line;
 
+    /// <summary>The site's password for this link, sent to the provider on create.</summary>
     public string? LinkPassword { get; set; } = linkPassword;
 
-    /// <summary>TB.S2: the user ticked "also try it on this link's own archives".</summary>
-    public bool LinkPasswordForArchives { get; } = linkPassword is not null && linkPasswordForArchives;
+    /// <summary>For this link's own archives, kept encrypted by the Host.</summary>
+    public string? ArchivePassword { get; set; } = archivePassword;
 
     public override string ToString() => "[add pick]";
 }
@@ -234,7 +238,7 @@ internal sealed class AddLinksDialog
             return null;
         }
 
-        var picks = _session.Chosen.Select(line => new AddLinksPick(line, TakeLinkPassword(line), LinkPasswordForArchives(line))).ToList();
+        var picks = _session.Chosen.Select(PickOf).ToList();
         var archivePassword = _archivePanel.Visibility == Visibility.Visible ? _archivePassword.Password : string.Empty;
         ClearPasswords();
         return new AddLinksChoice
@@ -315,20 +319,15 @@ internal sealed class AddLinksDialog
         return (FolderChooser.Attach(row, box), box, error);
     }
 
-    private string? TakeLinkPassword(AddLine line)
-    {
-        if (!_rows.TryGetValue(line, out var row) || row.HasPassword.IsChecked != true || line.Result?.Kind != "hosterLink") return null;
-        var password = row.Password.Password;
-        return password.Length > 0 ? password : null;
-    }
-
-    private bool LinkPasswordForArchives(AddLine line)
-        => _rows.TryGetValue(line, out var row) && row.HasPassword.IsChecked == true && row.ForArchives.IsChecked == true;
+    private AddLinksPick PickOf(AddLine line)
+        => _rows.TryGetValue(line, out var row) && line.Result?.Kind == "hosterLink"
+            ? new AddLinksPick(line, row.TakeSitePassword(), row.TakeArchivePassword())
+            : new AddLinksPick(line);
 
     private void ClearPasswords()
     {
         _archivePassword.Password = string.Empty;
-        foreach (var row in _rows.Values) row.Password.Password = string.Empty;
+        foreach (var row in _rows.Values) row.ClearPasswords();
     }
 
     private void SyncRows()
@@ -336,7 +335,7 @@ internal sealed class AddLinksDialog
         var lines = _session.Lines;
         foreach (var gone in _rows.Keys.Except(lines).ToList())
         {
-            _rows[gone].Password.Password = string.Empty;
+            _rows[gone].ClearPasswords();
             _rows.Remove(gone);
         }
 
@@ -345,7 +344,7 @@ internal sealed class AddLinksDialog
         {
             if (!_rows.TryGetValue(line, out var row))
             {
-                row = new LineRow(line, _session, _provider, _themeRoot, Refresh);
+                row = new LineRow(line, _session, _provider, _archivesSupported, _themeRoot, Refresh);
                 _rows[line] = row;
             }
 
@@ -386,6 +385,7 @@ internal sealed class AddLinksDialog
     {
         private readonly AddLine _line;
         private readonly string _provider;
+        private readonly bool _archivesSupported;
         private readonly FrameworkElement _themeRoot;
         private readonly TextBlock _name = new() { TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = RowTextWidth };
         private readonly TextBlock _word = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth };
@@ -394,34 +394,32 @@ internal sealed class AddLinksDialog
         private readonly CheckBox _direct = new() { Visibility = Visibility.Collapsed };
         private readonly StackPanel _extras = new() { Spacing = 6, Margin = new Thickness(28, 0, 0, 0) };
 
-        public LineRow(AddLine line, AddLineSession session, string provider, FrameworkElement themeRoot, Action changed)
+        public LineRow(AddLine line, AddLineSession session, string provider, bool archivesSupported, FrameworkElement themeRoot, Action changed)
         {
             _line = line;
             _provider = provider;
+            _archivesSupported = archivesSupported;
             _themeRoot = themeRoot;
             Box = new CheckBox { Content = new StackPanel { Children = { _name, _word, _detail } }, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             Box.Click += (_, _) => session.Select(line, Box.IsChecked == true);
-            HasPassword = new CheckBox { Content = "This link has a password", Visibility = Visibility.Collapsed };
-            Password = new PasswordBox
-            {
-                Header = "The password the site set for this link. It isn't an archive password.",
-                PasswordRevealMode = PasswordRevealMode.Hidden,
-                Visibility = Visibility.Collapsed,
-                MaxWidth = 360,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            // TB.S2: never ticked for the user. Only this link's own archives, and an archive password given wins.
-            ForArchives = new CheckBox { Content = "Also try it on this link's own archives", Visibility = Visibility.Collapsed };
+            HasPassword = new CheckBox { Content = "It needs a password", Visibility = Visibility.Collapsed };
+            // The owner, 2026-11-08: the archive password comes first, and the site's password is a box of its own,
+            // because the two are often different. Nothing typed in one is ever used for the other. Without extraction
+            // on this Host only the site's box is shown.
+            ArchivePassword = PasswordField("Archive password: used when the downloaded archives are extracted");
+            // Off until ticked: then the archive password is also sent to the site and the site's box goes away.
+            SameForBoth = new CheckBox { Content = "Use it as the site password too", Visibility = Visibility.Collapsed };
+            SitePassword = PasswordField("Site password: only if the link's page asks for one before it shows the file");
             HasPassword.Click += (_, _) =>
             {
-                Password.Visibility = HasPassword.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-                ForArchives.Visibility = Password.Visibility;
-                if (HasPassword.IsChecked != true)
-                {
-                    Password.Password = string.Empty;
-                    ForArchives.IsChecked = false;
-                }
-
+                if (HasPassword.IsChecked != true) ClearPasswords();
+                ShowPasswordBoxes();
+                changed();
+            };
+            SameForBoth.Click += (_, _) =>
+            {
+                if (SameForBoth.IsChecked == true) SitePassword.Password = string.Empty;
+                ShowPasswordBoxes();
                 changed();
             };
             _retry.Click += (_, _) => session.Retry(line);
@@ -429,16 +427,62 @@ internal sealed class AddLinksDialog
             _extras.Children.Add(_retry);
             _extras.Children.Add(_direct);
             _extras.Children.Add(HasPassword);
-            _extras.Children.Add(Password);
-            _extras.Children.Add(ForArchives);
+            _extras.Children.Add(ArchivePassword);
+            _extras.Children.Add(SameForBoth);
+            _extras.Children.Add(SitePassword);
             Root = new StackPanel { Spacing = 2, Children = { Box, _extras } };
         }
 
         public StackPanel Root { get; }
         public CheckBox Box { get; }
         public CheckBox HasPassword { get; }
-        public PasswordBox Password { get; }
-        public CheckBox ForArchives { get; }
+
+        /// <summary>For this link's own archives only. Shown only when this Host can extract.</summary>
+        public PasswordBox ArchivePassword { get; }
+
+        /// <summary>Sent to the provider as the link's own password, so it can open a password-protected hoster page.</summary>
+        public PasswordBox SitePassword { get; }
+
+        /// <summary>"Use it as the site password too": the archive password goes to the site as well.</summary>
+        public CheckBox SameForBoth { get; }
+
+        /// <summary>The site's password for this link, or null. With the tick, it is the archive password.</summary>
+        public string? TakeSitePassword()
+        {
+            if (HasPassword.IsChecked != true) return null;
+            var password = _archivesSupported && SameForBoth.IsChecked == true ? ArchivePassword.Password : SitePassword.Password;
+            return password.Length > 0 ? password : null;
+        }
+
+        /// <summary>The archive password for this link, or null.</summary>
+        public string? TakeArchivePassword()
+            => HasPassword.IsChecked == true && _archivesSupported && ArchivePassword.Password.Length > 0 ? ArchivePassword.Password : null;
+
+        public void ClearPasswords()
+        {
+            ArchivePassword.Password = string.Empty;
+            SitePassword.Password = string.Empty;
+            SameForBoth.IsChecked = false;
+        }
+
+        private void ShowPasswordBoxes()
+        {
+            var shown = HasPassword.IsChecked == true;
+            ArchivePassword.Visibility = shown && _archivesSupported ? Visibility.Visible : Visibility.Collapsed;
+            SameForBoth.Visibility = ArchivePassword.Visibility;
+            var same = _archivesSupported && SameForBoth.IsChecked == true;
+            SitePassword.Visibility = shown && !same ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private static PasswordBox PasswordField(string header) => new()
+        {
+            Header = header,
+            PlaceholderText = "Optional",
+            PasswordRevealMode = PasswordRevealMode.Hidden,
+            Visibility = Visibility.Collapsed,
+            MaxWidth = 420,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
 
         public void Update()
         {
@@ -465,16 +509,15 @@ internal sealed class AddLinksDialog
             _direct.IsChecked = _line.DirectChosen;
 
             HasPassword.Visibility = view.CanTakeLinkPassword ? Visibility.Visible : Visibility.Collapsed;
-            AutomationProperties.SetName(HasPassword, $"{view.Name} has a password");
-            AutomationProperties.SetName(Password, $"Link password for {view.Name}");
-            AutomationProperties.SetName(ForArchives, $"Also try the link password on the archives of {view.Name}");
+            AutomationProperties.SetName(HasPassword, $"{view.Name} needs a password");
+            AutomationProperties.SetName(ArchivePassword, $"Archive password for {view.Name}");
+            AutomationProperties.SetName(SitePassword, $"Site password for {view.Name}, sent to {ProviderOf(view)}");
+            AutomationProperties.SetName(SameForBoth, $"{view.Name}: use the archive password as the site password too");
             if (!view.CanTakeLinkPassword)
             {
                 HasPassword.IsChecked = false;
-                Password.Password = string.Empty;
-                Password.Visibility = Visibility.Collapsed;
-                ForArchives.IsChecked = false;
-                ForArchives.Visibility = Visibility.Collapsed;
+                ClearPasswords();
+                ShowPasswordBoxes();
             }
 
             _extras.Visibility = view.CanRetry || view.CanChooseDirect || view.CanTakeLinkPassword ? Visibility.Visible : Visibility.Collapsed;

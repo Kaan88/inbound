@@ -26,6 +26,13 @@
     <span id="serverDetail" class="muted"></span>
     <button id="openServer" class="link-button" type="button">Open the web UI</button>
   </section>
+  <section id="targetCard" class="card target-card hidden" role="group" aria-labelledby="targetHeading">
+    <span id="targetHeading">Send downloads to</span>
+    <div class="segmented">
+      <button id="targetLocal" type="button" data-target="local" aria-pressed="false">This PC</button>
+      <button id="targetServer" type="button" data-target="server" aria-pressed="false">Server</button>
+    </div>
+  </section>
   <section id="autoCard" class="card auto-card">
     <span id="autoState" class="auto-state">Automatic sending: checking…</span>
     <button id="autoTurnOn" class="link-button hidden" type="button">Turn on in Settings</button>

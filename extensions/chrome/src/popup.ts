@@ -23,6 +23,8 @@ interface Status {
   /** The desktop app is not installed here and a server is paired: the server is the only place. */
   localMissing?: boolean;
   server?: { address: string; name?: string; connected: boolean; lastError: string } | null;
+  /** Where a caught download goes: "server" only while one is paired. */
+  automaticTarget?: "local" | "server";
 }
 
 // Set from the status: with a server paired, every download is labelled with where it is.
@@ -276,6 +278,31 @@ function renderServer(status: Status): void {
     : status.server.lastError || status.server.address;
 }
 
+/**
+ * The This PC / Server switch (owner, 2026-11-08). Only with a server paired and the desktop app here: with one
+ * place there is nothing to switch.
+ */
+function renderTarget(status: Status): void {
+  const card = document.getElementById("targetCard") as HTMLElement;
+  card.classList.toggle("hidden", !status.server || status.localMissing === true);
+  const target = status.automaticTarget === "server" && status.server ? "server" : "local";
+  for (const id of ["targetLocal", "targetServer"]) {
+    const button = document.getElementById(id) as HTMLButtonElement;
+    button.setAttribute("aria-pressed", String(button.dataset.target === target));
+  }
+}
+
+async function setTarget(target: "local" | "server"): Promise<void> {
+  clearError();
+  try {
+    const result = (await chrome.runtime.sendMessage({ type: "dm.setDefaultTarget", target })) as { ok?: boolean; error?: string };
+    if (!result?.ok) showError(result?.error || "Could not change where downloads go.");
+    await refresh();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function renderLeftInBrowser(notes: Status["leftInBrowser"]): void {
   const card = document.getElementById("leftCard") as HTMLElement;
   const list = document.getElementById("leftList") as HTMLUListElement;
@@ -315,6 +342,7 @@ async function refresh(): Promise<void> {
     const connected = status.connected ?? false;
     serverAddress = status.server?.address ?? null;
     renderServer(status);
+    renderTarget(status);
     // Without the desktop app here, the paired server is the only place; its card says how it is.
     (document.getElementById("statusCard") as HTMLElement).classList.toggle("hidden", status.localMissing === true);
     statusDot.className = "dot";
@@ -332,7 +360,9 @@ async function refresh(): Promise<void> {
         ? "Automatic sending is off. Right-click a link to send it, or turn it on in Settings."
         : status.pauseUntil && status.pauseUntil > Date.now()
           ? "Catching is paused. Downloads stay in your browser."
-          : "Downloads that match your rules are sent automatically";
+          : status.automaticTarget === "server" && status.server
+            ? "Downloads that match your rules go to the server"
+            : "Downloads that match your rules are sent automatically";
       statusText.textContent = "Connected";
     } else {
       statusDot.classList.add("bad");
@@ -416,6 +446,11 @@ document.addEventListener("DOMContentLoaded", () => {
   (document.getElementById("openServer") as HTMLButtonElement).addEventListener("click", () => {
     if (serverAddress) void chrome.tabs.create({ url: `${serverAddress}/` });
   });
+
+  for (const id of ["targetLocal", "targetServer"]) {
+    const button = document.getElementById(id) as HTMLButtonElement;
+    button.addEventListener("click", () => void setTarget(button.dataset.target === "server" ? "server" : "local"));
+  }
 
   (document.getElementById("autoTurnOn") as HTMLButtonElement).addEventListener("click", () => {
     void chrome.runtime.openOptionsPage();

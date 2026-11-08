@@ -84,6 +84,34 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AnArchivePasswordAloneReachesTheArchivesAndTheSiteHearsNoPassword()
+    {
+        // Add Links' first box (owner, 2026-11-08): the archive password, typed apart from the site's.
+        await using var rig = await ContainerRig.CreateAsync(_server);
+        var (link, _, file) = rig.Remote.ScriptHoster("archive-only-pw", MockTorBoxState.Ready);
+
+        var added = await rig.Commands.AddAsync(new RemoteAddRequestDto
+        {
+            Input = link, Destination = rig.Remote.Destination, ApproveUncached = true, ArchivePassword = "Invented-Archive-Only-Pw",
+        });
+        Assert.True(added.Ok, added.Error);
+        Assert.True(added.Job!.HasArchivePassword);
+        Assert.False(added.Job.HasLinkPassword);
+
+        await rig.Remote.RunAsync();
+        await rig.Remote.AdvanceAsync(65);
+        Assert.Equal(RemoteJobState.LocalStarted, rig.Remote.View(added.Job.Id).State);
+        Assert.True(string.IsNullOrEmpty(rig.Mock.Submissions[^1].Password));
+
+        var (package, password) = Assert.Single(rig.Keeper.Given);
+        Assert.Equal(rig.Remote.View(added.Job.Id).PackageId, package);
+        Assert.Equal("Invented-Archive-Only-Pw", password);
+        Assert.Equal(0, rig.Keeper.Offers);
+        await rig.Remote.AssertCompletedAsync(file, "archive-only-pw", "archive-only-pw.bin");
+        await rig.Remote.AssertNothingLeakedAsync("Invented-Archive-Only-Pw", link);
+    }
+
+    [Fact]
     public async Task TbS2_ARetryWithTheLinkPasswordCanOfferItAndNeverReplacesAnArchivePasswordAlreadyGiven()
     {
         await using var rig = await ContainerRig.CreateAsync(_server);
