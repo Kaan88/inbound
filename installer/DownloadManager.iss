@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.6.0"
+  #define AppVersion "0.6.1"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -23,6 +23,8 @@
 #define ExtensionId "pknddmneejadnnngffojnoecojhdfalc"
 #define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
 #define FirefoxExtensionId "inbound-bridge@kaan88"
+#define ChromeStoreUrl "https://chromewebstore.google.com/detail/" + StoreExtensionId
+#define FirefoxAddonUrl "https://addons.mozilla.org/firefox/addon/inbound-download-manager/"
 
 [Setup]
 AppId={{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}
@@ -97,6 +99,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
+Filename: "{#ChromeStoreUrl}"; Description: "Open the extension in the Chrome Web Store (Chrome, Edge)"; Flags: postinstall shellexec skipifsilent unchecked nowait
+Filename: "{#FirefoxAddonUrl}"; Description: "Open the extension on Firefox Add-ons"; Flags: postinstall shellexec skipifsilent unchecked nowait
 
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
@@ -256,8 +260,11 @@ begin
     '{#AppName} {#AppVersion} is installed in:' + #13#10 +
     '  ' + Root + '\app' + #13#10 + #13#10 +
     'Add the extension to your browser (one time).' + #13#10 + #13#10 +
-    'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store.' + #13#10 +
+    'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store:' + #13#10 +
+    '  {#ChromeStoreUrl}' + #13#10 +
     'Edge may ask you to allow extensions from other stores.' + #13#10 + #13#10 +
+    'Firefox: install Inbound Download Manager from Firefox Add-ons:' + #13#10 +
+    '  {#FirefoxAddonUrl}' + #13#10 + #13#10 +
     'Or, in Chrome, load the unpacked copy that came with this install:' + #13#10 +
     '  1. Open chrome://extensions' + #13#10 +
     '  2. Turn on Developer mode (top right)' + #13#10 +

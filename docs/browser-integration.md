@@ -102,7 +102,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `background.scripts` instead of a service worker, and no `key` or `minimum_chrome_version`.
   `scripts\package-extension-firefox.ps1` checks it and zips it for addons.mozilla.org (AMO) into
   `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
-  unlisted version from the owner's AMO account; the owner uploaded one (2026-11-08).
+  unlisted version from the owner's AMO account; the owner uploaded one (2026-11-08). An unlisted add-on has no
+  public page. Setup links to `https://addons.mozilla.org/firefox/addon/inbound-download-manager/` (EXT.S3),
+  which opens only once a listed version is approved.
 - **Caught before the Save dialog (EXT.B5).** Only the Firefox manifest adds `webRequest` and
   `webRequestBlocking`. A blocking `webRequest.onHeadersReceived` listener sees each page and frame load's
   response. `response-download.ts` says whether Firefox would save it: a GET answered 200 or 206 that is an

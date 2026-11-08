@@ -18,9 +18,9 @@ Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; set
 
 The extension needs the desktop app, which it reaches through a per-user native-messaging host. Setup registers that host for Chrome, Edge and Firefox. Automatic sending is on from a fresh install; the extension's Settings, which open on install, can turn it off. It can also pair with your own Inbound server.
 
-- **Chrome:** install it from the Chrome Web Store.
+- **Chrome:** install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm).
 - **Edge:** install the same Chrome Web Store listing.
-- **Firefox:** Firefox has its own build. It is not published yet, and Firefox support with 0.6.0 is not checked yet.
+- **Firefox:** Firefox has its own build, on [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/inbound-download-manager/) once that page is public. It was checked in Firefox 159.
 
 To load it from source, build it (see below), open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked** and select `extensions\chrome\dist`. The extension ID is pinned by the manifest key. For Firefox, run `npm run build:firefox` in `extensions\chrome`; it writes `extensions\chrome\dist-firefox`, which loads as a temporary add-on from `about:debugging`.
 
