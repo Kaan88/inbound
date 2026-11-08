@@ -66,10 +66,12 @@
   - The window started each time from a 199.3 MB folder (REV.3).
   - Found and fixed on the way: the window's start-up trace was left in the install folder after uninstall. It now goes to the logs folder.
 - Owner, 2026-11-08: two ideas for later, recorded as ROADMAP D6 and D7.
-- **Not done:**
+- **Left for the owner, and what was settled after the release:**
   - The owner's parts: the Chrome Web Store and AMO uploads of extension 0.5.0.
-  - PERF.2 rerun on `dev` (`soak-fixed`): stopped after an hour (10:50 to 11:53 UTC) by the owner's choice. Both processes ran throughout; the Host rose 147.5 to 190.1 MB (+24 MB/h, like the 8-hour run), the window 302.5 to 331.9 MB. Summary in `artifacts\soak\soak-fixed\summary.txt`; payload deleted.
-  - EXT.B3 (Firefox), which needs this build installed.
+  - PERF.2, now done: no sign of a leak. With a fixed list, the lowest heap samples kept coming back down (43 MiB in hour 9 of the 8-hour run) and private memory came back to 140 MiB; no heap dumps were compared (ROADMAP PERF.2, `artifacts\evidence\perf\heap-floors.txt`). The rerun on `dev` (`soak-fixed`) was stopped after an hour (10:50 to 11:53 UTC) by the owner's choice. Both processes ran throughout; the Host rose 147.5 to 190.1 MB (+24 MB/h, like the 8-hour run), the window 302.5 to 331.9 MB. Summary in `artifacts\soak\soak-fixed\summary.txt`; payload deleted.
+  - EXT.B3, checked after the release: Firefox 159 with a test profile caught a download, and the installed native host handed it to a 0.6.0 test Host, which finished it. In the owner's first attempt the 0.5.3 Host was shut down 7.5 s after the request, which closed the bridge, and a closed bridge is reported as "unavailable". The second attempt's answer is not in the logs. Still to see: the owner's own Firefox once 0.6.0 is installed.
+  - TEST.3: `scripts\register-test-native-host.ps1` registers a test build for Chrome for Testing only (the Chromium key) and refuses when another test holds the key (`artifacts\evidence\dev-final\test3-register\run.txt`).
+  - D1 marked implemented, as planned for 0.6.0.
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 
