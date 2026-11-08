@@ -16,6 +16,7 @@
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
   import { listState } from '../lib/listState.svelte';
+  import { orderedQueues, queueStartedText } from '../lib/queues';
   import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
@@ -124,7 +125,7 @@
   const canDelete = $derived(selectedJobs.length > 0 || removableSideRows > 0);
   const connected = $derived(store.connection === 'open');
   const completedIds = $derived(allJobs.filter((job) => job.state === 'completed').map((job) => job.id));
-  const queues = $derived([...(settings?.queues ?? [])].sort((a, b) => a.order - b.order));
+  const queues = $derived(orderedQueues(settings?.queues ?? []));
 
   const archiveByJob = $derived.by(() => {
     const map = new Map<string, ArchiveSet>();
@@ -494,7 +495,7 @@
 
   async function queueAction(action: 'start' | 'stop', queueId: number) {
     const queue = queues.find((q) => q.id === queueId);
-    await store.attempt('queue.action', { queueId, action }, action === 'start' ? `${queue?.name ?? 'The queue'} started now.` : `${queue?.name ?? 'The queue'} stopped.`);
+    await store.attempt('queue.action', { queueId, action }, queueStartedText(queue?.name ?? 'The queue', action === 'start'));
   }
 
   function saveLimit(change: (settings: Settings) => void) {
