@@ -112,6 +112,7 @@ public sealed partial class DownloadManagerService
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
+        _ftpEngine?.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -1320,6 +1321,8 @@ public sealed partial class DownloadManagerService
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
+        // PERF.6: FTP downloads honour the cap too. The Host gives both engines one budget, so it is one cap for all.
+        _ftpEngine?.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
         List<JobRuntime> reconnected;
         lock (_sync)
         {

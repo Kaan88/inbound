@@ -13,7 +13,19 @@ namespace DownloadManager.Engine;
 public sealed class FtpDownloadEngine : IDownloadEngine
 {
     private readonly object _loginSync = new();
+    private readonly SharedSpeedBudget _sharedSpeed;
     private List<SiteLoginCredential> _siteLogins = new();
+
+    /// <param name="sharedSpeed">
+    /// PERF.6: the budget of the shared speed cap. Pass the HTTP engine's <see cref="HttpDownloadEngine.SpeedBudget"/>
+    /// so one cap covers HTTP and FTP downloads together. Without one, FTP downloads share a cap of their own.
+    /// </param>
+    public FtpDownloadEngine(SharedSpeedBudget? sharedSpeed = null) => _sharedSpeed = sharedSpeed ?? new SharedSpeedBudget();
+
+    /// <summary>Updates the cap all transfers share; on a budget shared with the HTTP engine, both see it.</summary>
+    public void UpdateSharedSpeedLimit(long? bytesPerSecond) => _sharedSpeed.Update(bytesPerSecond);
+
+    public long SharedSpeedLimit => _sharedSpeed.BytesPerSecond;
 
     public async Task<DownloadResult> ExecuteAsync(
         DownloadJob job,
@@ -43,6 +55,8 @@ public sealed class FtpDownloadEngine : IDownloadEngine
         }
 
         var received = offset;
+        // PERF.6: the download's own cap, read live, then the cap every download shares.
+        var ownLimit = new TransferRateLimiter(() => job.SpeedLimitBytesPerSecond);
         var stopwatch = Stopwatch.StartNew();
         var lastReport = DateTimeOffset.MinValue;
         var restarted = false;
@@ -91,6 +105,8 @@ public sealed class FtpDownloadEngine : IDownloadEngine
                             break;
                         }
 
+                        await ownLimit.WaitAsync(read, cancellationToken).ConfigureAwait(false);
+                        await _sharedSpeed.WaitAsync(read, cancellationToken).ConfigureAwait(false);
                         await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                             .ConfigureAwait(false);
                         received += read;
