@@ -12,6 +12,32 @@
 - Full run on the merged branch, all green with no reruns: Core 863, Engine 154, Integration 1,215, TorBox 323, Archives 329, Containers 183, extension 92 (tsc clean). Logs: `artifacts\campaign\20261108-merged\` (trx per suite).
 - Running next: the UI walkthrough in dark and light, the independent recovery check, the extension end to end in Chrome for Testing, PERF.5/PERF.2/PERF.3 and the UP.B2 fix; D1b on `stream-b`.
 
+### Independent recovery check (P2.7, P5.6, X.5; branch `campaign-recovery`, 2026-11-08)
+
+- Setup: own worktree and test instances (`DOWNLOADMANAGER_INSTANCE` + `DOWNLOADMANAGER_DATA` under the worktree's `artifacts`), Release builds of this branch, `tools\TestServer` only. Evidence: `artifacts\campaign\20261108-recovery\` (index in `README.txt`). My numbers were taken before reading E94; the comparison is the last bullet. Other tracks were loading the CPU throughout.
+- **Kill/restart matrix** (`scripts\kill-restart-matrix.ps1 -Instance ...`, 24 MiB, kills at 20/50/80%), three runs, all passed:
+
+  | run | conn | bytes kept at the 20 / 50 / 80% kills | final SHA-256 |
+  | --- | --- | --- | --- |
+  | 1 (256 KiB/s per conn) | 1 | 4,128,768 / 12,320,768 / 19,202,048 | `6d905264…476423` match |
+  | 1 | 8 | 492,810 / 11,633,927 / 12,034,711 | `a240b74f…6410e6` match |
+  | 2 (128 KiB/s per conn) | 1 | 4,915,200 / 11,927,552 / 19,726,336 | match |
+  | 2 | 8 | 5,516,375 / 11,148,690 / 16,588,177 | match |
+  | 3 (256 KiB/s, checkpoint column) | 1 | checkpoint 4,128,768 / 12,320,768 / 19,202,048 | match |
+  | 3 | 8 | checkpoint 200,399 / 11,144,911 / 11,352,301 | match |
+
+  Every final file equals the independent unthrottled copy; no `.part` file and no checkpoint left (checked by hand for runs 1 and 2, by the script for run 3). Runs 1 and 2 report "kept after restart", read once the job is moving again, so it can be above the bytes at the kill (run 2, 8 conn, 20%); the script now also reads the checkpoint before the restart (`checkpointBytes`) and fails if a finished job's checkpoint is left. At 8 connections and 2 MiB/s a kill point is crossed less than 5 s after the restart, so it keeps the previous checkpoint (run 3: 80% kill kept 11.35 MB of 20.5 MB): that is the 5 s `CheckpointInterval`, as designed; at half speed (run 2) it kept 16.6 MB.
+- **A1 yield and resplit under a kill:** two 24 MiB 8-connection jobs on one host (per-host cap 8) ran 4 + 4 connections; Host killed mid-transfer once (`fair-kill`) and twice (`fair-kill2`); both files match their references, no checkpoint left.
+- **Provider cells:** `HostKillMatrixTests` 6/6 (TEST.1's cell passed), plus `HostPipeRemoteTests.ScenarioJ…` and `RuntimeArchiveHostTests.KillingTheHostMidExtraction…` 2/2. By hand against `TestServer --torbox --cdn-bps 32768`: the seeded 3-file package added by magnet, Host killed with the 8 MiB file at 3.4 MB (`torbox-kill4`): after a restart it resumed by itself, all three files match the mock's bytes, one remote job, one item on the mock account, no part or checkpoint left.
+- **Browser handoff, Chrome for Testing 156** (headless, fresh profiles, unpacked `dist` built here, loaded as `pknddmneejadnnngffojnoecojhdfalc`, driven over the DevTools protocol; automatic sending ticked and saved in the options page):
+  - Normal: a TestServer file landed in the test instance, SHA-256 match, the browser's entry removed, nothing in the browser's folder.
+  - Host frozen, request forwarded to its pipe, Host killed 1.5 s later, Host startable: the native host exited, the extension's retry started a new native host, which started a new Host and was accepted; one job, SHA-256 match, browser entry removed.
+  - Same, but no Host can be started (isolated native-host copy, `DOWNLOADMANAGER_HOST` pointing nowhere): Chrome resumed its own download 0.4 s after the retry failed and finished it, SHA-256 match, no job in the app.
+  - Registration: the installed app's Chrome key was never written. The test build was registered under `HKCU\Software\Chromium\NativeMessagingHosts` and `HKCU\Software\Google\Chrome for Testing\NativeMessagingHosts` (neither had our name) and both were removed afterwards; before and after are in `browser\registry-*.txt`. At the time the Chrome key held another track's test value, not the installed app's; it was left as found.
+- Findings: **TEST.3** (CfT reads the Chromium key first and falls back to the Chrome key; the keys are shared by every track: another track's CfT used this track's native host for about 3 minutes while the Chromium key was set, it connects to whichever Host that browser's environment names, as that track's own native host would, but it was this branch's build). **UI.B11** (an exit pauses running downloads, so the auto-resume option only covers crashes; owner decision). **UI.B12** (a Host started while a killed one is still exiting quits silently; plausible mutex cause). Script fix committed: `kill-restart-matrix.ps1` checkpoint column and leftover-checkpoint check.
+- **Comparison with E94** (read after the runs): same final hashes (`6d905264…`, `a240b74f…`) and the same pass criteria; single-stream retention is close (E94 4.98/12.39/20.05 MB, here 4.13–4.92 / 11.93–12.32 / 19.20–19.73 MB). The 8-connection 20% and 80% kills kept less here in runs 1 and 3 (0.2–0.5 MB and 11.4–12.0 MB, against E94's 4.48 and 20.66 MB); run 2 at half speed came close (5.5 / 11.1 / 16.6 MB). The difference is when a kill falls relative to the 5 s checkpoint, not a loss of written data: every kill kept progress and every file was exact. P2.7, P5.6 and X.5 are marked verified.
+- Not done: Edge and Firefox handoff; a Windows sign-out during a download (UI.B11); a real-process test for UI.B12.
+
 ### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
 
 - VM: VirtualBox on E:, Windows 11 Enterprise LTSC evaluation from Microsoft, a new standard user, snapshot `clean-install`. Commands go in through the desktop session's Run dialog (VirtualBox keyboard input) because starting processes through the guest additions fails in this guest; files go both ways through the guest additions.
