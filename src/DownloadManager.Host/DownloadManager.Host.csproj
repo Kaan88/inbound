@@ -21,6 +21,14 @@
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
   </ItemGroup>
 
+  <!-- D8: the web bridge's sign-in file, from the server's sources (no ASP.NET), so the window can set its password. -->
+  <ItemGroup>
+    <Compile Include="..\DownloadManager.Server\Auth\AuthStore.cs" Link="WebUi\AuthStore.cs" />
+    <Compile Include="..\DownloadManager.Server\Auth\PasswordHash.cs" Link="WebUi\PasswordHash.cs" />
+    <Compile Include="..\DownloadManager.Server\Auth\AtomicFile.cs" Link="WebUi\AtomicFile.cs" />
+    <Compile Include="..\DownloadManager.Server\ServerStartException.cs" Link="WebUi\ServerStartException.cs" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

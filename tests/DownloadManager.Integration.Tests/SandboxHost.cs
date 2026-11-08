@@ -86,6 +86,9 @@ internal sealed partial class SandboxHost : IAsyncDisposable
 
     public static string HostExecutable => Executable("DownloadManager.Host", "net10.0-windows");
 
+    /// <summary>The web bridge (D8), built beside the Host; a test Host starts this one (<c>DOWNLOADMANAGER_BRIDGE</c>).</summary>
+    public static string BridgeExecutable => Executable("DownloadManager.Server", "net10.0");
+
     private ProcessStartInfo Prepare(string executable)
     {
         var info = new ProcessStartInfo(executable)
@@ -102,6 +105,7 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         info.Environment["DOWNLOADMANAGER_INSTANCE"] = Instance;
         info.Environment["DOWNLOADMANAGER_DATA"] = DataDirectory;
         info.Environment["DOWNLOADMANAGER_HOST"] = HostExecutable;
+        info.Environment["DOWNLOADMANAGER_BRIDGE"] = BridgeExecutable;
         info.Environment[ApiVariable] = _apiAddress;
         return info;
     }

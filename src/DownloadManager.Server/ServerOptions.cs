@@ -88,6 +88,16 @@ public sealed record ServerOptions
     /// </summary>
     public string HostKind { get; init; } = "server";
 
+    /// <summary>
+    /// The desktop Host's web bridge (D8, <c>--bridge</c>): no engine, the Host's data folder for sign-in, no setup page
+    /// (the password is set in the app on this PC), the "Open in browser" ticket sign-in, exclusive use of its port. Not
+    /// read from the environment.
+    /// </summary>
+    public bool Bridge { get; init; }
+
+    /// <summary>With <see cref="Bridge"/>: the key the Host signs this run's sign-in tickets with (<see cref="Contracts.WebUiTicket"/>).</summary>
+    internal byte[]? TicketKey { get; init; }
+
     /// <summary>Where downloads go until a client changes it: the first root.</summary>
     public string DefaultDownloadDirectory => Roots.Count > 0 ? Roots[0] : DefaultRoot;
 

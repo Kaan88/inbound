@@ -1,4 +1,9 @@
 using DownloadManager.Server;
+using DownloadManager.Server.Bridge;
+
+// The desktop Host's web bridge (D8): its own exit codes (WebBridgeExit), options on standard input.
+if (args.Contains("--bridge", StringComparer.Ordinal))
+    return await BridgeApp.RunAsync(Console.In, Console.Out, Console.Error);
 
 // Exit codes: 0 stopped normally, 2 a configuration the server refuses (the message says what to change), 1 a failure.
 var options = ServerOptions.FromEnvironment();
