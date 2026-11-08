@@ -2343,7 +2343,11 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Later",
                 DefaultButton = ContentDialogButton.Primary,
             };
-            if (await DialogGuard.ShowAsync(installDialog) != ContentDialogResult.Primary)
+            var installChoice = await DialogGuard.ShowAsync(installDialog);
+            // Refused because another dialog is open: nothing was asked, so nothing is deferred either. The installer
+            // stays downloaded, and Check for updates offers it again.
+            if (installChoice is null) return;
+            if (installChoice != ContentDialogResult.Primary)
             {
                 await _connection.DeferUpdateAsync(check.AvailableVersion!);
                 return;
@@ -4057,7 +4061,9 @@ public sealed partial class MainWindow : Window
                 Header = "Theme",
                 MinWidth = 200,
                 ItemsSource = new[] { "Same as Windows", "Light", "Dark" },
-                SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.Normalize(settings.Theme))),
+                // The theme in use, not only the Host's: a Dark Mode click the Host has yet to save is kept in
+                // _uiState, and starting from the Host's value would let OK undo it.
+                SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, settings.Theme))),
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(themeBox, "ThemeBox");
             void FollowThemeMenu() => themeBox.SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, AppTheme.Choice));
