@@ -51,7 +51,7 @@ ignored.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `PUID`, `PGID` | `1654` (the image's `app` user) | The user and group the server runs as. Use the owner of your download folder on the host (`id -u`, `id -g`). `0` is refused. |
+| `PUID`, `PGID` | `1000` | The user and group the server runs as. Use the owner of your download folder on the host (`id -u`, `id -g`). `0` is refused. Only the numbers count: no account is created in the container, and an existing one with the same id (the base image's `app` is 1654) changes nothing. |
 | `TZ` | `Etc/UTC` | Time zone for the scheduler, quotas and the log. |
 | `DOWNLOADMANAGER_PASSWORD_FILE` | - | A file holding the sign-in password. The web UI can't change it then. |
 | `DOWNLOADMANAGER_PASSWORD` | - | The password itself (visible in `docker inspect`; the file is better). |
@@ -79,6 +79,12 @@ The container starts as root only to prepare these, then runs the server as `PUI
 - The download folders are never changed recursively. An empty one the user can't write (the image's own folder,
   when nothing is mounted) is given to the user; otherwise the log warns that `PUID:PGID` can't write there.
 - Started with `--user` (or `user:` in compose), the container changes no owners and runs as that user.
+
+**Upgrading from an image whose default user was 1654.** Earlier images ran as `1654:1654` when `PUID`/`PGID` were
+not set; the default is `1000:1000` now. `/data` follows on its own (above), but a download folder that already holds
+files is never changed, so with a named volume at `/downloads` the log warns that `1000:1000` can't write there (it
+names the folder's owner) and downloads fail. Either keep the old user with `-e PUID=1654 -e PGID=1654`, or give the
+volume to the new one once: `docker run --rm -v <volume>:/downloads alpine chown -R 1000:1000 /downloads`.
 
 ## Backup
 
@@ -166,7 +172,9 @@ architecture and cross-publish, so only the last stage is the target's.
 
 Pinned inputs, all in the `Dockerfile`:
 
-- Base images by digest (`NODE_IMAGE`, `SDK_IMAGE`, `RUNTIME_IMAGE`). To update one, run
+- Base images by digest, written in the `FROM` lines (`node:24-alpine` twice, `dotnet/sdk:10.0`,
+  `dotnet/aspnet:10.0`). Dependabot (`.github/dependabot.yml`) opens a pull request each week when a newer digest
+  of the same tag exists; nothing merges by itself. To update one by hand, run
   `docker buildx imagetools inspect <image:tag>` and take the top `Digest` (the multi-architecture index).
 - 7-Zip: `SEVENZIP_VERSION` and the two SHA-256 values, for `https://www.7-zip.org/a/7z<version>-linux-x64.tar.xz`
   and `-linux-arm64.tar.xz`. Compute them from the downloads and compare them with the `digest` GitHub shows for the

@@ -8,15 +8,16 @@
 # the server for the target architecture (TARGETARCH -> linux-x64 / linux-arm64). Only the last stage is the target's
 # own, and it runs no command, so a cross build needs no emulation. Nothing in the image needs Node at run time.
 #
-# Base images are pinned by digest (the multi-architecture index). To update one: docker buildx imagetools inspect
-# <image:tag>, take the top "Digest", and change it here. docs/docker.md has the list and how to update 7-Zip.
+# Base images are pinned by digest (the multi-architecture index), written out in each FROM line so Dependabot
+# (.github/dependabot.yml) can propose new digests. Each image is named once: the two Node stages start from the
+# node-base stage, so one digest serves both and a Dependabot PR can't leave them apart. To update one by hand: docker buildx imagetools inspect <image:tag>, take the top "Digest", and change it here. docs/docker.md
+# has the list and how to update 7-Zip.
 
-ARG NODE_IMAGE=node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
-ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e
-ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
+# ---- Node, for the two stages below ---------------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS node-base
 
 # ---- Web UI: static files only ---------------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS webui
+FROM node-base AS webui
 WORKDIR /webui
 COPY webui/package.json webui/package-lock.json ./
 # Exactly the lockfile; no install scripts run (none of these packages needs one: the native parts are prebuilt).
@@ -28,7 +29,7 @@ RUN npm run build && test -f dist/index.html && test -f dist/signin/index.html
 # Source: https://www.7-zip.org/download.html, files https://www.7-zip.org/a/7z2604-linux-<arch>.tar.xz (7-Zip 26.04).
 # The hashes below were computed from those downloads on 2026-11-08 and equal the "digest" GitHub lists for the same
 # files on the official release https://github.com/ip7z/7zip/releases/tag/26.04.
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS sevenzip
+FROM node-base AS sevenzip
 ARG TARGETARCH
 ARG SEVENZIP_VERSION=2604
 ARG SEVENZIP_SHA256_X64=fc0327ba27e89bd086cf426dff17d77de582953cdbbc10a6576540a06853ffcd
@@ -49,7 +50,7 @@ RUN set -eu; \
     chmod 755 /out/tools/7-Zip/7zz; chmod 644 /out/tools/7-Zip/License.txt /out/tools/7-Zip/readme.txt
 
 # ---- The server ---------------------------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM ${SDK_IMAGE} AS server
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS server
 ARG TARGETARCH
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 WORKDIR /src
@@ -67,7 +68,7 @@ RUN set -eu; \
 # ---- Runtime ------------------------------------------------------------------------------------------------------
 # The regular ASP.NET image (Ubuntu), not the chiseled one: the entrypoint needs a shell, chown and setpriv to give
 # /data to PUID:PGID and then drop root, which a chiseled image (no shell, fixed user) can't do.
-FROM ${RUNTIME_IMAGE}
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Inbound Download Manager" \
@@ -83,16 +84,18 @@ ENV DOWNLOADMANAGER_DATA=/data \
     DOWNLOADMANAGER_ROOTS=/downloads \
     DOWNLOADMANAGER_URLS=http://0.0.0.0:8080 \
     ASPNETCORE_HTTP_PORTS= \
-    PUID=1654 \
-    PGID=1654 \
+    PUID=1000 \
+    PGID=1000 \
     TZ=Etc/UTC
 
 COPY --from=server /out/ /app/
 COPY --from=sevenzip /out/tools/ /app/tools/
 COPY --chmod=755 docker/entrypoint.sh docker/healthcheck.sh /usr/local/bin/
-# The two volumes, owned by the image's own non-root user (app, 1654); the entrypoint hands /data to PUID:PGID.
-COPY --from=server --chown=1654:1654 /src/docker-empty/ /data/
-COPY --from=server --chown=1654:1654 /src/docker-empty/ /downloads/
+# The two volumes, owned by the default PUID:PGID (1000, owner decision 2026-11-08), so the default needs no chown; the
+# entrypoint hands /data to another PUID:PGID. Only numbers are used, never an account name: whether the base image
+# has an account with that id (its own 'app' is 1654) makes no difference, and no account is added.
+COPY --from=server --chown=1000:1000 /src/docker-empty/ /data/
+COPY --from=server --chown=1000:1000 /src/docker-empty/ /downloads/
 
 VOLUME ["/data", "/downloads"]
 EXPOSE 8080

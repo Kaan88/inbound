@@ -46,7 +46,8 @@ unchanged is fine. The desktop Host can do all of these.
 - A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
   origin. Every request to `/api/`, with an `Origin` or without (a page's same-origin `GET` carries none), must name
   the server in its `Host` by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else gets
-  403. The one exception is below: a paired extension's `POST /api/ipc` and `POST /api/pair`.
+  403. The one exception is below: a paired extension's `POST /api/ipc`, `POST /api/pair` and
+  `DELETE /api/pair/self`.
 - Sign-in (D2) is on by default; see the next section.
 
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
@@ -55,7 +56,7 @@ request, update itself or run programs a client names, so those commands answer 
 ### Sign-in and paired browsers (D2)
 
 With sign-in on (the default), every path except `/health`, `/favicon.svg`, `/theme.js`, `/signin/...` and the calls
-below needs a session cookie or, for `POST /api/ipc` only, a paired browser's token. Without one, `/api/...` answers
+below needs a session cookie or, for `POST /api/ipc` and `DELETE /api/pair/self` only, a paired browser's token. Without one, `/api/...` answers
 401 with `{"ok":false,"error":...,"signIn":"/signin/"}`, a page `GET` is sent to `/signin/` (302), and the WebSocket
 upgrade is refused with 401. A failure always answers `{"ok":false,"error":"...","retryAfterSeconds":n?}`; a wait after
 wrong tries is 429 with `Retry-After`.
@@ -70,15 +71,30 @@ wrong tries is 429 with `Retry-After`.
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
 | `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired browsers (`id`, `name`, `createdAt`, `lastUsedAt`), and revoking one. |
 | `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. 1,000 wrong codes (from all addresses together) end the code. |
+| `DELETE /api/pair/self` | token | the extension's Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
 | `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
 
 - **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
   the token hashes. `DOWNLOADMANAGER_PASSWORD` or `DOWNLOADMANAGER_PASSWORD_FILE` sets it instead (hashed at start;
   the web UI can't change it then).
 - **Session:** a 256-bit random id in the `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`,
-  `Secure` over HTTPS); the server keeps only its SHA-256, in memory, so a restart signs everyone out. It ends after
-  24 hours without use (an open WebSocket counts as use) and 7 days after sign-in at most, and its WebSockets close
-  then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY`
+  `Secure` over HTTPS); the server keeps only its SHA-256. Sessions survive a restart: `<data>/sessions.json` (mode
+  600 off Windows, written to a temporary file, flushed and moved over the old one) holds each session's hash, start
+  and last use, never the id. A sign-in, sign-out or password change is written at once; an expired session is
+  refused at once and leaves the file at its next write or the next start. Last-use times are written at most every
+  10 minutes per session and on a clean stop, so a busy browser doesn't keep writing the disk; an open WebSocket
+  counts as use on the same 10-minute beat even when the page sends nothing, so after a kill a session may end up to
+  10 minutes early. A password change saves the new password and signs the other browsers out as one step for the
+  file, and a sign-in whose check began under the old password is refused. The file notes a stamp of the password (a
+  SHA-256 of its salt and hash): if the password changed while the server was down, every saved session is dropped.
+  A damaged file is deleted. A write that fails deletes the file, or empties it when it can't be deleted, so the
+  next start restores nobody; only a data folder that refuses all three keeps the old file, and the log then says to
+  delete it by hand. Off Windows the folder is flushed after each replace, so a power loss can't bring back the file
+  from before a sign-out (best effort, not run on Linux in this project's tests). With sign-in off
+  (`DOWNLOADMANAGER_AUTH=off`) sessions aren't kept and the file is removed at start, so turning sign-in on again
+  restores nobody. A session ends after 24
+  hours without use (an open WebSocket counts as use) and 7 days after sign-in at most, across restarts, and its
+  WebSockets close then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY`
   lists (addresses or networks; `1` is refused at start).
 - **Wrong tries** make that client address wait 1, 2, 4 ... seconds, up to 5 minutes, before the next try counts. A
   try counts as wrong from the moment it starts until it turns out right, so parallel tries can't pass the wait
@@ -87,14 +103,15 @@ wrong tries is 429 with `Retry-After`.
 - **Setup code:** asked of every browser except one on the server's own machine connecting directly: a connection
   from a listed proxy, or with `X-Forwarded-For` / `Forwarded`, always needs it.
 - **Origin:** every state change and the WebSocket upgrade must carry the server's own origin (above).
-- **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` only, and only for what the extension
+- **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` (and for unpairing itself), and only for what the extension
   role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
   `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
   comes without settings. Only the token's SHA-256 is stored. Requests from our Chrome extension ids
   (`chrome-extension://`, the store and the unpacked id) and from any `moz-extension://` origin (Firefox gives each
-  install a random id) pass the origin check for `POST /api/ipc` with a bearer token, which the sign-in gate then
-  checks, and for `POST /api/pair`, where the one-time code is the credential. They get CORS headers for those two
-  calls, without credentials; preflights answer 204.
+  install a random id) pass the origin check for `POST /api/ipc` and `DELETE /api/pair/self` with a bearer token,
+  which the sign-in gate then checks, and for `POST /api/pair`, where the one-time code is the credential. They get
+  CORS headers for those three calls, without credentials; preflights answer 204 (`Access-Control-Allow-Methods`
+  is `DELETE` for `/api/pair/self`, `POST` for the other two).
 - `DOWNLOADMANAGER_AUTH=off` turns sign-in off. Then the D1b rule holds again: the server refuses to listen beyond
   loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set too.
 
