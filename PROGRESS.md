@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### 0.6.1 release preparation (2026-11-08, `dev`)
+
+- Owner, 2026-11-08: "put a link to my firefox addon page to setup" (ROADMAP EXT.S3). `INSTALL.txt` names the Chrome Web Store page and the Firefox Add-ons page, and Setup's last page has two unticked boxes that open them. The README and `docs/browser-integration.md` link them too.
+- The Firefox page is not public: AMO's API answers "Authentication credentials were not provided" for the slug `inbound-download-manager` (a slug that doesn't exist gives "Not found"), so the add-on exists but is unlisted or awaiting review. The owner was told how to submit a listed version.
+- Versions: app 0.6.1, extension 0.5.1.
+- Every Windows suite passed (`artifacts\campaign61108-061\`): Core 895, Engine 162, Integration 1,269, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 44, svelte-check 0 errors.
+
 ### After 0.6.0: password boxes, Firefox popup size, target switch (2026-11-08, `dev`)
 
 - TB.S4 (owner): in Add Links a hoster link's password section has an archive password box first, a tick to use it as the site password too, and a separate site password box. The two never stand in for each other unless ticked. The retry dialog and the web UI's Add Links say the same. Core and Integration tests pass; not seen on screen.
