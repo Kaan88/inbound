@@ -32,13 +32,15 @@ public sealed class RemoteCommands : IDisposable
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
-    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null, ContainerImportService? containers = null)
+    /// <param name="roots">On a server, the folders whose files a client may have it read (container files). Null on the desktop.</param>
+    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null,
+        ContainerImportService? containers = null, PathRoots? roots = null)
     {
         _providers = providers;
         _jobs = jobs;
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
-        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log);
+        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots);
 
         _jobs.Changed += OnJobChanged;
         _jobs.Removed += OnJobRemoved;

@@ -232,12 +232,15 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
         var recorded = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = padded, Password = Secret });
         var file = Path.Combine(run.Paths.Root, "archive", "sets", $"{recorded.Set!.Id:N}.json");
         var text = await File.ReadAllTextAsync(file);
-        await File.WriteAllTextAsync(file, text.Replace("OLD.PART01.RAR", "OLD.PART1.RAR", StringComparison.Ordinal));
+        // Only the key changes: it holds the name as Windows compares it (upper case there), and Linux keeps the case,
+        // so there the plain name would also match the first volume's path.
+        static string Key(string name) => OperatingSystem.IsWindows() ? name.ToUpperInvariant() : name;
+        await File.WriteAllTextAsync(file, text.Replace(Key("|old.part01.rar"), Key("|old.part1.rar"), StringComparison.Ordinal));
 
         await run.Archives.ShutdownAsync();
         await run.StartCoordinatorAsync(new ArchiveCoordinatorOptions { ExtractorFactory = _ => tool });
 
-        Assert.Contains("OLD.PART01.RAR", await File.ReadAllTextAsync(file));
+        Assert.Contains(Key("|old.part01.rar"), await File.ReadAllTextAsync(file));
 
         // The twin that this old key would have swallowed has a set of its own.
         var job = await run.DownloadAsync("old.part1.rar", Other);
@@ -576,6 +579,7 @@ public sealed class RuntimeArchiveReviewTests(ArchiveFileServer fixture)
     }
 
     [SevenZipFact]
+    [Trait("Platform", "Windows")] // held open with a Windows share lock so the delete fails
     public async Task AnArchiveThatCouldNotBeDeletedIsNotMarkedAndFailsNothingLater()
     {
         await using var run = await ArchiveHarness.StartAsync(_server);

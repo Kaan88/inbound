@@ -102,6 +102,13 @@ public sealed partial class DownloadManagerService
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public bool TrayAvailable { get; set; }
     public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
+
+    /// <summary>
+    /// Where downloads may be written, for a Host whose clients are not the machine's user (the server's
+    /// <c>DOWNLOADMANAGER_ROOTS</c>). Every add, move and folder setting is held to these, whatever the client asked for or
+    /// a setting says, so a client can't make the server write outside them. Null (the desktop Host) allows any folder.
+    /// </summary>
+    public PathRoots? Roots { get; set; }
     public string StateDirectory => _paths.Root;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -485,6 +492,14 @@ public sealed partial class DownloadManagerService
         }
         var destination = ResolveDestination(request.DestinationDirectory, fileName,
             useLastFolder: !browserDownload, useCategoryFolder: !browserDownload, categoryId: categoryId);
+        if (Roots is { } roots)
+        {
+            // Checked on the resolved folder, which is also the one used: a link inside a root can't lead the file out.
+            if (roots.Allowed(destination) is not { } inside)
+                return new AddJobResponse { Accepted = false, Error = PathRoots.OutsideMessage, ErrorCode = "invalid_destination" };
+            destination = inside;
+        }
+
         string finalPath;
         try
         {
@@ -1199,6 +1214,11 @@ public sealed partial class DownloadManagerService
         if (string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory))
         {
             return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapSettings(_settings) };
+        }
+
+        if (Roots is { } roots && DescribeFolderOutsideRoots(settings, categories, roots) is { } outside)
+        {
+            return new SettingsResult { Ok = false, Error = outside, Settings = MapSettings(_settings) };
         }
 
         string directory;
@@ -2252,6 +2272,15 @@ public sealed partial class DownloadManagerService
 
     public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>
+    /// A completion program is a full path to something the OS can start. On Windows that is an .exe; Linux programs have
+    /// no extension, so there any absolute path passes and the start itself says whether it can run. A server refuses
+    /// completion programs from clients anyway (<c>SupportsProgramSettings</c>); this keeps a saved one valid there.
+    /// </summary>
+    public static bool IsCompletionProgramPath(string program) =>
+        Path.IsPathFullyQualified(program) &&
+        (!OperatingSystem.IsWindows() || string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsNewerVersion(string candidate, string installed)
     {
         static string Clean(string value) => value.Trim().TrimStart('v', 'V');
@@ -2309,8 +2338,7 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Error = "Unknown completion system action." };
                 if (completion.SystemAction != "none" && !_settings.AllowSystemCompletionActions)
                     return new JobActionResponse { Error = "Enable system completion actions in Scheduler before choosing this action." };
-                if (completion.ProgramPath is { Length: > 0 } program &&
-                    (!Path.IsPathFullyQualified(program) || !string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase)))
+                if (completion.ProgramPath is { Length: > 0 } program && !IsCompletionProgramPath(program))
                     return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
             }
 
@@ -2373,7 +2401,16 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Ok = false, Error = "The new path has no folder." };
                 }
 
-                if (!string.Equals(target, runtime.Job.FinalFilePath, StringComparison.OrdinalIgnoreCase))
+                if (Roots is { } roots)
+                {
+                    if (roots.Allowed(directory) is not { } inside)
+                        return new JobActionResponse { Ok = false, Error = PathRoots.OutsideMessage };
+                    directory = inside;
+                    target = Path.Combine(inside, Path.GetFileName(target));
+                }
+
+                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move.
+                if (!PathNames.Same(target, runtime.Job.FinalFilePath))
                 {
                     if (File.Exists(target))
                     {
@@ -3927,7 +3964,7 @@ public sealed partial class DownloadManagerService
         {
             marked = _jobs.Values
                 .Where(runtime => runtime.Job.State == DownloadState.Completed && runtime.Job.FileRemovedAfterExtraction != removed &&
-                    paths.Contains(runtime.Job.FinalFilePath, StringComparer.OrdinalIgnoreCase))
+                    paths.Contains(runtime.Job.FinalFilePath, PathNames.Comparer))
                 .ToList();
             foreach (var runtime in marked)
             {
@@ -4040,6 +4077,38 @@ public sealed partial class DownloadManagerService
             .Replace("\\?", ".") + "$";
         return System.Text.RegularExpressions.Regex.IsMatch(
             value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>
+    /// A folder setting the server's roots don't hold, in words, or null. The download folder is always checked, because
+    /// saving creates it. The others only when they change: a folder saved before the roots were narrowed is kept, so a
+    /// client sending its copy back doesn't fail on it, and an add that would use it is refused then.
+    /// </summary>
+    private string? DescribeFolderOutsideRoots(SettingsDto settings, List<CategoryDefinitionDto> categories, PathRoots roots)
+    {
+        string? Outside(string what, string? requested, string? current) =>
+            !string.IsNullOrWhiteSpace(requested) && !PathNames.Same(requested.Trim(), current?.Trim()) && roots.Allowed(requested) is null
+                ? $"{what} is outside the folders this server may use."
+                : null;
+
+        if (roots.Allowed(settings.DefaultDownloadDirectory) is null) return "The download folder is outside the folders this server may use.";
+        lock (_sync)
+        {
+            if (Outside("The last download folder", settings.LastDestinationDirectory, _settings.LastDestinationDirectory) is { } last) return last;
+            foreach (var (category, folder) in settings.CategoryFolders ?? new())
+            {
+                _settings.CategoryFolders.TryGetValue(category, out var current);
+                if (Outside($"The folder for {category}", folder, current) is { } problem) return problem;
+            }
+
+            foreach (var category in categories)
+            {
+                var current = _settings.CustomCategories.FirstOrDefault(item => item.Id == category.Id)?.DestinationDirectory;
+                if (Outside($"The folder for {category.Name}", category.DestinationDirectory, current) is { } problem) return problem;
+            }
+        }
+
+        return null;
     }
 
     private string ResolveDestination(string? requested, string fileName, bool useLastFolder = true, bool useCategoryFolder = true, string? categoryId = null)

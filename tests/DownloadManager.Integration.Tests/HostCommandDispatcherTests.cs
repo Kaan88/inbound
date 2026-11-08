@@ -3,6 +3,7 @@ using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Engine;
 using DownloadManager.Persistence;
+using DownloadManager.Tests.Shared;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Ipc;
 using DownloadManager.Runtime.Remote;
@@ -254,6 +255,7 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
     }
 
     [Fact]
+    [Trait("Platform", "Windows")]
     public void TheDesktopHostClaimsTheDesktopCapabilities()
     {
         // The Host assembly is Windows-only and not referenced, so its controller is read from the build the other
@@ -339,7 +341,7 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         var program = (await AskAsync(dispatcher, session, MessageTypes.JobUpdate, new JobUpdateRequest
         {
             JobId = added.Job!.Id,
-            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = @"C:\Tools\after.exe" },
+            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = TestPaths.Native(@"C:\Tools\after.exe") },
         })).GetPayload<JobActionResponse>();
         Assert.True(program.Ok, program.Error);
     }

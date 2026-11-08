@@ -11,11 +11,12 @@ internal static class RarTools
 
     public const string Password = "Test-Pw_123";
 
-    public static string SevenZipPath => SevenZipTool.BundledPath;
+    /// <summary>The bundled copy on Windows; elsewhere the 7zz that <see cref="SevenZipTool.Find"/> finds (PATH or DOWNLOADMANAGER_7ZIP).</summary>
+    public static string SevenZipPath => SevenZipTool.Find() ?? SevenZipTool.BundledPath;
 
     public static string RarPath => Path.Combine(WinRarFolder, "Rar.exe");
 
-    public static string? SevenZipMissing => SevenZipTool.Find() is not null ? null : $"The bundled 7-Zip is not at {SevenZipPath}, so extraction cannot run here.";
+    public static string? SevenZipMissing => SevenZipTool.Find() is not null ? null : $"7-Zip is not here ({SevenZipTool.MissingMessage}), so extraction cannot run.";
 
     public static string? RarMissing =>
         SevenZipMissing is { } missing ? missing
@@ -102,7 +103,13 @@ public sealed class Workspace : IDisposable
 
     public string Archive(string name) => Path.Combine(Archives, name);
 
-    public string Output(string relative) => Path.Combine(Destination, relative);
+    public string Output(string relative) => Path.Combine(Destination, Native(relative));
+
+    /// <summary>
+    /// The tests name nested files the Windows way (<c>sub.txt</c>). On Linux a backslash is part of a name, so it
+    /// becomes the separator here and the tests build and check the same folders there.
+    /// </summary>
+    public static string Native(string relative) => OperatingSystem.IsWindows() ? relative : relative.Replace('\\', '/');
 
     public string WriteArchive(string name, byte[] bytes)
     {
@@ -115,7 +122,7 @@ public sealed class Workspace : IDisposable
 
     public string WriteSource(string relative, byte[] bytes)
     {
-        var path = Path.Combine(Source, relative);
+        var path = Path.Combine(Source, Native(relative));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, bytes);
         return path;

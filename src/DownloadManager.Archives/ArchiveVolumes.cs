@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -62,27 +63,35 @@ public static partial class ArchiveVolumes
             .Select(Path.GetFileName)
             .Where(name => !string.IsNullOrEmpty(name))
             .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathNames.Comparer)
             .ToList();
+
+        // A set's names may differ in case (Film.PART1.RAR, film.part2.rar), so bases are matched ignoring it. On a file
+        // system that keeps case, two files can also differ only by it (Movie.part1.rar next to movie.part1.rar): grouping
+        // those ignoring case would make one set with two first volumes, and tie one's download to the other's cleanup.
+        // So in a folder that holds such a pair, bases are matched exactly. Windows never has one: NTFS keeps one file.
+        var grouping = names.Count == names.Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
 
         var oldStyleBases = names
             .Select(name => OldStyleVolume().Match(name))
             .Where(match => match.Success && IsLetter(match, 'r'))
             .Select(match => match.Groups["base"].Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(grouping);
 
         // A4.D: name.zNN beside no name.rNN is a spanned zip's part, not an old-style RAR volume past .r99.
         var spannedZipBases = names
             .Select(name => SpannedZipPart().Match(name))
             .Where(match => match.Success && !oldStyleBases.Contains(match.Groups["base"].Value))
             .Select(match => match.Groups["base"].Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(grouping);
 
-        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var spannedZips = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var parts = new Dictionary<string, List<(string Digits, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var splits = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(grouping);
+        var spannedZips = new Dictionary<string, List<(int Number, string Name)>>(grouping);
+        var parts = new Dictionary<string, List<(string Digits, string Name)>>(grouping);
+        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(grouping);
+        var splits = new Dictionary<string, List<(int Number, string Name)>>(grouping);
         var singles = new List<string>();
         var otherSingles = new List<(string Stem, string Name)>();
 
@@ -164,6 +173,7 @@ public static partial class ArchiveVolumes
             .OrderBy(set => set.BaseName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(set => set.Scheme)
             .ThenBy(set => set.Members[0], StringComparer.OrdinalIgnoreCase)
+            .ThenBy(set => set.Members[0], StringComparer.Ordinal)
             .ToList();
     }
 
@@ -209,7 +219,7 @@ public static partial class ArchiveVolumes
 
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
     public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName, Func<string, bool>? isWholeArchive = null) =>
-        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
+        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), PathNames.Comparer));
 
     private static ArchiveVolumeSet BuildOldStyle(string baseName, List<(int Index, string Name)> members)
     {

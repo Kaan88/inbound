@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using DownloadManager.Core;
 using DownloadManager.Core.Archives;
 using Microsoft.Win32.SafeHandles;
 
@@ -66,6 +67,12 @@ public static partial class ExtractionSafety
             if (DeviceNames.Contains(stem)) return "reserved device name";
         }
 
+        // Linux keeps a backslash as part of a name, so "a\b" is one file there and a folder and a file on Windows.
+        // Which one the archive meant can't be told, and a guess could put a file where the listing didn't say. 7-Zip
+        // on Linux lists folders with "/", so an ordinary archive never meets this. Checked last, so a traversal or a
+        // device name is still named as such.
+        if (!OperatingSystem.IsWindows() && path.Contains('\\')) return "backslash in name";
+
         return null;
     }
 
@@ -111,7 +118,9 @@ public static partial class ExtractionSafety
             }
         }
 
-        RefuseNamesWindowsCannotKeepApart(probe);
+        // Linux keeps a.txt and A.TXT apart, so there the listing's own repeat check is enough. A share that folds case
+        // anyway is caught after extraction: WalkStaging then counts fewer files than were listed.
+        if (OperatingSystem.IsWindows()) RefuseNamesWindowsCannotKeepApart(probe);
     }
 
     /// <summary>
@@ -124,7 +133,7 @@ public static partial class ExtractionSafety
         var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in probe.Entries)
         {
-            var path = entry.Path.Replace('/', '\\');
+            var path = PathNames.ToNativeSeparators(entry.Path);
             if (entry.Kind == ArchiveEntryKind.Directory)
             {
                 folders.Add(path);
@@ -177,19 +186,8 @@ public static partial class ExtractionSafety
         }
     }
 
-    /// <summary>Free bytes on the volume holding a path, or null when that cannot be told, as on a network share.</summary>
-    public static long? AvailableBytes(string path)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(path));
-            return string.IsNullOrEmpty(root) ? null : new DriveInfo(root).AvailableFreeSpace;
-        }
-        catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    /// <summary>Free bytes on the volume holding a path (its own mount on Linux), or null when that cannot be told, as on a network share.</summary>
+    public static long? AvailableBytes(string path) => Volumes.AvailableBytes(path);
 
     /// <summary>
     /// Walks what was really written. Refuses reparse points, hard links, unsafe names, hidden data
@@ -201,12 +199,12 @@ public static partial class ExtractionSafety
         var zoneAllowed = DataStreams.HasZoneIdentifier(probe.FirstVolume);
         var listedFiles = probe.Entries
             .Where(entry => entry.Kind == ArchiveEntryKind.File)
-            .Select(entry => entry.Path.Replace('/', '\\'))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(entry => PathNames.ToNativeSeparators(entry.Path))
+            .ToHashSet(PathNames.Comparer);
         var listedFolders = probe.Entries
             .Where(entry => entry.Kind == ArchiveEntryKind.Directory)
-            .Select(entry => entry.Path.Replace('/', '\\'))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(entry => PathNames.ToNativeSeparators(entry.Path))
+            .ToHashSet(PathNames.Comparer);
         foreach (var file in listedFiles)
         {
             for (var parent = Path.GetDirectoryName(file); !string.IsNullOrEmpty(parent); parent = Path.GetDirectoryName(parent))
@@ -260,9 +258,14 @@ public static partial class ExtractionSafety
                     throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a file the listing did not name: {SafeForDisplay(relative)}");
                 }
 
-                if (HardLinkCount(item.FullName) > 1)
+                switch (HardLinkCount(item.FullName))
                 {
-                    throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a hard link: {SafeForDisplay(relative)}");
+                    case > 1:
+                        throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a hard link: {SafeForDisplay(relative)}");
+                    case null:
+                        // Not counted is not one: the check stays closed rather than being skipped without a word.
+                        throw new ExtractionException(ExtractionFailureKind.UnsafePath,
+                            $"This system can't tell whether an extracted file is a hard link ({RuntimeInformation.ProcessArchitecture}), so nothing was moved out of the staging folder: {SafeForDisplay(relative)}");
                 }
 
                 total += ((FileInfo)item).Length;
@@ -275,21 +278,22 @@ public static partial class ExtractionSafety
             }
         }
 
-        var written = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var written = files.ToHashSet(PathNames.Comparer);
         if (listedFiles.FirstOrDefault(file => !written.Contains(file)) is { } absent)
         {
             throw new ExtractionException(ExtractionFailureKind.Corrupted, $"A listed file was not extracted: {SafeForDisplay(absent)}");
         }
 
-        // The checks above fold capital letters, so one file on disk could answer for two listed names.
+        // On Windows the checks above fold capital letters, so one file on disk could answer for two listed names. On
+        // Linux a share that folds case does the same: two listed names, one file written.
         var listedCount = probe.Entries.Count(entry => entry.Kind == ArchiveEntryKind.File);
         if (files.Count < listedCount)
         {
             throw new ExtractionException(ExtractionFailureKind.Corrupted, $"The archive lists {listedCount} files, and {files.Count} came out of it.");
         }
 
-        directories.Sort(StringComparer.OrdinalIgnoreCase);
-        files.Sort(StringComparer.OrdinalIgnoreCase);
+        directories.Sort(PathNames.Comparer);
+        files.Sort(PathNames.Comparer);
         return new StagedContent(directories, files);
     }
 
@@ -320,12 +324,67 @@ public static partial class ExtractionSafety
             diskFull ? $"The disk filled up while {action}." : $"Windows refused access while {action}: {exception.GetType().Name} (0x{exception.HResult:X8}).");
     }
 
-    private static uint HardLinkCount(string path)
+    /// <returns>Null when the count can't be told off Windows. Windows keeps its earlier rule: a failed call counts as one.</returns>
+    private static uint? HardLinkCount(string path)
     {
-        if (!OperatingSystem.IsWindows()) return 1;
+        if (OperatingSystem.IsLinux()) return UnixHardLinkCount(path);
+        if (!OperatingSystem.IsWindows()) return null;
         using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return GetFileInformationByHandle(handle, out var information) ? information.NumberOfLinks : 1;
     }
+
+    /// <summary>
+    /// .NET has no way to ask for a link count, and on Linux a tar can carry hard links the listing might not admit to,
+    /// so this asks the C library: <c>lstat</c>, or on a glibc older than 2.33, which doesn't export that, the
+    /// <c>__lxstat</c> it is built on. Null when neither can be called, the call fails, or the architecture's
+    /// <c>struct stat</c> isn't one this knows (<see cref="LinkCountIn"/>): the caller then refuses, rather than taking
+    /// an unchecked file for a single link.
+    /// </summary>
+    internal static uint? UnixHardLinkCount(string path)
+    {
+        var buffer = new byte[256];
+        int result;
+        try
+        {
+            result = lstat(path, buffer);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            try
+            {
+                // _STAT_VER: 1 on x64, 0 on arm64 (the generic layout); the buffer layout is the same as lstat's.
+                result = __lxstat(RuntimeInformation.ProcessArchitecture == Architecture.X64 ? 1 : 0, path, buffer);
+            }
+            catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+            {
+                return null;
+            }
+        }
+        catch (DllNotFoundException)
+        {
+            return null;
+        }
+
+        return result == 0 ? LinkCountIn(buffer, RuntimeInformation.ProcessArchitecture) : null;
+    }
+
+    /// <summary>
+    /// <c>st_nlink</c> from a <c>struct stat</c>: x64 has a 64-bit one at 16, arm64 (the generic layout) a 32-bit one at
+    /// 20. Null for any other architecture, whose layout hasn't been checked.
+    /// </summary>
+    internal static uint? LinkCountIn(byte[] stat, Architecture architecture) => architecture switch
+    {
+        Architecture.X64 => (uint)Math.Min(BitConverter.ToUInt64(stat, 16), uint.MaxValue),
+        Architecture.Arm64 => BitConverter.ToUInt32(stat, 20),
+        _ => null,
+    };
+
+    // Big enough for struct stat on every Linux architecture (x64 144 bytes, arm64 128).
+    [DllImport("libc", SetLastError = true)]
+    private static extern int lstat(string path, byte[] buffer);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int __lxstat(int version, string path, byte[] buffer);
 
     // Pack 4 because the native FILETIME fields are two DWORDs, not an 8-aligned long.
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

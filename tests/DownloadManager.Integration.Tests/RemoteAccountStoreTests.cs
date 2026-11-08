@@ -53,7 +53,7 @@ public sealed class RemoteAccountStoreTests : IDisposable
         var json = await File.ReadAllTextAsync(AccountFile);
         Assert.DoesNotContain(Key, json);
         Assert.DoesNotContain(Dashless, json);
-        Assert.Contains("dpapi:v1:", json);
+        Assert.Contains(SecretProtector.Current.Prefix, json);
         Assert.Contains("\"provider\": \"torbox\"", json);
 
         var reopened = await OpenAsync();
@@ -108,6 +108,7 @@ public sealed class RemoteAccountStoreTests : IDisposable
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // the failure is made with a Windows share lock; Linux locks are only advisory
     public async Task AFailedSaveChangesNothing()
     {
         var store = await OpenAsync();

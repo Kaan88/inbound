@@ -17,6 +17,7 @@ namespace DownloadManager.Integration.Tests;
 /// Rar.exe, in the same Host. Containers come from the test helpers, because no real sample was
 /// available. Every value is invented, and nothing reaches the real provider.
 /// </summary>
+[Trait("Platform", "Windows")]
 [Collection("runtime-archive")]
 public sealed class HostPipeContainerTests : IAsyncLifetime
 {

@@ -28,4 +28,8 @@
     <ProjectReference Include="..\..\src\DownloadManager.Archives\DownloadManager.Archives.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\TestPaths.cs" Link="Shared\TestPaths.cs" />
+  </ItemGroup>
+
 </Project>

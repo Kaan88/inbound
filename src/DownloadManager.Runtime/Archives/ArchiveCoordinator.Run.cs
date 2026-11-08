@@ -2,6 +2,7 @@ using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
 using DownloadManager.Persistence;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -17,7 +18,7 @@ public sealed partial class ArchiveCoordinator
     private async Task<Dictionary<Guid, int>> RecoverStagingAsync(IReadOnlyList<ArchiveSetRecord> sets)
     {
         var leftInPlace = new Dictionary<Guid, int>();
-        var accounted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var accounted = new HashSet<string>(PathNames.Comparer);
         foreach (var set in sets)
         {
             if (set is not { Destination: { } destination, StagingRoot: { } root }) continue;
@@ -45,7 +46,7 @@ public sealed partial class ArchiveCoordinator
             }
         }
 
-        foreach (var root in sets.Select(set => set.StagingRoot).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var root in sets.Select(set => set.StagingRoot).OfType<string>().Distinct(PathNames.Comparer))
         {
             try
             {
@@ -151,7 +152,7 @@ public sealed partial class ArchiveCoordinator
             lock (_sync)
             {
                 takenFolders = _sets.Values
-                    .Where(other => other.Id != id && other.Destination is not null && string.Equals(other.Directory, next.Directory, StringComparison.OrdinalIgnoreCase))
+                    .Where(other => other.Id != id && other.Destination is not null && PathNames.Same(other.Directory, next.Directory))
                     .Select(other => other.Destination!)
                     .ToList();
             }
@@ -226,7 +227,7 @@ public sealed partial class ArchiveCoordinator
         {
             // An earlier attempt may have left an original in staging under the folder it used. This run's folder is another one if the destination has changed since.
             if (earlierRoot is not null && earlierDestination is not null &&
-                !string.Equals(earlierDestination, claimed.Destination, StringComparison.OrdinalIgnoreCase))
+                !PathNames.Same(earlierDestination, claimed.Destination))
             {
                 await StagingArea.RecoverAndRemoveAsync(earlierRoot, FirstVolumePath(claimed), earlierDestination).ConfigureAwait(false);
             }
@@ -291,10 +292,10 @@ public sealed partial class ArchiveCoordinator
         var view = ArchiveDirectoryView.Read(claimed.Directory, _service.GetSnapshot().Jobs);
 
         // What a download brought or the claim saw. Anything else with such a name here could be what this very run extracted.
-        var extracted = result.Files.Select(file => Path.GetFileName(file.FinalPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var extracted = result.Files.Select(file => Path.GetFileName(file.FinalPath)).ToHashSet(PathNames.Comparer);
         var named = (view.FindByKey(claimed.Key)?.Members ?? [])
             .Where(member => view.JobsNamed(member).Any(job => job.State == "completed"))
-            .Union(claimed.Volumes, StringComparer.OrdinalIgnoreCase)
+            .Union(claimed.Volumes, PathNames.Comparer)
             .Where(member => view.IsOnDisk(member) && !extracted.Contains(member))
             .ToList();
         if (result.VolumesRead is not { } paths)
@@ -303,13 +304,13 @@ public sealed partial class ArchiveCoordinator
         }
 
         var read = paths
-            .Where(path => string.Equals(Path.GetDirectoryName(path), view.Directory, StringComparison.OrdinalIgnoreCase))
+            .Where(path => PathNames.Same(Path.GetDirectoryName(path), view.Directory))
             .Select(path => Path.GetFileName(path))
             .Where(name => name.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathNames.Comparer)
             .ToList();
         var jobs = claimed.JobIds.Union(read.SelectMany(view.JobsNamed).Where(job => job.State == "completed").Select(job => job.Id)).ToList();
-        return new RunUse(read, named.Except(read, StringComparer.OrdinalIgnoreCase).ToList(), jobs);
+        return new RunUse(read, named.Except(read, PathNames.Comparer).ToList(), jobs);
     }
 
     private (string? Password, bool Own, DateTimeOffset? PackageStamp) ResolvePassword(ArchiveSetRecord set)
@@ -580,12 +581,12 @@ public sealed partial class ArchiveCoordinator
 
                     case ExtractionFailureKind.MissingVolume:
                         next.ToolMissingVolumes = [.. missing];
-                        next.MissingVolumes = next.MissingVolumes.Union(missing, StringComparer.OrdinalIgnoreCase).ToList();
+                        next.MissingVolumes = next.MissingVolumes.Union(missing, PathNames.Comparer).ToList();
                         if (arrived && next.Wanted)
                         {
                             // Back in line. The next look at the folder tidies up what it is still waiting for.
                             next.State = ArchiveSetState.Waiting;
-                            next.MissingVolumes = next.MissingVolumes.Except(missing, StringComparer.OrdinalIgnoreCase).ToList();
+                            next.MissingVolumes = next.MissingVolumes.Except(missing, PathNames.Comparer).ToList();
                             ClearFailure(next);
                         }
 
@@ -626,7 +627,7 @@ public sealed partial class ArchiveCoordinator
     {
         var view = ArchiveDirectoryView.Read(claimed.Directory, _service.GetSnapshot().Jobs);
         return missing.All(name =>
-            !claimed.Volumes.Contains(name, StringComparer.OrdinalIgnoreCase) &&
+            !claimed.Volumes.Contains(name, PathNames.Comparer) &&
             (view.IsOnDisk(name) || view.JobsNamed(name).Any(job => job.State is not ("completed" or "failed" or "cancelled"))));
     }
 
@@ -677,10 +678,10 @@ internal static class ArchiveDestinations
     /// <summary>A retry keeps the folder its set already has. Otherwise the first name no other set is using.</summary>
     private static string SubfolderFor(ArchiveSetRecord set, IReadOnlyCollection<string> taken)
     {
-        bool Free(string folder) => !taken.Contains(folder, StringComparer.OrdinalIgnoreCase);
+        bool Free(string folder) => !taken.Contains(folder, PathNames.Comparer);
 
         if (set.Destination is { } earlier && Free(earlier) &&
-            string.Equals(Path.GetDirectoryName(earlier), set.Directory, StringComparison.OrdinalIgnoreCase))
+            PathNames.Same(Path.GetDirectoryName(earlier), set.Directory))
         {
             return earlier;
         }
