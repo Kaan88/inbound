@@ -1,5 +1,65 @@
 # Progress — session handoff
 
+### D4: end to end on the owner's VM through the web UI, from this PC (2026-11-08, `webui`)
+
+Image `inbound-test:dev` rebuilt on the VM from `webui` `e8324ae` (`REVISION` label set; only the TestServer changed
+since the D2-fix image, so the server layers came from the cache). Run with sign-in on, `-p 18080:8080`, `PUID`/`PGID`
+of the VM user, `TZ`, volumes in a test folder, label `inbound-test`. Driven from this PC over the LAN with
+Playwright's headless Chromium (a driver script in the session scratchpad, not committed); the VM address is in no
+tracked file, screenshot or file name.
+
+- **First open:** setup code field shown (browser not on the server's machine), code from `docker logs`, throwaway
+  password set; cookie `HttpOnly`, `SameSite=Strict`. Sign-out, then `/api/ipc` 401; sign-in again worked. From this
+  PC without a cookie 401, with a foreign `Origin` 403.
+- **TorBox (live, minimal):** key read from the owner's credentials file into the page without printing it, saved in
+  My TorBox; the page showed "Saved on the server" and the plan, and the key was nowhere in the page. In my account
+  listed the torrents (one call); a small cached item already in the account (3 files, 18.4 MB) went through
+  Download, Choose files (all), the default queue: three runs, each "torbox gave a link for this run", about 4 MB/s,
+  two valid JPEGs (end marker `FFD9`) and a 20-byte README, owned by the VM user, no `.part` left. About eight
+  TorBox calls; nothing added to or deleted from the account.
+- **Extraction (stand-in):** the TorBox item has no archive. A 3-volume RAR5 with a password (WinRAR's `Rar.exe`
+  here, `-v500k -p`) and a plain zip, 1.2 MB of random data and a text file, were served over HTTP by a labelled Node
+  container (`node:24-alpine`, already on the VM) on a labelled test network. Added through Add links (the RAR as
+  package `d4-sample`). The zip extracted by itself; the RAR showed "needs a password to extract", the password went
+  in through the prompt, and it extracted. Both outputs have the originals' SHA-256 (`87a0c016…`, `d4abd5a9…`).
+- **Expiring-link refresh (mock):** a live link can't be made to expire on demand. New TestServer option
+  `--first-link-dies-after <bytes>` (commit `e8324ae`): the mock's first CDN link stops after that many bytes, cuts
+  its connections and answers 403 after. A second server container pointed at the mock (`DOWNLOADMANAGER_INSTANCE`,
+  `DOWNLOADMANAGER_TORBOX_API` on loopback; the TestServer in the same network namespace, built for Linux in an SDK
+  container) was set up through its own web UI (port 18081) with the mock key. Download, choose `sub/video.bin`
+  (8 MiB): "the link was refused (Forbidden, HTTP 403), so asking for a fresh one, 1 of 2", a new link, Completed;
+  SHA-256 `1b30edc3…` equal to the mock's generated content.
+- **No token:** the key, the key without dashes and its first 6 characters, held in shell variables and never
+  printed: 0 in `docker logs` of both servers and the file server, 0 files in the data folder (logs, settings,
+  jobs, remote state), 0 in the downloads, 0 in `docker history --no-trunc` and `docker inspect` of the image and the
+  container, 0 of the image's 4,054 files (searched inside a throwaway container with `find -xdev`; a first `grep -r /`
+  found only its own `/proc/1/cmdline`). The mock key was in neither mock-server log.
+- **Memory (`docker stats`):** idle after sign-in and settings, 29 samples every 10 s: 44.0 MiB average (42.6 to
+  45.5), CPU 0.016%. TorBox download and extractions (every 2 to 3 s): up to 87 MiB. A 400 MB download from the file
+  server (8 ranges of 50 MiB, about 8 MB/s, SHA-256 checked): 87 to 106 MiB; the cgroup's anonymous memory went
+  only from 50 to 56 MiB, the rest is page cache of the written file. Idle after the whole session, with the 400 MB
+  file deleted through the web UI with its file: 100.8 MiB (100.6 to 101.8), CPU 0.016%. Of that, 64 MiB anonymous,
+  33 MiB shared memory that is .NET's W^X double mapping of compiled code (`/memfd:doublemapper`, 201 mappings in a
+  fresh server), 4 MiB kernel. Target under 100 MB idle: met before use, reached after a full session.
+- **Cleanup:** the test containers, the test network and `~/inbound-d4` (downloads, data with the sealed key,
+  sources, mock build) removed; `inbound-test:dev` kept; class-compass and komodo untouched; 8.8 GB free, as before.
+
+Evidence: `artifacts\d4\` in the worktree (ignored): the screenshots (the account's item list among them, so keep
+it local), the four memory CSVs, both servers' logs with addresses replaced. ROADMAP D2 and D4 and
+`docs/docker-webui-plan.md` updated. Not run again: the Windows or Linux test suites (only the TestServer's
+`Program.cs` changed; it builds on Windows and in the Linux SDK container). Not delegated to a cheaper reviewer (no
+agent tool in this session).
+
+Seen, not fixed (the tested image stays as built): the delete toast says "Deleted 1 download and their files" for
+one download; "Put each kind of file in its category's folder" is on by default on the server, yet the zip and RAR
+went to `/downloads` itself (not checked whether the server has category folders at all).
+
+Questions for the owner (safer choice taken): (1) The refresh was shown with the mock, not a live link; is that
+enough, or should a later run leave a live download paused past the link's lifetime? (2) Should a small archive
+(a few MB) be kept in the TorBox account for future live extraction checks? None was added. (3) Idle after use is
+about 101 MiB by `docker stats`; `DOTNET_EnableWriteXorExecute=0` would drop the 33 MiB double mapping but turns off
+a hardening feature, so it was not tried; PERF.3 can measure it if wanted.
+
 ### D2 / EXT.R1 review fixes: sign-in waits, trusted proxies, bodies, auth.json, upload references (2026-11-08, `webui`)
 
 Sixteen reviewer findings on `git diff dev...webui`, each checked against the code. Fixed (commit `a7aba23`):
