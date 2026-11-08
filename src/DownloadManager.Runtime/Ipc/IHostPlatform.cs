@@ -24,12 +24,23 @@ public sealed record PlatformCapabilities
     public bool SupportsUpdater { get; init; }
 
     /// <summary>
+    /// A client may change what the Host runs or trusts: <c>settings.update</c>'s <c>postDownloadCommand</c>,
+    /// <c>ffmpegPath</c>, <c>updateManifestUrl</c>, <c>updatePublicKey</c> and <c>allowSystemCompletionActions</c>, and a
+    /// download's completion program in <c>job.update</c>. The desktop pipe admits only the user who could start those
+    /// programs anyway. A network transport's client can't be assumed to be that person, so a server leaves this off
+    /// and those changes are refused; the rest of the settings still apply.
+    /// </summary>
+    public bool SupportsProgramSettings { get; init; }
+
+    /// <summary>
     /// Folders on the Host's own disk can be listed for a client that can't show a dialog there. Nothing reads this
     /// yet: the server's folder listing (D1b) is what it is for.
     /// </summary>
     public bool SupportsFolderBrowse { get; init; }
 
-    /// <summary>The desktop Host: a window, a dialog, a tray, an exit and the updater, and no folder listing.</summary>
+    /// <summary>
+    /// The desktop Host: a window, a dialog, a tray, an exit, the updater and the program settings, and no folder listing.
+    /// </summary>
     public static PlatformCapabilities Desktop { get; } = new()
     {
         SupportsOpenUi = true,
@@ -37,6 +48,7 @@ public sealed record PlatformCapabilities
         SupportsTray = true,
         SupportsShutdown = true,
         SupportsUpdater = true,
+        SupportsProgramSettings = true,
     };
 }
 

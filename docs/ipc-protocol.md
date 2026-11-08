@@ -20,11 +20,16 @@ don't know. A request with a different version gets `server.incompatible` and th
 `server.hello` lists capabilities. `remote` means this Host has the provider messages below.
 
 The meaning of every message lives in `HostCommandDispatcher` (`src/DownloadManager.Runtime/Ipc/`), which has no
-transport of its own; the desktop Host's named pipe is one transport over it. The pipe Host's capability list is
-`jobs`, `settings`, `handoff`, `tray`, `status` and, with the provider, `remote`, in that order; anything new is only
-appended. A Host on a machine that can't do something answers instead of acting: `host.openUi` and `host.shutdown`
-reply `ok: false`, `host.pickFolder` replies with an `error`, and `update.check`, `update.download`, `update.install`
-and `update.defer` reply `ok: false` with "Updates are not available here." The desktop Host can do all of these.
+transport of its own; the desktop Host's named pipe is one transport over it. The capability list is a set: look a
+name up, don't read a position. The pipe Host sends `jobs`, `settings`, `handoff`, `tray`, `status` and, with the
+provider, `remote`, in that order, and a new name is only ever appended; a Host without a tray leaves `tray` out, so
+the names after it sit one place earlier there. A Host on a machine that can't do something answers instead of
+acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
+`update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
+available here." A Host whose clients may not set what it runs (a network server) refuses a `settings.update` that
+changes `postDownloadCommand`, `ffmpegPath`, `updateManifestUrl`, `updatePublicKey` or
+`allowSystemCompletionActions`, and a `job.update` that sets a completion program; sending those values back
+unchanged is fine. The desktop Host can do all of these.
 
 ## One command at a time per connection
 
