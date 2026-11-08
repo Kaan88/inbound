@@ -57,8 +57,10 @@ Only a Host whose hello lists `folders` answers these; the desktop Host doesn't 
 with `error` "Folder browsing is not available here." Both requests reply with `folders.browseResult`
 (`FolderBrowseResult` in `FolderBrowseDtos.cs`).
 
-- `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden and unreadable
-  folders left out, at most 2,000 (then `truncated: true`). An empty or missing `path` lists the allowed roots. The
+- `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden folders (the
+  Hidden or System attribute on Windows, a leading dot on Linux) and unreadable ones left out, at most 2,000 (then
+  `truncated: true`, and the 2,000 are the first by name, not the first the disk returned). A hidden folder is left
+  out of the list, not out of reach: its path typed in opens it. An empty or missing `path` lists the allowed roots. The
   reply carries `path` (with links resolved), `parent` (null at a root), `roots`, `folders` (`name`, `path`),
   `freeBytes` and `totalBytes` of the mount that holds the folder.
 - `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
@@ -70,6 +72,11 @@ with `error` "Folder browsing is not available here." Both requests reply with `
   resolved component by component, following links, before it is checked, so a link inside a root that points out
   of it is refused, and so is `..` used to climb out. A link inside a root that stays inside is listed and works.
   A refusal is `ok: false` with an `error`, never a listing.
+- The same roots hold on such a server for every path a client gives: `job.add` (`destinationDirectory`, or the
+  folder settings it falls back on) answers `invalid_destination`; `job.update` Move/Rename, `settings.update` with a
+  changed folder outside them, `remote.container.preview`/`sendToJd`, a `.torrent` path in `remote.add`/`classify`,
+  `archive.extract` and `archive.setPassword` with a `filePath`, and `archive.settings.set` with a `folder` answer
+  `ok: false` with an error. The desktop Host has no roots.
 
 ## One command at a time per connection
 

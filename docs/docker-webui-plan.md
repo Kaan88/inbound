@@ -12,22 +12,35 @@ and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows 
 - **Endpoints:** `GET /api/ws` (WebSocket, one JSON envelope per text message, hello and snapshot then events),
   `POST /api/ipc` (one envelope in, one reply out), `GET /health` (no check of any kind), and static files from
   `wwwroot` (a labelled placeholder page until D2). The framing is in `docs/ipc-protocol.md`.
-- **Configuration:** `DOWNLOADMANAGER_DATA` (state, default `/data`), `DOWNLOADMANAGER_ROOTS` (the folders the web UI
-  may browse, default `/downloads`, several separated by `:` or `;`), `DOWNLOADMANAGER_URLS` or `ASPNETCORE_URLS`
-  (default `http://0.0.0.0:8080`), `DOWNLOADMANAGER_HOSTS` (host names a browser may use besides IP addresses and
-  `localhost`). On its first start the server sets the default download folder to the first root and turns off the
+- **Configuration:** `DOWNLOADMANAGER_DATA` (state, default `/data`), `DOWNLOADMANAGER_ROOTS` (the folders the
+  server may use for its clients, default `/downloads`, several separated by `:` or `;`), `DOWNLOADMANAGER_URLS` or
+  `ASPNETCORE_URLS` (default `http://0.0.0.0:8080`; these alone say where it listens, Kestrel's own
+  `Kestrel:Endpoints` configuration is turned off), `DOWNLOADMANAGER_HOSTS` (host names a browser may use besides IP
+  addresses and `localhost`), `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` (start although the saved secrets were
+  sealed with another key file; they are lost). On its first start the server sets the default download folder to the first root and turns off the
   desktop-only settings (notifications, sound, clipboard watching, start at sign-in).
 - **What the server can't do:** no window, folder dialog, tray, exit on request, updater or programs named by a client
   (`PlatformCapabilities` with only `SupportsFolderBrowse` on). Those commands answer that they are not available.
   Instead it answers `folders.browse` and `folders.create`, limited to the roots, with every path resolved through
   its links before the check.
+- **Everything a client names stays in the roots** (review fix, 2026-11-08): a download's folder (asked for, or taken
+  from the default, last, category or custom-category folder), Move/Rename of a finished download, a changed folder
+  setting (the download folder always, because saving creates it), a container file to preview or send, a `.torrent`
+  file given by its path, and an archive to extract, its password record or the "extract to this folder" setting.
+  Each path is resolved through its links first and the resolved one is used. Outside the roots the answer is an
+  error ("outside the folders this server may use") and nothing is written. The desktop Host has no roots.
+- **One server per data folder:** it holds `<data>/server.lock` open with no sharing (an exclusive `flock` on Linux)
+  for its whole life, as the desktop Host holds its mutex. A second server on the same folder stops with exit code 2.
+  The kernel drops the lock when the process ends, killed or not. A file system without working locks (some network
+  shares) can't give this guarantee, so the data belongs on a local volume.
+- **Listening:** the loopback rule below is checked on the configured addresses before starting and again on the
+  addresses Kestrel reports once it listens; a refusal stops it at once.
 - **Origin check:** a browser request to `/api/` must come from the server's own origin and must name the server by
   an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. That stops another web page, including one that
   points its own name at the server (DNS rebinding), from driving it through the user's browser.
 
 **There is no sign-in yet (D2).** Anyone who can reach the port can do everything a client can: add and delete
-downloads, write files anywhere the server's user may write (a job's destination is not limited to the roots, only
-the folder browser is), change settings, enter or replace the TorBox key and site logins. The server therefore refuses
+downloads, write files anywhere in the roots, change settings, enter or replace the TorBox key and site logins. The server therefore refuses
 to listen on anything but loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and logs a warning when
 it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep the port on a trusted home network.
 
@@ -35,15 +48,15 @@ it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep th
 
 | Windows part | On Linux now | Evidence |
 | --- | --- | --- |
-| `SecretProtector` (DPAPI) | `ISecretProtector`. The server uses `AesGcmSecretProtector`: AES-256-GCM, key in `<data>/secrets.key`, 32 random bytes, created with mode 600; a looser mode is reset to 600 with a warning. Blobs are `aesgcm:v1:`. The desktop keeps DPAPI unchanged. | `SecretKeyFileTests` (Server.Tests) |
+| `SecretProtector` (DPAPI) | `ISecretProtector`. The server uses `AesGcmSecretProtector`: AES-256-GCM, key in `<data>/secrets.key`, 32 random bytes, created with mode 600; a looser mode is reset to 600 with a warning. Blobs are `aesgcm:v1:` and carry the key's id. Before any store opens, the data folder is searched for blobs: one sealed with another key, or a missing key file while blobs exist, stops the start with exit code 2 and a message naming the key file, and no new key is made. Starting anyway would read those secrets as empty and the stores would drop them on their next save. `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` is the explicit way to start without them. The desktop keeps DPAPI unchanged. | `SecretKeyFileTests`, `ServerStartGuardTests` (Server.Tests) |
 | Bundled `7z.exe` | `7zz` (or `7z`) found by `DOWNLOADMANAGER_7ZIP`, then a `7zz` next to the program, then `PATH`. The tool status names the path used, or says how to install it. | `SevenZipToolTests`, the Archives and Integration extraction tests on Linux with the official 7-Zip 26.04 `7zz` |
-| Hard-link check after extraction (`GetFileInformationByHandle`) | `lstat` from the C library on Linux (x64 and arm64 layouts), so an extracted hard link is still refused. | `StagingWalkTests.RefusesAHardLink` on Linux |
+| Hard-link check after extraction (`GetFileInformationByHandle`) | `lstat` from the C library on Linux, or `__lxstat` on a glibc older than 2.33 (x64 and arm64 layouts), so an extracted hard link is still refused. When the count can't be read (no such call, a failed call, another architecture) the extraction is refused with a message saying so, rather than the check being skipped. Windows keeps its rule (a failed call counts as one link). | `StagingWalkTests.RefusesAHardLink` and `TheLinkCountIsReadOnlyFromALayoutThatIsKnownAndNeverGuessedAsOne` on Linux |
 | Password on 7-Zip's stdin ending in CR LF | LF only on Linux: 7-Zip for Linux keeps a CR as part of the password. | `ToolPasswordTests`, the RAR4 and 7z/zip password tests on Linux |
 | Junction checks | The same checks catch folder symlinks; the tests make a symlink where Windows makes a junction. | `StagingWalkTests.RefusesAJunction`, `FinalizerTests.AJunctionInTheDestinationIsRefused` on Linux |
 | `ToolLifetime` (job object) | The tool's process tree is killed on cancel, on dispose and when the server exits normally. | `ToolProcessTests` incl. `OffWindowsATiedToolIsKilledWhenThisProcessExits` |
 | FFmpeg path | `ffmpeg` on `PATH` (no `.exe`). | `FfmpegDiscoveryTests` |
 | Completion program check | A full path; `.exe` is only required on Windows. The server refuses completion programs anyway. | `HostCommandDispatcherTests.TheDesktopAcceptsProgramSettings` on Linux |
-| Path comparisons | `PathNames`: case-insensitive on Windows, case-sensitive elsewhere. Used for extraction staging and output sets, archive set keys, package folders, renames and the folder browser. | `PathNamesTests`, `ExtractionSafetyTests` |
+| Path comparisons | `PathNames`: case-insensitive on Windows, case-sensitive elsewhere. Used for extraction staging and output sets, archive set keys, package folders, renames and the folder browser, and (review fix) for every file name the archive code compares within one folder: volume grouping (`ArchiveVolumes`), the folder view's jobs by name, set members, the header cache, the volumes and jobs a run used, missing volumes. So on Linux `Movie.part1.rar` and `movie.part1.rar` are two sets, and one's download is never tied to the other's cleanup. File extensions and categories stay case-insensitive everywhere. | `PathNamesTests`, `ExtractionSafetyTests`, `ArchiveVolumesTests.NamesThatDifferOnlyByCaseAreOneFileOnWindowsAndTwoSetsOnLinux` |
 | Free space and same-volume checks | `Volumes`: the drive on Windows; the longest matching mount point on Linux, so `/downloads` on its own volume is measured as itself. | `PathNamesTests`, `DownloadFoldersTests` |
 | Mark of the web, `SparseFile`, `ExtractionDurability.FlushDirectory` | Skip off Windows (checked in the code: each returns at once there). Files are still flushed with `fsync` before an archive is deleted. | code review; the extraction tests pass on Linux |
 
@@ -52,10 +65,11 @@ it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep th
 - **Case on Linux:** extraction no longer refuses `a.txt` next to `A.TXT` on Linux, because Linux keeps them apart. The
   check stays on Windows. A name with a backslash is refused on Linux, since it would become a folder on Windows if
   the files were ever copied there.
-- **The secret key file** is part of the data volume. A backup of `/data` carries every secret with its key; losing
-  the key file makes saved site logins, proxy passwords and the TorBox key unreadable, and they must be entered again
-  (each is read as empty, with a warning naming the key file). Secrets copied from a Windows install (DPAPI) can't be
-  read on the server, for the same reason.
+- **The secret key file** is part of the data volume. A backup of `/data` carries every secret with its key. Losing
+  the key file stops the server until it is put back, or until the owner starts it once with
+  `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` and enters the site logins, proxy password and TorBox key again.
+  Secrets copied from a Windows install (DPAPI) can never be read on the server; they are read as empty with a warning
+  and don't stop the start, since no key file could open them.
 - **Not done on Linux:** a directory `fsync` after the renames (Windows flushes the folder; Linux skips it, so a power
   cut just after an extraction could lose the renames though not the file data); a kill of the server with SIGKILL
   leaves a running `7zz` to finish on its own (there is no job object). Both are noted for D3.
