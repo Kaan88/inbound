@@ -8,9 +8,9 @@ namespace DownloadManager.Server.Tests;
 /// <summary>D2 extension pairing: one-time codes, tokens kept as hashes, the extension's role only, revocation, CORS.</summary>
 public sealed class PairingTests
 {
-    private const string ChromeOrigin = "chrome-extension://" + BrowserBridge.UnpackedExtensionId;
+    internal const string ChromeOrigin = "chrome-extension://" + BrowserBridge.UnpackedExtensionId;
 
-    private static async Task<string> NewCodeAsync(AuthClient signedIn)
+    internal static async Task<string> NewCodeAsync(AuthClient signedIn)
     {
         using var response = await signedIn.PostAsync("/api/auth/pairing/code");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -19,7 +19,7 @@ public sealed class PairingTests
         return code;
     }
 
-    private static async Task<string> PairAsync(ServerHarness server, string code, string name = "Chrome on the desk")
+    internal static async Task<string> PairAsync(ServerHarness server, string code, string name = "Chrome on the desk")
     {
         using var extension = new AuthClient(server.Base) { Origin = ChromeOrigin };
         using var response = await extension.PostAsync("/api/pair", new { code, name });

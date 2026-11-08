@@ -28,7 +28,7 @@
         <span>Automatically send downloads to the desktop app</span>
       </label>
       <p class="consent small">
-        When this is on, downloads that match your rules stop in your browser and start again in the desktop app, and they leave the browser's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. Nothing is sent to the developer.
+        When this is on, downloads that match your rules stop in your browser and start again in the desktop app, and they leave the browser's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you pair your own Inbound server below and send downloads there, the same details go to that server instead. Nothing is sent to the developer.
         <a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a>
       </p>
       <label class="check">
@@ -51,8 +51,7 @@
           <option value="ask">Ask each time</option>
         </select>
       </label>
-      <p class="muted small">"Ask each time" opens a small window for each caught download, starting at the app's default folder, with Choose… for another folder and Keep in browser to leave it to the browser. The folder you choose there is for that download only. The right-click menu always asks.</p>
-      <!-- EXT.R1, later (PLAN.md stream C, transport): a "Send to: this PC / the server" choice goes here once the server transport exists. -->
+      <p class="muted small">"Ask each time" opens a small window for each caught download, starting at the app's default folder, with Choose… for another folder and Keep in browser to leave it to the browser. The folder you choose there is for that download only. With a server paired below, the window also asks whether to save on this PC or on the server. The right-click menu always asks.</p>
 
     </section>
 
@@ -88,11 +87,51 @@
       <p id="siteAccessResult" class="muted small"></p>
     </section>
 
+    <section id="serverCard" class="card form-card">
+      <h2>Inbound server</h2>
+      <p class="muted small">
+        Send downloads to your own Inbound server (the Docker or Linux version) as well as, or instead of, this PC.
+        To get a code, open the server's web UI, then Settings, Paired browsers, and choose Pair a browser. The code
+        works once, for ten minutes.
+      </p>
+      <div id="serverUnpaired">
+        <label class="field">
+          <span>Server address</span>
+          <input id="serverAddress" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="http://192.168.1.20:8080" />
+        </label>
+        <p id="serverCleartext" class="muted small hidden">This address uses http://, so the pairing token and the cookies sent with each download cross your network unencrypted. That is fine on a home network you trust; put the server behind https:// otherwise.</p>
+        <label class="field">
+          <span>Pairing code</span>
+          <input id="pairingCode" type="text" spellcheck="false" autocomplete="off" maxlength="12" placeholder="8 letters and digits" />
+        </label>
+        <div class="row">
+          <button id="pairServer" type="button">Pair</button>
+        </div>
+      </div>
+      <div id="serverPaired" class="hidden">
+        <p id="serverState" class="state-banner" data-on="false"></p>
+        <div class="row">
+          <button id="checkServer" type="button">Check connection</button>
+          <button id="openServer" type="button">Open the web UI</button>
+          <button id="unpairServer" type="button">Unpair</button>
+        </div>
+      </div>
+      <label class="field">
+        <span>Automatic downloads go to</span>
+        <select id="defaultTarget">
+          <option value="local">This PC</option>
+          <option value="server">The server</option>
+        </select>
+      </label>
+      <p class="muted small">Saved with Save settings. The server can be chosen once one is paired. If the place chosen can't take a download, it stays in your browser; it is never sent to the other place instead.</p>
+      <p id="serverResult" class="muted small" role="status"></p>
+    </section>
+
     <section class="card form-card">
       <h2>Connection</h2>
       <p class="muted small">
-        This extension needs the Inbound Download Manager desktop app for Windows, and sends download details
-        only to that app on this computer. Using the extension starts the app's background process if it is not
+        This extension needs the Inbound Download Manager desktop app for Windows, or an Inbound server paired
+        above, and sends download details only to that app on this computer or to your server. Using the extension starts the app's background process if it is not
         running. If the app is not installed or cannot be reached, or it refuses a download, the download stays
         in your browser. Once the app has accepted one, the browser's copy is gone, so pause catching first for a file from a
         submitted form or a link that works only once.

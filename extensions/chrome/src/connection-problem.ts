@@ -5,7 +5,7 @@ const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 
 /** True when the error means the desktop app is not on this computer at all. */
 export function isAppMissing(error: string | undefined): boolean {
-  return /not found/i.test(error ?? "");
+  return /not found|no such native application/i.test(error ?? "");
 }
 
 /** What a connection error means to someone using the extension, in place of Chrome's wording. */

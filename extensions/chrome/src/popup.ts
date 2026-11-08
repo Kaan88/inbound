@@ -1,5 +1,5 @@
 import { connectionProblem } from "./connection-problem";
-import { actionsFor, latestJobs, type JobAction, type JobSummary } from "./job-list";
+import { actionsFor, latestJobsByTarget, type JobAction, type JobSummary } from "./job-list";
 
 interface Settings {
   enabled: boolean;
@@ -20,7 +20,13 @@ interface Status {
   settings?: Settings;
   leftInBrowser?: Array<{ fileName: string; reason: string; at: number }>;
   jobs?: JobSummary[];
+  /** The desktop app is not installed here and a server is paired: the server is the only place. */
+  localMissing?: boolean;
+  server?: { address: string; name?: string; connected: boolean; lastError: string } | null;
 }
+
+// Set from the status: with a server paired, every download is labelled with where it is.
+let serverAddress: string | null = null;
 
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const statusDot = document.getElementById("statusDot") as HTMLSpanElement;
@@ -133,7 +139,9 @@ const ACTION_LABELS: Record<JobAction, string> = { pause: "Pause", resume: "Resu
 async function runJobAction(job: JobSummary, action: JobAction, deleteFile = false): Promise<void> {
   clearError();
   try {
-    const result = (await chrome.runtime.sendMessage({ type: "dm.jobAction", action, jobId: job.id, deleteFile })) as { ok?: boolean; error?: string };
+    const result = (await chrome.runtime.sendMessage({
+      type: "dm.jobAction", action, jobId: job.id, deleteFile, target: job.target ?? "local",
+    })) as { ok?: boolean; error?: string };
     if (!result?.ok) showError(result?.error || "The app did not do that.");
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
@@ -156,7 +164,7 @@ function actionRow(job: JobSummary): HTMLDivElement {
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.textContent = "Delete";
-    confirm.title = `Remove ${label} from Inbound`;
+    confirm.title = job.target === "server" ? `Remove ${label} from the server` : `Remove ${label} from Inbound`;
     confirm.addEventListener("click", () => void runJobAction(job, "remove", confirmingDelete.get(job.id) === true));
     const cancel = document.createElement("button");
     cancel.type = "button";
@@ -186,7 +194,7 @@ function actionRow(job: JobSummary): HTMLDivElement {
 }
 
 function renderJobs(jobs: JobSummary[]): void {
-  shownJobs = latestJobs(jobs);
+  shownJobs = latestJobsByTarget(jobs);
   jobsList.replaceChildren();
   if (!shownJobs.length) {
     const empty = document.createElement("li");
@@ -229,7 +237,16 @@ function renderJobs(jobs: JobSummary[]): void {
       meta.textContent += ` — ${job.failure.message}`;
     }
 
-    item.append(name, state, meta);
+    if (serverAddress) {
+      // EXT.R1: which place the download is in, when there are two.
+      const where = document.createElement("span");
+      where.className = "target-tag";
+      where.dataset.target = job.target ?? "local";
+      where.textContent = job.target === "server" ? "Server" : "This PC";
+      item.append(name, where, state, meta);
+    } else {
+      item.append(name, state, meta);
+    }
 
     if (typeof job.progress === "number" && job.progress > 0 && job.progress < 1) {
       const progress = document.createElement("div");
@@ -243,6 +260,20 @@ function renderJobs(jobs: JobSummary[]): void {
     item.append(actionRow(job));
     jobsList.append(item);
   }
+}
+
+function renderServer(status: Status): void {
+  const card = document.getElementById("serverCard") as HTMLElement;
+  card.classList.toggle("hidden", !status.server);
+  if (!status.server) return;
+  const dot = document.getElementById("serverDot") as HTMLSpanElement;
+  dot.className = `dot ${status.server.connected ? "ok" : "bad"}`;
+  (document.getElementById("serverLabel") as HTMLSpanElement).textContent = status.server.connected
+    ? "Connected to the server"
+    : "Server not answering";
+  (document.getElementById("serverDetail") as HTMLSpanElement).textContent = status.server.connected
+    ? status.server.address.replace(/^https?:\/\//, "")
+    : status.server.lastError || status.server.address;
 }
 
 function renderLeftInBrowser(notes: Status["leftInBrowser"]): void {
@@ -282,8 +313,14 @@ async function refresh(): Promise<void> {
 
     const enabled = status.settings?.enabled ?? status.enabled ?? false;
     const connected = status.connected ?? false;
+    serverAddress = status.server?.address ?? null;
+    renderServer(status);
+    // Without the desktop app here, the paired server is the only place; its card says how it is.
+    (document.getElementById("statusCard") as HTMLElement).classList.toggle("hidden", status.localMissing === true);
     statusDot.className = "dot";
-    if (!enabled) {
+    if (status.localMissing) {
+      statusText.textContent = status.server?.connected ? "Server connected" : "Server not answering";
+    } else if (!enabled) {
       statusDot.classList.add("warn");
       statusLabel.textContent = "Automatic sending is off";
       statusDetail.textContent = "Right-click a link to send it, or turn it on in Settings.";
@@ -304,7 +341,7 @@ async function refresh(): Promise<void> {
       statusText.textContent = "Disconnected";
     }
 
-    getApp.classList.toggle("hidden", !enabled || connected);
+    getApp.classList.toggle("hidden", !enabled || connected || status.localMissing === true);
     pauseActive = !!status.pauseUntil && status.pauseUntil > Date.now();
 
     // EXT.B1: whether downloads are caught automatically is always in view, with the way to turn it on.
@@ -374,6 +411,10 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
     }
+  });
+
+  (document.getElementById("openServer") as HTMLButtonElement).addEventListener("click", () => {
+    if (serverAddress) void chrome.tabs.create({ url: `${serverAddress}/` });
   });
 
   (document.getElementById("autoTurnOn") as HTMLButtonElement).addEventListener("click", () => {
