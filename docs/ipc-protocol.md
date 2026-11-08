@@ -19,6 +19,13 @@ don't know. A request with a different version gets `server.incompatible` and th
 
 `server.hello` lists capabilities. `remote` means this Host has the provider messages below.
 
+The meaning of every message lives in `HostCommandDispatcher` (`src/DownloadManager.Runtime/Ipc/`), which has no
+transport of its own; the desktop Host's named pipe is one transport over it. The pipe Host's capability list is
+`jobs`, `settings`, `handoff`, `tray`, `status` and, with the provider, `remote`, in that order; anything new is only
+appended. A Host on a machine that can't do something answers instead of acting: `host.openUi` and `host.shutdown`
+reply `ok: false`, `host.pickFolder` replies with an `error`, and `update.check`, `update.download`, `update.install`
+and `update.defer` reply `ok: false` with "Updates are not available here." The desktop Host can do all of these.
+
 ## One command at a time per connection
 
 The Host handles a connection's commands strictly in order, and each waits for the one before it.
