@@ -403,6 +403,36 @@ test('Download All: a folder typed before the late target list arrives is kept, 
   }
 });
 
+test('EXT.B2 Download All: a target list that arrives during a This PC pick does not switch to the server under it', async () => {
+  const targets = deferred();
+  const pick = deferred();
+  let confirmed;
+  const page = await openBatchWindow({
+    'dm.targets': () => targets.promise,
+    'dm.pickFolder': () => pick.promise,
+    'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    const picking = page.el('browseDestination').click();
+    // The server is the default target, and its list arrives while the desktop app's dialog is open.
+    targets.resolve({ ...BATCH_TARGETS, target: 'server' });
+    await tick();
+    await tick();
+    pick.resolve({ ok: true, path: 'E:\\Picked' });
+    await picking;
+    assert.equal(page.el('destination').value, 'E:\\Picked');
+    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
+    assert.equal(radios.length, 2, 'the choice is shown once the pick ends');
+    assert.ok(radios.every(radio => !radio.disabled));
+    assert.equal(radios.find(radio => radio.checked)?.value, 'local');
+    await page.el('confirm').click();
+    assert.equal(confirmed.target, 'local', 'a This PC folder is never sent to the server');
+    assert.equal(confirmed.destination, 'E:\\Picked');
+  } finally {
+    page.restore();
+  }
+});
+
 test('Download All: switching target shows that target\'s default, and the radios are held during a pick', async () => {
   const pick = deferred();
   let confirmed;
