@@ -588,7 +588,7 @@ public sealed partial class RuntimeServiceTests
 
         Assert.Empty(ctx.Service.GetSnapshot().Settings.RecentUrls);
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
-        Assert.Contains("\"protectedUrl\": \"dpapi:v1:", await JobJsonAsync(ctx, added.Id));
+        Assert.Contains("\"protectedUrl\": \"" + SecretProtector.Current.Prefix, await JobJsonAsync(ctx, added.Id));
         Assert.DoesNotContain(LinkSecret, System.Text.Json.JsonSerializer.Serialize(ctx.Service.GetSnapshot()));
     }
 
@@ -714,7 +714,7 @@ public sealed partial class RuntimeServiceTests
         var same = await ctx.Service.RefreshUrlAsync(id, failed.Url);
         Assert.True(same.Ok, same.Error);
         await ctx.WaitFor(id, j => j.State == "failed");
-        Assert.Contains("dpapi:v1:", await JobJsonAsync(ctx, id));
+        Assert.Contains(SecretProtector.Current.Prefix, await JobJsonAsync(ctx, id));
 
         var otherMasked = await ctx.Service.RefreshUrlAsync(id, $"{PastedHost}/other.bin?token={UrlRedactor.Mask}");
         Assert.False(otherMasked.Ok);

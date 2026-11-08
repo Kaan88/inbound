@@ -1,3 +1,4 @@
+using DownloadManager.Tests.Shared;
 using System.Diagnostics;
 using System.Text;
 using DownloadManager.Core.Providers;
@@ -195,7 +196,7 @@ public sealed class RemoteInputClassifierTests : IDisposable
     [InlineData(@"C:\Users\someone\file.torrent")]
     public void WithoutAKeyWhatOnlyAProviderCanDoGivesThatReason(string text)
     {
-        var result = Classify(text, Provider(accountProblem: "No key is set."));
+        var result = Classify(TestPaths.Native(text), Provider(accountProblem: "No key is set."));
         Assert.Equal(RemoteInputKind.Unsupported, result.Kind);
         Assert.Equal("No key is set.", result.Reason);
     }
@@ -294,7 +295,7 @@ public sealed class RemoteInputClassifierTests : IDisposable
 
     [Fact]
     public void ALocalTorrentFile()
-        => Assert.Equal(RemoteInputKind.TorrentFile, Classify(@"C:\Users\someone\Pack.TORRENT").Kind);
+        => Assert.Equal(RemoteInputKind.TorrentFile, Classify(TestPaths.Native(@"C:\Users\someone\Pack.TORRENT")).Kind);
 
     /// <summary>Opening one of these sends this Windows account's credentials to whatever host it names.</summary>
     [Theory]
@@ -418,7 +419,7 @@ public sealed class RemoteInputClassifierTests : IDisposable
     [InlineData("https://a.invalid/1\nhttps://b.invalid/2", "one link")]
     public void WhatCantBeUsedSaysWhy(string? text, string reason)
     {
-        var result = Classify(text);
+        var result = Classify(text is null ? null : TestPaths.Native(text));
         Assert.Equal(RemoteInputKind.Unsupported, result.Kind);
         Assert.Contains(reason, result.Reason);
     }

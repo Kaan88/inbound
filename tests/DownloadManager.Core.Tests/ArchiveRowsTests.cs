@@ -416,6 +416,7 @@ public sealed class ArchiveRowsTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public void A_rar_download_with_no_record_takes_a_password_in_advance_by_its_path()
     {
         var target = ArchiveRules.Plan([File("a.rar")], [], null, true).Password;

@@ -950,6 +950,7 @@ public sealed partial class RuntimeServiceTests
     /// what comes after the last one. The real CDN answers that with a 206 and no range, not a 416.
     /// </summary>
     [Fact]
+    [Trait("Platform", "Windows")] // an open file blocks a rename only on Windows
     public async Task ScenarioF_AResumeAfterAFailedRenameFinishesOnTheRealCdnsAnswer()
     {
         FinalizeHookCheckpoints? checkpoints = null;

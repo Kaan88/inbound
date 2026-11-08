@@ -53,12 +53,12 @@ internal static class ArchiveTools
 {
     private const string WinRarFolder = @"C:\Program Files\WinRAR";
 
-    /// <summary>The 7-Zip the build copies next to the tests, as it does next to the app.</summary>
-    public static string SevenZipPath => DownloadManager.Archives.SevenZipTool.BundledPath;
+    /// <summary>The bundled copy on Windows; elsewhere the 7zz that SevenZipTool.Find finds (PATH or DOWNLOADMANAGER_7ZIP).</summary>
+    public static string SevenZipPath => DownloadManager.Archives.SevenZipTool.Find() ?? DownloadManager.Archives.SevenZipTool.BundledPath;
 
     public static string RarPath => Path.Combine(WinRarFolder, "Rar.exe");
 
-    public static string? SevenZipMissing => DownloadManager.Archives.SevenZipTool.Find() is not null ? null : $"The bundled 7-Zip is not at {SevenZipPath}, so extraction cannot run here.";
+    public static string? SevenZipMissing => DownloadManager.Archives.SevenZipTool.Find() is not null ? null : $"7-Zip is not here ({DownloadManager.Archives.SevenZipTool.MissingMessage}), so extraction cannot run.";
 
     public static string? RarMissing =>
         SevenZipMissing is { } missing ? missing
@@ -259,7 +259,8 @@ internal sealed class ArchiveHarness : IAsyncDisposable
         },
     });
 
-    public string PathOf(string name) => Path.Combine(Downloads, name);
+    /// <summary>Tests name nested files the Windows way (<c>sub\a.txt</c>); on Linux the backslash becomes the separator.</summary>
+    public string PathOf(string name) => Path.Combine(Downloads, OperatingSystem.IsWindows() ? name : name.Replace('\\', '/'));
 
     /// <summary>Another coordinator on the same disk and service, as after a clean restart of it alone.</summary>
     public async Task StartAgainAsync()

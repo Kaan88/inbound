@@ -316,18 +316,22 @@ public sealed partial class RuntimeServiceTests
             Assert.True(collided.Ok);
             Assert.Equal(2, Directory.GetFiles(quarantine).Length);
 
-            // A locked orphan is reported as failed, not silently skipped.
-            var locked = Path.Combine(ctx.Destination, $"orphan-locked.{Guid.NewGuid():N}.part");
-            await File.WriteAllBytesAsync(locked, new byte[5]);
-            using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+            // A locked orphan is reported as failed, not silently skipped. Only Windows has a lock that stops a delete.
+            if (OperatingSystem.IsWindows())
             {
-                var failed = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
-                Assert.False(failed.Ok);
-                Assert.Contains(locked, failed.Failed, StringComparer.OrdinalIgnoreCase);
-                Assert.False(string.IsNullOrWhiteSpace(failed.Error));
+                var locked = Path.Combine(ctx.Destination, $"orphan-locked.{Guid.NewGuid():N}.part");
+                await File.WriteAllBytesAsync(locked, new byte[5]);
+                using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    var failed = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
+                    Assert.False(failed.Ok);
+                    Assert.Contains(locked, failed.Failed, StringComparer.OrdinalIgnoreCase);
+                    Assert.False(string.IsNullOrWhiteSpace(failed.Error));
+                }
+
+                File.Delete(locked);
             }
 
-            File.Delete(locked);
             await File.WriteAllBytesAsync(second, new byte[10]);
             var deleted = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
             Assert.True(deleted.Ok);
@@ -2413,7 +2417,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("127.0.0.1:3128", cleared.Address);
         var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
         Assert.DoesNotContain("clear-me-789", json);
-        Assert.DoesNotContain("dpapi:v1:", json);   // no protected blob left behind (no site logins here)
+        Assert.DoesNotContain(SecretProtector.Current.Prefix, json);   // no protected blob left behind (no site logins here)
     }
 
     [Fact]
@@ -2469,7 +2473,7 @@ public sealed partial class RuntimeServiceTests
 
             var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
             Assert.DoesNotContain("proxypass", json);
-            Assert.Contains("dpapi:v1:", json);
+            Assert.Contains(SecretProtector.Current.Prefix, json);
             Assert.DoesNotContain("\"password\"", json, StringComparison.OrdinalIgnoreCase);
 
             // A fresh service instance decrypts the blob and authenticates to the proxy.
@@ -2781,6 +2785,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // the installer updater is Windows-only
     public async Task UpdateHelperThatExitsAtOnceLeavesTheHostRunning()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -2818,6 +2823,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // the installer updater is Windows-only
     public async Task UpdateHelperStillWaitingForTheHostIsScheduled()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -2939,7 +2945,7 @@ public sealed partial class RuntimeServiceTests
         var json = await File.ReadAllTextAsync(jobPath);
         Assert.DoesNotContain(token, json);
         Assert.DoesNotContain("private-cookie-value", json);
-        Assert.Contains("dpapi:v1:", json);
+        Assert.Contains(SecretProtector.Current.Prefix, json);
         var store = new JsonJobStore(ctx.Paths);
         var reloaded = await store.LoadAsync(response.Job.Id);
         Assert.Equal(token, reloaded!.RequestHeaders["authorization"]);
@@ -3018,7 +3024,7 @@ public sealed partial class RuntimeServiceTests
             Assert.True(readBack.HasPassword);
             var settingsJson = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
             Assert.DoesNotContain("sitepass", settingsJson);
-            Assert.Contains("dpapi:v1:", settingsJson);
+            Assert.Contains(SecretProtector.Current.Prefix, settingsJson);
 
             var authorizedBefore = _server.SiteAuthAuthorized;
             var response = await ctx.Service.AddJobAsync(new AddJobRequest

@@ -305,6 +305,7 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public void ATorrentFileShowsItsFileName()
     {
         Assert.Equal("a.torrent", RemoteText.AddLineWords(new AddLine("C:\\t\\a.torrent"), "TorBox").Name);

@@ -1094,7 +1094,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(Sha256Of(927, size), await Hashing.Sha256FileAsync(completed.FinalFilePath));
 
         Assert.Empty(rig.Ctx.Service.GetSnapshot().Settings.RecentUrls);
-        Assert.Contains("\"protectedUrl\": \"dpapi:v1:", await JobJsonAsync(rig.Ctx, added.Id));
+        Assert.Contains("\"protectedUrl\": \"" + SecretProtector.Current.Prefix, await JobJsonAsync(rig.Ctx, added.Id));
         await rig.AssertNoLinkOrKeyLeakedAsync();
     }
 

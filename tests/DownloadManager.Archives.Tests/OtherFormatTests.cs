@@ -32,7 +32,7 @@ public sealed class OtherFormatTests : ExtractionTestBase
         if (password is not null)
         {
             // Asked twice when making an archive.
-            var line = Encoding.UTF8.GetBytes(password + "\r\n");
+            var line = Encoding.UTF8.GetBytes(password + (OperatingSystem.IsWindows() ? "\r\n" : "\n"));
             await process.StandardInput.BaseStream.WriteAsync(line);
             await process.StandardInput.BaseStream.WriteAsync(line);
         }

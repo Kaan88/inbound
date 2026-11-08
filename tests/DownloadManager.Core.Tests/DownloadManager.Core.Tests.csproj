@@ -50,4 +50,8 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\TestPaths.cs" Link="Shared\TestPaths.cs" />
+  </ItemGroup>
+
 </Project>

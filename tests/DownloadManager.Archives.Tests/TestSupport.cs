@@ -103,7 +103,13 @@ public sealed class Workspace : IDisposable
 
     public string Archive(string name) => Path.Combine(Archives, name);
 
-    public string Output(string relative) => Path.Combine(Destination, relative);
+    public string Output(string relative) => Path.Combine(Destination, Native(relative));
+
+    /// <summary>
+    /// The tests name nested files the Windows way (<c>sub.txt</c>). On Linux a backslash is part of a name, so it
+    /// becomes the separator here and the tests build and check the same folders there.
+    /// </summary>
+    public static string Native(string relative) => OperatingSystem.IsWindows() ? relative : relative.Replace('\\', '/');
 
     public string WriteArchive(string name, byte[] bytes)
     {
@@ -116,7 +122,7 @@ public sealed class Workspace : IDisposable
 
     public string WriteSource(string relative, byte[] bytes)
     {
-        var path = Path.Combine(Source, relative);
+        var path = Path.Combine(Source, Native(relative));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, bytes);
         return path;

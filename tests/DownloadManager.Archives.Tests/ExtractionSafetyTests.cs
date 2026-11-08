@@ -183,15 +183,15 @@ public sealed class StagingWalkTests : IDisposable
     [Fact]
     public void ReturnsWhatWasListed()
     {
-        _space.WriteSource(@"sub\a.txt", "aa");
+        _space.WriteSource(Workspace.Native(@"sub\a.txt"), "aa");
         Directory.CreateDirectory(Path.Combine(Payload, "empty"));
 
         var content = ExtractionSafety.WalkStaging(
             Payload,
-            Probe(new ArchiveEntry(@"sub\a.txt", 2, ArchiveEntryKind.File), new("empty", 0, ArchiveEntryKind.Directory)),
+            Probe(new ArchiveEntry(Workspace.Native(@"sub\a.txt"), 2, ArchiveEntryKind.File), new("empty", 0, ArchiveEntryKind.Directory)),
             new ExtractionLimits());
 
-        Assert.Equal([@"sub\a.txt"], content.Files);
+        Assert.Equal([Workspace.Native(@"sub\a.txt")], content.Files);
         Assert.Equal(["empty", "sub"], content.Directories);
     }
 
@@ -231,7 +231,7 @@ public sealed class StagingWalkTests : IDisposable
     public void RefusesAHardLink()
     {
         var target = _space.WriteSource("a.txt", "a");
-        Assert.True(CreateHardLink(Path.Combine(Payload, "b.txt"), target, IntPtr.Zero));
+        MakeHardLink(Path.Combine(Payload, "b.txt"), target);
         var failure = Refused(Probe(new ArchiveEntry("a.txt", 1, ArchiveEntryKind.File), new("b.txt", 1, ArchiveEntryKind.File)));
         Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
         Assert.Contains("hard link", failure.Message);
@@ -251,10 +251,29 @@ public sealed class StagingWalkTests : IDisposable
         Assert.Contains("link", failure.Message);
     }
 
+    /// <summary>A junction on Windows; elsewhere a folder symlink, the link Linux has for the same trick.</summary>
     internal static void MakeJunction(string link, string target)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+
         var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
         var (code, output) = RarTools.RunAsync(cmd, Environment.SystemDirectory, "/d", "/c", "mklink", "/J", link, target).GetAwaiter().GetResult();
+        Assert.True(code == 0, output);
+    }
+
+    internal static void MakeHardLink(string newFile, string existingFile)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(CreateHardLink(newFile, existingFile, IntPtr.Zero));
+            return;
+        }
+
+        var (code, output) = RarTools.RunAsync("ln", Path.GetDirectoryName(newFile)!, existingFile, newFile).GetAwaiter().GetResult();
         Assert.True(code == 0, output);
     }
 
@@ -292,14 +311,14 @@ public sealed class FinalizerTests : IDisposable
     [Fact]
     public async Task WritesNewFilesAndEmptyFolders()
     {
-        var staging = await StagingWithAsync((@"sub\a.txt", "new"));
+        var staging = await StagingWithAsync((Workspace.Native(@"sub\a.txt"), "new"));
         Directory.CreateDirectory(Path.Combine(staging.PayloadFolder, "empty"));
 
         var results = ExtractionFinalizer.MoveIntoDestination(
-            staging, new StagedContent(["empty", "sub"], [@"sub\a.txt"]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None);
+            staging, new StagedContent(["empty", "sub"], [Workspace.Native(@"sub\a.txt")]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None);
 
         Assert.Equal(ExtractedFileOutcome.Written, Assert.Single(results).Outcome);
-        Assert.Equal("new", File.ReadAllText(_space.Output(@"sub\a.txt")));
+        Assert.Equal("new", File.ReadAllText(_space.Output(Workspace.Native(@"sub\a.txt"))));
         Assert.True(Directory.Exists(_space.Output("empty")));
     }
 
@@ -352,10 +371,10 @@ public sealed class FinalizerTests : IDisposable
     [InlineData(ExtractionConflictPolicy.Rename)]
     public async Task FlatteningNeverLosesAFileFromThisArchive(ExtractionConflictPolicy policy)
     {
-        var staging = await StagingWithAsync((@"one\a.txt", "1"), (@"two\a.txt", "2"));
+        var staging = await StagingWithAsync((Workspace.Native(@"one\a.txt"), "1"), (Workspace.Native(@"two\a.txt"), "2"));
 
         var results = ExtractionFinalizer.MoveIntoDestination(
-            staging, new StagedContent(["one", "two"], [@"one\a.txt", @"two\a.txt"]), _space.Destination, policy, false, null, CancellationToken.None);
+            staging, new StagedContent(["one", "two"], [Workspace.Native(@"one\a.txt"), Workspace.Native(@"two\a.txt")]), _space.Destination, policy, false, null, CancellationToken.None);
 
         Assert.Equal(2, results.Count);
         Assert.Equal("1", File.ReadAllText(_space.Output("a.txt")));
@@ -369,10 +388,10 @@ public sealed class FinalizerTests : IDisposable
         Existing("3-blocked", "ignored");
         File.Delete(_space.Output("3-blocked"));
         Directory.CreateDirectory(_space.Output("3-blocked"));
-        var staging = await StagingWithAsync(("1-first.txt", "new first"), (@"2-sub\second.txt", "new second"), ("3-blocked", "cannot land"));
+        var staging = await StagingWithAsync(("1-first.txt", "new first"), (Workspace.Native(@"2-sub\second.txt"), "new second"), ("3-blocked", "cannot land"));
 
         var failure = Assert.Throws<ExtractionException>(() => ExtractionFinalizer.MoveIntoDestination(
-            staging, new StagedContent(["2-sub"], ["1-first.txt", @"2-sub\second.txt", "3-blocked"]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None));
+            staging, new StagedContent(["2-sub"], ["1-first.txt", Workspace.Native(@"2-sub\second.txt"), "3-blocked"]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None));
 
         Assert.Equal(ExtractionFailureKind.Permission, failure.Kind);
         Assert.Equal("old first", File.ReadAllText(_space.Output("1-first.txt")));
@@ -401,10 +420,10 @@ public sealed class FinalizerTests : IDisposable
         var outside = Directory.CreateDirectory(Path.Combine(_space.Root, "outside")).FullName;
         Directory.CreateDirectory(_space.Destination);
         StagingWalkTests.MakeJunction(_space.Output("sub"), outside);
-        var staging = await StagingWithAsync((@"sub\a.txt", "new"));
+        var staging = await StagingWithAsync((Workspace.Native(@"sub\a.txt"), "new"));
 
         var failure = Assert.Throws<ExtractionException>(() => ExtractionFinalizer.MoveIntoDestination(
-            staging, new StagedContent(["sub"], [@"sub\a.txt"]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None));
+            staging, new StagedContent(["sub"], [Workspace.Native(@"sub\a.txt")]), _space.Destination, ExtractionConflictPolicy.Overwrite, true, null, CancellationToken.None));
 
         Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
@@ -452,13 +471,13 @@ public sealed class StagingAreaTests : IDisposable
     public async Task ANextAttemptRestoresAnOriginalACrashLeftDisplaced()
     {
         var area = await PrepareAsync();
-        var displaced = Path.Combine(area.DisplacedFolder, @"sub\a.txt");
+        var displaced = Path.Combine(area.DisplacedFolder, Workspace.Native(@"sub\a.txt"));
         Directory.CreateDirectory(Path.GetDirectoryName(displaced)!);
         File.WriteAllText(displaced, "the only copy");
 
         await PrepareAsync();
 
-        Assert.Equal("the only copy", File.ReadAllText(_space.Output(@"sub\a.txt")));
+        Assert.Equal("the only copy", File.ReadAllText(_space.Output(Workspace.Native(@"sub\a.txt"))));
     }
 
     [Fact]
@@ -558,7 +577,7 @@ public sealed class StagingAreaTests : IDisposable
 
         await StagingArea.RecoverAndRemoveAsync(_space.Staging, _space.Archive("x.rar"), _space.Destination);
 
-        Assert.True(File.Exists(_space.Output(@"Startup\planted.cmd")));
+        Assert.True(File.Exists(_space.Output(Workspace.Native(@"Startup\planted.cmd"))));
         Assert.False(File.Exists(Path.Combine(_space.Root, "Startup", "planted.cmd")));
     }
 
@@ -618,6 +637,7 @@ public sealed class StagingAreaTests : IDisposable
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // drive letters; Linux volumes are checked by mount in PathNamesTests
     public async Task StagingOnAnotherVolumeIsRefused()
     {
         var failure = await Assert.ThrowsAsync<ExtractionException>(() =>
