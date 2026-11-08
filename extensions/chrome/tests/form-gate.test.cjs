@@ -377,6 +377,32 @@ test('Download All: Save in shows the default folder, and an untouched default i
   }
 });
 
+test('Download All: a folder typed before the late target list arrives is kept, and a later switch still shows the default', async () => {
+  const targets = deferred();
+  let confirmed;
+  const page = await openBatchWindow({
+    'dm.targets': () => targets.promise,
+    'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    page.el('destination').value = 'E:\Typed';
+    targets.resolve(BATCH_TARGETS);
+    await tick();
+    await tick();
+    assert.equal(page.el('destination').value, 'E:\Typed', 'the late list does not replace the typed folder');
+    await page.el('confirm').click();
+    assert.equal(confirmed.destination, 'E:\Typed');
+
+    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
+    const server = radios.find(radio => radio.value === 'server');
+    server.checked = true;
+    await server.dispatch('change');
+    assert.equal(page.el('destination').value, '/downloads');
+  } finally {
+    page.restore();
+  }
+});
+
 test('Download All: switching target shows that target\'s default, and the radios are held during a pick', async () => {
   const pick = deferred();
   let confirmed;

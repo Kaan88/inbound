@@ -933,7 +933,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         settings = { ...settings, defaultTarget: "local" };
         await chrome.storage.local.set({ settings });
       }
-      return { ok: true, settings, server: null, revoked };
+      return { ok: true, settings, server: null, revoked, wasPaired: Boolean(leaving) };
     }
 
     case "dm.targets": {

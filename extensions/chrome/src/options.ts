@@ -245,14 +245,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const result = byId<HTMLParagraphElement>("serverResult");
     try {
       result.textContent = "Unpairing...";
-      const response = (await chrome.runtime.sendMessage({ type: "dm.unpairServer" })) as { ok?: boolean; error?: string; revoked?: boolean };
+      const response = (await chrome.runtime.sendMessage({ type: "dm.unpairServer" })) as { ok?: boolean; error?: string; revoked?: boolean; wasPaired?: boolean };
       if (!response?.ok) {
         result.textContent = response?.error || "Could not unpair.";
         return;
       }
       showServer(null);
       // The server removed the token itself (DELETE /api/pair/self), or it could not be reached in time.
-      result.textContent = response.revoked
+      result.textContent = response.wasPaired === false
+        ? "Not paired. Downloads go to this PC."
+        : response.revoked
         ? "Unpaired. Downloads go to this PC. The server removed this browser's pairing too, so its token no longer works there."
         : "Unpaired. Downloads go to this PC. The server could not be told, so remove this browser from its Paired browsers list too, so its token stops working there.";
     } catch (error) {
