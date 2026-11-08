@@ -303,7 +303,7 @@ public sealed class SchedulerWindow : Window
                 <StackPanel Grid.Column="1" Spacing="2">
                   <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding SizeText}" FontSize="12" Opacity="0.75"/>
+                    <TextBlock Text="{Binding SizeText}" Visibility="{Binding SizeVisibility}" FontSize="12" Opacity="0.75"/>
                     <TextBlock Text="{Binding StateText}" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis"/>
                   </StackPanel>
                 </StackPanel>
@@ -335,7 +335,8 @@ public sealed class SchedulerWindow : Window
 
     private UIElement BuildLimitsTab()
     {
-        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(10), MaxWidth = 680 };
+        // Left-aligned like the other tabs; MaxWidth alone centred it in a wide window.
+        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(10), MaxWidth = 680, HorizontalAlignment = HorizontalAlignment.Left };
         panel.Children.Add(new TextBlock { Text = "Queue limits", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
         panel.Children.Add(_maxConcurrent);
         panel.Children.Add(_quotaEnabled);

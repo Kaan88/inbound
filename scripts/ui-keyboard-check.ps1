@@ -50,14 +50,18 @@ public static class UiKeyboardCheckNative {
 '@
 
 $proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
-    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" } | Select-Object -First 1
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" -and $_.CommandLine -notmatch '--job|update-progress' } |
+    Select-Object -First 1
 if (-not $proc) { Write-Output 'NO TEST UI'; exit 1 }
 # The installed copy is the owner's real app; a -PathPart that happens to match it must not send keys there.
 if ($proc.ExecutablePath -like '*\Programs\Inbound Download Manager\*') { Write-Output 'REFUSED: that is the installed app, not a test instance'; exit 1 }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $pidCondition = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$proc.ProcessId)
-$win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
+$win = $null
+foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCondition)) {
+    if ($candidate.Current.Name -eq 'Inbound Download Manager') { $win = $candidate; break }
+}
 if (-not $win) { Write-Output 'NO WINDOW'; exit 1 }
 $hwnd = [IntPtr]$win.Current.NativeWindowHandle
 
@@ -81,6 +85,14 @@ function Invoke-Element($el) {
     $p = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke(); return $true }
     return $false
+}
+# Any delete confirmation: "Delete download?", "Delete 3 downloads?", "Remove extraction record?".
+function Find-DeleteDialog {
+    $c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
+    foreach ($t in $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $c)) {
+        if ($t.Current.Name -match '^(Delete .+|Remove extraction record)\?$') { return $t }
+    }
+    return $null
 }
 function Modal-Info([string]$title) {
     $el = Find-ByName $title
@@ -130,8 +142,15 @@ if ($add) {
 $jobs = Find-ById 'JobsList'
 $itemCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)
 $rows = if ($jobs) { $jobs.FindAll([System.Windows.Automation.TreeScope]::Children, $itemCondition) } else { @() }
-if ($rows.Count -gt 0) {
-    $rows[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+# One finished file, not a package ("Holiday photos, Completed · 3/3") or an extraction record (no state), so the
+# checks below see the single-download dialog and its "Delete from disk" box.
+$finished = $null
+foreach ($row in $rows) {
+    if ($row.Current.Name -match ', Completed(,|$)') { $finished = $row; break }
+}
+$first = if ($finished) { $finished } elseif ($rows.Count -gt 0) { $rows[0] } else { $null }
+if ($first) {
+    $first.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     Start-Sleep -Milliseconds 400
 }
 
@@ -140,12 +159,13 @@ $delete = Find-ById 'DeleteButton'
 if ($delete -and (Invoke-Element $delete)) {
     Start-Sleep -Milliseconds 700
     $input = [UiKeyboardCheckNative]::InputSite($hwnd)
-    Write-Output "DELETE open=$([bool](Find-ByName 'Delete download?')) $(Modal-Info 'Delete download?') inputSite=$input"
+    $dialog = Find-DeleteDialog
+    Write-Output "DELETE open=$([bool]$dialog) title='$(if ($dialog) { $dialog.Current.Name })' inputSite=$input"
     [UiKeyboardCheckNative]::Enter($input)
     Start-Sleep -Milliseconds 900
     $rowsAfter = $jobs.FindAll([System.Windows.Automation.TreeScope]::Children, $itemCondition).Count
-    Write-Output "DELETE-ENTER closed=$(-not [bool](Find-ByName 'Delete download?')) rowsAfter=$rowsAfter"
-    if (Find-ByName 'Delete download?') { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
+    Write-Output "DELETE-ENTER closed=$(-not [bool](Find-DeleteDialog)) rowsAfter=$rowsAfter"
+    if (Find-DeleteDialog) { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
 }
 
 # UI.R20: Shift+Delete opens the dialog with "Delete from disk" ticked; Delete and the toolbar button leave it
@@ -159,21 +179,16 @@ function DeleteBox-State {
     return 'no-toggle'
 }
 function Close-DeleteDialog {
-    $title = Find-ByName 'Delete download?'
-    if ($title) { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
+    if (Find-DeleteDialog) { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
 }
 if ($rows.Count -gt 0) {
-    $finished = $null
-    foreach ($row in $jobs.FindAll([System.Windows.Automation.TreeScope]::Children, $itemCondition)) {
-        if ($row.Current.Name -match 'Complete') { $finished = $row; break }
-    }
-    $target = if ($finished) { $finished } else { $rows[0] }
+    $target = $first
     $target.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $target.SetFocus()
     Start-Sleep -Milliseconds 400
     foreach ($case in @(@{ Name = 'SHIFT-DELETE'; Shift = $true; Expect = 'On' }, @{ Name = 'DELETE-KEY'; Shift = $false; Expect = 'Off' })) {
         # A dialog left open by the last case would take this key instead of the list: stop rather than guess.
-        if (Find-ByName 'Delete download?') { Write-Output "$($case.Name) skipped: the last delete dialog is still open"; break }
+        if (Find-DeleteDialog) { Write-Output "$($case.Name) skipped: the last delete dialog is still open"; break }
         $target.SetFocus()
         Start-Sleep -Milliseconds 200
         if (-not [UiKeyboardCheckNative]::Delete($hwnd, $case.Shift)) {
@@ -183,14 +198,16 @@ if ($rows.Count -gt 0) {
         Start-Sleep -Milliseconds 900
         $state = DeleteBox-State
         $verdict = if ($state -eq 'absent') { 'n/a (no finished row selected)' } elseif ($state -eq $case.Expect) { 'ok' } else { 'WRONG' }
-        Write-Output "$($case.Name) open=$([bool](Find-ByName 'Delete download?')) deleteFromDisk=$state expect=$($case.Expect) $verdict"
+        Write-Output "$($case.Name) open=$([bool](Find-DeleteDialog)) deleteFromDisk=$state expect=$($case.Expect) $verdict"
         Close-DeleteDialog
     }
-    if ($delete -and (Invoke-Element $delete)) {
+    # Never press the toolbar's Delete behind an open dialog: a second dialog used to end the window (UI.B8).
+    if (Find-DeleteDialog) { Write-Output 'DELETE-TOOLBAR skipped: a delete dialog is still open' }
+    elseif ($delete -and (Invoke-Element $delete)) {
         Start-Sleep -Milliseconds 900
         $state = DeleteBox-State
         $verdict = if ($state -eq 'absent') { 'n/a (no finished row selected)' } elseif ($state -eq 'Off') { 'ok' } else { 'WRONG' }
-        Write-Output "DELETE-TOOLBAR open=$([bool](Find-ByName 'Delete download?')) deleteFromDisk=$state expect=Off $verdict"
+        Write-Output "DELETE-TOOLBAR open=$([bool](Find-DeleteDialog)) deleteFromDisk=$state expect=Off $verdict"
         Close-DeleteDialog
     }
 }
@@ -215,7 +232,7 @@ if ($file) {
 # Add dialog is modal.
 if ($add -and (Invoke-Element $add)) {
     Start-Sleep -Milliseconds 700
-    Write-Output "ADD open=$([bool](Find-ByName 'Add download')) $(Modal-Info 'Add download')"
+    Write-Output "ADD open=$([bool](Find-ByName 'Enter new address to download')) $(Modal-Info 'Enter new address to download')"
     Invoke-Element (Get-Button 'Cancel') | Out-Null
 }
 Write-Output 'UI-KEYBOARD-CHECK-DONE'

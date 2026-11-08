@@ -20,7 +20,8 @@ public sealed class StatisticsWindow : Window
     public StatisticsWindow()
     {
         Title = "Statistics — Inbound Download Manager";
-        WindowLayout.ResizeForDpi(this, 650, 650);
+        // Tall enough that the closing note is not cut off at 100%; it still scrolls on a shorter screen.
+        WindowLayout.ResizeForDpi(this, 650, 720);
         WindowPlacement.Track(this, "statistics");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
