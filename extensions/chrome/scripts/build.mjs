@@ -35,6 +35,9 @@ export function firefoxManifest(chromeManifest) {
   delete manifest.key;
   delete manifest.minimum_chrome_version;
   manifest.background = { scripts: ["background.js"] };
+  // EXT.B5: Firefox asks where to save before downloads.onCreated, so there downloads are caught from their
+  // response headers (blocking webRequest, which Firefox keeps in MV3). Chrome has onDeterminingFilename.
+  manifest.permissions = [...new Set([...(manifest.permissions ?? []), "webRequest", "webRequestBlocking"])];
   manifest.browser_specific_settings = {
     gecko: {
       id: FIREFOX_EXTENSION_ID,
