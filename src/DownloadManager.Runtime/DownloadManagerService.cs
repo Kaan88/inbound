@@ -199,6 +199,42 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    /// <summary>
+    /// The settings alone. <see cref="GetSnapshot"/> maps and sorts every job and reads the browser
+    /// registration from the registry, which a caller that only wants a setting should not pay for.
+    /// </summary>
+    public SettingsDto GetSettings()
+    {
+        lock (_sync)
+        {
+            return MapSettings(_settings);
+        }
+    }
+
+    /// <summary>The Host's status, without the job list (it still reads the browser registration).</summary>
+    public HostStatusDto GetStatus()
+    {
+        lock (_sync)
+        {
+            return BuildStatusLocked();
+        }
+    }
+
+    /// <summary>
+    /// The number of active downloads, as <see cref="HostStatusDto.ActiveDownloads"/> counts them. The tray asks
+    /// at most once a second while anything changes, so this neither copies the job list nor touches the registry.
+    /// </summary>
+    public int ActiveDownloadCount()
+    {
+        lock (_sync)
+        {
+            return CountActiveLocked();
+        }
+    }
+
+    private int CountActiveLocked() => _jobs.Values.Count(r => r.Job.State is DownloadState.Connecting or DownloadState.Downloading
+        or DownloadState.RetryWaiting or DownloadState.Verifying);
+
     public async Task<IReadOnlyList<SegmentDto>> GetSegmentsAsync(
         Guid id,
         CancellationToken cancellationToken = default)
@@ -4178,8 +4214,7 @@ public sealed partial class DownloadManagerService
 
     private HostStatusDto BuildStatusLocked()
     {
-        var active = _jobs.Values.Count(r => r.Job.State is DownloadState.Connecting or DownloadState.Downloading
-            or DownloadState.RetryWaiting or DownloadState.Verifying);
+        var active = CountActiveLocked();
         var queued = _jobs.Values.Count(r => r.Job.State == DownloadState.Queued);
         var nativeHost = NativeHostState?.Invoke() ?? default;
         return new HostStatusDto

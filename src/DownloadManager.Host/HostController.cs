@@ -55,7 +55,7 @@ public sealed class HostController : IHostPlatform
                     ShowNewFolderButton = true,
                 };
                 var startingPath = string.IsNullOrWhiteSpace(initialPath)
-                    ? _service.GetSnapshot().Settings.DefaultDownloadDirectory
+                    ? _service.GetSettings().DefaultDownloadDirectory
                     : initialPath;
                 if (Directory.Exists(startingPath)) picker.InitialDirectory = startingPath;
                 var accepted = picker.ShowDialog() == DialogResult.OK;
