@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
+  import { tickUntil } from '../lib/ticker';
 
   // The one page a browser sees before signing in: set the password the first time, then sign in with it.
   interface Status {
@@ -18,8 +19,8 @@
   let busy = $state(false);
   let waitUntil = $state(0);
   let now = $state(Date.now());
-  const timer = setInterval(() => (now = Date.now()), 500);
-  onDestroy(() => clearInterval(timer));
+  // The clock runs only while a wait counts down.
+  $effect(() => tickUntil(waitUntil, 500, (time) => (now = time)));
 
   const waitLeft = $derived(Math.max(0, Math.ceil((waitUntil - now) / 1000)));
 

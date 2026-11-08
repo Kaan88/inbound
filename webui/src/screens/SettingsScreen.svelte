@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
   import { dateTime } from '../lib/format';
+  import { tickUntil } from '../lib/ticker';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSettings, Settings, SiteLogin } from '../lib/types';
 
@@ -121,12 +121,13 @@
   // Sign-in and paired browsers
   let current = $state('');
   let next = $state('');
+  let keepPaired = $state(false);
   let passwordFromEnvironment = $state(false);
   let pairing = $state<{ code: string; expiresAt: string } | null>(null);
   let now = $state(Date.now());
   let tokens = $state<{ id: string; name: string; createdAt: string; lastUsedAt?: string }[]>([]);
-  const timer = setInterval(() => (now = Date.now()), 1000);
-  onDestroy(() => clearInterval(timer));
+  // The clock runs only while a pairing code is showing.
+  $effect(() => tickUntil(pairing ? Date.parse(pairing.expiresAt) : 0, 1000, (time) => (now = time)));
 
   async function json<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
@@ -150,10 +151,17 @@
 
   async function changePassword() {
     try {
-      await json('/api/auth/password', { method: 'POST', body: JSON.stringify({ current, password: next }) });
+      const result = await json<{ unpaired?: number }>('/api/auth/password', {
+        method: 'POST', body: JSON.stringify({ current, password: next, keepPairedBrowsers: keepPaired }),
+      });
       current = '';
       next = '';
-      store.toast('Password changed. Other browsers were signed out.');
+      keepPaired = false;
+      const unpaired = result.unpaired ?? 0;
+      store.toast(unpaired > 0
+        ? `Password changed. Other browsers were signed out and ${unpaired} paired browser${unpaired === 1 ? ' was' : 's were'} removed.`
+        : 'Password changed. Other browsers were signed out.');
+      void loadSignIn();
     } catch (error) {
       store.toast(error instanceof Error ? error.message : String(error), 'error');
     }
@@ -334,6 +342,8 @@
         <form class="mb-6 grid max-w-xl gap-3 sm:grid-cols-2" onsubmit={(event) => { event.preventDefault(); void changePassword(); }}>
           <div><label class="label" for="pw-current">Current password</label><input id="pw-current" class="field" type="password" bind:value={current} autocomplete="current-password" /></div>
           <div><label class="label" for="pw-new">New password (8 characters or more)</label><input id="pw-new" class="field" type="password" bind:value={next} autocomplete="new-password" minlength="8" /></div>
+          <label class="flex items-start gap-2 text-[13px] sm:col-span-2"><input type="checkbox" class="mt-0.5" bind:checked={keepPaired} />
+            <span>Keep the paired browsers<span class="hint block">Otherwise they are removed and pair again, in case someone who knew the old password paired one.</span></span></label>
           <div class="sm:col-span-2"><button class="btn-primary" type="submit" disabled={!current || next.length < 8}>Change password</button>
             <span class="hint ml-2">Other browsers are signed out.</span></div>
         </form>

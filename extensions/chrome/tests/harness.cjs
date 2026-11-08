@@ -51,8 +51,10 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
     runtime,
     storage: {
       local: {
+        accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
         async get(key) { return { [key]: values[key] }; },
         async set(update) { Object.assign(values, structuredClone(update)); },
+        async setAccessLevel(options) { this.accessLevel = options.accessLevel; },
       },
       session: {
         async get(key) { return { [key]: session[key] }; },

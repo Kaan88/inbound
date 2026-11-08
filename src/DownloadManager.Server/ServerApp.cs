@@ -83,6 +83,7 @@ public sealed class ServerApp : IAsyncDisposable
     public static async Task<ServerApp> StartAsync(ServerOptions options, bool logToConsole = true, CancellationToken cancellationToken = default)
     {
         if (options.DescribeUnsafeBinding() is { } refusal) throw new ServerStartException(refusal);
+        if (options.TrustProxyProblem is { } proxyProblem) throw new ServerStartException(proxyProblem);
 
         var paths = new StoragePaths(Path.GetFullPath(options.DataDirectory));
         paths.EnsureCreated();
@@ -166,6 +167,7 @@ public sealed class ServerApp : IAsyncDisposable
         // A .torrent file is read from the roots, or from the folder the web UI's uploads go to (and nowhere else).
         var uploads = TorrentUploads.Prepare(paths.Root);
         remoteJobs.Roots = new PathRoots([.. options.Roots, uploads.Directory]);
+        remoteJobs.ResolveReference = uploads.Resolve;
         var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info, roots: roots);
         service.DirectAddresses = remoteJobs;
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -267,10 +269,18 @@ public sealed class ServerApp : IAsyncDisposable
         builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
 
         var web = builder.Build();
+        // The address the connection really came from, before a proxy's header replaces it: the setup code's
+        // "this machine" rule goes by it (ServerAuth.NeedsSetupCode).
+        web.Use((context, next) =>
+        {
+            context.Items[ServerAuth.PeerItem] = context.Connection.RemoteIpAddress;
+            return next();
+        });
         if (options.TrustProxy)
         {
-            // Only behind a reverse proxy that sets these: the client's address (for the sign-in waits) and whether it
-            // came over HTTPS (for the cookie's Secure flag and the origin check). The nearest hop only.
+            // Only from the listed proxies: the client's address (for the sign-in waits) and whether it came over HTTPS
+            // (for the cookie's Secure flag and the origin check). The nearest hop only. A client that reaches the port
+            // directly is not listed, so what it puts in these headers is ignored.
             var forwarded = new ForwardedHeadersOptions
             {
                 ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
@@ -278,6 +288,7 @@ public sealed class ServerApp : IAsyncDisposable
             };
             forwarded.KnownIPNetworks.Clear();
             forwarded.KnownProxies.Clear();
+            foreach (var network in options.TrustedProxies) forwarded.KnownIPNetworks.Add(network);
             web.UseForwardedHeaders(forwarded);
         }
 
@@ -452,13 +463,14 @@ public sealed class ServerStartException(string message) : Exception(message);
 
 /// <summary>
 /// Refuses a request to <c>/api/</c> that a web page on another site made through the user's browser: a WebSocket
-/// upgrade or a POST whose <c>Origin</c> isn't this server's own. A request without an <c>Origin</c> (curl, the CLI, a
-/// test) passes, because a browser always sends one for these. With sign-in off this is what keeps a page the user
-/// happens to open from driving the server on their network; with it on, it is a second wall behind the
+/// upgrade or a POST whose <c>Origin</c> isn't this server's own. A request without an <c>Origin</c> (curl, a test)
+/// passes that part, because a browser always sends one for these. With sign-in off this is what keeps a page the
+/// user happens to open from driving the server on their network; with it on, it is a second wall behind the
 /// <c>SameSite=Strict</c> cookie.
 /// A page can also make its own name point at this server (DNS rebinding), and then its origin and the Host header
-/// agree. So a browser request must also address the server by an IP address, by <c>localhost</c>, or by a name listed
-/// in <c>DOWNLOADMANAGER_HOSTS</c> (separated by <c>;</c> or <c>,</c>): a rebinding page can only use a name of its own.
+/// agree; its same-origin GETs carry no <c>Origin</c> at all. So every request to <c>/api/</c>, with an
+/// <c>Origin</c> or without, must address the server by an IP address, by <c>localhost</c>, or by a name listed in
+/// <c>DOWNLOADMANAGER_HOSTS</c> (separated by <c>;</c> or <c>,</c>): a rebinding page can only use a name of its own.
 /// The browser extension is the one other origin let through, and only where it has its own credential
 /// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> with a bearer token, and <c>/api/pair</c> with a code.
 /// </summary>
@@ -486,12 +498,16 @@ public static class OriginCheck
     public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames)
     {
         var origin = request.Headers.Origin.ToString();
-        if (string.IsNullOrEmpty(origin)) return null;
+        var hasOrigin = !string.IsNullOrEmpty(origin);
+        // Without a Host (HTTP/1.0) it isn't a browser, and there is no name to check.
+        if (!hasOrigin && !request.Host.HasValue) return null;
         var own = $"{request.Scheme}://{request.Host.Value}";
-        if (!Uri.TryCreate(origin, UriKind.Absolute, out var from) || !Uri.TryCreate(own, UriKind.Absolute, out var self) ||
-            !string.Equals(from.Scheme, self.Scheme, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(from.Host, self.Host, StringComparison.OrdinalIgnoreCase) ||
-            from.Port != self.Port)
+        if (!Uri.TryCreate(own, UriKind.Absolute, out var self)) return "Requests from another site are refused.";
+        if (hasOrigin &&
+            (!Uri.TryCreate(origin, UriKind.Absolute, out var from) ||
+             !string.Equals(from.Scheme, self.Scheme, StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(from.Host, self.Host, StringComparison.OrdinalIgnoreCase) ||
+             from.Port != self.Port))
             return "Requests from another site are refused.";
 
         var name = self.IdnHost;

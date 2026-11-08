@@ -68,6 +68,17 @@ const AUTO_OFF_NOTICE_KEY = "autoOffNoticeShown";
 let leftInBrowser: LeftInBrowser[] = [];
 let badgeTimer: ReturnType<typeof setTimeout> | undefined;
 let autoSendSyncQueue: Promise<void> = Promise.resolve();
+// The paired server's token is kept in storage.local, and a content script runs on every page. Content scripts use no
+// storage at all, so storage.local is closed to them (Chrome lets them read it otherwise). Set at every start, and
+// waited for before a token is written.
+const storageRestricted = restrictStorageToExtension();
+async function restrictStorageToExtension(): Promise<void> {
+  try {
+    await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
+  } catch {
+    // A browser without it keeps its default.
+  }
+}
 async function hasDeleteGesture(url: string): Promise<boolean> {
   // DownloadItem has no tab id. Ask page scripts for the exact initiating link
   // before pausing Chrome, rather than racing a fire-and-forget click message
@@ -902,6 +913,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // Only from Settings, which asked the browser for access to the server's address first, on the click.
       if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can pair a server." };
       const pairing = await pairWithServer(String(message.address ?? ""), String(message.code ?? ""), pairingName(navigator.userAgent));
+      await storageRestricted;
       await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: pairing });
       server = new ServerTransport(pairing);
       server.connected = true;

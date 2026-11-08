@@ -102,11 +102,19 @@ internal static class AuthServer
             return change is null ? options : change(options);
         }, work);
 
-    /// <summary>Sets the first password from this machine and keeps the session.</summary>
-    public static async Task<AuthClient> SetUpAsync(ServerHarness server, string password = Password)
+    /// <summary>The setup code the server wrote to its log.</summary>
+    public static string SetupCode(ServerHarness server)
+    {
+        var log = string.Join("\n", Directory.GetFiles(Path.Combine(server.Data, "logs")).Select(File.ReadAllText));
+        const string marker = "setup code: ";
+        return log[(log.IndexOf(marker, StringComparison.Ordinal) + marker.Length)..].Split('\n')[0].Trim();
+    }
+
+    /// <summary>Sets the first password from this machine (with the setup code when asked) and keeps the session.</summary>
+    public static async Task<AuthClient> SetUpAsync(ServerHarness server, string password = Password, string? setupCode = null)
     {
         var client = new AuthClient(server.Base);
-        using var response = await client.PostAsync("/api/auth/setup", new { password });
+        using var response = await client.PostAsync("/api/auth/setup", setupCode is null ? new { password } : new { password, setupCode });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(client.Session);
         return client;

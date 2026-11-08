@@ -10,7 +10,8 @@ namespace DownloadManager.Server;
 /// <item><c>DOWNLOADMANAGER_URLS</c>, else <c>ASPNETCORE_URLS</c>: where to listen, separated by <c>;</c>. Default <c>http://0.0.0.0:8080</c>.</item>
 /// <item><c>DOWNLOADMANAGER_AUTH</c>: <c>off</c> turns sign-in off (D2). It is on otherwise, for a new install too.</item>
 /// <item><c>DOWNLOADMANAGER_PASSWORD</c> or <c>DOWNLOADMANAGER_PASSWORD_FILE</c>: the sign-in password; without them it is set on the setup page.</item>
-/// <item><c>DOWNLOADMANAGER_TRUST_PROXY=1</c>: believe <c>X-Forwarded-For</c> and <c>X-Forwarded-Proto</c> (only behind a reverse proxy that sets them).</item>
+/// <item><c>DOWNLOADMANAGER_TRUST_PROXY</c>: the reverse proxy's address or network (<c>172.30.0.10</c>, <c>172.30.0.0/24</c>; several
+/// separated by <c>,</c> or <c>;</c>). <c>X-Forwarded-For</c> and <c>X-Forwarded-Proto</c> are believed from those addresses only.</item>
 /// <item><c>DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1</c>: with sign-in off, needed to listen on anything but loopback.</item>
 /// <item><c>DOWNLOADMANAGER_HOSTS</c>: host names a browser may use for the server, besides IP addresses and <c>localhost</c>.</item>
 /// <item><c>DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1</c>: start although saved secrets were sealed with another key file (they are lost).</item>
@@ -47,8 +48,24 @@ public sealed record ServerOptions
     /// <summary>A file holding the password (a Docker secret), from <c>DOWNLOADMANAGER_PASSWORD_FILE</c>.</summary>
     public string? PasswordFile { get; init; }
 
-    /// <summary>Take the client address and scheme from a reverse proxy's <c>X-Forwarded-*</c> headers.</summary>
-    public bool TrustProxy { get; init; }
+    /// <summary>
+    /// The reverse proxies whose <c>X-Forwarded-*</c> headers give the client's address and scheme. Only a connection
+    /// from one of these is believed: believing any client would let it choose a new address for every wrong password
+    /// (no wait would ever apply) and claim to be this machine (no setup code).
+    /// </summary>
+    public IReadOnlyList<IPNetwork> TrustedProxies { get; init; } = [];
+
+    /// <summary>Why <c>DOWNLOADMANAGER_TRUST_PROXY</c> can't be used as given, or null. The server refuses to start then.</summary>
+    public string? TrustProxyProblem { get; init; }
+
+    public bool TrustProxy => TrustedProxies.Count > 0;
+
+    /// <summary>Whether a connection from this address is one of <see cref="TrustedProxies"/>.</summary>
+    public bool IsTrustedProxy(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        return TrustedProxies.Any(network => network.Contains(address));
+    }
 
     /// <summary>A session ends after this long without a request; an open WebSocket keeps it alive.</summary>
     public TimeSpan SessionIdleTimeout { get; init; } = TimeSpan.FromHours(24);
@@ -76,6 +93,7 @@ public sealed record ServerOptions
         if (string.IsNullOrWhiteSpace(urls)) urls = read("ASPNETCORE_URLS");
         var password = read(PasswordVariable);
         var passwordFile = read(PasswordFileVariable);
+        var proxies = ParseTrustedProxies(read(TrustProxyVariable), out var proxyProblem);
         return new ServerOptions
         {
             DataDirectory = string.IsNullOrWhiteSpace(data) ? DefaultData : data.Trim(),
@@ -88,10 +106,55 @@ public sealed record ServerOptions
             SignInRequired = read(AuthVariable)?.Trim().ToLowerInvariant() is not ("off" or "0" or "false" or "no"),
             Password = string.IsNullOrEmpty(password) ? null : new SecretValue(password),
             PasswordFile = string.IsNullOrWhiteSpace(passwordFile) ? null : passwordFile.Trim(),
-            TrustProxy = read(TrustProxyVariable)?.Trim() is "1" or "true" or "yes",
+            TrustedProxies = proxies,
+            TrustProxyProblem = proxyProblem,
             DiscardUnreadableSecrets = read(DownloadManager.Persistence.AesGcmSecretProtector.DiscardVariable)?.Trim() is "1" or "true" or "yes",
             AllowedHostNames = OriginCheck.ParseHosts(read(OriginCheck.HostsVariable)),
         };
+    }
+
+    /// <summary>
+    /// The proxies <c>DOWNLOADMANAGER_TRUST_PROXY</c> names: IP addresses and networks in CIDR form. Empty, <c>0</c>,
+    /// <c>off</c> and the like trust none. <c>1</c> (trust whoever connects) and a network of every address are refused,
+    /// as is anything that doesn't parse, with <paramref name="problem"/> saying so.
+    /// </summary>
+    public static List<IPNetwork> ParseTrustedProxies(string? value, out string? problem)
+    {
+        problem = null;
+        var networks = new List<IPNetwork>();
+        var text = value?.Trim() ?? string.Empty;
+        if (text.Length == 0 || text.ToLowerInvariant() is "0" or "off" or "false" or "no") return networks;
+        if (text.ToLowerInvariant() is "1" or "on" or "true" or "yes")
+        {
+            problem = $"{TrustProxyVariable} takes the reverse proxy's address or network (for example 172.30.0.10 or 172.30.0.0/24), " +
+                      "not \"" + text + "\": believing X-Forwarded-For from any client would let it skip the sign-in waits and the setup code.";
+            return [];
+        }
+
+        foreach (var entry in text.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            IPNetwork network;
+            if (IPAddress.TryParse(entry, out var single) && !entry.Contains('/'))
+            {
+                if (single.IsIPv4MappedToIPv6) single = single.MapToIPv4();
+                network = new IPNetwork(single, single.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128);
+            }
+            else if (!IPNetwork.TryParse(entry, out network))
+            {
+                problem = $"{TrustProxyVariable}: \"{entry}\" is neither an IP address nor a network such as 172.30.0.0/24.";
+                return [];
+            }
+
+            if (network.PrefixLength == 0)
+            {
+                problem = $"{TrustProxyVariable}: \"{entry}\" is every address, so any client could claim any address. Give the proxy's own address or network.";
+                return [];
+            }
+
+            networks.Add(network);
+        }
+
+        return networks;
     }
 
     /// <summary>

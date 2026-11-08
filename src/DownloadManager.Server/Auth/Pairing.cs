@@ -14,7 +14,7 @@ public sealed class TokenDto
 /// <summary>
 /// Pairing a browser extension with this server. A signed-in user asks for a code: 8 characters from 32 that can't be
 /// mistaken for each other (no I, O, 0 or 1), good for 10 minutes and for one pairing. Asking again replaces it, and
-/// 10 wrong tries on it end it. The extension sends the code to <c>/api/pair</c> and gets a token of 32 random bytes;
+/// 1,000 wrong tries on it end it (from any address: the waits are per address). The extension sends the code to <c>/api/pair</c> and gets a token of 32 random bytes;
 /// only the token's SHA-256 is kept. A token can be revoked, and it only ever opens the extension's role
 /// (<see cref="DownloadManager.Contracts.BridgeRole.ServerExtension"/>).
 /// </summary>
@@ -25,7 +25,12 @@ public sealed class Pairing(AuthStore store, TimeProvider time)
     public const int MaxTokens = 50;
     public const string TokenPrefix = "ibt_";
     public static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(10);
-    private const int MaxWrongTries = 10;
+    /// <summary>
+    /// Wrong tries, from all addresses together, that end a code. A code is one of 32^8 (about 10^12), so even this
+    /// many guesses have less than a one-in-a-billion chance; a lower number would let anyone cancel the owner's code
+    /// with a few wrong tries.
+    /// </summary>
+    public const int MaxWrongTries = 1000;
 
     private readonly object _gate = new();
     private string? _code;
@@ -104,6 +109,9 @@ public sealed class Pairing(AuthStore store, TimeProvider time)
     public List<TokenDto> List() => store.Tokens().OrderBy(token => token.CreatedAt).Select(ToDto).ToList();
 
     public bool Revoke(string id) => !string.IsNullOrEmpty(id) && store.RemoveToken(id);
+
+    /// <summary>Unpairs every browser (after a password change); how many there were.</summary>
+    public int RevokeAll() => store.RemoveAllTokens();
 
     /// <summary>Upper case, without spaces or dashes; null when it can't be a code at all.</summary>
     internal static string? Normalize(string? code)

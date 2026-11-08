@@ -25,7 +25,8 @@ public sealed class AuthFile
 /// <summary>
 /// <c>auth.json</c> in the data folder: the password's hash and the paired browsers' token hashes. Neither can be
 /// turned back into what it was made from. Written to a temporary file next to it, flushed, then moved over it, so a
-/// kill at any point leaves the old file or the new one; owner-only (mode 600) off Windows.
+/// kill at any point leaves the old file or the new one; owner-only (mode 600) off Windows. A change that can't be
+/// saved is undone in memory too, so what is in force is always what the file says.
 /// </summary>
 public sealed class AuthStore
 {
@@ -77,8 +78,9 @@ public sealed class AuthStore
     {
         lock (_gate)
         {
+            var before = _file.Password;
             _file.Password = record;
-            Save();
+            SaveOrUndo(() => _file.Password = before);
         }
     }
 
@@ -91,11 +93,12 @@ public sealed class AuthStore
     {
         lock (_gate)
         {
+            var before = _file.Tokens.ToList();
             _file.Tokens.Add(record);
             // The oldest unused ones go first when there are too many.
             while (_file.Tokens.Count > limit)
                 _file.Tokens.Remove(_file.Tokens.OrderBy(token => token.LastUsedAt ?? token.CreatedAt).First());
-            Save();
+            SaveOrUndo(() => _file.Tokens = before);
         }
     }
 
@@ -103,9 +106,36 @@ public sealed class AuthStore
     {
         lock (_gate)
         {
+            var before = _file.Tokens.ToList();
             var removed = _file.Tokens.RemoveAll(token => token.Id == id) > 0;
-            if (removed) Save();
+            if (removed) SaveOrUndo(() => _file.Tokens = before);
             return removed;
+        }
+    }
+
+    /// <summary>Removes every paired browser's token; how many there were.</summary>
+    public int RemoveAllTokens()
+    {
+        lock (_gate)
+        {
+            var before = _file.Tokens;
+            if (before.Count == 0) return 0;
+            _file.Tokens = [];
+            SaveOrUndo(() => _file.Tokens = before);
+            return before.Count;
+        }
+    }
+
+    private void SaveOrUndo(Action undo)
+    {
+        try
+        {
+            Save();
+        }
+        catch
+        {
+            undo();
+            throw;
         }
     }
 

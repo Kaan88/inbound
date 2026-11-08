@@ -49,7 +49,8 @@ secrets:
 
 # ---- HTTPS through a reverse proxy (optional) --------------------------------------------------------------------
 # The server speaks plain HTTP. For HTTPS, put a proxy in front, stop publishing 8080 on the host (remove `ports:`
-# above, or bind it to 127.0.0.1), and let the proxy reach the container on the compose network. With Caddy:
+# above, or bind it to 127.0.0.1), and let the proxy reach the container on the compose network. The proxy gets a
+# fixed address there, and only that address is believed. With Caddy:
 #
 #   caddy:
 #     image: caddy:2
@@ -58,6 +59,17 @@ secrets:
 #     volumes:
 #       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 #       - ./caddy-data:/data
+#     networks:
+#       inbound-net:
+#         ipv4_address: 172.30.0.10
+#
+# with `networks: [inbound-net]` on the inbound service, and at the end of the file:
+#
+#   networks:
+#     inbound-net:
+#       ipam:
+#         config:
+#           - subnet: 172.30.0.0/24
 #
 # Caddyfile:
 #
@@ -67,7 +79,7 @@ secrets:
 #
 # and in the inbound service's environment:
 #
-#   DOWNLOADMANAGER_TRUST_PROXY: "1"        # believe X-Forwarded-For/-Proto from the proxy (only behind one)
+#   DOWNLOADMANAGER_TRUST_PROXY: "172.30.0.10"   # the proxy's own address: X-Forwarded-For/-Proto from it only
 #   DOWNLOADMANAGER_HOSTS: "downloads.example.org"
 #
 # Caddy forwards WebSockets on its own; the web UI needs them (/api/ws). docs/docker.md has a Traefik example.

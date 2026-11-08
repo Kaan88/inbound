@@ -44,9 +44,9 @@ unchanged is fine. The desktop Host can do all of these.
   clients that needn't hold a connection.
 - `GET /health` answers `{"status":"ok","version":...}` and is the only path a health check needs.
 - A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
-  origin, and must name the server by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else
-  gets 403. A request without `Origin` (curl, scripts, tests) is not checked. The one exception is below: a paired
-  extension's `POST /api/ipc` and `POST /api/pair`.
+  origin. Every request to `/api/`, with an `Origin` or without (a page's same-origin `GET` carries none), must name
+  the server in its `Host` by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else gets
+  403. The one exception is below: a paired extension's `POST /api/ipc` and `POST /api/pair`.
 - Sign-in (D2) is on by default; see the next section.
 
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
@@ -66,11 +66,11 @@ wrong tries is 429 with `Retry-After`.
 | `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
 | `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
 | `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
-| `POST /api/auth/password` | yes | `{current, password}`; every other session ends. 409 when the password comes from the environment. |
+| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, and every paired browser is unpaired unless `keepPairedBrowsers` is true. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
 | `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired browsers (`id`, `name`, `createdAt`, `lastUsedAt`), and revoking one. |
-| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. Ten wrong codes end the code. |
-| `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, path}`, a path the server's own `remote.classify` and `remote.add` accept. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. 1,000 wrong codes (from all addresses together) end the code. |
+| `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
 
 - **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
   the token hashes. `DOWNLOADMANAGER_PASSWORD` or `DOWNLOADMANAGER_PASSWORD_FILE` sets it instead (hashed at start;
@@ -78,8 +78,14 @@ wrong tries is 429 with `Retry-After`.
 - **Session:** a 256-bit random id in the `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`,
   `Secure` over HTTPS); the server keeps only its SHA-256, in memory, so a restart signs everyone out. It ends after
   24 hours without use (an open WebSocket counts as use) and 7 days after sign-in at most, and its WebSockets close
-  then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only with `DOWNLOADMANAGER_TRUST_PROXY=1`.
-- **Wrong tries** make that client address wait 1, 2, 4 ... seconds, up to 5 minutes, before the next try counts.
+  then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY`
+  lists (addresses or networks; `1` is refused at start).
+- **Wrong tries** make that client address wait 1, 2, 4 ... seconds, up to 5 minutes, before the next try counts. A
+  try counts as wrong from the moment it starts until it turns out right, so parallel tries can't pass the wait
+  together. An IPv6 client counts by its /64 network. The setup, sign-in and pairing bodies are read up to 16 KB,
+  chunked or not.
+- **Setup code:** asked of every browser except one on the server's own machine connecting directly: a connection
+  from a listed proxy, or with `X-Forwarded-For` / `Forwarded`, always needs it.
 - **Origin:** every state change and the WebSocket upgrade must carry the server's own origin (above).
 - **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` only, and only for what the extension
   role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus

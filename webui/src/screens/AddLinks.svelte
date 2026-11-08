@@ -142,11 +142,12 @@
     torrentName = file.name;
     try {
       const response = await fetch('/api/upload/torrent', { method: 'POST', body: file, credentials: 'same-origin', headers: { 'Content-Type': 'application/x-bittorrent' } });
-      const body = (await response.json()) as { ok: boolean; path?: string; error?: string };
-      if (!body.ok || !body.path) throw new Error(body.error ?? 'The upload failed.');
-      torrentPath = body.path;
+      // A reference to the uploaded file (upload:…), not its path on the server.
+      const body = (await response.json()) as { ok: boolean; upload?: string; error?: string };
+      if (!body.ok || !body.upload) throw new Error(body.error ?? 'The upload failed.');
+      torrentPath = body.upload;
       if (remoteOn) {
-        torrentInfo = await store.ask<ClassifyResult>('remote.classify', { text: body.path, withFiles: true });
+        torrentInfo = await store.ask<ClassifyResult>('remote.classify', { text: body.upload, withFiles: true });
         torrentChosen = new Set((torrentInfo.files ?? []).map((f) => f.fileId));
       }
     } catch (error) {

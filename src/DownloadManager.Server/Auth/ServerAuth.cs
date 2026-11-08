@@ -17,7 +17,9 @@ namespace DownloadManager.Server.Auth;
 /// so whoever reaches a new server first can't take it.</item>
 /// <item>A signed-in browser holds a session cookie: <c>HttpOnly</c>, <c>SameSite=Strict</c>, <c>Secure</c> when the
 /// request came over HTTPS, 32 random bytes, ending when idle and at an absolute limit (<see cref="SessionStore"/>).</item>
-/// <item>Wrong passwords and codes make that address wait, longer each time (<see cref="SignInLimiter"/>).</item>
+/// <item>Wrong passwords and codes make that address wait, longer each time (<see cref="SignInLimiter"/>). A try
+/// counts as wrong from its start until it turns out right, so parallel guesses can't all slip past the wait.</item>
+/// <item>A changed password also unpairs every browser extension, unless the change asks to keep them.</item>
 /// <item>Only <c>/health</c>, the sign-in page's own files under <c>/signin/</c> and the sign-in calls answer without a
 /// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> only (<see cref="Pairing"/>).</item>
 /// </list>
@@ -28,11 +30,16 @@ public sealed class ServerAuth
     public const string SignInPath = "/signin/";
     internal const string SessionItem = "inbound.session";
     internal const string TokenItem = "inbound.token";
+    /// <summary>The address the connection really came from, noted before a trusted proxy's headers replace it.</summary>
+    internal const string PeerItem = "inbound.peer";
+    /// <summary>The most a sign-in, setup or pairing body may be, chunked or not.</summary>
+    internal const int MaxFormBytes = 16 * 1024;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly ServerLog _log;
     private readonly TimeProvider _time;
+    private readonly ServerOptions _options;
     private readonly SemaphoreSlim _passwordGate = new(1, 1);
     private string? _setupCode;
 
@@ -43,6 +50,7 @@ public sealed class ServerAuth
         PasswordFromEnvironment = passwordFromEnvironment;
         _log = log;
         _time = options.Time;
+        _options = options;
         Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout);
         Limiter = new SignInLimiter(_time);
         Pairing = new Pairing(store, _time);
@@ -229,6 +237,8 @@ public sealed class ServerAuth
         public string? Password { get; set; }
         public string? Current { get; set; }
         public string? SetupCode { get; set; }
+        /// <summary>On a password change: leave the paired browser extensions paired (they are unpaired otherwise).</summary>
+        public bool KeepPairedBrowsers { get; set; }
     }
 
     private sealed class PairForm
@@ -242,30 +252,35 @@ public sealed class ServerAuth
         if (!Required) return Error(StatusCodes.Status400BadRequest, "Sign-in is turned off on this server.");
         var form = await ReadAsync<PasswordForm>(context).ConfigureAwait(false);
         if (form is null) return Error(StatusCodes.Status400BadRequest, "A JSON body with the password is expected.");
+        if (!SetupNeeded) return Error(StatusCodes.Status409Conflict, "A password is set already. Sign in with it.");
         var address = AddressOf(context);
-        if (Limiter.Wait(address) is { } wait) return TooSoon(context, wait);
+        var needsCode = NeedsSetupCode(context);
+        // Only a try with a setup code is a guess; it counts as wrong until the code turns out right.
+        var ifWrong = TimeSpan.Zero;
+        if ((needsCode ? Limiter.Begin(address, out ifWrong) : Limiter.Wait(address)) is { } wait) return TooSoon(context, wait);
 
         await _passwordGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
         try
         {
             if (!SetupNeeded) return Error(StatusCodes.Status409Conflict, "A password is set already. Sign in with it.");
-            if (NeedsSetupCode(context))
+            if (needsCode)
             {
                 var given = Pairing.Normalize(form.SetupCode);
                 var expected = Pairing.Normalize(_setupCode);
                 if (given is null || expected is null ||
                     !CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(given), Encoding.ASCII.GetBytes(expected)))
                 {
-                    var next = Limiter.Failed(address);
                     _log.Warn($"A setup try with a wrong setup code from {address}.");
-                    return Error(StatusCodes.Status403Forbidden, "That setup code is wrong. It is in the server's log (docker logs).", next);
+                    return Error(StatusCodes.Status403Forbidden, "That setup code is wrong. It is in the server's log (docker logs).", ifWrong);
                 }
+
+                Limiter.Succeeded(address);
             }
 
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
-            Store.SetPassword(await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false));
+            var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false);
+            if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
             _setupCode = null;
-            Limiter.Succeeded(address);
             _log.Info($"The sign-in password was set on the setup page from {address}.");
         }
         finally
@@ -284,13 +299,13 @@ public sealed class ServerAuth
         if (form is null) return Error(StatusCodes.Status400BadRequest, "A JSON body with the password is expected.");
         if (SetupNeeded) return Error(StatusCodes.Status409Conflict, "No password is set yet. Set one first.");
         var address = AddressOf(context);
-        if (Limiter.Wait(address) is { } wait) return TooSoon(context, wait);
+        // Counted as wrong before the slow check, so the tries waiting for it can't skip the wait.
+        if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
 
         if (!await PasswordHash.VerifyAsync(form.Password, Store.Password, context.RequestAborted).ConfigureAwait(false))
         {
-            var next = Limiter.Failed(address);
             _log.Warn($"A sign-in with a wrong password from {address} ({Limiter.Failures(address)} in a row).");
-            return Error(StatusCodes.Status401Unauthorized, "That password is wrong.", next);
+            return Error(StatusCodes.Status401Unauthorized, "That password is wrong.", ifWrong);
         }
 
         Limiter.Succeeded(address);
@@ -306,30 +321,39 @@ public sealed class ServerAuth
         var form = await ReadAsync<PasswordForm>(context).ConfigureAwait(false);
         if (form is null) return Error(StatusCodes.Status400BadRequest, "A JSON body with the passwords is expected.");
         var address = AddressOf(context);
-        if (Limiter.Wait(address) is { } wait) return TooSoon(context, wait);
+        if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
 
         await _passwordGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
         try
         {
             if (!await PasswordHash.VerifyAsync(form.Current, Store.Password, context.RequestAborted).ConfigureAwait(false))
-            {
-                var next = Limiter.Failed(address);
-                return Error(StatusCodes.Status403Forbidden, "The current password is wrong.", next);
-            }
+                return Error(StatusCodes.Status403Forbidden, "The current password is wrong.", ifWrong);
 
+            Limiter.Succeeded(address);
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
-            Store.SetPassword(await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "changed", context.RequestAborted).ConfigureAwait(false));
+            var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "changed", context.RequestAborted).ConfigureAwait(false);
+            if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
         }
         finally
         {
             _passwordGate.Release();
         }
 
-        Limiter.Succeeded(address);
-        // Every other browser signs in again with the new password; this one stays.
+        // Every other browser signs in again with the new password; this one stays. Someone who knew the old one may
+        // have paired an extension too, so those go as well unless the change says to keep them.
         Sessions.RemoveAllExcept(SessionOf(context));
-        _log.Info("The sign-in password was changed; other browsers were signed out.");
-        return Results.Json(new { ok = true });
+        var unpaired = 0;
+        if (!form.KeepPairedBrowsers && !TrySave(() => unpaired = Pairing.RevokeAll()))
+        {
+            _log.Warn("The sign-in password was changed and other browsers were signed out, but the paired browsers could not be removed.");
+            return Error(StatusCodes.Status500InternalServerError,
+                "The password was changed, but the paired browsers could not be removed. Remove them under Paired browsers.");
+        }
+
+        _log.Info(form.KeepPairedBrowsers
+            ? "The sign-in password was changed; other browsers were signed out, paired browsers were kept."
+            : $"The sign-in password was changed; other browsers were signed out and {unpaired} paired browser(s) removed.");
+        return Results.Json(new { ok = true, unpaired });
     }
 
     private async Task<IResult> PairAsync(HttpContext context)
@@ -337,12 +361,11 @@ public sealed class ServerAuth
         var form = await ReadAsync<PairForm>(context).ConfigureAwait(false);
         if (form is null) return Error(StatusCodes.Status400BadRequest, "A JSON body with the code is expected.");
         var address = AddressOf(context);
-        if (Limiter.Wait(address) is { } wait) return TooSoon(context, wait);
+        if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
         if (Pairing.Redeem(form.Code, form.Name) is not { } paired)
         {
-            var next = Limiter.Failed(address);
             _log.Warn($"A pairing try with a wrong or expired code from {address}.");
-            return Error(StatusCodes.Status401Unauthorized, "That code is wrong, used or expired. Show a new one in the web UI (Settings, Paired browsers).", next);
+            return Error(StatusCodes.Status401Unauthorized, "That code is wrong, used or expired. Show a new one in the web UI (Settings, Paired browsers).", ifWrong);
         }
 
         Limiter.Succeeded(address);
@@ -352,10 +375,37 @@ public sealed class ServerAuth
 
     // ---- Helpers -----------------------------------------------------------------------------------------------
 
-    /// <summary>A browser on this machine, not through a proxy, sets the first password without the code.</summary>
-    private static bool NeedsSetupCode(HttpContext context) =>
-        context.Connection.RemoteIpAddress is not { } remote || !IPAddress.IsLoopback(remote) ||
-        context.Request.Headers.ContainsKey("X-Forwarded-For") || context.Request.Headers.ContainsKey("Forwarded");
+    /// <summary>
+    /// A browser on this machine, not through a proxy, sets the first password without the code. What counts is the
+    /// address the connection really came from (<see cref="PeerItem"/>), not one a proxy's header gave: a connection
+    /// from a listed proxy (<c>DOWNLOADMANAGER_TRUST_PROXY</c>) or one carrying forwarding headers can be from anywhere.
+    /// A proxy on this machine that adds no such header can't be told apart; it must be listed (docs/docker.md).
+    /// </summary>
+    private bool NeedsSetupCode(HttpContext context)
+    {
+        var peer = context.Items.TryGetValue(PeerItem, out var noted) && noted is IPAddress address ? address : context.Connection.RemoteIpAddress;
+        if (peer is null || !IPAddress.IsLoopback(peer) || _options.IsTrustedProxy(peer)) return true;
+        var headers = context.Request.Headers;
+        return headers.ContainsKey("X-Forwarded-For") || headers.ContainsKey("Forwarded") || headers.ContainsKey("X-Original-For");
+    }
+
+    /// <summary>Runs a write to auth.json; false when it couldn't be saved (nothing changed then, in memory or on disk).</summary>
+    private bool TrySave(Action save)
+    {
+        try
+        {
+            save();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Error($"The sign-in file could not be saved: {ex.GetType().Name}");
+            return false;
+        }
+    }
+
+    private static IResult NotSaved() =>
+        Error(StatusCodes.Status500InternalServerError, "The password could not be saved, so nothing was changed. Check the data folder's space and permissions.");
 
     private void StartSession(HttpContext context)
     {
@@ -382,12 +432,31 @@ public sealed class ServerAuth
 
     private static string AddressOf(HttpContext context) => SignInLimiter.AddressOf(context.Connection.RemoteIpAddress);
 
+    /// <summary>
+    /// The JSON form, or null. At most <see cref="MaxFormBytes"/> are read, whether the length was given or the body
+    /// came chunked: these calls answer without a session, before any password is checked.
+    /// </summary>
     private static async Task<T?> ReadAsync<T>(HttpContext context) where T : class
     {
-        if (context.Request.ContentLength is > 16 * 1024) return null;
+        if (context.Request.ContentLength is > MaxFormBytes) return null;
+        var buffer = new byte[MaxFormBytes + 1];
+        var length = 0;
         try
         {
-            return await JsonSerializer.DeserializeAsync<T>(context.Request.Body, Json, context.RequestAborted).ConfigureAwait(false);
+            int read;
+            while (length < buffer.Length &&
+                   (read = await context.Request.Body.ReadAsync(buffer.AsMemory(length), context.RequestAborted).ConfigureAwait(false)) > 0)
+                length += read;
+        }
+        catch (BadHttpRequestException)
+        {
+            return null;
+        }
+
+        if (length > MaxFormBytes) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, length), Json);
         }
         catch (JsonException)
         {

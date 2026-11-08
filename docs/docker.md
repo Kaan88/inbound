@@ -58,7 +58,7 @@ ignored.
 | `DOWNLOADMANAGER_AUTH` | on | `off` turns sign-in off. The server then listens beyond loopback only with `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` as well, and anyone who reaches the port controls it, saved logins included. |
 | `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED` | - | `1`: with sign-in off, listen on every address anyway. |
 | `DOWNLOADMANAGER_HOSTS` | - | Host names you type in the browser for the server (comma separated), besides IP addresses and `localhost`. Needed for a name such as `nas.home.arpa`: other names are refused, against DNS rebinding. |
-| `DOWNLOADMANAGER_TRUST_PROXY` | - | `1`: believe `X-Forwarded-For` and `X-Forwarded-Proto` from a reverse proxy. Only behind one, never with the port open to clients directly. |
+| `DOWNLOADMANAGER_TRUST_PROXY` | - | The reverse proxy's address or network, such as `172.30.0.10` or `172.30.0.0/24` (several separated by `,`). `X-Forwarded-For` and `X-Forwarded-Proto` are believed from those addresses only, and every browser through them is asked for the setup code. `1` is refused: a client that reached the port directly could then pick a new address for every wrong password and pass as this machine. |
 | `DOWNLOADMANAGER_ROOTS` | `/downloads` | The folders the web UI may use, separated by `:`. Mount a volume at each. The first is the default download folder. |
 | `DOWNLOADMANAGER_DATA` | `/data` | The state folder. |
 | `DOWNLOADMANAGER_URLS` | `http://0.0.0.0:8080` | Where the server listens inside the container. |
@@ -100,8 +100,16 @@ alone resumes them only if the download folder is still there.
 ## Reverse proxy and HTTPS
 
 The server speaks plain HTTP. To reach it over HTTPS, put a proxy in front, publish only the proxy's ports, and set
-`DOWNLOADMANAGER_TRUST_PROXY=1` and `DOWNLOADMANAGER_HOSTS=<your name>` on the server. The proxy must pass WebSockets
-(`/api/ws`); Caddy and Traefik do on their own. The session cookie is then marked `Secure`.
+`DOWNLOADMANAGER_TRUST_PROXY=<the proxy's address>` and `DOWNLOADMANAGER_HOSTS=<your name>` on the server. Give the
+proxy a fixed address on the compose network (`docker/compose.example.yml` does: `172.30.0.10`) and name that
+address, not the whole network: Docker's own port forwarding can make a connection come from the network's gateway.
+The proxy must pass WebSockets (`/api/ws`); Caddy and Traefik do on their own. The session cookie is then marked
+`Secure`.
+
+A proxy on the same machine as a server that runs outside Docker connects from `127.0.0.1`. List it
+(`DOWNLOADMANAGER_TRUST_PROXY=127.0.0.1`): a proxy that adds no `X-Forwarded-For` would otherwise make every browser
+look like one on the server's own machine, which sets the first password without the setup code. Setting the
+password with `DOWNLOADMANAGER_PASSWORD_FILE` avoids the setup page altogether.
 
 Caddy (`Caddyfile`), with both containers on one compose network:
 

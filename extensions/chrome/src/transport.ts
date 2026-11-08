@@ -197,7 +197,10 @@ export class NativeTransport implements Transport {
 
 // ---- The server: POST /api/ipc with a paired token -------------------------------------------------
 
-/** What pairing stores (chrome.storage.local, key SERVER_STORAGE_KEY). The token never leaves the background. */
+/**
+ * What pairing stores (chrome.storage.local, key SERVER_STORAGE_KEY). The token is never sent to the extension's pages
+ * or to content scripts, and background.ts closes storage.local to content scripts.
+ */
 export interface ServerPairing {
   /** The server's origin, as normalizeServerAddress gives it: scheme, host and port, no path. */
   address: string;
