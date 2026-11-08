@@ -25,19 +25,23 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
   const pausedDownloads = [];
   const tabMessages = [];
   let pageMessageCount = 0;
+  const runtimeOnConnect = event();
   const runtime = {
     id: 'test-extension',
     lastError: undefined,
     onMessage: runtimeOnMessage,
+    onConnect: runtimeOnConnect,
     onInstalled: event(),
     onStartup: event(),
     getManifest: () => ({ version: '0.0.0-test' }),
     getURL: value => `chrome-extension://test/${value}`,
     connectNative: () => {
+      const portIndex = nativePorts.length;
       const port = {
         onMessage: nativeOnMessage,
         onDisconnect: event(),
-        postMessage(message) { nativeMessages.push(message); },
+        // Which connection carried it, so a test can tell the shared one (0) from one-off ones.
+        postMessage(message) { message.portIndex = portIndex; nativeMessages.push(message); },
         disconnected: false,
         disconnect() { this.disconnected = true; },
       };
@@ -86,7 +90,7 @@ function makeChrome(initialSettings, pending, pages = new Map()) {
     cookies: { async getAll() { return []; } },
   };
   return {
-    chrome, values, session, runtimeOnMessage, nativeOnMessage, nativeMessages, nativePorts, contextMenuClicked,
+    chrome, values, session, runtimeOnMessage, runtimeOnConnect, nativeOnMessage, nativeMessages, nativePorts, contextMenuClicked,
     downloadsCreated, pausedDownloads, tabMessages,
     get pageMessageCount() { return pageMessageCount; },
   };
@@ -114,6 +118,20 @@ function sendRuntimeMessage(harness, message,
     const handled = harness.runtimeOnMessage.listeners[0](message, sender, resolve);
     if (handled !== true) reject(new Error('Runtime listener did not keep the response channel open.'));
   });
+}
+
+/** Waits for the background to send a native message of this type and answers it. */
+async function answerNative(harness, type, payload) {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const request = harness.nativeMessages.find(message => message.type === type && !message.answered);
+    if (request) {
+      request.answered = true;
+      for (const listener of harness.nativeOnMessage.listeners) listener({ type: `${type}.reply`, replyTo: request.id, payload });
+      return request;
+    }
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error(`No ${type} was sent.`);
 }
 
 test('right-click handoff retains its source frame and refreshes matching partition cookies on confirmation', async () => {
@@ -178,8 +196,13 @@ test('one-off handoff folder is used for that download only', async () => {
     const source = path.join(__dirname, '..', 'src', 'background.ts');
     await startBackground(source);
 
-    const handoffInfo = await sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: pending.id });
-    assert.equal(handoffInfo.defaults.destination, '');
+    const folders = { ok: true, defaultFolder: 'D:\\Default', favorites: [{ name: 'Music', path: 'E:\\Music' }] };
+    const handoffInfo = sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: pending.id });
+    await answerNative(harness, 'settings.downloadFolders', folders);
+    const info = await handoffInfo;
+    assert.equal(info.defaults.destination, 'D:\\Default');
+    assert.deepEqual(info.defaults.favorites, [{ name: 'Music', path: 'E:\\Music' }]);
+    assert.equal(info.held, false);
 
     const response = sendRuntimeMessage(harness, {
       type: 'dm.confirmHandoff',
@@ -187,15 +210,17 @@ test('one-off handoff folder is used for that download only', async () => {
       destination: 'D:\\This\\Download\\Only',
       startMode: 'later',
     });
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(harness.nativeMessages.length, 1);
-    assert.equal(harness.nativeMessages[0].payload.destinationDirectory, 'D:\\This\\Download\\Only');
-    harness.nativeOnMessage.listeners[0]({
-      type: 'handoff.ack',
-      replyTo: harness.nativeMessages[0].id,
-      payload: { accepted: true },
-    });
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.destinationDirectory, 'D:\\This\\Download\\Only');
     assert.equal((await response).ack.accepted, true);
+
+    // UI.R3: the next download's window starts at the default folder again, not the one-off choice.
+    harness.session['handoff.handoff-2'] = { ...pending, id: 'handoff-2', url: 'https://example.test/next.zip' };
+    const nextInfo = sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: 'handoff-2' });
+    await answerNative(harness, 'settings.downloadFolders', folders);
+    assert.equal((await nextInfo).defaults.destination, 'D:\\Default');
+    assert.equal(JSON.stringify(harness.values.settings).includes('This\\Download'), false,
+      'a one-off folder is never stored in the extension settings');
     assert.equal(harness.values.settings.startMode, 'later');
   } finally {
     global.chrome = oldChrome;
@@ -216,7 +241,10 @@ test('folder picker rejects page senders and forwards extension requests to the 
   global.chrome = harness.chrome;
   try {
     await startBackground(path.join(__dirname, '..', 'src', 'background.ts'));
-    await sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: pendingHandoff.id });
+    const info = sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: pendingHandoff.id });
+    await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: '', favorites: [] });
+    await info;
+    const before = harness.nativeMessages.length;
     const rejectedPage = await sendRuntimeMessage(harness, { type: 'dm.pickFolder' }, {
       url: 'https://example.test/', tab: { id: 4 }, frameId: 0,
     });
@@ -225,15 +253,15 @@ test('folder picker rejects page senders and forwards extension requests to the 
     });
     assert.equal(rejectedPage.ok, false);
     assert.equal(rejectedForgedUrl.ok, false);
-    assert.equal(harness.nativeMessages.length, 0);
+    assert.equal(harness.nativeMessages.length, before);
 
     const handoff = sendRuntimeMessage(harness, {
       type: 'dm.confirmHandoff', id: pendingHandoff.id,
       fileName: 'archive.zip', destination: '', startMode: 'now',
     });
     await new Promise(resolve => setTimeout(resolve, 50));
-    assert.ok(harness.nativeMessages.length >= 1, 'regular handoff should open the shared native connection');
-    const handoffRequest = harness.nativeMessages[0];
+    assert.ok(harness.nativeMessages.length >= before + 1, 'regular handoff should use the shared native connection');
+    const handoffRequest = harness.nativeMessages[before];
     harness.nativeOnMessage.listeners[0]({
       type: 'handoff.ack', replyTo: handoffRequest.id, payload: { accepted: true },
     });
@@ -247,8 +275,8 @@ test('folder picker rejects page senders and forwards extension requests to the 
       url: `${harness.chrome.runtime.getURL('handoff.html')}?id=test`,
     });
     await new Promise(resolve => setTimeout(resolve, 50));
-    assert.ok(harness.nativeMessages.length >= 2, 'folder picker should use its own native connection');
-    const request = harness.nativeMessages[1];
+    assert.ok(harness.nativeMessages.length >= before + 2, 'folder picker should use its own native connection');
+    const request = harness.nativeMessages[before + 1];
     assert.equal(harness.nativePorts.length, 2);
     assert.notEqual(harness.nativePorts[0], harness.nativePorts[1]);
     assert.equal(request.type, 'host.pickFolder');
@@ -644,4 +672,383 @@ test('the extension makes no network requests of its own', () => {
     assert.doesNotMatch(fs.readFileSync(path.join(sourceDir, name), 'utf8'),
       /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/, name);
   }
+});
+
+// ---- EXT.B1, EXT.R1, EXT.R2, EXT.E1 ------------------------------------------------------------
+
+/** A harness whose downloads can really be paused, resumed, cancelled and erased. */
+function capturingChrome(initialSettings) {
+  const harness = makeChrome(initialSettings, { id: 'seed' });
+  const log = { paused: [], resumed: [], cancelled: [], erased: [], notes: [], windows: [], badge: [], downloaded: [] };
+  const gone = new Set();
+  Object.assign(harness.chrome.downloads, {
+    async pause(id) { log.paused.push(id); },
+    async resume(id) { log.resumed.push(id); },
+    async cancel(id) { log.cancelled.push(id); gone.add(id); },
+    async erase({ id }) { log.erased.push(id); },
+    async search({ id }) { return gone.has(id) ? [] : [{ id, state: 'in_progress' }]; },
+    async download(options) { log.downloaded.push(options); return 100 + log.downloaded.length; },
+  });
+  harness.chrome.notifications.create = (options) => { log.notes.push(options); };
+  harness.chrome.windows = {
+    async create(options) { log.windows.push(options); return { id: 900 + log.windows.length }; },
+    onRemoved: event(),
+  };
+  harness.chrome.action = {
+    async setBadgeText(details) { log.badge.push(details.text); },
+    async setBadgeBackgroundColor() {},
+    async setTitle() {},
+  };
+  return { harness, log };
+}
+
+const catching = { enabled: true, autoIntercept: true, startMode: 'now', destinationMode: 'default',
+  interceptedExtensions: [], excludedExtensions: ['html', 'jpg'], excludedHosts: [], notifications: true, rulesVersion: 2 };
+const ownPage = (page) => ({ id: 'test-extension', url: `chrome-extension://test/${page}` });
+
+test('EXT.B1: a .flac from a file host is caught with the default rules, cookies of its final address included', async () => {
+  const { harness, log } = capturingChrome(catching);
+  harness.chrome.cookies = { async getAll(query) {
+    return query.url.includes('/files/') ? [{ name: 'file_token', value: 't', path: '/files', domain: 'host.test' }]
+      : [{ name: 'session', value: 's', path: '/', domain: 'host.test' }];
+  } };
+  await withBackground(harness, async () => {
+    const answered = startDownload(harness, { id: 7, url: 'https://host.test/dl?id=9', finalUrl: 'https://host.test/files/track.flac', filename: 'track.flac' });
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.suggestedFileName, 'track.flac');
+    assert.equal(request.payload.finalUrl, 'https://host.test/files/track.flac');
+    assert.equal(request.payload.headers.Cookie, 'file_token=t; session=s');
+    await settle(() => log.cancelled.length);
+    assert.deepEqual(log.paused, [7]);
+    assert.deepEqual(log.cancelled, [7]);
+    // Accepted: the browser is never told a file name.
+    const raced = await Promise.race([answered.then(() => 'answered'), new Promise(resolve => setTimeout(() => resolve('held'), 50))]);
+    assert.equal(raced, 'held');
+  });
+});
+
+test('EXT.B1: a copy still on the old allow-list catches a .flac after the update', async () => {
+  const legacy = { enabled: true, autoIntercept: true, startMode: 'now', notifications: false, excludedExtensions: [], excludedHosts: [],
+    interceptedExtensions: ['3gp', '7z', 'aac', 'ace', 'aif', 'apk', 'arj', 'asf', 'avi', 'bin', 'bz2', 'exe', 'gz', 'gzip', 'img', 'iso', 'lzh',
+      'm4a', 'm4v', 'mkv', 'mov', 'mp3', 'mpa', 'mpe', 'mpeg', 'mpg', 'msi', 'msu', 'ogg', 'ogv', 'plj', 'pps', 'ppt', 'qt', 'ra', 'rar', 'rm',
+      'rmvb', 'sea', 'sit', 'sitx', 'tar', 'wav', 'wma', 'wmv', 'z', 'zip'] };
+  const { harness, log } = capturingChrome(legacy);
+  await withBackground(harness, async () => {
+    void startDownload(harness, { id: 3, url: 'https://host.test/track.flac', filename: 'track.flac' });
+    await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.deepEqual(log.paused, [3]);
+    assert.deepEqual(harness.values.settings.interceptedExtensions, []);
+    assert.equal(harness.values.settings.rulesVersion, 2);
+  });
+});
+
+test('a download left by a rule says why; default exclusions and blob: downloads stay quiet', async () => {
+  const { harness, log } = capturingChrome({ ...catching, excludedHosts: ['bank.test'] });
+  await withBackground(harness, async () => {
+    await startDownload(harness, { id: 1, url: 'https://bank.test/statement.pdf', filename: 'statement.pdf' });
+    assert.equal(log.notes.length, 1);
+    assert.equal(log.notes[0].title, 'Left in your browser');
+    assert.match(log.notes[0].message, /statement\.pdf: bank\.test is on your list of sites never to catch/);
+
+    await startDownload(harness, { id: 2, url: 'https://site.test/photo.jpg', filename: 'photo.jpg' });
+    await startDownload(harness, { id: 3, url: 'blob:https://site.test/77', filename: 'made-by-page.zip' });
+    assert.equal(log.notes.length, 1, 'a default exclusion and a blob: download raise no notification');
+    assert.deepEqual(log.paused, []);
+
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' });
+    assert.deepEqual(status.leftInBrowser.map(note => note.fileName), ['photo.jpg', 'statement.pdf']);
+    assert.match(status.leftInBrowser[0].reason, /\.jpg files are on your list/);
+  });
+});
+
+test('automatic sending off: the badge says OFF, and the first download of the session says why', async () => {
+  const { harness, log } = capturingChrome({ ...catching, autoIntercept: false });
+  await withBackground(harness, async () => {
+    assert.equal(log.badge.at(-1), 'OFF');
+    await startDownload(harness, { id: 1, url: 'https://site.test/a.zip', filename: 'a.zip' });
+    await startDownload(harness, { id: 2, url: 'https://site.test/b.zip', filename: 'b.zip' });
+    assert.equal(log.notes.length, 1);
+    assert.match(log.notes[0].message, /a\.zip: Automatic sending is off/);
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' });
+    assert.equal(status.automaticSending, false);
+    assert.equal(status.leftInBrowser.length, 2);
+
+    await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...catching } });
+    assert.equal(log.badge.at(-1), '');
+    await sendRuntimeMessage(harness, { type: 'dm.pauseCatching' });
+    assert.equal(log.badge.at(-1), 'OFF');
+  });
+});
+
+test('EXT.R1: "ask each time" holds the download until the folder window answers', async () => {
+  const { harness, log } = capturingChrome({ ...catching, destinationMode: 'ask' });
+  await withBackground(harness, async () => {
+    let answered = 0;
+    const handled = harness.downloadsCreated.listeners[0](
+      { id: 21, url: 'https://site.test/a.iso', filename: 'a.iso', referrer: '', mime: '', totalBytes: 10, fileSize: 10 }, () => { answered++; });
+    assert.equal(handled, true);
+    await settle(() => log.windows.length);
+    assert.deepEqual(log.paused, [21]);
+    assert.match(log.windows[0].url, /handoff\.html\?id=/);
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+
+    const info = sendRuntimeMessage(harness, { type: 'dm.getHandoff', id }, ownPage('handoff.html'));
+    await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: 'D:\\Downloads', favorites: [] });
+    const shown = await info;
+    assert.equal(shown.held, true);
+    assert.equal(shown.defaults.destination, 'D:\\Downloads');
+
+    const confirmed = sendRuntimeMessage(harness, { type: 'dm.confirmHandoff', id, destination: 'E:\\Other', startMode: 'now' }, ownPage('handoff.html'));
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.isAutoIntercept, true);
+    assert.equal(request.payload.destinationDirectory, 'E:\\Other');
+    assert.equal((await confirmed).ack.accepted, true);
+    assert.deepEqual(log.cancelled, [21]);
+    assert.deepEqual(log.resumed, []);
+    assert.equal(answered, 0);
+  });
+});
+
+test('EXT.R1: Keep in browser, or closing the window, gives the held download back', async () => {
+  const { harness, log } = capturingChrome({ ...catching, destinationMode: 'ask' });
+  await withBackground(harness, async () => {
+    let answered = 0;
+    harness.downloadsCreated.listeners[0]({ id: 31, url: 'https://site.test/a.iso', filename: 'a.iso' }, () => { answered++; });
+    await settle(() => log.windows.length);
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    assert.deepEqual(log.resumed, [31]);
+    assert.equal(answered, 1);
+    assert.equal(harness.session[`handoff.${id}`], undefined);
+
+    harness.downloadsCreated.listeners[0]({ id: 32, url: 'https://site.test/b.iso', filename: 'b.iso' }, () => { answered++; });
+    await settle(() => log.windows.length === 2);
+    const second = decodeURIComponent(log.windows[1].url.split('id=')[1]);
+    const window = openHandoffPort(harness, second);
+    assert.equal(window.port.disconnected, false);
+    window.close();
+    await settle(() => log.resumed.length === 2);
+    assert.deepEqual(log.resumed, [31, 32]);
+    assert.equal(answered, 2);
+    assert.deepEqual(log.cancelled, []);
+  });
+});
+
+/** The folder window's port to the worker, as handoff.ts opens it. close() is the window closing. */
+function openHandoffPort(harness, id, url = `chrome-extension://test/handoff.html?id=${encodeURIComponent(id)}`, senderId = 'test-extension') {
+  const port = { name: `dm.handoff:${id}`, sender: { id: senderId, url }, onMessage: event(), onDisconnect: event(),
+    disconnected: false, disconnect() { this.disconnected = true; }, postMessage() {} };
+  for (const listener of harness.runtimeOnConnect.listeners) listener(port);
+  return { port, close() { for (const listener of port.onDisconnect.listeners) listener(port); } };
+}
+
+test('closing a browser window wakes nothing: no windows.onRemoved listener, and only the handoff page may hold a port', async () => {
+  const { harness, log } = capturingChrome({ ...catching, destinationMode: 'ask' });
+  await withBackground(harness, async () => {
+    assert.equal(harness.chrome.windows.onRemoved.listeners.length, 0);
+    harness.downloadsCreated.listeners[0]({ id: 41, url: 'https://site.test/a.iso', filename: 'a.iso' }, () => {});
+    await settle(() => log.windows.length);
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    // Another page of this extension, or another extension, naming the same request is turned away,
+    // and its port closing gives nothing back.
+    for (const forged of [openHandoffPort(harness, id, 'chrome-extension://test/popup.html'),
+      openHandoffPort(harness, id, 'chrome-extension://test/handoff.html', 'other-extension')]) {
+      assert.equal(forged.port.disconnected, true);
+      assert.equal(forged.port.onDisconnect.listeners.length, 0);
+    }
+    assert.deepEqual(log.resumed, []);
+    assert.ok(harness.session[`handoff.${id}`]);
+  });
+});
+
+test('EXT.R1: a worker that restarted with the folder window open starts the download again in the browser', async () => {
+  const { harness, log } = capturingChrome({ ...catching, destinationMode: 'ask' });
+  // Left by the worker before it restarted: the browser download is paused and its name callback gone.
+  harness.session['handoff.lost'] = { id: 'lost', url: 'https://site.test/a.iso', suggestedFileName: 'a.iso', userAgent: 'x',
+    isAutoIntercept: true, createdAt: Date.now(), browserDownloadId: 61 };
+  await withBackground(harness, async () => {
+    openHandoffPort(harness, 'lost').close();
+    await settle(() => log.downloaded.length);
+    assert.deepEqual(log.cancelled, [61]);
+    assert.deepEqual(log.erased, [61]);
+    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/a.iso', filename: 'a.iso' }]);
+    assert.equal(harness.session['handoff.lost'], undefined);
+    // The new browser download is let through at once, not caught again.
+    let answered = 0;
+    const result = harness.downloadsCreated.listeners[0]({ id: 62, url: 'https://site.test/a.iso', filename: 'a.iso' }, () => { answered++; });
+    assert.notEqual(result, true);
+    assert.equal(answered, 1);
+    assert.deepEqual(log.paused, []);
+    // Only once: the same address later is caught as usual.
+    assert.equal(harness.downloadsCreated.listeners[0]({ id: 63, url: 'https://site.test/a.iso', filename: 'a.iso' }, () => {}), true);
+  });
+});
+
+test('EXT.R1: closing the folder window while the request is being sent waits for the answer', async () => {
+  const { harness, log } = capturingChrome({ ...catching, destinationMode: 'ask' });
+  await withBackground(harness, async () => {
+    for (const [downloadId, accepted] of [[71, true], [72, false]]) {
+      let answered = 0;
+      harness.downloadsCreated.listeners[0]({ id: downloadId, url: `https://site.test/${downloadId}.iso`, filename: 'a.iso' }, () => { answered++; });
+      await settle(() => log.windows.length === downloadId - 70);
+      const id = decodeURIComponent(log.windows.at(-1).url.split('id=')[1]);
+      const window = openHandoffPort(harness, id);
+      const confirmed = sendRuntimeMessage(harness, { type: 'dm.confirmHandoff', id, destination: '', startMode: 'now' }, ownPage('handoff.html'));
+      await settle(() => harness.nativeMessages.some(message => message.type === 'handoff.request' && !message.answered));
+      window.close();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(log.resumed.includes(downloadId), false, 'nothing is given back while the app may still take it');
+      await answerNative(harness, 'handoff.request', { accepted, error: accepted ? undefined : 'No.' });
+      await confirmed;
+      if (accepted) {
+        assert.ok(log.cancelled.includes(downloadId));
+        assert.equal(log.resumed.includes(downloadId), false);
+        assert.equal(answered, 0);
+      } else {
+        // Nobody is left to choose: the browser keeps it.
+        await settle(() => log.resumed.includes(downloadId));
+        assert.ok(log.resumed.includes(downloadId));
+        assert.equal(answered, 1);
+      }
+    }
+  });
+});
+
+test('EXT.R2: pause, resume, retry and delete reach the app, deleting the file only when asked', async () => {
+  const { harness } = capturingChrome(catching);
+  const job = '6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f';
+  await withBackground(harness, async () => {
+    const cases = [
+      ['pause', true, 'job.pause', false], ['resume', false, 'job.resume', false], ['retry', false, 'job.retry', false],
+      ['remove', false, 'job.remove', false], ['remove', true, 'job.remove', true]];
+    for (const [action, deleteFile, type, expectedDelete] of cases) {
+      const reply = sendRuntimeMessage(harness, { type: 'dm.jobAction', action, jobId: job, deleteFile }, ownPage('popup.html'));
+      const request = await answerNative(harness, type, { ok: true, job: { id: job } });
+      assert.deepEqual(request.payload, { jobId: job, deleteFile: expectedDelete }, `${action} ${deleteFile}`);
+      assert.equal((await reply).ok, true);
+    }
+    const before = harness.nativeMessages.length;
+    for (const message of [{ action: 'shutdown', jobId: job }, { action: 'remove', jobId: 'not-a-job' }, { action: 'constructor', jobId: job }]) {
+      assert.equal((await sendRuntimeMessage(harness, { type: 'dm.jobAction', ...message }, ownPage('popup.html'))).ok, false);
+    }
+    // A web page cannot ask at all.
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.jobAction', action: 'remove', jobId: job, deleteFile: true },
+      { id: 'test-extension', url: 'https://evil.test/', tab: { id: 4 } })).ok, false);
+    assert.equal(harness.nativeMessages.length, before);
+
+    // The app's refusal comes back as an error.
+    const refused = sendRuntimeMessage(harness, { type: 'dm.jobAction', action: 'pause', jobId: job }, ownPage('popup.html'));
+    await answerNative(harness, 'job.pause', { ok: false, error: 'Job not found.' });
+    assert.deepEqual(await refused, { ok: false, error: 'Job not found.' });
+  });
+});
+
+test('EXT.R2: the popup gets the newest 20 of all downloads', async () => {
+  const { harness } = capturingChrome(catching);
+  await withBackground(harness, async () => {
+    const reply = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+    const jobs = Array.from({ length: 25 }, (_, index) => ({ id: `id-${index}`, fileName: `f${index}`, state: 'completed', receivedBytes: 1,
+      createdAt: new Date(Date.UTC(2026, 0, 1, index)).toISOString() }));
+    await answerNative(harness, 'jobs.query', { jobs });
+    const shown = (await reply).jobs;
+    assert.equal(shown.length, 20);
+    assert.equal(shown[0].fileName, 'f24');
+  });
+});
+
+test('EXT.E1: without onDeterminingFilename (Firefox) a download is caught from onCreated', async () => {
+  const { harness, log } = capturingChrome(catching);
+  delete harness.chrome.downloads.onDeterminingFilename;
+  await withBackground(harness, async () => {
+    assert.equal(harness.chrome.downloads.onCreated.listeners.length, 1);
+    harness.chrome.downloads.onCreated.listeners[0]({ id: 5, url: 'https://site.test/book.epub', filename: 'C:\\Users\\me\\Downloads\\book.epub',
+      referrer: '', mime: '', totalBytes: 1, fileSize: 1 });
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.suggestedFileName, 'book.epub');
+    await settle(() => log.cancelled.length);
+    assert.deepEqual(log.paused, [5]);
+    assert.deepEqual(log.cancelled, [5]);
+  });
+});
+
+/** Firefox: no file-name hook, so downloads come from onCreated. */
+function firefoxChrome(settings = catching) {
+  const made = capturingChrome(settings);
+  delete made.harness.chrome.downloads.onDeterminingFilename;
+  return made;
+}
+
+const firefoxItem = (id, fileName) => ({ id, url: `https://site.test/${fileName}`, filename: fileName, referrer: '', mime: '', totalBytes: 1, fileSize: 1 });
+
+test('EXT.E1: on Firefox a download that will not pause is left in the browser, never sent while it still arrives', async () => {
+  const { harness, log } = firefoxChrome();
+  harness.chrome.downloads.pause = async () => { throw new Error('cannot pause'); };
+  await withBackground(harness, async () => {
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(8, 'big.iso'));
+    await settle(() => log.notes.length);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+    assert.match(log.notes[0].message, /big\.iso: The browser would not pause it/);
+
+    // Already finished: said so, nothing sent.
+    harness.chrome.downloads.search = async ({ id }) => [{ id, state: 'complete' }];
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(9, 'small.zip'));
+    await settle(() => log.notes.length === 2);
+    assert.match(log.notes[1].message, /small\.zip: It finished in the browser before it could be sent/);
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+  });
+});
+
+test('EXT.E1: on Firefox the download is paused before the tabs are asked about a Delete gesture', async () => {
+  const { harness, log } = firefoxChrome();
+  const order = [];
+  harness.chrome.downloads.pause = async (id) => { order.push('pause'); log.paused.push(id); };
+  harness.chrome.tabs.query = async () => { order.push('tabs'); return [{ id: 4 }]; };
+  harness.chrome.tabs.sendMessage = async () => ({ keep: true });
+  await withBackground(harness, async () => {
+    const before = order.length;
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(10, 'a.zip'));
+    await settle(() => log.resumed.length);
+    assert.deepEqual(order.slice(before, before + 2), ['pause', 'tabs']);
+    // A Delete gesture still keeps it in the browser, which continues it.
+    assert.deepEqual(log.resumed, [10]);
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+  });
+});
+
+test('EXT.E1: on Firefox a refused download the browser cannot continue gets a note', async () => {
+  const { harness, log } = firefoxChrome();
+  harness.chrome.downloads.resume = async () => { throw new Error('Download cannot be resumed'); };
+  harness.chrome.downloads.search = async ({ id }) => [{ id, state: 'interrupted', paused: false }];
+  await withBackground(harness, async () => {
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(11, 'a.zip'));
+    await answerNative(harness, 'handoff.request', { accepted: false, error: 'Disk full.' });
+    await settle(() => log.notes.length);
+    assert.match(log.notes.at(-1).message, /Disk full\. The browser could not continue it/);
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
+    assert.match(status.leftInBrowser[0].reason, /could not continue it/);
+  });
+});
+
+test('EXT.R2: popup actions use a connection of their own, so a slow delete cannot hold up a handoff', async () => {
+  const { harness, log } = capturingChrome(catching);
+  const job = '6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f';
+  await withBackground(harness, async () => {
+    // The shared connection is open (a handoff used it).
+    void startDownload(harness, { id: 12, url: 'https://site.test/first.zip', filename: 'first.zip' });
+    const first = await answerNative(harness, 'handoff.request', { accepted: true });
+    // A delete the app is slow to answer.
+    const removing = sendRuntimeMessage(harness, { type: 'dm.jobAction', action: 'remove', jobId: job, deleteFile: true }, ownPage('popup.html'));
+    await settle(() => harness.nativeMessages.some(message => message.type === 'job.remove'));
+    const remove = harness.nativeMessages.find(message => message.type === 'job.remove');
+    assert.notEqual(remove.portIndex, first.portIndex);
+    // A handoff meanwhile goes out on the shared connection and is answered first.
+    void startDownload(harness, { id: 13, url: 'https://site.test/second.zip', filename: 'second.zip' });
+    const second = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(second.portIndex, first.portIndex);
+    await settle(() => log.cancelled.length === 2);
+    await answerNative(harness, 'job.remove', { ok: true, job: { id: job } });
+    assert.equal((await removing).ok, true);
+    assert.equal(harness.nativePorts[remove.portIndex].disconnected, true, 'the one-off connection is closed after its answer');
+  });
 });

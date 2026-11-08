@@ -5,22 +5,15 @@ import { isUnsupportedUrl, UNSUPPORTED_SITE_MESSAGE } from "./unsupported-sites"
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
 import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
-
-type StartMode = "now" | "later";
-
-interface Settings {
-  enabled: boolean;
-  autoIntercept: boolean;
-  startMode: StartMode;
-  interceptedExtensions: string[];
-  excludedExtensions: string[];
-  excludedHosts: string[];
-  notifications: boolean;
-}
+import {
+  DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
+} from "./capture-rules";
+import { JOB_ACTION_MESSAGES, latestJobs, type JobAction, type JobSummary } from "./job-list";
 
 interface PendingHandoff {
   id: string;
   url: string;
+  finalUrl?: string;
   pageUrl?: string;
   referrer?: string;
   userAgent: string;
@@ -30,18 +23,15 @@ interface PendingHandoff {
   isAutoIntercept: boolean;
   createdAt: number;
   cookieContext?: BrowserCookieContext;
+  /** Set for an automatic catch held in the browser while the user chooses a folder (destinationMode "ask"). */
+  browserDownloadId?: number;
 }
 
-interface JobSummary {
-  id: string;
+/** A download the extension saw and left in the browser, with the reason, for the popup. */
+interface LeftInBrowser {
   fileName: string;
-  state: string;
-  receivedBytes: number;
-  totalBytes?: number;
-  progress?: number;
-  bytesPerSecond?: number;
-  failure?: { message?: string };
-  finalFilePath?: string;
+  reason: string;
+  at: number;
 }
 
 interface NativeEnvelope {
@@ -51,23 +41,6 @@ interface NativeEnvelope {
   replyTo?: string;
   payload?: unknown;
 }
-
-const DEFAULT_SETTINGS: Settings = {
-  enabled: true,
-  // Off until the user turns it on in Settings, next to the explanation of what it shares.
-  autoIntercept: false,
-  startMode: "now",
-  interceptedExtensions: [
-    "3gp", "7z", "aac", "ace", "aif", "apk", "arj", "asf", "avi", "bin", "bz2",
-    "exe", "gz", "gzip", "img", "iso", "lzh", "m4a", "m4v", "mkv", "mov", "mp3",
-    "mpa", "mpe", "mpeg", "mpg", "msi", "msu", "ogg", "ogv", "plj", "pps", "ppt",
-    "qt", "ra", "rar", "rm", "rmvb", "sea", "sit", "sitx", "tar", "wav", "wma",
-    "wmv", "z", "zip",
-  ],
-  excludedExtensions: [],
-  excludedHosts: [],
-  notifications: true,
-};
 
 // Content scripts run alongside pages this extension does not trust, so they get only what they
 // need. Everything else, cookies and settings above all, is for the extension's own pages.
@@ -91,6 +64,18 @@ const pendingRequests = new Map<
 >();
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
+// File-name suggestions still owed to the browser for downloads held while the folder window is open.
+const heldSuggestions = new Map<number, () => void>();
+const HANDOFF_PORT_PREFIX = "dm.handoff:";
+// Folder-window requests being sent to the app right now, and those whose window closed meanwhile.
+const confirmingHandoffs = new Set<string>();
+const closedWhileConfirming = new Set<string>();
+// URLs started again in the browser by keepInBrowser; their next download is let through once.
+const restartedInBrowser = new Set<string>();
+const LEFT_IN_BROWSER_KEY = "leftInBrowser";
+const AUTO_OFF_NOTICE_KEY = "autoOffNoticeShown";
+let leftInBrowser: LeftInBrowser[] = [];
+let badgeTimer: ReturnType<typeof setTimeout> | undefined;
 let autoSendSyncQueue: Promise<void> = Promise.resolve();
 async function hasDeleteGesture(url: string): Promise<boolean> {
   // DownloadItem has no tab id. Ask page scripts for the exact initiating link
@@ -126,17 +111,46 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // holding the suggestion (returning true) while the Host is asked keeps the
 // download bubble from opening. An accepted download is cancelled without ever
 // answering; anything kept by the browser gets the default name and resumes.
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  let answered = false;
-  const answer = (): void => {
-    if (answered) return;
-    answered = true;
-    try { suggest(); } catch { /* the download is already gone */ }
-  };
-  void onDownloadCreated(item)
-    .then((intercepted) => { if (!intercepted) answer(); })
-    .catch(() => answer());
-  return true;
+// Firefox has no onDeterminingFilename: there the download is caught from
+// onCreated, paused at once, and cancelled or resumed the same way.
+if (chrome.downloads.onDeterminingFilename) {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    if (restartedInBrowser.delete(item.url)) {
+      // Started again by keepInBrowser after the worker lost the first one's callback.
+      try { suggest(); } catch { /* gone */ }
+      return;
+    }
+    let answered = false;
+    const answer = (): void => {
+      if (answered) return;
+      answered = true;
+      heldSuggestions.delete(item.id);
+      try { suggest(); } catch { /* the download is already gone */ }
+    };
+    void onDownloadCreated(item, answer)
+      .then((handled) => { if (!handled) answer(); })
+      .catch(() => answer());
+    return true;
+  });
+} else {
+  chrome.downloads.onCreated.addListener((item) => {
+    void onDownloadCreated(item).catch(() => undefined);
+  });
+}
+// The folder window of a held download keeps a port open to this worker. Its pings keep the worker
+// (and so the browser's file-name callback, which only lives in memory) alive while the window is
+// open, and the port closing is how a window closed without a choice is seen. This replaces a
+// windows.onRemoved listener, which woke the worker for every browser window that closed.
+chrome.runtime.onConnect.addListener((port) => {
+  if (!port.name.startsWith(HANDOFF_PORT_PREFIX)) return;
+  const sourcePage = (port.sender?.url ?? "").split(/[?#]/)[0];
+  if (port.sender?.id !== chrome.runtime.id || sourcePage !== chrome.runtime.getURL("handoff.html")) {
+    try { port.disconnect(); } catch { /* already closed */ }
+    return;
+  }
+  const id = port.name.slice(HANDOFF_PORT_PREFIX.length);
+  port.onMessage.addListener(() => { /* a ping: receiving it is the point */ });
+  port.onDisconnect.addListener(() => { void handoffWindowClosed(id); });
 });
 chrome.runtime.onInstalled.addListener((details) => {
   void installMenus();
@@ -169,13 +183,68 @@ async function ensureSettingsLoaded(): Promise<void> {
 
 async function loadSettings(): Promise<void> {
   const stored = await chrome.storage.local.get("settings");
-  settings = {
-    ...DEFAULT_SETTINGS,
-    ...(stored.settings ?? {}),
-  };
+  const migrated = migrateSettings(stored.settings);
+  settings = migrated.settings;
+  if (migrated.changed) {
+    // Once: a copy that never edited the old allow-list now catches everything except the exclude list.
+    await chrome.storage.local.set({ settings }).catch(() => undefined);
+  }
   const normalized = await chrome.storage.local.get("pauseUntil");
   pauseUntil = typeof normalized.pauseUntil === "number" ? normalized.pauseUntil : 0;
+  try {
+    const notes = (await chrome.storage.session.get(LEFT_IN_BROWSER_KEY))[LEFT_IN_BROWSER_KEY];
+    leftInBrowser = Array.isArray(notes) ? notes.slice(0, 5) : [];
+  } catch { leftInBrowser = []; }
   settingsLoaded = true;
+  updateBadge();
+}
+
+/**
+ * The toolbar shows "OFF" whenever downloads are not being caught automatically, so a fresh install
+ * (automatic sending starts off) or a pause cannot be mistaken for the extension failing.
+ */
+function updateBadge(): void {
+  const action = (chrome as { action?: typeof chrome.action }).action;
+  if (!action?.setBadgeText) return;
+  const paused = Date.now() < pauseUntil;
+  const off = !automaticSendingActive();
+  try {
+    void action.setBadgeText({ text: off || paused ? "OFF" : "" })?.catch?.(() => undefined);
+    void action.setBadgeBackgroundColor?.({ color: "#6b6b6b" })?.catch?.(() => undefined);
+    void action.setTitle?.({
+      title: off
+        ? "Inbound Download Manager: automatic sending is off"
+        : paused
+          ? "Inbound Download Manager: catching is paused"
+          : "Inbound Download Manager: catching downloads",
+    })?.catch?.(() => undefined);
+  } catch { /* the badge is a convenience */ }
+  if (paused && badgeTimer === undefined) {
+    // Best effort: a worker that sleeps through the end of the pause updates the badge when it wakes,
+    // opens the popup or sees the next download.
+    badgeTimer = setTimeout(() => { badgeTimer = undefined; updateBadge(); }, Math.min(pauseUntil - Date.now() + 500, 5 * 60 * 1000));
+    // Never what keeps a process alive (the tests run this under Node).
+    (badgeTimer as { unref?: () => void }).unref?.();
+  }
+}
+
+/** Remembers why a download stayed in the browser, for the popup, and says so when it should. */
+async function noteLeftInBrowser(fileName: string, reason: string, quiet: boolean): Promise<void> {
+  leftInBrowser = [{ fileName, reason, at: Date.now() }, ...leftInBrowser].slice(0, 5);
+  try { await chrome.storage.session.set({ [LEFT_IN_BROWSER_KEY]: leftInBrowser }); } catch { /* popup note only */ }
+  if (!quiet) {
+    notify("Left in your browser", `${fileName}: ${reason}`);
+  }
+}
+
+/** Automatic sending is off: said once per browser session, then only in the popup and the badge. */
+async function noteAutomaticSendingOff(fileName: string): Promise<void> {
+  let shown = false;
+  try { shown = (await chrome.storage.session.get(AUTO_OFF_NOTICE_KEY))[AUTO_OFF_NOTICE_KEY] === true; } catch { /* show it */ }
+  await noteLeftInBrowser(fileName, "Automatic sending is off. Turn it on in the extension's Settings.", shown);
+  if (!shown) {
+    try { await chrome.storage.session.set({ [AUTO_OFF_NOTICE_KEY]: true }); } catch { /* shown again next time */ }
+  }
 }
 
 // Automatic catching was on from the start before 0.4.0. A copy that never saved its settings was
@@ -266,65 +335,72 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
   });
 }
 
-async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<boolean> {
+/**
+ * Decides one browser download. Returns true when the extension has taken it over (sent to the app,
+ * or held while the folder window is open), so the browser must not be given its file name now.
+ */
+async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: () => void): Promise<boolean> {
   await ensureSettingsLoaded();
+  updateBadge();
+  const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
+  // blob: and data: downloads are the page's own; nothing is said about them.
+  const pageOwned = !isHttpUrl(item.finalUrl || item.url);
   if (!settings.enabled || !settings.autoIntercept) {
+    if (!pageOwned) await noteAutomaticSendingOff(fileName);
     return false;
   }
 
   if (Date.now() < pauseUntil) {
+    if (!pageOwned) await noteLeftInBrowser(fileName, "Catching is paused.", true);
     return false;
   }
 
-  if (await hasDeleteGesture(item.url)) {
+  // Chromium: the file name is held (answer is set), so the download cannot finish while the checks
+  // run. Firefox has no such hold and the file keeps arriving, so there the download is paused as soon
+  // as the rules say to catch it, and the slower Delete-gesture lookup (it asks every tab) comes after.
+  const holdsName = answer !== undefined;
+  if (holdsName && await hasDeleteGesture(item.url)) {
+    await noteLeftInBrowser(fileName, "Delete was held when the download started.", true);
     return false;
   }
 
-  const url = item.finalUrl || item.url;
-  if (!isHttpUrl(url)) {
-    return false;
-  }
-
-  if ([item.url, item.finalUrl, item.referrer].some(isUnsupportedUrl)) {
-    return false;
-  }
-
-  const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
-  const extension = extensionOf(fileName || url);
-  const host = hostOf(url);
-  if (!host) {
-    return false;
-  }
-
-  // Every site involved, not just where a redirect ended up: an excluded site's cookies are read for
-  // the original address, and files behind a login often redirect to a storage host.
-  const sourceHosts = [item.url, item.finalUrl, item.referrer]
-    .map((value) => (value ? hostOf(value) : null))
-    .filter((value): value is string => !!value);
-  if (settings.excludedHosts.some((pattern) => sourceHosts.some((candidate) => hostMatches(candidate, pattern)))) {
-    return false;
-  }
-
-  if (extension && settings.excludedExtensions.includes(extension)) {
-    return false;
-  }
-
-  if (extension && settings.interceptedExtensions.length > 0 &&
-      !settings.interceptedExtensions.includes(extension)) {
-    return false;
-  }
-
-  if (!extension && /^text\/html/i.test(item.mime ?? "")) {
+  const decision = decideCapture({
+    url: item.url, finalUrl: item.finalUrl, referrer: item.referrer, mime: item.mime, fileName,
+  }, settings);
+  if (!decision.capture) {
+    if (decision.reason) await noteLeftInBrowser(fileName, decision.reason, decision.quiet);
     return false;
   }
 
   try {
     await chrome.downloads.pause(item.id);
   } catch {
-    // While the file name is held the download cannot complete, so a failed
-    // pause only matters if the download already finished or was removed.
     const [live] = await chrome.downloads.search({ id: item.id }).catch(() => []);
-    if (!live || live.state !== "in_progress") return false;
+    if (!live || live.state !== "in_progress") {
+      // Finished or removed before it could be paused. Only Firefox gets here in practice: with the
+      // name held, Chromium cannot finish the download first.
+      if (live?.state === "complete") {
+        await noteLeftInBrowser(fileName, "It finished in the browser before it could be sent.", false);
+      }
+      return false;
+    }
+    if (!holdsName) {
+      // Still arriving and not paused: sending it now would download the same file twice until the
+      // app's answer cancels the browser's copy. It stays in the browser.
+      await noteLeftInBrowser(fileName, "The browser would not pause it, so it was not sent.", false);
+      return false;
+    }
+    // With the name held the download cannot complete, so it can still be handed over.
+  }
+
+  if (!holdsName && await hasDeleteGesture(item.url)) {
+    await noteLeftInBrowser(fileName, "Delete was held when the download started.", true);
+    await resumeInBrowser(item.id, fileName);
+    return false;
+  }
+
+  if (settings.destinationMode === "ask") {
+    return await holdForFolderChoice(item, fileName, answer);
   }
 
   let requestId = downloadRequestIds.get(item.id);
@@ -348,7 +424,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
       startMode: settings.startMode,
       isAutoIntercept: true,
-      headers: await cookieHeaders(item.url),
+      headers: await browserCookieHeaders(item.url, {}, item.finalUrl),
     });
 
     if (ack.accepted) {
@@ -358,13 +434,15 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       notify(
         browserEntryRemoved
           ? ack.duplicate ? "Already in Inbound" : "Sent to Inbound"
-          : "Sent to Inbound, but still listed in Chrome",
-        browserEntryRemoved ? fileName : "Chrome's copy could not be removed. Check Chrome's download list.",
+          : "Sent to Inbound, but still listed in your browser",
+        browserEntryRemoved ? fileName : "The browser's copy could not be removed. Check the browser's download list.",
       );
       return true;
     } else {
-      await chrome.downloads.resume(item.id).catch(() => undefined);
-      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} This download stays in Chrome.`);
+      const resumed = await resumeInBrowser(item.id, fileName);
+      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} ${resumed
+        ? "This download stays in your browser."
+        : "The browser could not continue it: start it again from the browser's download list."}`);
       lastNativeError = ack.error ?? "handoff rejected";
     }
   } catch (error) {
@@ -374,13 +452,126 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem): Promise<b
       downloadRequestIds.delete(item.id);
       return true;
     }
-    await chrome.downloads.resume(item.id).catch(() => undefined);
+    const resumed = await resumeInBrowser(item.id, fileName);
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
     lastNativeError = message;
-    notify("Inbound unavailable", `${readableError(message)} This download stays in Chrome.`);
+    notify("Inbound unavailable", `${readableError(message)} ${resumed
+      ? "This download stays in your browser."
+      : "The browser could not continue it: start it again from the browser's download list."}`);
   }
   return false;
+}
+
+/**
+ * Lets a paused browser download continue. Firefox cannot continue some paused downloads (a server
+ * that does not resume, for one); then the popup keeps a note so the user knows to start it again.
+ */
+async function resumeInBrowser(downloadId: number, fileName: string): Promise<boolean> {
+  try {
+    await chrome.downloads.resume(downloadId);
+    return true;
+  } catch {
+    const [live] = await chrome.downloads.search({ id: downloadId }).catch(() => []);
+    // Not paused any more (it was never paused, or it went on by itself): nothing is wrong.
+    if (live && live.state === "in_progress" && !live.paused) return true;
+    await noteLeftInBrowser(fileName, "The browser could not continue it. Start it again from the browser's download list.", true);
+    return false;
+  }
+}
+
+/**
+ * "Ask each time": the browser's download stays paused (and, in Chromium, its file name unanswered)
+ * while the folder window is open. Download sends it and removes the browser's copy; Keep in browser,
+ * or closing the window, resumes it in the browser. The window's port keeps the worker alive while it
+ * is open. If the worker restarts anyway, the pending entry (in session storage, with the browser's
+ * download id) still works, and keepInBrowser starts the download again because the browser's
+ * file-name callback did not survive.
+ */
+async function holdForFolderChoice(item: chrome.downloads.DownloadItem, fileName: string, answer?: () => void): Promise<boolean> {
+  const id = crypto.randomUUID();
+  const pending: PendingHandoff = {
+    id,
+    url: item.url,
+    finalUrl: item.finalUrl || undefined,
+    pageUrl: item.referrer || undefined,
+    referrer: item.referrer || undefined,
+    userAgent: navigator.userAgent,
+    suggestedFileName: fileName,
+    mimeType: item.mime || undefined,
+    totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
+    isAutoIntercept: true,
+    createdAt: Date.now(),
+    browserDownloadId: item.id,
+  };
+  try {
+    pendingHandoffs.set(id, pending);
+    await chrome.storage.session.set({ [`handoff.${id}`]: pending });
+    if (answer) heldSuggestions.set(item.id, answer);
+    await chrome.windows.create({
+      url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
+      type: "popup",
+      width: 560,
+      height: 680,
+    });
+    return true;
+  } catch {
+    // No window, no choice: the browser keeps it, as on any other failure.
+    pendingHandoffs.delete(id);
+    heldSuggestions.delete(item.id);
+    await chrome.storage.session.remove(`handoff.${id}`).catch(() => undefined);
+    await chrome.downloads.resume(item.id).catch(() => undefined);
+    return false;
+  }
+}
+
+async function pendingHandoff(id: string): Promise<PendingHandoff | undefined> {
+  return pendingHandoffs.get(id) ??
+    (await chrome.storage.session.get(`handoff.${id}`))[`handoff.${id}`] as PendingHandoff | undefined;
+}
+
+async function forgetHandoff(id: string): Promise<void> {
+  pendingHandoffs.delete(id);
+  await chrome.storage.session.remove(`handoff.${id}`).catch(() => undefined);
+}
+
+/** Gives a held download back to the browser: its file name, then the transfer. */
+async function keepInBrowser(pending: PendingHandoff): Promise<void> {
+  await forgetHandoff(pending.id);
+  const downloadId = pending.browserDownloadId;
+  if (typeof downloadId !== "number") return;
+  const answer = heldSuggestions.get(downloadId);
+  heldSuggestions.delete(downloadId);
+  if (answer || !chrome.downloads.onDeterminingFilename) {
+    answer?.();
+    await resumeInBrowser(downloadId, pending.suggestedFileName ?? "download");
+    return;
+  }
+  // Chromium, and the worker restarted while the window was open: the callback that answers the
+  // browser's file-name question is gone, and nothing else can answer it, so the paused download
+  // would wait for ever. It is cancelled and started again in the browser, which lets the new one
+  // through once. The page's referrer is not carried over; the browser's own cookies are.
+  await chrome.downloads.cancel(downloadId).catch(() => undefined);
+  await chrome.downloads.erase({ id: downloadId }).catch(() => undefined);
+  restartedInBrowser.add(pending.url);
+  try {
+    await chrome.downloads.download({ url: pending.url, filename: pending.suggestedFileName || undefined });
+  } catch {
+    restartedInBrowser.delete(pending.url);
+    await noteLeftInBrowser(pending.suggestedFileName ?? "download",
+      "The browser could not start it again. Download it again from the page.", false);
+  }
+}
+
+/** The folder window's port closed: a window closed without a choice leaves the download in the browser. */
+async function handoffWindowClosed(id: string): Promise<void> {
+  if (confirmingHandoffs.has(id)) {
+    // Being sent right now; the answer decides (see dm.confirmHandoff).
+    closedWhileConfirming.add(id);
+    return;
+  }
+  const pending = await pendingHandoff(id).catch(() => undefined);
+  if (typeof pending?.browserDownloadId === "number") await keepInBrowser(pending);
 }
 
 async function requestHandoff(payload: Record<string, unknown>): Promise<any> {
@@ -479,32 +670,42 @@ function ensurePort(): chrome.runtime.Port {
   return port;
 }
 
-function pickNativeFolder(initialPath?: string): Promise<any> {
-  // A modal picker can stay open for minutes. Use its own native connection so
-  // it cannot block automatic handoffs on the normal sequential IPC connection.
+/**
+ * One request on a native connection of its own, closed after the answer. The Host answers one
+ * command at a time per connection, so anything that may take long (a folder picker left open, a
+ * delete of a large file) goes here: on the shared connection it would hold up an automatic handoff
+ * past its time limit, the browser would keep its copy, and the app could still take the queued one.
+ */
+function requestOnOwnConnection(type: string, payload: unknown, timeoutMs: number, timeoutMessage: string): Promise<NativeEnvelope> {
   const port = chrome.runtime.connectNative(NATIVE_HOST);
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     let finished = false;
-    const finish = (result: any, error?: Error): void => {
+    const finish = (result: NativeEnvelope | null, error?: Error): void => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
       try { port.disconnect(); } catch { /* already closed */ }
-      if (error) reject(error); else resolve(result);
+      if (error || !result) reject(error ?? new Error(timeoutMessage)); else resolve(result);
     };
-    const timer = setTimeout(() => finish(null, new Error("Folder selection timed out.")), 120000);
+    const timer = setTimeout(() => finish(null, new Error(timeoutMessage)), timeoutMs);
     port.onMessage.addListener((message: NativeEnvelope) => {
-      if (message.replyTo !== id) return;
-      if (message.type !== "host.folderPicked") {
-        finish(null, new Error("This version of the desktop app cannot show a folder picker. Update the app."));
-      } else finish(message.payload);
+      if (message.replyTo === id) finish(message);
     });
     port.onDisconnect.addListener(() => finish(null,
-      new Error(chrome.runtime.lastError?.message ?? "The folder selection connection closed.")));
-    try { port.postMessage({ v: 1, type: "host.pickFolder", id, payload: { initialPath } }); }
+      new Error(chrome.runtime.lastError?.message ?? "The connection to the desktop app closed.")));
+    try { port.postMessage({ v: 1, type, id, payload }); }
     catch (error) { finish(null, error instanceof Error ? error : new Error(String(error))); }
   });
+}
+
+async function pickNativeFolder(initialPath?: string): Promise<any> {
+  // A modal picker can stay open for minutes.
+  const reply = await requestOnOwnConnection("host.pickFolder", { initialPath }, 120000, "Folder selection timed out.");
+  if (reply.type !== "host.folderPicked") {
+    throw new Error("This version of the desktop app cannot show a folder picker. Update the app.");
+  }
+  return reply.payload;
 }
 
 function disconnectPort(): void {
@@ -572,27 +773,6 @@ async function cookieHeaders(url: string): Promise<Record<string, string>> {
   return browserCookieHeaders(url);
 }
 
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
-
-function hostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function hostMatches(host: string, pattern: string): boolean {
-  const normalized = pattern.trim().toLowerCase().replace(/^\*\./, "");
-  if (!normalized) {
-    return false;
-  }
-
-  return host === normalized || host.endsWith(`.${normalized}`);
-}
-
 function baseName(value: string): string {
   try {
     const path = new URL(value).pathname;
@@ -606,12 +786,6 @@ function baseName(value: string): string {
 
   const cleaned = value.split(/[\\/]/).pop() ?? "download";
   return cleaned.split("?")[0] || "download";
-}
-
-function extensionOf(value: string): string {
-  const clean = (value.split("?")[0] ?? "").split("#")[0] ?? "";
-  const match = /\.([a-z0-9]{1,10})$/i.exec(clean);
-  return match ? match[1]!.toLowerCase() : "";
 }
 
 function inferFileName(url: string, kind: "link" | "file"): string {
@@ -789,16 +963,20 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (nativePort === null) {
         await sendNative("host.ping", {}, 3000, 0).catch(() => undefined);
       }
+      updateBadge();
       return {
         ok: true,
         extensionVersion: EXTENSION_VERSION,
         enabled: settings.enabled,
         autoIntercept: settings.autoIntercept,
+        automaticSending: automaticSendingActive(),
         connected: nativePort !== null,
         lastError: lastNativeError,
         pauseUntil,
         settings,
-        jobs: [...lastJobs.values()],
+        siteAccess: await hasSiteAccess(),
+        leftInBrowser,
+        jobs: latestJobs([...lastJobs.values()]),
       };
 
     case "dm.openApp": {
@@ -822,27 +1000,28 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
 
     case "dm.getHandoff": {
       const id = String(message.id ?? "");
-      let pending = pendingHandoffs.get(id);
+      const pending = await pendingHandoff(id);
       if (!pending) {
-        const stored = await chrome.storage.session.get(`handoff.${id}`);
-        pending = stored[`handoff.${id}`] as PendingHandoff | undefined;
+        return { ok: false, error: "This download request has expired. Start again from the right-click menu." };
       }
-      return pending
-        ? {
-            ok: true,
-            handoff: pending,
-            defaults: {
-              destination: "",
-              startMode: settings.startMode,
-            },
-          }
-        : { ok: false, error: "This download request has expired. Start again from the right-click menu." };
+      // The window starts at the app's default folder every time; a folder chosen for one download
+      // is never carried to the next (UI.R3). Favorites are offered beside it.
+      const folders = await downloadFolders();
+      return {
+        ok: true,
+        handoff: pending,
+        held: typeof pending.browserDownloadId === "number",
+        defaults: {
+          destination: folders.defaultFolder,
+          favorites: folders.favorites,
+          startMode: settings.startMode,
+        },
+      };
     }
 
     case "dm.confirmHandoff": {
       const id = String(message.id ?? "");
-      const pending = pendingHandoffs.get(id) ??
-        (await chrome.storage.session.get(`handoff.${id}`))[`handoff.${id}`] as PendingHandoff | undefined;
+      const pending = await pendingHandoff(id);
       if (!pending) {
         return { ok: false, error: "This download request has expired. Start again from the right-click menu." };
       }
@@ -851,10 +1030,17 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const destination = typeof message.destination === "string"
         ? message.destination.trim()
         : "";
-      const ack = await requestHandoff({
+      if (confirmingHandoffs.has(id)) {
+        return { ok: false, error: "This download is being sent already." };
+      }
+      confirmingHandoffs.add(id);
+      let ack: any;
+      try {
+        ack = await requestHandoff({
         requestId: crypto.randomUUID(),
         extensionId: chrome.runtime.id,
         url: pending.url,
+        finalUrl: pending.finalUrl,
         pageUrl: pending.pageUrl,
         referrer: pending.referrer,
         userAgent: pending.userAgent,
@@ -863,14 +1049,26 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         totalBytes: pending.totalBytes,
         startMode,
         isAutoIntercept: pending.isAutoIntercept,
-        headers: await browserCookieHeaders(pending.url, pending.cookieContext),
+        headers: await browserCookieHeaders(pending.url, pending.cookieContext, pending.finalUrl),
         destinationDirectory: destination || undefined,
-      });
+        });
+      } finally {
+        confirmingHandoffs.delete(id);
+        // The window closed while this was being sent. Not accepted: nobody is left to choose, so the
+        // held download goes back to the browser, as when the window closes at any other time.
+        if (closedWhileConfirming.delete(id) && !ack?.accepted && typeof pending.browserDownloadId === "number") {
+          await keepInBrowser(pending);
+        }
+      }
 
       // Keep a rejected request so the user can correct it and try again.
       if (ack?.accepted) {
-        pendingHandoffs.delete(id);
-        await chrome.storage.session.remove(`handoff.${id}`);
+        await forgetHandoff(id);
+        if (typeof pending.browserDownloadId === "number") {
+          // The app holds it now; the browser's paused copy goes, and its file name is never answered.
+          heldSuggestions.delete(pending.browserDownloadId);
+          await removeAcceptedBrowserDownload(chrome.downloads, pending.browserDownloadId).catch(() => false);
+        }
       }
 
       // A folder selected here belongs only to this request. The configured
@@ -886,13 +1084,20 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true, ack };
     }
 
+    case "dm.keepInBrowser": {
+      const pending = await pendingHandoff(String(message.id ?? ""));
+      if (pending) await keepInBrowser(pending);
+      return { ok: true };
+    }
+
     case "dm.saveSettings": {
-      settings = {
+      settings = migrateSettings({
         ...DEFAULT_SETTINGS,
         ...message.settings,
-      };
+      }).settings;
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;
+      updateBadge();
       await syncAutoSendWithTabs();
       return { ok: true, settings };
     }
@@ -900,23 +1105,80 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.pauseCatching": {
       pauseUntil = message.cancel === true ? 0 : Date.now() + 5 * 60 * 1000;
       await chrome.storage.local.set({ pauseUntil });
+      updateBadge();
       return { ok: true, pauseUntil };
     }
 
     case "dm.jobs": {
       try {
         const snapshot = await sendNative("jobs.query", {}, 6000);
-        const jobs = (snapshot?.jobs ?? []) as JobSummary[];
-        for (const job of jobs) {
-          lastJobs.set(job.id, job);
-        }
+        const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
+        lastJobs = new Map(jobs.map((job) => [job.id, job]));
         return { ok: true, jobs };
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: [...lastJobs.values()] };
+        return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
       }
+    }
+
+    case "dm.jobAction": {
+      const action = message.action as JobAction;
+      const type = Object.prototype.hasOwnProperty.call(JOB_ACTION_MESSAGES, action) ? JOB_ACTION_MESSAGES[action] : undefined;
+      const jobId = typeof message.jobId === "string" ? message.jobId : "";
+      if (!type || !/^[0-9a-f-]{32,36}$/i.test(jobId)) {
+        return { ok: false, error: "Unknown download action." };
+      }
+      // A failed connection throws, and the message listener turns it into a readable error.
+      const reply = await requestOnOwnConnection(type, {
+        jobId,
+        // Deleting the file is asked for only with Delete, and only when the box was ticked.
+        deleteFile: action === "remove" && message.deleteFile === true,
+      }, 10000, "Timed out waiting for the desktop app.");
+      if (reply.type === "handoff.error" || reply.type === "server.incompatible") {
+        return { ok: false, error: readableError(extractError(reply.payload)) };
+      }
+      const result = reply.payload as any;
+      return result?.ok === true
+        ? { ok: true, job: result.job }
+        : { ok: false, error: result?.error || result?.message || "The app did not do that." };
     }
 
     default:
       return { ok: false, error: "Unknown message." };
+  }
+}
+
+interface DownloadFolders {
+  defaultFolder: string;
+  favorites: Array<{ name: string; path: string }>;
+}
+
+/** The app's default folder and favorite folders, or nothing when the app is too old or unreachable. */
+async function downloadFolders(): Promise<DownloadFolders> {
+  try {
+    const result = await sendNative("settings.downloadFolders", {}, 4000, 0);
+    if (result?.ok !== true) return { defaultFolder: "", favorites: [] };
+    return {
+      defaultFolder: typeof result.defaultFolder === "string" ? result.defaultFolder : "",
+      favorites: (Array.isArray(result.favorites) ? result.favorites : [])
+        .filter((item: any) => typeof item?.path === "string" && item.path.trim())
+        .slice(0, 50)
+        .map((item: any) => ({ name: typeof item.name === "string" && item.name.trim() ? item.name : item.path, path: item.path })),
+    };
+  } catch {
+    return { defaultFolder: "", favorites: [] };
+  }
+}
+
+/**
+ * Whether the extension may read cookies and run its page script everywhere. Chrome and Edge grant
+ * this at install; Firefox may leave it to the user, so Settings offers to ask for it.
+ */
+async function hasSiteAccess(): Promise<boolean> {
+  try {
+    return chrome.permissions?.contains
+      ? await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] })
+      : true;
+  } catch {
+    return true;
   }
 }

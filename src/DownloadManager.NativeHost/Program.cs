@@ -17,14 +17,15 @@ internal static class Program
     {
         _stdin = Console.OpenStandardInput();
         _stdout = Console.OpenStandardOutput();
-        var origin = args.FirstOrDefault(a => a.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase));
         var log = NativeLog.Create();
-        log($"Native host started. Origin='{origin ?? "(none)"}' PID={Environment.ProcessId}");
+        var caller = BrowserBridge.TrustedCaller(args);
+        log($"Native host started. Caller={caller ?? "(refused)"} PID={Environment.ProcessId}");
 
-        if (!string.IsNullOrWhiteSpace(origin) &&
-            !BrowserBridge.IsTrustedOrigin(origin))
+        // Refused before the Host is started or a single frame is read: only our own extension, in
+        // Chrome, Edge or Firefox, may use this bridge.
+        if (caller is null)
         {
-            log($"Rejected unexpected origin '{origin}'.");
+            log($"Refused a caller that is not a trusted extension: {string.Join(' ', args.Select(a => a.Length > 120 ? a[..120] : a))}");
             return 2;
         }
 
@@ -101,7 +102,7 @@ internal static class Program
 
     private static async Task ForwardToHostAsync(IpcClient host, IpcMessage message, Action<string> log)
     {
-        if (NativeBridgePolicy.AllowFromExtension(message.Type))
+        if (NativeBridgePolicy.AllowFromExtension(message))
         {
             await host.SendAsync(message).ConfigureAwait(false);
             log($"Forwarded '{message.Type}' {message.Id}.");

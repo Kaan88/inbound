@@ -25,12 +25,20 @@
         <span>File name</span>
         <input id="fileName" type="text" spellcheck="false" />
       </label>
+      <!-- EXT.R1, later (PLAN.md stream C, transport): the "Save to: this PC / the server" choice goes here,
+           above the folder, once the server transport exists. Until then everything goes to this PC. -->
       <label class="field">
-        <span>Destination folder (optional)</span>
+        <span>Save in</span>
         <div class="destination-picker">
-          <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
-          <button id="browseDestination" type="button">Browse…</button>
+          <input id="destination" type="text" spellcheck="false" placeholder="The app's default folder" />
+          <button id="browseDestination" type="button">Choose…</button>
         </div>
+      </label>
+      <label id="favoritesField" class="field hidden">
+        <span>Favorite folders</span>
+        <select id="favorites">
+          <option value="">Pick a favorite folder…</option>
+        </select>
       </label>
       <label class="field">
         <span>Start</span>
@@ -40,8 +48,8 @@
         </select>
       </label>
       <p id="hint" class="muted small">
-        The folder applies to this download only. Your Start choice becomes the default for later
-        downloads. New downloads use your configured default folder.
+        The folder applies to this download only; the next one starts at the default folder again. Your
+        Start choice becomes the default for later downloads.
         Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses.
       </p>
     </section>
@@ -49,6 +57,7 @@
     <div class="actions">
       <button id="confirm" class="primary" type="button">Download</button>
       <button id="cancel" type="button">Cancel</button>
+      <button id="keepInBrowser" class="hidden" type="button">Keep in browser</button>
     </div>
     <p id="error" class="error hidden"></p>
     <p id="success" class="success hidden"></p>

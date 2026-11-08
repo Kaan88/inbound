@@ -318,11 +318,16 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         return await Task.WhenAny(both, Task.Delay(wait)) == both;
     }
 
-    public Process StartNativeHost()
+    /// <summary>The native host as a browser starts it; by default as Chrome does for the unpacked extension.</summary>
+    public Process StartNativeHost(params string[] arguments)
     {
         var info = Prepare(Executable("DownloadManager.NativeHost", "net10.0"));
         info.RedirectStandardInput = true;
         info.RedirectStandardOutput = true;
+        foreach (var argument in arguments.Length > 0 ? arguments : [BrowserBridge.UnpackedExtensionOrigin, "--parent-window=0"])
+        {
+            info.ArgumentList.Add(argument);
+        }
         return Process.Start(info) ?? throw new InvalidOperationException("The native host did not start.");
     }
 

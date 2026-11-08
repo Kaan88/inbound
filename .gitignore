@@ -19,6 +19,7 @@ coverage/
 # Node
 node_modules/
 extensions/chrome/dist/
+extensions/chrome/dist-firefox/
 extensions/chrome/.parcel-cache/
 *.tsbuildinfo
 

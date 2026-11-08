@@ -167,7 +167,7 @@ internal static class Program
                 log.Warn($"Remote jobs could not start: {ex.GetType().Name}");
             }
 
-            service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
+            service.NativeHostState = NativeHostRegistration.Read;
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
@@ -188,6 +188,7 @@ internal static class Program
             var currentSettings = service.GetSnapshot().Settings;
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
+            TryRepairNativeHostKeys(log);
             service.SettingsChanged += (_, next) =>
             {
                 currentSettings = service.GetSnapshot().Settings;
@@ -455,20 +456,18 @@ internal static class Program
         }
     }
 
+    private static void TryRepairNativeHostKeys(FileLogger log)
+    {
+        var failure = NativeHostRegistration.TryRepair();
+        if (failure is not null)
+        {
+            log.Warn($"Could not repair the browser bridge registration: {failure}");
+        }
+    }
+
     private static string BrowserIntegrationText(DownloadManagerService service)
     {
-        var settings = service.GetSnapshot().Settings;
-        if (!settings.BrowserIntegrationEnabled)
-        {
-            return "disabled";
-        }
-
-        if (!NativeHostRegistration.IsRegistered())
-        {
-            return "native host not registered";
-        }
-
-        return "connected";
+        return NativeHostRegistration.Read().IntegrationText(service.GetSnapshot().Settings.BrowserIntegrationEnabled);
     }
 
     private static void FireAndForget(Task task, FileLogger log)
