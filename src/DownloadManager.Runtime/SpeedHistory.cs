@@ -23,8 +23,17 @@ public sealed class SpeedHistory
 
     /// <summary>Each running download's last figure and the second it came in.</summary>
     private readonly Dictionary<Guid, (double Rate, long Second)> _rates = new();
+    /// <summary>A step back of more than this is the clock being set back, not reports arriving out of order.</summary>
+    private const int ClockStepSeconds = 10;
+
     private readonly long _firstSecond;
     private long _openSecond;
+
+    /// <summary>
+    /// Seconds added to the wall clock's since it was last set back, so the history's own seconds never go backwards.
+    /// The latest second is always the clock's now; older ones keep the times they were written at.
+    /// </summary>
+    private long _offset;
 
     public SpeedHistory(DateTimeOffset start)
     {
@@ -70,7 +79,7 @@ public sealed class SpeedHistory
             values.Add((long)Math.Round(_values[Slot(s)]));
         }
 
-        return new SpeedHistoryDto { Start = DateTimeOffset.FromUnixTimeSeconds(first), IntervalSeconds = 1, BytesPerSecond = values };
+        return new SpeedHistoryDto { Start = DateTimeOffset.FromUnixTimeSeconds(first - _offset), IntervalSeconds = 1, BytesPerSecond = values };
     }
 
     /// <summary>
@@ -90,13 +99,19 @@ public sealed class SpeedHistory
     }
 
     /// <summary>
-    /// Moves to <paramref name="now"/>'s second, filling those passed over. Returns it, or -1 for a time before the
-    /// open second (the clock went back), which then writes nothing.
+    /// Moves to <paramref name="now"/>'s second, filling those passed over. Returns it, or -1 for a time a little before
+    /// the open second (a report that arrived late), which then writes nothing. A clock set back further carries on from
+    /// the open second, so the graph doesn't stand still until the clock catches up.
     /// </summary>
     private long Advance(DateTimeOffset now)
     {
-        var second = now.ToUnixTimeSeconds();
-        if (second < _openSecond) return -1;
+        var second = now.ToUnixTimeSeconds() + _offset;
+        if (second < _openSecond)
+        {
+            if (_openSecond - second <= ClockStepSeconds) return -1;
+            _offset += _openSecond - second;
+            return _openSecond;
+        }
         if (second == _openSecond) return second;
 
         // Only the last hour matters; a longer gap rewrites every slot once. Past the newest report's hold every
