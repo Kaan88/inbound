@@ -184,6 +184,10 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
                 return name;
             });
             text = Times().Replace(text, "<time>");
+            // Whether this PC has the browser bridge registered is the machine's state, not the protocol's (TEST.3).
+            text = text.Replace("\"nativeHostRegistered\":true", "\"nativeHostRegistered\":<bool>", StringComparison.Ordinal)
+                .Replace("\"nativeHostRegistered\":false", "\"nativeHostRegistered\":<bool>", StringComparison.Ordinal);
+            text = BrowserIntegration().Replace(text, "\"browserIntegration\":\"<state>\"");
             result.Add(text);
         }
 
@@ -200,6 +204,9 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
 
     [GeneratedRegex("[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")]
     private static partial Regex Guids();
+
+    [GeneratedRegex("\"browserIntegration\":\"[^\"]*\"")]
+    private static partial Regex BrowserIntegration();
 
     [GeneratedRegex(@"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?")]
     private static partial Regex Times();

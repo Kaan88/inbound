@@ -16,7 +16,7 @@ Review of this branch (2026-11-08), each finding checked against the code:
 - Fixed: `DialogGuard` refuses a dialog without a `XamlRoot` (it could not show anyway); a source test checks all 44 dialogs set one.
 - Docs: the design guidelines described the old theme source and a capture method that no longer works; `docs/architecture.md` says closing ends the window's process by default.
 - Not a code defect: closing ending the process by default is the owner's PERF.5 decision. The tray, a second launch or the Start menu entry brings the window back; no tray check is made.
-- Question for the owner (PERF.5): an install whose settings were saved since 0.5.3 has "Closing the window ends it" stored as off and keeps it. Turn it on once for those installs with a settings migration, or keep the stored value?
+- Question for the owner (PERF.5): an install whose settings were saved since 0.5.3 has "Closing the window ends it" stored as off and keeps it. Turn it on once for those installs with a settings migration, or keep the stored value? Answered by the owner's "On by default": on dev a settings load with no `settings.json.perf5` marker beside it turns the option on once and writes the marker; every save from this build writes it, so a later choice of off is kept (`WindowSettingsDefaultsTests.AnUpgradedInstallThatStoredOffGetsItOnOnce`).
 - Not checked: the theme and Delete changes in the running window; a Windows theme change while the app runs.
 - Tests after these fixes: WinUI build clean (one older nullable warning); Core 888 passed (7 new); Integration 1,236 of 1,237 passed, the one failure the golden frames' `nativeHostRegistered` (true on this PC, TEST.3).
 
@@ -85,7 +85,8 @@ Later: a live expiring-link check with a real TorBox download (only the mock so 
   - UI.B11: Tasks > Exit and the tray's Exit quit the whole app (the Host), which pauses running downloads; closing the window does not. Owner: "leave as is". Closed.
   - EXT.B1 verified in the owner's Edge: the `dev` build caught a TorBox Direct Download.
   - Firefox (EXT.E1): the owner's add-on shows "Inbound unavailable": the installed 0.5.3 writes no Firefox native-messaging key. The next release's installer writes it; until then `scripts
-  - The owner ran the script: the Firefox and Edge keys and both manifests are in place, and Firefox now starts the native host, which forwards `handoff.request` to the Host (native-host log, 12:07). Still "Inbound unavailable": 0.5.3's Host trusts only the Chrome extension IDs, so it refuses Firefox's add-on ID (EXT.B3). Firefox needs the next app release; the wrong notification text is still to explain.egister-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
+  - The owner ran the script: the Firefox and Edge keys and both manifests are in place, and Firefox now starts the native host, which forwards `handoff.request` to the Host (native-host log, 12:07). Still "Inbound unavailable": 0.5.3's Host trusts only the Chrome extension IDs, so it refuses Firefox's add-on ID (EXT.B3). Firefox needs the next app release; the wrong notification text is still to explain.
+egister-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
 
 ### Test campaign merged into `dev` (2026-11-08)
 
