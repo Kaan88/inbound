@@ -511,7 +511,7 @@ public sealed partial class RuntimeServiceTests
         Assert.True(response.Accepted, response.Error);
         Assert.DoesNotContain(LinkSecret, response.Job!.Url);
         Assert.DoesNotContain(LinkSecret, response.Job.PageUrl);
-        Assert.Equal(ProviderLinks.MaxConnections, response.Job.RequestedConnections);
+        Assert.Equal(Math.Min(8, ProviderLinks.MaxConnections), response.Job.RequestedConnections);
         Assert.Empty(ctx.Service.GetSnapshot().Settings.RecentUrls);
         Assert.DoesNotContain(LinkSecret, JsonSerializer.Serialize(ctx.Service.GetSnapshot()));
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);

@@ -43,7 +43,7 @@ should send these on a separate connection of their own and keep its main one fo
 - `remote.classify` and `remote.add` (the provider's hoster list may have to be fetched)
 - `remote.item.get`
 - `remote.files`
-- `remote.deleteRemote`
+- `remote.deleteRemote` and `remote.startQueued`
 - `remote.container.preview` and `remote.container.add` (the hoster list again)
 - `remote.container.sendToJd`, which waits for a person to answer another program's question, for up to five minutes
 - `job.refreshUrl` with an address that differs from the job's (the hoster list again). With the job's own address it answers at once
@@ -92,6 +92,7 @@ registered. Kinds are `torrents`, `webdl` and `usenet`.
 | `remote.checkNow` | `jobId?`, `provider?` | `remote.actionResult` |
 | `remote.remove` | `jobId` | `remote.actionResult` |
 | `remote.deleteRemote` | `jobId`, `confirmed` | `remote.actionResult` |
+| `remote.startQueued` | `jobId` | `remote.actionResult` |
 | `remote.archivePassword` | `jobId`, `password` | `remote.actionResult` |
 | `remote.container.preview` | `path` | `remote.container.previewResult` |
 | `remote.container.add` | `previewId`, `entryIds`, `destination?`, `queueId?`, `startMode?`, `approveUncached?` | `remote.container.addResult` |
@@ -207,7 +208,12 @@ the provider asked for still holds.
 
 **`remote.remove`** takes the job off this app's list and leaves the provider's item and any local
 downloads as they are. **`remote.deleteRemote`** deletes the item from the provider for good, and is
-refused unless `confirmed` is true.
+refused unless `confirmed` is true. For a job still waiting in the provider's queue, with no item yet, it takes
+the job's entry out of that queue instead and then takes the job off the list.
+
+**`remote.startQueued`** (added 2026-11-08, TB.S1; an added message, so no protocol bump) starts a job's entry
+waiting in the provider's queue, found by the job's hash in a fresh read of the queue. It is refused for any job
+not waiting there, and the account is looked at again at once so the new item is picked up.
 
 **`remote.archivePassword`** sets the password for a job's archives, before or after its downloads exist.
 It is not `linkPassword`: that is the source site's password for a link and goes to the provider, while this

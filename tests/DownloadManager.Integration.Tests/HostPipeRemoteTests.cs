@@ -928,6 +928,15 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         Assert.Equal(2, odd.ExitCode);
         Assert.Contains("--item", odd.Error);
 
+        // TB.S2: offering a link password to archives needs a link password; alone it is refused, not ignored.
+        var archivesOnly = await host.RunCliAsync(link, "remote", "add", "-", "--link-password-for-archives");
+        Assert.Equal(2, archivesOnly.ExitCode);
+        Assert.Contains("--link-password-stdin", archivesOnly.Error);
+        var retryArchivesOnly = await host.RunCliAsync(null, "remote", "retry", "1", "--link-password-for-archives");
+        Assert.Equal(2, retryArchivesOnly.ExitCode);
+        Assert.Contains("--link-password-stdin", retryArchivesOnly.Error);
+        Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
+
         // Through the provider, with nothing chosen: when it is ready it starts.
         var added = await host.RunCliAsync(link, "remote", "add", "-", "--dest", host.Destination);
         Assert.True(added.ExitCode == 0, added.Error);

@@ -259,6 +259,21 @@ public interface IRemoteQueue
     Task<IReadOnlyList<RemoteQueuedItem>> ListQueuedAsync(RemoteItemKind kind, int offset, int limit, bool fresh, CancellationToken cancellationToken = default);
 }
 
+public enum RemoteQueueAction
+{
+    /// <summary>Start the item now, without waiting for the provider to take it from its queue.</summary>
+    Start,
+    /// <summary>Take the item out of the queue. Nothing was created for it yet, so nothing else is deleted.</summary>
+    Remove,
+}
+
+/// <summary>Starts or removes one item waiting in the provider's queue. Only ever called from an explicit user action.</summary>
+public interface IRemoteQueueControl
+{
+    /// <param name="queueId">The id <see cref="RemoteQueuedItem.QueueId"/> gave, not an item id.</param>
+    Task ControlQueuedAsync(string queueId, RemoteQueueAction action, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Recognises the links a provider's website hands out for items on an account.</summary>
 public interface IRemoteFolderLinkParser
 {

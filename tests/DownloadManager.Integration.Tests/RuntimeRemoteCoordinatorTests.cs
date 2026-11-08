@@ -785,6 +785,84 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task TbS1_StartNowTakesAQueuedEntryOutOfTheQueueAndTheItemIsPickedUp()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("startnow");
+        var hash = RemoteRig.Md5Of(link);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "startnow/startnow.bin", 32 * Kb, 8);
+        rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.Ready], queued: true);
+        // Another entry in the same queue, which must never be touched.
+        var other = rig.HosterLink("bystander");
+        rig.Mock.ScriptSubmission(RemoteRig.Md5Of(other), [], [MockTorBoxState.Ready], queued: true);
+        var bystander = await rig.AddAsync(new RemoteAddRequest { Input = other, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        await rig.AdvanceAsync(70);
+        Assert.Equal(RemoteStage.Queued, rig.View(job.Id).Stage);
+
+        var started = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Start);
+        Assert.True(started.Ok, started.Error);
+        var item = rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!;
+        Assert.Equal([("start", item.Id)], rig.Mock.QueueControls);
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        Assert.Equal(item.Id.ToString(), rig.View(job.Id).ItemId);
+        await rig.AssertCompletedAsync(file, "startnow", "startnow.bin");
+
+        // Not waiting in the queue any more: refused, and nothing is sent.
+        var again = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Start);
+        Assert.False(again.Ok);
+        Assert.Single(rig.Mock.QueueControls);
+        Assert.Equal(RemoteStage.Queued, rig.View(bystander.Id).Stage);
+    }
+
+    [Fact]
+    public async Task TbS1_RemovingAQueuedRowFromTheProviderTakesOnlyItsEntryOutOfTheQueue()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("dequeue");
+        var hash = RemoteRig.Md5Of(link);
+        rig.Mock.ScriptSubmission(hash, [], [MockTorBoxState.Ready], queued: true);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        Assert.Equal(RemoteStage.Queued, rig.View(job.Id).Stage);
+        var queuedId = rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!.Id;
+
+        Assert.False((await rig.Jobs.RemoveRemoteItemAsync(job.Id, confirmed: false)).Ok);
+        Assert.Empty(rig.Mock.QueueControls);
+
+        var removed = await rig.Jobs.RemoveRemoteItemAsync(job.Id, confirmed: true);
+        Assert.True(removed.Ok, removed.Error);
+        Assert.Equal([("delete", queuedId)], rig.Mock.QueueControls);
+        Assert.Empty(rig.Mock.Deleted);
+        Assert.Null(rig.Jobs.Find(job.Id));
+        Assert.Null(rig.Mock.FindItem(RemoteItemKind.WebDownload, hash));
+    }
+
+    [Fact]
+    public async Task TbS1_AQueuedEntryThatLeftMeanwhileIsCheckedAgainNotGuessed()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("leftqueue");
+        var hash = RemoteRig.Md5Of(link);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "leftqueue/leftqueue.bin", 16 * Kb, 9);
+        rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.Ready], queued: true);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!.InQueue = false;
+
+        var result = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Remove);
+        Assert.False(result.Ok);
+        Assert.Contains("no longer in your TorBox queue", result.Error);
+        Assert.Empty(rig.Mock.QueueControls);
+        Assert.NotNull(rig.Jobs.Find(job.Id));
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+    }
+
+    [Fact]
     public async Task ScenarioC_AnUnknownStateStaysVisibleAndNeverCountsAsReady()
     {
         await using var rig = await RemoteRig.CreateAsync(_server);

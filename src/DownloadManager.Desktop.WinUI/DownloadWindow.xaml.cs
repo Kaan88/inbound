@@ -185,11 +185,9 @@ public sealed partial class DownloadWindow : Window
             UseSpeedLimit.IsEnabled = job.CanChangeSpeedLimit;
             ApplySpeedLimitButton.IsEnabled = _connected && job.CanChangeSpeedLimit;
             SpeedLimitNotice.Text = job.CanChangeSpeedLimit
-                ? "Applies to ordinary HTTP/HTTPS file downloads. FTP, HLS, and DASH transfers do not support this control."
-                : "Speed limiting is available for unfinished HTTP/HTTPS file downloads. It is unavailable for FTP, HLS, DASH, and finished transfers.";
-            CurrentRateText.Text = job.BytesPerSecond is > 0
-                ? $"Current transfer rate: {Bytes((long)job.BytesPerSecond.Value)}/s"
-                : "Current transfer rate: —";
+                ? "Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
+                : "Speed limiting is available for unfinished HTTP/HTTPS and FTP file downloads. It is unavailable for HLS, DASH, and finished transfers.";
+            CurrentRateText.Text = job.BytesPerSecond is > 0 ? $"{Bytes((long)job.BytesPerSecond.Value)}/s" : "—";
             if (_displayedSpeedLimit != job.SpeedLimitBytesPerSecond)
             {
                 _displayedSpeedLimit = job.SpeedLimitBytesPerSecond;

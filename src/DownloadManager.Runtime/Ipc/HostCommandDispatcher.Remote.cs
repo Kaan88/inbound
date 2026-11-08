@@ -11,7 +11,7 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     private static bool WaitsOnProvider(string type) => type is
         MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or MessageTypes.RemoteHosters or
-        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or
+        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteStartQueued or
         MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd or
         // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
         MessageTypes.JobRefreshUrl;
@@ -34,7 +34,8 @@ public sealed partial class HostCommandDispatcher
             MessageTypes.RemoteItemGet => MessageTypes.RemoteItemResult,
             MessageTypes.RemoteFiles => MessageTypes.RemoteFilesResult,
             MessageTypes.RemoteSelect or MessageTypes.RemoteRetry or MessageTypes.RemoteCheckNow or
-            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteArchivePassword => MessageTypes.RemoteActionResult,
+            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteArchivePassword or
+            MessageTypes.RemoteStartQueued => MessageTypes.RemoteActionResult,
             MessageTypes.RemoteContainerPreview => MessageTypes.RemoteContainerPreviewResult,
             MessageTypes.RemoteContainerAdd => MessageTypes.RemoteContainerAddResult,
             MessageTypes.RemoteContainerSendToJd => MessageTypes.RemoteContainerSendResult,
@@ -63,6 +64,7 @@ public sealed partial class HostCommandDispatcher
                 MessageTypes.RemoteRetry => await remote.RetryAsync(message.GetPayload<RemoteRetryRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteCheckNow => await remote.CheckNowAsync(Payload<RemoteCheckNowRequest>(message), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteRemove => await remote.RemoveAsync(message.GetPayload<RemoteJobIdRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteStartQueued => await remote.StartQueuedAsync(message.GetPayload<RemoteJobIdRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteArchivePassword => await remote.SetArchivePasswordAsync(message.GetPayload<RemoteArchivePasswordRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteContainerPreview => await remote.ContainerPreviewAsync(message.GetPayload<RemoteContainerPreviewRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteContainerAdd => await remote.ContainerAddAsync(message.GetPayload<RemoteContainerAddRequest>(), cancellationToken).ConfigureAwait(false),

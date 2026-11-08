@@ -50,6 +50,10 @@ Do not assume any supplied link works. If the CDN links have expired, get new on
 - [JD] File data read from `files[]`: `id`, `name`, `short_name`, `size`, `md5`, plus an infected flag. JD's stable identity is type, download id and file id or path. It requests a fresh link per download.
 - [JD, Inferred] It spaces web download creation by about 65 s, uses `bypass_cache=true` while waiting, and reads `cached`, `download_finished`, `download_state`, `download_present`, `progress`. Confirm in bytecode. It also stores a download password for retries; find out what that password is for.
 - [Support] Links last 3 hours, use at most 4 connections per file, and do not share one link across apps or devices.
+  - Update 2026-11-08 (TB.L1): a live measurement on one cached 300 MB file got HTTP 206 on 1, 2, 4, 8 and 16 parallel range
+    requests (about 6.4 MB/s each, 92.4 MB/s at 16) with no refusal, and TorBox staff on its feature board (2024-03-10)
+    said there is no explicit limit, only fair use. The per-file cap is now 16, the highest count measured; the per-host
+    limit (default 8) still caps one host overall. See ROADMAP TB.L1.
 - [Inferred] What `hash` means for `webdl/checkcached`. Test it with a known cached item.
 
 **Existing code to reuse, not rebuild:**
@@ -108,7 +112,7 @@ These are binding. Research notes are in `notes-local/` (`torbox-code-audit.md`,
 - Dedupe: owner `provider:torbox`, request id `<remote job id>/<file id>`.
 - Link resolution happens in `RunJobAsync`, once per run, through an optional `IRemoteLinkBroker` on the service. Re-run with a fresh link when the engine reports `ExpiredUrl`, `Unauthorized`, `Forbidden` or `NotFound`, at most twice per run. Temporary API failures retry with backoff inside the run (cancellable), then fail as resumable. The broker checks the item is still there and the file's size and md5 still match. If not, it deletes the part and checkpoint and restarts from zero, or fails with the real reason.
 
-**Pasted CDN links** (`*.tb-cdn.*` or any URL whose query holds the account key): `Url` becomes a display form with the token masked, the real address goes into a new DPAPI-protected persisted field `ProtectedUrl`, loaded into `ResolvedUrl` at run start. Capped at 4 connections. Never added to `RecentUrls`. Applied in `AddJobCoreAsync`, so it covers every entry path.
+**Pasted CDN links** (`*.tb-cdn.*` or any URL whose query holds the account key): `Url` becomes a display form with the token masked, the real address goes into a new DPAPI-protected persisted field `ProtectedUrl`, loaded into `ResolvedUrl` at run start. Capped at 4 connections (16 since TB.L1, 2026-11-08). Never added to `RecentUrls`. Applied in `AddJobCoreAsync`, so it covers every entry path.
 
 **Log safety.** Add `UrlRedactor` in Core. Use it in clipboard logs, tray text, and exception logs. API errors are sanitized before reaching `ex.Message` paths.
 

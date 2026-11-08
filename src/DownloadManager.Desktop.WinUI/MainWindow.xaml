@@ -430,7 +430,10 @@
                                     <TextBlock Grid.Column="2" Text="{Binding QueueText}" FontSize="11"
                                                 VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                                                ToolTipService.ToolTip="{Binding QueueName}" />
-                                    <TextBlock Grid.Column="3" Text="{Binding SizeText}" FontSize="11"
+                                    <!-- UI.R6: live counters line up on the right in their fixed columns, with tabular figures, so
+                                         the units hold still when the digit count changes. The margin matches the header's. -->
+                                    <TextBlock Grid.Column="3" Text="{Binding SizeText}" FontSize="11" AutomationProperties.AutomationId="SizeCell"
+                                               HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="1">
                                         <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis" />
@@ -453,9 +456,11 @@
                                             <FontIcon Glyph="&#xE8D7;" FontSize="12" Foreground="{ThemeResource InboundIconPauseBrush}" />
                                         </Button>
                                     </Grid>
-                                    <TextBlock Grid.Column="6" Text="{Binding EtaText}" FontSize="11"
-                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                    <TextBlock Grid.Column="7" Text="{Binding SpeedText}" FontSize="11"
+                                    <TextBlock Grid.Column="6" Text="{Binding EtaText}" FontSize="11" AutomationProperties.AutomationId="EtaCell"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
+                                                VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="7" Text="{Binding SpeedText}" FontSize="11" AutomationProperties.AutomationId="RateCell"
+                                                HorizontalAlignment="Right" TextAlignment="Right" Margin="0,0,8,0"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="8" Text="{Binding LastTryText}" FontSize="11"
                                                 VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />

@@ -578,7 +578,8 @@ public sealed partial class RuntimeServiceTests
         Assert.DoesNotContain(LinkSecret, added.Url);
         Assert.DoesNotContain(LinkSecret, added.PageUrl);
         Assert.Null(added.FinalUrl);
-        Assert.Equal(ProviderLinks.MaxConnections, added.RequestedConnections);
+        // The default connections and the host limit (8 each) are below the provider cap, so they decide.
+        Assert.Equal(Math.Min(8, ProviderLinks.MaxConnections), added.RequestedConnections);
         Assert.False(added.IsRemote);
 
         var completed = await ctx.WaitFor(added.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));

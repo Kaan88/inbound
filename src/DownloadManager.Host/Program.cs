@@ -110,7 +110,8 @@ internal static class Program
                 mediaCheckpoints: mediaCheckpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
+            // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;

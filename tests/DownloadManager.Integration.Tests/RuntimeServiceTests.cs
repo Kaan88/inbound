@@ -1078,6 +1078,44 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task Perf6_FtpDownloadsTakeALiveSpeedLimitAndTheSharedCap()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        // 128 KB at 32 KB/s is about 4 s; uncapped, loopback FTP takes milliseconds.
+        settings.GlobalSpeedLimitBytesPerSecond = 32_768;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-capped.bin",
+            Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+        Assert.True(added.Job!.CanChangeSpeedLimit);
+        var completed = await ctx.WaitFor(added.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 2.5, 25);
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+
+        var later = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/plain.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-own-limit.bin",
+            Source = "cli",
+            StartMode = "later",
+        });
+        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = later.Job!.Id, SpeedLimitBytesPerSecond = 16_384 });
+        Assert.True(update.Ok, update.Error);
+        Assert.Equal(16_384, update.Job!.SpeedLimitBytesPerSecond);
+    }
+
+    [Fact]
     public async Task FtpRequiresLoginAndResumesFromPartialBytes()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -4121,7 +4159,7 @@ public sealed partial class RuntimeServiceTests
                 handler: handler,
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
             var service = new DownloadManagerService(
                 paths,
                 store,

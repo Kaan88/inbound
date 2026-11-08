@@ -620,6 +620,43 @@ public sealed class MockTorBoxApiTests : IClassFixture<MockServerFixture>, IDisp
     }
 
     [Fact]
+    public async Task AQueuedEntryCanBeStartedOrRemovedByItsQueueIdAlone()
+    {
+        // TB.S1: queued/controlqueued, as the schema names it, with the two operations seen working live.
+        var hashes = new[] { "https://hoster.invalid/queued-start", "https://hoster.invalid/queued-delete" }
+            .Select(link => (Link: link, Hash: _client.PredictHash(RemoteItemKind.WebDownload, link)!)).ToList();
+        foreach (var (link, hash) in hashes)
+        {
+            _mock.ScriptSubmission(hash, [MockTorBoxFile.Of(_mock.NextFileId(), "w/w.bin", 8)], [MockTorBoxState.Ready], queued: true);
+            Assert.True((await _client.SubmitAsync(new RemoteSubmission { Kind = RemoteItemKind.WebDownload, Link = link })).Queued);
+        }
+
+        var queue = await _client.ListQueuedAsync(RemoteItemKind.WebDownload, 0, 50, fresh: true);
+        var start = queue.Single(entry => entry.Hash == hashes[0].Hash).QueueId!;
+        var remove = queue.Single(entry => entry.Hash == hashes[1].Hash).QueueId!;
+
+        await _client.ControlQueuedAsync(start, RemoteQueueAction.Start);
+        await _client.ControlQueuedAsync(remove, RemoteQueueAction.Remove);
+
+        Assert.Equal([("start", long.Parse(start)), ("delete", long.Parse(remove))], _mock.QueueControls);
+        Assert.Empty(await _client.ListQueuedAsync(RemoteItemKind.WebDownload, 0, 50, fresh: true));
+        // Started: TorBox lists it as an item now. Removed: gone everywhere, and no item was deleted for it.
+        var listed = await _client.ListAsync(RemoteItemKind.WebDownload, 0, 50, fresh: true);
+        Assert.Contains(listed, item => item.Hash == hashes[0].Hash);
+        Assert.DoesNotContain(listed, item => item.Hash == hashes[1].Hash);
+        Assert.Empty(_mock.Deleted);
+    }
+
+    [Fact]
+    public async Task ControllingAQueuedEntryThatIsGoneIsNotFoundAndANonNumberNeverLeaves()
+    {
+        var gone = await Assert.ThrowsAsync<RemoteProviderException>(() => _client.ControlQueuedAsync("987654", RemoteQueueAction.Start));
+        Assert.Equal(RemoteFailureKind.NotFound, gone.Kind);
+        await Assert.ThrowsAsync<ArgumentException>(() => _client.ControlQueuedAsync("1 or all", RemoteQueueAction.Remove));
+        Assert.Equal(1, _mock.Calls("POST queued/controlqueued"));
+    }
+
+    [Fact]
     public async Task AskingForCachedOnlyIsRefusedWhenItIsNot()
     {
         const string hash = "1111222233334444555566667777888899990000";
