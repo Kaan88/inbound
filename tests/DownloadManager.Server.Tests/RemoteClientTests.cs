@@ -377,27 +377,66 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
-    public async Task APasswordChangeThatUnpairsClosesTheSocketsAndOneThatKeepsThemDoesNot()
+    public async Task APasswordChangeAlwaysUnpairsDesktopAppsAndKeepsOnlyExtensionsWhenAsked()
     {
         await using var server = await AuthServer.StartAsync();
         using var user = await AuthServer.SetUpAsync(server);
         var token = await PairRemoteClientAsync(server);
+        var extensionToken = await PairingTests.PairAsync(server, await PairingTests.NewCodeAsync(user), "Chrome");
         await using var socket = await ConnectAsync(server, token);
         await socket.ReadUntilAsync(message => message.Type == MessageTypes.JobsSnapshot);
+        using var extension = new AuthClient(server.Base) { Origin = PairingTests.ChromeOrigin };
+        using var app = new AuthClient(server.Base);
 
+        // "Keep the paired browser extensions" keeps those only: the desktop app's token was made with the old
+        // password and has a signed-in browser's rights, so it goes with it, socket and all.
         using (var kept = await user.PostAsync("/api/auth/password", new { current = AuthServer.Password, password = "second password", keepPairedBrowsers = true }))
+        {
             Assert.Equal(HttpStatusCode.OK, kept.StatusCode);
-        Assert.True((await socket.AskAsync<HostActionResult>(MessageTypes.HostPing, new { })).Ok);
+            Assert.Equal(1, (await user.JsonAsync(kept)).GetProperty("unpaired").GetInt32());
+        }
 
+        Assert.True(await ClosesWithinAsync(socket, TimeSpan.FromSeconds(10)));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await app.IpcAsync(MessageTypes.HostPing, new { }, token)).Status);
+        Assert.Equal(HttpStatusCode.OK, (await extension.IpcAsync(MessageTypes.HostPing, new { }, extensionToken)).Status);
+        Assert.Equal(TokenRoles.Extension, server.App.Auth.Pairing.List().Single().Role);
+
+        // Without it the extensions go too.
         using (var changed = await user.PostAsync("/api/auth/password", new { current = "second password", password = "third password" }))
         {
             Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
             Assert.Equal(1, (await user.JsonAsync(changed)).GetProperty("unpaired").GetInt32());
         }
 
-        Assert.True(await ClosesWithinAsync(socket, TimeSpan.FromSeconds(10)));
-        using var app = new AuthClient(server.Base);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await app.IpcAsync(MessageTypes.HostPing, new { }, token)).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await extension.IpcAsync(MessageTypes.HostPing, new { }, extensionToken)).Status);
+        Assert.Empty(server.App.Auth.Pairing.List());
+    }
+
+    [Fact]
+    public async Task APasswordChangeDuringAPasswordPairingMakesThePairingFail()
+    {
+        var time = new ManualTime(DateTimeOffset.UtcNow);
+        await using var server = await AuthServer.StartAsync(time);
+        using var user = await AuthServer.SetUpAsync(server);
+        var address = SignInLimiter.AddressOf(IPAddress.Loopback);
+
+        // The change counts as a try when it starts, then holds the password gate while it checks the current
+        // password and hashes the new one (two slow hashes).
+        var change = user.PostAsync("/api/auth/password", new { current = AuthServer.Password, password = "second password", keepPairedBrowsers = true });
+        var began = DateTime.UtcNow;
+        while (server.App.Auth.Limiter.Wait(address) is null)
+        {
+            Assert.True(DateTime.UtcNow - began < TimeSpan.FromSeconds(10), "The password change didn't start.");
+            await Task.Delay(5);
+        }
+
+        // Past the wait that try started, so the pairing is checked: against the old password, still in force.
+        time.Advance(TimeSpan.FromSeconds(5));
+        var (status, _) = await PairWithPasswordAsync(server, AuthServer.Password);
+        using var changed = await change;
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+        Assert.Empty(server.App.Auth.Pairing.List());
     }
 
     [Fact]
@@ -574,5 +613,139 @@ public sealed class RemoteClientTests
         using var client = new AuthClient(windows.Base);
         using var answer = await client.GetAsync("/api/auth/status");
         Assert.Equal("windows", (await client.JsonAsync(answer)).GetProperty("hostKind").GetString());
+    }
+
+    // ---- 8. After the review ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PasswordPairingWithAnOriginIsRefusedAndNotCounted()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using (await AuthServer.SetUpAsync(server)) { }
+
+        // Any Firefox extension passes the origin check on /api/pair (their ids are random), and so does the server's
+        // own page: neither may trade the password for a desktop app's token.
+        foreach (var origin in new[] { "moz-extension://0d1c2b3a-4e5f-6071-8293-a4b5c6d7e8f9", PairingTests.ChromeOrigin, server.Base.GetLeftPart(UriPartial.Authority) })
+        {
+            var (status, body) = await PairWithPasswordAsync(server, AuthServer.Password, origin: origin);
+            Assert.Equal(HttpStatusCode.Forbidden, status);
+            Assert.False(body.TryGetProperty("token", out _));
+        }
+
+        Assert.Empty(server.App.Auth.Pairing.List());
+        // Nothing was counted as a wrong try: the desktop app (no Origin) pairs at once.
+        await PairRemoteClientAsync(server);
+    }
+
+    [Fact]
+    public async Task AProxysOwnBearerHeaderOnTheWebSocketLeavesTheCookieInCharge()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var user = await AuthServer.SetUpAsync(server);
+        // As a sign-in proxy that passes its own token on sends it with every request, the upgrade included.
+        const string proxyToken = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJvd25lciJ9.c2lnbmF0dXJl";
+        await using (var socket = await ConnectAsync(server, proxyToken, sessionCookie: user.Session))
+            Assert.Equal(MessageTypes.ServerHello, (await socket.ReadAsync())!.Type);
+
+        // Without the cookie it is the sign-in it always was; one of our own tokens that is wrong is still refused.
+        Assert.Equal(HttpStatusCode.Unauthorized, await RefusedUpgradeAsync(() => ConnectAsync(server, proxyToken)));
+        Assert.Equal(HttpStatusCode.Unauthorized, await RefusedUpgradeAsync(() => ConnectAsync(server, "ibt_madeup", sessionCookie: user.Session)));
+    }
+
+    [Fact]
+    public async Task RevokingATokenEndsItsRunningIpcRequest()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var user = await AuthServer.SetUpAsync(server);
+        var token = await PairRemoteClientAsync(server);
+
+        // A file server that takes the connection and never answers: file.metadata waits for it (12 s at most).
+        using var silent = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        var accepted = silent.AcceptTcpClientAsync();
+        using var app = new AuthClient(server.Base);
+        var request = app.IpcAsync(MessageTypes.FileMetadata,
+            new FileMetadataRequest { Url = $"http://127.0.0.1:{((IPEndPoint)silent.LocalEndpoint).Port}/file.bin" }, token);
+        using var connection = await accepted.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var revokedAt = DateTime.UtcNow;
+        using (var revoked = await user.SendAsync(HttpMethod.Delete, $"/api/auth/tokens/{await TokenIdAsync(user, "Desk PC")}"))
+            Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        var (status, reply) = await request.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(DateTime.UtcNow - revokedAt < TimeSpan.FromSeconds(5), $"The request ran on for {DateTime.UtcNow - revokedAt}.");
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+        Assert.Null(reply);
+    }
+
+    [Fact]
+    public async Task AnOpenWebSocketKeepsItsTokensLastUseCurrentSoItIsNotPushedOutFirst()
+    {
+        var time = new ManualTime(DateTimeOffset.UtcNow);
+        // A short idle time makes the beat short (a tenth of it): 100 ms here, 10 minutes by default.
+        await using var server = await AuthServer.StartAsync(time, options => options with { SessionIdleTimeout = TimeSpan.FromSeconds(1) });
+        using (await AuthServer.SetUpAsync(server)) { }
+        var desk = await PairRemoteClientAsync(server);
+        await using var socket = await ConnectAsync(server, desk);
+        await socket.ReadUntilAsync(message => message.Type == MessageTypes.JobsSnapshot);
+        var pairing = server.App.Auth.Pairing;
+        time.Advance(TimeSpan.FromSeconds(1));
+        pairing.Issue(TokenRoles.Extension, "first extension");
+
+        // Weeks later, still connected: its last use is the socket's latest beat, not the time it connected.
+        time.Advance(TimeSpan.FromDays(20));
+        var later = time.GetUtcNow();
+        var began = DateTime.UtcNow;
+        while (pairing.List().Single(token => token.Name == "Desk PC").LastUsedAt < later)
+        {
+            Assert.True(DateTime.UtcNow - began < TimeSpan.FromSeconds(10), "The open socket didn't refresh its token's last use.");
+            await Task.Delay(20);
+        }
+
+        // So when too many pair, the extension that was never used goes first, and the desktop app stays connected.
+        for (var i = 0; i < Pairing.MaxTokens - 1; i++) pairing.Issue(TokenRoles.Extension, $"newer {i}");
+        var names = pairing.List().Select(token => token.Name).ToList();
+        Assert.Equal(Pairing.MaxTokens, names.Count);
+        Assert.Contains("Desk PC", names);
+        Assert.DoesNotContain("first extension", names);
+        Assert.True((await socket.AskAsync<HostActionResult>(MessageTypes.HostPing, new { })).Ok);
+    }
+
+    [Fact]
+    public async Task WithTheHelloFlagSilenceClosesTheSocketAfterFiveSeconds()
+    {
+        await using var server = await ServerHarness.StartAsync();
+        await using var silent = await ConnectAsync(server, null, "/api/ws?hello=1");
+        var began = DateTime.UtcNow;
+        Assert.True(await ClosesWithinAsync(silent, TimeSpan.FromSeconds(15)));
+        Assert.True(DateTime.UtcNow - began >= TimeSpan.FromSeconds(4), $"Closed after {DateTime.UtcNow - began}.");
+        Assert.Empty(silent.Received);
+    }
+
+    [Fact]
+    public async Task WithTheHelloFlagAHelloThatIsNotOneClosesTheSocket()
+    {
+        await using var server = await ServerHarness.StartAsync();
+        await using var client = await ConnectAsync(server, null, "/api/ws?hello=1");
+        await client.SendAsync(IpcMessage.Create<object>(MessageTypes.ClientHello, "not a hello"));
+        Assert.Null(await client.ReadAsync());
+        Assert.Equal(WebSocketCloseStatus.InvalidPayloadData, client.Socket.CloseStatus);
+        Assert.Empty(client.Received);
+    }
+
+    [Fact]
+    public async Task TheLogKeepsEachMessageOnOneLine()
+    {
+        var work = ServerHarness.NewWork();
+        var folder = Path.Combine(work, "logs");
+        var log = new ServerLog(folder, console: false);
+        // A message type a client chose, written into a warning as the hello check does.
+        log.Warn("A WebSocket client sent 'x\n2026-11-09T10:00:00.0000000+00:00 [INFO] The sign-in password was set\r\x1b[2J' first; closed.");
+        log.Info("next");
+
+        var lines = await File.ReadAllLinesAsync(Directory.GetFiles(folder).Single());
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("'x\\n2026-11-09T10:00:00.0000000+00:00 [INFO] The sign-in password was set\\r\\u001b[2J' first", lines[0]);
+        Assert.EndsWith("[INFO] next", lines[1]);
+        Directory.Delete(work, recursive: true);
     }
 }

@@ -46,8 +46,11 @@ track it.
   `Origin` and a valid token on a token path, and `POST /api/pair` with no `Origin`, may name the server by any
   host name (a browser always sends `Origin` there, so a rebinding page gains nothing). `GET /api/ws?hello=1` takes
   a `client.hello` first (snapshot, events), as the desktop's hello pipe does; without the flag nothing changes.
-  `/api/auth/status` says `hostKind` (`server` here). Settings, Paired browsers shows each token's role ("Browser
-  extension" or "Desktop app"). Evidence: `RemoteClientTests` (16) in Server.Tests, documented in
+  `/api/auth/status` says `hostKind` (`server` here). Settings, Paired apps (formerly Paired browsers) shows each
+  token's role ("Browser extension" or "Desktop app") and says what each may do. A password change always removes the
+  desktop apps' tokens; "Keep the paired browser extensions" keeps only the extensions'. Revoking a token also ends
+  its running `/api/ipc` requests, an open WebSocket keeps its token's last use current, password pairing with an
+  `Origin` is refused, and only a `Bearer ibt_...` header is read as a token on `/api/ws`. Evidence: `RemoteClientTests` (16) in Server.Tests, documented in
   `docs/ipc-protocol.md`. The desktop side (a Servers list, the WebSocket client, DPAPI for the token, the
   confirmation before a token goes over plain HTTP) is not built yet.
 - **The extension's server transport (EXT.R1, 2026-11-08):** `extensions/chrome/src/transport.ts` with

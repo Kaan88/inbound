@@ -317,7 +317,8 @@ public sealed class ServerApp : IAsyncDisposable
             // Signing out, a changed password or the session's absolute end closes the socket too. A desktop app's
             // token (the gate let no other role through) closes it when the token is revoked, by a password change too.
             var session = ServerAuth.SessionOf(context);
-            var tokenEnded = ServerAuth.TokenOf(context) is { } token ? auth.Pairing.Lifetime(token.Id) : CancellationToken.None;
+            var paired = ServerAuth.TokenOf(context);
+            var tokenEnded = paired is not null ? auth.Pairing.Lifetime(paired.Id) : CancellationToken.None;
             if (tokenEnded.IsCancellationRequested)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -339,8 +340,12 @@ public sealed class ServerApp : IAsyncDisposable
             }
 
             // An open socket is the session's activity even when the page sends nothing (it only listens to progress), so
-            // its last-seen time is refreshed on the sessions file's own beat; a kill then loses at most that much.
-            var seen = session is null ? Task.CompletedTask : KeepSeenAsync(auth.Sessions, session, options.Time, lifetime.Token);
+            // its last-seen time is refreshed on the sessions file's own beat; a kill then loses at most that much. A
+            // desktop app's token is refreshed on the same beat, so one that stays connected for weeks neither shows a
+            // stale last use nor looks like the oldest unused token when too many push one out.
+            var seen = session is not null ? KeepSeenAsync(auth.Sessions.SaveEvery, () => auth.Sessions.Touch(session), options.Time, lifetime.Token)
+                : paired is not null ? KeepSeenAsync(auth.Sessions.SaveEvery, () => auth.Pairing.Touch(paired.Id), options.Time, lifetime.Token)
+                : Task.CompletedTask;
             try
             {
                 await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token,
@@ -388,12 +393,32 @@ public sealed class ServerApp : IAsyncDisposable
                 return;
             }
 
+            // A token's request ends with the token, as its WebSockets do: a command still running when the owner removes
+            // the pairing (or changes the password) is cancelled, not finished for an app that no longer has access.
+            var tokenEnded = ServerAuth.TokenOf(context) is { } holder ? auth.Pairing.Lifetime(holder.Id) : CancellationToken.None;
             var session = new OneShotSession(request.Id);
-            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);
-            if (!dispatcher.RejectIfIncompatible(session, request))
-                await dispatcher.DispatchAsync(session, request, lifetime.Token).ConfigureAwait(false);
+            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping, tokenEnded);
+            IpcMessage? reply = null;
+            try
+            {
+                if (!tokenEnded.IsCancellationRequested && !dispatcher.RejectIfIncompatible(session, request))
+                    await dispatcher.DispatchAsync(session, request, lifetime.Token).ConfigureAwait(false);
+                if (!tokenEnded.IsCancellationRequested)
+                    reply = await session.Reply.WaitAsync(TimeSpan.FromMinutes(5), lifetime.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (tokenEnded.IsCancellationRequested)
+            {
+                // The pairing was removed meanwhile (answered below).
+            }
 
-            var reply = await session.Reply.WaitAsync(TimeSpan.FromMinutes(5), lifetime.Token).ConfigureAwait(false);
+            if (reply is null || tokenEnded.IsCancellationRequested)
+            {
+                // Also when the cancelled command still answered (with its failure): the answer is the removed pairing.
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { ok = false, error = "This app's pairing was removed. Pair it again." }, stopping).ConfigureAwait(false);
+                return;
+            }
+
             if (paired)
             {
                 reply = NativeBridgePolicy.To(BridgeRole.ServerExtension, reply) ??
@@ -413,13 +438,16 @@ public sealed class ServerApp : IAsyncDisposable
         return web;
     }
 
-    /// <summary>Touches the session every <see cref="SessionStore.SaveEvery"/> while its socket is open (one wake-up per beat).</summary>
-    private static async Task KeepSeenAsync(SessionStore sessions, Session session, TimeProvider time, CancellationToken cancellationToken)
+    /// <summary>
+    /// Touches the session or the token every <paramref name="every"/> (<see cref="SessionStore.SaveEvery"/>) while its
+    /// socket is open (one wake-up per beat).
+    /// </summary>
+    private static async Task KeepSeenAsync(TimeSpan every, Action touch, TimeProvider time, CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(sessions.SaveEvery, time);
+        using var timer = new PeriodicTimer(every, time);
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) sessions.Touch(session);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) touch();
         }
         catch (OperationCanceledException)
         {

@@ -138,16 +138,36 @@ public sealed class AuthStore
         }
     }
 
-    /// <summary>Removes every paired browser's token; how many there were.</summary>
-    public int RemoveAllTokens()
+    /// <summary>Removes every paired app's token; how many there were.</summary>
+    public int RemoveAllTokens() => RemoveTokens(_ => true);
+
+    /// <summary>Removes the tokens that <paramref name="which"/> picks; how many there were.</summary>
+    public int RemoveTokens(Func<TokenRecord, bool> which)
     {
         lock (_gate)
         {
             var before = _file.Tokens;
-            if (before.Count == 0) return 0;
-            _file.Tokens = [];
+            var kept = before.Where(token => !which(token)).ToList();
+            var removed = before.Count - kept.Count;
+            if (removed == 0) return 0;
+            _file.Tokens = kept;
             SaveOrUndo(() => _file.Tokens = before);
-            return before.Count;
+            return removed;
+        }
+    }
+
+    /// <summary>
+    /// Notes a use of this token that isn't a request (its WebSocket is still open), saved as <see cref="FindToken"/>
+    /// saves: at most once a minute. False when the token is gone.
+    /// </summary>
+    public bool TouchToken(string id, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            var token = _file.Tokens.FirstOrDefault(token => token.Id == id);
+            if (token is null) return false;
+            NoteUse(token, now);
+            return true;
         }
     }
 
@@ -182,24 +202,27 @@ public sealed class AuthStore
                 }
 
                 if (!CryptographicOperations.FixedTimeEquals(stored, hash)) continue;
-                var save = token.LastUsedAt is not { } last || now - last > TimeSpan.FromMinutes(1);
-                token.LastUsedAt = now;
-                if (save)
-                {
-                    try
-                    {
-                        Save();
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        // The last-used time is only shown; a failed save must not refuse the request.
-                    }
-                }
-
+                NoteUse(token, now);
                 return Copy(token);
             }
 
             return null;
+        }
+    }
+
+    /// <summary>Under the lock: the token's last use is now; saved when the saved one is over a minute old.</summary>
+    private void NoteUse(TokenRecord token, DateTimeOffset now)
+    {
+        var save = token.LastUsedAt is not { } last || now - last > TimeSpan.FromMinutes(1);
+        token.LastUsedAt = now;
+        if (!save) return;
+        try
+        {
+            Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The last-used time is only shown (and orders which token goes first); a failed save must not refuse the request.
         }
     }
 
