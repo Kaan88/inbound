@@ -2544,7 +2544,21 @@ public sealed partial class DownloadManagerService
         CancellationToken cancellationToken = default)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var moved = await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false);
+            if (!moved.Ok) return moved;
+
+            // A running download moved into a queue that is already full: the same rule as a lowered limit
+            // (owner, 2026-11-08: "Yes, same rule") sends the queue's newest extra one back to Queued.
+            await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                if (_jobs.TryGetValue(id, out var runtime)) moved.Job = Map(runtime.Job);
+            }
+
+            return moved;
+        }
         finally { _settingsUpdateGate.Release(); }
     }
 
