@@ -1,5 +1,16 @@
 # Progress — session handoff
 
+### Plan for the remaining work; owner hands over (2026-11-08)
+
+- Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.
+- New owner and user reports recorded: UI.B7 (limit raise leaves jobs connecting), UI.R20 (Shift+Delete), UI.R21 (limits apply live), TB.L1 (measure TorBox limits).
+- The plan is `PLAN.md` (untracked, in the worktree). Owner: "don't ask me for anything, I'll be a sleep. it's completely yours. do whatever is planned." Questions that need the owner go in the "Questions for the owner" list below instead of stopping.
+- Stale rows tidied: UP.B1 and UI.B2 released in 0.5.1, PERF.1 superseded by PERF.5, A1/A2/A1.C/A4 on main; CLAUDE.md status updated.
+
+#### Questions for the owner (2026-11-08 run)
+
+- (none yet)
+
 ### Owner's remaining checks (2026-11-08)
 
 - Owner: the 0.5.2 list "all work" (UI.R9 to UI.R13, TB.F15, UI.R2 verified). TB.F9 and TB.F14 "fixed already"; the add flow (TB.F10, TB.F2) "also done and fixed"; hover info (UI.R7) done; smoothing (UI.R8) removed; update window placement (UI.R14) fixed. Edge and Firefox go with the extension work (EXT.E1).
