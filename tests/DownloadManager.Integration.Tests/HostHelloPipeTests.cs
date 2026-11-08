@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
@@ -138,9 +138,13 @@ public sealed class HostHelloPipeTests
         Assert.Contains("1 total", doctor.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// End to end only: the native host never forwarded the greeting snapshot, so this shows the events still arrive, not
+    /// that the Host skipped the snapshot. <see cref="The_native_host_asks_the_hello_pipe_for_events_but_no_snapshot"/> does.
+    /// </summary>
     [Trait("Platform", "Windows")]
     [Fact]
-    public async Task The_native_host_forwards_no_snapshot_but_still_the_events()
+    public async Task The_native_host_still_forwards_the_events_through_the_hello_pipe()
     {
         await using var host = await SandboxHost.StartAsync(NoApi);
         await using var other = await host.ConnectAsync();
@@ -181,6 +185,118 @@ public sealed class HostHelloPipeTests
         }
     }
 
+    [Trait("Platform", "Windows")]
+    [Fact]
+    public async Task A_first_frame_without_a_type_is_closed()
+    {
+        await using var host = await SandboxHost.StartAsync(NoApi);
+        await using (var pipe = await HelloPipeAsync(host))
+        {
+            var frame = Encoding.UTF8.GetBytes($"{{\"v\":{Protocol.Version},\"id\":\"x\"}}");
+            var length = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(length, frame.Length);
+            await pipe.WriteAsync(length);
+            await pipe.WriteAsync(frame);
+            await pipe.FlushAsync();
+            Assert.Null(await ReadAsync(pipe));
+        }
+
+        await using var after = await host.ConnectAsync();
+        Assert.True((await after.AskAsync<HostActionResult>(MessageTypes.HostPing, new { })).Ok);
+    }
+
+    [Trait("Platform", "Windows")]
+    [Fact]
+    public async Task A_client_that_never_says_hello_is_closed_after_the_deadline()
+    {
+        await using var host = await SandboxHost.StartAsync(NoApi);
+        await using var pipe = await HelloPipeAsync(host);
+        var clock = Stopwatch.StartNew();
+        Assert.Null(await ReadAsync(pipe));
+        Assert.InRange(clock.Elapsed, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(15));
+    }
+
+    /// <summary>
+    /// What the native host asks the Host for, seen by a Host played by the test: its first frame on the hello pipe is
+    /// <c>client.hello</c> with no snapshot and with the events, and it then forwards the extension's request there.
+    /// </summary>
+    [Trait("Platform", "Windows")]
+    [Fact]
+    public async Task The_native_host_asks_the_hello_pipe_for_events_but_no_snapshot()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", "hellohost-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var instance = "t" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using var server = new NamedPipeServerStream($"DownloadManager-{InstanceKey(instance)}-hello", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            IpcMessage? first = null;
+            var serving = Task.Run(async () =>
+            {
+                using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await server.WaitForConnectionAsync(wait.Token);
+                first = await IpcFraming.ReadAsync(server, wait.Token);
+                await IpcFraming.WriteAsync(server, IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto
+                {
+                    HostVersion = "0.6.2", ProtocolVersion = Protocol.Version, Capabilities = ["jobs", "settings", "handoff", "tray", "status"],
+                }), wait.Token);
+                var request = await IpcFraming.ReadAsync(server, wait.Token);
+                Assert.Equal(MessageTypes.HostPing, request!.Type);
+                await IpcFraming.WriteAsync(server, IpcMessage.Create(MessageTypes.HostActionResult,
+                    new HostActionResult { Ok = true, Message = "pong" }, request.Id), wait.Token);
+            });
+
+            var info = new ProcessStartInfo(Executable("DownloadManager.NativeHost"))
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                WorkingDirectory = root,
+            };
+            foreach (var name in info.Environment.Keys.Where(n => n.StartsWith("DOWNLOADMANAGER_", StringComparison.OrdinalIgnoreCase)).ToList())
+                info.Environment.Remove(name);
+            info.Environment["DOWNLOADMANAGER_INSTANCE"] = instance;
+            info.Environment["DOWNLOADMANAGER_DATA"] = root;
+            info.ArgumentList.Add(BrowserBridge.UnpackedExtensionOrigin);
+            info.ArgumentList.Add("--parent-window=0");
+            using var native = Process.Start(info)!;
+            try
+            {
+                var stderr = native.StandardError.ReadToEndAsync();
+                var ping = IpcMessage.Create(MessageTypes.HostPing, new { });
+                await IpcFraming.WriteAsync(native.StandardInput.BaseStream, ping);
+                await native.StandardInput.BaseStream.FlushAsync();
+                var reply = await ReadAsync(native.StandardOutput.BaseStream);
+                Assert.True(reply?.ReplyTo == ping.Id, $"reply {reply?.Type}; stderr: {(native.HasExited ? await stderr : "(running)")}");
+                await serving;
+
+                Assert.Equal(MessageTypes.ClientHello, first!.Type);
+                var asked = first.GetPayload<ClientHelloDto>();
+                Assert.False(asked.Snapshot);
+                Assert.True(asked.Events);
+            }
+            finally
+            {
+                if (!native.HasExited) native.Kill(entireProcessTree: true);
+                await native.WaitForExitAsync();
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+        }
+    }
+
+    /// <summary>The pipe key of a test instance, as <see cref="PipeNames"/> makes it.</summary>
+    private static string InstanceKey(string instance)
+    {
+        var identity = $"{Environment.UserDomainName}\\{Environment.UserName}\nInstance:{instance}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)).AsSpan(0, 8)).ToLowerInvariant();
+    }
+
     /// <summary>
     /// A Host from before the hello pipe: only the main pipe, which sends the hello and the snapshot as soon as a
     /// client connects. Played here by the test, under a test instance's pipe name, so the CLI's fallback is what runs.
@@ -192,11 +308,9 @@ public sealed class HostHelloPipeTests
         var root = Path.Combine(AppContext.BaseDirectory, "test-work", "oldhost-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var instance = "t" + Guid.NewGuid().ToString("N");
-        var identity = $"{Environment.UserDomainName}\\{Environment.UserName}\nInstance:{instance}";
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)).AsSpan(0, 8)).ToLowerInvariant();
         try
         {
-            await using var server = new NamedPipeServerStream($"DownloadManager-{key}", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            await using var server = new NamedPipeServerStream($"DownloadManager-{InstanceKey(instance)}", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             var serving = Task.Run(async () =>
             {
                 using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -212,7 +326,7 @@ public sealed class HostHelloPipeTests
                     new HostStatusDto { HostVersion = "0.6.1", ProtocolVersion = Protocol.Version, TotalJobs = 42 }, request.Id), wait.Token);
             });
 
-            var info = new ProcessStartInfo(CliExecutable())
+            var info = new ProcessStartInfo(Executable("DownloadManager.Cli"))
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -244,13 +358,13 @@ public sealed class HostHelloPipeTests
         }
     }
 
-    private static string CliExecutable()
+    private static string Executable(string project)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = directory.Parent!.Name;
         while (!File.Exists(Path.Combine(directory.FullName, "DownloadManager.slnx")))
             directory = directory.Parent ?? throw new InvalidOperationException("Could not find the repository root.");
-        var path = Path.Combine(directory.FullName, "src", "DownloadManager.Cli", "bin", configuration, "net10.0", "DownloadManager.Cli.exe");
-        return File.Exists(path) ? path : throw new FileNotFoundException($"The CLI has not been built: {path}");
+        var path = Path.Combine(directory.FullName, "src", project, "bin", configuration, "net10.0", project + ".exe");
+        return File.Exists(path) ? path : throw new FileNotFoundException($"{project} has not been built: {path}");
     }
 }
