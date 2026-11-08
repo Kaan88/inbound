@@ -66,6 +66,32 @@ internal static class LiveAccount
             .ToList();
     }
 
+    /// <summary>
+    /// Owner, 2026-11-08: one small archive stays on the account for live extraction checks, kept out of any
+    /// test cleanup ("yes add one and airlock it"). Anything named with this prefix is never removed by a test.
+    /// </summary>
+    public const string KeptPrefix = "inbound-live-check";
+
+    /// <summary>The kept archive: a web download, Airlock on, of a public domain zip (docs/plans/torbox-integration.md).</summary>
+    public const string KeptArchiveName = "inbound-live-check-archive.zip";
+    public const long KeptArchiveSize = 1_291_466;
+    public const string KeptArchiveMd5 = "27f461ea38147b50776e4feaabd36f74";
+
+    public static bool IsKept(string? name) =>
+        name is not null && name.TrimStart().StartsWith(KeptPrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The only way a test removes an item: it looks the item up first and leaves a kept one alone, because a
+    /// submission the provider matched to an existing item answers with that item's id. Returns whether it removed it.
+    /// </summary>
+    public static async Task<bool> RemoveUnlessKeptAsync(TorBoxClient client, RemoteItemRef created)
+    {
+        var item = await client.GetAsync(created, fresh: true).ConfigureAwait(false);
+        if (item is null || IsKept(item.Name)) return false;
+        await client.RemoveAsync(created).ConfigureAwait(false);
+        return true;
+    }
+
     /// <summary>The API's answer as it is, for what the client deliberately doesn't show. The caller disposes the document.</summary>
     public static async Task<(HttpStatusCode Status, JsonDocument? Body)> RawAsync(string relative, string? bearer = "")
     {

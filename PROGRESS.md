@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### TorBox kept archive, TB.L2 (2026-11-08, branch `owner-torbox-file`)
+
+- Added web download `inbound-live-check-archive.zip` (id 2240130) to the account and turned Airlock on ("yes add one and airlock it"). Content: a 1.29 MB public domain zip from archive.org (Project Gutenberg eBook 14838), no password. TorBox can't take a local file, GitHub and sqlite.org links were refused, so not our own zip.
+- A fresh `mylist` read: `cached: true`, `airlocked: true`, tag `inbound-live-check`, one 1,291,466-byte zip. `expires_at` still said 2026-12-08 after Airlock; whether Airlock lifts it is unverified.
+- Live tests now remove items only through `LiveAccount.RemoveUnlessKeptAsync`, which skips `inbound-live-check*` names. `KeptArchiveTests`: 9 pass without a key; with the key all 10 pass, including the live read of the item. LiveTests project without a key: 9 passed, 30 skipped.
+- API calls: 7 in all (2 refused submissions, 1 submission, 1 read, 1 edit, 1 read, 1 list from the live test). No key or link was printed, logged or committed.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):
