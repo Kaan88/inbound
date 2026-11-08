@@ -1,22 +1,27 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
-  import { fade } from 'svelte/transition';
+  import ArchiveNoticeBar from '../components/ArchiveNoticeBar.svelte';
+  import ArchivePassword from '../components/ArchivePassword.svelte';
   import ContextMenu, { type MenuItem } from '../components/ContextMenu.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../components/Icon.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
-  import { archiveTone, speed } from '../lib/format';
   import {
-    archiveCanRetry, archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, archiveRemoveText, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
-    downloadChoices, emptyText, isTypingTarget, leftExtractingText, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
-    pauseTargets, planFileMenu, priorityTargets, queueText, remoteActions, remoteEnterAction, remoteInProviderQueue, remoteRemoveText, resumeTargets,
+    extractAgainQuestion, extractSummary, leftExtracting, planForRows, removeQuestion as archiveRemoveQuestion, targetOf, type ArchivePasswordTarget,
+  } from '../lib/archives';
+  import {
+    archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
+    downloadChoices, emptyText, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
+    pauseTargets, planFileMenu, priorityTargets, queueText, remoteEnterAction, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
   import { listState } from '../lib/listState.svelte';
+  import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
   import { buildRows, selectedJobIds, type Row, type ViewKey } from '../lib/views';
-  import ArchivePassword from './ArchivePassword.svelte';
+  import ArchiveRecord from './ArchiveRecord.svelte';
+  import ExtractFromDisk from './ExtractFromDisk.svelte';
   import JobDetails from './JobDetails.svelte';
   import PackageDialog from './PackageDialog.svelte';
   import RemoteActions from './RemoteActions.svelte';
@@ -67,7 +72,9 @@
     else packageOpen = group.id;
   }
   let remoteOpen = $state<RemoteJob | null>(null);
-  let passwordFor = $state<ArchiveSet | null>(null);
+  let archiveOpen = $state<ArchiveSet | null>(null);
+  let passwordTarget = $state<ArchivePasswordTarget | null>(null);
+  let extractFromDisk = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; label: string } | null>(null);
   let grid: HTMLDivElement | undefined = $state();
   let suppressClick = false;
@@ -126,7 +133,6 @@
   });
   // The column is there whenever there is a set to talk about, and the Host answers archive.list.
   const showExtraction = $derived(store.model.archivesAnswered && Object.keys(store.model.archives).length > 0);
-  const needPassword = $derived(Object.values(store.model.archives).filter((set) => set.needsPassword && !set.hasPassword && set.state !== 'completed'));
 
   // A toast's Show opens that download.
   $effect(() => {
@@ -135,6 +141,42 @@
       store.showJob = null;
     }
   });
+
+  // What the archive commands take for the selection (ArchiveRules.Plan), for the toolbar and the row menu.
+  const archivePlan = $derived(planForRows(rows, selected, (id) => archiveByJob.get(id), connected));
+  const canCheckRemote = $derived(Object.values(store.model.remoteJobs).some((job) => actionsOf(job).checkNow));
+
+  async function extractSelection() {
+    const plan = archivePlan;
+    if (!plan.canExtract) return;
+    const words: string[] = [];
+    if (plan.extractJobIds.length > 0) {
+      const result = await store.attempt<{ sets?: ArchiveSet[]; ignored?: { reason?: string }[] }>('archive.extract', { jobIds: plan.extractJobIds });
+      if (result) words.push(extractSummary(result));
+    }
+    for (const set of plan.extractSets) {
+      if (await store.attempt('archive.retry', { setId: set.id })) words.push(`Extraction asked for: ${set.name}.`);
+    }
+    if (words.length) store.toast(words.join(' '));
+  }
+
+  /** Retry Extraction, or Extract Again for a finished set, which asks first (RetryArchivesAsync). */
+  function retryArchives(sets: ArchiveSet[]) {
+    if (sets.length === 0) return;
+    const run = () => each(sets, 'archive.retry', (s) => ({ setId: s.id }), 'Extraction asked for again.');
+    if (sets.some((set) => set.state === 'completed')) confirm = { title: 'Extract again?', text: extractAgainQuestion, ok: 'Extract Again', onok: run };
+    else void run();
+  }
+
+  function askRemoveRecords(sets: ArchiveSet[]) {
+    if (sets.length === 0) return;
+    confirm = {
+      title: 'Remove extraction record?',
+      text: archiveRemoveQuestion(sets),
+      ok: 'Remove Record',
+      onok: () => each(sets, 'archive.remove', (s) => ({ setId: s.id }), sets.length === 1 ? 'Extraction record removed.' : 'Extraction records removed.'),
+    };
+  }
 
   // A row that left the view leaves the selection.
   $effect(() => {
@@ -230,8 +272,8 @@
     else if (row.kind === 'remote') void runRemote(remoteEnterAction([row.remote]), [row.remote], true);
     else if (row.kind === 'archive') {
       const primary = archivePrimary(row.set);
-      if (primary === 'retry') void store.attempt('archive.retry', { setId: row.set.id }, 'Extraction asked for again.');
-      else if (primary === 'password') passwordFor = row.set;
+      if (primary === 'retry') retryArchives([row.set]);
+      else if (primary === 'password') passwordTarget = targetOf(row.set);
       else if (primary === 'copyFolder') void copy(row.set.destination ?? '', 'Folder path copied.');
     }
   }
@@ -399,7 +441,7 @@
   async function removeSideRows() {
     const jobs = remoteRows.map((row) => row.remote);
     const sets = archiveRows.map((row) => row.set).filter(archiveRemovable);
-    const left = leftExtractingText(archiveRows.length - sets.length);
+    const left = leftExtracting(archiveRows.length - sets.length);
     const run = async () => {
       for (const job of jobs) await store.attempt('remote.remove', { jobId: job.id });
       for (const set of sets) await store.attempt('archive.remove', { setId: set.id });
@@ -407,24 +449,23 @@
       if (left) store.toast(left);
     };
     if (jobs.length > 0 && sets.length > 0) {
-      confirm = { title: 'Remove from list?', text: `${remoteRemoveText(jobs)} ${archiveRemoveText(sets)}`, ok: 'Remove from list', onok: run };
+      confirm = { title: 'Remove from list?', text: `${remoteRemoveQuestion(jobs)} ${archiveRemoveQuestion(sets)}`, ok: 'Remove from list', onok: run };
     } else if (jobs.length > 0) {
-      confirm = { title: 'Remove from list?', text: remoteRemoveText(jobs), ok: 'Remove from list', onok: run };
+      confirm = { title: 'Remove from list?', text: remoteRemoveQuestion(jobs), ok: 'Remove from list', onok: run };
     } else if (sets.length > 0) {
-      confirm = { title: 'Remove extraction record?', text: archiveRemoveText(sets), ok: 'Remove Record', onok: run };
+      confirm = { title: 'Remove extraction record?', text: archiveRemoveQuestion(sets), ok: 'Remove Record', onok: run };
     }
     if (left && jobs.length + sets.length === 0) store.toast(left);
   }
 
   /** A download still waiting in the provider's own queue comes out of it; nothing else is deleted. */
   function askDequeue(jobs: RemoteJob[]) {
-    const queued = jobs.filter(remoteInProviderQueue);
+    const queued = jobs.filter(isInProviderQueue);
     if (queued.length === 0) return;
-    const provider = queued[0].providerName;
-    const what = queued.length === 1 ? `'${queued[0].name ?? queued[0].displayHost ?? 'this item'}'` : `these ${queued.length} items`;
+    const provider = providerNameOf(queued[0]);
     confirm = {
       title: `Remove from ${provider}'s queue?`,
-      text: `Take ${what} out of your ${provider} queue and off this list? ${provider} hasn't started them, so nothing else is deleted.`,
+      text: dequeueQuestion(queued),
       ok: 'Remove from queue',
       onok: async () => {
         for (const job of queued) await store.attempt('remote.deleteRemote', { jobId: job.id, confirmed: true });
@@ -533,16 +574,16 @@
     const plan = planFileMenu(!!single, firstLocal?.kind === 'package', sideRows, removableSideRows, single?.fileRemovedAfterExtraction === true);
 
     if (remote.length > 0) {
-      const actions = remote.map(remoteActions);
-      const queuedHere = remote.every(remoteInProviderQueue);
-      const name = remote[0].providerName;
+      const actions = remote.map(actionsOf);
+      const queuedHere = remote.every(isInProviderQueue);
+      const name = providerNameOf(remote[0]);
       items.push(
-        { label: 'Select Files…', hidden: !remote.every((j) => remoteActions(j).selectFiles), onselect: () => (remoteOpen = remote[0]) },
+        { label: 'Select Files…', hidden: !remote.every((j) => actionsOf(j).selectFiles), onselect: () => (remoteOpen = remote[0]) },
         { label: 'Download All Files', hidden: !offersDownloadAll(remote), onselect: () => void each(remote.filter((j) => j.state === 'awaitingSelection'), 'remote.select', (j) => ({ jobId: j.id, all: true }), 'Files chosen.') },
-        { label: `Add to ${name}`, hidden: !remote.every((j) => remoteActions(j).approve), onselect: () => void runRemote('approve', remote) },
+        { label: `Add to ${name}`, hidden: !remote.every((j) => actionsOf(j).approve), onselect: () => void runRemote('approve', remote) },
         { label: 'Enter Link Password…', hidden: !(actions.length === 1 && actions[0].enterLinkPassword), onselect: () => (remoteOpen = remote[0]) },
-        { label: 'Retry', hidden: !actions.some((a) => a.retry), onselect: () => void runRemote('retry', remote.filter((j) => remoteActions(j).retry)) },
-        { label: 'Check Now', hint: 'F5', hidden: !actions.some((a) => a.checkNow), onselect: () => void runRemote('checkNow', remote.filter((j) => remoteActions(j).checkNow)) },
+        { label: 'Retry', hidden: !actions.some((a) => a.retry), onselect: () => void runRemote('retry', remote.filter((j) => actionsOf(j).retry)) },
+        { label: 'Check Now', hint: 'F5', hidden: !actions.some((a) => a.checkNow), onselect: () => void runRemote('checkNow', remote.filter((j) => actionsOf(j).checkNow)) },
         { label: `Start Now on ${name}`, hidden: !queuedHere, onselect: () => void each(remote, 'remote.startQueued', (j) => ({ jobId: j.id }), 'Started at the provider.') },
         { label: 'Remove from Queue…', hidden: !queuedHere, onselect: () => askDequeue(remote) },
         { label: 'Details…', hidden: remote.length !== 1, onselect: () => (remoteOpen = remote[0]) },
@@ -550,17 +591,14 @@
       );
     }
 
-    if (archiveRows.length > 0 && localRows.length === 0) {
-      const sets = archiveRows.map((row) => row.set);
-      const only = sets.length === 1 ? sets[0] : null;
+    const archive = archivePlan;
+    const records = archiveRows.map((row) => row.set);
+    const onlyRecord = localRows.length === 0 && records.length === 1 ? records[0] : null;
+    // As ArchiveMenu.Apply: nothing at all for a selection with no archive in it.
+    const showsArchive = records.length > 0 || !['no archive selected', 'select an archive download first'].includes(archive.extractReason ?? '');
+    if (showsArchive && localRows.length === 0) {
       if (items.length) items.push({ separator: true });
-      items.push(
-        { label: archivePasswordText(only), hidden: !only, onselect: () => (passwordFor = only) },
-        { label: archiveRetryText(sets), hidden: !sets.some(archiveCanRetry), onselect: () => void each(sets.filter(archiveCanRetry), 'archive.retry', (s) => ({ setId: s.id }), 'Extraction asked for again.') },
-        { label: 'Copy Folder Path', hidden: !(only?.state === 'completed' && only.destination), onselect: () => void copy(only?.destination ?? '', 'Folder path copied.') },
-        { label: 'Cancel Extraction', hidden: !sets.some((s) => s.state === 'extracting' || s.state === 'waiting'), onselect: () => void each(sets.filter((s) => s.state === 'extracting' || s.state === 'waiting'), 'archive.cancel', (s) => ({ setId: s.id }), 'Extraction cancelled.') },
-        { label: 'Remove Extraction Record…', hint: 'Delete', disabled: !sets.some(archiveRemovable), onselect: () => void removeSideRows() },
-      );
+      items.push(...archiveItems(archive, records, onlyRecord));
     }
 
     if (localRows.length > 0) {
@@ -571,6 +609,7 @@
         { label: menuLabel('Copy path', plan.openReason), disabled: plan.openReason !== null || !sizeOnly, onselect: () => void copy(single?.finalFilePath ?? '', 'Path copied.') },
         { label: menuLabel('Copy folder path', plan.openReason), disabled: plan.openReason !== null || !single?.destinationDirectory, onselect: () => void copy(single?.destinationDirectory ?? '', 'Folder path copied.') },
         { separator: true },
+        ...(showsArchive ? [...archiveItems(archive, records, null), { separator: true } as MenuItem] : []),
         { label: 'Resume', disabled: !canResume, onselect: () => void resume() },
         { label: 'Stop', disabled: !canPause, onselect: () => void stop() },
         { label: 'Cancel Package…', hidden: packageRows.length === 0, disabled: !canCancelPackage, onselect: askCancelPackage },
@@ -600,6 +639,21 @@
       );
     }
     return items;
+  }
+
+  /** ArchiveMenu.Apply: Extract (saying why when it can't run, unless Retry already offers it), the password, retry, cancel and remove. */
+  function archiveItems(archive: typeof archivePlan, records: ArchiveSet[], onlyRecord: ArchiveSet | null): MenuItem[] {
+    return [
+      { label: archive.extractText, hidden: !archive.showExtract, disabled: !archive.canExtract, onselect: () => void extractSelection() },
+      { label: archivePasswordText(archive.password?.needed === true), hidden: !archive.password, onselect: () => (passwordTarget = archive.password) },
+      { label: archiveRetryText(archive.retry), hidden: archive.retry.length === 0, onselect: () => retryArchives(archive.retry) },
+      { label: 'Cancel Extraction', hidden: archive.cancel.length === 0, onselect: () => void each(archive.cancel, 'archive.cancel', (s) => ({ setId: s.id }), 'Extraction cancelled.') },
+      { label: 'Copy Folder Path', hidden: !(onlyRecord?.state === 'completed' && onlyRecord.destination), onselect: () => void copy(onlyRecord?.destination ?? '', 'Folder path copied.') },
+      { label: 'Details…', hidden: !onlyRecord, onselect: () => (archiveOpen = onlyRecord) },
+      records.length > 0
+        ? { label: 'Remove Extraction Record…', hint: 'Delete', disabled: !records.some(archiveRemovable), onselect: () => void removeSideRows() }
+        : { label: 'Remove Extraction Record…', hidden: archive.remove.length === 0, onselect: () => askRemoveRecords(archive.remove) },
+    ];
   }
 
   async function copy(text: string, done: string) {
@@ -726,7 +780,7 @@
       if (selected.size > 0) askDelete(event.shiftKey);
     } else if (event.key === 'F5' && remoteRows.length > 0) {
       event.preventDefault();
-      void runRemote('checkNow', remoteRows.map((r) => r.remote).filter((j) => remoteActions(j).checkNow));
+      void runRemote('checkNow', remoteRows.map((r) => r.remote).filter((j) => actionsOf(j).checkNow));
     } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
       event.preventDefault();
       const row = rows[index] ?? rows[0];
@@ -801,6 +855,14 @@
   <button class="toolbtn" title={selectedJobs.length === 0 && removableSideRows > 0 ? 'Remove the selected rows from the list' : 'Delete the selected download and its partial data'} disabled={!connected || !canDelete} onclick={() => askDelete(false)}><Icon name="trash" class="text-icon-danger" /><span>Delete</span></button>
   <button class="toolbtn" title="Remove completed downloads from the list" disabled={!connected || completedIds.length === 0} onclick={askDeleteCompleted}><Icon name="sweep" class="text-icon-danger" /><span>Delete Completed</span></button>
   <span class="toolsep"></span>
+  <button class="toolbtn" disabled={!archivePlan.canExtract} title={archivePlan.extractText} onclick={() => void extractSelection()}><Icon name="archive" class="text-icon-media" /><span>Extract</span></button>
+  <button class="toolbtn" title="Set the password for the selected archive" disabled={!archivePlan.password} onclick={() => (passwordTarget = archivePlan.password)}><Icon name="key" class="text-icon-pause" /><span>Archive password</span></button>
+  <button class="toolbtn" title="Extract an archive that is already on the server" disabled={!connected} onclick={() => (extractFromDisk = true)}><Icon name="archive" class="text-icon-media" /><span>Extract archive…</span></button>
+  {#if view === 'remote'}
+    <span class="toolsep"></span>
+    <button class="toolbtn" disabled={!connected || !canCheckRemote} title={canCheckRemote ? 'Ask the provider about your waiting items now, without waiting for the next check' : 'Nothing is waiting on a provider, so there is nothing to check'} onclick={() => store.attempt('remote.checkNow', {}, 'Checking now…')}><Icon name="refresh" class="text-icon-info" /><span>Check now</span></button>
+  {/if}
+  <span class="toolsep"></span>
   <a class="toolbtn" title="Open Download Manager settings" href="#/settings"><Icon name="settings" class="text-icon-neutral" /><span>Options</span></a>
   <a class="toolbtn" title="Manage scheduled queue runs" href="#/queues"><Icon name="calendar" class="text-icon-info" /><span>Scheduler</span></a>
   <span class="toolsep"></span>
@@ -816,13 +878,7 @@
   <button class="toolbtn" title="Sort, limits, clean up leftover files" aria-haspopup="menu" onclick={(event) => toolbarMenu(event, 'More', moreItems())}><Icon name="more" /><span>More</span></button>
 </div>
 
-{#if needPassword.length > 0}
-  <div class="flex flex-wrap items-center gap-2 border-b border-divider bg-highlight px-3 py-1.5 text-[13px]" role="status" transition:fade={{ duration: 150 }}>
-    <Icon name="key" size={16} class="text-icon-pause" />
-    <span class="flex-1">{needPassword.length === 1 ? `${needPassword[0].name} needs a password to extract.` : `${needPassword.length} archives need a password to extract.`}</span>
-    <button class="btn py-0.5" onclick={() => (passwordFor = needPassword[0])}>Enter password</button>
-  </div>
-{/if}
+<ArchiveNoticeBar onpassword={(target) => (passwordTarget = target)} onshow={(set) => (archiveOpen = set)} />
 
 {#snippet head(key: SortKey, label: string, cls: string)}
   <div role="columnheader" aria-sort={ariaSort(key)} class={cls}>
@@ -911,10 +967,10 @@
           {#if row.kind === 'job'}
             {@const set = archiveByJob.get(row.job.id)}
             {#if set && set.needsPassword && !set.hasPassword}
-              <button tabindex="-1" class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordFor = set; }}><Icon name="key" size={13} /></button>
+              <button tabindex="-1" class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordTarget = targetOf(set); }}><Icon name="key" size={13} /></button>
             {/if}
           {:else if row.kind === 'archive' && row.set.needsPassword && !row.set.hasPassword}
-            <button tabindex="-1" class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordFor = row.set; }}><Icon name="key" size={13} /></button>
+            <button tabindex="-1" class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordTarget = targetOf(row.set); }}><Icon name="key" size={13} /></button>
           {/if}
         </span>
       {/if}
@@ -931,7 +987,7 @@
         Nothing matches “{search}”.
       {:else}
         <p class="mb-3 whitespace-pre-line">{emptyText(view, providerName)}</p>
-        <button class="btn-primary" onclick={onadd}><Icon name="add" size={16} /> Add URL</button>
+        {#if view !== 'remote'}<button class="btn-primary" onclick={onadd}><Icon name="add" size={16} /> Add URL</button>{/if}
       {/if}
     </div>
   {/each}
@@ -1011,7 +1067,7 @@
 {/if}
 
 {#if details}
-  <JobDetails jobId={details} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+  <JobDetails jobId={details} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(target) => { details = null; passwordTarget = target; }} />
 {/if}
 
 
@@ -1019,8 +1075,16 @@
   <RemoteActions remote={store.model.remoteJobs[remoteOpen.id] ?? remoteOpen} onclose={() => (remoteOpen = null)} />
 {/if}
 
-{#if passwordFor}
-  <ArchivePassword set={store.model.archives[passwordFor.id] ?? passwordFor} onclose={() => (passwordFor = null)} />
+{#if archiveOpen}
+  <ArchiveRecord set={store.model.archives[archiveOpen.id] ?? archiveOpen} onclose={() => (archiveOpen = null)} onpassword={(target) => { archiveOpen = null; passwordTarget = target; }} />
+{/if}
+
+{#if passwordTarget}
+  <ArchivePassword target={passwordTarget} onclose={() => (passwordTarget = null)} />
+{/if}
+
+{#if extractFromDisk}
+  <ExtractFromDisk onclose={() => (extractFromDisk = false)} />
 {/if}
 
 <style>

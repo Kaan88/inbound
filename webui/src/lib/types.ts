@@ -261,6 +261,12 @@ export interface RemoteJob {
   heldForApproval: boolean;
   hasLinkPassword: boolean;
   hasArchivePassword: boolean;
+  /** The provider's own word for the state, as it sent it. */
+  rawState?: string;
+  /** The provider's item this job covers; empty while the provider has not queued it. */
+  itemId?: string;
+  startMode?: string;
+  selectedFileIds?: string[];
   failureKind?: string;
   failureMessage?: string;
   nextCheckAt?: string;
@@ -271,6 +277,16 @@ export interface RemoteJob {
   notes: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RemoteAddResult {
+  ok: boolean;
+  error?: string;
+  /** Something asked for that didn't happen, because an active job already covers this input. */
+  note?: string;
+  existing?: boolean;
+  inputKind?: string;
+  job?: RemoteJob;
 }
 
 export interface RemoteAccount {
@@ -331,7 +347,10 @@ export interface RemoteItem {
   cached: boolean;
   error?: string;
   createdAt?: string;
+  updatedAt?: string;
   expiresAt?: string;
+  rawState?: string;
+  etaSeconds?: number;
   fileCount: number;
   files?: RemoteFile[];
 }
@@ -376,7 +395,9 @@ export interface ArchiveSet {
   note?: string;
   packageId?: string;
   jobIds: string[];
+  attempts?: number;
   createdAt?: string;
+  completedAt?: string;
   updatedAt: string;
 }
 

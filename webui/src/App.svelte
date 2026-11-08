@@ -11,6 +11,7 @@
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
+  import { noticeBoard, noticeWatchingSince } from './lib/archives';
   import AddLinks from './screens/AddLinks.svelte';
   import AddUrl from './screens/AddUrl.svelte';
   import ImportList from './screens/ImportList.svelte';
@@ -21,13 +22,14 @@
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
 
   // The shell: header, sidebar of views, the screen picked by the address's #hash, and the toasts.
-  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider' } | { kind: 'statistics' };
+  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider'; provider: string } | { kind: 'statistics' };
 
   function parse(hash: string): Screen {
     const key = hash.replace(/^#\/?/, '');
     if (key === 'queues') return { kind: 'queues' };
     if (key === 'settings') return { kind: 'settings' };
-    if (key === 'provider') return { kind: 'provider' };
+    // `#/provider/<id>` is that account's My provider; `#/provider` alone is the first one that can browse.
+    if (key === 'provider' || key.startsWith('provider/')) return { kind: 'provider', provider: decodeURIComponent(key.slice('provider/'.length)) };
     if (key === 'statistics') return { kind: 'statistics' };
     return { kind: 'list', view: parseViewKey(key) ?? 'all' };
   }
@@ -71,11 +73,20 @@
     return () => removeEventListener('hashchange', changed);
   });
 
+  // The extraction notices are kept up to date on every screen, not only while the list shows.
+  $effect(() => {
+    noticeBoard.update(Object.values(store.model.archives), noticeWatchingSince, store.model.settings?.notifyOnCompletion !== false);
+  });
   const count = $derived(counts(store.model));
   const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
   const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
   const listCounts = $derived(countJobs(Object.values(store.model.jobs)));
-  const current = $derived(screen.kind === 'list' ? screen.view : screen.kind);
+  // A provider's page is marked by its account: `#/provider` alone stands for the first one that can browse.
+  const current = $derived(
+    screen.kind === 'list' ? screen.view
+      : screen.kind === 'provider' ? `provider:${screen.provider || (providers.find((entry) => entry.showBrowse)?.provider ?? '')}`
+      : screen.kind,
+  );
   const categories = $derived(categoryList(store.model.settings?.customCategories ?? []));
   const statusText = $derived(screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
   // The Host answers archive.list, or has no extraction to show.
@@ -153,7 +164,7 @@
       {#if store.has('remote')}
         {#each providers as entry (entry.provider)}
           {#if entry.showWaiting}{@render link('#/remote', 'remote', 'cloud', entry.waiting > 0 ? `Waiting for ${entry.name} (${entry.waiting})` : `Waiting for ${entry.name}`)}{/if}
-          {#if entry.showBrowse}{@render link('#/provider', 'provider', 'key', `My ${entry.name}`)}{/if}
+          {#if entry.showBrowse}{@render link(`#/provider/${encodeURIComponent(entry.provider)}`, `provider:${entry.provider}`, 'key', `My ${entry.name}`)}{/if}
         {/each}
       {/if}
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
@@ -169,7 +180,7 @@
       {:else if screen.kind === 'queues'}
         <QueuesScreen />
       {:else if screen.kind === 'provider'}
-        <TorBoxScreen />
+        <TorBoxScreen provider={screen.provider} />
       {:else if screen.kind === 'statistics'}
         <StatisticsScreen />
       {:else}

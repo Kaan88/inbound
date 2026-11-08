@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { packagePasswordHint, showsArchiveSection } from '../lib/details';
-  import { archiveShort } from '../lib/format';
+  import { archiveLabel, fullWithNote } from '../lib/archives';
   import { store } from '../lib/store.svelte';
   import type { Job } from '../lib/types';
 
@@ -38,7 +38,7 @@
   const asking = $derived(sets.filter((s) => s.needsPassword));
   const wrong = $derived(asking.some((s) => s.failureKind === 'wrongPassword'));
   const lines = $derived.by(() => {
-    const out = sets.slice(0, 6).map((set) => `${set.name}: ${set.stateText || archiveShort(set)}${set.note ? ` ${set.note}` : ''}`);
+    const out = sets.slice(0, 6).map((set) => `${set.name}: ${fullWithNote(set) || archiveLabel(set).text}`);
     if (sets.length > 6) out.push(`and ${sets.length - 6} more`);
     if (asking.length > 0) {
       out.unshift(wrong

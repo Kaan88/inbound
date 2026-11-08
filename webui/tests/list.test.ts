@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  archiveCanRetry, archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
+  archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
   graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
   priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
 } from '../src/lib/list';
+import { canRetry, targetOf } from '../src/lib/archives';
 import { apply, emptyModel } from '../src/lib/model';
 import type { ArchiveSet, Job, RemoteJob } from '../src/lib/types';
 import { buildRows, categoryList, counts, parseViewKey, viewHash } from '../src/lib/views';
@@ -529,12 +530,12 @@ describe('review fixes', () => {
 
   it('offers Extract Again for a completed set that still has its archives', () => {
     const done = set({ state: 'completed' });
-    expect(archiveCanRetry(done)).toBe(true);
-    expect(archiveCanRetry({ ...done, archivesDeleted: true })).toBe(false);
+    expect(canRetry(done)).toBe(true);
+    expect(canRetry({ ...done, archivesDeleted: true })).toBe(false);
     expect(archiveRetryText([done])).toBe('Extract Again…');
     expect(archiveRetryText([set({ state: 'failed' })])).toBe('Retry Extraction');
-    expect(archivePasswordText(set({ needsPassword: true }))).toBe('Enter Archive Password…');
-    expect(archivePasswordText(set({}))).toBe('Archive Password…');
+    expect(archivePasswordText(targetOf(set({ needsPassword: true })).needed)).toBe('Enter Archive Password…');
+    expect(archivePasswordText(targetOf(set({})).needed)).toBe('Archive Password…');
   });
 
   it('shows provider entries by the desktop gating', () => {

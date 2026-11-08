@@ -10,14 +10,15 @@
     addressLabel, barValue, completedSize, detailRows, failureLabel, hasOwnAddress, heading, mergeSegments, noFileText, noticeText,
     hideAddresses, pollsSegments, redownloadRefusal, segmentRows, updateRates, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
   } from '../lib/details';
-  import { archiveShort, archiveTone, dateTime, percent, speed, tone } from '../lib/format';
+  import { archiveRowView, extractSummary, fullWithNote, looksLikeArchive, planFor, type ArchivePasswordTarget } from '../lib/archives';
+  import { dateTime, percent, speed, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, ClassifyResult, ConnectionInfo, Job, Segment } from '../lib/types';
   import MoveRename from './MoveRename.svelte';
   import Properties from './Properties.svelte';
   import RefreshAddress from './RefreshAddress.svelte';
 
-  let { jobId, set, onclose, onpassword }: { jobId: string; set?: ArchiveSet; onclose: () => void; onpassword: (set: ArchiveSet) => void } = $props();
+  let { jobId, set, onclose, onpassword }: { jobId: string; set?: ArchiveSet; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void } = $props();
 
   // The download as the server has it. When it leaves the list the dialog stays, saying so, until it is closed (D21).
   let last = $state<Job | null>(untrack(() => store.model.jobs[jobId] ?? null));
@@ -32,6 +33,14 @@
   const complete = $derived(job?.state === 'completed');
   const desktopApp = store.has('tray');
   const providerName = $derived(store.model.accounts.find((a) => a.provider === job?.remoteProvider)?.providerName ?? job?.remoteProvider ?? 'your provider');
+  const archive = $derived(set ? archiveRowView(set) : null);
+  // What the archive commands would take for this one file (ArchiveRules.Plan).
+  const plan = $derived(job ? planFor([{ jobId: job.id, fileName: job.fileName, filePath: job.finalFilePath, set }], [], null, connected) : null);
+  async function extractThis() {
+    if (!job) return;
+    const result = await store.attempt<{ sets?: ArchiveSet[]; ignored?: { reason?: string }[] }>('archive.extract', { jobIds: [job.id] });
+    if (result) store.toast(extractSummary(result));
+  }
 
   // Opening a download is a click, which is when a browser lets the page ask for system notices.
   store.askForNotices();
@@ -319,8 +328,8 @@
         {#if set}
           <dt class="text-muted">Extraction</dt>
           <dd>
-            <span class="tone-{archiveTone(set)}">{archiveShort(set)}</span>
-            <span class="block text-[12px] text-muted">{set.stateText}</span>
+            <span class="tone-{archive?.tone}" title={archive?.tooltip}>{archive?.text}</span>
+            <span class="block text-[12px] text-muted">{fullWithNote(set)}</span>
           </dd>
         {/if}
       </dl>
@@ -370,7 +379,7 @@
       <input id="done-path" class="field font-mono" readonly value={job.finalFilePath} onfocus={(event) => event.currentTarget.select()} />
       {#if job.fileRemovedAfterExtraction}<p class="hint">{noFileText(hideAddresses(job.statusNote))}</p>{/if}
       {#if set}
-        <div><span class="text-muted">Extraction</span> <span class="tone-{archiveTone(set)} ml-2">{archiveShort(set)}</span></div>
+        <div><span class="text-muted">Extraction</span> <span class="tone-{archive?.tone} ml-2" title={archive?.tooltip}>{archive?.text || fullWithNote(set)}</span></div>
       {/if}
       {#if desktopApp}
         <label class="mt-2 flex items-center gap-2"><input type="checkbox" checked={showForJob} disabled={!connected} onchange={(event) => void setShowForJob(event.currentTarget.checked)} /> Show the completion window for this download</label>
@@ -398,9 +407,9 @@
           <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'refresh')}>Refresh download address…</button>
         {/if}
         <button class="btn" disabled={!connected} onclick={() => (dialog = 'properties')}>Properties…</button>
-        {#if set?.needsPassword}<button class="btn" onclick={() => onpassword(set)}>Archive password…</button>{/if}
-        {#if set && (set.state === 'downloaded' || set.state === 'failed')}
-          <button class="btn" onclick={() => store.attempt('archive.extract', { jobIds: [job.id] }, 'Extraction asked for.')}>Extract</button>
+        {#if plan?.password}<button class="btn" onclick={() => onpassword(plan!.password!)}>Archive password…</button>{/if}
+        {#if plan && (plan.canExtract || set !== undefined || looksLikeArchive(job.fileName))}
+          <button class="btn" disabled={!plan.canExtract} title={plan.extractText} onclick={extractThis}>{plan.extractText}</button>
         {/if}
       {/if}
     {/if}
