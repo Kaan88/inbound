@@ -20,6 +20,13 @@ function fakeServer(handlers = {}) {
       const answer = handlers.pair ? handlers.pair(body) : { status: 200, body: { ok: true, token: TOKEN, id: 'p7', name: body.name } };
       return { status: answer.status, async text() { return JSON.stringify(answer.body); } };
     }
+    if (url === `${ADDRESS}/api/pair/self`) {
+      // The server's self-revoke: the same bearer token as /api/ipc, 204 and no body when it is removed.
+      if (handlers.revoke instanceof Error) throw handlers.revoke;
+      if (init.headers.Authorization !== `Bearer ${TOKEN}`) return { status: 401, async text() { return ''; } };
+      const answer = handlers.revoke ? await handlers.revoke() : { status: 204 };
+      return { status: answer.status, async text() { return answer.body === undefined ? '' : JSON.stringify(answer.body); } };
+    }
     if (init.headers.Authorization !== `Bearer ${TOKEN}`) {
       return { status: 401, async text() { return JSON.stringify({ ok: false, error: "This browser isn't paired with the server, or its pairing was removed. Pair it again." }); } };
     }
@@ -273,5 +280,95 @@ test('EXT.R1: the popup keeps one place\'s downloads when the other does not ans
     assert.deepEqual(listed.jobs.map(j => j.fileName), ['here.zip']);
     assert.equal(listed.groups[1].ok, false);
     assert.match(listed.groups[1].error, /not answering/);
+  });
+});
+
+test('EXT.R1: Unpair asks the server to remove this browser\'s token with the token itself, and says so when it did', async () => {
+  const { harness } = paired(catching);
+  const server = fakeServer();
+  await withServer(harness, server, async () => {
+    const unpaired = await sendRuntimeMessage(harness, { type: 'dm.unpairServer' }, ownPage('options.html'));
+    assert.equal(unpaired.ok, true);
+    assert.equal(unpaired.revoked, true);
+    const revokes = server.calls.filter(call => call.url === `${ADDRESS}/api/pair/self`);
+    assert.equal(revokes.length, 1);
+    assert.equal(revokes[0].init.method, 'DELETE');
+    assert.equal(revokes[0].init.headers.Authorization, `Bearer ${TOKEN}`);
+    assert.equal(revokes[0].init.body, undefined, 'a DELETE carries no body');
+    assert.equal(revokes[0].init.credentials, 'omit');
+    assert.equal(revokes[0].init.redirect, 'error');
+    assert.ok(revokes[0].init.signal, 'the call has a time limit');
+    assert.equal(harness.values.server, null);
+    assert.equal(JSON.stringify(unpaired).includes(TOKEN), false);
+    // Nothing is sent to the server after it is forgotten.
+    await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
+    assert.equal(server.calls.length, 1);
+  });
+});
+
+for (const [name, revoke] of [
+  ['does not answer', new TypeError('Failed to fetch')],
+  ['is too old to know the call', () => ({ status: 404, body: { ok: false } })],
+  ['already removed the token', () => ({ status: 401, body: { ok: false } })],
+  ['fails', () => ({ status: 500, body: { ok: false } })],
+]) {
+  test(`EXT.R1: Unpair forgets the token here when the server ${name}, and does not say the server removed it`, async () => {
+    const { harness } = paired({ ...catching, defaultTarget: 'server' });
+    const server = fakeServer({ revoke });
+    await withServer(harness, server, async () => {
+      const unpaired = await sendRuntimeMessage(harness, { type: 'dm.unpairServer' }, ownPage('options.html'));
+      assert.equal(unpaired.ok, true);
+      assert.equal(unpaired.revoked, false);
+      assert.equal(harness.values.server, null);
+      assert.equal(harness.values.settings.defaultTarget, 'local');
+    });
+  });
+}
+
+test('EXT.R1: Unpair from another page asks nothing of the server and keeps the pairing', async () => {
+  const { harness } = paired(catching);
+  const server = fakeServer();
+  await withServer(harness, server, async () => {
+    const refused = await sendRuntimeMessage(harness, { type: 'dm.unpairServer' }, ownPage('popup.html'));
+    assert.equal(refused.ok, false);
+    assert.equal(server.calls.length, 0);
+    assert.equal(harness.values.server.token, TOKEN);
+  });
+});
+
+test('Download All: Save in starts at the app\'s default folder without a server, as the folder window does', async () => {
+  const { harness } = capturingChrome(catching);
+  const server = fakeServer();
+  await withServer(harness, server, async () => {
+    const reply = sendRuntimeMessage(harness, { type: 'dm.targets' }, ownPage('batch.html'));
+    await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: 'D:\\Downloads', favorites: [] });
+    const shown = await reply;
+    assert.equal(shown.ok, true);
+    assert.deepEqual(shown.targets.map(t => [t.id, t.defaultFolder]), [['local', 'D:\\Downloads']]);
+    assert.equal(shown.target, 'local');
+    assert.equal(server.calls.length, 0, 'nothing is asked of a server');
+    // Only the Download All window asks.
+    const refused = await sendRuntimeMessage(harness, { type: 'dm.targets' }, { id: 'test-extension', url: 'https://site.test/' });
+    assert.equal(refused.ok, false);
+  });
+});
+
+test('Download All: with a server paired each target brings its own default folder, and an untouched default is not sent', async () => {
+  const { harness } = paired({ ...catching, defaultTarget: 'server' });
+  const server = fakeServer({
+    'settings.downloadFolders': { ok: true, defaultFolder: '/downloads', favorites: [] },
+    'handoff.request': { accepted: true, job: { id: 'j9' } },
+  });
+  await withServer(harness, server, async () => {
+    const reply = sendRuntimeMessage(harness, { type: 'dm.targets' }, ownPage('batch.html'));
+    await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: 'D:\\Downloads', favorites: [] });
+    const shown = await reply;
+    assert.deepEqual(shown.targets.map(t => [t.id, t.defaultFolder]), [['local', 'D:\\Downloads'], ['server', '/downloads']]);
+    assert.equal(shown.target, 'server');
+    // batch.ts sends "" when Save in still shows the default; the server then decides the folder.
+    const sent = await sendRuntimeMessage(harness, { type: 'dm.confirmBatch', urls: [{ url: 'https://site.test/a.zip' }],
+      destination: '', startMode: 'now', target: 'server' }, ownPage('batch.html'));
+    assert.equal(sent.ok, true);
+    assert.equal(server.of('handoff.request')[0].body.payload.destinationDirectory, undefined);
   });
 });
