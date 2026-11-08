@@ -29,18 +29,24 @@ public sealed class RemoteCommands : IDisposable
     private readonly Dictionary<string, LastAnswer> _answers = new(StringComparer.Ordinal);
     private readonly List<(RemoteAccountStore Store, EventHandler Handler)> _accountHandlers = [];
     private readonly ContainerImportService _containers;
+    private readonly PathRoots? _jobRoots;
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
     /// <param name="roots">On a server, the folders whose files a client may have it read (container files). Null on the desktop.</param>
+    /// <param name="jobRoots">
+    /// Where these callers may have the coordinator read a .torrent file and save downloads, passed with each call
+    /// because the coordinator is shared: a browser on another device (D8). Null leaves it to the coordinator's own.
+    /// </param>
     public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null,
-        ContainerImportService? containers = null, PathRoots? roots = null)
+        ContainerImportService? containers = null, PathRoots? roots = null, PathRoots? jobRoots = null)
     {
         _providers = providers;
         _jobs = jobs;
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
-        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots);
+        _jobRoots = jobRoots;
+        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots, jobRoots: jobRoots);
 
         _jobs.Changed += OnJobChanged;
         _jobs.Removed += OnJobRemoved;
@@ -257,7 +263,7 @@ public sealed class RemoteCommands : IDisposable
     public async Task<RemoteClassifyResult> ClassifyAsync(RemoteClassifyRequest request, CancellationToken cancellationToken = default)
     {
         var classified = request.WithFiles
-            ? await _jobs.ClassifyWithFilesAsync(request.Text, cancellationToken).ConfigureAwait(false)
+            ? await _jobs.ClassifyWithFilesAsync(request.Text, cancellationToken, _jobRoots).ConfigureAwait(false)
             : await _jobs.ClassifyAsync(request.Text, cancellationToken).ConfigureAwait(false);
         return new RemoteClassifyResult
         {
@@ -327,6 +333,8 @@ public sealed class RemoteCommands : IDisposable
             ArchivePassword = OfferedLinkPassword(request) ?? request.ArchivePassword,
             // An offer only: a password the package gets from the user meanwhile stays.
             ArchivePasswordOffered = OfferedLinkPassword(request) is not null,
+            SourceRoots = _jobRoots,
+            DestinationRoots = _jobRoots,
         }, cancellationToken).ConfigureAwait(false);
 
         return new RemoteAddResultDto

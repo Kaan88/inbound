@@ -165,6 +165,14 @@ public sealed class DownloadJob
     public TimeSpan? EstimatedRemaining { get; set; }
 
     public DownloadSource Source { get; set; } = DownloadSource.Cli;
+
+    /// <summary>
+    /// A browser on another device added this download or last changed its address (D8), so it never reaches this PC
+    /// or its local network (<see cref="NetworkAddresses"/>), whatever <c>AllowLocalNetwork</c> says. Every request,
+    /// redirect and connection is checked, not just the first address.
+    /// </summary>
+    public bool PublicNetworkOnly { get; set; }
+
     public string? ClientRequestId { get; set; }
     public string? OwnerExtensionId { get; set; }
     public int QueueId { get; set; }

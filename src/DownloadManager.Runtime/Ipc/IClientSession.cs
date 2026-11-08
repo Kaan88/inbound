@@ -23,4 +23,12 @@ public interface IClientSession
     /// when the frame is larger than <see cref="Protocol.MaxFrameBytes"/>, and then nothing of it was sent.
     /// </summary>
     Task SendDirectAsync(IpcMessage message, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Ends the connection from the Host's side (<see cref="HostCommandDispatcher.CloseSessions"/>): no more frames are
+    /// read and what is queued is the last that is sent. A session that lives for one reply has nothing to end.
+    /// </summary>
+    void Close()
+    {
+    }
 }

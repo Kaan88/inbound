@@ -16,11 +16,19 @@ public sealed partial class HostCommandDispatcher
         // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
         MessageTypes.JobRefreshUrl;
 
-    private async Task<bool> TryDispatchRemoteAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
+    private async Task<bool> TryDispatchRemoteAsync(IClientSession client, SessionRights rights, IpcMessage message, CancellationToken cancellationToken)
     {
-        if (_remote is not { } remote || !message.Type.StartsWith("remote.", StringComparison.Ordinal))
+        if (rights.Remote is not { } remote || !message.Type.StartsWith("remote.", StringComparison.Ordinal))
         {
             return false;
+        }
+
+        // The provider's key is this PC's user's own: a web session can use the account, never set or remove its key.
+        if (rights.Scope is not null && message.Type is MessageTypes.RemoteAccountSetKey or MessageTypes.RemoteAccountClearKey)
+        {
+            await Reply(client, message, MessageTypes.RemoteAccountResult,
+                new RemoteAccountResult { Error = ProviderKeyUnavailable }).ConfigureAwait(false);
+            return true;
         }
 
         var replyType = message.Type switch

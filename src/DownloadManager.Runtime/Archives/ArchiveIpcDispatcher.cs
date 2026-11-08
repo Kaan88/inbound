@@ -15,7 +15,8 @@ namespace DownloadManager.Runtime.Archives;
 /// </param>
 public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoots? roots = null)
 {
-    private const string FileOutside = "That file is outside the folders this server may use.";
+    /// <summary>The coordinator it answers for.</summary>
+    public ArchiveCoordinator Coordinator => coordinator;
 
     public static bool Handles(string? messageType) =>
         messageType?.StartsWith(ArchiveMessageTypes.Prefix, StringComparison.Ordinal) == true;
@@ -37,7 +38,7 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                         {
                             var current = coordinator.GetSettings();
                             current.Ok = false;
-                            current.Error = PathRoots.OutsideMessage;
+                            current.Error = roots.OutsideText;
                             return IpcMessage.Create(ArchiveMessageTypes.SettingsResult, current, request.Id);
                         }
 
@@ -55,7 +56,7 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                 case ArchiveMessageTypes.Extract:
                     var extract = request.GetPayload<ArchiveExtractRequest>();
                     if (Confine(extract.FilePath) is var (extractPath, extractOk) && !extractOk)
-                        return IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Ok = false, Error = FileOutside }, request.Id);
+                        return IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Ok = false, Error = roots!.OutsideFileText() }, request.Id);
                     extract.FilePath = extractPath;
                     return IpcMessage.Create(
                         ArchiveMessageTypes.ExtractResult,
@@ -65,7 +66,7 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                 case ArchiveMessageTypes.SetPassword:
                     var password = request.GetPayload<ArchiveSetPasswordRequest>();
                     if (Confine(password.FilePath) is var (passwordPath, passwordOk) && !passwordOk)
-                        return Action(request, new ArchiveActionResult { Ok = false, Error = FileOutside });
+                        return Action(request, new ArchiveActionResult { Ok = false, Error = roots!.OutsideFileText() });
                     password.FilePath = passwordPath;
                     return Action(request, await coordinator.SetPasswordAsync(password, cancellationToken).ConfigureAwait(false));
 
