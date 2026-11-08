@@ -325,6 +325,9 @@ public sealed class ServerApp : IAsyncDisposable
                 session.SocketOpened();
             }
 
+            // An open socket is the session's activity even when the page sends nothing (it only listens to progress), so
+            // its last-seen time is refreshed on the sessions file's own beat; a kill then loses at most that much.
+            var seen = session is null ? Task.CompletedTask : KeepSeenAsync(auth.Sessions, session, options.Time, lifetime.Token);
             try
             {
                 await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token,
@@ -332,6 +335,8 @@ public sealed class ServerApp : IAsyncDisposable
             }
             finally
             {
+                lifetime.Cancel();
+                await seen.ConfigureAwait(false);
                 if (session is not null)
                 {
                     session.SocketClosed();
@@ -394,6 +399,20 @@ public sealed class ServerApp : IAsyncDisposable
         return web;
     }
 
+    /// <summary>Touches the session every <see cref="SessionStore.SaveEvery"/> while its socket is open (one wake-up per beat).</summary>
+    private static async Task KeepSeenAsync(SessionStore sessions, Session session, TimeProvider time, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(sessions.SaveEvery, time);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) sessions.Touch(session);
+        }
+        catch (OperationCanceledException)
+        {
+            // The socket closed.
+        }
+    }
+
     private static async Task WriteEnvelopeAsync(HttpContext context, IpcMessage message, CancellationToken cancellationToken)
     {
         context.Response.ContentType = "application/json";
@@ -419,6 +438,16 @@ public sealed class ServerApp : IAsyncDisposable
         await Step(() => _archives.ShutdownAsync(CancellationToken.None), "Archive shutdown").ConfigureAwait(false);
         await Step(() => _remoteJobs.StopAsync(), "Remote jobs shutdown").ConfigureAwait(false);
         await Step(() => _service.ShutdownAsync(CancellationToken.None), "Service shutdown").ConfigureAwait(false);
+        // Last-seen times not yet written (they are saved at most every few minutes while the server runs).
+        try
+        {
+            Auth?.Sessions.Flush();
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Sessions flush: {ex.GetType().Name}");
+        }
+
         _remoteCommands.Dispose();
         _remote.Dispose();
         _engine.Dispose();
@@ -472,7 +501,8 @@ public sealed class ServerStartException(string message) : Exception(message);
 /// <c>Origin</c> or without, must address the server by an IP address, by <c>localhost</c>, or by a name listed in
 /// <c>DOWNLOADMANAGER_HOSTS</c> (separated by <c>;</c> or <c>,</c>): a rebinding page can only use a name of its own.
 /// The browser extension is the one other origin let through, and only where it has its own credential
-/// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> with a bearer token, and <c>/api/pair</c> with a code.
+/// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c> with a bearer token, and
+/// <c>/api/pair</c> with a code.
 /// </summary>
 public static class OriginCheck
 {

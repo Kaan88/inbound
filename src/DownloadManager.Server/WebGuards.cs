@@ -5,20 +5,24 @@ namespace DownloadManager.Server;
 
 /// <summary>
 /// The browser extension calling the server (D2 pairing; the extension side is stream C's transport). Its requests
-/// carry its own origin, so the <see cref="OriginCheck"/> lets them through only on the two paths where it brings a
+/// carry its own origin, so the <see cref="OriginCheck"/> lets them through only on the three paths where it brings a
 /// credential of its own, and this answers the CORS questions for them. Credentials (cookies) are never allowed
 /// across: the extension proves itself with a bearer token, never with the user's sign-in.
 /// <list type="bullet">
 /// <item><c>chrome-extension://</c> with one of our own ids (the store build and the unpacked build).</item>
 /// <item><c>moz-extension://</c> with any id: Firefox gives each install a random one, so it can't be listed. It is
-/// let in on <c>/api/ipc</c> only with a bearer token, which the sign-in gate then checks, and on <c>/api/pair</c>,
+/// let in on <c>/api/ipc</c> and <c>DELETE /api/pair/self</c> only with a bearer token, which the sign-in gate then
+/// checks, and on <c>/api/pair</c>,
 /// where the one-time code is the credential and wrong codes make the address wait.</item>
 /// </list>
 /// </summary>
 public static class ExtensionCors
 {
     private static bool IsExtensionPath(PathString path) =>
-        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals("/api/pair", StringComparison.OrdinalIgnoreCase);
+        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals("/api/pair", StringComparison.OrdinalIgnoreCase) ||
+        IsPairSelf(path);
+
+    private static bool IsPairSelf(PathString path) => path.Equals(Auth.ServerAuth.PairSelfPath, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsExtensionOrigin(string? origin)
     {
@@ -33,6 +37,10 @@ public static class ExtensionCors
     {
         if (!IsExtensionPath(request.Path) || !IsExtensionOrigin(request.Headers.Origin.ToString())) return false;
         if (HttpMethods.IsOptions(request.Method)) return true;
+        // The extension's Unpair: DELETE with its own token, which the sign-in gate then checks.
+        if (IsPairSelf(request.Path))
+            return HttpMethods.IsDelete(request.Method) &&
+                   request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
         if (!HttpMethods.IsPost(request.Method)) return false;
         return request.Path.Equals("/api/pair", StringComparison.OrdinalIgnoreCase) ||
                request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
@@ -53,7 +61,7 @@ public static class ExtensionCors
         headers.Vary = "Origin";
         if (HttpMethods.IsOptions(request.Method))
         {
-            headers.AccessControlAllowMethods = "POST";
+            headers.AccessControlAllowMethods = IsPairSelf(request.Path) ? "DELETE" : "POST";
             headers.AccessControlAllowHeaders = "Authorization, Content-Type";
             headers.AccessControlMaxAge = "600";
             context.Response.StatusCode = StatusCodes.Status204NoContent;

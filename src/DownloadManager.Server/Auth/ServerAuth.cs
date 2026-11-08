@@ -21,13 +21,16 @@ namespace DownloadManager.Server.Auth;
 /// counts as wrong from its start until it turns out right, so parallel guesses can't all slip past the wait.</item>
 /// <item>A changed password also unpairs every browser extension, unless the change asks to keep them.</item>
 /// <item>Only <c>/health</c>, the sign-in page's own files under <c>/signin/</c> and the sign-in calls answer without a
-/// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> only (<see cref="Pairing"/>).</item>
+/// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c>
+/// only (<see cref="Pairing"/>).</item>
 /// </list>
 /// </summary>
 public sealed class ServerAuth
 {
     public const string CookieName = "inbound_session";
     public const string SignInPath = "/signin/";
+    /// <summary>Where a paired extension unpairs itself (<c>DELETE</c>, with its own token).</summary>
+    public const string PairSelfPath = "/api/pair/self";
     internal const string SessionItem = "inbound.session";
     internal const string TokenItem = "inbound.token";
     /// <summary>The address the connection really came from, noted before a trusted proxy's headers replace it.</summary>
@@ -51,7 +54,10 @@ public sealed class ServerAuth
         _log = log;
         _time = options.Time;
         _options = options;
-        Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout);
+        // Kept in the data folder beside auth.json, so a restart doesn't sign anyone out (owner, 2026-11-08). With
+        // sign-in off there is nothing to keep, and the file goes (CreateAsync), so turning it on again restores nobody.
+        Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout,
+            required ? SessionsPath(store) : null, () => SessionStore.StampOf(store.Password), log.Warn);
         Limiter = new SignInLimiter(_time);
         Pairing = new Pairing(store, _time);
     }
@@ -97,6 +103,20 @@ public sealed class ServerAuth
             }
         }
 
+        if (!options.SignInRequired && File.Exists(SessionsPath(store)))
+        {
+            try
+            {
+                File.Delete(SessionsPath(store));
+                log.Info("Sign-in is off, so the saved sessions were removed; every browser signs in again when it is turned on.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new ServerStartException(
+                    $"Sign-in is off, and the saved sessions {SessionsPath(store)} can't be removed ({ex.GetType().Name}); they would come back when it is turned on. Delete the file.");
+            }
+        }
+
         var auth = new ServerAuth(options.SignInRequired, store, fromEnvironment, options, log);
         if (!options.SignInRequired)
         {
@@ -114,6 +134,9 @@ public sealed class ServerAuth
 
         return auth;
     }
+
+    private static string SessionsPath(AuthStore store) =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.Path)!, SessionStore.FileName);
 
     private static string NewSetupCode()
     {
@@ -145,8 +168,8 @@ public sealed class ServerAuth
     public Func<HttpContext, Func<Task>, Task> Middleware => async (context, next) =>
     {
         var request = context.Request;
-        // A paired extension: its token, on POST /api/ipc only, whether sign-in is on or not.
-        if (request.Path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) && request.Headers.Authorization.Count > 0)
+        // A paired extension: its token, on POST /api/ipc and DELETE /api/pair/self only, whether sign-in is on or not.
+        if (IsTokenPath(request.Path) && request.Headers.Authorization.Count > 0)
         {
             var header = request.Headers.Authorization.ToString();
             var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? Pairing.Authenticate(header[7..].Trim()) : null;
@@ -184,6 +207,10 @@ public sealed class ServerAuth
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
     };
 
+    /// <summary>The paths a paired browser's bearer token opens.</summary>
+    internal static bool IsTokenPath(PathString path) =>
+        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals(PairSelfPath, StringComparison.OrdinalIgnoreCase);
+
     internal static Session? SessionOf(HttpContext context) => context.Items.TryGetValue(SessionItem, out var value) ? value as Session : null;
 
     internal static TokenDto? TokenOf(HttpContext context) => context.Items.TryGetValue(TokenItem, out var value) ? value as TokenDto : null;
@@ -218,6 +245,22 @@ public sealed class ServerAuth
                 ? Results.Json(new { ok = true })
                 : Results.Json(new { ok = false, error = "No paired browser has that id." }, statusCode: StatusCodes.Status404NotFound));
         web.MapPost("/api/pair", (Func<HttpContext, Task<IResult>>)PairAsync);
+        web.MapDelete(PairSelfPath, (HttpContext context) => UnpairSelf(context));
+    }
+
+    /// <summary>
+    /// The extension's Unpair: the token that authenticated this request (the gate above checked it, as on
+    /// <c>/api/ipc</c>) removes its own record, and only its own: the id comes from the token, never from the request.
+    /// A session cookie doesn't count here; without a token it is 401.
+    /// </summary>
+    private IResult UnpairSelf(HttpContext context)
+    {
+        if (TokenOf(context) is not { } token)
+            return Error(StatusCodes.Status401Unauthorized, "Only a paired browser can unpair itself, with its own token.");
+        if (!TrySave(() => Pairing.Revoke(token.Id)))
+            return Error(StatusCodes.Status500InternalServerError, "The pairing could not be removed. Check the data folder's space and permissions.");
+        _log.Info($"A browser unpaired itself: {token.Name} ({token.Id}).");
+        return Results.NoContent();
     }
 
     private object Status(HttpContext context) => new
@@ -259,6 +302,7 @@ public sealed class ServerAuth
         var ifWrong = TimeSpan.Zero;
         if ((needsCode ? Limiter.Begin(address, out ifWrong) : Limiter.Wait(address)) is { } wait) return TooSoon(context, wait);
 
+        PasswordRecord record;
         await _passwordGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
         try
         {
@@ -278,7 +322,7 @@ public sealed class ServerAuth
             }
 
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
-            var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false);
+            record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false);
             if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
             _setupCode = null;
             _log.Info($"The sign-in password was set on the setup page from {address}.");
@@ -288,7 +332,8 @@ public sealed class ServerAuth
             _passwordGate.Release();
         }
 
-        StartSession(context);
+        if (!StartSession(context, record))
+            return Error(StatusCodes.Status409Conflict, "The password was changed just now. Sign in with the new one.");
         return Results.Json(new { ok = true });
     }
 
@@ -302,14 +347,17 @@ public sealed class ServerAuth
         // Counted as wrong before the slow check, so the tries waiting for it can't skip the wait.
         if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
 
-        if (!await PasswordHash.VerifyAsync(form.Password, Store.Password, context.RequestAborted).ConfigureAwait(false))
+        // The record checked is the one the session is made under: a password changed during the slow check makes it
+        // wrong after all (StartSession), instead of giving a session the change has already ended the others for.
+        var checkedAgainst = Store.Password;
+        if (!await PasswordHash.VerifyAsync(form.Password, checkedAgainst, context.RequestAborted).ConfigureAwait(false) ||
+            !StartSession(context, checkedAgainst!))
         {
             _log.Warn($"A sign-in with a wrong password from {address} ({Limiter.Failures(address)} in a row).");
             return Error(StatusCodes.Status401Unauthorized, "That password is wrong.", ifWrong);
         }
 
         Limiter.Succeeded(address);
-        StartSession(context);
         return Results.Json(new { ok = true });
     }
 
@@ -332,16 +380,17 @@ public sealed class ServerAuth
             Limiter.Succeeded(address);
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
             var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "changed", context.RequestAborted).ConfigureAwait(false);
-            if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
+            // Every other browser signs in again with the new password; this one stays. The two happen as one step for
+            // the sessions file and for sign-ins under way (SessionStore.ChangePassword).
+            if (!Sessions.ChangePassword(() => TrySave(() => Store.SetPassword(record)), SessionOf(context))) return NotSaved();
         }
         finally
         {
             _passwordGate.Release();
         }
 
-        // Every other browser signs in again with the new password; this one stays. Someone who knew the old one may
-        // have paired an extension too, so those go as well unless the change says to keep them.
-        Sessions.RemoveAllExcept(SessionOf(context));
+        // Someone who knew the old password may have paired an extension too, so those go as well unless the change
+        // says to keep them.
         var unpaired = 0;
         if (!form.KeepPairedBrowsers && !TrySave(() => unpaired = Pairing.RevokeAll()))
         {
@@ -407,9 +456,11 @@ public sealed class ServerAuth
     private static IResult NotSaved() =>
         Error(StatusCodes.Status500InternalServerError, "The password could not be saved, so nothing was changed. Check the data folder's space and permissions.");
 
-    private void StartSession(HttpContext context)
+    /// <summary>Signs this browser in under <paramref name="password"/>; false when that is no longer the password in force.</summary>
+    private bool StartSession(HttpContext context, PasswordRecord password)
     {
-        var (id, session) = Sessions.Create();
+        if (Sessions.TryCreate(() => ReferenceEquals(Store.Password, password)) is not { } created) return false;
+        var (id, session) = created;
         context.Response.Cookies.Append(CookieName, id, new CookieOptions
         {
             HttpOnly = true,
@@ -419,6 +470,7 @@ public sealed class ServerAuth
             Expires = Sessions.AbsoluteEnd(session),
             IsEssential = true,
         });
+        return true;
     }
 
     private static void ExpireCookie(HttpContext context) =>
