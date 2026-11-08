@@ -92,10 +92,16 @@ test('a copy that never edited the old list moves to catch-everything, once', ()
   const again = migrateSettings(first.settings);
   assert.equal(again.changed, false);
 
-  // Their own exclude list survives the move.
-  const withOwnExcludes = migrateSettings({ ...stored, excludedExtensions: ['iso'] });
-  assert.deepEqual(withOwnExcludes.settings.excludedExtensions, ['iso']);
+  // Their own exclude list survives the move, and the new defaults join it: pages and images were
+  // never caught under the old allow-list, and one exclude of their own must not change that.
+  const withOwnExcludes = migrateSettings({ ...stored, excludedExtensions: ['iso', 'JPG'] });
+  assert.deepEqual(withOwnExcludes.settings.excludedExtensions,
+    ['iso', 'jpg', ...DEFAULT_SETTINGS.excludedExtensions.filter(item => item !== 'jpg')]);
   assert.deepEqual(withOwnExcludes.settings.interceptedExtensions, []);
+  for (const fileName of ['photo.jpg', 'page.html', 'data.json', 'disk.iso']) {
+    assert.equal(decideCapture({ url: `https://site.test/${fileName}`, fileName }, withOwnExcludes.settings).capture, false, fileName);
+  }
+  assert.equal(decideCapture({ url: 'https://site.test/a.zip', fileName: 'a.zip' }, withOwnExcludes.settings).capture, true);
 });
 
 test('an edited allow-list is the user\'s choice and stays', () => {

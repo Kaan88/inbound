@@ -1,4 +1,4 @@
-﻿using DownloadManager.Contracts;
+using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 
@@ -295,6 +295,47 @@ public sealed class NativeBridgePolicyTests
             Assert.False(NativeBridgePolicy.AllowToExtension(type), type);
             Assert.Null(NativeBridgePolicy.ToExtension(IpcMessage.Create(type, new { })));
         });
+    }
+
+    [Theory]
+    [InlineData("job.pause", false)]
+    [InlineData("job.resume", false)]
+    [InlineData("job.retry", false)]
+    [InlineData("job.cancel", false)]
+    [InlineData("job.remove", false)]
+    [InlineData("job.remove", true)]
+    public void AJobActionForOneDownloadCrosses(string type, bool deleteFile)
+        => Assert.True(NativeBridgePolicy.AllowFromExtension(
+            IpcMessage.Create(type, new { jobId = Guid.NewGuid().ToString(), deleteFile })));
+
+    [Theory]
+    // A list: job.remove would remove every download named, and delete their files.
+    [InlineData("job.remove", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""jobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""],""deleteFile"":true}")]
+    [InlineData("job.remove", @"{""JobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""]}")]
+    // Deleting the file belongs to Delete only.
+    [InlineData("job.cancel", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":true}")]
+    [InlineData("job.pause", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""DeleteFile"":true}")]
+    [InlineData("job.remove", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":""yes""}")]
+    // No download, an empty one, a malformed one, or two.
+    [InlineData("job.pause", @"{}")]
+    [InlineData("job.pause", @"{""jobId"":""00000000-0000-0000-0000-000000000000""}")]
+    [InlineData("job.pause", @"{""jobId"":""not-a-job""}")]
+    [InlineData("job.pause", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""JobId"":""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.resume", @"[]")]
+    public void AJobActionBeyondOneDownloadIsRefused(string type, string payload)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(payload);
+        var message = new IpcMessage(Protocol.Version, type, "request-1", null, document.RootElement.Clone());
+        Assert.False(NativeBridgePolicy.AllowFromExtension(message));
+    }
+
+    [Fact]
+    public void AJobActionWithNoPayloadIsRefusedAndOtherTypesAreJudgedByTypeAlone()
+    {
+        Assert.False(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.JobRemove)));
+        Assert.True(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.HostPing)));
+        Assert.True(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.JobsQuery, new { })));
+        Assert.False(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create("settings.update", new { })));
     }
 
     [Fact]

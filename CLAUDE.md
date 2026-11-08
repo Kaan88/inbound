@@ -180,7 +180,7 @@ not as acceptance evidence.
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
 - **Chrome stable 156 removed `--load-extension`**. Manual “Load unpacked” works;
   for automation use Chrome for Testing 156+ (verified path:
-  `C:\Users\kaank\AppData\Local\Temp\opencode\cft2\chrome-win64\chrome.exe`; the older
+  `%LOCALAPPDATA%\Temp\opencode\cft2\chrome-win64\chrome.exe`; the older
   `...\opencode\cft\chrome-win64` copy lost its version manifest and fails to start with a side-by-side error).
   Chrome for Testing loads the extension with `--load-extension` and a fresh
   profile. Do not waste time automating Chrome stable's folder picker.

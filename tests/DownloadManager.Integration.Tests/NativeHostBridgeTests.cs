@@ -149,6 +149,20 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
             var part = stopped.Job!.PartFilePath;
             Assert.True(File.Exists(part), part);
 
+            // A list of downloads, or a cancel that deletes the file, is more than the popup does.
+            foreach (var (type, request) in new[]
+            {
+                (MessageTypes.JobRemove, new JobActionRequest { JobId = id, JobIds = [id], DeleteFile = true }),
+                (MessageTypes.JobCancel, new JobActionRequest { JobId = id, DeleteFile = true }),
+            })
+            {
+                var refused = await AskAsync(native, type, request);
+                Assert.Equal(MessageTypes.HostActionResult, refused.Type);
+                Assert.False(refused.GetPayload<HostActionResult>().Ok);
+            }
+            Assert.Contains((await AskAsync(native, MessageTypes.JobsQuery, new { })).GetPayload<SnapshotDto>().Jobs, job => job.Id == id);
+            Assert.True(File.Exists(part), "A refused request deletes nothing.");
+
             var removed = (await AskAsync(native, MessageTypes.JobRemove, new JobActionRequest { JobId = id, DeleteFile = true })).GetPayload<JobActionResponse>();
             Assert.True(removed.Ok, removed.Error);
             var snapshot = (await AskAsync(native, MessageTypes.JobsQuery, new { })).GetPayload<SnapshotDto>();

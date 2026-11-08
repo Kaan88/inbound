@@ -370,6 +370,23 @@ public sealed class NativeHostRegistrationTests
         Assert.Contains(@"RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');", code);
     }
 
+    [Fact]
+    public void Uninstall_puts_back_another_programs_chrome_key_that_an_old_uninstall_log_deletes()
+    {
+        // Every release up to 0.5.3 wrote Chrome's key with uninsdeletekey, and an upgrade appends to
+        // that uninstall log, so the old entry deletes the key after CurUninstallStepChanged ran.
+        var code = Code(@"installer\DownloadManager.iss", "//");
+        const string chrome = @"'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}'";
+        Assert.Matches(
+            @"if CurUninstallStep = usUninstall then\s+begin\s+ForeignChromeRegistration := '';\s+if RegQueryStringValue\(HKCU, " + Regex.Escape(chrome) +
+            @", '', Registered\) and\s+FileExists\(Registered\) and\s+\(CompareText\(Registered, ExpandConstant\('\{app\}\\native-host\\\{#NativeHostName\}\.json'\)\) <> 0\) then\s+ForeignChromeRegistration := Registered;",
+            code);
+        Assert.Matches(
+            @"else if \(CurUninstallStep = usPostUninstall\) and \(ForeignChromeRegistration <> ''\) and\s+not RegValueExists\(HKCU, " + Regex.Escape(chrome) +
+            @", ''\) then\s+RegWriteStringValue\(HKCU, " + Regex.Escape(chrome) + @", '', ForeignChromeRegistration\);",
+            code);
+    }
+
     // --- Firefox (EXT.E1): its own key and its own manifest, optional like Edge's ---
 
     private const string FakeFirefoxKey = @"HKCU:\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager";

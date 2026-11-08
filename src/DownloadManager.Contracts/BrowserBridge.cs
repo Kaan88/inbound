@@ -47,7 +47,11 @@ public static class BrowserBridge
     /// (chrome-extension://id/) first; Firefox passes the path of its manifest and then the add-on ID.
     /// Only a trusted Chrome origin or the trusted Firefox ID is accepted, and anything else is refused,
     /// including no caller at all. Before, a command line without a chrome-extension:// origin skipped
-    /// the check, so any program, or another browser's extension, could reach the Host through the bridge.
+    /// the check, so a browser that named some other extension as the caller was let through.
+    /// This checks what the browser says, not who started the process: any program the user runs can
+    /// write this command line, and such a program can reach the Host's pipe directly anyway (its ACL
+    /// admits the whole user account). What it closes is the browser path: another extension, in any
+    /// browser this native host is registered for, cannot use the bridge.
     /// </summary>
     /// <returns>A short name of the trusted caller for the log, or null to refuse.</returns>
     public static string? TrustedCaller(IReadOnlyList<string> arguments)

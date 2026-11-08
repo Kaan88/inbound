@@ -11,7 +11,22 @@
 - UI.R3 confirmed by tests (browser handoffs start at the default folder, also after a Host restart; a one-off folder is not kept). UI.R4 checked in code and by new `fit-window` tests; `handoff.html` refits after the favorites load. On-screen checks are left for the owner.
 - Tests: extension `tsc --noEmit` clean, npm 85 of 85, Chrome and Firefox builds succeed; solution build clean; Core 833 of 833; Integration 1,176 of 1,176 (full suite).
 
+#### Stream C review fixes (2026-11-08)
+
+- Rules move: a copy on the old allow-list that also had its own excludes now gets the new default excludes added to them, so pages and images, never caught before, stay in the browser (the move had kept only the user's excludes).
+- "Ask each time": the folder window keeps a port open to the extension's worker. Its pings keep the worker, which holds the browser's file-name callback in memory, alive; the port closing is how a closed window is seen, replacing a listener that woke the worker for every browser window that closed. Closing the window while the download is being sent waits for the app's answer. If the worker restarts anyway, Keep in browser cancels the stuck download and starts it again in the browser once. Tested with mocks; that the pings keep a real Chrome or Edge worker awake is not yet checked in a browser.
+- Firefox (no file-name hold): the download is paused as soon as the rules say to catch it, before the slower Delete-gesture lookup. One that will not pause is left in the browser with a note instead of being sent while it still downloads; one that finished first is noted; one the browser cannot continue after a refusal is noted.
+- Popup actions (pause, resume, retry, delete) use their own native connection, so a slow delete cannot hold up an automatic handoff on the shared one.
+- Bridge: job actions from the extension are checked by payload too: exactly one download, no list, file deletion only with Delete (`job.remove`). Tested in Core and through the real native host.
+- `TrustedCaller`'s comment and the docs now say what the check is: it stops other browser extensions, not local programs, which can reach the Host's pipe anyway.
+- Uninstall: installs upgraded from 0.5.3 or earlier still have `uninsdeletekey` for Chrome's key in their uninstall log. Uninstall now notes another program's working Chrome registration first and writes it back afterwards. Checked by a source test and an Inno Setup 7 compile of Setup; not by a real upgrade and uninstall.
+- Not changed, with reasons: cookies of a cross-origin final address are still not added (the engine drops `Cookie` on a cross-origin request, `HttpDownloadEngine` `sameOrigin` check, so they would go nowhere); automatic sending still starts off on a fresh install (the 0.4.0 privacy choice; question below).
+- Tidy: CLAUDE.md's Chrome for Testing path uses `%LOCALAPPDATA%` instead of the account name; the BOM added to `ProviderLinkTests.cs` is gone.
+- Tests: extension `tsc --noEmit` clean, npm 92 of 92, Chrome and Firefox builds succeed; solution build clean (2 old nullable warnings); Core 850 of 850; Integration bridge/registration/native-host tests 106 of 106; full Integration suite 1,176 of 1,177, the one failure the known flaky TEST.1 (`HostKillMatrixTests.KilledWithAPackageHalfDone…`), which passed when run alone.
+
 #### Questions for the owner (stream C)
+
+- Automatic sending starts off on a fresh install (since 0.4.0, so cookies are sent only after the user agrees). EXT.B1 now makes this visible (OFF badge, popup, Settings, one notification) but does not turn it on. Should a fresh install catch by default?
 
 - AMO signing: upload `artifacts\firefox-addon` (from `scripts\package-extension-firefox.ps1`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
 - The privacy policy (`docs/chrome-extension-privacy.md`) changed (final-address cookies, the "left in browser" notes, folder window, popup actions); the online copy needs updating when this ships.

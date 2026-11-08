@@ -186,13 +186,31 @@ begin
   RegDeleteKeyIncludingSubkeys(HKCU, SubKey);
 end;
 
+var
+  // Installs upgraded from 0.5.3 or earlier: Setup appends to the existing uninstall log, and the old
+  // entries still carry "uninsdeletekey" for Chrome's key. Inno Setup runs them after usUninstall, so
+  // the key goes whatever it holds by then. Another program's working registration found there at
+  // usUninstall is written back at usPostUninstall.
+  ForeignChromeRegistration: String;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Registered: String;
 begin
-  if CurUninstallStep <> usUninstall then
-    exit;
-  RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');
-  RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');
-  RemoveFirefoxNativeHostKey('Software\Mozilla\NativeMessagingHosts\{#NativeHostName}');
+  if CurUninstallStep = usUninstall then
+  begin
+    ForeignChromeRegistration := '';
+    if RegQueryStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}', '', Registered) and
+       FileExists(Registered) and
+       (CompareText(Registered, ExpandConstant('{app}\native-host\{#NativeHostName}.json')) <> 0) then
+      ForeignChromeRegistration := Registered;
+    RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');
+    RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');
+    RemoveFirefoxNativeHostKey('Software\Mozilla\NativeMessagingHosts\{#NativeHostName}');
+  end
+  else if (CurUninstallStep = usPostUninstall) and (ForeignChromeRegistration <> '') and
+          not RegValueExists(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}', '') then
+    RegWriteStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}', '', ForeignChromeRegistration);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
