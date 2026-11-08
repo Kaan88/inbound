@@ -114,6 +114,26 @@ public sealed class SpeedHistoryTests
     }
 
     [Fact]
+    public void AClockSetBackCarriesOnInsteadOfStandingStill()
+    {
+        var history = new SpeedHistory(T0);
+        var job = Guid.NewGuid();
+        history.Report(job, 500, T0.AddSeconds(99));
+        history.Report(job, 500, T0.AddSeconds(100));
+
+        // A minute back, as a time sync might: the next reports still count, from where the history was.
+        history.Report(job, 700, T0.AddSeconds(40));
+        history.Report(job, 700, T0.AddSeconds(41));
+        var read = history.Read(T0.AddSeconds(41));
+
+        Assert.Equal(102, read.BytesPerSecond.Count);
+        Assert.Equal(500, read.BytesPerSecond[99]);
+        Assert.Equal(700, read.BytesPerSecond[^1]);
+        // The newest second is the clock's now.
+        Assert.Equal(T0.AddSeconds(41), read.Start.AddSeconds(read.BytesPerSecond.Count - 1));
+    }
+
+    [Fact]
     public void NonsenseRatesCountAsZero()
     {
         var history = new SpeedHistory(T0);
