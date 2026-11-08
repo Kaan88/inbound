@@ -168,6 +168,45 @@ public sealed partial class RuntimeServiceTests
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
     }
 
+    /// <summary>
+    /// A pasted provider link saved by 0.5.3 holds 4, the old cap, whatever the default was. That 4 follows a changed
+    /// default up to the new cap; a count below it was chosen and stays.
+    /// </summary>
+    [Fact]
+    public async Task APastedLinkSavedAtTheOldCapOfFourFollowsAChangedDefault()
+    {
+        var handler = new CdnRedirectHandler(_server);
+        await using var ctx = await ServiceContext.CreateAsync(_server, handler: handler);
+        await SetConnectionsAsync(ctx, 8, perHost: 32);
+
+        async Task<JobDto> AddPastedAsync(string name, int connections)
+        {
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{PastedHost}/file/{name}?size=1024&seed=1&token={LinkSecret}",
+                FileName = name,
+                DestinationDirectory = ctx.Destination,
+                Connections = connections,
+                StartMode = "later",
+                Source = "cli",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!;
+        }
+
+        var oldCap = await AddPastedAsync("old-cap.bin", 4);
+        var chosen = await AddPastedAsync("chosen-two.bin", 2);
+        Assert.Equal(4, oldCap.RequestedConnections);
+
+        await SetConnectionsAsync(ctx, 12);
+        Assert.Equal(12, ctx.Service.GetJob(oldCap.Id)!.RequestedConnections);
+        Assert.Equal(2, ctx.Service.GetJob(chosen.Id)!.RequestedConnections);
+
+        await SetConnectionsAsync(ctx, 32);
+        Assert.Equal(ProviderLinks.MaxConnections, ctx.Service.GetJob(oldCap.Id)!.RequestedConnections);
+        await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
+    }
+
     /// <summary>An FTP download is one connection; a change while one runs leaves it, and its record, as they are.</summary>
     [Fact]
     public async Task AChangedConnectionCountLeavesARunningFtpDownloadAlone()
