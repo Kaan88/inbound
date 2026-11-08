@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### 0.6.1 released; server running on the owner's mini PC (2026-11-08)
+
+- 0.6.1 is on GitHub (tag `v0.6.1`, squashed to `main`). The assets are in `artifacts\release\v0.6.1\`. Checks: signature and checksums verified, the latest feed serves 0.6.1, Setup's hash on GitHub matches, binaries are `0.6.1+f460462`, and the token scan found nothing. The Docker image workflow for `v0.6.1` passed. Extension 0.5.1 zips for the owner: `artifacts\chrome-store\` and `artifacts\firefox-addon\`.
+
 
 - Found on the way: the pairing path "Settings, Paired browsers" named a heading, not a tab. The tab is "Sign-in and browsers". Fixed in the extension's options page and pairing error, and in the server's wrong-code message; these ship with the next release. Extension 161 and Server 86 tests pass.
 
