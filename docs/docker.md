@@ -99,6 +99,8 @@ key): they are sealed with it (AES-256-GCM). Keep it with the backup, and keep t
 secrets. Without the key the server stops at start with exit code 2 and a message naming the file: put the key back,
 or start once with `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` and enter the logins, the proxy password and the
 TorBox key again. Secrets from the Windows app (sealed by Windows) can't be opened in the container at all.
+That choice is remembered in `secrets.key.discarded` beside the key (key ids only, nothing secret), so later
+starts don't need the variable; a secret sealed with any other key still stops the start. Back it up with the key.
 
 Downloads in progress keep their part files in the download folder (`<name>.<id>.part`), so a backup of `/data`
 alone resumes them only if the download folder is still there.
