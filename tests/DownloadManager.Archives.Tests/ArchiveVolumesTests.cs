@@ -368,6 +368,19 @@ public sealed class ArchiveVolumesTests
         Assert.Empty(ArchiveVolumes.RecoveryVolumes(string.Empty, names));
     }
 
+    [Fact]
+    public void TbS3_TwoSetsThatDifferOnlyByCaseKeepTheirOwnRecoveryVolumes()
+    {
+        // On a file system that keeps case, Group makes these two sets; deleting one's .rev files must not take the other's.
+        string[] revs = ["Movie.part1.rev", "Movie.part2.rev", "movie.part1.rev", "movie.part2.rev"];
+        Assert.Equal(["Movie.part1.rev", "Movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", revs, otherBaseNames: ["movie"]));
+        Assert.Equal(["movie.part1.rev", "movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("movie", revs, otherBaseNames: ["Movie"]));
+        // Even when the other set is not tracked, the case-only pair among the names is enough.
+        Assert.Equal(["Movie.part1.rev", "Movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", revs));
+        // Without such a pair, case is still ignored.
+        Assert.Equal(["MOVIE.part1.rev", "movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", ["MOVIE.part1.rev", "movie.part2.rev"]));
+    }
+
     [Theory]
     [InlineData(new[] { "a.rar" }, true)]
     [InlineData(new[] { "a.part1.rar", "a.part2.rar" }, true)]

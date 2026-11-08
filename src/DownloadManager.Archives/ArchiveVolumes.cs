@@ -187,14 +187,24 @@ public static partial class ArchiveVolumes
     public static IReadOnlyList<string> RecoveryVolumes(string baseName, IEnumerable<string> fileNames, IEnumerable<string>? otherBaseNames = null)
     {
         if (string.IsNullOrEmpty(baseName)) return [];
-        var others = (otherBaseNames ?? [])
-            .Where(other => !string.Equals(other, baseName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        return fileNames
+        var names = fileNames
             .Select(Path.GetFileName)
-            .Where(name => !string.IsNullOrEmpty(name) && IsRecoveryOf(baseName, name!) && !others.Any(other => IsRecoveryOf(other, name!)))
+            .Where(name => !string.IsNullOrEmpty(name))
             .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var allOthers = (otherBaseNames ?? []).ToList();
+
+        // The same rule as Group: names are matched ignoring case, unless the folder holds names that differ only by it
+        // (Movie and movie as two sets, on a file system that keeps case). Then one set's .rev files are not the other's.
+        var exact = allOthers.Any(other => string.Equals(other, baseName, StringComparison.OrdinalIgnoreCase) &&
+                                           !string.Equals(other, baseName, StringComparison.Ordinal)) ||
+                    names.Distinct(StringComparer.Ordinal).Count() != names.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var comparison = exact ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var comparer = exact ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        var others = allOthers.Where(other => !string.Equals(other, baseName, comparison)).ToList();
+        return names
+            .Where(name => IsRecoveryOf(baseName, name, comparison) && !others.Any(other => IsRecoveryOf(other, name, comparison)))
+            .Distinct(comparer)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -210,11 +220,11 @@ public static partial class ArchiveVolumes
         _ => false,
     };
 
-    private static bool IsRecoveryOf(string baseName, string name)
+    private static bool IsRecoveryOf(string baseName, string name, StringComparison comparison)
     {
         if (!name.EndsWith(".rev", StringComparison.OrdinalIgnoreCase) || name.Length <= baseName.Length + ".rev".Length - 1) return false;
         var stem = name[..^".rev".Length];
-        return stem.StartsWith(baseName, StringComparison.OrdinalIgnoreCase) && RecoverySuffix().IsMatch(stem[baseName.Length..]);
+        return stem.StartsWith(baseName, comparison) && RecoverySuffix().IsMatch(stem[baseName.Length..]);
     }
 
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
