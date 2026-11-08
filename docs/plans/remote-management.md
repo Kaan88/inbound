@@ -21,7 +21,8 @@ other easily. maybe I want to manage my homeserver from my desktop ui or vice ve
    - with the box off nothing runs: no process, no port, no timers.
 2. **The web UI** is the Docker server's. Served from Windows it shows Windows paths, its folder browser starts at
    the app's folders, and texts that today name Docker follow a new `hostKind` (`windows` or `server`) in the hello
-   and the sign-in status. Its Settings gains "Other servers": saved addresses shown as links.
+   and the sign-in status. Its header gains a host switcher: a dropdown of saved hosts (kept in that host's
+   web UI settings) that opens the chosen host's own web UI in the same tab.
 3. **Servers in the desktop window**: a Servers list (File → Servers, and a switcher in the status bar); the
    window itself shows the chosen server (section 5).
 
@@ -152,12 +153,15 @@ as its own item.
 
 1. The desktop window manages other servers **natively** (section 5): it switches between "This PC" and saved servers. The app-window (WebView2) variant is not built.
 2. A browser may save and browse only in **the app's folders** (download, category, favorites, extraction), worked out live; it cannot change them.
+3. The web UI switches hosts with a **dropdown in its header** that lists saved hosts and opens the chosen host's own
+   web UI in the same tab (sign in once per host). One page controlling several hosts is not built: it would need
+   cross-site sign-in and looser origin checks on every host, and would have to cope with every host's version.
 
 ## Order of work
 
 1. Web-role rights in the Host (section 2) with the Windows path tests. Reviewed as security work.
 2. Bridge mode in `DownloadManager.Server`, started and stopped by the Host; `webui.*` pipe commands; idle measured.
-3. Options → Web UI page; web UI texts by `hostKind` and "Other servers"; publish and Setup ship the bridge and
+3. Options → Web UI page; web UI texts by `hostKind` and the host switcher; publish and Setup ship the bridge and
    the web UI; the firewall button.
 4. Token roles and password pairing (both server kinds), then the native Servers list and switcher (section 5).
 5. End to end: a browser on another device → this PC; the window → the Docker server on the owner's server; the
