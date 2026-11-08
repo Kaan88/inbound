@@ -232,6 +232,7 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        UiTrace.Write($"MainWindow closing completely={_settings?.CloseWindowCompletely == true}");
         // Closing the window hides it, and by default (PERF.5) also ends this process. Downloads and the browser
         // bridge stay alive in the background host; Exit is an explicit tray/menu action.
         SaveUiState(sender);
