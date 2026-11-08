@@ -215,3 +215,27 @@ public sealed class SelectionCommandsTests
         return (0.2126 * Channel(color[1..3])) + (0.7152 * Channel(color[3..5])) + (0.0722 * Channel(color[5..7]));
     }
 }
+
+public sealed class DeleteRulesTests
+{
+    [Fact]
+    public void The_selection_is_deleted_wherever_Delete_was_chosen()
+    {
+        IReadOnlyList<string> selected = ["a", "b"];
+        Assert.Equal(selected, DeleteRules.Targets(selected, "record", fromContextMenu: true));
+        Assert.Equal(selected, DeleteRules.Targets(selected, "record", fromContextMenu: false));
+    }
+
+    [Fact]
+    public void The_context_menu_deletes_the_download_behind_a_selected_record()
+    {
+        Assert.Equal(["record"], DeleteRules.Targets<string>([], "record", fromContextMenu: true));
+    }
+
+    [Fact]
+    public void The_toolbar_and_key_leave_a_records_download_alone()
+    {
+        Assert.Empty(DeleteRules.Targets<string>([], "record", fromContextMenu: false));
+        Assert.Empty(DeleteRules.Targets<string>([], null, fromContextMenu: true));
+    }
+}

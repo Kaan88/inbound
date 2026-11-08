@@ -2,11 +2,23 @@
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 
-- **PERF.5:** "Closing the window ends it" is on by default; a stored value is kept.
+- **PERF.5:** "Closing the window ends it" is on by default for new installs. A stored value is kept, and the settings file stores every value, so an upgraded install whose settings were saved since 0.5.3 (when the option arrived) keeps it off. Turning it on there needs a one-time settings migration: asked below.
 - **UI.R25:** the Remove items in the right-click and File menus are now "Delete…", the same dialog as the Delete key.
 - **UI.B8:** every `ContentDialog` goes through `DialogGuard`; a second one is refused and counts as cancel. Grep finds no direct `ShowAsync` left; a test-instance repro (Delete dialog open, Delete Completed and Add URL invoked) kept the window alive.
 - **UI.R23:** Statistics has a Close button; the settings' Theme (System, Light, Dark) is the theme source for every window, with a Theme box in Options and View > Dark Mode as a toggle; the old `darkMode` moves into it once. A Windows theme change while running was not checked.
 - Tests: Core 881 passed (12 new); Integration 1,236 of 1,237 passed, the one failure the golden frames expecting the old default, now updated; after it the golden test still differs only in `nativeHostRegistered` (true on this PC since the owner registered the browsers today; TEST.3), not from this work.
+
+Review of this branch (2026-11-08), each finding checked against the code:
+- Fixed: the right-click menu's Delete… on an archive record removed the record, not the download behind it, which the old Remove deleted (`DeleteRules`; the File menu, toolbar and Delete key never acted on a record's download and still don't).
+- Fixed: the Hosters window still read the old `darkMode` and did not follow the Theme setting; it now uses `AppTheme` like every other window (a source test checks that every window does, and that only `AppTheme` reads `darkMode`).
+- Fixed: a View > Dark Mode click before the Host had saved the old value could be undone by the next snapshot and the old value sent to the Host. The click now keeps its own choice in ui-state until the Host has saved it, a save in progress picks up a later click, and an Options save drops any kept choice.
+- Fixed: a download or package window that opened before the main window moved `darkMode` never followed the setting; it now reads ui-state again on each snapshot until the value has gone.
+- Fixed: `DialogGuard` refuses a dialog without a `XamlRoot` (it could not show anyway); a source test checks all 44 dialogs set one.
+- Docs: the design guidelines described the old theme source and a capture method that no longer works; `docs/architecture.md` says closing ends the window's process by default.
+- Not a code defect: closing ending the process by default is the owner's PERF.5 decision. The tray, a second launch or the Start menu entry brings the window back; no tray check is made.
+- Question for the owner (PERF.5): an install whose settings were saved since 0.5.3 has "Closing the window ends it" stored as off and keeps it. Turn it on once for those installs with a settings migration, or keep the stored value?
+- Not checked: the theme and Delete changes in the running window; a Windows theme change while the app runs.
+- Tests after these fixes: WinUI build clean (one older nullable warning); Core 888 passed (7 new); Integration 1,236 of 1,237 passed, the one failure the golden frames' `nativeHostRegistered` (true on this PC, TEST.3).
 
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
