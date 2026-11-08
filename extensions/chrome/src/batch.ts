@@ -44,6 +44,9 @@ let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
 const selected = new Set<string>();
+// The app's folder dialog is open; Send waits for it.
+let picking = false;
+let sending = false;
 
 function showError(message: string): void {
   errorBox.textContent = message;
@@ -78,7 +81,7 @@ function updateSelection(visible: PageLink[] = visibleLinks()): void {
   selectAll.indeterminate = shownSelected > 0 && shownSelected < visible.length;
   countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
   selectionLabel.textContent = `${selected.size} selected`;
-  confirmButton.disabled = selected.size === 0;
+  confirmButton.disabled = picking || selected.size === 0;
 }
 
 function render(): void {
@@ -196,10 +199,11 @@ selectAll.addEventListener("change", () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (selected.size === 0) {
+  if (selected.size === 0 || picking) {
     return;
   }
 
+  sending = true;
   confirmButton.disabled = true;
   cancelButton.disabled = true;
   showError("");
@@ -239,6 +243,7 @@ confirmButton.addEventListener("click", async () => {
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
   } finally {
+    sending = false;
     cancelButton.disabled = false;
     updateSelection();
   }
@@ -247,7 +252,12 @@ confirmButton.addEventListener("click", async () => {
 cancelButton.addEventListener("click", () => window.close());
 
 browseDestinationButton.addEventListener("click", () => {
-  void pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+  // Send waits while the app's folder dialog is open.
+  void pickDestinationFolder(destinationInput, browseDestinationButton, showError, (busy) => {
+    picking = busy;
+    // While a send is in progress, its own finally block restores the buttons.
+    if (!sending) updateSelection();
+  });
 });
 
 void loadLinks();

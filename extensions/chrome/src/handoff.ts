@@ -173,8 +173,17 @@ document.addEventListener("keydown", (event) => {
            (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
 });
 
+// Send waits while the app's folder dialog is open, then gets back the state it had before.
+let confirmDisabledBeforePick = false;
 browseDestinationButton.addEventListener("click", () => {
-  void pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+  void pickDestinationFolder(destinationInput, browseDestinationButton, showError, (busy) => {
+    if (busy) {
+      confirmDisabledBeforePick = confirmButton.disabled;
+      confirmButton.disabled = true;
+    } else {
+      confirmButton.disabled = confirmDisabledBeforePick;
+    }
+  });
 });
 import { fitWindowToContent } from "./fit-window";
 
