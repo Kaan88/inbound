@@ -3,11 +3,16 @@
 param([Parameter(Mandatory)][string]$PathPart)
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" | Where-Object { $_.ExecutablePath -like "*$PathPart*" } | Select-Object -First 1
+# The main window's process: a progress window runs in a process of its own (--job).
+$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
+    Where-Object { $_.ExecutablePath -like "*$PathPart*" -and $_.CommandLine -notmatch '--job|update-progress' } | Select-Object -First 1
 if (-not $proc) { 'NO TEST UI'; exit 1 }
 $AE = [System.Windows.Automation.AutomationElement]
 $root = $AE::RootElement
-$win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, [int]$proc.ProcessId)))
+$win = $null
+foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, [int]$proc.ProcessId)))) {
+    if ($candidate.Current.Name -eq 'Inbound Download Manager') { $win = $candidate; break }
+}
 if (-not $win) { 'NO WINDOW'; exit 1 }
 function ById($id) { $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $id))) }
 foreach ($id in 'SizeCell', 'EtaCell', 'RateCell') {

@@ -1,5 +1,9 @@
+# Accessibility checks of a running test UI: control names, tab order, Add URL names, the contrast of every Inbound
+# colour token in both the Dark and the Light theme (read from App.xaml), a simulated DPI matrix and a localization note.
+# Attaches only to a UI whose executable path contains -PathPart and refuses the installed app; it moves and resizes that
+# window for the DPI matrix, so run it against a test instance only. Starts nothing.
 [CmdletBinding()]
-param()
+param([Parameter(Mandatory)][string]$PathPart)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName UIAutomationClient
@@ -40,10 +44,18 @@ function Check([bool]$condition, [string]$message) {
     Write-Output "FAIL $message"
 }
 
-$proc = Get-Process DownloadManager.Desktop.WinUI -ErrorAction Stop
+$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" -and $_.CommandLine -notmatch '--job|update-progress' } |
+    Select-Object -First 1
+if (-not $proc) { Write-Output 'NO TEST UI'; exit 1 }
+if ($proc.ExecutablePath -like '*\Programs\Inbound Download Manager\*') { Write-Output 'REFUSED: that is the installed app, not a test instance'; exit 1 }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
-$pc = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $proc.Id)
-$win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pc)
+$pc = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$proc.ProcessId)
+# The main window by its title: Options or Statistics can be the process's first window.
+$win = $null
+foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pc)) {
+    if ($candidate.Current.Name -eq 'Inbound Download Manager') { $win = $candidate; break }
+}
 if (-not $win) { Write-Output 'NO WINDOW'; exit 1 }
 $hwnd = [IntPtr]$win.Current.NativeWindowHandle
 
@@ -132,7 +144,10 @@ $cancelCondition = New-Object System.Windows.Automation.PropertyCondition(
 $cancel = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cancelCondition)
 if ($cancel) { $cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 500 }
 
-# 3. Contrast of the explicit dark palette.
+# 3. Contrast of every Inbound colour token, Dark and Light, read from App.xaml so the check follows the palette.
+# Text tokens (secondary, error, status) need 4.5:1 on the window surface and on the chrome; glyph and progress tokens
+# are non-text UI and need 3:1 (WCAG 1.4.11). Pairs on the highlight banner are printed for information only.
+# WinUI's own text beside the tokens (primary text, text on the accent button) is checked with WinUI's theme values.
 function Luminance([string]$hex) {
     $r = [Convert]::ToInt32($hex.Substring(1, 2), 16) / 255
     $g = [Convert]::ToInt32($hex.Substring(3, 2), 16) / 255
@@ -150,25 +165,53 @@ function Contrast([string]$fg, [string]$bg) {
     if ($l1 -lt $l2) { $tmp = $l1; $l1 = $l2; $l2 = $tmp }
     return ($l1 + 0.05) / ($l2 + 0.05)
 }
-$pairs = @(
-    @('#D7D7D7', '#1E1E1E', 'primary text'),
-    @('#E6E6E6', '#232323', 'toolbar label'),
-    @('#A0A0A0', '#1E1E1E', 'secondary text'),
-    @('#B8B8B8', '#1E1E1E', 'rate/ETA text'),
-    @('#8C8C8C', '#1E1E1E', 'empty text'),
-    @('#8C8C8C', '#252526', 'muted sidebar'),
-    @('#6FA8DC', '#1E1E1E', 'blue icon'),
-    @('#8CCF8C', '#1E1E1E', 'green icon'),
-    @('#E8B36A', '#1E1E1E', 'orange icon'),
-    @('#D98C8C', '#1E1E1E', 'red icon')
-)
+$xamlNs = 'http://schemas.microsoft.com/winfx/2006/xaml'
+[xml]$appXaml = Get-Content -Raw (Join-Path $PSScriptRoot '..\src\DownloadManager.Desktop.WinUI\App.xaml')
+$ns = New-Object System.Xml.XmlNamespaceManager($appXaml.NameTable)
+$ns.AddNamespace('p', 'http://schemas.microsoft.com/winfx/2006/xaml/presentation')
+$ns.AddNamespace('x', $xamlNs)
+$accent = @{}
+foreach ($c in $appXaml.SelectNodes('//p:Color', $ns)) { $accent[$c.GetAttribute('Key', $xamlNs)] = $c.InnerText.Trim() }
 $low = @()
-foreach ($pair in $pairs) {
-    $ratio = Contrast $pair[0] $pair[1]
-    Write-Output ("CONTRAST {0} on {1}: {2:N2}:1 ({3})" -f $pair[0], $pair[1], $ratio, $pair[2])
-    if ($ratio -lt 4.5) { $low += $pair[2] }
+$checked = 0
+foreach ($theme in @('Dark', 'Light')) {
+    $dict = $appXaml.SelectSingleNode("//p:ResourceDictionary.ThemeDictionaries/p:ResourceDictionary[@x:Key='$theme']", $ns)
+    if (-not $dict) { $low += "$theme dictionary missing"; continue }
+    $tokens = @{}
+    foreach ($brush in $dict.SelectNodes('p:SolidColorBrush', $ns)) { $tokens[$brush.GetAttribute('Key', $xamlNs)] = $brush.GetAttribute('Color') }
+    foreach ($key in ($tokens.Keys | Sort-Object)) {
+        $isText = $key -match 'Text|Status'
+        $isGlyph = $key -match 'Icon|ProgressFill'
+        if (-not ($isText -or $isGlyph)) { continue }
+        $need = if ($isText) { 4.5 } else { 3.0 }
+        foreach ($bg in @('InboundSurfaceBrush', 'InboundChromeBrush', 'InboundHighlightBrush')) {
+            $ratio = Contrast $tokens[$key] $tokens[$bg]
+            $info = $bg -eq 'InboundHighlightBrush'
+            $verdict = if ($info) { 'info' } elseif ($ratio -ge $need) { 'ok' } else { 'LOW' }
+            Write-Output ("CONTRAST {0,-5} {1,-27} {2} on {3,-21} {4}: {5:N2}:1 (needs {6}) {7}" -f $theme, $key, $tokens[$key], $bg, $tokens[$bg], $ratio, $need, $verdict)
+            if (-not $info) {
+                $checked++
+                if ($ratio -lt $need) { $low += "$theme $key on $bg" }
+            }
+        }
+    }
+    # TextFillColorPrimary is #FFFFFF in Dark and #E4000000 in Light (about #1B1B1B on these surfaces); the accent button
+    # fills with SystemAccentColorLight2 (Dark) or SystemAccentColorDark1 (Light) and writes black or white text on it.
+    $primary = if ($theme -eq 'Dark') { '#FFFFFF' } else { '#1B1B1B' }
+    $accentFill = if ($theme -eq 'Dark') { $accent['SystemAccentColorLight2'] } else { $accent['SystemAccentColorDark1'] }
+    $onAccent = if ($theme -eq 'Dark') { '#000000' } else { '#FFFFFF' }
+    foreach ($pair in @(@($primary, $tokens['InboundSurfaceBrush'], 'primary text on surface'),
+                        @($primary, $tokens['InboundChromeBrush'], 'primary text on chrome'),
+                        @($onAccent, $accentFill, 'text on the accent button'))) {
+        $ratio = Contrast $pair[0] $pair[1]
+        $verdict = if ($ratio -ge 4.5) { 'ok' } else { 'LOW' }
+        Write-Output ("CONTRAST {0,-5} {1} on {2}: {3:N2}:1 (needs 4.5, {4}) {5}" -f $theme, $pair[0], $pair[1], $ratio, $pair[2], $verdict)
+        $checked++
+        if ($ratio -lt 4.5) { $low += "$theme $($pair[2])" }
+    }
 }
-Check ($low.Count -eq 0) 'all normal-text palette pairs meet 4.5:1'
+Write-Output "CONTRAST pairs checked: $checked; low: $($low -join ', ')"
+Check ($low.Count -eq 0 -and $checked -gt 40) 'every Dark and Light colour token meets its contrast minimum'
 
 # 4. DPI and simulated effective-area matrix.
 $systemDpi = [U7Native]::GetDpiForSystem()
