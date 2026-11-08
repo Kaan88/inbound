@@ -14,7 +14,7 @@ namespace DownloadManager.Providers.TorBox;
 /// </summary>
 public sealed class TorBoxClient :
     IRemoteProvider, IRemoteCatalog, IRemoteCacheChecker, IRemoteSubmitter, IRemoteLinkResolver,
-    IRemoteHosterDirectory, IRemoteItemRemover, IRemoteQueue, IRemoteFolderLinkParser
+    IRemoteHosterDirectory, IRemoteItemRemover, IRemoteQueue, IRemoteQueueControl, IRemoteFolderLinkParser
 {
     public const string ProviderId = "torbox";
     public static readonly Uri DefaultBaseAddress = new("https://api.torbox.app/v1/api/");
@@ -56,7 +56,10 @@ public sealed class TorBoxClient :
 
     public RemoteTransferPolicy TransferPolicy { get; } = new()
     {
-        MaxConnectionsPerFile = 4,
+        // TB.L1, measured 2026-11-08 on one cached 300 MB file: 1, 2, 4, 8 and 16 parallel range requests on its CDN
+        // link were all answered 206, with no refusal, at about 6.4 MB/s each. TorBox publishes no per-file figure,
+        // so 16 is the highest count measured, not a TorBox limit. The per-host limit still caps one host overall.
+        MaxConnectionsPerFile = 16,
         CreationSpacing = TimeSpan.FromSeconds(65),
         ShortestPoll = TimeSpan.FromSeconds(15),
         LongestPoll = TimeSpan.FromSeconds(60),
@@ -163,6 +166,31 @@ public sealed class TorBoxClient :
         {
             return [];
         }
+    }
+
+    /// <summary>
+    /// Source: TorBox's OpenAPI schema (https://api.torbox.app/openapi.json, read 2026-11-08) lists
+    /// <c>POST /v1/api/queued/controlqueued</c> with a JSON body <c>ControlQueuedDownload</c> of <c>operation</c>
+    /// (string), <c>queued_id</c> (integer) and <c>all</c> (boolean). The schema names no operations: <c>start</c> and
+    /// <c>delete</c> are the two seen working live on 2026-11-07 (PROGRESS.md, TB.S1). <c>all</c> is never sent, so one
+    /// call can only ever touch the one queued entry it names.
+    /// </summary>
+    public async Task ControlQueuedAsync(string queueId, RemoteQueueAction action, CancellationToken cancellationToken = default)
+    {
+        if (!long.TryParse(queueId, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+        {
+            throw new ArgumentException("Not a TorBox queue id.", nameof(queueId));
+        }
+
+        var operation = action switch
+        {
+            RemoteQueueAction.Start => "start",
+            RemoteQueueAction.Remove => "delete",
+            _ => throw new ArgumentOutOfRangeException(nameof(action)),
+        };
+        var payload = new Dictionary<string, object> { ["queued_id"] = id, ["operation"] = operation };
+        using var body = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        using var document = await SendAsync(HttpMethod.Post, "queued/controlqueued", body, false, cancellationToken).ConfigureAwait(false);
     }
 
     public RemoteFolderLinkParse? ParseFolderLink(string? text) => TorBoxFolderLink.Parse(text);
