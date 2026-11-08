@@ -327,6 +327,21 @@ export function completionFrom(
   return { ok: true, options: { programPath: path, openFile, systemAction, forceSystemAction: canForce(systemAction) && force } };
 }
 
+/**
+ * Keeps only the completion fields this session may set. A field it may not set is left out, so the Host keeps the
+ * download's own value instead of refusing a save the user cannot fix.
+ */
+export function completionForSession(options: JobCompletionOptions, programAllowed: boolean, actionsAllowed: boolean): Partial<JobCompletionOptions> {
+  const out: Partial<JobCompletionOptions> = {};
+  if (programAllowed) out.programPath = options.programPath;
+  if (actionsAllowed) {
+    out.openFile = options.openFile;
+    out.systemAction = options.systemAction;
+    out.forceSystemAction = options.forceSystemAction;
+  }
+  return out;
+}
+
 // ---- Packages (D15, D16) -------------------------------------------------------------------------------------
 
 export function isCancelled(job: Pick<Job, 'state'>): boolean {

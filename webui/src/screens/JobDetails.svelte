@@ -31,7 +31,8 @@
 
   const connected = $derived(store.connection === 'open');
   const complete = $derived(job?.state === 'completed');
-  const desktopApp = store.has('tray');
+  // The completion window belongs to the desktop app on the PC. A browser session gets the tray name but never openUi.
+  const desktopApp = $derived(store.features.openUi);
   const providerName = $derived(store.model.accounts.find((a) => a.provider === job?.remoteProvider)?.providerName ?? job?.remoteProvider ?? 'your provider');
   const archive = $derived(set ? archiveRowView(set) : null);
   // What the archive commands would take for this one file (ArchiveRules.Plan).
