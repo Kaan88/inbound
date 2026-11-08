@@ -1,5 +1,13 @@
 # Progress — session handoff
 
+### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
+
+- **PERF.5:** "Closing the window ends it" is on by default; a stored value is kept.
+- **UI.R25:** the Remove items in the right-click and File menus are now "Delete…", the same dialog as the Delete key.
+- **UI.B8:** every `ContentDialog` goes through `DialogGuard`; a second one is refused and counts as cancel. Grep finds no direct `ShowAsync` left; a test-instance repro (Delete dialog open, Delete Completed and Add URL invoked) kept the window alive.
+- **UI.R23:** Statistics has a Close button; the settings' Theme (System, Light, Dark) is the theme source for every window, with a Theme box in Options and View > Dark Mode as a toggle; the old `darkMode` moves into it once. A Windows theme change while running was not checked.
+- Tests: Core 881 passed (12 new); Integration 1,236 of 1,237 passed, the one failure the golden frames expecting the old default, now updated; after it the golden test still differs only in `nativeHostRegistered` (true on this PC since the owner registered the browsers today; TEST.3), not from this work.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):
