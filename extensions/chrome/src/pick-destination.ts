@@ -5,6 +5,7 @@ interface FolderPickerResponse {
   error?: string;
 }
 
+/** Asks the app for a folder. Pages run it through FormGate.pick, which holds Send meanwhile (EXT.B2). */
 export async function pickDestinationFolder(
   input: HTMLInputElement,
   button: HTMLButtonElement,
