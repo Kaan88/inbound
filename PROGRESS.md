@@ -1,5 +1,11 @@
 # Progress — session handoff
 
+### Host speed history and full queues (2026-11-08, branch `owner-host`)
+
+- **UI.R24 (implemented, automated tests; the graph not checked on screen):** owner: "Keep the hour". The Host keeps the last hour of total download speed in a 3,600-slot ring buffer (`SpeedHistory`), written from progress reports with no timer; idle seconds are filled in as zeros from the times alone, so an idle Host does no work for it. A window asks for it (`speed.history`, new and additive, no protocol bump) on each connection and the speed graph merges it in, so the hour survives a closed window.
+- **Full queues (implemented, automated tests):** owner: "Yes, same rule". Moving a running download into a full queue now runs the lowered-limit check, so the queue's newest extra download goes back to Queued with its data; downloads that can't resume (and verifying, finishing or muxing ones) keep running.
+- Tests (Release): Core 869, Engine 159 passed; Integration 1,241 of 1,242 passed (11 new). The one failure, `HostGoldenFramesTests.AScriptedSessionSendsTheSameFrames`, differs only in `nativeHostRegistered: true`: this PC now has the `com.kaank.downloadmanager` Chrome registration (the owner ran `register-native-host.ps1` today), which the Host's status reads. Environmental, not from this branch.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):
