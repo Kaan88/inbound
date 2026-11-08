@@ -16,6 +16,9 @@ namespace DownloadManager.Runtime.Ipc;
 public sealed partial class HostCommandDispatcher
 {
     private const string UpdatesUnavailable = "Updates are not available here.";
+    private const string ProgramSettingsUnavailable =
+        "The post-download command, FFmpeg path, update source and system completion actions can't be changed from here.";
+    private const string CompletionProgramUnavailable = "A completion program can't be set from here.";
     private static readonly TimeSpan GroupsBroadcastDelay = TimeSpan.FromMilliseconds(100);
 
     private readonly DownloadManagerService _service;
@@ -41,8 +44,10 @@ public sealed partial class HostCommandDispatcher
     public ArchiveIpcDispatcher? Archives { get; init; }
 
     /// <summary>
-    /// What the hello offers. The desktop Host's list keeps this order, because frontends have read it since protocol 1;
-    /// anything new is only ever appended.
+    /// What the hello offers. It is a set: clients look a name up (<c>Contains</c>) and never read a position. The desktop
+    /// Host's list is still exactly the one it has sent since protocol 1, in that order, and a new name is only ever
+    /// appended. A platform without something leaves its name out, so on one without a tray the names after
+    /// <c>tray</c> sit one place earlier; that is why a position can't be relied on.
     /// </summary>
     public List<string> Capabilities
     {
@@ -268,6 +273,13 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobUpdate:
                     var jobUpdate = message.GetPayload<JobUpdateRequest>();
+                    if (!_platform.Capabilities.SupportsProgramSettings && ChangesCompletionProgram(jobUpdate))
+                    {
+                        await Reply(client, message, MessageTypes.JobActionResult,
+                            new JobActionResponse { Error = CompletionProgramUnavailable, Job = _service.GetJob(jobUpdate.JobId) }).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.JobActionResult,
                         await _service.UpdateJobAsync(jobUpdate, cancellationToken)
                             .ConfigureAwait(false))
@@ -374,6 +386,14 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
+                    if (!_platform.Capabilities.SupportsProgramSettings &&
+                        _service.GetSnapshot().Settings is var currentSettings && ChangesProgramSettings(update.Settings, currentSettings))
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult,
+                            new SettingsResult { Error = ProgramSettingsUnavailable, Settings = currentSettings }).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.SettingsResult,
                         await _service.UpdateSettingsAsync(update.Settings, cancellationToken).ConfigureAwait(false))
                         .ConfigureAwait(false);
@@ -451,6 +471,34 @@ public sealed partial class HostCommandDispatcher
                 new HostActionResult { Ok = false, Message = reason }).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="requested"/> changes a setting that makes the Host start a program or trust an installer.
+    /// A client that sends back the settings it was given, with other changes, is not refused for them.
+    /// </summary>
+    private static bool ChangesProgramSettings(SettingsDto? requested, SettingsDto current)
+        => requested is not null && (
+            !SameText(requested.PostDownloadCommand, current.PostDownloadCommand) ||
+            !SameText(requested.FfmpegPath, current.FfmpegPath) ||
+            !SameText(requested.UpdateManifestUrl, current.UpdateManifestUrl) ||
+            !SameText(requested.UpdatePublicKey, current.UpdatePublicKey) ||
+            requested.AllowSystemCompletionActions != current.AllowSystemCompletionActions);
+
+    /// <summary>
+    /// A completion program is a program the Host starts. No program ("") and the default one (null, the post-download
+    /// command, which is guarded above) are always allowed, and so is sending back the one the download already has.
+    /// </summary>
+    private bool ChangesCompletionProgram(JobUpdateRequest request)
+        => request.CompletionOptions?.ProgramPath is { } program && !string.IsNullOrWhiteSpace(program) &&
+           !SameText(program, _service.GetJob(request.JobId)?.CompletionOptions.ProgramPath);
+
+    // The settings store trims the command and the FFmpeg path and keeps an empty one as none, so " x" and "x", and
+    // "" and null, are the same setting and sending one back is no change.
+    private static bool SameText(string? left, string? right)
+        => string.Equals(
+            string.IsNullOrWhiteSpace(left) ? null : left.Trim(),
+            string.IsNullOrWhiteSpace(right) ? null : right.Trim(),
+            StringComparison.Ordinal);
 
     private async Task HandleHandoffAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
     {

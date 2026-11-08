@@ -89,7 +89,7 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         using var remote = new RemoteCommands(registry, jobs);
         Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "remote"], Dispatcher(service, remote: remote).Capabilities);
 
-        // Somewhere without a tray says so by leaving it out; the rest keep their places.
+        // Somewhere without a tray leaves it out, so the names after it move up: clients look a name up, never a position.
         Assert.Equal(["jobs", "settings", "handoff", "status"], Dispatcher(service, new FakePlatform(new PlatformCapabilities(), _timeline)).Capabilities);
     }
 
@@ -227,6 +227,121 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
 
         // None of them reached the machine.
         Assert.DoesNotContain(_timeline, entry => entry.StartsWith("platform:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WithTheDesktopsCapabilitiesThoseCommandsReachTheMachine()
+    {
+        var service = await ServiceAsync();
+        var platform = new FakePlatform(PlatformCapabilities.Desktop, _timeline);
+        var dispatcher = Dispatcher(service, platform);
+        var session = Session();
+
+        var opened = (await AskAsync(dispatcher, session, MessageTypes.HostOpenUi, new HostActionRequest { Action = "options" })).GetPayload<HostActionResult>();
+        Assert.True(opened.Ok);
+        Assert.Equal(["options"], platform.Opened);
+
+        var picked = (await AskAsync(dispatcher, session, MessageTypes.HostPickFolder, new FolderPickRequest())).GetPayload<FolderPickResult>();
+        Assert.True(picked.Ok);
+        Assert.Contains("platform:pick", _timeline);
+
+        // The service's own answer, not the gate's: a test build is not an installed one.
+        var check = (await AskAsync(dispatcher, session, MessageTypes.UpdateCheck, new { })).GetPayload<UpdateCheckResult>();
+        Assert.Equal("notInstalled", check.Status);
+        var defer = (await AskAsync(dispatcher, session, MessageTypes.UpdateDefer, new UpdateDeferRequest { Version = "9.9.9" })).GetPayload<SettingsResult>();
+        Assert.True(defer.Ok);
+        Assert.Equal("9.9.9", defer.Settings.SkippedUpdateVersion);
+    }
+
+    [Fact]
+    public void TheDesktopHostClaimsTheDesktopCapabilities()
+    {
+        // The Host assembly is Windows-only and not referenced, so its controller is read from the build the other
+        // tests start. Its getter touches no field, so an object without a constructor run is enough.
+        var hostDll = Path.ChangeExtension(SandboxHost.HostExecutable, ".dll");
+        var type = System.Reflection.Assembly.LoadFrom(hostDll).GetType("DownloadManager.Host.HostController", throwOnError: true)!;
+        var controller = (IHostPlatform)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+        Assert.Equal(PlatformCapabilities.Desktop, controller.Capabilities);
+        Assert.True(controller.Capabilities is
+        {
+            SupportsOpenUi: true, SupportsFolderPicker: true, SupportsTray: true, SupportsShutdown: true,
+            SupportsUpdater: true, SupportsProgramSettings: true, SupportsFolderBrowse: false,
+        });
+    }
+
+    [Fact]
+    public async Task WithoutProgramSettingsAClientCantSetWhatTheHostRunsButTheRestStillApplies()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service, new FakePlatform(new PlatformCapabilities(), _timeline));
+        var session = Session();
+        var current = service.GetSnapshot().Settings;
+
+        // Sent back as it came, with one ordinary change: applied.
+        current.MaxConcurrentDownloads = current.MaxConcurrentDownloads == 3 ? 4 : 3;
+        var ordinary = (await AskAsync(dispatcher, session, MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = current })).GetPayload<SettingsResult>();
+        Assert.True(ordinary.Ok);
+        Assert.Equal(current.MaxConcurrentDownloads, service.GetSnapshot().Settings.MaxConcurrentDownloads);
+
+        foreach (var change in new Action<SettingsDto>[]
+                 {
+                     s => s.PostDownloadCommand = @"C:\Windows\System32\cmd.exe /c echo",
+                     s => s.FfmpegPath = @"C:\Tools\ffmpeg.exe",
+                     s => s.UpdateManifestUrl = "https://example.invalid/manifest.json",
+                     s => s.UpdatePublicKey = "not the key",
+                     s => s.AllowSystemCompletionActions = !s.AllowSystemCompletionActions,
+                 })
+        {
+            var settings = service.GetSnapshot().Settings;
+            settings.MaxConcurrentDownloads = 7;
+            change(settings);
+            var refused = (await AskAsync(dispatcher, session, MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings })).GetPayload<SettingsResult>();
+            Assert.False(refused.Ok);
+            Assert.Contains("can't be changed from here", refused.Error);
+            // Nothing of a refused update applies, the ordinary change with it included.
+            Assert.NotEqual(7, service.GetSnapshot().Settings.MaxConcurrentDownloads);
+        }
+
+        var added = await service.AddJobAsync(new AddJobRequest { Url = "http://127.0.0.1:9/after.bin", DestinationDirectory = _root, StartMode = "later" });
+        var jobId = added.Job!.Id;
+        var program = (await AskAsync(dispatcher, session, MessageTypes.JobUpdate, new JobUpdateRequest
+        {
+            JobId = jobId,
+            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = @"C:\Tools\after.exe" },
+        })).GetPayload<JobActionResponse>();
+        Assert.False(program.Ok);
+        Assert.Equal("A completion program can't be set from here.", program.Error);
+        Assert.Null(service.GetJob(jobId)!.CompletionOptions.ProgramPath);
+
+        // No program ("" or the default) is still a choice a client can make.
+        var none = (await AskAsync(dispatcher, session, MessageTypes.JobUpdate, new JobUpdateRequest
+        {
+            JobId = jobId,
+            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = "" },
+        })).GetPayload<JobActionResponse>();
+        Assert.True(none.Ok, none.Error);
+    }
+
+    [Fact]
+    public async Task TheDesktopAcceptsProgramSettings()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+        var settings = service.GetSnapshot().Settings;
+        settings.PostDownloadCommand = @"C:\Tools\after.exe ""%1""";
+
+        var result = (await AskAsync(dispatcher, session, MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings })).GetPayload<SettingsResult>();
+        Assert.True(result.Ok, result.Error);
+        Assert.Equal(settings.PostDownloadCommand, service.GetSnapshot().Settings.PostDownloadCommand);
+
+        var added = await service.AddJobAsync(new AddJobRequest { Url = "http://127.0.0.1:9/after.bin", DestinationDirectory = _root, StartMode = "later" });
+        var program = (await AskAsync(dispatcher, session, MessageTypes.JobUpdate, new JobUpdateRequest
+        {
+            JobId = added.Job!.Id,
+            CompletionOptions = new JobCompletionOptionsDto { ProgramPath = @"C:\Tools\after.exe" },
+        })).GetPayload<JobActionResponse>();
+        Assert.True(program.Ok, program.Error);
     }
 
     [Fact]

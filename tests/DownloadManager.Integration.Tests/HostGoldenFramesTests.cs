@@ -13,9 +13,11 @@ namespace DownloadManager.Integration.Tests;
 /// handling out of the pipe server (D1a) must not change a single frame: the script is run on the code before the
 /// move and after it, and the two files must be equal.
 /// <para>
-/// The frames go to <c>artifacts\d1a\frames-&lt;label&gt;.txt</c> under the repository, with the label from
-/// <c>GOLDEN_FRAMES_LABEL</c> (default <c>latest</c>). With <c>GOLDEN_FRAMES_BASELINE</c> set to an earlier file,
-/// the test also fails unless this run's frames equal it. Without it, the test checks only that the script ran.
+/// Every run compares its frames with the committed <c>GoldenFrames\host-pipe-session.txt</c>, recorded on the code
+/// before the move, so a change to what an existing client sees fails here. A change meant to alter the frames
+/// rewrites that file with <c>GOLDEN_FRAMES_UPDATE=1</c> and shows the difference in its commit.
+/// <c>GOLDEN_FRAMES_BASELINE</c> names another file to compare with instead. Each run's frames also go to
+/// <c>artifacts\d1a\frames-&lt;label&gt;.txt</c>, with the label from <c>GOLDEN_FRAMES_LABEL</c> (default <c>latest</c>).
 /// </para>
 /// </summary>
 public sealed partial class HostGoldenFramesTests : IAsyncLifetime
@@ -80,6 +82,14 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
             await Ask(MessageTypes.HandoffRequest, new HandoffRequest { RequestId = "r2", ExtensionId = "notours", Url = "http://127.0.0.1:9/h.bin" });
             await Ask(MessageTypes.HostCleanOrphans, new CleanOrphansRequest { Delete = false });
 
+            // The updater's commands reach the service only where the platform has an updater. A test build is not an
+            // installed one, so each stops before the network, and the failed download and install each broadcast
+            // update.progress.
+            await Ask(MessageTypes.UpdateCheck, new { });
+            await Ask(MessageTypes.UpdateDownload, new { });
+            await Ask(MessageTypes.UpdateInstall, new UpdateInstallRequest());
+            await Ask(MessageTypes.UpdateDefer, new UpdateDeferRequest { Version = "9.9.9-golden" });
+
             var settings = (await connection.AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { })).Settings;
             await Task.Delay(Settle);
             settings.MaxConcurrentDownloads = settings.MaxConcurrentDownloads == 3 ? 4 : 3;
@@ -114,12 +124,18 @@ public sealed partial class HostGoldenFramesTests : IAsyncLifetime
         var output = Path.Combine(directory, $"frames-{(string.IsNullOrWhiteSpace(label) ? "latest" : label)}.txt");
         await File.WriteAllLinesAsync(output, normalised, new UTF8Encoding(false));
 
-        if (Environment.GetEnvironmentVariable("GOLDEN_FRAMES_BASELINE") is { Length: > 0 } baseline)
+        var committed = Path.Combine(RepositoryRoot(), "tests", "DownloadManager.Integration.Tests", "GoldenFrames", "host-pipe-session.txt");
+        if (Environment.GetEnvironmentVariable("GOLDEN_FRAMES_UPDATE") == "1")
         {
-            var expected = await File.ReadAllLinesAsync(baseline);
-            Assert.Equal(expected.Length, normalised.Count);
-            for (var i = 0; i < expected.Length; i++) Assert.Equal(expected[i], normalised[i]);
+            await File.WriteAllLinesAsync(committed, normalised, new UTF8Encoding(false));
+            return;
         }
+
+        var baseline = Environment.GetEnvironmentVariable("GOLDEN_FRAMES_BASELINE") is { Length: > 0 } other ? other : committed;
+        var expected = await File.ReadAllLinesAsync(baseline);
+        // Line by line first, so a failure names the first frame that differs rather than only the counts.
+        for (var i = 0; i < Math.Min(expected.Length, normalised.Count); i++) Assert.Equal(expected[i], normalised[i]);
+        Assert.Equal(expected.Length, normalised.Count);
     }
 
     /// <summary>Its own raw connection, because <see cref="HostConnection"/> always speaks the current version.</summary>
