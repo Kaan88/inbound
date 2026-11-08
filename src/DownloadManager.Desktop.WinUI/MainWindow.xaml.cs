@@ -3902,7 +3902,7 @@ public sealed partial class MainWindow : Window
             }
 
             var webUi = new WebUiOptionsPage(_remote) { PageIndex = nextPage + (extraction is null ? 0 : 1) };
-            window.AddPage("Web UI", "", webUi.Controls);
+            window.AddPage("Web UI", "\uE12B", webUi.Controls);
 
             window.Closed += (_, _) =>
             {
@@ -4047,6 +4047,9 @@ public sealed partial class MainWindow : Window
                 var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
                 var webUiSaveProblem = await webUi.SaveAsync();
                 await RefreshAsync();
+                // Neither problem is dropped: both are said, and the window shows the page of the first.
+                if (webUiSaveProblem is not null && extractionSaveProblem is not null)
+                    return ($"{extractionSaveProblem} {webUiSaveProblem}", extractionPageIndex);
                 if (webUiSaveProblem is not null) return (webUiSaveProblem, webUi.PageIndex);
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };

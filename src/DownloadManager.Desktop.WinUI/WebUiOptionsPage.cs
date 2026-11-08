@@ -20,6 +20,8 @@ internal sealed class WebUiOptionsPage
     private readonly NumberBox _port = SettingsWindow.Number("Port", WebUiForm.DefaultPort, WebUiForm.MinPort, WebUiForm.MaxPort);
     private readonly TextBox _names = new() { Header = "Also reachable as", PlaceholderText = "nas, nas.example.com", MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBlock _addresses = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Visibility = Visibility.Collapsed };
+    private readonly TextBlock _addressesHint = SettingsWindow.Hint("Type one of these in the browser on the other device.");
+    private readonly TextBlock _localOnlyHint = SettingsWindow.Hint("Other devices can't reach the web UI until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.");
     private readonly Button _openInBrowser = new() { Content = "Open in browser", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _openResult = new("Open in browser result");
     private readonly StatusLine _passwordState = new("Web UI password status");
@@ -30,7 +32,7 @@ internal sealed class WebUiOptionsPage
     private readonly StatusLine _firewallState = new("Windows Firewall status");
     private readonly StatusLine _profile = new("Network type");
     private readonly StatusLine _publicNote = new("Public network note");
-    private readonly CheckBox _allowPublic = new() { Content = "Also allow on Public networks" };
+    private readonly CheckBox _allowPublic = new() { Content = "Also allow on Public networks (every Public network, including ones you join later)" };
     private readonly Button _allow = new() { Content = "Allow through Windows Firewall", IsEnabled = false };
     private readonly Button _recheck = new() { Content = "Check again", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _firewallResult = new("Windows Firewall result");
@@ -40,9 +42,10 @@ internal sealed class WebUiOptionsPage
 
     private const string NewPortNote = "Select Apply to use the new port, then allow it through Windows Firewall.";
 
-    private WebUiStatusDto? _status;
-    private IReadOnlyList<NetworkProfile>? _profiles;
+    private WebUiStatusWire? _status;
+    private IReadOnlyList<NetworkEntry>? _profiles;
     private bool _profilesKnown;
+    private bool _profilesRequested;
     private bool _applying;
     private bool _busy;
 
@@ -114,7 +117,8 @@ internal sealed class WebUiOptionsPage
             _names,
             SettingsWindow.Hint("Names that other devices use for this PC, such as nas or nas.local. Separate them with commas."),
             _addresses,
-            SettingsWindow.Hint("Type one of these in the browser on the other device."),
+            _addressesHint,
+            _localOnlyHint,
             _openInBrowser,
             _openResult.Text,
             SettingsWindow.Hint("Open in browser signs in for you, with a link that works once for a minute, so the password isn't typed into a page on this PC."),
@@ -125,12 +129,11 @@ internal sealed class WebUiOptionsPage
             _allowPublic,
             firewallButtons,
             _firewallResult.Text,
-            SettingsWindow.Hint("Until Windows Firewall allows it, the web UI answers on this PC only. Allowing it asks Windows for permission once and adds a rule for the web UI program, this port, and devices on your own network."),
+            SettingsWindow.Hint("Until Windows Firewall allows it, the web UI answers on this PC only. Allowing it asks Windows for permission once, in a Windows PowerShell prompt, and adds a rule for the web UI program, this port, and devices on your own network."),
         ];
 
         _client.WebUiChanged += OnChanged;
         _ = LoadAsync();
-        _ = LoadProfilesAsync();
     }
 
     public UIElement[] Controls { get; }
@@ -169,11 +172,44 @@ internal sealed class WebUiOptionsPage
             return null;
         }
 
+        // A refusal (nothing changed) comes back as words, and the window stays open on this page.
         if (!result.Ok || result.Status is null) return result.Error ?? RemoteText.Failure(null);
-        ApplyStatus(result.Status, replaceInputs: true);
-        return request.Enabled == true && result.Status.State == WebUiStates.Failed
-            ? WebUiForm.StateText(result.Status).Text
+        var status = result.Status;
+        if (request.Enabled == true && status.State == WebUiWireStates.Starting)
+        {
+            // The port-in-use or forbidden-port failure arrives a moment after the start, so wait for it before
+            // the window closes and the person believes the web UI is on.
+            try
+            {
+                status = await WaitForStartAsync(status, _closing.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+        }
+
+        ApplyStatus(status, replaceInputs: true);
+        return request.Enabled == true && status.State == WebUiWireStates.Failed
+            ? WebUiForm.StateText(status).Text
             : null;
+    }
+
+    private static readonly TimeSpan StartPatience = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan StartPoll = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>Reads the state again until it is no longer starting, for a few seconds at most.</summary>
+    private async Task<WebUiStatusWire> WaitForStartAsync(WebUiStatusWire status, CancellationToken token)
+    {
+        var until = DateTime.UtcNow + StartPatience;
+        while (status.State == WebUiWireStates.Starting && DateTime.UtcNow < until)
+        {
+            await Task.Delay(StartPoll, token);
+            var again = await _client.GetWebUiAsync(token);
+            if (again.Ok && again.Status is not null) status = again.Status;
+        }
+
+        return status;
     }
 
     public void Close()
@@ -208,11 +244,14 @@ internal sealed class WebUiOptionsPage
 
         _loadStatus.Show(string.Empty);
         ApplyStatus(result.Status, replaceInputs: true);
+        // The network type is read once the Host has a web UI to show, never while Options only opens.
+        if (!_profilesRequested) await LoadProfilesAsync();
     }
 
     private async Task LoadProfilesAsync()
     {
-        List<NetworkProfile>? profiles;
+        _profilesRequested = true;
+        List<NetworkEntry>? profiles;
         try
         {
             profiles = await WebUiFirewall.ReadNetworkProfilesAsync(_closing.Token);
@@ -227,14 +266,14 @@ internal sealed class WebUiOptionsPage
         RenderFirewall();
     }
 
-    private void OnChanged(WebUiStatusDto status)
+    private void OnChanged(WebUiStatusWire status)
     {
         if (_status is null) return;
         ApplyStatus(status, replaceInputs: false);
     }
 
     /// <param name="replaceInputs">Put the saved values in the box, port and names. Left alone for a change from the Host while the person is editing.</param>
-    private void ApplyStatus(WebUiStatusDto status, bool replaceInputs)
+    private void ApplyStatus(WebUiStatusWire status, bool replaceInputs)
     {
         var previous = _status;
         _status = status;
@@ -257,9 +296,10 @@ internal sealed class WebUiOptionsPage
         Render();
     }
 
-    private bool InputsEdited(WebUiStatusDto saved)
+    private bool InputsEdited(WebUiStatusWire saved)
         => (_enable.IsChecked == true) != saved.Enabled ||
-           (!double.IsNaN(_port.Value) && (int)_port.Value != saved.Port) ||
+           // An emptied port box counts as being edited, so a change from the Host doesn't refill it.
+           double.IsNaN(_port.Value) || (int)_port.Value != saved.Port ||
            WebUiForm.ParseNames(_names.Text, out _) is not { } names ||
            !names.SequenceEqual(saved.AlsoReachableAs, StringComparer.OrdinalIgnoreCase);
 
@@ -276,6 +316,8 @@ internal sealed class WebUiOptionsPage
         var addresses = WebUiForm.AddressesToType(status);
         _addresses.Text = string.Join(Environment.NewLine, addresses);
         _addresses.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _addressesHint.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _localOnlyHint.Visibility = status is { State: WebUiWireStates.Running, LocalOnly: true } ? Visibility.Visible : Visibility.Collapsed;
         RenderFirewall();
         RenderButtons();
     }
@@ -285,8 +327,7 @@ internal sealed class WebUiOptionsPage
         if (_status is not { } status) return;
         _firewallState.Show(WebUiForm.FirewallText(status));
         _profile.Show(_profilesKnown ? WebUiForm.ProfileText(_profiles) : string.Empty);
-        var isPublic = _profiles?.Contains(NetworkProfile.Public) == true;
-        _publicNote.Show(isPublic ? WebUiForm.PublicNetworkNote : string.Empty, isProblem: false);
+        _publicNote.Show(WebUiForm.ShowPublicNote(_profiles) ? WebUiForm.PublicNetworkNote : string.Empty, isProblem: false);
         RenderButtons();
     }
 
@@ -294,7 +335,7 @@ internal sealed class WebUiOptionsPage
     {
         var status = _status;
         _setPassword.IsEnabled = !_busy && status is not null && !string.IsNullOrEmpty(_newPassword.Password);
-        _openInBrowser.IsEnabled = !_busy && status is { State: WebUiStates.Running };
+        _openInBrowser.IsEnabled = !_busy && status is { State: WebUiWireStates.Running };
         _recheck.IsEnabled = !_busy && status is not null;
         var portMoved = status is not null && !double.IsNaN(_port.Value) && (int)_port.Value != status.Port;
         _allow.IsEnabled = !_busy && status is not null && !string.IsNullOrEmpty(status.BridgePath) && !portMoved;
@@ -341,6 +382,7 @@ internal sealed class WebUiOptionsPage
             return;
         }
 
+        if (_busy) return;
         // Out of the boxes before anything is sent, whatever the answer turns out to be.
         _newPassword.Password = string.Empty;
         _repeatPassword.Password = string.Empty;
@@ -412,6 +454,9 @@ internal sealed class WebUiOptionsPage
                 case FirewallRunOutcome.Declined:
                     _firewallResult.Say("Windows Firewall wasn't changed, because permission wasn't given.", isProblem: true);
                     return;
+                case FirewallRunOutcome.TimedOut:
+                    _firewallResult.Say("Windows hasn't answered yet, and the change may still go through. Select Check again before trying once more.", isProblem: true);
+                    return;
                 case FirewallRunOutcome.Failed:
                     _firewallResult.Say("Windows Firewall couldn't be changed. Try again, or add the rule in Windows Security.", isProblem: true);
                     return;
@@ -421,7 +466,12 @@ internal sealed class WebUiOptionsPage
         });
     }
 
-    private Task RecheckAsync() => RunAsync(token => RecheckCoreAsync(token, afterAdding: false));
+    private Task RecheckAsync() => RunAsync(async token =>
+    {
+        await RecheckCoreAsync(token, afterAdding: false);
+        // The network type can change while the window is open, so it is read again here.
+        await LoadProfilesAsync();
+    });
 
     private async Task RecheckCoreAsync(CancellationToken token, bool afterAdding)
     {
@@ -434,11 +484,11 @@ internal sealed class WebUiOptionsPage
         }
 
         await ShowReplyAsync(result, token);
-        var ready = _status?.Firewall == WebUiFirewallStates.Ready;
+        var ready = _status?.Firewall == WebUiWireFirewall.Ready;
         _firewallResult.Say(ready
             ? (afterAdding ? "Done. Windows Firewall now allows other devices to reach the web UI." : "Windows Firewall allows other devices to reach the web UI.")
             : (afterAdding ? "The rule was added, but the web UI doesn't see it yet. Select Check again in a moment." : "Windows Firewall doesn't allow this yet."),
-            isProblem: !ready && !afterAdding);
+            isProblem: !ready);
     }
 
     // ---- Shared ------------------------------------------------------------------------------

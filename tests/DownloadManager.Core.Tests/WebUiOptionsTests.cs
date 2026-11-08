@@ -11,6 +11,7 @@ public sealed class WebUiOptionsTests
 {
     private const string System32 = @"C:\Windows\System32";
     private const string Bridge = @"C:\Program Files\Inbound Download Manager\DownloadManager.Server.exe";
+    private const string Install = @"C:\Program Files\Inbound Download Manager";
     private const string RuleName = "Inbound Download Manager web UI";
 
     private static string Decode(FirewallCommand command)
@@ -26,7 +27,7 @@ public sealed class WebUiOptionsTests
     [Trait("Platform", "Windows")]
     public void TheAllowCommandIsWindowsPowerShellInSystem32WithFixedArguments()
     {
-        var command = WebUiFirewall.BuildAllowCommand(Bridge, 8080, RuleName, alsoPublic: false, System32);
+        var command = WebUiFirewall.BuildAllowCommand(Bridge, 8080, RuleName, alsoPublic: false, System32, Install);
 
         Assert.Equal(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", command.FileName);
         Assert.True(WebUiFirewall.IsSystemProgram(command.FileName, System32));
@@ -37,15 +38,17 @@ public sealed class WebUiOptionsTests
     [Trait("Platform", "Windows")]
     public void TheScriptRemovesBlockRulesThenAddsOneAllowRuleForTheProgramPortAndLocalSubnet()
     {
-        var script = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 8080, RuleName, alsoPublic: false, System32));
+        var script = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 8080, RuleName, alsoPublic: false, System32, Install));
 
         var expected = string.Join("\n",
             "$ErrorActionPreference = 'Stop'",
             "try {",
+            @"  $env:PSModulePath = 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules'",
+            @"  Import-Module 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\NetSecurity\NetSecurity.psd1' -ErrorAction Stop",
             @"  $program = 'C:\Program Files\Inbound Download Manager\DownloadManager.Server.exe'",
             "  $name = 'Inbound Download Manager web UI'",
-            "  Get-NetFirewallApplicationFilter -Program $program -ErrorAction SilentlyContinue | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule",
-            "  Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule",
+            "  $mine = @(Get-NetFirewallApplicationFilter -PolicyStore PersistentStore | Where-Object { $_.Program -eq $program } | Get-NetFirewallRule)",
+            "  $mine | Where-Object { $_.Direction -eq 'Inbound' -and ($_.Action -eq 'Block' -or $_.DisplayName -ceq $name) } | Remove-NetFirewallRule",
             "  New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Allow -Program $program -Protocol TCP -LocalPort 8080 -RemoteAddress LocalSubnet -Profile Private | Out-Null",
             "  exit 0",
             "} catch {",
@@ -58,8 +61,8 @@ public sealed class WebUiOptionsTests
     [Trait("Platform", "Windows")]
     public void PublicNetworksAreAddedOnlyWhenAsked()
     {
-        var withoutPublic = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 9090, RuleName, alsoPublic: false, System32));
-        var withPublic = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 9090, RuleName, alsoPublic: true, System32));
+        var withoutPublic = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 9090, RuleName, alsoPublic: false, System32, Install));
+        var withPublic = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 9090, RuleName, alsoPublic: true, System32, Install));
 
         Assert.Contains("-LocalPort 9090 -RemoteAddress LocalSubnet -Profile Private |", withoutPublic);
         Assert.DoesNotContain("Public", withoutPublic);
@@ -72,7 +75,7 @@ public sealed class WebUiOptionsTests
     {
         var path = @"C:\Users\O'Neil\it’s here\DownloadManager.Server.exe";
 
-        var script = Decode(WebUiFirewall.BuildAllowCommand(path, 8080, RuleName, alsoPublic: false, System32));
+        var script = Decode(WebUiFirewall.BuildAllowCommand(path, 8080, RuleName, alsoPublic: false, System32, @"C:\Users\O'Neil"));
 
         Assert.Contains(@"$program = 'C:\Users\O''Neil\it’’s here\DownloadManager.Server.exe'", script);
         Assert.Equal("'a''b'", WebUiFirewall.Quote("a'b"));
@@ -87,10 +90,13 @@ public sealed class WebUiOptionsTests
     [InlineData(@"C:\Windows\System32\cmd.exe")]
     [InlineData("C:\\Program Files\\x\n\\DownloadManager.Server.exe")]
     [InlineData("")]
+    [InlineData(@"C:\Elsewhere\DownloadManager.Server.exe")]
+    [InlineData(@"C:\Program Files\Inbound Download Manager2\DownloadManager.Server.exe")]
+    [InlineData(@"C:\Program Files\Inbound Download Manager\..\Evil\DownloadManager.Server.exe")]
     [Trait("Platform", "Windows")]
     public void OnlyTheWebUiProgramCanBeNamedInARule(string path)
     {
-        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(path, 8080, RuleName, false, System32));
+        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(path, 8080, RuleName, false, System32, Install));
     }
 
     [Theory]
@@ -100,16 +106,20 @@ public sealed class WebUiOptionsTests
     [Trait("Platform", "Windows")]
     public void APortOutsideTheAllowedRangeIsRefused(int port)
     {
-        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(Bridge, port, RuleName, false, System32));
+        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(Bridge, port, RuleName, false, System32, Install));
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("bad\nname")]
-    public void ARuleNeedsAnUsableName(string name)
+    [InlineData("*")]
+    [InlineData("Inbound*")]
+    [InlineData("?*")]
+    [InlineData("Another rule")]
+    public void ARuleNeedsTheFixedName(string name)
     {
-        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(Bridge, 8080, name, false, System32));
+        Assert.Throws<ArgumentException>(() => WebUiFirewall.BuildAllowCommand(Bridge, 8080, name, false, System32, Install));
     }
 
     [Theory]
@@ -133,20 +143,106 @@ public sealed class WebUiOptionsTests
     public void ReadingTheNetworkTypeNeedsNoPermissionAndRunsFromSystem32()
     {
         var command = WebUiFirewall.NetworkProfileCommand(System32);
+        var script = Decode(command);
 
         Assert.True(WebUiFirewall.IsSystemProgram(command.FileName, System32));
-        Assert.Contains("Get-NetConnectionProfile", command.Arguments);
+        Assert.Contains("Get-NetConnectionProfile", script);
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'\ntry {\n  $env:PSModulePath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'\n  Import-Module 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\NetConnection\\NetConnection.psd1'", script);
         Assert.DoesNotContain("runas", command.Arguments, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void TheNetworkTypesAreReadFromTheOutput()
     {
-        Assert.Equal([NetworkProfile.Public, NetworkProfile.Private, NetworkProfile.Domain],
-            WebUiFirewall.ParseProfiles("Public\r\nPrivate\r\nDomainAuthenticated\r\n"));
+        Assert.Equal(
+            [new NetworkEntry("Ethernet", NetworkProfile.Public), new NetworkEntry("Wi-Fi", NetworkProfile.Private), new NetworkEntry("Corp", NetworkProfile.Domain)],
+            WebUiFirewall.ParseProfiles("Ethernet|Public\r\nWi-Fi|Private\r\nCorp|DomainAuthenticated\r\n"));
+        Assert.Equal([new NetworkEntry(string.Empty, NetworkProfile.Public)], WebUiFirewall.ParseProfiles("Public"));
         Assert.Empty(WebUiFirewall.ParseProfiles(""));
         Assert.Empty(WebUiFirewall.ParseProfiles("something else\n"));
         Assert.Empty(WebUiFirewall.ParseProfiles(null));
+    }
+
+    // ---- What the elevated script may trust ---------------------------------------------------------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Platform", "Windows")]
+    public void TheScriptStartsWithTheSystemModuleOnlyAndMatchesRulesExactly(bool alsoPublic)
+    {
+        var script = Decode(WebUiFirewall.BuildAllowCommand(Bridge, 8080, RuleName, alsoPublic, System32, Install));
+
+        Assert.StartsWith("$ErrorActionPreference = 'Stop'\ntry {\n  $env:PSModulePath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'\n  Import-Module 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\NetSecurity\\NetSecurity.psd1' -ErrorAction Stop\n", script);
+        // -Program and -DisplayName on the Get cmdlets would read the values as wildcard patterns.
+        Assert.DoesNotContain("Get-NetFirewallRule -DisplayName", script);
+        Assert.DoesNotContain("Get-NetFirewallApplicationFilter -Program", script);
+        Assert.Contains("$_.Program -eq $program", script);
+        Assert.Contains("$_.DisplayName -ceq $name", script);
+    }
+
+    [Fact]
+    [Trait("Platform", "Windows")]
+    public void APathWithPatternCharactersStaysADataString()
+    {
+        const string folder = @"C:\Program Files\App [x] (1)";
+        var script = Decode(WebUiFirewall.BuildAllowCommand(folder + @"\DownloadManager.Server.exe", 8080, RuleName, false, System32, folder));
+
+        Assert.Contains(@"$program = 'C:\Program Files\App [x] (1)\DownloadManager.Server.exe'", script);
+    }
+
+    // ---- Running it ------------------------------------------------------------------------------------
+
+    private static readonly FirewallCommand SomeCommand = new(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile");
+
+    [Fact]
+    public async Task ExitCodeZeroIsDoneAndAnyOtherIsFailed()
+    {
+        Assert.Equal(FirewallRunOutcome.Done, await WebUiFirewall.RunElevatedAsync(SomeCommand, default, (_, _) => Task.FromResult(0)));
+        Assert.Equal(FirewallRunOutcome.Failed, await WebUiFirewall.RunElevatedAsync(SomeCommand, default, (_, _) => Task.FromResult(1)));
+    }
+
+    [Fact]
+    public async Task SayingNoAtTheWindowsPromptIsDeclinedNotFailed()
+    {
+        var outcome = await WebUiFirewall.RunElevatedAsync(SomeCommand, default, (_, _) => throw new System.ComponentModel.Win32Exception(1223));
+
+        Assert.Equal(FirewallRunOutcome.Declined, outcome);
+    }
+
+    [Fact]
+    public async Task OtherStartProblemsAreFailed()
+    {
+        Assert.Equal(FirewallRunOutcome.Failed,
+            await WebUiFirewall.RunElevatedAsync(SomeCommand, default, (_, _) => throw new System.ComponentModel.Win32Exception(5)));
+        Assert.Equal(FirewallRunOutcome.Failed,
+            await WebUiFirewall.RunElevatedAsync(SomeCommand, default, (_, _) => throw new InvalidOperationException()));
+    }
+
+    [Fact]
+    public async Task NoAnswerInTimeIsTimedOutBecauseTheCommandMayStillFinish()
+    {
+        var outcome = await WebUiFirewall.RunElevatedAsync(SomeCommand, default,
+            async (_, token) => { await Task.Delay(Timeout.Infinite, token); return 0; }, TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal(FirewallRunOutcome.TimedOut, outcome);
+    }
+
+    [Fact]
+    public async Task ClosingTheWindowEndsTheWaitWithoutAnOutcome()
+    {
+        using var closed = new CancellationTokenSource();
+        var wait = WebUiFirewall.RunElevatedAsync(SomeCommand, closed.Token, async (_, token) => { await Task.Delay(Timeout.Infinite, token); return 0; });
+        closed.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
+    }
+
+    [Fact]
+    public async Task AProgramThatIsNotInSystem32IsNeverStarted()
+    {
+        Assert.Equal(FirewallRunOutcome.Failed,
+            await WebUiFirewall.RunElevatedAsync(new FirewallCommand(@"C:\Program Files\x\powershell.exe", ""), default));
     }
 
     // ---- The page's checks ---------------------------------------------------------------------
@@ -195,7 +291,7 @@ public sealed class WebUiOptionsTests
     [Fact]
     public void TheBoxCannotBeTickedWithoutAPassword()
     {
-        var saved = new WebUiStatusDto { HasPassword = false };
+        var saved = new WebUiStatusWire { HasPassword = false };
 
         var request = WebUiForm.Changes(saved, enabled: true, 8080, "", out var problem);
 
@@ -206,7 +302,7 @@ public sealed class WebUiOptionsTests
     [Fact]
     public void OnlyWhatChangedIsSent()
     {
-        var saved = new WebUiStatusDto { Enabled = false, HasPassword = true, Port = 8080, AlsoReachableAs = ["nas"] };
+        var saved = new WebUiStatusWire { Enabled = false, HasPassword = true, Port = 8080, AlsoReachableAs = ["nas"] };
 
         Assert.Null(WebUiForm.Changes(saved, false, 8080, "nas", out var problem));
         Assert.Null(problem);
@@ -227,7 +323,7 @@ public sealed class WebUiOptionsTests
     [Fact]
     public void AnEnabledBoxCanAlwaysBeSwitchedOffEvenIfThePasswordIsGone()
     {
-        var saved = new WebUiStatusDto { Enabled = true, HasPassword = false };
+        var saved = new WebUiStatusWire { Enabled = true, HasPassword = false };
 
         var request = WebUiForm.Changes(saved, false, 8080, "", out var problem);
 
@@ -238,35 +334,56 @@ public sealed class WebUiOptionsTests
     [Fact]
     public void TheAddressesToTypeAreTheHostsPlusTheNamesAndNothingWhileItIsOff()
     {
-        var running = new WebUiStatusDto
+        var running = new WebUiStatusWire
         {
-            State = WebUiStates.Running, Port = 8080, AlsoReachableAs = ["nas"],
-            Addresses = ["http://192.168.1.20:8080/"], Firewall = WebUiFirewallStates.Ready,
+            State = WebUiWireStates.Running, Port = 8080, AlsoReachableAs = ["nas"],
+            Addresses = ["http://192.168.1.20:8080/"], Firewall = WebUiWireFirewall.Ready,
         };
 
         Assert.Equal(["http://192.168.1.20:8080/", "http://nas:8080/"], WebUiForm.AddressesToType(running));
-        Assert.Empty(WebUiForm.AddressesToType(new WebUiStatusDto { State = WebUiStates.Off }));
-        Assert.Equal(["http://localhost:8080/"], WebUiForm.AddressesToType(new WebUiStatusDto { State = WebUiStates.Running, LocalOnly = true }));
+        Assert.Empty(WebUiForm.AddressesToType(new WebUiStatusWire { State = WebUiWireStates.Off }));
+        // Nothing works on another device while the web UI listens on this PC only, and localhost would be that device.
+        Assert.Empty(WebUiForm.AddressesToType(new WebUiStatusWire { State = WebUiWireStates.Running, LocalOnly = true, AlsoReachableAs = ["nas"], Addresses = ["http://192.168.1.20:8080/"] }));
     }
 
     [Fact]
     public void TheStateIsToldInPlainWords()
     {
-        Assert.StartsWith("Off", WebUiForm.StateText(new WebUiStatusDto()).Text);
-        Assert.Contains("only this PC", WebUiForm.StateText(new WebUiStatusDto { State = WebUiStates.Running, LocalOnly = true }).Text);
-        var (failed, problem) = WebUiForm.StateText(new WebUiStatusDto { State = WebUiStates.Failed, Error = "Port 8080 is in use." });
+        Assert.StartsWith("Off", WebUiForm.StateText(new WebUiStatusWire()).Text);
+        Assert.Contains("only this PC", WebUiForm.StateText(new WebUiStatusWire { State = WebUiWireStates.Running, LocalOnly = true }).Text);
+        var (failed, problem) = WebUiForm.StateText(new WebUiStatusWire { State = WebUiWireStates.Failed, Error = "Port 8080 is in use." });
         Assert.True(problem);
         Assert.Contains("Port 8080 is in use.", failed);
-        Assert.Contains("isn't set to allow", WebUiForm.FirewallText(new WebUiStatusDto { Firewall = WebUiFirewallStates.Missing }));
+        Assert.Contains("isn't set to allow", WebUiForm.FirewallText(new WebUiStatusWire { Firewall = WebUiWireFirewall.Missing }));
     }
 
     [Fact]
     public void TheNetworkTypeLineSaysWhatWasRead()
     {
-        Assert.Equal("Network type: Public.", WebUiForm.ProfileText([NetworkProfile.Public, NetworkProfile.Public]));
-        Assert.Equal("Network type: Private, Public.", WebUiForm.ProfileText([NetworkProfile.Private, NetworkProfile.Public]));
+        Assert.Equal("Network type: Ethernet is Public.", WebUiForm.ProfileText([new NetworkEntry("Ethernet", NetworkProfile.Public)]));
+        Assert.Equal("Network type: Ethernet is Private, wgcf is Public.",
+            WebUiForm.ProfileText([new NetworkEntry("Ethernet", NetworkProfile.Private), new NetworkEntry("wgcf", NetworkProfile.Public)]));
         Assert.Contains("couldn't be read", WebUiForm.ProfileText(null));
         Assert.Contains("isn't connected", WebUiForm.ProfileText([]));
+    }
+
+    [Fact]
+    public void ThePublicNoteComesOnlyWhenNoConnectedNetworkIsPrivate()
+    {
+        Assert.False(WebUiForm.ShowPublicNote(null));
+        Assert.False(WebUiForm.ShowPublicNote([]));
+        Assert.False(WebUiForm.ShowPublicNote([new NetworkEntry("Ethernet", NetworkProfile.Private), new NetworkEntry("vpn", NetworkProfile.Public)]));
+        Assert.True(WebUiForm.ShowPublicNote([new NetworkEntry("Wi-Fi", NetworkProfile.Public), new NetworkEntry("vpn", NetworkProfile.Public)]));
+    }
+
+    [Fact]
+    public void AStatusWithWordsInErrorIsARefusalOnlyWhenTheStateIsNotAStartProblem()
+    {
+        Assert.True(new WebUiStatusWire { State = WebUiWireStates.Off, Error = "Set a password first." }.IsRefusal);
+        Assert.True(new WebUiStatusWire { State = WebUiWireStates.Running, Error = "Not allowed." }.IsRefusal);
+        Assert.False(new WebUiStatusWire { State = WebUiWireStates.Failed, Error = "Port in use." }.IsRefusal);
+        Assert.False(new WebUiStatusWire { State = WebUiWireStates.Starting, Error = "Restarting." }.IsRefusal);
+        Assert.False(new WebUiStatusWire { State = WebUiWireStates.Running }.IsRefusal);
     }
 
     [Theory]
@@ -289,9 +406,9 @@ public sealed class WebUiOptionsTests
     public async Task TheStatusIsReadFromTheHost()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.Get, "webui.status", new WebUiStatusDto
+        host.Answer(WebUiWireTypes.Get, "webui.status", new WebUiStatusWire
         {
-            Enabled = true, Port = 8081, HasPassword = true, State = WebUiStates.Running, Firewall = WebUiFirewallStates.Missing,
+            Enabled = true, Port = 8081, HasPassword = true, State = WebUiWireStates.Running, Firewall = WebUiWireFirewall.Missing,
             LocalOnly = true, BridgePath = Bridge, RuleName = RuleName, AlsoReachableAs = ["nas"],
         });
         await using var client = host.NewClient();
@@ -301,7 +418,7 @@ public sealed class WebUiOptionsTests
         Assert.True(result.Ok);
         Assert.Equal(8081, result.Status!.Port);
         Assert.True(result.Status.LocalOnly);
-        Assert.Equal(WebUiFirewallStates.Missing, result.Status.Firewall);
+        Assert.Equal(WebUiWireFirewall.Missing, result.Status.Firewall);
         Assert.Equal(Bridge, result.Status.BridgePath);
         Assert.Equal(["nas"], result.Status.AlsoReachableAs);
     }
@@ -310,28 +427,28 @@ public sealed class WebUiOptionsTests
     public async Task OnlyTheChangedFieldsAreSentAndThePasswordGoesInItsOwnMessage()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.Set, "webui.status", new WebUiStatusDto { Port = 9000 });
-        host.Answer(WebUiMessageTypes.SetPassword, "webui.status", new WebUiStatusDto { HasPassword = true });
+        host.Answer(WebUiWireTypes.Set, "webui.status", new WebUiStatusWire { Port = 9000 });
+        host.Answer(WebUiWireTypes.SetPassword, "webui.status", new WebUiStatusWire { HasPassword = true });
         await using var client = host.NewClient();
 
-        await client.SetWebUiAsync(new WebUiSetRequest { Port = 9000 });
+        await client.SetWebUiAsync(new WebUiSetWire { Port = 9000 });
         await client.SetWebUiPasswordAsync("a long password");
 
-        var set = host.LastPayload(WebUiMessageTypes.Set)!.Value;
+        var set = host.LastPayload(WebUiWireTypes.Set)!.Value;
         Assert.Equal(9000, set.GetProperty("port").GetInt32());
         Assert.False(set.TryGetProperty("enabled", out _));
         Assert.False(set.TryGetProperty("alsoReachableAs", out _));
-        Assert.Equal("a long password", host.LastPayload(WebUiMessageTypes.SetPassword)!.Value.GetProperty("password").GetString());
+        Assert.Equal("a long password", host.LastPayload(WebUiWireTypes.SetPassword)!.Value.GetProperty("password").GetString());
     }
 
     [Fact]
     public async Task ARefusalComesBackInTheHostsWords()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.Set, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Set a password first." });
+        host.Answer(WebUiWireTypes.Set, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Set a password first." });
         await using var client = host.NewClient();
 
-        var result = await client.SetWebUiAsync(new WebUiSetRequest { Enabled = true });
+        var result = await client.SetWebUiAsync(new WebUiSetWire { Enabled = true });
 
         Assert.False(result.Ok);
         Assert.Equal("Set a password first.", result.Error);
@@ -339,10 +456,53 @@ public sealed class WebUiOptionsTests
     }
 
     [Fact]
+    public async Task AStatusWithAnErrorIsARefusalForSetAndForThePassword()
+    {
+        var host = new WebUiHost();
+        host.Answer(WebUiWireTypes.Set, WebUiWireTypes.Status, new WebUiStatusWire { Error = "Set a password first." });
+        host.Answer(WebUiWireTypes.SetPassword, WebUiWireTypes.Status, new WebUiStatusWire { Error = "The password is too short." });
+        await using var client = host.NewClient();
+
+        var set = await client.SetWebUiAsync(new WebUiSetWire { Enabled = true });
+        var password = await client.SetWebUiPasswordAsync("short");
+
+        Assert.False(set.Ok);
+        Assert.Equal("Set a password first.", set.Error);
+        Assert.False(password.Ok);
+        Assert.Equal("The password is too short.", password.Error);
+    }
+
+    [Fact]
+    public async Task AFailedStartIsStillAStatusNotARefusal()
+    {
+        var host = new WebUiHost();
+        host.Answer(WebUiWireTypes.Set, WebUiWireTypes.Status, new WebUiStatusWire { Enabled = true, State = WebUiWireStates.Failed, Error = "Port 8080 is in use." });
+        await using var client = host.NewClient();
+
+        var set = await client.SetWebUiAsync(new WebUiSetWire { Enabled = true });
+
+        Assert.True(set.Ok);
+        Assert.Equal(WebUiWireStates.Failed, set.Status!.State);
+    }
+
+    [Fact]
+    public async Task ARefusedTicketCarriesTheHostsWords()
+    {
+        var host = new WebUiHost();
+        host.Answer(WebUiWireTypes.OpenTicket, WebUiWireTypes.Ticket, new WebUiTicketWire { Error = "The web UI isn't running." });
+        await using var client = host.NewClient();
+
+        var ticket = await client.OpenWebUiTicketAsync();
+
+        Assert.False(ticket.Ok);
+        Assert.Equal("The web UI isn't running.", ticket.Error);
+    }
+
+    [Fact]
     public async Task AHostWithoutTheWebUiSaysSoInPlainWords()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.Get, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." });
+        host.Answer(WebUiWireTypes.Get, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." });
         await using var client = host.NewClient();
 
         var result = await client.GetWebUiAsync();
@@ -354,7 +514,7 @@ public sealed class WebUiOptionsTests
     public async Task ASuccessWithoutAStatusHasNoErrorAndNoStatus()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.SetPassword, MessageTypes.HostActionResult, new HostActionResult { Ok = true });
+        host.Answer(WebUiWireTypes.SetPassword, MessageTypes.HostActionResult, new HostActionResult { Ok = true });
         await using var client = host.NewClient();
 
         var result = await client.SetWebUiPasswordAsync("a long password");
@@ -367,7 +527,7 @@ public sealed class WebUiOptionsTests
     public async Task ATicketCarriesTheSignInLink()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.OpenTicket, "webui.ticket", new WebUiTicketDto { Url = "http://127.0.0.1:8080/?ticket=t" });
+        host.Answer(WebUiWireTypes.OpenTicket, "webui.ticket", new WebUiTicketWire { Url = "http://127.0.0.1:8080/?ticket=t" });
         await using var client = host.NewClient();
 
         var ticket = await client.OpenWebUiTicketAsync();
@@ -380,7 +540,7 @@ public sealed class WebUiOptionsTests
     public async Task ATicketTheHostRefusesIsNotALink()
     {
         var host = new WebUiHost();
-        host.Answer(WebUiMessageTypes.OpenTicket, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "The web UI isn't running." });
+        host.Answer(WebUiWireTypes.OpenTicket, MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "The web UI isn't running." });
         await using var client = host.NewClient();
 
         var ticket = await client.OpenWebUiTicketAsync();
@@ -394,12 +554,12 @@ public sealed class WebUiOptionsTests
     {
         var host = new WebUiHost();
         await using var client = host.NewClient();
-        var heard = new List<WebUiStatusDto>();
+        var heard = new List<WebUiStatusWire>();
         client.WebUiChanged += heard.Add;
         client.Start();
         var pipe = await host.FirstConnectionAsync();
 
-        pipe.Push(IpcMessage.Create(WebUiMessageTypes.Changed, new WebUiStatusDto { State = WebUiStates.Failed, Error = "Port in use." }));
+        pipe.Push(IpcMessage.Create(WebUiWireTypes.Changed, new WebUiStatusWire { State = WebUiWireStates.Failed, Error = "Port in use." }));
 
         await host.UntilAsync(() => { host.Flush(); return heard.Count == 1; });
         Assert.Equal("Port in use.", heard[0].Error);
