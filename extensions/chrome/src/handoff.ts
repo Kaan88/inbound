@@ -1,3 +1,4 @@
+import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
 
 interface PendingHandoff {
@@ -24,8 +25,23 @@ const favoritesSelect = document.getElementById("favorites") as HTMLSelectElemen
 let defaultDestination = "";
 let held = false;
 let finished = false;
+// There is no request to confirm (no id, expired, or the worker could not be reached).
+let unavailable = false;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const successBox = document.getElementById("success") as HTMLParagraphElement;
+// EXT.B2: Send and Choose... exclude each other; the buttons are drawn from this state only.
+const gate = new FormGate(renderButtons);
+
+function renderButtons(): void {
+  confirmButton.disabled = unavailable || finished || !gate.canSend;
+  browseDestinationButton.disabled = !gate.canPick;
+}
+
+function markUnavailable(message: string): void {
+  showError(message);
+  unavailable = true;
+  renderButtons();
+}
 
 function showError(message: string): void {
   errorBox.textContent = message;
@@ -41,8 +57,7 @@ function showSuccess(message: string): void {
 
 document.addEventListener("DOMContentLoaded", async () => {
   if (!handoffId) {
-    showError("This window has no download to confirm. Start again from the right-click menu.");
-    confirmButton.disabled = true;
+    markUnavailable("This window has no download to confirm. Start again from the right-click menu.");
     return;
   }
 
@@ -55,8 +70,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
-      showError(response?.error || "This download request has expired. Start again from the right-click menu.");
-      confirmButton.disabled = true;
+      markUnavailable(response?.error || "This download request has expired. Start again from the right-click menu.");
       return;
     }
 
@@ -81,13 +95,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
     void fitWindowToContent().catch(() => undefined);
   } catch (error) {
-    showError(error instanceof Error ? error.message : String(error));
-    confirmButton.disabled = true;
+    markUnavailable(error instanceof Error ? error.message : String(error));
   }
 });
 
 confirmButton.addEventListener("click", async () => {
-  confirmButton.disabled = true;
+  if (unavailable || finished) return;
+  await gate.send(sendToApp);
+});
+
+async function sendToApp(): Promise<void> {
   errorBox.classList.add("hidden");
   try {
     const response = (await chrome.runtime.sendMessage({
@@ -104,13 +121,11 @@ confirmButton.addEventListener("click", async () => {
 
     if (!response?.ok) {
       showError(response?.error || "The download could not be sent to the app.");
-      confirmButton.disabled = false;
       return;
     }
 
     if (!response.ack?.accepted) {
       showError(response.ack?.error || "Inbound Download Manager rejected this request.");
-      confirmButton.disabled = false;
       return;
     }
 
@@ -123,9 +138,8 @@ confirmButton.addEventListener("click", async () => {
     setTimeout(() => window.close(), 1200);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
-    confirmButton.disabled = false;
   }
-});
+}
 
 cancelButton.addEventListener("click", () => window.close());
 
@@ -173,17 +187,8 @@ document.addEventListener("keydown", (event) => {
            (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
 });
 
-// Send waits while the app's folder dialog is open, then gets back the state it had before.
-let confirmDisabledBeforePick = false;
-browseDestinationButton.addEventListener("click", () => {
-  void pickDestinationFolder(destinationInput, browseDestinationButton, showError, (busy) => {
-    if (busy) {
-      confirmDisabledBeforePick = confirmButton.disabled;
-      confirmButton.disabled = true;
-    } else {
-      confirmButton.disabled = confirmDisabledBeforePick;
-    }
-  });
+browseDestinationButton.addEventListener("click", async () => {
+  await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
 });
 import { fitWindowToContent } from "./fit-window";
 

@@ -13,7 +13,7 @@
   - Popup: all downloads of the app (11, including a CLI job and a failed one); Pause, Resume, Retry and Delete with and without the file worked against the Host; Pause catching showed OFF and a note.
   - Firefox: `npm run build:firefox` built. `web-ext lint` not run (no cached copy offline). Edge not run (no test copy; the owner's Edge is off limits).
   - Extension: typecheck clean; `npm test` 94 of 94 after the fix (92 before).
-- Found and fixed: EXT.B2, Send could be pressed while the app's folder dialog was open (the download went to the folder shown and the choice was lost). Checked on screen after the fix.
+- Found and fixed: EXT.B2, Send could be pressed while the app's folder dialog was open (the download went to the folder shown and the choice was lost). Checked on screen after the first fix. Review fix: that version could leave Send disabled for good after a send that failed while the dialog was open, and let Choose… be pressed during a send; both windows now use one state model (`FormGate`), covered by npm tests that run the page scripts. The review fix is not yet checked on screen.
 - Test setup notes, not product bugs: a Host built without the WinUI app shows a "frontend was not found" message box for each completed download while the completion dialog is on (turned off in the test instance's settings); `chrome.runtime.reload()` on an extension loaded with `--load-extension` unloaded it, so the browser was restarted instead; `chrome.action.openPopup()` needs a focused window, so the popup was opened as a tab.
 - Not done: Edge; a real Firefox run and AMO signing; the owner's TorBox Direct Download check (EXT.B1). The Haiku diff review named in CLAUDE.md was not available to this subagent (no agent tool).
 

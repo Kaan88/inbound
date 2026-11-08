@@ -1,3 +1,4 @@
+import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
 
 interface PageLink {
@@ -44,9 +45,8 @@ let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
 const selected = new Set<string>();
-// The app's folder dialog is open; Send waits for it.
-let picking = false;
-let sending = false;
+// EXT.B2: Send and Choose... exclude each other; updateSelection draws the buttons from this state.
+const gate = new FormGate(() => updateSelection());
 
 function showError(message: string): void {
   errorBox.textContent = message;
@@ -81,7 +81,9 @@ function updateSelection(visible: PageLink[] = visibleLinks()): void {
   selectAll.indeterminate = shownSelected > 0 && shownSelected < visible.length;
   countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
   selectionLabel.textContent = `${selected.size} selected`;
-  confirmButton.disabled = picking || selected.size === 0;
+  confirmButton.disabled = !gate.canSend || selected.size === 0;
+  browseDestinationButton.disabled = !gate.canPick;
+  cancelButton.disabled = gate.sending;
 }
 
 function render(): void {
@@ -199,13 +201,14 @@ selectAll.addEventListener("change", () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (selected.size === 0 || picking) {
+  if (selected.size === 0) {
     return;
   }
 
-  sending = true;
-  confirmButton.disabled = true;
-  cancelButton.disabled = true;
+  await gate.send(sendToApp);
+});
+
+async function sendToApp(): Promise<void> {
   showError("");
   showSuccess("");
   selectionLabel.textContent = `Adding ${selected.size} download${selected.size === 1 ? "" : "s"}...`;
@@ -242,22 +245,13 @@ confirmButton.addEventListener("click", async () => {
     }
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
-  } finally {
-    sending = false;
-    cancelButton.disabled = false;
-    updateSelection();
   }
-});
+}
 
 cancelButton.addEventListener("click", () => window.close());
 
-browseDestinationButton.addEventListener("click", () => {
-  // Send waits while the app's folder dialog is open.
-  void pickDestinationFolder(destinationInput, browseDestinationButton, showError, (busy) => {
-    picking = busy;
-    // While a send is in progress, its own finally block restores the buttons.
-    if (!sending) updateSelection();
-  });
+browseDestinationButton.addEventListener("click", async () => {
+  await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
 });
 
 void loadLinks();

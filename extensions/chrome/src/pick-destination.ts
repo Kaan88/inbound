@@ -5,19 +5,13 @@ interface FolderPickerResponse {
   error?: string;
 }
 
-/**
- * Asks the app for a folder. onBusy(true) runs before the request and onBusy(false) after it settles,
- * so a page can hold its send button meanwhile: the folder dialog belongs to the app, not this window,
- * and a send while it is open would go to the folder shown, losing the folder chosen afterwards.
- */
+/** Asks the app for a folder. Pages run it through FormGate.pick, which holds Send meanwhile (EXT.B2). */
 export async function pickDestinationFolder(
   input: HTMLInputElement,
   button: HTMLButtonElement,
   showError: (message: string) => void,
-  onBusy?: (busy: boolean) => void,
 ): Promise<void> {
   button.disabled = true;
-  onBusy?.(true);
   try {
     const response = await chrome.runtime.sendMessage({
       type: "dm.pickFolder",
@@ -33,6 +27,5 @@ export async function pickDestinationFolder(
     showError(error instanceof Error ? error.message : String(error));
   } finally {
     button.disabled = false;
-    onBusy?.(false);
   }
 }

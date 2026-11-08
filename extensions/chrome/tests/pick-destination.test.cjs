@@ -87,37 +87,3 @@ test('Browse stays disabled until a pending picker request settles', async () =>
     global.chrome = previousChrome;
   }
 });
-
-test('EXT.B2: Send waits while the app\'s folder dialog is open (onBusy brackets the request)', async () => {
-  const previousChrome = global.chrome;
-  let finish;
-  const events = [];
-  global.chrome = { runtime: { sendMessage: () => { events.push('request'); return new Promise(resolve => { finish = resolve; }); } } };
-  try {
-    const state = controls('D:\\Start');
-    const pending = pickDestinationFolder(state.input, state.button, state.showError, busy => events.push(busy ? 'busy' : 'idle'));
-    assert.deepEqual(events, ['busy', 'request']);
-    finish({ ok: true, cancelled: true });
-    await pending;
-    assert.deepEqual(events, ['busy', 'request', 'idle']);
-    events.length = 0;
-    global.chrome = { runtime: { async sendMessage() { throw new Error('gone'); } } };
-    await pickDestinationFolder(state.input, state.button, state.showError, busy => events.push(busy ? 'busy' : 'idle'));
-    assert.deepEqual(events, ['busy', 'idle'], 'an error still releases Send');
-  } finally {
-    global.chrome = previousChrome;
-  }
-});
-
-test('EXT.B2: the folder window and the batch window hold Send while choosing a folder', () => {
-  const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'utf8');
-  const call = 'pickDestinationFolder(destinationInput, browseDestinationButton, showError, (busy) =>';
-  const handoff = read('handoff.ts');
-  assert.ok(handoff.includes(call), 'handoff.ts passes onBusy');
-  assert.ok(handoff.includes('confirmDisabledBeforePick = confirmButton.disabled;'), 'handoff.ts remembers Send');
-  assert.ok(handoff.includes('confirmButton.disabled = confirmDisabledBeforePick;'), 'handoff.ts restores Send');
-  const batch = read('batch.ts');
-  assert.ok(batch.includes(call), 'batch.ts passes onBusy');
-  assert.ok(batch.includes('confirmButton.disabled = picking || selected.size === 0;'), 'batch.ts holds Send while picking');
-  assert.ok(batch.includes('if (selected.size === 0 || picking) {'), 'a Send click while picking does nothing');
-});
