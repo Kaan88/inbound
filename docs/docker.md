@@ -53,7 +53,7 @@ ignored.
 | --- | --- | --- |
 | `PUID`, `PGID` | `1000` | The user and group the server runs as. Use the owner of your download folder on the host (`id -u`, `id -g`). `0` is refused. Only the numbers count: no account is created in the container, and an existing one with the same id (the base image's `app` is 1654) changes nothing. |
 | `TZ` | `Etc/UTC` | Time zone for the scheduler, quotas and the log. |
-| `DOWNLOADMANAGER_PASSWORD_FILE` | - | A file holding the sign-in password. The web UI can't change it then. |
+| `DOWNLOADMANAGER_PASSWORD_FILE` | - | A file holding the sign-in password. The web UI can't change it then. Changing it and restarting signs every browser out and removes the paired extensions. |
 | `DOWNLOADMANAGER_PASSWORD` | - | The password itself (visible in `docker inspect`; the file is better). |
 | `DOWNLOADMANAGER_AUTH` | on | `off` turns sign-in off. The server then listens beyond loopback only with `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` as well, and anyone who reaches the port controls it, saved logins included. |
 | `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED` | - | `1`: with sign-in off, listen on every address anyway. |
