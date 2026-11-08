@@ -6,8 +6,11 @@ namespace DownloadManager.Core.Providers;
 /// </summary>
 public static class ProviderLinks
 {
-    /// <summary>What the provider allows for one file.</summary>
-    public const int MaxConnections = 4;
+    /// <summary>
+    /// Connections for one pasted provider link: the same CDN as the provider's own jobs, so the same cap. 16 is the
+    /// highest count measured without a refusal (TB.L1, 2026-11-08), not a figure the provider publishes.
+    /// </summary>
+    public const int MaxConnections = 16;
 
     private const string CdnLabel = "tb-cdn";
     private const string ApiDomain = "torbox.app";

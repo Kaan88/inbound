@@ -320,4 +320,41 @@ public sealed class ArchiveVolumesTests
     [InlineData("notes.gz")]
     [InlineData("film.mp4")]
     public void OtherNamesAreNotArchives(string name) => Assert.Empty(ArchiveVolumes.Group([name]));
+
+    [Fact]
+    public void TbS3_RecoveryVolumesAreFoundByTheNamesRarGivesThemAndAreNeverArchives()
+    {
+        string[] names =
+        [
+            "show.part01.rar", "show.part02.rar", "show.part01.rev", "show.part02.rev", "SHOW.rev", "show1_2_1.rev",
+            "show.r00.rev", "show.3.rev", "show2.rev", "showcase.rev", "show.part01.rev.txt", "other.part1.rev",
+        ];
+
+        Assert.Equal(
+            ["show.3.rev", "show.part01.rev", "show.part02.rev", "show.r00.rev", "SHOW.rev", "show1_2_1.rev"],
+            ArchiveVolumes.RecoveryVolumes("show", names));
+        Assert.Empty(ArchiveVolumes.Group(["show.part01.rev", "show.rev"]));
+    }
+
+    [Fact]
+    public void TbS3_ARecoveryVolumeAnotherSetInTheFolderCouldClaimIsLeftAlone()
+    {
+        // "a.part1" could be a whole archive's own name: its .rev is ambiguous between the two, so neither takes it.
+        string[] names = ["a.part1.rev", "a.rev", "a.part1.part1.rev"];
+        Assert.Equal(["a.rev"], ArchiveVolumes.RecoveryVolumes("a", names, otherBaseNames: ["a.part1"]));
+        Assert.Equal(["a.part1.part1.rev"], ArchiveVolumes.RecoveryVolumes("a.part1", names, otherBaseNames: ["a"]));
+        Assert.Empty(ArchiveVolumes.RecoveryVolumes(string.Empty, names));
+    }
+
+    [Theory]
+    [InlineData(new[] { "a.rar" }, true)]
+    [InlineData(new[] { "a.part1.rar", "a.part2.rar" }, true)]
+    [InlineData(new[] { "a.rar", "a.r00" }, true)]
+    [InlineData(new[] { "a.001.rar", "a.002.rar" }, true)]
+    [InlineData(new[] { "a.7z" }, false)]
+    [InlineData(new[] { "a.zip" }, false)]
+    [InlineData(new[] { "a.7z.001", "a.7z.002" }, false)]
+    [InlineData(new[] { "a.z01", "a.zip" }, false)]
+    public void TbS3_OnlyRarSetsHaveRecoveryVolumes(string[] names, bool rar) =>
+        Assert.Equal(rar, ArchiveVolumes.HasRarRecoveryVolumes(Assert.Single(ArchiveVolumes.Group(names))));
 }

@@ -216,7 +216,7 @@ internal static class RarBuilder
         return aes.EncryptCbc(padded, iv, PaddingMode.None);
     }
 
-    private static uint Crc(byte[] data)
+    internal static uint Crc(byte[] data)
     {
         var crc = 0xFFFFFFFFu;
         foreach (var value in data) crc = CrcTable[(crc ^ value) & 0xFF] ^ (crc >> 8);

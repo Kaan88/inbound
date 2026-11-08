@@ -401,7 +401,7 @@ public sealed partial class MainWindow
         {
             var request = folder
                 ? AddRequests.ForFolderLink(pick.Line, choice.Destination, choice.QueueId, choice.StartLater)
-                : AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files);
+                : AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files, pick.LinkPasswordForArchives);
             pick.LinkPassword = null;
             if (request is null) continue;
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;

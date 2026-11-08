@@ -12,13 +12,14 @@ namespace DownloadManager.Runtime.Archives;
 internal static partial class ArchiveSetIdentity
 {
     /// <summary>
-    /// Whether a name could belong to an archive set: RAR, a split name.7z.001, or a single 7z, zip or tar. Decides
+    /// Whether a name could belong to an archive set: RAR, a split name.7z.001, a spanned zip's name.z01 (A4.D), or a
+    /// single 7z, zip or tar. Decides
     /// nothing by itself: the volume grouping does that with the rest of the folder in view.
     /// </summary>
     public static bool LooksLikeVolume(string? fileName) =>
         !string.IsNullOrEmpty(fileName) &&
         (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase) || OldStyleVolumeName().IsMatch(fileName) ||
-         SplitPieceName().IsMatch(fileName) || ArchiveNames.StemOfSingle(fileName) is not null);
+         SplitPieceName().IsMatch(fileName) || SpannedZipPartName().IsMatch(fileName) || ArchiveNames.StemOfSingle(fileName) is not null);
 
     /// <summary>The first volume's name, present or not. A set missing its first has it as its first gap.</summary>
     public static string FirstName(ArchiveVolumeSet set) =>
@@ -53,6 +54,10 @@ internal static partial class ArchiveSetIdentity
 
     [GeneratedRegex(@"\.(?:7z|zip|rar|tar)\.\d{3}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SplitPieceName();
+
+    /// <summary>name.z01 to name.z999. The two-digit ones also match the old-style RAR pattern; the grouping tells them apart.</summary>
+    [GeneratedRegex(@"\.z\d{2,3}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SpannedZipPartName();
 }
 
 /// <summary>What one folder holds right now: files on disk, and files that downloads there will bring.</summary>

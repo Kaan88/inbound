@@ -57,7 +57,7 @@ public sealed class ProviderLinksTests
     }
 
     [Fact]
-    public void AllowsTheProvidersConnectionLimit() => Assert.Equal(4, ProviderLinks.MaxConnections);
+    public void AllowsTheProvidersConnectionLimit() => Assert.Equal(16, ProviderLinks.MaxConnections);
 }
 
 public sealed class UrlRedactorTests

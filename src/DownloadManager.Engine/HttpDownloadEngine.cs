@@ -118,16 +118,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         => _hostLimiter.UpdateLimit(limit);
 
     /// <summary>All transfers draw on this one budget as well as their own, so N downloads share the cap.</summary>
-    public void UpdateSharedSpeedLimit(long? bytesPerSecond)
-        => Volatile.Write(ref _sharedSpeedLimit, bytesPerSecond is > 0 ? bytesPerSecond.Value : 0);
+    public void UpdateSharedSpeedLimit(long? bytesPerSecond) => SpeedBudget.Update(bytesPerSecond);
 
-    public long SharedSpeedLimit => Volatile.Read(ref _sharedSpeedLimit);
+    public long SharedSpeedLimit => SpeedBudget.BytesPerSecond;
 
-    private long _sharedSpeedLimit;
-    private TransferRateLimiter? _sharedRateLimiter;
+    /// <summary>The shared cap's budget. Give it to the FTP engine too, so the cap covers both (PERF.6).</summary>
+    public SharedSpeedBudget SpeedBudget { get; } = new();
 
-    private TransferRateLimiter SharedRateLimiter =>
-        LazyInitializer.EnsureInitialized(ref _sharedRateLimiter, () => new TransferRateLimiter(() => Volatile.Read(ref _sharedSpeedLimit)));
+    private SharedSpeedBudget SharedRateLimiter => SpeedBudget;
 
     public int HostConnectionLimit => _hostLimiter.Limit;
 

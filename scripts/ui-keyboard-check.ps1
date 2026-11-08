@@ -1,5 +1,8 @@
+# Opens and cancels the app's dialogs, and sends real Delete and Shift+Delete key input to its list (UI.R20).
+# Attaches to a running UI whose executable path contains -PathPart; starts nothing. Use a test instance only:
+# the installed app is refused, so these keys never reach the owner's real list.
 [CmdletBinding()]
-param()
+param([Parameter(Mandatory)][string]$PathPart)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName UIAutomationClient
@@ -22,6 +25,22 @@ public static class UiKeyboardCheckNative {
     }, IntPtr.Zero);
     return found;
   }
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  // Real key input, so the app's own Shift state check sees the key held (PostMessage would not set it).
+  // Sent only while the app's window is in front: Shift+Delete in another window can delete files for good.
+  public static bool Delete(IntPtr top, bool shift) {
+    SetForegroundWindow(top);
+    System.Threading.Thread.Sleep(150);
+    if (GetForegroundWindow() != top) return false;
+    if (shift) keybd_event(0x10, 0x2A, 0, UIntPtr.Zero);
+    keybd_event(0x2E, 0x53, 1, UIntPtr.Zero);
+    System.Threading.Thread.Sleep(60);
+    keybd_event(0x2E, 0x53, 3, UIntPtr.Zero);
+    if (shift) keybd_event(0x10, 0x2A, 2, UIntPtr.Zero);
+    return true;
+  }
   public static void Enter(IntPtr hwnd) {
     PostMessage(hwnd, 0x0100, (IntPtr)13, (IntPtr)1);
     System.Threading.Thread.Sleep(80);
@@ -30,10 +49,14 @@ public static class UiKeyboardCheckNative {
 }
 '@
 
-$proc = Get-Process DownloadManager.Desktop.WinUI -ErrorAction Stop
+$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" } | Select-Object -First 1
+if (-not $proc) { Write-Output 'NO TEST UI'; exit 1 }
+# The installed copy is the owner's real app; a -PathPart that happens to match it must not send keys there.
+if ($proc.ExecutablePath -like '*\Programs\Inbound Download Manager\*') { Write-Output 'REFUSED: that is the installed app, not a test instance'; exit 1 }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $pidCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $proc.Id)
+    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$proc.ProcessId)
 $win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
 if (-not $win) { Write-Output 'NO WINDOW'; exit 1 }
 $hwnd = [IntPtr]$win.Current.NativeWindowHandle
@@ -123,6 +146,53 @@ if ($delete -and (Invoke-Element $delete)) {
     $rowsAfter = $jobs.FindAll([System.Windows.Automation.TreeScope]::Children, $itemCondition).Count
     Write-Output "DELETE-ENTER closed=$(-not [bool](Find-ByName 'Delete download?')) rowsAfter=$rowsAfter"
     if (Find-ByName 'Delete download?') { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
+}
+
+# UI.R20: Shift+Delete opens the dialog with "Delete from disk" ticked; Delete and the toolbar button leave it
+# unticked. The box only shows when a selected row is finished, so select a finished row first if there is one.
+# Every case is cancelled; nothing is deleted. Run it against a test instance only.
+function DeleteBox-State {
+    $box = Find-ById 'DeleteFromDiskBox'
+    if (-not $box) { return 'absent' }
+    $toggle = $null
+    if ($box.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) { return "$($toggle.Current.ToggleState)" }
+    return 'no-toggle'
+}
+function Close-DeleteDialog {
+    $title = Find-ByName 'Delete download?'
+    if ($title) { Invoke-Element (Get-Button 'Cancel') | Out-Null; Start-Sleep -Milliseconds 500 }
+}
+if ($rows.Count -gt 0) {
+    $finished = $null
+    foreach ($row in $jobs.FindAll([System.Windows.Automation.TreeScope]::Children, $itemCondition)) {
+        if ($row.Current.Name -match 'Complete') { $finished = $row; break }
+    }
+    $target = if ($finished) { $finished } else { $rows[0] }
+    $target.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    $target.SetFocus()
+    Start-Sleep -Milliseconds 400
+    foreach ($case in @(@{ Name = 'SHIFT-DELETE'; Shift = $true; Expect = 'On' }, @{ Name = 'DELETE-KEY'; Shift = $false; Expect = 'Off' })) {
+        # A dialog left open by the last case would take this key instead of the list: stop rather than guess.
+        if (Find-ByName 'Delete download?') { Write-Output "$($case.Name) skipped: the last delete dialog is still open"; break }
+        $target.SetFocus()
+        Start-Sleep -Milliseconds 200
+        if (-not [UiKeyboardCheckNative]::Delete($hwnd, $case.Shift)) {
+            Write-Output "$($case.Name) skipped: the app's window could not be brought to the front, so no key was sent"
+            continue
+        }
+        Start-Sleep -Milliseconds 900
+        $state = DeleteBox-State
+        $verdict = if ($state -eq 'absent') { 'n/a (no finished row selected)' } elseif ($state -eq $case.Expect) { 'ok' } else { 'WRONG' }
+        Write-Output "$($case.Name) open=$([bool](Find-ByName 'Delete download?')) deleteFromDisk=$state expect=$($case.Expect) $verdict"
+        Close-DeleteDialog
+    }
+    if ($delete -and (Invoke-Element $delete)) {
+        Start-Sleep -Milliseconds 900
+        $state = DeleteBox-State
+        $verdict = if ($state -eq 'absent') { 'n/a (no finished row selected)' } elseif ($state -eq 'Off') { 'ok' } else { 'WRONG' }
+        Write-Output "DELETE-TOOLBAR open=$([bool](Find-ByName 'Delete download?')) deleteFromDisk=$state expect=Off $verdict"
+        Close-DeleteDialog
+    }
 }
 
 # Move/Rename uses DefaultButton=Primary; the current path is a safe no-op.

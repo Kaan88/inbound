@@ -183,7 +183,13 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var peak = known.Length == 0 ? 0 : known.Max();
         var average = known.Length == 0 ? 0 : known.Average();
         var latest = visible.LastOrDefault().Rate;
-        Summary.Text = $"{(latest is { } current ? RateText(current) : "—")}   ·   Average {RateText(average)}   ·   Peak {RateText(peak)}";
+        var currentText = latest is { } current ? RateText(current) : "—";
+        var averageText = RateText(average);
+        var peakText = RateText(peak);
+        if (SummaryCurrent.Text != currentText) SummaryCurrent.Text = currentText;
+        if (SummaryAverage.Text != averageText) SummaryAverage.Text = averageText;
+        if (SummaryPeak.Text != peakText) SummaryPeak.Text = peakText;
+        AutomationProperties.SetName(Summary, $"{currentText}, average {averageText}, peak {peakText}");
 
         if (!_expanded) return;
         Plot.Children.Clear();

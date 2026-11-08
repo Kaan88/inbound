@@ -24,6 +24,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\DownloadManager.Archives.Tests\RarBuilder.cs" Link="RarBuilder.cs" />
+    <Compile Include="..\DownloadManager.Archives.Tests\SpannedZipBuilder.cs" Link="SpannedZipBuilder.cs" />
     <Compile Include="..\DownloadManager.Containers.Tests\ContainerFixtures.cs" Link="ContainerFixtures.cs" />
   </ItemGroup>
 

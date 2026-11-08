@@ -215,6 +215,7 @@ public sealed partial class MockTorBox
     private readonly List<JsonObject> _hosters = [];
     private readonly List<MockTorBoxSubmission> _submissions = [];
     private readonly List<(string Route, long Id)> _deleted = [];
+    private readonly List<(string Operation, long QueuedId)> _queueControls = [];
     private readonly List<string> _authSeen = [];
     private long _nextId;
     private long _nextFileId;
@@ -272,6 +273,7 @@ public sealed partial class MockTorBox
             _hosters.Clear();
             _submissions.Clear();
             _deleted.Clear();
+            _queueControls.Clear();
             _authSeen.Clear();
             _nextId = 133_998_000;
             _nextFileId = 0;
@@ -508,6 +510,15 @@ public sealed partial class MockTorBox
         get
         {
             lock (_sync) return _submissions.ToList();
+        }
+    }
+
+    /// <summary>Every <c>queued/controlqueued</c> call that named one entry, in order.</summary>
+    public IReadOnlyList<(string Operation, long QueuedId)> QueueControls
+    {
+        get
+        {
+            lock (_sync) return _queueControls.ToList();
         }
     }
 
@@ -793,6 +804,7 @@ public sealed partial class MockTorBox
             case "GET usenet/requestdl": return RequestLink(RemoteItemKind.Usenet, "usenet_id", query);
             case "GET webdl/hosters": return Hosters();
             case "GET queued/getqueued": return Queued(query);
+            case "POST queued/controlqueued": return await ControlQueuedAsync(context).ConfigureAwait(false);
             case "GET torrents/getqueued":
                 return Err(410, "DEPRECATED", "This endpoint is now deprecated. Please use /v1/api/queued/getqueued instead.");
             case "POST torrents/controltorrent": return await ControlAsync(context, route, RemoteItemKind.Torrent, "torrent_id").ConfigureAwait(false);
@@ -1323,6 +1335,48 @@ public sealed partial class MockTorBox
             _items.Remove(item);
             _deleted.Add((route, id));
             return Ok(null, "Removed.");
+        }
+    }
+
+    /// <summary>
+    /// The schema (openapi.json, 2026-11-08) gives <c>operation</c>, <c>queued_id</c> and <c>all</c>, and a 404 answer;
+    /// <c>start</c> and <c>delete</c> were seen working live (TB.S1). Here a queued entry's id is its item's id, and a
+    /// start lists the item in mylist from then on, as the real one did within seconds. What the real service answers
+    /// for an unknown id isn't known, so this one says 404, the only error its schema names besides validation.
+    /// </summary>
+    private async Task<Answer> ControlQueuedAsync(HttpContext context)
+    {
+        using var document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        var root = document.RootElement;
+        var operation = root.TryGetProperty("operation", out var op) && op.ValueKind == JsonValueKind.String ? op.GetString() : null;
+        if (root.TryGetProperty("all", out var all) && all.ValueKind == JsonValueKind.True)
+        {
+            return Err(400, "INVALID_OPTION", "This mock refuses all=true: nothing in the app should ever send it.");
+        }
+
+        if (operation is not ("start" or "delete") ||
+            !root.TryGetProperty("queued_id", out var idElement) || !idElement.TryGetInt64(out var id))
+        {
+            return Err(400, "INVALID_OPTION", "Unsupported operation.");
+        }
+
+        lock (_sync)
+        {
+            var item = _items.FirstOrDefault(candidate => candidate.Id == id && candidate.InQueue);
+            if (item is null)
+            {
+                return Err(404, "ITEM_NOT_FOUND", "Queued download not found.");
+            }
+
+            _queueControls.Add((operation, id));
+            if (operation == "start")
+            {
+                item.InQueue = false;
+                return Ok(null, "Queued download started.");
+            }
+
+            _items.Remove(item);
+            return Ok(null, "Queued download deleted.");
         }
     }
 

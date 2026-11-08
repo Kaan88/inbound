@@ -2,8 +2,12 @@ namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>One column of a list with a header. An empty title means a plain cell with no header of its own.</summary>
 /// <param name="SpokenTitle">What a screen reader says for a title that is only a letter.</param>
-internal sealed record ListColumn(string Key, string Title, double DefaultWidth, double MinWidth, string? SpokenTitle = null, bool Centered = false)
+/// <param name="RightAligned">UI.R6: a live counter. Its header and cells line up on the right, so units hold still as digits are added.</param>
+internal sealed record ListColumn(string Key, string Title, double DefaultWidth, double MinWidth, string? SpokenTitle = null, bool Centered = false, bool RightAligned = false)
 {
+    /// <summary>The gap a right-aligned cell keeps from the next column, in the header and in the rows alike.</summary>
+    public const double RightPadding = 8;
+
     public bool HasHeader => Title.Length > 0;
 
     public string Spoken => SpokenTitle ?? Title;
@@ -21,11 +25,11 @@ internal static class ListColumnSets
             new ListColumn("icon", string.Empty, 30, 30),
             new ListColumn("name", "File Name", 264, 120),
             new ListColumn("queue", "Q", 30, 24, SpokenTitle: "Queue", Centered: true),
-            new ListColumn("size", "Size", 78, 40),
+            new ListColumn("size", "Size", 78, 40, RightAligned: true),
             new ListColumn("status", "Status", 140, 60),
             new ListColumn("extraction", "Extraction", 140, 60),
-            new ListColumn("eta", "Time left", 78, 40),
-            new ListColumn("rate", "Transfer rate", 86, 40),
+            new ListColumn("eta", "Time left", 78, 40, RightAligned: true),
+            new ListColumn("rate", "Transfer rate", 86, 40, RightAligned: true),
             new ListColumn("lastTry", "Last Try Date", 116, 60),
             new ListColumn("description", "Description", 210, 60),
         ],

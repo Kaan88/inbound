@@ -45,12 +45,17 @@
             <TabViewItem Header="Speed limiter" IsClosable="False">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="12" Padding="4,12,10,10">
-                        <TextBlock x:Name="CurrentRateText" Text="Current transfer rate: —" />
+                        <!-- UI.R6: the rate holds a right edge of its own, so its units stay put as digits come and go. -->
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Current transfer rate:" />
+                            <TextBlock x:Name="CurrentRateText" Text="—" MinWidth="80" TextAlignment="Right"
+                                       AutomationProperties.Name="Current transfer rate" />
+                        </StackPanel>
                         <CheckBox x:Name="UseSpeedLimit" Content="Use speed limiter" />
                         <TextBox x:Name="SpeedLimitInput" Header="Maximum download speed (KB/s)"
                                  PlaceholderText="Enter a positive number" IsEnabled="False" />
                         <TextBlock x:Name="SpeedLimitNotice"
-                                   Text="Applies to ordinary HTTP/HTTPS file downloads. FTP, HLS, and DASH transfers do not support this control."
+                                   Text="Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
                                    TextWrapping="Wrap" FontSize="12"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Button x:Name="ApplySpeedLimitButton" Content="Apply speed limit"

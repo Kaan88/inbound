@@ -113,6 +113,7 @@ public sealed partial class DownloadManagerService
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
+        _ftpEngine?.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -1328,6 +1329,8 @@ public sealed partial class DownloadManagerService
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
+        // PERF.6: FTP downloads honour the cap too. The Host gives both engines one budget, so it is one cap for all.
+        _ftpEngine?.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
         List<JobRuntime> reconnected;
         List<JobRuntime> running;
         lock (_sync)
@@ -2328,7 +2331,7 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = "Update transfer settings and Move/Rename in separate requests." };
             if (request.SpeedLimitBytesPerSecond is not null &&
                 (runtime.Job.IsTerminal || !SupportsLiveSpeedLimit(runtime.Job)))
-                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS file downloads." };
+                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS and FTP file downloads." };
             if (request.SpeedLimitBytesPerSecond is not null)
                 runtime.Job.SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond;
             if (request.ShowCompletionDialog is not null)
@@ -4200,6 +4203,8 @@ public sealed partial class DownloadManagerService
 
     private static bool SupportsLiveSpeedLimit(DownloadJob job)
         => job.RemoteSource is not null ||
+           // PERF.6: the FTP engine reads the download's own limit as it goes, like the HTTP one.
+           (Uri.TryCreate(job.Url, UriKind.Absolute, out var ftp) && ftp.Scheme == "ftp") ||
            Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
            uri.Scheme is "http" or "https" &&
            !uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
