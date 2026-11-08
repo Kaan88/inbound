@@ -100,6 +100,18 @@ public sealed partial class DownloadManagerService
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+
+    /// <summary>UI.R24. Guarded by <c>_sync</c>; written from progress reports, so it costs nothing while idle.</summary>
+    private readonly SpeedHistory _speedHistory = new(DateTimeOffset.UtcNow);
+
+    /// <summary>UI.R24: the last hour of total download speed, for a window that has just connected.</summary>
+    public SpeedHistoryDto GetSpeedHistory()
+    {
+        lock (_sync)
+        {
+            return _speedHistory.Read(DateTimeOffset.UtcNow);
+        }
+    }
     public bool TrayAvailable { get; set; }
     public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
 
@@ -2544,7 +2556,21 @@ public sealed partial class DownloadManagerService
         CancellationToken cancellationToken = default)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var moved = await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false);
+            if (!moved.Ok) return moved;
+
+            // A running download moved into a queue that is already full: the same rule as a lowered limit
+            // (owner, 2026-11-08: "Yes, same rule") sends the queue's newest extra one back to Queued.
+            await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                if (_jobs.TryGetValue(id, out var runtime)) moved.Job = Map(runtime.Job);
+            }
+
+            return moved;
+        }
         finally { _settingsUpdateGate.Release(); }
     }
 
@@ -3548,11 +3574,16 @@ public sealed partial class DownloadManagerService
         {
             JobDto? dto = null;
             var quotaReached = false;
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now;
             lock (_sync)
             {
+                // Read under the lock, so reports reach the speed history in time order and none is dropped as
+                // coming from an earlier second.
+                now = DateTimeOffset.UtcNow;
                 if (job.State is DownloadState.Paused or DownloadState.Cancelled || runtime.CancelledForRemoval)
                 {
+                    // Its share of the total speed ends now, not when its wind-down finishes (UI.R24).
+                    _speedHistory.Stopped(job.Id, now);
                     return;
                 }
 
@@ -3566,6 +3597,7 @@ public sealed partial class DownloadManagerService
                 // (UI.R21). A report from its wind-down still counts its bytes, but must not make it look as
                 // if it were running again.
                 var windingDown = runtime.Preempted || (runtime.PauseRequested && runtime.ResumeWhenStopped);
+                _speedHistory.Report(job.Id, windingDown ? 0 : p.BytesPerSecond, now);
                 if (!windingDown)
                 {
                     job.BytesPerSecond = p.BytesPerSecond;
@@ -3660,6 +3692,7 @@ public sealed partial class DownloadManagerService
             job.WaitingForHost = null;
             runtime.LastPhase = null;
             runtime.Preempted = false;
+            _speedHistory.Stopped(job.Id, DateTimeOffset.UtcNow);
 
             // The file is where it landed, whatever else happened while it got there.
             if (result.Success)

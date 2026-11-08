@@ -274,6 +274,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplySnapshot(SnapshotDto snapshot)
     {
+        if (!_graphSnapshotReady) _ = LoadSpeedHistoryAsync();
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
         FollowThemeSetting(snapshot.Settings);

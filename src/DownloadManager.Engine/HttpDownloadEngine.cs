@@ -1555,6 +1555,18 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         }
 
                         encrypted.Write(buffer, 0, read);
+
+                        // The segment is decrypted only once it is whole, so report while it arrives too: a long
+                        // segment would otherwise go quiet for its whole download. The count is what is surely
+                        // plaintext (padding is at most one block), so it never runs ahead of the final figure.
+                        var now = DateTimeOffset.UtcNow;
+                        if (now - progressState.LastReport >= TimeSpan.FromMilliseconds(300))
+                        {
+                            progressState.LastReport = now;
+                            var arrived = alreadyReceived + Math.Max(0, encrypted.Length - 16);
+                            var arrivalSpeed = arrived / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+                            progress?.Report(new TransferProgress(arrived, null, arrivalSpeed, null, 1, phase));
+                        }
                     }
 
                     var plain = DecryptHlsSegment(
