@@ -5,6 +5,7 @@ var withProxy = false;
 var withSocks5 = false;
 var withTorBox = false;
 int? cdnBytesPerSecond = null;
+long? firstLinkDiesAfter = null;
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] is "--port" or "-p" && i + 1 < args.Length && int.TryParse(args[i + 1], out var parsed))
@@ -32,6 +33,13 @@ for (var i = 0; i < args.Length; i++)
     {
         cdnBytesPerSecond = bps;
     }
+
+    // The first link the mock issues dies after this many bytes, cutting off its connections, as an expiring link
+    // does mid-download; the next link works. For an end-to-end refresh check from outside the process (D4).
+    if (args[i] == "--first-link-dies-after" && i + 1 < args.Length && long.TryParse(args[i + 1], out var dies) && dies > 0)
+    {
+        firstLinkDiesAfter = dies;
+    }
 }
 
 var host = await TestServerHost.StartAsync(port);
@@ -43,6 +51,11 @@ if (withTorBox)
 {
     host.TorBox.SeedSandbox();
     host.TorBox.CdnBytesPerSecond = cdnBytesPerSecond;
+    if (firstLinkDiesAfter is { } bytes)
+    {
+        host.TorBox.NextLinkDiesAfter(bytes);
+        host.TorBox.LinkDied = () => Console.WriteLine($"Mock TorBox: the first link died after {bytes} bytes");
+    }
     // Invented, like everything in the mock. Point a sandbox Host at it with DOWNLOADMANAGER_TORBOX_API.
     Console.WriteLine($"Mock TorBox API at {host.TorBox.ApiBase} (key {MockTorBox.DefaultApiKey})");
 }
