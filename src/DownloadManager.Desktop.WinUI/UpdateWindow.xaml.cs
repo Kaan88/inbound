@@ -16,10 +16,7 @@ public sealed partial class UpdateWindow : Window
     public UpdateWindow()
     {
         InitializeComponent();
-        var theme = UiStateStore.Load().DarkMode;
-        Root.RequestedTheme = theme is { } dark
-            ? (dark ? ElementTheme.Dark : ElementTheme.Light)
-            : ElementTheme.Default;
+        AppTheme.Track(Root);
         // UI.R14: sized for the display's scaling (it was clipped at 150%), and in the middle of the main window.
         WindowLayout.ResizeForDpi(this, 460, 250);
         WindowLayout.CenterOnMainWindow(this);

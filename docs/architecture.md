@@ -29,7 +29,9 @@
   enforces one instance.
 - **Tray** is a library hosted inside Host. The menu can open the UI, pause all,
   resume all, show integration status, open settings, and exit. Closing the UI
-  only closes the UI; Kill/Exit is explicit.
+  only closes the UI, never the Host; Kill/Exit is explicit. By default closing
+  the window also ends the window's process (PERF.5, "Closing the window ends
+  it"); the tray, a second launch or the Start menu entry starts it again.
 - **Desktop.WinUI** is a client. It never touches the job store or engine. It
   connects, gets a snapshot, subscribes to events, and reconnects on failure.
 - **NativeHost** is launched by Chrome per native-messaging connection. It

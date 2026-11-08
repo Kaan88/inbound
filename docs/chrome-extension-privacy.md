@@ -133,8 +133,9 @@ app does not write cookies to them.
 
 Removing the extension or uninstalling the app does not delete this data. Removing a download from the
 list deletes its record and its cookies. It does not delete the recent-addresses list, the logs, or the
-size, status and dates kept for the app's statistics. If you use Remove on a paused or failed download, a
-small progress file containing its addresses also stays behind. To erase everything, exit the app from its
+size, status and dates kept for the app's statistics. If a paused or failed download is taken off the list
+with its data kept (the command-line `remove --keep-file`), a small progress file containing its addresses
+also stays behind. To erase everything, exit the app from its
 tray icon, then delete that folder.
 
 ## Who else sees anything
