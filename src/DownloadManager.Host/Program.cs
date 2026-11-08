@@ -38,12 +38,26 @@ internal static class Program
         var configureStartup = args.FirstOrDefault(arg =>
             arg.StartsWith("--configure-sign-in-launch=", StringComparison.OrdinalIgnoreCase));
         using var mutex = new Mutex(initiallyOwned: true, PipeNames.MutexName(), out var createdNew);
+        string? takeOverNote = null;
         if (!createdNew)
         {
             // Never rewrite settings behind a running service's single-writer authority.
             if (configureStartup is not null) return 1;
-            NotifyExistingInstance();
-            return 0;
+            switch (WaitForExistingInstance(mutex, TimeSpan.FromSeconds(5)))
+            {
+                case ExistingInstance.Answered:
+                    TryLogBeforeStart("Another Host is running for this profile; asked it to open its window and exiting.");
+                    return 0;
+                case ExistingInstance.Busy:
+                    TryLogBeforeStart("Another Host holds this profile but did not answer within 5 seconds; exiting.");
+                    return 0;
+                case ExistingInstance.Abandoned:
+                    takeOverNote = "The previous Host ended without releasing this profile (killed or crashed); taking over.";
+                    break;
+                default:
+                    takeOverNote = "The previous Host released this profile while this one was starting; taking over.";
+                    break;
+            }
         }
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
@@ -65,6 +79,7 @@ internal static class Program
 
         var log = new FileLogger(paths.LogsDirectory);
         log.Info($"Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
+        if (takeOverNote is not null) log.Info(takeOverNote);
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             log.Error($"Unhandled exception: {e.ExceptionObject}");
@@ -416,20 +431,74 @@ internal static class Program
         }
     }
 
-    private static void NotifyExistingInstance()
+    private enum ExistingInstance
+    {
+        Answered,
+        Busy,
+        Released,
+        Abandoned,
+    }
+
+    /// <summary>
+    /// UI.B12: the mutex outlives a Host killed with taskkill /F until Windows has closed its handles, so a start
+    /// in that moment used to find it, take the dying process for a running copy and exit with 0. A live copy
+    /// answers on its pipe; a dying one doesn't, and its mutex is soon released or abandoned. Whichever comes
+    /// first within the wait decides. A copy that holds the mutex and never answers (still starting, or hung)
+    /// keeps it: two Hosts on one profile would break the single writer.
+    /// </summary>
+    private static ExistingInstance WaitForExistingInstance(Mutex mutex, TimeSpan wait)
+    {
+        var deadline = DateTimeOffset.UtcNow + wait;
+        while (true)
+        {
+            try
+            {
+                if (mutex.WaitOne(TimeSpan.FromMilliseconds(200))) return ExistingInstance.Released;
+            }
+            catch (AbandonedMutexException)
+            {
+                // The wait still acquired it.
+                return ExistingInstance.Abandoned;
+            }
+
+            if (NotifyExistingInstance(TimeSpan.FromMilliseconds(300))) return ExistingInstance.Answered;
+            if (DateTimeOffset.UtcNow >= deadline) return ExistingInstance.Busy;
+        }
+    }
+
+    /// <summary>For the exits before the Host's own log exists. A second copy appends to the running one's file.</summary>
+    private static void TryLogBeforeStart(string message)
+    {
+        try
+        {
+            var paths = StoragePaths.CreateDefault();
+            new FileLogger(paths.LogsDirectory).Info(message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // There is nowhere to log this.
+        }
+    }
+
+    /// <returns>Whether a running copy took the request.</returns>
+    private static bool NotifyExistingInstance(TimeSpan connectTimeout)
     {
         IpcClient? client = null;
         try
         {
-            client = IpcClient.ConnectAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
+            client = IpcClient.ConnectAsync(connectTimeout).GetAwaiter().GetResult();
             var message = IpcMessage.Create(MessageTypes.HostOpenUi,
                 new HostActionRequest { Action = string.Empty });
             client.SendAsync(message).GetAwaiter().GetResult();
-            client.ReadAsync().Wait(TimeSpan.FromSeconds(2));
+            // Only a live copy writes. A pipe end that a dying process still holds can accept a connection but
+            // never sends its greeting.
+            using var reply = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            return client.ReadAsync(reply.Token).GetAwaiter().GetResult() is not null;
         }
         catch (Exception)
         {
-            // The existing process may still be starting; it will be found by the next attempt.
+            // No pipe, no greeting, or it closed under us: the copy is still starting or already going.
+            return false;
         }
         finally
         {
