@@ -497,14 +497,11 @@ public sealed partial class MainWindow
         box.PasswordChanged += (_, _) => dialog.IsPrimaryButtonEnabled = box.Password.Length > 0;
         dialog.Opened += (_, _) => box.Focus(FocusState.Programmatic);
 
-        ContentDialogResult answer;
-        try
+        // Null when another dialog is open over this window (UI.B8). The row and the notice are still there.
+        var answer = await DialogGuard.ShowAsync(dialog);
+        if (answer is null)
         {
-            answer = await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException)
-        {
-            // Another dialog is open over this window. The row and the notice are still there.
+            box.Password = string.Empty;
             return;
         }
 

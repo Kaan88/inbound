@@ -180,7 +180,7 @@ internal sealed class ProviderAccountPage
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {

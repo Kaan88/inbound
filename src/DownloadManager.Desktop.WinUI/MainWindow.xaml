@@ -65,7 +65,7 @@
                 <MenuFlyoutItem x:Name="FileStopItem" Text="Stop Download" AccessKey="S" Click="MenuPause_Click" />
                 <MenuFlyoutItem x:Name="FileRedownloadItem" Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem x:Name="FileRemoveItem" Text="Remove" AccessKey="V" Click="MenuRemove_Click" />
+                <MenuFlyoutItem x:Name="FileDeleteItem" Text="Delete…" AccessKey="E" KeyboardAcceleratorTextOverride="Delete" Click="MenuDelete_Click" />
             </MenuBarItem>
 
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">

@@ -35,7 +35,7 @@ internal static class FileMenuRules
     /// <param name="singleFile">The selection's first local row is a file, which is what Open and its like act on.</param>
     /// <param name="package">The selection's first local row is a package.</param>
     /// <param name="sideRows">Selected rows with no local download behind them: remote jobs and archive records.</param>
-    /// <param name="removableSideRows">Those of them that Remove can take off the list. An archive still extracting can't go.</param>
+    /// <param name="removableSideRows">Those of them that Delete can take off the list. An archive still extracting can't go.</param>
     /// <param name="fileRemoved">That file's archive was removed after extraction.</param>
     public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false)
     {
@@ -99,4 +99,14 @@ internal static class ProgressBarRules
     /// <summary>The moving bar means bytes are being worked on and their total isn't known. A failed or paused download isn't doing that.</summary>
     public static bool ShowsMovingBar(string state, long? totalBytes)
         => totalBytes is not > 0 && state is "connecting" or "downloading" or "verifying";
+}
+
+/// <summary>What Delete… acts on (UI.R25). Nothing here touches the UI.</summary>
+internal static class DeleteRules
+{
+    /// <summary>The selected downloads; or, from the list's context menu when only an archive record is selected,
+    /// the download behind it, as the context menu's Remove did. The File menu, toolbar and Delete key act on the
+    /// selection only, so for them a selection of side rows alone removes those rows.</summary>
+    public static IReadOnlyList<T> Targets<T>(IReadOnlyList<T> selected, T? recordDownload, bool fromContextMenu) where T : class
+        => selected.Count > 0 ? selected : fromContextMenu && recordDownload is not null ? [recordDownload] : [];
 }

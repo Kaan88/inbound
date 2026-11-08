@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DownloadManager.Core;
+using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Persistence;
@@ -782,6 +783,7 @@ public sealed class JsonSettingsStore : ISettingsStore
             ? null
             : settings.SkippedUpdateVersion.Trim();
 
+        settings.Theme = ThemeChoices.Normalize(settings.Theme);
         settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
         settings.CustomCategories ??= new();
         settings.ArchivedDownloads ??= new();

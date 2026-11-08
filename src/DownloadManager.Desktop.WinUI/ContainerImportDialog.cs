@@ -100,16 +100,19 @@ internal sealed class ContainerImportDialog
         dialog.PrimaryButtonClick += OnPrimary;
         UpdateButtons();
 
-        try
+        // Refused at once, without showing, when another dialog is open over this window (UI.B8); nothing has been
+        // asked yet then, so nothing is read either.
+        var shown = DialogGuard.ShowAsync(dialog);
+        if (shown.IsCompleted && shown.Result is null)
         {
-            // This call is what throws when another dialog is open, and then nothing has been asked yet.
-            var shown = dialog.ShowAsync();
-            _ = ReadAsync();
-            await shown;
+            _closing.Cancel();
+            return new ContainerImportAnswer(null, null, false, CouldNotOpen: true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+
+        _ = ReadAsync();
+        if (await shown is null)
         {
-            // Another dialog is already open over this window.
+            // It failed to open after all.
             _closing.Cancel();
             return new ContainerImportAnswer(null, null, false, CouldNotOpen: true);
         }

@@ -27,8 +27,7 @@ internal sealed class HosterWindow : Window
     private HosterWindow(RemoteClient client)
     {
         _client = client;
-        var theme = UiStateStore.Load().DarkMode;
-        _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
+        AppTheme.Track(_root);
         Title = "Hosters — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 760, 640);
         WindowPlacement.Track(this, "hosters");

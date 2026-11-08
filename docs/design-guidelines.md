@@ -28,8 +28,10 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 - In code-behind, use `InboundTheme.Brush("InboundXxxBrush", element)`. Pass the
   window's root element. Each window sets its own `RequestedTheme`, so an
   application-level lookup can return the wrong variant.
-- New windows read `UiStateStore.Load().DarkMode`, set `RequestedTheme` on the
-  root, and use `InboundSurfaceBrush` for the background.
+- New windows call `AppTheme.Track(root)`, which sets `RequestedTheme` on the root
+  from the settings' Theme (System, Light or Dark) and changes it with the setting
+  and with Windows, and use `InboundSurfaceBrush` for the background. Do not read
+  the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
   `Content`. It sets the app icon and a title bar matching `InboundChromeBrush`,
   so a dark window never sits under a white caption.
@@ -178,8 +180,11 @@ default window width. With one remote or archive row selected, the status bar sa
 3. Drive realistic states with TestServer throttling, for example
    `/slow/name.iso?size=80000000&bps=400000`. Add a failing URL and a small
    file that completes so every status color is on screen.
-4. Capture both themes. To switch, set `"DarkMode": false|true` in
-   `artifacts\uiqa\data\ui-state.json` and restart the UI.
+4. Capture both themes. To switch, use the Theme box in Options or View > Dark
+   Mode on the test instance. Both change the test Host's Theme setting, and every
+   open window follows. Editing `artifacts\uiqa\data\ui-state.json` does not: its
+   `theme` is only a start-up hint, and a `darkMode` there is saved into the
+   Host's setting the next time the window connects.
 5. Capture a window with `PrintWindow` and flag 2 (`PW_RENDERFULLCONTENT`). It needs no focus and takes in nothing
    else on the desktop, while a copy of the screen can come out black. A menu or flyout is a window of its own, with
    class `Microsoft.UI.Content.PopupWindowSiteBridge` or `Xaml_WindowedPopupClass`, so capture it by itself.
