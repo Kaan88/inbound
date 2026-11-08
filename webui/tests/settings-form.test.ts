@@ -68,7 +68,11 @@ describe('validateForm', () => {
     expect(validateForm(form)?.message).toBe('Connections per site must be between 1 and 64.');
     form.maxConnectionsPerHost = 64;
     form.speedKb = -5;
-    expect(validateForm(form)?.message).toBe('Speed limit must be a positive number of KB/s.');
+    expect(validateForm(form)?.message).toBe('Speed limit must be between 1 and 10000000 KB/s.');
+    form.speedKb = 10_000_001;
+    expect(validateForm(form)?.message).toBe('Speed limit must be between 1 and 10000000 KB/s.');
+    form.speedKb = 10_000_000;
+    expect(validateForm(form)).toBeNull();
   });
 
   it('checks a manual proxy address, but not one that is switched off', () => {
@@ -134,7 +138,7 @@ describe('applyForm', () => {
     form.proxy.mode = 'system';
     applyForm(current, form);
     expect(current.proxy.address).toBeUndefined();
-    expect(current.proxy.username).toBeUndefined();
+    expect(current.proxy.username).toBe("u");
   });
 
   it('sends category folders that have a value, edits custom categories and stages removals', () => {
@@ -205,5 +209,39 @@ describe('small helpers', () => {
     expect(justCompleted(undefined, 'completed')).toBe(false);
     expect(justCompleted('completed', 'completed')).toBe(false);
     expect(justCompleted('downloading', 'failed')).toBe(false);
+  });
+});
+
+describe('speed limit and proxy user name round trips', () => {
+  it('keeps a stored limit that is not a multiple of 1024 until the box is edited', () => {
+    const current = settings({ globalSpeedLimitBytesPerSecond: 1536 });
+    const form = formFrom(current);
+    expect(form.speedKb).toBe(1);
+    expect(validateForm(form)).toBeNull();
+    applyForm(current, form);
+    expect(current.globalSpeedLimitBytesPerSecond).toBe(1536);
+    form.speedKb = 3;
+    applyForm(current, form);
+    expect(current.globalSpeedLimitBytesPerSecond).toBe(3072);
+    form.speedKb = null;
+    applyForm(current, form);
+    expect(current.globalSpeedLimitBytesPerSecond).toBeUndefined();
+  });
+
+  it('shows a tiny stored limit as 1 KB/s and lets it through untouched', () => {
+    const current = settings({ globalSpeedLimitBytesPerSecond: 300 });
+    const form = formFrom(current);
+    expect(form.speedKb).toBe(1);
+    applyForm(current, form);
+    expect(current.globalSpeedLimitBytesPerSecond).toBe(300);
+  });
+
+  it('keeps the proxy user name when the mode is not manual', () => {
+    const current = settings({ proxy: { mode: 'manual', address: 'p:1', username: 'me', hasPassword: true } });
+    const form = formFrom(current);
+    form.proxy.mode = 'none';
+    applyForm(current, form);
+    expect(current.proxy?.username).toBe('me');
+    expect(current.proxy?.address).toBeUndefined();
   });
 });

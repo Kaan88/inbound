@@ -68,6 +68,9 @@ export interface OptionsForm {
   defaultConnections: number | null;
   maxConnectionsPerHost: number | null;
   speedKb: number | null;
+  /** The limit as stored and as shown when the draft was made, so an untouched box keeps the stored bytes. */
+  speedBytesAtOpen: number | null;
+  speedKbAtOpen: number | null;
   profiles: string;
   autoResume: boolean;
   allowLocalNetwork: boolean;
@@ -217,6 +220,9 @@ export function formFrom(settings: Settings): OptionsForm {
     const key = Object.keys(saved).find((k) => k.toLowerCase() === name);
     folders[name] = key ? saved[key] : '';
   }
+  const speedBytes = settings.globalSpeedLimitBytesPerSecond && settings.globalSpeedLimitBytesPerSecond > 0 ? settings.globalSpeedLimitBytesPerSecond : null;
+  // Whole KB/s, cut off like the desktop, but never shown as 0 while a limit is set.
+  const speedShown = speedBytes === null ? null : Math.max(1, Math.floor(speedBytes / 1024));
   return {
     defaultDownloadDirectory: settings.defaultDownloadDirectory,
     useCategoryFolders: settings.useCategoryFolders,
@@ -229,7 +235,9 @@ export function formFrom(settings: Settings): OptionsForm {
     maxConcurrentDownloads: settings.maxConcurrentDownloads,
     defaultConnections: settings.defaultConnections,
     maxConnectionsPerHost: settings.maxConnectionsPerHost,
-    speedKb: settings.globalSpeedLimitBytesPerSecond && settings.globalSpeedLimitBytesPerSecond > 0 ? Math.round(settings.globalSpeedLimitBytesPerSecond / 1024) : null,
+    speedKb: speedShown,
+    speedBytesAtOpen: speedBytes,
+    speedKbAtOpen: speedShown,
     profiles: profilesToText(settings.connectionProfiles),
     autoResume: settings.autoResumeUnfinishedOnStartup,
     allowLocalNetwork: settings.allowLocalNetwork,
@@ -249,6 +257,9 @@ export interface Problem {
   message: string;
   page: OptionsPage;
 }
+
+/** The desktop's upper bound for the speed box (KB/s). */
+export const maxSpeedKb = 10_000_000;
 
 const whole = (value: number | null | undefined) => (value === null || value === undefined || !Number.isFinite(value) ? null : Math.round(value));
 
@@ -270,7 +281,8 @@ export function validateForm(form: OptionsForm, archive?: { saved: ArchiveSettin
   const perSite = whole(form.maxConnectionsPerHost);
   if (perSite === null || perSite < 1 || perSite > 64) return { message: 'Connections per site must be between 1 and 64.', page: 'connection' };
   const limit = whole(form.speedKb);
-  if (limit !== null && limit <= 0) return { message: 'Speed limit must be a positive number of KB/s.', page: 'connection' };
+  const speedUntouched = limit === form.speedKbAtOpen;
+  if (!speedUntouched && limit !== null && (limit < 1 || limit > maxSpeedKb)) return { message: `Speed limit must be between 1 and ${maxSpeedKb} KB/s.`, page: 'connection' };
   if (form.proxy.mode === 'manual' && composeProxyAddress(form.proxy.type, form.proxy.host) === null)
     return { message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy' };
   const profiles = parseProfiles(form.profiles);
@@ -284,7 +296,8 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   settings.proxy = {
     mode: form.proxy.mode,
     address: manual ? composeProxyAddress(form.proxy.type, form.proxy.host) ?? undefined : undefined,
-    username: manual && form.proxy.username.trim() ? form.proxy.username.trim() : undefined,
+    // Like the desktop, the user name is kept in every mode (the box is only greyed out).
+    username: form.proxy.username.trim() || undefined,
     // Empty keeps the saved password unless "Forget" is ticked.
     password: manual && !form.proxy.forget && form.proxy.password ? form.proxy.password : undefined,
     clearPassword: form.proxy.forget,
@@ -298,7 +311,10 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   settings.defaultConnections = whole(form.defaultConnections) ?? settings.defaultConnections;
   settings.maxConnectionsPerHost = whole(form.maxConnectionsPerHost) ?? settings.maxConnectionsPerHost;
   const limit = whole(form.speedKb);
-  settings.globalSpeedLimitBytesPerSecond = limit !== null && limit > 0 ? limit * 1024 : undefined;
+  // An untouched box keeps the stored bytes (a stored 1536 B/s is not rewritten as 2048).
+  settings.globalSpeedLimitBytesPerSecond = limit === form.speedKbAtOpen && form.speedBytesAtOpen !== null
+    ? form.speedBytesAtOpen
+    : limit !== null && limit > 0 ? limit * 1024 : undefined;
   settings.connectionProfiles = parseProfiles(form.profiles).profiles;
   settings.useCategoryFolders = form.useCategoryFolders;
   settings.autoResumeUnfinishedOnStartup = form.autoResume;
