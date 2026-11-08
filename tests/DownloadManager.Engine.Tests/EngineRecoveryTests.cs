@@ -730,7 +730,7 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
     }
 
     /// <summary>
-    /// UI.B10: a server that cuts every response short still sends some of the file each time. The single-stream
+    /// UI.B15: a server that cuts every response short still sends some of the file each time. The single-stream
     /// path starts its count of attempts over after progress; a segment kept counting, so in the PERF.2 soak every
     /// segmented download from such a server failed near the end while the single-stream one finished.
     /// </summary>
@@ -746,6 +746,24 @@ public sealed class EngineRecoveryTests(TestServerFixture fixture) : IDisposable
 
         Assert.True(result.Success, result.Failure?.Message);
         Assert.Equal(Sha256Of(731, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
+    }
+
+    /// <summary>
+    /// UI.B15: the reset comes before the limit is checked, so with one attempt allowed, every attempt that gets
+    /// bytes still retries. Checked after the limit, the first cut response failed the download.
+    /// </summary>
+    [Fact]
+    public async Task ASegmentThatGetsBytesOnItsLastAllowedAttemptStillRetries()
+    {
+        const int size = 2 * Megabyte;
+        const string name = "cut-last-attempt.bin";
+        var job = Job($"{_server.BaseAddress}/truncate/{name}?size={size}&cut={256 * 1024}&seed=733", name, connections: 4);
+
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var result = await Engine(maxAttempts: 1).ExecuteAsync(job, null, null, limit.Token);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(Sha256Of(733, size), await Hashing.Sha256FileAsync(result.FinalFilePath!));
     }
 
     /// <summary>The reset needs new bytes: a segment that gets none still runs out of attempts.</summary>
