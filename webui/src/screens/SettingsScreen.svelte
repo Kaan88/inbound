@@ -430,7 +430,7 @@
         <div>
           <label class="label" for="set-post">Run this program after each download</label>
           <input id="set-post" class="field font-mono" readonly value={store.model.settings?.postDownloadCommand || ''} placeholder="(nothing)" />
-          <p class="hint mt-1 flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> This makes the server run a program, so it can't be changed from a browser.</p>
+          <p class="hint mt-1 flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {store.texts.postProgramNote}</p>
         </div>
       </div>
     {:else if page === 'connection'}
@@ -497,7 +497,7 @@
       <h1 class="mb-3 text-[18px] font-semibold">Updates</h1>
       <div class="card mb-3 max-w-xl bg-highlight p-3 text-[13px]">
         <p class="flex items-start gap-2"><Icon name="lock" size={16} class="mt-0.5 shrink-0" />
-          These settings make the server run a program or trust an installer, so they can't be changed from a browser. They are shown as they are. The server is updated by updating its image.</p>
+          {store.texts.updatesNote}</p>
       </div>
       <dl class="grid max-w-xl grid-cols-[minmax(150px,auto)_1fr] gap-x-4 gap-y-2 text-[13px]">
         <dt class="text-muted">FFmpeg</dt><dd class="break-all font-mono text-[12px]">{store.model.settings?.ffmpegPath || '(found on PATH)'}</dd>
@@ -555,9 +555,9 @@
     {:else if page === 'signin'}
       <h1 class="mb-3 text-[18px] font-semibold">Sign-in</h1>
       {#if !store.signInRequired}
-        <p class="card mb-4 bg-highlight p-3 text-[13px]">Sign-in is off on this server (DOWNLOADMANAGER_AUTH=off): anyone who can reach it can use it.</p>
+        <p class="card mb-4 bg-highlight p-3 text-[13px]">{store.texts.authOffNote}</p>
       {:else if passwordFromEnvironment}
-        <p class="mb-4 text-[13px] text-muted">The password comes from DOWNLOADMANAGER_PASSWORD or DOWNLOADMANAGER_PASSWORD_FILE. Change it there and restart the server.</p>
+        <p class="mb-4 text-[13px] text-muted">{store.texts.passwordSourceNote}</p>
       {:else}
         <form class="mb-6 grid max-w-xl gap-3 sm:grid-cols-2" onsubmit={(event) => { event.preventDefault(); void changePassword(); }}>
           <div><label class="label" for="pw-current">Current password</label><input id="pw-current" class="field" type="password" bind:value={current} autocomplete="current-password" /></div>

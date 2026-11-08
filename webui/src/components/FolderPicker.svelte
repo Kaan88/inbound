@@ -100,9 +100,9 @@
   });
 </script>
 
-<Dialog title="Choose a folder on the server" {onclose} wide>
+<Dialog title={store.texts.folderPickerTitle} {onclose} wide>
   <form class="mb-3 flex gap-2" onsubmit={(event) => { event.preventDefault(); void browse(typed); }}>
-    <input class="field font-mono" bind:value={typed} placeholder="Type a path, such as /downloads/movies" aria-label="Folder path" spellcheck="false" autocomplete="off" />
+    <input class="field font-mono" bind:value={typed} placeholder={store.texts.folderPlaceholder} aria-label="Folder path" spellcheck="false" autocomplete="off" />
     <button class="btn shrink-0" type="submit" disabled={busy}>Check</button>
   </form>
   {#if error}
