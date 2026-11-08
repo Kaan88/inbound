@@ -85,8 +85,7 @@ Later: a live expiring-link check with a real TorBox download (only the mock so 
   - UI.B11: Tasks > Exit and the tray's Exit quit the whole app (the Host), which pauses running downloads; closing the window does not. Owner: "leave as is". Closed.
   - EXT.B1 verified in the owner's Edge: the `dev` build caught a TorBox Direct Download.
   - Firefox (EXT.E1): the owner's add-on shows "Inbound unavailable": the installed 0.5.3 writes no Firefox native-messaging key. The next release's installer writes it; until then `scripts
-  - The owner ran the script: the Firefox and Edge keys and both manifests are in place, and Firefox now starts the native host, which forwards `handoff.request` to the Host (native-host log, 12:07). Still "Inbound unavailable": 0.5.3's Host trusts only the Chrome extension IDs, so it refuses Firefox's add-on ID (EXT.B3). Firefox needs the next app release; the wrong notification text is still to explain.
-egister-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
+  - The owner ran the script: the Firefox and Edge keys and both manifests are in place, and Firefox now starts the native host, which forwards `handoff.request` to the Host (native-host log, 12:07). Still "Inbound unavailable": 0.5.3's Host trusts only the Chrome extension IDs, so it refuses Firefox's add-on ID (EXT.B3). Firefox needs the next app release; the wrong notification text is still to explain.egister-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
 
 ### Test campaign merged into `dev` (2026-11-08)
 
