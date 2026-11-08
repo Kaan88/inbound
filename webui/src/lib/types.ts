@@ -285,6 +285,10 @@ export interface ArchiveSet {
   volumes: string[];
   missingVolumes: string[];
   downloadingVolumes: string[];
+  /** Parts of downloadingVolumes: all paused; won't start by themselves (start later, stopped queue); waiting in a running queue. Older servers leave them out. */
+  pausedVolumes?: string[];
+  heldVolumes?: string[];
+  queuedVolumes?: string[];
   failedVolumes: string[];
   phase?: string;
   percent?: number;

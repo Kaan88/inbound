@@ -271,9 +271,10 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await run.WaitForJobAsync(first.Id, "completed");
 
         var waiting = await run.WaitForSetAsync(set => set.State == "waiting" && set.DownloadingVolumes.Count == names.Count - 1);
-        // Added with "later", so they wait in the queue: the words say so rather than "still downloading" (UI.R23 (1)).
-        Assert.Contains("waiting to download", waiting.StateText);
+        // Added with "later", so they won't start by themselves: the words say so rather than "still downloading" (UI.R23 (1)).
+        Assert.Contains("not started", waiting.StateText);
         Assert.DoesNotContain("still downloading", waiting.StateText);
+        Assert.DoesNotContain("waiting to download", waiting.StateText);
         Assert.Equal(names[0], Path.GetFileName(waiting.FirstVolume));
         Assert.Equal(0, run.ToolRuns);
         Assert.Single(run.Archives.List());
