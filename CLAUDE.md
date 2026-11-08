@@ -36,7 +36,9 @@ only updater (check/download/install/rollback/notifications/gating), the WinUI
 scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
-Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1), built with the extension work;
+Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1), built with the extension work.
+Edge users install the Chrome Web Store listing (same ID); Setup, repair and the Host register the native host under
+Edge's key too (source-level, real Edge check pending). Firefox gets its own build and gecko ID;
 HLS master/media assembly including AES-128 (single and rotating keys) and
 alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
 byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
@@ -178,10 +180,15 @@ not as acceptance evidence.
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
 - **Chrome stable 156 removed `--load-extension`**. Manual “Load unpacked” works;
   for automation use Chrome for Testing 156+ (verified path:
-  `C:\Users\kaank\AppData\Local\Temp\opencode\cft\chrome-win64\chrome.exe`).
+  `C:\Users\kaank\AppData\Local\Temp\opencode\cft2\chrome-win64\chrome.exe`; the older
+  `...\opencode\cft\chrome-win64` copy lost its version manifest and fails to start with a side-by-side error).
   Chrome for Testing loads the extension with `--load-extension` and a fresh
   profile. Do not waste time automating Chrome stable's folder picker.
 - Mandatory enterprise policy is not a reliable path here; use CfT/manual.
+- An agent shell can read a stale native-host registry value while a normal terminal reads the real one,
+  and Chrome launched from the agent shell then reports "Specified native messaging host not found".
+  Run browser tests from a normal terminal. The reason the views differ is not established; to read the
+  real value from an agent shell use WMI `StdRegProv` `GetStringValue` under `HKEY_USERS\<SID>`.
 - The harness denies child-process writes to user `Downloads` and default
   LocalAppData, so Host state falls back to `artifacts\app\data` during tests.
   Use `test-downloads` for browser-test destinations.

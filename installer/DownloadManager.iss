@@ -4,7 +4,7 @@
 ;
 ; Layout matches scripts\install.ps1 so the in-app updater and repair script keep working:
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\app\           program files (replaced on upgrade)
-;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked Chrome extension
+;   %LOCALAPPDATA%\Programs\Inbound Download Manager\extension\     unpacked browser extension
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\native-host\   browser bridge manifest
 ;   %LOCALAPPDATA%\Programs\Inbound Download Manager\install.json   installed version/channel
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
@@ -80,15 +80,19 @@ Name: "{userprograms}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters:
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; IconFilename: "{app}\app\{#HostExe}"; Tasks: desktopicon
 
 [Registry]
-; Chrome native messaging host (the browser bridge).
-Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"; Flags: uninsdeletekey
+; Native messaging host (the browser bridge), registered for Chrome and for Edge. Both keys point at
+; the same manifest and are written whether or not the browser is installed. Edge's key is optional:
+; the Host tries again at every start, so a failure there does not stop Setup. Uninstall removes them
+; in CurUninstallStepChanged, only when they are this install's.
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"; Flags: noerror
 ; Launch at sign-in is owned by the app's Options setting (the Host writes this value from it);
 ; setup configures the setting independently of the optional launch. Uninstall removes the value.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "DownloadManagerHost"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\INSTALL.txt"; Description: "Show how to add the Chrome extension"; Flags: postinstall shellexec skipifsilent unchecked
+Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
 
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
@@ -155,6 +159,26 @@ begin
   end;
 end;
 
+// The same rule as scripts\uninstall.ps1: a key is removed only when it points at this install's
+// manifest or at a file that no longer exists, so another program's working registration stays.
+procedure RemoveNativeHostKey(const SubKey: String);
+var
+  Registered: String;
+begin
+  if RegQueryStringValue(HKCU, SubKey, '', Registered) and FileExists(Registered) and
+     (CompareText(Registered, ExpandConstant('{app}\native-host\{#NativeHostName}.json')) <> 0) then
+    exit;
+  RegDeleteKeyIncludingSubkeys(HKCU, SubKey);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep <> usUninstall then
+    exit;
+  RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');
+  RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Root, ManifestDir, StartupArgument: String;
@@ -186,7 +210,10 @@ begin
   SaveStringToFile(Root + '\INSTALL.txt',
     '{#AppName} {#AppVersion} is installed in:' + #13#10 +
     '  ' + Root + '\app' + #13#10 + #13#10 +
-    'Add the Chrome extension (one time):' + #13#10 +
+    'Add the extension to your browser (one time).' + #13#10 + #13#10 +
+    'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store.' + #13#10 +
+    'Edge may ask you to allow extensions from other stores.' + #13#10 + #13#10 +
+    'Or, in Chrome, load the unpacked copy that came with this install:' + #13#10 +
     '  1. Open chrome://extensions' + #13#10 +
     '  2. Turn on Developer mode (top right)' + #13#10 +
     '  3. Click "Load unpacked" and select:' + #13#10 +

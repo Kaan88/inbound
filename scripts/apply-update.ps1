@@ -25,6 +25,7 @@ $extensionBackupDir = Join-Path $InstallRoot "extension-rollback"
 $newExtensionDir = Join-Path $InstallRoot "extension-new"
 $metadataPath = Join-Path $InstallRoot "install.json"
 $metadataBackup = $null
+$rootScriptBackups = @{}
 $appSwapped = $false
 $extensionSwapped = $false
 $script:frontendsWereOpen = $false
@@ -317,6 +318,25 @@ try {
         Swap-In $extensionDir $newExtensionDir $extensionBackupDir
     }
 
+    # Setup puts these beside app\, where swapping app\ never reaches them, and repair.ps1 would go on
+    # running the version Setup installed. A script install has no copies, so none is added. An old copy
+    # still works, so one that cannot be replaced is no reason to undo the update.
+    foreach ($name in @("register-native-host.ps1", "repair.ps1")) {
+        $packagedScript = Join-Path $PackageDir $name
+        $installedScript = Join-Path $InstallRoot $name
+        if (-not (Test-Path -LiteralPath $packagedScript) -or -not (Test-Path -LiteralPath $installedScript)) { continue }
+        try {
+            $originalScript = [IO.File]::ReadAllBytes($installedScript)
+            Copy-Item -LiteralPath $packagedScript -Destination "$installedScript.tmp" -Force
+            Move-Item -LiteralPath "$installedScript.tmp" -Destination $installedScript -Force
+            $rootScriptBackups[$installedScript] = $originalScript
+        }
+        catch {
+            Write-Warning "Could not update ${name}: $($_.Exception.Message)"
+            Remove-Item -LiteralPath "$installedScript.tmp" -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     $register = Join-Path $PackageDir "register-native-host.ps1"
     if (Test-Path $register) {
         & $register -AppDir $appDir -Force
@@ -376,6 +396,10 @@ catch {
             $extensionRestored = $false
             $message = "$message; extension rollback error: $($_.Exception.Message)"
         }
+    }
+    foreach ($installedScript in @($rootScriptBackups.Keys)) {
+        try { [IO.File]::WriteAllBytes($installedScript, $rootScriptBackups[$installedScript]) }
+        catch { $message = "$message; script rollback error: $($_.Exception.Message)" }
     }
     if ($null -ne $metadataBackup) {
         try { [System.IO.File]::WriteAllText($metadataPath, $metadataBackup, (New-Object System.Text.UTF8Encoding($false))) }

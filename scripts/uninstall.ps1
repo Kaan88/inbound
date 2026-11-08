@@ -5,17 +5,44 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$installRoot = $InstallRoot
+$installRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+if ($installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\')) {
+    throw "InstallRoot must be an application directory, not a drive root."
+}
 $appDir = Join-Path $installRoot "app"
 
 Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
-$nativeKey = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager"
-if (Test-Path $nativeKey) {
+# Chrome and Edge each have a key; keep in step with BrowserBridge.NativeHostKeyPaths.
+# A key is removed only when it points at this install's manifest or at a file that no longer exists,
+# so another program's working registration under the same name is left alone.
+function Test-NativeKeyIsOurs([string]$registered, [string]$ownManifest) {
+    if (-not $registered) { return $true }
+    try {
+        if (-not (Test-Path -LiteralPath $registered)) { return $true }
+        return [IO.Path]::GetFullPath($registered) -ieq [IO.Path]::GetFullPath($ownManifest)
+    }
+    catch { return $false }
+}
+
+$hostName = "com.kaank.downloadmanager"
+$ownManifest = Join-Path $installRoot "native-host\$hostName.json"
+$nativeKeys = [ordered]@{
+    "Chrome" = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+    "Edge"   = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+}
+foreach ($browser in $nativeKeys.Keys) {
+    $nativeKey = $nativeKeys[$browser]
+    if (-not (Test-Path $nativeKey)) { continue }
+    $registered = (Get-Item $nativeKey).GetValue("")
+    if (-not (Test-NativeKeyIsOurs $registered $ownManifest)) {
+        Write-Warning "Left the $browser native-host registration alone: it points at $registered, not at this install."
+        continue
+    }
     Remove-Item $nativeKey -Recurse -Force
-    Write-Host "Removed Chrome native-host registration."
+    Write-Host "Removed $browser native-host registration."
 }
 
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"

@@ -439,8 +439,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private static string ToDisplaySource(string source)
         => source switch
         {
-            "chromeContextMenu" => "Chrome menu",
-            "chromeAuto" => "Chrome",
+            "chromeContextMenu" => "Browser menu",
+            "chromeAuto" => "Browser",
             "clipboard" => "Clipboard",
             "cli" => "CLI",
             "batch" => "Batch",
