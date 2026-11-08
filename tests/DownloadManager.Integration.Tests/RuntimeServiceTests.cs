@@ -1141,6 +1141,8 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(resumed.FinalFilePath));
         Assert.True(_server.Ftp.RestCount > restBefore);
         Assert.True(_server.Ftp.BytesServed("slow.bin") < 524_288 * 3 / 2);
+        // The server took REST, so a lowered limit may now requeue this job without losing its data (UI.R21).
+        Assert.True(resumed.ResumeSupported);
     }
 
     [Fact]

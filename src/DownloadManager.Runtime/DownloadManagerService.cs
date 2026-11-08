@@ -3486,13 +3486,21 @@ public sealed partial class DownloadManagerService
                     job.TotalBytes = p.TotalBytes;
                 }
 
-                job.BytesPerSecond = p.BytesPerSecond;
-                job.EstimatedRemaining = p.EstimatedRemaining;
-                job.ActiveConnections = p.ActiveConnections;
-                runtime.LastPhase = p.Phase;
+                // A transfer a lower limit sent back to the queue is already shown, and maybe saved, as Queued
+                // (UI.R21). A report from its wind-down still counts its bytes, but must not make it look as
+                // if it were running again.
+                var windingDown = runtime.Preempted || (runtime.PauseRequested && runtime.ResumeWhenStopped);
+                if (!windingDown)
+                {
+                    job.BytesPerSecond = p.BytesPerSecond;
+                    job.EstimatedRemaining = p.EstimatedRemaining;
+                    job.ActiveConnections = p.ActiveConnections;
+                    runtime.LastPhase = p.Phase;
+                }
+
                 // Follow the engine's phase so a job waiting between retries (or still
                 // connecting) is not shown as downloading at 0 B/s.
-                if (job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
+                if (!windingDown && job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
                     or DownloadState.Downloading)
                 {
                     job.State = p.Phase switch

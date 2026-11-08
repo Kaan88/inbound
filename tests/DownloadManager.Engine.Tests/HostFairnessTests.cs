@@ -259,6 +259,48 @@ public sealed class HostFairnessTests(TestServerFixture fixture, ITestOutputHelp
         Assert.Equal(0, engine.HostConnectionsActive);
     }
 
+    /// <summary>
+    /// A segmented job whose worker still waits for a connection when its last range is nearly done must not
+    /// wait for it once nothing is left to take: the free connection can go to another job first, and before the
+    /// fix the finished job then sat in its run until some other download let a connection go.
+    /// </summary>
+    [Fact]
+    public async Task AWorkerWithNothingLeftStopsWaitingForAConnection()
+    {
+        const int small = 2 * Megabyte;
+        const int large = 3 * Megabyte;
+        var engine = Engine(hostLimit: 2);
+        using var stopOthers = new CancellationTokenSource();
+        // Y holds one connection for a long time and never yields.
+        var y = Job("idle-y.bin", large, 851, 256 * 1024, 1);
+        var yRun = engine.ExecuteAsync(y, null, null, stopOthers.Token);
+        await UntilAsync(() => engine.HostConnectionsActive == 1, "Y to hold a connection");
+
+        // X gets the other connection; its second worker waits, holding no range.
+        var x = Job("idle-x.bin", small, 852, 1024 * 1024, 2);
+        var xBytes = 0L;
+        var xRun = engine.ExecuteAsync(x, null, new SyncProgress(p => Volatile.Write(ref xBytes, p.ReceivedBytes)), CancellationToken.None);
+        // Bytes, not just a connection: the probe's connection is not yet a worker's.
+        await UntilAsync(() => Volatile.Read(ref xBytes) > 0, "X to be under way on the other connection");
+
+        // Z waits too, from before X's first range ends: when X's last range ends, the free connection goes to
+        // Z (holding none, waiting longer) rather than to X's worker that asked again after its first range.
+        var z = Job("idle-z.bin", large, 853, 256 * 1024, 1);
+        var zRun = engine.ExecuteAsync(z, null, null, stopOthers.Token);
+        await UntilAsync(() => engine.WaitingForHost(z.Id) == Host, "Z to be waiting");
+        Assert.True(Volatile.Read(ref xBytes) < small / 2, "X's first range ended before Z waited, so this proves nothing.");
+
+        // X's bytes take about two seconds; Y needs about twelve. X must not wait for it.
+        await AssertFileAsync(await xRun.WaitAsync(TimeSpan.FromSeconds(8)), 852, small);
+        Assert.False(yRun.IsCompleted, "Y finished first, so this proves nothing.");
+        Assert.False(zRun.IsCompleted, "Z finished first, so this proves nothing.");
+        Assert.Null(engine.WaitingForHost(x.Id));
+
+        stopOthers.Cancel();
+        await Task.WhenAll(yRun, zRun).WaitAsync(Patience);
+        await UntilAsync(() => engine.HostConnectionsActive == 0, "every connection to come back");
+    }
+
     private sealed class SyncProgress(Action<TransferProgress> report) : IProgress<TransferProgress>
     {
         public void Report(TransferProgress value) => report(value);

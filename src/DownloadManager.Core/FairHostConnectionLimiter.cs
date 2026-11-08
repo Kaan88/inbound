@@ -77,6 +77,11 @@ public sealed class HostSlot : IDisposable
 /// <item>A free connection goes to the waiting job holding the fewest on that host, the oldest waiter first.</item>
 /// <item>A job below its fair share, <c>max(1, limit / jobs on the host)</c>, that is waiting on a full gate
 /// asks the job furthest above its share to yield one yieldable connection.</item>
+/// <item>A job below its share that gives a connection back keeps it for a short while (the reuse window), as
+/// long as no waiting job is below its own share. A media job asks for one connection per fragment, and a
+/// segmented worker asks again between ranges; without this the connection would go to the job above its
+/// share, and the next request would make that job yield it back, aborting a response and flushing its file
+/// each time.</item>
 /// </list>
 /// </summary>
 public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
@@ -89,10 +94,15 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
     private int _active;
     private int _peak;
     private long _sequence;
+    private readonly long _reuseWindowMs;
 
-    public FairHostConnectionLimiter(int limit)
+    /// <summary>How long a released connection is kept for its job when nobody waiting is short of their share.</summary>
+    public static readonly TimeSpan DefaultReuseWindow = TimeSpan.FromMilliseconds(250);
+
+    public FairHostConnectionLimiter(int limit, TimeSpan? reuseWindow = null)
     {
         _limit = Math.Max(1, limit);
+        _reuseWindowMs = Math.Max(0, (long)(reuseWindow ?? DefaultReuseWindow).TotalMilliseconds);
     }
 
     /// <summary>Raised, never under the limiter's lock, when a job starts or stops waiting with no connection to its host.</summary>
@@ -164,6 +174,8 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
             _limit = Math.Max(1, limit);
             foreach (var gate in _gates.Values.ToList())
             {
+                // A kept connection is only a courtesy; the new limit decides afresh.
+                gate.Parks.Clear();
                 GrantLocked(gate, effects);
                 RebalanceLocked(gate, effects);
                 TrackWaitingLocked(gate);
@@ -180,7 +192,8 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
         cancellationToken.ThrowIfCancellationRequested();
         host ??= string.Empty;
         var effects = new Effects();
-        Waiter waiter;
+        HostSlot? immediate = null;
+        Waiter? waiter = null;
         lock (_sync)
         {
             if (!_gates.TryGetValue(host, out var gate))
@@ -189,35 +202,62 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
                 _gates[host] = gate;
             }
 
-            // Free connections are always handed out at once, so waiters mean the gate is full.
-            if (gate.Waiters.Count == 0 && gate.Held.Count < _limit)
+            var kept = gate.Parks.FindIndex(park => park.OwnerId == ownerId);
+            if (kept >= 0)
             {
-                var slot = GrantSlotLocked(gate, ownerId, yieldable);
-                // Someone else may now be above a fair share with this owner on the host; nobody is waiting, so nothing yields.
-                return Task.FromResult(slot);
+                // The connection this job gave back a moment ago, still kept for it.
+                gate.Parks.RemoveAt(kept);
+                immediate = GrantSlotLocked(gate, ownerId, yieldable);
+                // This job may have had another request waiting with nothing held.
+                TrackWaitingLocked(gate);
             }
-
-            waiter = new Waiter(gate, ownerId, yieldable, ++_sequence);
-            gate.Waiters.Add(waiter);
-            RebalanceLocked(gate, effects);
-            TrackWaitingLocked(gate);
+            else if (gate.Waiters.Count == 0 && gate.Held.Count + gate.Parks.Count < _limit)
+            {
+                // Free connections are always handed out at once, so waiters mean the gate is full.
+                // Someone else may now be above a fair share with this owner on the host; nobody is waiting, so nothing yields.
+                immediate = GrantSlotLocked(gate, ownerId, yieldable);
+            }
+            else
+            {
+                waiter = new Waiter(gate, ownerId, yieldable, ++_sequence);
+                gate.Waiters.Add(waiter);
+                // Only kept connections can be free here; a job short of its share takes one of those at once.
+                GrantLocked(gate, effects);
+                RebalanceLocked(gate, effects);
+                TrackWaitingLocked(gate);
+            }
         }
 
         effects.Apply();
         DispatchNotifications();
-
-        if (cancellationToken.CanBeCanceled)
+        if (immediate is not null)
         {
-            waiter.Registration = cancellationToken.Register(static state =>
-            {
-                var (limiter, pending, token) = ((FairHostConnectionLimiter, Waiter, CancellationToken))state!;
-                limiter.Abandon(pending, token);
-            }, (this, waiter, cancellationToken));
-            // Granted before the registration existed: nothing will unregister it otherwise.
-            if (waiter.Completion.Task.IsCompleted) waiter.Registration.Unregister();
+            return Task.FromResult(immediate);
         }
 
-        return waiter.Completion.Task;
+        return cancellationToken.CanBeCanceled ? WaitAsync(waiter!, cancellationToken) : waiter!.Completion.Task;
+    }
+
+    /// <summary>
+    /// The cancel registration lives exactly as long as the wait, on the caller's side: a grant on another
+    /// thread can't race its creation, and nothing is left on a long-lived token once the slot is in hand.
+    /// </summary>
+    private async Task<HostSlot> WaitAsync(Waiter waiter, CancellationToken cancellationToken)
+    {
+        var registration = cancellationToken.Register(static state =>
+        {
+            var (limiter, pending, token) = ((FairHostConnectionLimiter, Waiter, CancellationToken))state!;
+            limiter.Abandon(pending, token);
+        }, (this, waiter, cancellationToken));
+        try
+        {
+            return await waiter.Completion.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            // Unregister, not Dispose: Dispose would wait for a cancel callback running elsewhere.
+            registration.Unregister();
+        }
     }
 
     internal void Release(HostSlot slot)
@@ -231,10 +271,88 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
             }
 
             _active--;
+            KeepForOwnerLocked(gate, slot.OwnerId);
             GrantLocked(gate, effects);
             RebalanceLocked(gate, effects);
             TrackWaitingLocked(gate);
             ForgetIfIdleLocked(gate);
+        }
+
+        effects.Apply();
+        DispatchNotifications();
+    }
+
+    /// <summary>
+    /// Keeps the connection just given back for its job for the reuse window, when that job is below its share
+    /// and everyone waiting already has theirs. Then the job's next request gets it back at once instead of
+    /// taking it from the others with a yield. A waiting job short of its share is never kept waiting by this.
+    /// </summary>
+    private void KeepForOwnerLocked(Gate gate, Guid ownerId)
+    {
+        if (_reuseWindowMs == 0 || gate.Waiters.Count == 0 || gate.Held.Count + gate.Parks.Count >= _limit)
+        {
+            return;
+        }
+
+        var counts = CountsLocked(gate);
+        counts.TryAdd(ownerId, 0);
+        var share = Math.Max(1, _limit / counts.Count);
+        if (counts[ownerId] >= share || gate.Waiters.Any(waiter => counts[waiter.OwnerId] < share))
+        {
+            return;
+        }
+
+        gate.Parks.Add(new Park(ownerId, Environment.TickCount64 + _reuseWindowMs));
+        if (gate.Parks.Count == 1)
+        {
+            ArmParkTimerLocked(gate);
+        }
+    }
+
+    /// <summary>Connections held or kept, per job, with every waiting job counted (at zero if it holds none).</summary>
+    private static Dictionary<Guid, int> CountsLocked(Gate gate)
+    {
+        var counts = new Dictionary<Guid, int>();
+        foreach (var slot in gate.Held) counts[slot.OwnerId] = counts.GetValueOrDefault(slot.OwnerId) + 1;
+        foreach (var park in gate.Parks) counts[park.OwnerId] = counts.GetValueOrDefault(park.OwnerId) + 1;
+        foreach (var waiter in gate.Waiters) counts.TryAdd(waiter.OwnerId, 0);
+        return counts;
+    }
+
+    private void ArmParkTimerLocked(Gate gate)
+    {
+        if (gate.Parks.Count == 0)
+        {
+            return;
+        }
+
+        gate.ParkTimer ??= new Timer(static state =>
+        {
+            var (limiter, owner) = ((FairHostConnectionLimiter, Gate))state!;
+            limiter.ExpireParks(owner);
+        }, (this, gate), Timeout.Infinite, Timeout.Infinite);
+        // Kept connections are added in deadline order, so the first is the next to run out.
+        var due = Math.Max(0, gate.Parks[0].Deadline - Environment.TickCount64);
+        gate.ParkTimer.Change(due, Timeout.Infinite);
+    }
+
+    private void ExpireParks(Gate gate)
+    {
+        var effects = new Effects();
+        lock (_sync)
+        {
+            if (!_gates.TryGetValue(gate.Host, out var current) || current != gate)
+            {
+                return;
+            }
+
+            var now = Environment.TickCount64;
+            gate.Parks.RemoveAll(park => park.Deadline <= now);
+            GrantLocked(gate, effects);
+            RebalanceLocked(gate, effects);
+            TrackWaitingLocked(gate);
+            ForgetIfIdleLocked(gate);
+            ArmParkTimerLocked(gate);
         }
 
         effects.Apply();
@@ -274,7 +392,18 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
 
     private void GrantLocked(Gate gate, Effects effects)
     {
-        while (gate.Held.Count < _limit && gate.Waiters.Count > 0)
+        if (gate.Parks.Count > 0 && gate.Waiters.Count > 0)
+        {
+            var counts = CountsLocked(gate);
+            var share = Math.Max(1, _limit / counts.Count);
+            if (gate.Waiters.Any(waiter => counts[waiter.OwnerId] < share))
+            {
+                // Someone waiting is short of their share: keeping connections for others would starve them.
+                gate.Parks.Clear();
+            }
+        }
+
+        while (gate.Held.Count + gate.Parks.Count < _limit && gate.Waiters.Count > 0)
         {
             // Fewest held first, so a job with none gets in ahead of one that already transfers.
             Waiter? next = null;
@@ -310,6 +439,12 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
             foreach (var slot in gate.Held)
             {
                 remaining[slot.OwnerId] = remaining.GetValueOrDefault(slot.OwnerId) + (slot.YieldAsked ? 0 : 1);
+            }
+
+            // A kept connection is its job's, and can't be asked to yield (it carries no transfer).
+            foreach (var park in gate.Parks)
+            {
+                remaining[park.OwnerId] = remaining.GetValueOrDefault(park.OwnerId) + 1;
             }
 
             foreach (var waiter in gate.Waiters)
@@ -413,9 +548,11 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
 
     private void ForgetIfIdleLocked(Gate gate)
     {
-        if (gate.Held.Count == 0 && gate.Waiters.Count == 0)
+        if (gate.Held.Count == 0 && gate.Waiters.Count == 0 && gate.Parks.Count == 0)
         {
             _gates.Remove(gate.Host);
+            gate.ParkTimer?.Dispose();
+            gate.ParkTimer = null;
         }
     }
 
@@ -450,7 +587,12 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
         public List<HostSlot> Held { get; } = new();
         public List<Waiter> Waiters { get; } = new();
         public HashSet<Guid> WaitingOwners { get; set; } = new();
+        /// <summary>Connections given back and kept for their job a little while; they count against the limit.</summary>
+        public List<Park> Parks { get; } = new();
+        public Timer? ParkTimer { get; set; }
     }
+
+    private readonly record struct Park(Guid OwnerId, long Deadline);
 
     private sealed class Waiter(Gate gate, Guid ownerId, bool yieldable, long sequence)
     {
@@ -459,7 +601,6 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
         public bool Yieldable { get; } = yieldable;
         public long Sequence { get; } = sequence;
         public TaskCompletionSource<HostSlot> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public CancellationTokenRegistration Registration { get; set; }
     }
 
     /// <summary>What a change decided, carried out after the lock: completing a task or cancelling a token can run other code.</summary>
@@ -472,8 +613,6 @@ public sealed class FairHostConnectionLimiter : IHostConnectionLimiter
         {
             foreach (var (waiter, slot) in Grants)
             {
-                // Unregister, not Dispose: Dispose would wait for a cancel callback running elsewhere.
-                waiter.Registration.Unregister();
                 if (!waiter.Completion.TrySetResult(slot))
                 {
                     slot.Dispose();

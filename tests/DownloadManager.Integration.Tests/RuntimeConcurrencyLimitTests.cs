@@ -55,6 +55,7 @@ public sealed partial class RuntimeServiceTests
         for (var i = 0; i < 3; i++) jobs.Add(await AddSlowAsync(ctx, $"lower-{i}.bin", size, 901 + i, 256 * 1024, 2));
         foreach (var job in jobs) await ctx.WaitFor(job.Id, j => j.State == "downloading" && j.ReceivedBytes > 256 * 1024, TimeSpan.FromSeconds(30));
 
+        var seenBefore = jobs.ToDictionary(job => job.Id, job => states[job.Id].Count);
         await SetLimitsAsync(ctx, simultaneous: 1);
 
         // At once, before the transfers have wound down, the newest two show Queued; the oldest goes on.
@@ -86,6 +87,15 @@ public sealed partial class RuntimeServiceTests
             Assert.DoesNotContain(seen, state => state.StartsWith("paused", StringComparison.Ordinal) || state.EndsWith(":paused", StringComparison.Ordinal));
             Assert.DoesNotContain(seen, state => state.EndsWith(":failed", StringComparison.Ordinal));
             Assert.Contains("queued:queued", seen);
+
+            // From the requeue until the run has wound down (both announced as "queued"), a late progress
+            // report must not show it running again.
+            var after = seen.Skip(seenBefore[job.Id]).ToList();
+            var first = after.IndexOf("queued:queued");
+            var second = after.IndexOf("queued:queued", first + 1);
+            Assert.True(first >= 0 && second > first, string.Join(", ", after));
+            Assert.DoesNotContain(after.Skip(first).Take(second - first),
+                state => state.EndsWith(":downloading", StringComparison.Ordinal) || state.EndsWith(":connecting", StringComparison.Ordinal));
         }
     }
 

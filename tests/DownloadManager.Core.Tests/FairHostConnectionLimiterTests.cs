@@ -181,6 +181,113 @@ public sealed class FairHostConnectionLimiterTests
         Assert.Equal(0, limiter.Active);
     }
 
+    /// <summary>
+    /// A media job asks for one connection per fragment. Between fragments the connection it gave back is kept
+    /// for it, so its next fragment doesn't make the segmented job above its share yield one (abort a response,
+    /// flush its file) every time.
+    /// </summary>
+    [Fact]
+    public async Task AJobThatAsksAgainAtOnceGetsItsConnectionBackWithoutAYield()
+    {
+        var limiter = new FairHostConnectionLimiter(8, reuseWindow: TimeSpan.FromSeconds(30));
+        var media = Guid.NewGuid();
+        var segmented = Guid.NewGuid();
+        var fragment = await limiter.AcquireAsync(Host, media, yieldable: false, CancellationToken.None);
+        var slots = new List<HostSlot>();
+        for (var i = 0; i < 7; i++) slots.Add(await limiter.AcquireAsync(Host, segmented, yieldable: true, CancellationToken.None));
+        // The segmented job's next worker waits; it is above its share of 4, so nobody yields for it.
+        var extraWorker = limiter.AcquireAsync(Host, segmented, yieldable: true, CancellationToken.None);
+        Assert.False(extraWorker.IsCompleted);
+
+        for (var i = 0; i < 20; i++)
+        {
+            fragment.Dispose();
+            Assert.False(extraWorker.IsCompleted, $"fragment {i}: the kept connection went to the job above its share.");
+            fragment = await limiter.AcquireAsync(Host, media, yieldable: false, CancellationToken.None).WaitAsync(Wait);
+            Assert.DoesNotContain(slots, slot => slot.YieldRequested);
+        }
+
+        Assert.Equal(8, limiter.ActiveOn(Host));
+        fragment.Dispose();
+        foreach (var slot in slots) slot.Dispose();
+        (await extraWorker.WaitAsync(Wait)).Dispose();
+        await UntilIdleAsync(limiter);
+    }
+
+    [Fact]
+    public async Task AKeptConnectionGoesToTheWaiterOnceTheWindowEnds()
+    {
+        var limiter = new FairHostConnectionLimiter(2, reuseWindow: TimeSpan.FromMilliseconds(50));
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var aSlot = await limiter.AcquireAsync(Host, a, yieldable: false, CancellationToken.None);
+        var bSlot = await limiter.AcquireAsync(Host, b, yieldable: true, CancellationToken.None);
+        var bSecond = limiter.AcquireAsync(Host, b, yieldable: true, CancellationToken.None);
+
+        // A, now below its share of 1, keeps its connection a moment; B already has its share, so it waits.
+        aSlot.Dispose();
+        Assert.False(bSecond.IsCompleted);
+        var granted = await bSecond.WaitAsync(Wait);
+        Assert.Equal(b, granted.OwnerId);
+        Assert.Equal(0, limiter.HeldBy(Host, a));
+        granted.Dispose();
+        bSlot.Dispose();
+        await UntilIdleAsync(limiter);
+    }
+
+    [Fact]
+    public async Task AJobShortOfItsShareIsNeverKeptWaitingForAKeptConnection()
+    {
+        var limiter = new FairHostConnectionLimiter(2, reuseWindow: TimeSpan.FromSeconds(30));
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var aSlot = await limiter.AcquireAsync(Host, a, yieldable: false, CancellationToken.None);
+        var bSlot = await limiter.AcquireAsync(Host, b, yieldable: true, CancellationToken.None);
+        var bSecond = limiter.AcquireAsync(Host, b, yieldable: true, CancellationToken.None);
+        aSlot.Dispose();
+        Assert.False(bSecond.IsCompleted);
+
+        // C holds nothing, so it is short of its share, and gets the connection kept for A at once.
+        var c = await limiter.AcquireAsync(Host, Guid.NewGuid(), yieldable: false, CancellationToken.None).WaitAsync(Wait);
+        Assert.Equal(2, limiter.ActiveOn(Host));
+        Assert.False(bSecond.IsCompleted);
+        c.Dispose();
+        bSlot.Dispose();
+        (await bSecond.WaitAsync(Wait)).Dispose();
+        await UntilIdleAsync(limiter);
+    }
+
+    /// <summary>A grant racing the waiter's own cancel registration leaves the slot usable and the token clean.</summary>
+    [Fact]
+    public async Task GrantsRacingTheirCancelRegistrationStayCorrect()
+    {
+        var limiter = new FairHostConnectionLimiter(1, reuseWindow: TimeSpan.Zero);
+        using var runToken = new CancellationTokenSource();
+        var holder = await limiter.AcquireAsync(Host, Guid.NewGuid(), yieldable: false, CancellationToken.None);
+        for (var i = 0; i < 2000; i++)
+        {
+            var waiting = limiter.AcquireAsync(Host, Guid.NewGuid(), yieldable: false, runToken.Token);
+            holder.Dispose();
+            holder = await waiting.WaitAsync(Wait);
+        }
+
+        // Every grant is done with; cancelling the long-lived token now must reach no waiter.
+        runToken.Cancel();
+        Assert.Equal(1, limiter.ActiveOn(Host));
+        holder.Dispose();
+        Assert.Equal(0, limiter.Active);
+    }
+
+    private static async Task UntilIdleAsync(FairHostConnectionLimiter limiter)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (limiter.Active != 0)
+        {
+            Assert.True(clock.Elapsed < Wait, $"{limiter.Active} connections still out.");
+            await Task.Delay(5);
+        }
+    }
+
     /// <summary>Many owners taking and giving back at random never see more than the limit out.</summary>
     [Fact]
     public async Task UnderLoadTheLimitHoldsAndEveryoneGetsThrough()
