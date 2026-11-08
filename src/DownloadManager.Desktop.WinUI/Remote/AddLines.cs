@@ -39,14 +39,14 @@ internal static partial class LinkExtractor
 {
     private static readonly char[] TrailingPunctuation = ['.', ',', ';', ')', ']', '}', '!', '?'];
 
-    [GeneratedRegex(@"https?://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?:https?|ftp)://[^\s""'<>`]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex HttpPattern();
 
     // A path counts only as a whole line, because "C:\x.torrent" inside a sentence is anyone's guess.
-    [GeneratedRegex(@"(?<link>(?:https?://|magnet:)[^\s""'<>`]+)|^[ \t]*(?<path>(?:[a-z]:\\|\\\\)[^\r\n""<>|*?]*\.torrent)[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline)]
+    [GeneratedRegex(@"(?<link>(?:https?://|ftp://|magnet:)[^\s""'<>`]+)|^[ \t]*(?<path>(?:[a-z]:\\|\\\\)[^\r\n""<>|*?]*\.torrent)[ \t]*\r?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline)]
     private static partial Regex InputPattern();
 
-    /// <summary>What Add Links takes with no provider to send anything to: distinct http and https links in free text.</summary>
+    /// <summary>What Add Links takes with no provider to send anything to: distinct http, https and ftp links in free text.</summary>
     public static List<string> HttpLinks(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
@@ -84,7 +84,7 @@ internal static partial class LinkExtractor
     public static bool IsTorrentPath(string input) => input.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && !IsMagnet(input) && !input.Contains("://", StringComparison.Ordinal);
 
     public static bool IsWebLink(string input)
-        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "ftp";
 }
 
 /// <summary>
