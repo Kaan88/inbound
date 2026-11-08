@@ -215,7 +215,7 @@ public sealed partial class MainWindow
 
             if (!LinkExtractor.IsWebLink(text) && !LinkExtractor.IsMagnet(text) && !LinkExtractor.IsTorrentPath(text))
             {
-                error.Say("Enter an http or https address, a magnet, or the full path of a .torrent file.", isProblem: true);
+                error.Say("Enter an http, https or ftp address, a magnet, or the full path of a .torrent file.", isProblem: true);
                 return;
             }
 

@@ -37,6 +37,13 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    public void FtpLinksAreFoundLikeHttpLinks()
+    {
+        Assert.Equal(["ftp://a.example/x.zip", "FTP://b.example/y"], LinkExtractor.HttpLinks("get ftp://a.example/x.zip, and FTP://b.example/y."));
+        Assert.Equal(["ftp://a.example/x.zip", "https://a.example/y"], LinkExtractor.Inputs("ftp://a.example/x.zip\nhttps://a.example/y"));
+    }
+
+    [Fact]
     public void WithAProviderMagnetsAndWholeLineTorrentPathsAreFoundInOrder()
     {
         var text = $"first https://a.example/x.zip.\r\n{MagnetLink}\r\n  C:\\t\\a.torrent  \r\nnot this C:\\t\\b.torrent one\n\\\\server\\c.torrent\nhttps://torbox.app/download?id=1&type=torrents";
@@ -71,7 +78,7 @@ public sealed class AddLinesTests
     {
         Assert.Empty(LinkExtractor.Inputs(null));
         Assert.Empty(LinkExtractor.Inputs("   "));
-        Assert.Empty(LinkExtractor.Inputs("ftp://a.example/x just words"));
+        Assert.Empty(LinkExtractor.Inputs("gopher://a.example/x just words"));
     }
 
     // ---- Routes ------------------------------------------------------------------------------------
