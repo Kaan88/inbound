@@ -1,10 +1,9 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
-using DownloadManager.Runtime.Remote;
 
-namespace DownloadManager.Host;
+namespace DownloadManager.Runtime.Ipc;
 
-public sealed partial class HostPipeServer
+public sealed partial class HostCommandDispatcher
 {
     /// <summary>
     /// These wait on the network, so they run under a lifetime that ends when their client goes
@@ -17,7 +16,7 @@ public sealed partial class HostPipeServer
         // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
         MessageTypes.JobRefreshUrl;
 
-    private async Task<bool> TryDispatchRemoteAsync(ClientConnection client, IpcMessage message, CancellationToken cancellationToken)
+    private async Task<bool> TryDispatchRemoteAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
     {
         if (_remote is not { } remote || !message.Type.StartsWith("remote.", StringComparison.Ordinal))
         {
@@ -91,7 +90,7 @@ public sealed partial class HostPipeServer
         => message.Payload is null ? new T() : message.GetPayload<T>();
 
     /// <summary>A frame over the limit would end the connection, and a very large item shouldn't do that to a frontend.</summary>
-    private async Task ReplyWithinFrameAsync(ClientConnection client, IpcMessage request, string type, object reply)
+    private async Task ReplyWithinFrameAsync(IClientSession client, IpcMessage request, string type, object reply)
     {
         var message = IpcMessage.Create(type, reply, request.Id);
         if (message.Payload is { } payload && payload.GetRawText().Length >= Protocol.MaxFrameBytes - 1024)
@@ -101,15 +100,11 @@ public sealed partial class HostPipeServer
             return;
         }
 
-        await client.SendAsync(message).ConfigureAwait(false);
+        client.Enqueue(message);
     }
 
-    private void OnRemoteChanged(object? sender, RemoteChangedDto change)
-    {
-        var message = IpcMessage.Create(MessageTypes.RemoteChanged, change);
-        foreach (var client in _clients.Values)
-        {
-            client.Writer.TryWrite(message);
-        }
-    }
+    private void OnRemoteChanged(object? sender, RemoteChangedDto change) => BroadcastRemoteChanged(change);
+
+    public void BroadcastRemoteChanged(RemoteChangedDto change)
+        => Broadcast(IpcMessage.Create(MessageTypes.RemoteChanged, change));
 }
