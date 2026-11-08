@@ -125,6 +125,7 @@ public sealed class ServerAuth
     internal static bool IsPublic(PathString path) =>
         path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/favicon.svg", StringComparison.OrdinalIgnoreCase) ||
+        path.Equals("/theme.js", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/signin", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWithSegments("/signin", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/api/auth/status", StringComparison.OrdinalIgnoreCase) ||
@@ -219,7 +220,8 @@ public sealed class ServerAuth
         setupCodeNeeded = SetupNeeded && NeedsSetupCode(context),
         passwordFromEnvironment = PasswordFromEnvironment,
         sessionEndsAt = SessionOf(context) is { } session ? Sessions.AbsoluteEnd(session) : (DateTimeOffset?)null,
-        version = Protocol.HostVersion,
+        // Only for a browser that may use the server: a version tells a stranger which flaws to try.
+        version = !Required || SessionOf(context) is not null ? Protocol.HostVersion : null,
     };
 
     private sealed class PasswordForm

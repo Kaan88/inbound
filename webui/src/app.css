@@ -1,0 +1,172 @@
+@import "tailwindcss";
+/* Both builds scan the components here; the sign-in build's root is signin/, which would miss them. */
+@source "./";
+
+/*
+  The desktop app's palette (src/DownloadManager.Desktop.WinUI/App.xaml, docs/design-guidelines.md), as CSS variables.
+  Light is the default; dark comes from the system, or from data-theme on <html> when the user picked one.
+  Never hard-code a color in a component: use these through the Tailwind names below (bg-chrome, text-muted, ...).
+*/
+:root {
+  color-scheme: light;
+  --chrome: #f3f3f3;
+  --surface: #ffffff;
+  --divider: #dadada;
+  --text: #1a1a1a;
+  --muted: #666666;
+  --progress: #1f6fc5;
+  --track: #e2e2e2;
+  --error: #c42b1c;
+  --highlight: #dce9f7;
+  --accent: #1f6fc5;
+  --accent-hover: #1a5fa8;
+  --accent-text: #ffffff;
+  --icon-start: #2e8b3e;
+  --icon-pause: #b7791f;
+  --icon-danger: #c42b1c;
+  --icon-info: #1f6fc5;
+  --icon-neutral: #6a6a6a;
+  --icon-media: #7b4fb8;
+  --status-active: #1b65b4;
+  --status-done: #1b7130;
+  --status-failed: #b3261e;
+  --status-waiting: #8a5a00;
+  --status-neutral: #5f5f5f;
+  --hover: rgb(0 0 0 / 0.04);
+  --selected: #dce9f7;
+  --shadow: rgb(0 0 0 / 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --chrome: #202020;
+    --surface: #181818;
+    --divider: #343434;
+    --text: #f2f2f2;
+    --muted: #a3a3a3;
+    --progress: #4aa3f0;
+    --track: #383838;
+    --error: #f07a7a;
+    --highlight: #2b3a4f;
+    --accent: #4aa3f0;
+    --accent-hover: #84bdf3;
+    --accent-text: #0e1b2a;
+    --icon-start: #8ccf8c;
+    --icon-pause: #e8b36a;
+    --icon-danger: #e08a8a;
+    --icon-info: #6fa8dc;
+    --icon-neutral: #a8a8a8;
+    --icon-media: #b49ad6;
+    --status-active: #6db3f2;
+    --status-done: #5dc879;
+    --status-failed: #f58b8b;
+    --status-waiting: #e0a93e;
+    --status-neutral: #a3a3a3;
+    --hover: rgb(255 255 255 / 0.05);
+    --selected: #2b3a4f;
+    --shadow: rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --chrome: #202020;
+  --surface: #181818;
+  --divider: #343434;
+  --text: #f2f2f2;
+  --muted: #a3a3a3;
+  --progress: #4aa3f0;
+  --track: #383838;
+  --error: #f07a7a;
+  --highlight: #2b3a4f;
+  --accent: #4aa3f0;
+  --accent-hover: #84bdf3;
+  --accent-text: #0e1b2a;
+  --icon-start: #8ccf8c;
+  --icon-pause: #e8b36a;
+  --icon-danger: #e08a8a;
+  --icon-info: #6fa8dc;
+  --icon-neutral: #a8a8a8;
+  --icon-media: #b49ad6;
+  --status-active: #6db3f2;
+  --status-done: #5dc879;
+  --status-failed: #f58b8b;
+  --status-waiting: #e0a93e;
+  --status-neutral: #a3a3a3;
+  --hover: rgb(255 255 255 / 0.05);
+  --selected: #2b3a4f;
+  --shadow: rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --color-chrome: var(--chrome);
+  --color-surface: var(--surface);
+  --color-divider: var(--divider);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-progress: var(--progress);
+  --color-track: var(--track);
+  --color-error: var(--error);
+  --color-highlight: var(--highlight);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-icon-start: var(--icon-start);
+  --color-icon-pause: var(--icon-pause);
+  --color-icon-danger: var(--icon-danger);
+  --color-icon-info: var(--icon-info);
+  --color-icon-neutral: var(--icon-neutral);
+  --color-icon-media: var(--icon-media);
+  --color-status-active: var(--status-active);
+  --color-status-done: var(--status-done);
+  --color-status-failed: var(--status-failed);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-neutral: var(--status-neutral);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  html, body {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body { margin: 0; min-height: 100dvh; overflow-x: hidden; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
+  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.92em; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded border border-divider bg-surface px-3 py-1.5 text-[13px] leading-5 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-45;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded border border-accent bg-accent px-3 py-1.5 text-[13px] font-semibold leading-5 text-accent-text hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-45;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded border border-icon-danger bg-surface px-3 py-1.5 text-[13px] font-semibold leading-5 text-status-failed hover:bg-hover disabled:opacity-45;
+  }
+  .btn-icon {
+    @apply inline-flex size-8 items-center justify-center rounded text-text hover:bg-hover disabled:opacity-45;
+  }
+  .field {
+    @apply w-full min-w-0 rounded border border-divider bg-surface px-2.5 py-1.5 text-[13px] leading-5 placeholder:text-muted focus:border-accent focus:outline-none;
+  }
+  .label { @apply mb-1 block text-[12px] font-semibold text-muted; }
+  .hint { @apply text-[12px] leading-snug text-muted; }
+  .section-title { @apply mb-2 text-[13px] font-semibold; }
+  .card { @apply rounded-md border border-divider bg-surface; }
+  .tone-active { color: var(--status-active); }
+  .tone-done { color: var(--status-done); }
+  .tone-failed { color: var(--status-failed); }
+  .tone-waiting { color: var(--status-waiting); }
+  .tone-neutral { color: var(--status-neutral); }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
