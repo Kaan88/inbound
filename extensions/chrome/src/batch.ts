@@ -241,6 +241,7 @@ async function sendToApp(): Promise<void> {
 
     if (accepted > 0 && failed === 0) {
       selected.clear();
+      render();
       setTimeout(() => window.close(), 1400);
     }
   } catch (error) {
