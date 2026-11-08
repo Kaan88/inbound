@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import { bytes, dateTime } from '../lib/format';
+  import { newUuid } from '../lib/ids';
   import { store } from '../lib/store.svelte';
   import type { Queue, Schedule } from '../lib/types';
 
@@ -45,7 +46,7 @@
 
   function newSchedule(): Schedule {
     return {
-      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`,
+      id: newUuid(),
       name: 'Nightly', queueId: store.model.settings?.defaultQueueId ?? 0, enabled: true, kind: 'daily',
       days: days.join(','), startTime: '02:00', stopTime: '07:00', timedStartEnabled: true, startOnHostStartup: false,
       openFileWhenDone: false, exitWhenDone: false, shutdownWhenDone: false, shutdownMode: 'shutdown', forceShutdown: false,

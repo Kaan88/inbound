@@ -2,7 +2,7 @@
   import Dialog from '../components/Dialog.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
-  import { kindWord, linesOf, routeOf, showsAddress, type AddLine } from '../lib/addlines';
+  import { kindWord, linesOf, routeOf, showsAddress, withoutAdded, type AddLine } from '../lib/addlines';
   import { bytes, siteOf } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import type { ClassifyResult, RemoteFile } from '../lib/types';
@@ -99,6 +99,7 @@
     let ok = 0;
     const failures: string[] = [];
     const remoteIds: string[] = [];
+    const done: string[] = [];
     for (const line of addable) {
       const route = routeOf(line);
       try {
@@ -121,12 +122,15 @@
           if (result.job) remoteIds.push(result.job.id);
         }
         ok++;
+        done.push(line.input);
       } catch (error) {
         failures.push(`Line ${line.position}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     adding = false;
     addedRemote = remoteIds;
+    // A retry must not send the lines that were already added a second time.
+    if (failures.length) ({ lines, text } = withoutAdded(lines, text, done));
     summary = `${ok} added${failures.length ? `, ${failures.length} not added` : ''}.`;
     if (failures.length) store.toast(failures.slice(0, 3).join(' '), 'error');
     if (ok) store.toast(`Added ${ok} link${ok === 1 ? '' : 's'}.`);
