@@ -94,8 +94,10 @@ address and a one-time code from the server's web UI. Until you do, nothing belo
 - **What the extension keeps:** the server's address, the name it was paired under, and a token the server
   gave it, in Chrome's local storage on this computer (not synced). The token lets the extension send
   downloads and use the popup's actions on that server, and nothing else. It is not encrypted by the
-  extension; anyone who can read your browser profile can read it. Unpair deletes it from the extension;
-  remove the browser from the web UI's Paired browsers list too, so the token stops working there.
+  extension; anyone who can read your browser profile can read it. Unpair deletes it from the extension
+  and sends the token to the server once more, only to ask it to remove this pairing, so the token stops
+  working there too. If the server can't be reached, Settings says so: then remove the browser from the
+  web UI's Paired browsers list yourself.
 - **What goes to the server:** for each download you send there (automatically, if you chose the server
   for automatic downloads, or by choosing Server in the folder window), the same details as for the
   desktop app, listed above, your cookies for that site included. The extension asks Chrome for access to
