@@ -4682,10 +4682,16 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
 
+    private bool IsContentDialogOpen() =>
+        Content?.XamlRoot is { } root && VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Any(popup => popup.Child is ContentDialog);
+
     /// <summary>Asks before deleting the selection. <paramref name="deleteFromDisk"/> is the box's starting state:
     /// only Shift+Delete starts it ticked, so a plain Delete never removes finished files without a click.</summary>
     private async Task ConfirmDeleteAsync(bool deleteFromDisk)
     {
+        // WinUI allows one ContentDialog at a time and a second ShowAsync throws, which ends the window. The toolbar can
+        // still be invoked behind an open dialog (UI Automation, a screen reader), so a Delete then does nothing (UI.B8).
+        if (IsContentDialogOpen()) return;
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
