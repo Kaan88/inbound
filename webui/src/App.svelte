@@ -8,16 +8,18 @@
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
   import SettingsScreen from './screens/SettingsScreen.svelte';
+  import StatisticsScreen from './screens/StatisticsScreen.svelte';
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
 
   // The shell: header, sidebar of views, the screen picked by the address's #hash, and the toasts.
-  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider' };
+  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider' } | { kind: 'statistics' };
 
   function parse(hash: string): Screen {
     const key = hash.replace(/^#\/?/, '');
     if (key === 'queues') return { kind: 'queues' };
     if (key === 'settings') return { kind: 'settings' };
     if (key === 'provider') return { kind: 'provider' };
+    if (key === 'statistics') return { kind: 'statistics' };
     const view = (['all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions'] as ViewKey[]).find((v) => v === key);
     return { kind: 'list', view: view ?? 'all' };
   }
@@ -106,6 +108,7 @@
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
       {@render link('#/queues', 'queues', 'calendar', 'Queues and scheduler')}
       {#if store.has('remote')}{@render link('#/provider', 'provider', 'key', `My ${providerName}`)}{/if}
+      {@render link('#/statistics', 'statistics', 'chart', 'Statistics')}
       {@render link('#/settings', 'settings', 'settings', 'Settings')}
     </nav>
 
@@ -118,6 +121,8 @@
         <QueuesScreen />
       {:else if screen.kind === 'provider'}
         <TorBoxScreen />
+      {:else if screen.kind === 'statistics'}
+        <StatisticsScreen />
       {:else}
         <SettingsScreen />
       {/if}
@@ -140,6 +145,7 @@
     <div class="pointer-events-auto flex max-w-md items-start gap-2 rounded-md border border-divider bg-surface px-3 py-2 text-[13px] shadow-lg {toast.tone === 'error' ? 'border-l-4 border-l-icon-danger' : ''}" role={toast.tone === 'error' ? 'alert' : 'status'}>
       <Icon name={toast.tone === 'error' ? 'alert' : 'info'} size={16} class="mt-0.5 shrink-0 {toast.tone === 'error' ? 'text-icon-danger' : 'text-icon-info'}" />
       <span class="min-w-0 flex-1">{toast.text}</span>
+      {#if toast.jobId}<button class="text-accent hover:underline" onclick={() => { if (screen.kind !== 'list') location.hash = '#/all'; store.showJob = toast.jobId ?? null; store.dismiss(toast.id); }}>Show</button>{/if}
       <button class="text-muted hover:text-text" aria-label="Dismiss" onclick={() => store.dismiss(toast.id)}><Icon name="close" size={14} /></button>
     </div>
   {/each}

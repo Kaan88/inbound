@@ -2,7 +2,8 @@
 
 import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
-import type { Settings } from './types';
+import { noticeFor } from './details';
+import type { Job, Settings } from './types';
 
 export type Theme = 'system' | 'dark' | 'light';
 
@@ -10,6 +11,8 @@ export interface Toast {
   id: number;
   text: string;
   tone: 'info' | 'error';
+  /** A download the toast is about; the toast then offers "Show". */
+  jobId?: string;
 }
 
 function readTheme(): Theme {
@@ -35,6 +38,8 @@ export class Store {
   theme = $state<Theme>(readTheme());
   toasts = $state<Toast[]>([]);
   signInRequired = $state(true);
+  /** A download the list screen should open (from a toast's Show). */
+  showJob = $state<string | null>(null);
   private client: ProtocolClient | null = null;
   private toastId = 0;
 
@@ -64,8 +69,34 @@ export class Store {
   }
 
   private receive(message: Envelope): void {
+    const event = message.type === 'job.event' ? (message.payload as { job?: Job; eventType?: string } | undefined) : undefined;
+    const before = event?.job?.id ? this.model.jobs[event.job.id]?.state : undefined;
     apply(this.model, message);
+    if (event?.job && event.eventType !== 'removed') this.announce(before, event.job);
     if (message.type === 'jobs.snapshot') void this.afterSnapshot();
+  }
+
+  /** D10: a download that finished or failed gets a toast, and a system notice while this tab is hidden. */
+  private announce(before: string | undefined, job: Job): void {
+    const notice = noticeFor(before, job, this.model.settings?.notifyOnCompletion !== false);
+    if (!notice) return;
+    this.toast(notice.text, notice.tone, notice.jobId);
+    try {
+      if (document.visibilityState === 'hidden' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(notice.tone === 'error' ? 'Download failed' : 'Download complete', { body: notice.text, tag: `inbound-${job.id}` });
+      }
+    } catch {
+      // Notifications can be blocked; the toast was shown.
+    }
+  }
+
+  /** Asks once for the right to show system notices; called from a click, which browsers require. */
+  askForNotices(): void {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default' && this.model.settings?.notifyOnCompletion !== false) void Notification.requestPermission();
+    } catch {
+      // Not offered here.
+    }
   }
 
   /** What isn't in the snapshot: the provider's work and account, and the archive sets. */
@@ -137,9 +168,9 @@ export class Store {
     return hasCapability(this.model, capability);
   }
 
-  toast(text: string, tone: Toast['tone'] = 'info'): void {
+  toast(text: string, tone: Toast['tone'] = 'info', jobId?: string): void {
     const id = ++this.toastId;
-    this.toasts.push({ id, text, tone });
+    this.toasts.push({ id, text, tone, jobId });
     setTimeout(() => this.dismiss(id), tone === 'error' ? 8000 : 4000);
   }
 
