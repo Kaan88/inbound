@@ -458,6 +458,9 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         // What the next Host will resume from: every byte the checkpoint counts is in the part file, and no two
         // ranges overlap.
         var saved = await SavedCheckpointAsync(host, child.Id);
+        // The first written bytes save a checkpoint at once, and the child had more than 384 KB before the change,
+        // so every cell must find one.
+        Assert.True(saved is { CompletedBytes: > 0 }, "No checkpoint with bytes was saved before the kill.");
         if (killAt == "split") Assert.True(saved is { Segments.Count: > 2 }, "The checkpoint lost its split ranges.");
         if (saved is not null)
         {
@@ -482,7 +485,9 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         Assert.Equal(child.Id, done.Id);
         Assert.Equal(12, done.RequestedConnections);
         AssertSameFile(host, file, "Live", "changed.bin");
-        Assert.InRange(Mock.PeakCdnConnections, 1, 16);
+        // Where the kill came after the new workers connected, more than four were seen on the CDN at once; the
+        // "saved" cell kills at once, so only the restarted run's count (12, from the saved settings) is shown there.
+        Assert.InRange(Mock.PeakCdnConnections, killAt == "saved" ? 1 : 5, 16);
         Assert.Empty(Mock.Submissions);
         AssertNoStrayFiles(host);
         await connection.DisposeAsync();
