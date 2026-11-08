@@ -42,6 +42,9 @@ export interface Job {
   isRemote?: boolean;
   remoteProvider?: string;
   queueRetryAt?: string;
+  startMode?: string;
+  conflictPolicy?: string;
+  expectedSha256?: string;
 }
 
 export interface DownloadGroup {

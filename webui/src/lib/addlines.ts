@@ -11,6 +11,14 @@ export interface AddLine {
   error: string | null;
   /** The user ticked "Download directly" for a line nobody could classify. */
   direct: boolean;
+  /** Ticked to be added. Starts from the desktop's defaults ({@link defaultSelected}) until the user says otherwise. */
+  selected?: boolean;
+  /** The user ticked or unticked it, so a later answer from the server doesn't change it. */
+  touched?: boolean;
+  /** A download with this address is already on the list. */
+  listed?: boolean;
+  /** For an uploaded .torrent file: its name, because the input is only a reference to the upload. */
+  label?: string;
 }
 
 export type Route = 'checking' | 'direct' | 'provider' | 'none';
