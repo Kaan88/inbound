@@ -121,9 +121,12 @@ Browser extension:
   4. Select: $extensionTarget
   5. Confirm the extension ID is $extensionId
 
-Native host registration (same manifest for both):
+  Firefox: the Firefox add-on is not published yet.
+
+Native host registration (Chrome and Edge share one manifest; Firefox has its own):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager
   HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager
+  HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager
 
 The host lives in the notification area. Closing the main window hides it;
 downloads and browser handoff continue. Use the tray Exit action to stop it.

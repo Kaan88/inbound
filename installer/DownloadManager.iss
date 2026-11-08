@@ -22,6 +22,7 @@
 #define NativeHostName "com.kaank.downloadmanager"
 #define ExtensionId "pknddmneejadnnngffojnoecojhdfalc"
 #define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
+#define FirefoxExtensionId "inbound-bridge@kaan88"
 
 [Setup]
 AppId={{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}
@@ -86,6 +87,9 @@ Name: "{userdesktop}\{#AppName}"; Filename: "{app}\app\{#HostExe}"; Parameters: 
 ; in CurUninstallStepChanged, only when they are this install's.
 Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"
 Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.json"; Flags: noerror
+; Firefox reads its own key and a manifest of its own (allowed_extensions, not allowed_origins), written
+; in CurStepChanged. Optional like Edge's.
+Root: HKCU; Subkey: "Software\Mozilla\NativeMessagingHosts\{#NativeHostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\native-host\{#NativeHostName}.firefox.json"; Flags: noerror
 ; Launch at sign-in is owned by the app's Options setting (the Host writes this value from it);
 ; setup configures the setting independently of the optional launch. Uninstall removes the value.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "DownloadManagerHost"; Flags: uninsdeletevalue dontcreatekey
@@ -171,12 +175,24 @@ begin
   RegDeleteKeyIncludingSubkeys(HKCU, SubKey);
 end;
 
+// The same rule for Firefox's key, which points at Firefox's own manifest.
+procedure RemoveFirefoxNativeHostKey(const SubKey: String);
+var
+  Registered: String;
+begin
+  if RegQueryStringValue(HKCU, SubKey, '', Registered) and FileExists(Registered) and
+     (CompareText(Registered, ExpandConstant('{app}\native-host\{#NativeHostName}.firefox.json')) <> 0) then
+    exit;
+  RegDeleteKeyIncludingSubkeys(HKCU, SubKey);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep <> usUninstall then
     exit;
   RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');
   RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');
+  RemoveFirefoxNativeHostKey('Software\Mozilla\NativeMessagingHosts\{#NativeHostName}');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -205,6 +221,14 @@ begin
     '  "path": "' + JsonEscape(Root + '\app\DownloadManager.NativeHost.exe') + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
     '  "allowed_origins": [ "chrome-extension://{#StoreExtensionId}/", "chrome-extension://{#ExtensionId}/" ]' + #13#10 +
+    '}');
+  WriteUtf8(ManifestDir + '\{#NativeHostName}.firefox.json',
+    '{' + #13#10 +
+    '  "name": "{#NativeHostName}",' + #13#10 +
+    '  "description": "{#AppName} browser bridge",' + #13#10 +
+    '  "path": "' + JsonEscape(Root + '\app\DownloadManager.NativeHost.exe') + '",' + #13#10 +
+    '  "type": "stdio",' + #13#10 +
+    '  "allowed_extensions": [ "{#FirefoxExtensionId}" ]' + #13#10 +
     '}');
 
   SaveStringToFile(Root + '\INSTALL.txt',
