@@ -87,8 +87,17 @@ function Assert-SignedXpiMatchesBuild([string]$xpi) {
             try { $memory = [IO.MemoryStream]::new(); $stream.CopyTo($memory) } finally { $stream.Dispose() }
             $bytes = $memory.ToArray()
             $sha256 = [Convert]::ToBase64String([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))
-            if ($sha256 -ne [Convert]::ToBase64String([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($file.Path)))) {
-                throw "'$($file.Name)' in the XPI differs from the build."
+            $builtBytes = [IO.File]::ReadAllBytes($file.Path)
+            if ($sha256 -ne [Convert]::ToBase64String([Security.Cryptography.SHA256]::Create().ComputeHash($builtBytes))) {
+                # web-ext writes manifest.json again when it packs (it dropped the final newline in 0.5.3's signing),
+                # so that one file is compared by its JSON content; every other file byte for byte.
+                $same = $false
+                if ($file.Name -eq 'manifest.json') {
+                    $utf8 = [Text.UTF8Encoding]::new($false)
+                    $same = (($utf8.GetString($bytes) | ConvertFrom-Json) | ConvertTo-Json -Depth 32 -Compress) -ceq
+                        (($utf8.GetString($builtBytes) | ConvertFrom-Json) | ConvertTo-Json -Depth 32 -Compress)
+                }
+                if (-not $same) { throw "'$($file.Name)' in the XPI differs from the build." }
             }
             $digest = $listed[$file.Name]
             $sha1 = [Convert]::ToBase64String([Security.Cryptography.SHA1]::Create().ComputeHash($bytes))

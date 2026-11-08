@@ -1,5 +1,13 @@
 # Progress — session handoff
 
+### Paused: 0.6.3 release half done (2026-11-08)
+
+- Owner paused the session ("pause here, I have more ideas suddenly. save work"). Nothing of 0.6.3 is pushed or released.
+- Done: addons.mozilla.org signed extension 0.5.3 as unlisted (version 0.5.3 is now used up there). The signed XPI (SHA-256 17dfe6e0...b5a1d) is in `artifacts\firefox-addon\` of the main checkout and of `dev`. Firefox 159.0.1 in a fresh test profile installed it permanently (signature accepted); the unsigned zip was refused with ERROR_SIGNEDSTATE_REQUIRED. `extensions/firefox-updates.json` points at `releases/download/v0.6.3/inbound-bridge-0.5.3-firefox.xpi` with that hash.
+- First real signing found that web-ext rewrites `manifest.json` (drops the final newline); the check now compares that one file by its JSON content. The signed file was kept and reused, not uploaded again.
+- The release squash for 0.6.3 is local only: commit 2aee7e5 on top of `main` 0c99668 (local branch `release-0.6.3-wip`, worktree `.claude\worktrees\rel063`), without the local-only docs. Setup, the package and the release files were not built yet (the build was stopped for EXT.S5).
+- To resume: add EXT.S5 if wanted (needs a new squash), then in the release tree build the package and Setup, run prepare-release, push the tag, create the release with six files, then push `main`. Do not run the sign script for 0.5.3 again without `-SignedXpi`.
+
 ### Firefox add-on self-distributed (2026-11-08, `dev`)
 
 - Owner, 2026-11-08: keep the Firefox add-on unlisted, publish the XPI on GitHub, and have Setup install it when a box is ticked; asked whether they must hand over each XPI. No: with an AMO API key pair (Developer Hub, Manage API Keys) saved outside the repository, `scripts\sign-extension-firefox.ps1` signs each version. ROADMAP EXT.S4 has the design and what was checked. Extension 0.5.3 carries the `update_url`; the owner's current copy (0.5.1/0.5.2 from AMO) has none, so it has to be added again once from the 0.6.3 Setup or the release XPI.
