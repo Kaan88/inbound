@@ -4,6 +4,7 @@ import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
 import { notifyEnabled } from './notify';
 import { noticeFor } from './details';
+import { featuresOf, hostTexts, type Features, type HostTexts } from './hostKind';
 import type { Job, Settings } from './types';
 
 export type Theme = 'system' | 'dark' | 'light';
@@ -174,6 +175,15 @@ export class Store {
 
   has(capability: string): boolean {
     return hasCapability(this.model, capability);
+  }
+
+  /** The texts that fit this host (the server or the Windows app), and what this session may use on it. */
+  get texts(): HostTexts {
+    return hostTexts(this.model.hello?.hostKind);
+  }
+
+  get features(): Features {
+    return featuresOf(this.model.hello?.capabilities);
   }
 
   toast(text: string, tone: Toast['tone'] = 'info', jobId?: string): void {

@@ -241,6 +241,8 @@ export interface Hello {
   protocolVersion: number;
   startedAt: string;
   capabilities: string[];
+  /** `windows` for the desktop app's web bridge, `server` for the headless server; absent from an older server. */
+  hostKind?: string;
 }
 
 export interface RemoteJob {

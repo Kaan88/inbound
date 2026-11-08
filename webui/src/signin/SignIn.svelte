@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { hostKindOf, hostTexts } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
 
   // The one page a browser sees before signing in: set the password the first time, then sign in with it.
@@ -8,6 +9,7 @@
     signedIn: boolean;
     setupNeeded: boolean;
     setupCodeNeeded: boolean;
+    hostKind?: string;
     version?: string;
   }
 
@@ -22,6 +24,9 @@
   // The clock runs only while a wait counts down.
   $effect(() => tickUntil(waitUntil, 500, (time) => (now = time)));
 
+  const texts = $derived(hostTexts(status?.hostKind));
+  // The Windows app has no setup step: its password is set in the desktop app, and the web UI never offers to set one.
+  const setupHere = $derived(!!status?.setupNeeded && hostKindOf(status.hostKind) !== 'windows');
   const waitLeft = $derived(Math.max(0, Math.ceil((waitUntil - now) / 1000)));
 
   async function load() {
@@ -84,17 +89,18 @@
     {#if !status}
       <p class="text-[13px] text-muted">{problem || 'Loading…'}</p>
     {:else}
-      <h1 class="mb-1 text-[16px] font-semibold">{status.setupNeeded ? 'Set a password' : 'Sign in'}</h1>
-      <p class="hint mb-4">{status.setupNeeded
-        ? 'This server has no password yet. The one you set here is needed to use it from any browser.'
-        : 'Enter the password of this server.'}</p>
+      <h1 class="mb-1 text-[16px] font-semibold">{setupHere ? 'Set a password' : 'Sign in'}</h1>
+      <p class="hint mb-4">{status.setupNeeded ? texts.noPasswordYet : texts.signInHint}</p>
 
+      {#if status.setupNeeded && !setupHere}
+        <!-- Nothing to type: the password is set in the desktop app. -->
+      {:else}
       <form class="grid gap-3" onsubmit={submit}>
-        {#if status.setupNeeded && status.setupCodeNeeded}
+        {#if setupHere && status.setupCodeNeeded && texts.setupCodeHint}
           <div>
             <label class="label" for="setup-code">Setup code</label>
             <input id="setup-code" class="field font-mono uppercase tracking-widest" bind:value={setupCode} autocomplete="off" spellcheck="false" required />
-            <p class="hint mt-1">This browser isn't on the server's own computer, so the server asks for the code it wrote in its log (docker logs).</p>
+            <p class="hint mt-1">{texts.setupCodeHint}</p>
           </div>
         {/if}
         <!-- A user name the browser's password manager can store with the password; the server has one user. -->
@@ -114,6 +120,7 @@
         {#if waitLeft > 0}<p class="text-[12px] text-muted" role="status">Wait {waitLeft} s before trying again.</p>{/if}
         <button class="btn-primary w-full" type="submit" disabled={busy || waitLeft > 0}>{status.setupNeeded ? 'Set the password' : 'Sign in'}</button>
       </form>
+      {/if}
       {#if status.version}<p class="hint mt-5 text-center">Server {status.version}</p>{/if}
     {/if}
   </div>
