@@ -142,11 +142,59 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   worker restarts anyway, the pending entry (in session storage) still works, and since the file-name
   callback is gone, Keep in browser cancels the stuck download and starts it again in the browser, once. A folder chosen there is for that
   download only; the next window starts at the default folder again (UI.R3). The right-click menu always
-  asks. A "this PC or the server" choice goes above the folder once the server transport exists.
+  asks. With a server paired the window also offers **This PC or Server** (below).
 - **Popup:** the newest 20 of all the app's downloads, whatever started them, with Pause, Resume (Retry for
   a failed one) and Delete, which asks first and has "Delete the file too", unticked. Each action goes on a
   native connection of its own, as the folder picker does: the Host answers one command at a time per
   connection, and a slow delete must not hold up an automatic handoff past its time limit.
+
+## Sending to the user's own server (EXT.R1 transport)
+
+`src/transport.ts` has two transports with one interface (`send` for a reply payload, `request` for a whole
+envelope on a connection of its own):
+
+- **`NativeTransport`**, this PC: the native-messaging code that used to live in `background.ts`, unchanged in
+  behaviour (one shared connection with one reconnect, one-off connections for the folder picker and the
+  popup's actions, `job.event` passed on).
+- **`ServerTransport`**, the server: one `POST <address>/api/ipc` per envelope with
+  `Authorization: Bearer <token>`, `credentials: "omit"` (never the browser's cookies for the server),
+  `redirect: "error"` (the token goes to the paired address only) and a time limit. A 401 means the pairing
+  was removed (`ServerUnpairedError`, "Pair it again"); a 403 refusal of the paired role comes back as its
+  envelope; no answer is said in the server's own words, never as the desktop app missing.
+
+**Pairing** (Settings, Inbound server): the user types the address (a missing scheme means http; a path is
+dropped; a user name or password in it is refused) and the 8-character code from the web UI (Settings,
+Paired browsers). On the click the page asks the browser for access to that host only
+(`permissions.request`, origin pattern without the port); Chrome and Edge already have it through the
+all-sites host permission, Firefox may ask. The background then calls `POST /api/pair` with the code and a
+name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
+`{address, token, id, name, pairedAt}` under `server` in `chrome.storage.local`. No page gets the token:
+`dm.status` and the other replies carry the address, name and state only. Unpair deletes it and sets
+automatic downloads back to this PC; the token can't revoke itself, so Settings says to remove it from the
+web UI too. Only `options.html` may pair or unpair. A plain-http address that is not loopback gets a one-line
+note that the token and cookies cross the network unencrypted.
+
+**Which target:**
+
+- **Automatic sending** uses "Automatic downloads go to" (`settings.defaultTarget`, This PC by default; the
+  server only while one is paired). There is no fallback: if that target refuses or does not answer, the
+  download resumes in the browser, as before, and is never sent to the other one, so the cookies only go
+  where the user chose.
+- **The folder window** (Ask each time, and the right-click menu) and **Download All** offer the targets that
+  can work: the server once paired, and This PC unless the server is paired and the desktop app is not
+  installed here (the native host is "not found"). With one target no choice is shown. Each target brings its
+  own default folder and favorites (`settings.downloadFolders` from each). Choose… opens the app's folder
+  dialog for This PC, and for the server a list of its folders one level at a time (`folders.browse` through
+  `dm.browseServerFolders`, which only `handoff.html` and `batch.html` may use; the server limits it to its
+  roots). The window starts on the default target. A folder chosen there is for that download only.
+- **The popup** lists the newest 20 of each place, labelled This PC or Server, and sends Pause, Resume, Retry
+  and Delete to the place the download is in. Without the desktop app here, its card is hidden and the
+  server's card shows the state. One place not answering leaves the other's list.
+
+The server's side (pairing, the token, the extension role with `folders.browse`, CORS for our extension ids
+and any `moz-extension://` origin) is in `docs/ipc-protocol.md` (Sign-in and paired browsers).
+`scripts/server-smoke.mjs` runs `transport.ts` against a running test server (pair, folders, handoff,
+duplicate, list, delete, a refused command, a removed token).
 
 ## Handoff flow (durable)
 
@@ -215,7 +263,10 @@ The host replies with `handoff.ack` / `handoff.error`, then streams
 
 `downloads`, `contextMenus`, `storage`, `cookies`, `nativeMessaging` and
 `notifications`, with host permissions for `http://*/*` and `https://*/*`, since a
-download can start from any site. `docs/chrome-store/LISTING.md` gives the reason
+download can start from any site. Pairing a server asks for its host again
+(`permissions.request`), which matters in Firefox, where host access is the user's
+choice; no `optional_host_permissions` entry is added, since the required host
+permissions already cover every http and https address. `docs/chrome-store/LISTING.md` gives the reason
 for each. What the extension does with data is in
 `docs/chrome-extension-privacy.md`; keep both true when behaviour changes.
 
@@ -244,6 +295,9 @@ first install and explains beside the checkbox what it shares.
   `jobIds` list, and asks for `deleteFile` only on `job.remove`, so a compromised extension cannot remove
   every download and its file in one request. A snapshot loses its settings on the way. Provider (`remote.*`) and
   archive messages never cross.
+- To a paired server the extension is the `BridgeRole.ServerExtension` role: the same allow-list plus
+  `folders.browse`, checked by the server on every `POST /api/ipc` with the token, replies included. The
+  extension sends `handoff.request` with its own extension id, which the server checks as the desktop app does.
 - Inside the extension, content scripts can send only the messages they need
   (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.
 - The host validates every field and enforces size/depth limits.

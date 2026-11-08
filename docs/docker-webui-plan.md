@@ -25,8 +25,19 @@ track it.
   when it was paired and last used, and removable. The token works only on `POST /api/ipc` and only for the
   extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
   never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
-  (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side
-  (choosing the server, entering the code, sending there) is Stream C's transport work and is not built here.
+  (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side is
+  built too (stream C transport, next item).
+- **The extension's server transport (EXT.R1, 2026-11-08):** `extensions/chrome/src/transport.ts` with
+  `NativeTransport` (this PC) and `ServerTransport` (`POST /api/ipc` with the bearer token, no cookies, no redirects).
+  The extension's Settings has an "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI,
+  Unpair) and "Automatic downloads go to: This PC / The server" (This PC by default). The folder window and Download
+  All offer This PC or Server when both can work, each with its default folder, and Choose… lists the server's
+  folders; the popup lists both, labelled. Any failure leaves the download in the browser, never sent to the other
+  place. Details: `docs/browser-integration.md`, "Sending to the user's own server". Evidence: npm tests
+  (`transport.test.cjs` 13, `server-target.test.cjs` 13), Server.Tests `ExtensionTransportTests` (3),
+  `scripts/server-smoke.mjs` against a running server (12 steps), and Chrome for Testing with the built extension
+  against a loopback test server: paired from Settings, an automatic download and an "ask each time" download landed
+  on the server with matching SHA-256 (PROGRESS).
 - **Torrent upload:** `POST /api/upload/torrent` keeps the file in `<data>/uploads` (removed after a day, at most 200),
   a folder only the provider coordinator may read besides the roots.
 - **Web UI** (`webui/`, Svelte 5, Vite 8, Tailwind 4, exact versions in `package-lock.json`): built to
@@ -47,8 +58,7 @@ track it.
   after the password, pause and resume, delete without the file, torrent upload to the mock provider, site login and
   proxy saved write-only, pairing and revoking, sign-out), against the server with a temp data folder, the
   TestServer and its mock TorBox. Screenshots: `artifacts\webui\` (not committed).
-- **Not done here:** the Dockerfile and compose (D3, in the next section), the run against the real TorBox (D4), and
-  the extension's server transport.
+- **Not done here:** the Dockerfile and compose (D3, in the next section) and the run against the real TorBox (D4).
 
 
 ## D3: what was built (2026-11-08)
@@ -258,9 +268,9 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 - **Sign-in:** one user. A password is set on first open, or from an environment variable, and stored hashed.
   Session cookie (`HttpOnly`, `SameSite=Strict`), origin check on every change, a growing wait after failed
   tries. Only `/health` and the sign-in page answer without signing in. TLS comes from a reverse proxy (D3 docs).
-- **Browser extension:** native messaging cannot reach a container. The server side is built: pairing by a one-time
-  code, and a token for `POST /api/ipc` limited to the extension's commands. The extension's transport is its own
-  item.
+- **Browser extension:** native messaging cannot reach a container. Built: pairing by a one-time code, a token for
+  `POST /api/ipc` limited to the extension's commands, and the extension's server transport with the This PC /
+  Server choice (EXT.R1).
 
 ## D3 Docker
 

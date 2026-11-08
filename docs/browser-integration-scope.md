@@ -11,5 +11,9 @@ extension and per-user native-messaging host. **Firefox** is required too (owner
 | Firefox | Built and registered; not signed, not checked in a real Firefox (ROADMAP EXT.E1) | `npm run build:firefox` writes `dist-firefox` with the add-on ID `inbound-bridge@kaan88`; Setup and the scripts register a Firefox manifest (`allowed_extensions`) under `HKCU\Software\Mozilla\NativeMessagingHosts`. Release Firefox runs only add-ons signed by addons.mozilla.org, which needs the owner's account. See `docs/browser-integration.md`, Firefox |
 | Other browsers | Not supported | No extension/host implementation |
 
+In Chrome, Edge and Firefox the extension can also send downloads to the user's own Inbound server (Docker or
+Linux) after pairing in its Settings; that path needs no native host (`docs/browser-integration.md`, Sending to the
+user's own server).
+
 Adding a browser requires its own extension package or a compatible store listing, a native-host
 registration path, and handoff verification; the host IPC and protocol can be reused.
