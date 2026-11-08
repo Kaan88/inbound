@@ -65,7 +65,8 @@
 
   onMount(() => {
     store.start();
-    const changed = () => {
+    const changed = (event: HashChangeEvent) => {
+      if (store.leaveGuard?.(event)) return;
       screen = parse(location.hash);
       drawer = false;
     };

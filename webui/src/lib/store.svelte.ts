@@ -47,6 +47,11 @@ export class Store {
   keyEpoch = $state(0);
   /** The Settings page to open next (a provider's account page, from My provider). */
   settingsPage = $state<string | null>(null);
+  /**
+   * Set by a screen that must ask before the page address changes (Options with unsaved changes). The shell calls it
+   * on every address change before it swaps the screen; true means the change is held and the screen asks.
+   */
+  leaveGuard: ((event: HashChangeEvent) => boolean) | null = null;
   private client: ProtocolClient | null = null;
   private toastId = 0;
 

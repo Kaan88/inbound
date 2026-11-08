@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loginNeedsPassword } from '../src/lib/settingsRules';
+import { heldLeave, loginNeedsPassword } from '../src/lib/settingsRules';
 
 describe('loginNeedsPassword', () => {
   const saved = { site: 'Example.com', username: 'ann', hasPassword: true };
@@ -18,5 +18,19 @@ describe('loginNeedsPassword', () => {
     expect(loginNeedsPassword(saved, 'other.com', 'bob', 'secret')).toBe(false);
     expect(loginNeedsPassword(undefined, 'a', 'b', '')).toBe(false);
     expect(loginNeedsPassword({ ...saved, hasPassword: false }, 'other.com', 'bob', '')).toBe(false);
+  });
+});
+
+describe('heldLeave', () => {
+  it('holds a move to another screen while the Options draft has changes', () => {
+    expect(heldLeave('http://x/#/queues', true, false)).toBe('#/queues');
+    expect(heldLeave('http://x/', true, false)).toBe('#/all');
+  });
+
+  it('lets everything go when nothing changed, the question is already open, or the address is still Options', () => {
+    expect(heldLeave('http://x/#/queues', false, false)).toBeNull();
+    expect(heldLeave('http://x/#/queues', true, true)).toBeNull();
+    expect(heldLeave('http://x/#/settings', true, false)).toBeNull();
+    expect(heldLeave('not an address', true, false)).toBeNull();
   });
 });
