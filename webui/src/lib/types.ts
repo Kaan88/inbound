@@ -51,6 +51,60 @@ export interface Job {
   startMode?: string;
   conflictPolicy?: string;
   expectedSha256?: string;
+  // D-items: the details view.
+  resumeSupported?: boolean | null;
+  speedLimitBytesPerSecond?: number | null;
+  canChangeSpeedLimit?: boolean;
+  categoryIsAutomatic?: boolean;
+  showCompletionDialog?: boolean | null;
+  completionOptions?: JobCompletionOptions;
+}
+
+/** What happens when one download completes: a program (null = the global one, '' = none), opening it, a system action. */
+export interface JobCompletionOptions {
+  programPath?: string | null;
+  openFile: boolean;
+  systemAction: string;
+  forceSystemAction: boolean;
+}
+
+export interface Segment {
+  start: number;
+  end: number;
+  completed: number;
+  isComplete: boolean;
+  fraction: number;
+}
+
+export interface ConnectionInfo {
+  id: string;
+  host: string;
+  state: string;
+  rangeStart?: number | null;
+  rangeEnd?: number | null;
+  receivedBytes: number;
+  bytesPerSecond: number;
+  statusCode?: number | null;
+  httpVersion?: string | null;
+  startedAt: string;
+}
+
+export interface Statistics {
+  capturedAt: string;
+  firstRecordedAt?: string | null;
+  recordedBytes: number;
+  completedBytes: number;
+  completedTodayBytes: number;
+  completedCount: number;
+  completedTodayCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  retainedCount: number;
+  archivedCount: number;
+  activeCount: number;
+  queuedCount: number;
+  pausedCount: number;
+  bytesPerSecond: number;
 }
 
 export interface DownloadGroup {
@@ -161,6 +215,8 @@ export interface Settings {
   categoryFolders?: Record<string, string>;
   customCategories?: CategoryDefinition[];
   deleteCategoryIds?: string[];
+  notifyOnCompletion?: boolean;
+  showCompletionDialog?: boolean;
   [key: string]: unknown;
 }
 

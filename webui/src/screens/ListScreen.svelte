@@ -18,6 +18,7 @@
   import { buildRows, selectedJobIds, type Row, type ViewKey } from '../lib/views';
   import ArchivePassword from './ArchivePassword.svelte';
   import JobDetails from './JobDetails.svelte';
+  import PackageDialog from './PackageDialog.svelte';
   import RemoteActions from './RemoteActions.svelte';
 
   let { view, search, onadd }: { view: ViewKey; search: string; onadd: () => void } = $props();
@@ -58,6 +59,13 @@
   let expanded = $state(loadExpanded());
   let sort = $state<SortState>(parseSort(load('inbound.listSort')));
   let details = $state<string | null>(null);
+  let packageOpen = $state<string | null>(null);
+  // A package with just one listed file opens that file's own window (ProgressDetailRules.OnlyFile).
+  function openPackage(group: { id: string; jobIds: string[] }) {
+    const listed = group.jobIds.filter((id) => store.model.jobs[id]);
+    if (listed.length === 1) details = listed[0];
+    else packageOpen = group.id;
+  }
   let remoteOpen = $state<RemoteJob | null>(null);
   let passwordFor = $state<ArchiveSet | null>(null);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; label: string } | null>(null);
@@ -119,6 +127,14 @@
   // The column is there whenever there is a set to talk about, and the Host answers archive.list.
   const showExtraction = $derived(store.model.archivesAnswered && Object.keys(store.model.archives).length > 0);
   const needPassword = $derived(Object.values(store.model.archives).filter((set) => set.needsPassword && !set.hasPassword && set.state !== 'completed'));
+
+  // A toast's Show opens that download.
+  $effect(() => {
+    if (store.showJob) {
+      details = store.showJob;
+      store.showJob = null;
+    }
+  });
 
   // A row that left the view leaves the selection.
   $effect(() => {
@@ -573,7 +589,10 @@
         { separator: true },
         { label: 'Delete…', hint: 'Delete', onselect: () => askDelete(false) },
         { separator: true },
-        { label: menuLabel('Progress Details…', plan.fileReason), disabled: plan.fileReason !== null, onselect: () => (details = single!.id) },
+        // As the desktop: on a package row it opens the package's window, otherwise the file's.
+        firstLocal?.kind === 'package' && localRows.length === 1
+          ? { label: 'Progress Details…', onselect: () => openPackage(firstLocal.group) }
+          : { label: menuLabel('Progress Details…', plan.fileReason), disabled: plan.fileReason !== null, onselect: () => (details = single!.id) },
         { label: 'Group into Package…', hidden: !canGroup(selectedJobs.length, localRows.length), onselect: groupSelected },
         { label: 'Remove from Package', hidden: !selectedJobs.some((job) => packageOf(job.id)), onselect: () => void ungroupSelected() },
         { label: 'Rename Package…', hidden: !(firstLocal?.kind === 'package' || (firstLocal?.kind === 'job' && !!packageOf(firstLocal.job.id))), onselect: renamePackage },
@@ -987,9 +1006,14 @@
   </Dialog>
 {/if}
 
-{#if details && store.model.jobs[details]}
-  <JobDetails job={store.model.jobs[details]} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+{#if packageOpen}
+  <PackageDialog groupId={packageOpen} onclose={() => (packageOpen = null)} onopenfile={(id) => { details = id; }} />
 {/if}
+
+{#if details}
+  <JobDetails jobId={details} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+{/if}
+
 
 {#if remoteOpen}
   <RemoteActions remote={store.model.remoteJobs[remoteOpen.id] ?? remoteOpen} onclose={() => (remoteOpen = null)} />
