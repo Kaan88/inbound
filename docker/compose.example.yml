@@ -1,0 +1,73 @@
+# Inbound Download Manager server, example compose file (D3). Copy it to compose.yml next to a password file:
+#
+#   printf '%s' 'a long password' > inbound-password.txt && chmod 600 inbound-password.txt
+#   docker compose up -d
+#
+# then open http://<this machine>:8080 and sign in. docs/docker.md explains every setting.
+name: inbound
+
+services:
+  inbound:
+    image: ghcr.io/kaan88/inbound:latest
+    # Or build it from a checkout of the repository instead of pulling it:
+    # build: { context: .., dockerfile: Dockerfile }
+    container_name: inbound
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - "8080:8080"
+    environment:
+      # The user and group that own your download folder on the host (id -u, id -g). /data is given to them too.
+      PUID: "1000"
+      PGID: "1000"
+      # Your time zone, for the scheduler and the log (for example Europe/Istanbul).
+      TZ: "Etc/UTC"
+      # Sign-in is on by default. The password comes from the secret below; without it the first browser to open
+      # the page sets one (a browser on another machine also needs the setup code from `docker logs inbound`).
+      DOWNLOADMANAGER_PASSWORD_FILE: /run/secrets/inbound_password
+      # Or, less safe (it shows in `docker inspect`):
+      # DOWNLOADMANAGER_PASSWORD: "a long password"
+      # Only on a home network you trust: turn sign-in off. The server then listens beyond loopback only with
+      # DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1 as well.
+      # DOWNLOADMANAGER_AUTH: "off"
+      # DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED: "1"
+      # Host names you use in the browser for this server, besides IP addresses and localhost:
+      # DOWNLOADMANAGER_HOSTS: "nas.home.arpa,downloads.example.org"
+    secrets:
+      - inbound_password
+    volumes:
+      # State: download list, settings, logs, the sign-in password hash and secrets.key (the key that opens the saved
+      # site logins, proxy password and TorBox key). Back it up as a whole.
+      - ./data:/data
+      # Where downloads go. The web UI can only choose folders under here.
+      - /srv/downloads:/downloads
+
+secrets:
+  inbound_password:
+    file: ./inbound-password.txt
+
+# ---- HTTPS through a reverse proxy (optional) --------------------------------------------------------------------
+# The server speaks plain HTTP. For HTTPS, put a proxy in front, stop publishing 8080 on the host (remove `ports:`
+# above, or bind it to 127.0.0.1), and let the proxy reach the container on the compose network. With Caddy:
+#
+#   caddy:
+#     image: caddy:2
+#     restart: unless-stopped
+#     ports: ["443:443", "80:80"]
+#     volumes:
+#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#       - ./caddy-data:/data
+#
+# Caddyfile:
+#
+#   downloads.example.org {
+#       reverse_proxy inbound:8080
+#   }
+#
+# and in the inbound service's environment:
+#
+#   DOWNLOADMANAGER_TRUST_PROXY: "1"        # believe X-Forwarded-For/-Proto from the proxy (only behind one)
+#   DOWNLOADMANAGER_HOSTS: "downloads.example.org"
+#
+# Caddy forwards WebSockets on its own; the web UI needs them (/api/ws). docs/docker.md has a Traefik example.
