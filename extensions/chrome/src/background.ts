@@ -385,10 +385,11 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     return false;
   }
 
-  // Firefox (no held file name) can run without access to the site, and then no cookies can be read: a
-  // download that needs a sign-in would go to the app without one while the browser's working copy is
-  // cancelled. It stays in the browser instead. Chromium grants site access at install and is not asked.
-  if (!holdsName && !await canReadCookiesFor(item.url)) {
+  // Without access to the site no cookies can be read, so a download that needs a sign-in would go to the
+  // app without one while the browser's copy is cancelled. It stays in the browser instead. Firefox may
+  // install without site access; Chrome and Edge grant it at install, but the user can withdraw it for a
+  // site (or set it to "on click"), so every browser is asked (EXT.R5).
+  if (!await canReadCookiesFor(item.url)) {
     await noteLeftInBrowser(fileName, "The extension has no access to this site, so its sign-in could not be sent. Allow site access in the extension's Settings.", false);
     return false;
   }

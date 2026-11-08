@@ -285,6 +285,10 @@ permissions already cover every http and https address. `docs/chrome-store/LISTI
 for each. What the extension does with data is in
 `docs/chrome-extension-privacy.md`; keep both true when behaviour changes.
 
+Without access to a download's site its cookies can't be read, so such a download stays in the browser,
+with a note saying why. That holds in every browser: Firefox may install without site access, and in
+Chrome and Edge the user can withdraw it for a site or set it to "on click".
+
 Automatic catching is on from a fresh install; Settings opens on first install and explains beside the
 checkbox what it shares, so it can be turned off before the first download.
 

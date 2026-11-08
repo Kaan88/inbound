@@ -894,14 +894,25 @@ test('EXT.E1: on Firefox without access to the site a download stays in the brow
   });
 });
 
-test('Chromium is not asked about site access before a catch', async () => {
+test('EXT.R5: on Chromium a site whose access was withdrawn keeps its download, and others still go', async () => {
   const { harness, log } = capturingChrome(catching);
-  harness.chrome.permissions = { async contains() { return false; } };
+  const asked = [];
+  harness.chrome.permissions = {
+    async contains({ origins }) { asked.push(...origins); return !origins.includes('https://withdrawn.test/*'); },
+  };
   await withBackground(harness, async () => {
-    void startDownload(harness, { id: 42, url: 'https://site.test/a.zip', filename: 'a.zip' });
+    void startDownload(harness, { id: 42, url: 'https://withdrawn.test/a.zip', filename: 'a.zip' });
+    await settle(() => log.notes.length);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(log.notes[0].message, /a\.zip: The extension has no access to this site/);
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+    assert.deepEqual(log.cancelled, []);
+    assert.ok(asked.includes('https://withdrawn.test/*'));
+
+    void startDownload(harness, { id: 43, url: 'https://open.test/b.zip', filename: 'b.zip' });
     await answerNative(harness, 'handoff.request', { accepted: true });
     await settle(() => log.cancelled.length);
-    assert.deepEqual(log.cancelled, [42]);
+    assert.deepEqual(log.cancelled, [43]);
   });
 });
 
