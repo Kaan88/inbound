@@ -12,7 +12,9 @@
   - TB.L1: keep 16 connections per TorBox file.
   - Automatic sending on a fresh extension install: on. `DEFAULT_SETTINGS.autoIntercept` is now true; Settings still opens on install with the explanation; an update keeps the saved choice. Docs and the privacy page say so (the online copy needs the same change when this ships).
   - Image license label: the owner has no license in mind. The image keeps no `licenses` label until one is chosen.
-  - UI.B11: the owner asked what "exiting" means. Answer given: Tasks > Exit in the window and Exit in the tray menu quit the whole app (the Host), which pauses running downloads; closing the window does not. Waiting on the decision.
+  - UI.B11: Tasks > Exit and the tray's Exit quit the whole app (the Host), which pauses running downloads; closing the window does not. Owner: "leave as is". Closed.
+  - EXT.B1 verified in the owner's Edge: the `dev` build caught a TorBox Direct Download.
+  - Firefox (EXT.E1): the owner's signed add-on shows "Inbound unavailable": the installed 0.5.3 writes no Firefox native-messaging key. The next release's installer writes it; until then `scriptsegister-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
 
 ### Test campaign merged into `dev` (2026-11-08)
 
