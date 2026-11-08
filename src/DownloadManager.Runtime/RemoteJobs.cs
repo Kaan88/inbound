@@ -742,7 +742,13 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
         }
 
         DownloadJob snapshot;
-        lock (_sync) snapshot = job.Clone();
+        lock (_sync)
+        {
+            snapshot = job.Clone();
+            // The last run's link is no guide to this one's host or cap.
+            runtime.RunLink = null;
+        }
+
         RemoteLinkResolution resolution;
         try
         {
@@ -794,6 +800,7 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             job.ExpectedTotalBytes = resolution.ExpectedTotalBytes ?? job.ExpectedTotalBytes;
             job.ExpectedMd5 = resolution.ExpectedMd5 ?? job.ExpectedMd5;
             job.ResolvedUrl = resolution.Url;
+            runtime.RunLink = (uri, resolution.MaxConnections ?? int.MaxValue);
             ProviderConnectionsLocked(job, uri, resolution.MaxConnections ?? int.MaxValue);
         }
 
@@ -804,7 +811,8 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
     /// <summary>
     /// A provider job's count is never chosen by hand (its add request carries none), so each run takes the user's
     /// current connections per download, the host's limit and the provider's cap afresh (TB.L1). A job saved under an
-    /// older, lower provider cap grows to the new one; a raised or lowered default reaches it on its next run. The
+    /// older, lower provider cap grows to the new one; a raised or lowered default reaches it on its next run, and a
+    /// running segmented transfer at once (UI.R21) within the same cap. The
     /// engine resumes a checkpoint with any count, since workers never outnumber its remaining segments.
     /// </summary>
     private void ProviderConnectionsLocked(DownloadJob job, Uri address, int cap)

@@ -377,6 +377,141 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         host.AssertNowhere(Key, "/torbox-cdn/");
     }
 
+    // ---- A connection change on a running provider download (UI.R21) ----------------------------
+
+    /// <summary>
+    /// The connection count is raised while a provider file downloads, and the Host is killed either the moment the
+    /// change is saved (the new workers still connecting) or once they are splitting the remaining ranges. The
+    /// checkpoint on disk must describe only bytes that are really in the part file, the next Host must finish the
+    /// file with exactly the provider's bytes, and nothing is submitted again.
+    /// </summary>
+    [Theory]
+    [InlineData("saved")]
+    [InlineData("connecting")]
+    [InlineData("split")]
+    public async Task KilledWhileAConnectionChangeReachesAProviderDownload_TheCheckpointHoldsAndTheBytesMatch(string killAt)
+    {
+        await using var host = await StartHostAsync();
+        var connection = await WithKeyAsync(host);
+        var settings = (await connection.AskAsync<SettingsResult>(MessageTypes.SettingsGet, new { })).Settings;
+        settings.DefaultConnections = 2;
+        settings.MaxConnectionsPerHost = 32;
+        Assert.True((await connection.AskAsync<SettingsResult>(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings })).Ok);
+
+        var file = NewFile("Live/changed.bin", 12 * 1024 * Kb, 59 + killAt.Length);
+        var item = Mock.AddItem(RemoteItemKind.Torrent, "Live", [file]);
+        Mock.CdnBytesPerSecond = 64 * Kb;
+        var job = (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto
+        {
+            Input = $"https://torbox.app/download?id={item.Id}&type=torrents",
+            Destination = host.Destination,
+            Selection = "all",
+        })).Job!;
+        await UntilJobAsync(connection, job.Id, candidate => candidate.State == "localStarted", "the child job");
+
+        JobDto child;
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+        while (true)
+        {
+            child = Assert.Single(await ProviderJobsAsync(connection));
+            if (child.State == "downloading" && child.ReceivedBytes > 384 * Kb) break;
+            Assert.True(DateTimeOffset.UtcNow < deadline, $"The child never got under way: {child.State} {child.ReceivedBytes}");
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(2, child.RequestedConnections);
+        var linksBefore = Mock.Calls(TorrentLink);
+        settings.DefaultConnections = 12;
+        Assert.True((await connection.AskAsync<SettingsResult>(MessageTypes.SettingsUpdate, new SettingsUpdateRequest { Settings = settings })).Ok);
+        if (killAt != "saved")
+        {
+            deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+            while (true)
+            {
+                child = Assert.Single(await ProviderJobsAsync(connection));
+                if (child.ActiveConnections > 4) break;
+                Assert.NotEqual("completed", child.State);
+                Assert.True(DateTimeOffset.UtcNow < deadline, $"The new workers never connected: {child.ActiveConnections}/{child.RequestedConnections}");
+                await Task.Delay(10);
+            }
+        }
+
+        if (killAt == "split")
+        {
+            // Until the Host has saved a checkpoint that holds the ranges the new workers split off.
+            deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+            while ((await SavedCheckpointAsync(host, child.Id))?.Segments.Count is not > 2)
+            {
+                Assert.True(DateTimeOffset.UtcNow < deadline, "No checkpoint with the split ranges was saved.");
+                Assert.NotEqual("completed", Assert.Single(await ProviderJobsAsync(connection)).State);
+                await Task.Delay(50);
+            }
+
+            child = Assert.Single(await ProviderJobsAsync(connection));
+        }
+
+        output.WriteLine($"killing at {child.ActiveConnections}/{child.RequestedConnections} connections, {child.ReceivedBytes} bytes");
+        Assert.Equal(linksBefore, Mock.Calls(TorrentLink));
+        await host.KillAsync();
+        Mock.CdnBytesPerSecond = null;
+
+        // What the next Host will resume from: every byte the checkpoint counts is in the part file, and no two
+        // ranges overlap.
+        var saved = await SavedCheckpointAsync(host, child.Id);
+        if (killAt == "split") Assert.True(saved is { Segments.Count: > 2 }, "The checkpoint lost its split ranges.");
+        if (saved is not null)
+        {
+            output.WriteLine($"checkpoint: {saved.Segments.Count} segments, {saved.CompletedBytes} bytes");
+            var ordered = saved.Segments.OrderBy(segment => segment.Start).ToList();
+            for (var index = 1; index < ordered.Count; index++) Assert.True(ordered[index].Start > ordered[index - 1].End, "Two saved ranges overlap.");
+            if (saved.CompletedBytes > 0)
+            {
+                var part = await File.ReadAllBytesAsync(child.PartFilePath);
+                foreach (var segment in ordered.Where(segment => segment.Completed > 0))
+                {
+                    Assert.InRange(segment.Completed, 0, segment.End - segment.Start + 1);
+                    Assert.True(part.AsSpan((int)segment.Start, (int)segment.Completed).SequenceEqual(file.Content.AsSpan((int)segment.Start, (int)segment.Completed)),
+                        $"The range from {segment.Start} counts bytes the part file doesn't hold.");
+                }
+            }
+        }
+
+        await host.RestartAsync();
+        connection = await host.ConnectAsync();
+        var done = Assert.Single(await FinishProviderJobsAsync(connection, 1));
+        Assert.Equal(child.Id, done.Id);
+        Assert.Equal(12, done.RequestedConnections);
+        AssertSameFile(host, file, "Live", "changed.bin");
+        Assert.InRange(Mock.PeakCdnConnections, 1, 16);
+        Assert.Empty(Mock.Submissions);
+        AssertNoStrayFiles(host);
+        await connection.DisposeAsync();
+        await host.StopAsync();
+        host.AssertNowhere(Key, "/torbox-cdn/");
+    }
+
+    /// <summary>The job's checkpoint as the next Host would read it, or null when there is none yet.</summary>
+    private static async Task<DownloadManager.Core.DownloadCheckpoint?> SavedCheckpointAsync(SandboxHost host, Guid id)
+    {
+        var file = Directory.EnumerateFiles(host.DataDirectory, $"{id:N}.json", SearchOption.AllDirectories)
+            .SingleOrDefault(path => Path.GetFileName(Path.GetDirectoryName(path)) == "checkpoints");
+        if (file is null) return null;
+        var store = new DownloadManager.Persistence.JsonCheckpointStore(
+            new DownloadManager.Persistence.StoragePaths(Path.GetDirectoryName(Path.GetDirectoryName(file))!));
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await store.LoadAsync(id, CancellationToken.None);
+            }
+            catch (IOException) when (attempt < 20)
+            {
+                // Being replaced right now; either version is whole.
+                await Task.Delay(10);
+            }
+        }
+    }
+
     // ---- Extraction and cleanup of a provider package -------------------------------------------
 
     /// <summary>
