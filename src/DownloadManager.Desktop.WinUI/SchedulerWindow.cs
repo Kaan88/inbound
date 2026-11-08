@@ -284,8 +284,8 @@ public sealed class SchedulerWindow : Window
     private UIElement BuildFilesTab()
     {
         var panel = new StackPanel { Spacing = 9, Padding = new Thickness(10) };
-        panel.Children.Add(new TextBlock { Text = "Queued downloads", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
-        panel.Children.Add(new TextBlock { Text = "Choose the order of waiting downloads within the same priority. Active transfers continue. Membership and order are saved when you click Apply.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "Downloads in this queue", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
+        panel.Children.Add(new TextBlock { Text = "All downloads in this queue, also finished and failed ones. Set the order of waiting downloads with the same priority, or move a download to another queue. Running downloads go on. Apply saves the changes.", TextWrapping = TextWrapping.Wrap });
         _files.ItemTemplate = (DataTemplate)XamlReader.Load("""
             <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
               <Grid ColumnSpacing="10" Padding="4">
@@ -325,7 +325,7 @@ public sealed class SchedulerWindow : Window
         moveRow.Children.Add(_moveFile);
         panel.Children.Add(moveRow);
         panel.Children.Add(_fileHint);
-        _fileHint.Text = "Save applies membership changes first, then writes an exact order only if the current queue membership still matches the unsaved result.";
+        _fileHint.Text = "Apply saves moves and removals first, then the order. If downloads joined or left the queue in the meantime, the order is not saved; set it again.";
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
 
@@ -338,7 +338,7 @@ public sealed class SchedulerWindow : Window
         panel.Children.Add(_quotaEnabled);
         panel.Children.Add(_quotaMb);
         panel.Children.Add(_quotaHours);
-        panel.Children.Add(new TextBlock { Text = "Quota use and its current window are owned by the Host; Apply changes only the queue's limit policy.", TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
+        panel.Children.Add(new TextBlock { Text = "Apply changes the limits only. How much of the quota is used, and when it starts again, stay as they are.", TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
         _quotaEnabled.Checked += (_, _) => UpdateQuotaControls();
         _quotaEnabled.Unchecked += (_, _) => UpdateQuotaControls();
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -520,8 +520,8 @@ public sealed class SchedulerWindow : Window
         _moveTarget.SelectedIndex = _moveTarget.Items.Count > 0 ? 0 : -1;
         UpdateFileButtons();
         _fileHint.Text = draft.MembershipChanges.Count == 0 && !draft.OrderDirty
-            ? $"{candidate.Length} queued download(s). Order changes apply within matching priority groups."
-            : "Membership/order changes are unsaved. Close discards them; Apply saves them.";
+            ? $"{candidate.Length} {(candidate.Length == 1 ? "download" : "downloads")} in this queue. The order counts among downloads with the same priority."
+            : "Changes not saved yet. Apply saves them; Close discards them.";
     }
 
     private static bool byIdContains(JobDto[] jobs, Guid id) => jobs.Any(job => job.Id == id);

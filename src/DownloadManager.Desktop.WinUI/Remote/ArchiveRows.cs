@@ -103,7 +103,7 @@ internal static partial class ArchiveText
                     : ("Downloaded", RemoteRowTone.Neutral);
 
             case "waiting":
-                if (set.DownloadingVolumes.Count > 0) return ($"Waiting: {Parts(set.DownloadingVolumes)} downloading", RemoteRowTone.Waiting);
+                if (set.DownloadingVolumes.Count > 0) return ($"Waiting: {Parts(set.DownloadingVolumes)} {UnfinishedWord(set)}", RemoteRowTone.Waiting);
                 if (set.FailedVolumes.Count > 0) return ($"Waiting: {Parts(set.FailedVolumes)} didn't download", RemoteRowTone.Waiting);
                 if (set.MissingVolumes.Count > 0) return ($"Waiting: {Parts(set.MissingVolumes)} missing", RemoteRowTone.Waiting);
                 return ("Waiting for extraction", RemoteRowTone.Waiting);
@@ -161,6 +161,15 @@ internal static partial class ArchiveText
     }
 
     /// <summary>One or two names cut down to what tells volumes apart, otherwise a count. A list cell has no room for more.</summary>
+    /// <summary>"paused" or "queued" only when every unfinished part is; otherwise something is still downloading.</summary>
+    private static string UnfinishedWord(ArchiveSetDto set)
+    {
+        var paused = set.DownloadingVolumes.Count(name => set.PausedVolumes.Contains(name, StringComparer.OrdinalIgnoreCase));
+        var queued = set.DownloadingVolumes.Count(name => set.QueuedVolumes.Contains(name, StringComparer.OrdinalIgnoreCase));
+        if (paused == set.DownloadingVolumes.Count) return "paused";
+        return paused + queued == set.DownloadingVolumes.Count ? "queued" : "downloading";
+    }
+
     private static string Parts(IReadOnlyList<string> names) => names.Count switch
     {
         0 => string.Empty,
