@@ -289,6 +289,7 @@ test('EXT.R1: Unpair asks the server to remove this browser\'s token with the to
   await withServer(harness, server, async () => {
     const unpaired = await sendRuntimeMessage(harness, { type: 'dm.unpairServer' }, ownPage('options.html'));
     assert.equal(unpaired.ok, true);
+    assert.equal(unpaired.wasPaired, true);
     assert.equal(unpaired.revoked, true);
     const revokes = server.calls.filter(call => call.url === `${ADDRESS}/api/pair/self`);
     assert.equal(revokes.length, 1);
@@ -324,6 +325,18 @@ for (const [name, revoke] of [
     });
   });
 }
+
+test('EXT.R1: Unpair with nothing paired calls no server and does not claim one was told or not told', async () => {
+  const { harness } = capturingChrome(catching);
+  const server = fakeServer();
+  await withServer(harness, server, async () => {
+    const unpaired = await sendRuntimeMessage(harness, { type: 'dm.unpairServer' }, ownPage('options.html'));
+    assert.equal(unpaired.ok, true);
+    assert.equal(unpaired.wasPaired, false);
+    assert.equal(unpaired.revoked, false);
+    assert.equal(server.calls.length, 0);
+  });
+});
 
 test('EXT.R1: Unpair from another page asks nothing of the server and keeps the pairing', async () => {
   const { harness } = paired(catching);
