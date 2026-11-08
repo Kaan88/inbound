@@ -63,4 +63,27 @@ public sealed class RuntimeArchiveRecoveryVolumeTests(ArchiveFileServer fixture)
         Assert.False(done.ArchivesDeleted);
         Assert.Equal(["inside.txt", "movie.part1.rev", "movie.rar", "movie.rev", "movie1_2_1.rev", "movie2.rev", "other.rev"], run.AllFiles());
     }
+
+    [SevenZipFact]
+    public async Task AZipSetDeletedAfterExtractionLeavesAMatchingRevFileAlone()
+    {
+        // Only RAR writes .rev files, so a zip called "movie" doesn't own movie.rev even with deletion on.
+        await using var run = await ArchiveHarness.StartAsync(_server);
+        await run.Archives.UpdateSettingsAsync(new ArchiveSettingsUpdate { DeleteArchives = true });
+        using var buffer = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var entry = zip.CreateEntry("inside.txt").Open();
+            entry.Write(Text);
+        }
+
+        run.WriteFile("movie.zip", buffer.ToArray());
+        run.WriteFile("movie.rev", NotAnArchive);
+
+        await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = run.PathOf("movie.zip") });
+        await run.WaitForSetAsync(set => set is { State: "completed", ArchivesDeleted: true });
+        await WaitUntilAsync(() => !File.Exists(run.PathOf("movie.zip")), "the zip deleted");
+
+        Assert.Equal(["inside.txt", "movie.rev"], run.AllFiles());
+    }
 }

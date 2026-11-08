@@ -1912,8 +1912,8 @@ internal static partial class Program
               dm remote key clear
               dm remote classify <link>
               dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
-                          [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
-                          [--link-password-for-archives] [--archive-password-stdin]
+                          [--start startNow|queue|later] [--select all|ask|ID,ID]
+                          [--link-password-stdin [--link-password-for-archives]] [--archive-password-stdin]
               dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
               dm remote list
               dm remote files <id>

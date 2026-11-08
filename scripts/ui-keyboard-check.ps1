@@ -1,5 +1,8 @@
+# Opens and cancels the app's dialogs, and sends real Delete and Shift+Delete key input to its list (UI.R20).
+# Attaches to a running UI whose executable path contains -PathPart; starts nothing. Use a test instance only:
+# the installed app is refused, so these keys never reach the owner's real list.
 [CmdletBinding()]
-param()
+param([Parameter(Mandatory)][string]$PathPart)
 
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName UIAutomationClient
@@ -46,10 +49,14 @@ public static class UiKeyboardCheckNative {
 }
 '@
 
-$proc = Get-Process DownloadManager.Desktop.WinUI -ErrorAction Stop
+$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" } | Select-Object -First 1
+if (-not $proc) { Write-Output 'NO TEST UI'; exit 1 }
+# The installed copy is the owner's real app; a -PathPart that happens to match it must not send keys there.
+if ($proc.ExecutablePath -like '*\Programs\Inbound Download Manager\*') { Write-Output 'REFUSED: that is the installed app, not a test instance'; exit 1 }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $pidCondition = New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $proc.Id)
+    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$proc.ProcessId)
 $win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
 if (-not $win) { Write-Output 'NO WINDOW'; exit 1 }
 $hwnd = [IntPtr]$win.Current.NativeWindowHandle
@@ -165,6 +172,8 @@ if ($rows.Count -gt 0) {
     $target.SetFocus()
     Start-Sleep -Milliseconds 400
     foreach ($case in @(@{ Name = 'SHIFT-DELETE'; Shift = $true; Expect = 'On' }, @{ Name = 'DELETE-KEY'; Shift = $false; Expect = 'Off' })) {
+        # A dialog left open by the last case would take this key instead of the list: stop rather than guess.
+        if (Find-ByName 'Delete download?') { Write-Output "$($case.Name) skipped: the last delete dialog is still open"; break }
         $target.SetFocus()
         Start-Sleep -Milliseconds 200
         if (-not [UiKeyboardCheckNative]::Delete($hwnd, $case.Shift)) {

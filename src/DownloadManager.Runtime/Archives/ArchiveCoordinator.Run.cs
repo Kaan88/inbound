@@ -424,6 +424,10 @@ public sealed partial class ArchiveCoordinator
     /// <summary>The <c>.rev</c> files on disk beside this set that are its own. Called under the gate.</summary>
     private List<string> RecoveryVolumesLocked(ArchiveSetRecord set, IReadOnlyCollection<string> read)
     {
+        // Only RAR writes .rev files: a 7z, zip or split set called "name" must not take a user's own name.rev.
+        var names = set.Volumes.Append(set.FirstVolumeName).Concat(read).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (ArchiveVolumes.FindSet(names, set.FirstVolumeName) is not { } own || !ArchiveVolumes.HasRarRecoveryVolumes(own)) return [];
+
         string[] present;
         try
         {
