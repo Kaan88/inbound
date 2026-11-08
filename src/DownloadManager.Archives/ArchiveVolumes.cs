@@ -19,6 +19,12 @@ public enum ArchiveVolumeScheme
 
     /// <summary><c>name.7z.001</c>, <c>name.zip.001</c> and the like: one archive cut into pieces, which 7-Zip joins.</summary>
     Split,
+
+    /// <summary>
+    /// A spanned zip (A4.D): <c>name.z01</c>, <c>name.z02</c> ... and <c>name.zip</c> last. The <c>.zip</c> holds the
+    /// central directory, so it is the volume 7-Zip opens, and the set's first volume here, though it is the last part.
+    /// </summary>
+    ZipSpanned,
 }
 
 /// <param name="BaseName">The name shared by the members, without the volume suffix.</param>
@@ -36,7 +42,8 @@ public sealed record ArchiveVolumeSet(
     IReadOnlyList<string> MissingVolumes);
 
 /// <summary>
-/// Groups the file names of one folder into archive sets: RAR sets, split name.7z.001 sets, and single 7z, zip and
+/// Groups the file names of one folder into archive sets: RAR sets, split name.7z.001 sets, spanned name.z01 + name.zip
+/// sets, and single 7z, zip and
 /// tar files. Reads no files.
 /// </summary>
 public static partial class ArchiveVolumes
@@ -64,7 +71,15 @@ public static partial class ArchiveVolumes
             .Select(match => match.Groups["base"].Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // A4.D: name.zNN beside no name.rNN is a spanned zip's part, not an old-style RAR volume past .r99.
+        var spannedZipBases = names
+            .Select(name => SpannedZipPart().Match(name))
+            .Where(match => match.Success && !oldStyleBases.Contains(match.Groups["base"].Value))
+            .Select(match => match.Groups["base"].Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        var spannedZips = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var parts = new Dictionary<string, List<(string Digits, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
         var splits = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
@@ -73,6 +88,21 @@ public static partial class ArchiveVolumes
 
         foreach (var name in names)
         {
+            // Before the old-style branch, whose letters run to z, and before name.zip is taken for a single zip.
+            if (SpannedZipPart().Match(name) is { Success: true } zipPart && spannedZipBases.Contains(zipPart.Groups["base"].Value))
+            {
+                Add(spannedZips, zipPart.Groups["base"].Value, (int.Parse(zipPart.Groups["number"].Value, CultureInfo.InvariantCulture), name));
+                continue;
+            }
+
+            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && name.Length > ".zip".Length &&
+                spannedZipBases.Contains(name[..^".zip".Length]))
+            {
+                // The last part, numbered after every .zNN so it sorts last.
+                Add(spannedZips, name[..^".zip".Length], (int.MaxValue, name));
+                continue;
+            }
+
             if (SplitVolume().Match(name) is { Success: true } piece)
             {
                 Add(splits, piece.Groups["base"].Value, (int.Parse(piece.Groups["number"].Value, CultureInfo.InvariantCulture), name));
@@ -126,6 +156,7 @@ public static partial class ArchiveVolumes
         foreach (var (baseName, members) in parts) sets.AddRange(BuildPartSets(baseName, members));
         foreach (var (baseName, members) in threeDigit) sets.AddRange(BuildThreeDigit(baseName, members));
         foreach (var (baseName, members) in splits) sets.Add(BuildSplit(baseName, members));
+        foreach (var (baseName, members) in spannedZips) sets.Add(BuildSpannedZip(baseName, members));
         foreach (var name in singles) sets.Add(new ArchiveVolumeSet(name[..^".rar".Length], ArchiveVolumeScheme.Single, name, [name], []));
         foreach (var (stem, name) in otherSingles) sets.Add(new ArchiveVolumeSet(stem, ArchiveVolumeScheme.Single, name, [name], []));
 
@@ -274,6 +305,30 @@ public static partial class ArchiveVolumes
         return new ArchiveVolumeSet(baseName, ArchiveVolumeScheme.Split, first, ordered.Select(member => member.Name).ToList(), missing);
     }
 
+    /// <summary>
+    /// The .zNN parts in order, then name.zip. The names show gaps up to the highest part seen; a missing last .zNN is
+    /// known only from name.zip, which says how many disks there are, so 7-Zip names that one. Without name.zip the set
+    /// has no volume to open yet, and name.zip is its first gap.
+    /// </summary>
+    private static ArchiveVolumeSet BuildSpannedZip(string baseName, List<(int Number, string Name)> members)
+    {
+        var ordered = members.OrderBy(member => member.Number).ToList();
+        var parts = ordered.Where(member => member.Number != int.MaxValue).ToList();
+        var last = ordered.FirstOrDefault(member => member.Number == int.MaxValue).Name;
+        var width = parts.Count > 0 ? Math.Max(2, parts.Max(part => part.Name.Length - part.Name.LastIndexOf(".z", StringComparison.OrdinalIgnoreCase) - 2)) : 2;
+        var present = parts.Select(member => member.Number).ToHashSet();
+        var missing = new List<string>();
+        if (last is null) missing.Add(baseName + ".zip");
+        if (parts.Count > 0)
+        {
+            missing.AddRange(Enumerable.Range(1, parts[^1].Number)
+                .Where(number => !present.Contains(number))
+                .Select(number => string.Create(CultureInfo.InvariantCulture, $"{baseName}.z{number.ToString("D" + width, CultureInfo.InvariantCulture)}")));
+        }
+
+        return new ArchiveVolumeSet(baseName, ArchiveVolumeScheme.ZipSpanned, last, ordered.Select(member => member.Name).ToList(), missing);
+    }
+
     private static bool IsLetter(Match match, char letter) =>
         char.ToLowerInvariant(match.Groups["letter"].Value[0]) == letter;
 
@@ -294,6 +349,9 @@ public static partial class ArchiveVolumes
 
     [GeneratedRegex(@"^(?<base>.+\.(?:7z|zip|rar|tar))\.(?<number>\d{3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SplitVolume();
+
+    [GeneratedRegex(@"^(?<base>.+)\.z(?<number>\d{2,3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SpannedZipPart();
 
     /// <summary>What follows a set's base name in a recovery volume's name: nothing, .partN, .N, .rNN, or RAR 3's N_N[_N].</summary>
     [GeneratedRegex(@"^(?:|\.part\d{1,4}|\.\d{1,4}|\.[r-z]\d{2}|\d{1,4}(?:_\d{1,4}){1,2})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

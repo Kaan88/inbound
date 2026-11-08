@@ -7,7 +7,10 @@ RAR5, single or split as `name.part01.rar` or `name.rar` with `name.r00`), 7z, z
 `name.rar.001` or `name.tar.001`. A compressed tar comes out as its files, not as a `.tar`. Archives protected
 by a password work, including ones with encrypted file names. A split set waits until every volume has
 arrived, and is extracted once. Names alone cannot tell how many pieces a `.001` set has, so if 7-Zip finds the
-set ends early, it waits for the next piece. Zip sets spanned as `name.zip` with `name.z01` are not recognised. Automatic extraction is off until you turn it on, and archives are kept unless you choose
+set ends early, it waits for the next piece. Spanned zip sets (`name.z01`, `name.z02` ... and `name.zip`) are one
+set too: `name.zip` holds the index and is the file 7-Zip opens, so the set waits for it, and a missing part is
+named, the last one from the disk count in `name.zip`. They are checked with hand-built sets, not ones from a zip
+tool. Automatic extraction is off until you turn it on, and archives are kept unless you choose
 to delete them, which happens only after a verified success. Files go through a temporary folder next to
 their destination and appear only when the whole set has checked out, so a crash or restart cannot leave
 a half-extracted result: the set simply runs again. An archive that tries to write outside its folder, or
