@@ -258,9 +258,14 @@ public static partial class ExtractionSafety
                     throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a file the listing did not name: {SafeForDisplay(relative)}");
                 }
 
-                if (HardLinkCount(item.FullName) > 1)
+                switch (HardLinkCount(item.FullName))
                 {
-                    throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a hard link: {SafeForDisplay(relative)}");
+                    case > 1:
+                        throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a hard link: {SafeForDisplay(relative)}");
+                    case null:
+                        // Not counted is not one: the check stays closed rather than being skipped without a word.
+                        throw new ExtractionException(ExtractionFailureKind.UnsafePath,
+                            $"This system can't tell whether an extracted file is a hard link ({RuntimeInformation.ProcessArchitecture}), so nothing was moved out of the staging folder: {SafeForDisplay(relative)}");
                 }
 
                 total += ((FileInfo)item).Length;
@@ -319,43 +324,67 @@ public static partial class ExtractionSafety
             diskFull ? $"The disk filled up while {action}." : $"Windows refused access while {action}: {exception.GetType().Name} (0x{exception.HResult:X8}).");
     }
 
-    private static uint HardLinkCount(string path)
+    /// <returns>Null when the count can't be told off Windows. Windows keeps its earlier rule: a failed call counts as one.</returns>
+    private static uint? HardLinkCount(string path)
     {
         if (OperatingSystem.IsLinux()) return UnixHardLinkCount(path);
-        if (!OperatingSystem.IsWindows()) return 1;
+        if (!OperatingSystem.IsWindows()) return null;
         using SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return GetFileInformationByHandle(handle, out var information) ? information.NumberOfLinks : 1;
     }
 
     /// <summary>
     /// .NET has no way to ask for a link count, and on Linux a tar can carry hard links the listing might not admit to,
-    /// so this asks the C library. <c>struct stat</c> differs by architecture: x64 has a 64-bit <c>st_nlink</c> at 16,
-    /// arm64 (the generic layout) a 32-bit one at 20. Another architecture, or a failed call, counts as one link, as a
-    /// failed call does on Windows.
+    /// so this asks the C library: <c>lstat</c>, or on a glibc older than 2.33, which doesn't export that, the
+    /// <c>__lxstat</c> it is built on. Null when neither can be called, the call fails, or the architecture's
+    /// <c>struct stat</c> isn't one this knows (<see cref="LinkCountIn"/>): the caller then refuses, rather than taking
+    /// an unchecked file for a single link.
     /// </summary>
-    internal static uint UnixHardLinkCount(string path)
+    internal static uint? UnixHardLinkCount(string path)
     {
         var buffer = new byte[256];
+        int result;
         try
         {
-            if (lstat(path, buffer) != 0) return 1;
+            result = lstat(path, buffer);
         }
-        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+        catch (EntryPointNotFoundException)
         {
-            return 1;
+            try
+            {
+                // _STAT_VER: 1 on x64, 0 on arm64 (the generic layout); the buffer layout is the same as lstat's.
+                result = __lxstat(RuntimeInformation.ProcessArchitecture == Architecture.X64 ? 1 : 0, path, buffer);
+            }
+            catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
+            {
+                return null;
+            }
+        }
+        catch (DllNotFoundException)
+        {
+            return null;
         }
 
-        return RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => (uint)Math.Min(BitConverter.ToUInt64(buffer, 16), uint.MaxValue),
-            Architecture.Arm64 => BitConverter.ToUInt32(buffer, 20),
-            _ => 1,
-        };
+        return result == 0 ? LinkCountIn(buffer, RuntimeInformation.ProcessArchitecture) : null;
     }
+
+    /// <summary>
+    /// <c>st_nlink</c> from a <c>struct stat</c>: x64 has a 64-bit one at 16, arm64 (the generic layout) a 32-bit one at
+    /// 20. Null for any other architecture, whose layout hasn't been checked.
+    /// </summary>
+    internal static uint? LinkCountIn(byte[] stat, Architecture architecture) => architecture switch
+    {
+        Architecture.X64 => (uint)Math.Min(BitConverter.ToUInt64(stat, 16), uint.MaxValue),
+        Architecture.Arm64 => BitConverter.ToUInt32(stat, 20),
+        _ => null,
+    };
 
     // Big enough for struct stat on every Linux architecture (x64 144 bytes, arm64 128).
     [DllImport("libc", SetLastError = true)]
     private static extern int lstat(string path, byte[] buffer);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int __lxstat(int version, string path, byte[] buffer);
 
     // Pack 4 because the native FILETIME fields are two DWORDs, not an 8-aligned long.
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

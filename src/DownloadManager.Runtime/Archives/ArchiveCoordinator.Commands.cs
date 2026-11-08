@@ -222,7 +222,7 @@ public sealed partial class ArchiveCoordinator
             ClearFailure(next);
             if (!string.IsNullOrEmpty(password)) next.ProtectedPassword = SecretProtector.ProtectArchivePassword(password);
 
-            foreach (var job in jobs.Where(job => job.State == "completed" && job.CompletedAt is not null && set.Members.Contains(Path.GetFileName(job.FinalFilePath), StringComparer.OrdinalIgnoreCase)))
+            foreach (var job in jobs.Where(job => job.State == "completed" && job.CompletedAt is not null && set.Members.Contains(Path.GetFileName(job.FinalFilePath), PathNames.Comparer)))
             {
                 next.SeenJobs[job.Id] = job.CompletedAt!.Value;
             }

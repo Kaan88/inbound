@@ -8,8 +8,15 @@ namespace DownloadManager.Runtime.Archives;
 /// these are safe on a client's one command at a time. A bad payload is answered without echoing it,
 /// because it can hold a password.
 /// </summary>
-public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator)
+/// <param name="roots">
+/// On a server, the folders a client may have it read archives from and extract into: a client there is not the
+/// machine's user. A path it gives is checked and replaced by the resolved one, so a link can't lead out. Null on the
+/// desktop, where the user may name any file.
+/// </param>
+public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoots? roots = null)
 {
+    private const string FileOutside = "That file is outside the folders this server may use.";
+
     public static bool Handles(string? messageType) =>
         messageType?.StartsWith(ArchiveMessageTypes.Prefix, StringComparison.Ordinal) == true;
 
@@ -23,22 +30,44 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator)
                     return IpcMessage.Create(ArchiveMessageTypes.SettingsResult, coordinator.GetSettings(), request.Id);
 
                 case ArchiveMessageTypes.SettingsSet:
+                    var update = request.GetPayload<ArchiveSettingsUpdate>();
+                    if (roots is not null && !string.IsNullOrWhiteSpace(update.Folder))
+                    {
+                        if (roots.Allowed(update.Folder) is not { } folder)
+                        {
+                            var current = coordinator.GetSettings();
+                            current.Ok = false;
+                            current.Error = PathRoots.OutsideMessage;
+                            return IpcMessage.Create(ArchiveMessageTypes.SettingsResult, current, request.Id);
+                        }
+
+                        update.Folder = folder;
+                    }
+
                     return IpcMessage.Create(
                         ArchiveMessageTypes.SettingsResult,
-                        await coordinator.UpdateSettingsAsync(request.GetPayload<ArchiveSettingsUpdate>(), cancellationToken).ConfigureAwait(false),
+                        await coordinator.UpdateSettingsAsync(update, cancellationToken).ConfigureAwait(false),
                         request.Id);
 
                 case ArchiveMessageTypes.List:
                     return IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = coordinator.List() }, request.Id);
 
                 case ArchiveMessageTypes.Extract:
+                    var extract = request.GetPayload<ArchiveExtractRequest>();
+                    if (Confine(extract.FilePath) is var (extractPath, extractOk) && !extractOk)
+                        return IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Ok = false, Error = FileOutside }, request.Id);
+                    extract.FilePath = extractPath;
                     return IpcMessage.Create(
                         ArchiveMessageTypes.ExtractResult,
-                        await coordinator.ExtractAsync(request.GetPayload<ArchiveExtractRequest>(), cancellationToken).ConfigureAwait(false),
+                        await coordinator.ExtractAsync(extract, cancellationToken).ConfigureAwait(false),
                         request.Id);
 
                 case ArchiveMessageTypes.SetPassword:
-                    return Action(request, await coordinator.SetPasswordAsync(request.GetPayload<ArchiveSetPasswordRequest>(), cancellationToken).ConfigureAwait(false));
+                    var password = request.GetPayload<ArchiveSetPasswordRequest>();
+                    if (Confine(password.FilePath) is var (passwordPath, passwordOk) && !passwordOk)
+                        return Action(request, new ArchiveActionResult { Ok = false, Error = FileOutside });
+                    password.FilePath = passwordPath;
+                    return Action(request, await coordinator.SetPasswordAsync(password, cancellationToken).ConfigureAwait(false));
 
                 case ArchiveMessageTypes.Retry:
                     return Action(request, await coordinator.RetryAsync(request.GetPayload<ArchiveActionRequest>().SetId, cancellationToken).ConfigureAwait(false));
@@ -62,6 +91,13 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator)
             // Every result type has ok and error, so whichever one the client expects reads this.
             return Action(request, new ArchiveActionResult { Ok = false, Error = $"The change could not be saved: {exception.GetType().Name}." });
         }
+    }
+
+    /// <summary>The path to use and whether it may be: unchanged without roots or without a path, else the resolved one inside them.</summary>
+    private (string? Path, bool Ok) Confine(string? path)
+    {
+        if (roots is null || string.IsNullOrWhiteSpace(path)) return (path, true);
+        return roots.Allowed(path) is { } inside ? (inside, true) : (path, false);
     }
 
     private static IpcMessage Action(IpcMessage request, ArchiveActionResult result) =>

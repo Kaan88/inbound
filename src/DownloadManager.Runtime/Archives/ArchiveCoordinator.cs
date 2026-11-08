@@ -505,7 +505,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         foreach (var named in next.ToolMissingVolumes)
         {
-            if (!view.IsOnDisk(named) && !downloading.Contains(named, StringComparer.OrdinalIgnoreCase) && !missing.Contains(named, StringComparer.OrdinalIgnoreCase)) missing.Add(named);
+            if (!view.IsOnDisk(named) && !downloading.Contains(named, PathNames.Comparer) && !missing.Contains(named, PathNames.Comparer)) missing.Add(named);
         }
 
         next.Volumes = present;
@@ -521,7 +521,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
             case ArchiveSetState.Failed:
                 // The volume the tool said was absent has turned up, or is on its way.
                 if (next.FailureKind == ExtractionFailureKind.MissingVolume && next.Wanted && next.ToolMissingVolumes.Count > 0 &&
-                    next.ToolMissingVolumes.All(named => view.IsOnDisk(named) || downloading.Contains(named, StringComparer.OrdinalIgnoreCase)))
+                    next.ToolMissingVolumes.All(named => view.IsOnDisk(named) || downloading.Contains(named, PathNames.Comparer)))
                 {
                     next.State = ArchiveSetState.Waiting;
                     ClearFailure(next);

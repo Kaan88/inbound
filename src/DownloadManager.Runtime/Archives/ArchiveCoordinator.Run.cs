@@ -18,7 +18,7 @@ public sealed partial class ArchiveCoordinator
     private async Task<Dictionary<Guid, int>> RecoverStagingAsync(IReadOnlyList<ArchiveSetRecord> sets)
     {
         var leftInPlace = new Dictionary<Guid, int>();
-        var accounted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var accounted = new HashSet<string>(PathNames.Comparer);
         foreach (var set in sets)
         {
             if (set is not { Destination: { } destination, StagingRoot: { } root }) continue;
@@ -46,7 +46,7 @@ public sealed partial class ArchiveCoordinator
             }
         }
 
-        foreach (var root in sets.Select(set => set.StagingRoot).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var root in sets.Select(set => set.StagingRoot).OfType<string>().Distinct(PathNames.Comparer))
         {
             try
             {
@@ -292,10 +292,10 @@ public sealed partial class ArchiveCoordinator
         var view = ArchiveDirectoryView.Read(claimed.Directory, _service.GetSnapshot().Jobs);
 
         // What a download brought or the claim saw. Anything else with such a name here could be what this very run extracted.
-        var extracted = result.Files.Select(file => Path.GetFileName(file.FinalPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var extracted = result.Files.Select(file => Path.GetFileName(file.FinalPath)).ToHashSet(PathNames.Comparer);
         var named = (view.FindByKey(claimed.Key)?.Members ?? [])
             .Where(member => view.JobsNamed(member).Any(job => job.State == "completed"))
-            .Union(claimed.Volumes, StringComparer.OrdinalIgnoreCase)
+            .Union(claimed.Volumes, PathNames.Comparer)
             .Where(member => view.IsOnDisk(member) && !extracted.Contains(member))
             .ToList();
         if (result.VolumesRead is not { } paths)
@@ -307,10 +307,10 @@ public sealed partial class ArchiveCoordinator
             .Where(path => PathNames.Same(Path.GetDirectoryName(path), view.Directory))
             .Select(path => Path.GetFileName(path))
             .Where(name => name.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathNames.Comparer)
             .ToList();
         var jobs = claimed.JobIds.Union(read.SelectMany(view.JobsNamed).Where(job => job.State == "completed").Select(job => job.Id)).ToList();
-        return new RunUse(read, named.Except(read, StringComparer.OrdinalIgnoreCase).ToList(), jobs);
+        return new RunUse(read, named.Except(read, PathNames.Comparer).ToList(), jobs);
     }
 
     private (string? Password, bool Own, DateTimeOffset? PackageStamp) ResolvePassword(ArchiveSetRecord set)
@@ -545,12 +545,12 @@ public sealed partial class ArchiveCoordinator
 
                     case ExtractionFailureKind.MissingVolume:
                         next.ToolMissingVolumes = [.. missing];
-                        next.MissingVolumes = next.MissingVolumes.Union(missing, StringComparer.OrdinalIgnoreCase).ToList();
+                        next.MissingVolumes = next.MissingVolumes.Union(missing, PathNames.Comparer).ToList();
                         if (arrived && next.Wanted)
                         {
                             // Back in line. The next look at the folder tidies up what it is still waiting for.
                             next.State = ArchiveSetState.Waiting;
-                            next.MissingVolumes = next.MissingVolumes.Except(missing, StringComparer.OrdinalIgnoreCase).ToList();
+                            next.MissingVolumes = next.MissingVolumes.Except(missing, PathNames.Comparer).ToList();
                             ClearFailure(next);
                         }
 
@@ -591,7 +591,7 @@ public sealed partial class ArchiveCoordinator
     {
         var view = ArchiveDirectoryView.Read(claimed.Directory, _service.GetSnapshot().Jobs);
         return missing.All(name =>
-            !claimed.Volumes.Contains(name, StringComparer.OrdinalIgnoreCase) &&
+            !claimed.Volumes.Contains(name, PathNames.Comparer) &&
             (view.IsOnDisk(name) || view.JobsNamed(name).Any(job => job.State is not ("completed" or "failed" or "cancelled"))));
     }
 

@@ -15,35 +15,24 @@ public sealed class FolderBrowser
     /// <summary>A listing carries at most this many folders, so one huge folder can't make a frame too large.</summary>
     public const int MaxFolders = 2000;
 
-    private const int MaxLinkHops = 40;
     private const int MaxNameBytes = 255;
 
-    private const string Outside = "That folder is outside the folders this server may use.";
     private const string Unreadable = "That folder can't be opened.";
 
+    private readonly PathRoots _roots;
+
     public FolderBrowser(IEnumerable<string> roots)
+        : this(new PathRoots(roots))
     {
-        Roots = roots
-            .Where(root => !string.IsNullOrWhiteSpace(root))
-            .Select(root => Resolve(root.Trim()))
-            .OfType<string>()
-            .Distinct(PathNames.Comparer)
-            .ToList();
     }
+
+    public FolderBrowser(PathRoots roots) => _roots = roots;
 
     /// <summary>The allowed roots, resolved. A root that doesn't exist yet stays, and listing it says so.</summary>
-    public IReadOnlyList<string> Roots { get; }
+    public IReadOnlyList<string> Roots => _roots.Roots;
 
-    /// <summary>
-    /// <c>DOWNLOADMANAGER_ROOTS</c>: folders separated by <c>;</c>, or also by <c>:</c> off Windows, where a drive letter
-    /// can't be confused with one. Nothing given means <paramref name="fallback"/>.
-    /// </summary>
-    public static List<string> ParseRoots(string? value, string fallback)
-    {
-        var separators = OperatingSystem.IsWindows() ? new[] { ';' } : new[] { ';', ':' };
-        var roots = (value ?? string.Empty).Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        return roots.Count > 0 ? roots : [fallback];
-    }
+    /// <inheritdoc cref="PathRoots.Parse"/>
+    public static List<string> ParseRoots(string? value, string fallback) => PathRoots.Parse(value, fallback);
 
     public FolderBrowseResult Browse(string? path)
     {
@@ -60,23 +49,32 @@ public sealed class FolderBrowser
         if (Allowed(path) is not { } real) return Refused(path);
         if (!Directory.Exists(real)) return Failed("That folder doesn't exist.");
 
-        var folders = new List<FolderEntryDto>();
+        // Kept sorted while listing and cut at MaxFolders, so a truncated listing really holds the first ones by name
+        // (as the contract says), not whichever the file system happened to return first.
+        var folders = new SortedSet<FolderEntryDto>(ByName);
         var truncated = false;
         try
         {
-            // Hidden folders (a leading dot on Linux) and ones that can't be read are left out, as a file dialog would.
-            var options = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = false };
+            // Hidden folders and ones that can't be read are left out, as a file dialog would. Hidden is the attribute on
+            // Windows and a leading dot on Linux; .NET reports a dot name as Hidden there too, but the name check below
+            // doesn't rely on that.
+            var options = new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = false,
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+            };
             foreach (var directory in new DirectoryInfo(real).EnumerateDirectories("*", options))
             {
+                if (!OperatingSystem.IsWindows() && directory.Name.StartsWith('.')) continue;
                 // A link is listed only when it stays inside the roots: anything else could not be opened anyway.
                 if (directory.LinkTarget is not null && Allowed(directory.FullName) is null) continue;
-                if (folders.Count == MaxFolders)
+                folders.Add(new FolderEntryDto { Name = directory.Name, Path = directory.FullName });
+                if (folders.Count > MaxFolders)
                 {
                     truncated = true;
-                    break;
+                    folders.Remove(folders.Max!);
                 }
-
-                folders.Add(new FolderEntryDto { Name = directory.Name, Path = directory.FullName });
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -84,17 +82,14 @@ public sealed class FolderBrowser
             return Failed(Unreadable);
         }
 
-        folders.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0
-            ? order
-            : StringComparer.Ordinal.Compare(left.Name, right.Name));
         var space = FolderSpaceMeter.Measure(real);
         return new FolderBrowseResult
         {
             Ok = true,
             Path = real,
-            Parent = Roots.Any(root => PathNames.Same(root, real)) ? null : Path.GetDirectoryName(real),
+            Parent = _roots.IsRoot(real) ? null : Path.GetDirectoryName(real),
             Roots = Roots.ToList(),
-            Folders = folders,
+            Folders = folders.ToList(),
             Truncated = truncated,
             FreeBytes = space.FreeBytes,
             TotalBytes = space.TotalBytes,
@@ -122,70 +117,16 @@ public sealed class FolderBrowser
     }
 
     /// <summary>The resolved path when it is inside a root, otherwise null.</summary>
-    public string? Allowed(string path)
-    {
-        var real = Resolve(path);
-        return real is not null && Roots.Any(root => Inside(real, root)) ? real : null;
-    }
+    public string? Allowed(string path) => _roots.Allowed(path);
 
-    private static bool Inside(string real, string root) =>
-        PathNames.Same(real, root) || real.StartsWith(Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar, PathNames.Comparison);
+    /// <inheritdoc cref="PathRoots.Resolve"/>
+    public static string? Resolve(string path) => PathRoots.Resolve(path);
 
-    /// <summary>
-    /// The path as the file system reaches it: each part in turn, a link replaced by its target and walked again, and
-    /// <c>..</c> taken from where the walk really is, not from the text. Parts that don't exist are kept as written.
-    /// Null for a relative path or a loop of links.
-    /// </summary>
-    public static string? Resolve(string path)
-    {
-        try
-        {
-            if (!Path.IsPathFullyQualified(path)) return null;
-            var current = Path.GetPathRoot(path)!;
-            var pending = new Stack<string>();
-            Push(pending, path[current.Length..]);
-            var hops = 0;
-            while (pending.Count > 0)
-            {
-                var part = pending.Pop();
-                if (part is "" or ".") continue;
-                if (part == "..")
-                {
-                    current = Path.GetDirectoryName(current) ?? current;
-                    continue;
-                }
-
-                var next = Path.Combine(current, part);
-                var target = new FileInfo(next).LinkTarget;
-                if (target is null)
-                {
-                    current = next;
-                    continue;
-                }
-
-                if (++hops > MaxLinkHops) return null;
-                if (Path.IsPathFullyQualified(target))
-                {
-                    current = Path.GetPathRoot(target)!;
-                    target = target[current.Length..];
-                }
-
-                Push(pending, target);
-            }
-
-            return Path.TrimEndingDirectorySeparator(current);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            return null;
-        }
-    }
-
-    private static void Push(Stack<string> pending, string relative)
-    {
-        var parts = relative.Split(OperatingSystem.IsWindows() ? ['\\', '/'] : ['/']);
-        for (var index = parts.Length - 1; index >= 0; index--) pending.Push(parts[index]);
-    }
+    /// <summary>Case-insensitive first, so "audio" sits next to "Audio"; then exact, so two such names keep one order.</summary>
+    private static readonly Comparer<FolderEntryDto> ByName = Comparer<FolderEntryDto>.Create((left, right) =>
+        StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0
+            ? order
+            : StringComparer.Ordinal.Compare(left.Name, right.Name));
 
     private static string? DescribeBadName(string? name)
     {
@@ -198,7 +139,7 @@ public sealed class FolderBrowser
     }
 
     private FolderBrowseResult Refused(string? path) =>
-        Failed(string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ? "Give the folder's full path." : Outside);
+        Failed(string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ? "Give the folder's full path." : PathRoots.OutsideMessage);
 
     private FolderBrowseResult Failed(string error) => new() { Error = error, Roots = Roots.ToList() };
 }

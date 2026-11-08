@@ -101,7 +101,7 @@ internal sealed class ArchiveDirectoryView
             onDisk.Clear();
         }
 
-        var jobsByName = new Dictionary<string, List<JobDto>>(StringComparer.OrdinalIgnoreCase);
+        var jobsByName = new Dictionary<string, List<JobDto>>(PathNames.Comparer);
         foreach (var job in allJobs)
         {
             if (string.IsNullOrEmpty(job.FinalFilePath)) continue;
@@ -119,7 +119,7 @@ internal sealed class ArchiveDirectoryView
     }
 
     public ArchiveVolumeSet? FindSet(string fileName) =>
-        Sets.FirstOrDefault(set => set.Members.Contains(fileName, StringComparer.OrdinalIgnoreCase));
+        Sets.FirstOrDefault(set => set.Members.Contains(fileName, PathNames.Comparer));
 
     /// <summary>
     /// A set whose first volume really exists goes first: a later volume with nothing before it works out
@@ -153,8 +153,8 @@ internal sealed class ArchiveDirectoryView
         return Sets.FirstOrDefault(candidate =>
             candidate is { Scheme: ArchiveVolumeScheme.PartNumbered, FirstVolume: { } first } &&
             ArchiveSetIdentity.BaseOfFirstPart(first) is { } candidateBase &&
-            string.Equals(candidateBase, baseName, StringComparison.OrdinalIgnoreCase) &&
-            (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, StringComparer.OrdinalIgnoreCase))));
+            string.Equals(candidateBase, baseName, PathNames.Comparison) &&
+            (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, PathNames.Comparer))));
     }
 }
 
@@ -165,7 +165,7 @@ internal sealed class ArchiveDirectoryView
 internal static class VolumeHeaders
 {
     private const int MostRemembered = 4096;
-    private static readonly ConcurrentDictionary<string, (long Length, long Ticks, bool Whole)> Known = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (long Length, long Ticks, bool Whole)> Known = new(PathNames.Comparer);
 
     public static bool SaysWholeArchive(string path)
     {

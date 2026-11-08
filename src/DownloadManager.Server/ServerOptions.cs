@@ -1,5 +1,4 @@
 using System.Net;
-using DownloadManager.Runtime.Ipc;
 
 namespace DownloadManager.Server;
 
@@ -11,7 +10,10 @@ namespace DownloadManager.Server;
 /// <item><c>DOWNLOADMANAGER_URLS</c>, else <c>ASPNETCORE_URLS</c>: where to listen, separated by <c>;</c>. Default <c>http://0.0.0.0:8080</c>.</item>
 /// <item><c>DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1</c>: needed to listen on anything but loopback, because there is no sign-in yet (D2).</item>
 /// <item><c>DOWNLOADMANAGER_HOSTS</c>: host names a browser may use for the server, besides IP addresses and <c>localhost</c>.</item>
+/// <item><c>DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1</c>: start although saved secrets were sealed with another key file (they are lost).</item>
 /// </list>
+/// Where it listens comes from these variables only: Kestrel's own <c>Kestrel:Endpoints</c> configuration is ignored, so
+/// it can't open a port the loopback rule below didn't see.
 /// </summary>
 public sealed record ServerOptions
 {
@@ -29,6 +31,9 @@ public sealed record ServerOptions
     public IReadOnlyList<string> Urls { get; init; } = [DefaultUrls];
     public bool AllowUnauthenticated { get; init; }
 
+    /// <summary>Start even when saved secrets can't be opened with the key file; they are then lost.</summary>
+    public bool DiscardUnreadableSecrets { get; init; }
+
     /// <summary>Names a browser may use for this server besides an IP address and <c>localhost</c> (<see cref="OriginCheck"/>).</summary>
     public IReadOnlyList<string> AllowedHostNames { get; init; } = [];
 
@@ -44,11 +49,12 @@ public sealed record ServerOptions
         return new ServerOptions
         {
             DataDirectory = string.IsNullOrWhiteSpace(data) ? DefaultData : data.Trim(),
-            Roots = FolderBrowser.ParseRoots(read(RootsVariable), DefaultRoot),
+            Roots = DownloadManager.Runtime.PathRoots.Parse(read(RootsVariable), DefaultRoot),
             Urls = string.IsNullOrWhiteSpace(urls)
                 ? [DefaultUrls]
                 : urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             AllowUnauthenticated = read(AllowUnauthenticatedVariable)?.Trim() is "1" or "true" or "yes",
+            DiscardUnreadableSecrets = read(DownloadManager.Persistence.AesGcmSecretProtector.DiscardVariable)?.Trim() is "1" or "true" or "yes",
             AllowedHostNames = OriginCheck.ParseHosts(read(OriginCheck.HostsVariable)),
         };
     }
@@ -57,10 +63,13 @@ public sealed record ServerOptions
     /// Why the server must not start with these addresses, or null. Until D2 adds sign-in anyone who reaches the port
     /// controls the downloads and every saved login, so an address other than loopback needs the explicit variable.
     /// </summary>
-    public string? DescribeUnsafeBinding()
+    public string? DescribeUnsafeBinding() => DescribeUnsafeBinding(Urls);
+
+    /// <summary>The same rule for the addresses Kestrel reports it really listens on, checked again once it has started.</summary>
+    public string? DescribeUnsafeBinding(IEnumerable<string> urls)
     {
         if (AllowUnauthenticated) return null;
-        var exposed = Urls.Where(url => !IsLoopback(url)).ToList();
+        var exposed = urls.Where(url => !IsLoopback(url)).ToList();
         return exposed.Count == 0
             ? null
             : $"Refusing to listen on {string.Join(", ", exposed)}: this server has no sign-in yet, so anyone who can reach it " +
