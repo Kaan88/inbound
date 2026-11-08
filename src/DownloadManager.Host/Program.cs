@@ -187,13 +187,13 @@ internal static class Program
             dispatcher.Start();
             pipe.Start();
 
-            var currentSettings = service.GetSnapshot().Settings;
+            var currentSettings = service.GetSettings();
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
             TryRepairNativeHostKeys(log);
             service.SettingsChanged += (_, next) =>
             {
-                currentSettings = service.GetSnapshot().Settings;
+                currentSettings = service.GetSettings();
                 updateMonitor.ApplySettings(currentSettings);
                 TryApplyStartup(next.LaunchAtStartup, log);
                 log.Info("Settings updated.");
@@ -206,7 +206,7 @@ internal static class Program
                 ResumeAll: () => FireAndForget(service.ResumeAllAsync(), log),
                 Exit: ExitApplication,
                 IntegrationStatus: () => BrowserIntegrationText(service),
-                ActiveCount: () => service.GetSnapshot().Status.ActiveDownloads,
+                ActiveCount: () => service.ActiveDownloadCount(),
                 UpdateText: () => updateMonitor.UpdateText,
                 InstallUpdate: () => _ = updateMonitor.InstallAsync(),
                 CheckForUpdates: updateMonitor.CheckNow);
@@ -469,7 +469,7 @@ internal static class Program
 
     private static string BrowserIntegrationText(DownloadManagerService service)
     {
-        return NativeHostRegistration.Read().IntegrationText(service.GetSnapshot().Settings.BrowserIntegrationEnabled);
+        return NativeHostRegistration.Read().IntegrationText(service.GetSettings().BrowserIntegrationEnabled);
     }
 
     private static void FireAndForget(Task task, FileLogger log)

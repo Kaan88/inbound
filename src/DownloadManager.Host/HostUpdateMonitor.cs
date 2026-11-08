@@ -79,7 +79,7 @@ internal sealed class HostUpdateMonitor : IDisposable
     {
         ReportLastInstall();
         _ = ReportLastInstallLaterAsync();
-        ApplySettings(_service.GetSnapshot().Settings);
+        ApplySettings(_service.GetSettings());
         if (_autoCheck)
         {
             _ = CheckAsync(manual: false);
@@ -186,7 +186,7 @@ internal sealed class HostUpdateMonitor : IDisposable
                 return;
             }
 
-            var skipped = _service.GetSnapshot().Settings.SkippedUpdateVersion;
+            var skipped = _service.GetSettings().SkippedUpdateVersion;
             if (!manual &&
                 string.Equals(check.AvailableVersion, skipped, StringComparison.OrdinalIgnoreCase))
             {
