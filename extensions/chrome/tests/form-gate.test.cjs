@@ -351,3 +351,63 @@ test('EXT.B2 batch window: Browse and Cancel are held during a send, and a faile
     page.restore();
   }
 });
+
+const BATCH_TARGETS = {
+  ok: true, target: 'local',
+  targets: [{ id: 'local', label: 'This PC', chooser: 'dialog', defaultFolder: 'D:\\Default', favorites: [] },
+    { id: 'server', label: 'Server', chooser: 'list', defaultFolder: '/downloads', favorites: [] }],
+};
+
+test('Download All: Save in shows the default folder, and an untouched default is sent as "" so the app decides', async () => {
+  let confirmed;
+  const page = await openBatchWindow({
+    'dm.targets': async () => ({ ok: true, target: 'local', targets: [BATCH_TARGETS.targets[0]] }),
+    'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    assert.equal(page.el('destination').value, 'D:\\Default');
+    await page.el('confirm').click();
+    assert.equal(confirmed.destination, '');
+    assert.equal(confirmed.target, 'local');
+    page.el('destination').value = 'E:\\Typed';
+    await page.el('confirm').click();
+    assert.equal(confirmed.destination, 'E:\\Typed', 'a changed folder is sent');
+  } finally {
+    page.restore();
+  }
+});
+
+test('Download All: switching target shows that target\'s default, and the radios are held during a pick', async () => {
+  const pick = deferred();
+  let confirmed;
+  const page = await openBatchWindow({
+    'dm.targets': async () => BATCH_TARGETS,
+    'dm.pickFolder': () => pick.promise,
+    'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
+    assert.equal(radios.length, 2);
+    assert.equal(page.el('destination').value, 'D:\\Default');
+    const picking = page.el('browseDestination').click();
+    assert.ok(radios.every(radio => radio.disabled), 'no target switch while the folder dialog is open (EXT.B2)');
+    pick.resolve({ ok: true, cancelled: true });
+    await picking;
+    assert.ok(radios.every(radio => !radio.disabled));
+
+    const server = radios.find(radio => radio.value === 'server');
+    server.checked = true;
+    await server.dispatch('change');
+    assert.equal(page.el('destination').value, '/downloads');
+    await page.el('confirm').click();
+    assert.equal(confirmed.target, 'server');
+    assert.equal(confirmed.destination, '', 'the server decides its default too');
+
+    const local = radios.find(radio => radio.value === 'local');
+    local.checked = true;
+    await local.dispatch('change');
+    assert.equal(page.el('destination').value, 'D:\\Default', 'a folder for one target is not kept for the other');
+  } finally {
+    page.restore();
+  }
+});
