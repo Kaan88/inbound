@@ -162,6 +162,25 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         Assert.Equal(4, ordered.Count);
     }
 
+    /// <summary>
+    /// UI.B12 on a clean exit: a Host started while this one is exiting must not get the hello, or it takes this one
+    /// for a running copy, asks it for a window and quits, and then no Host is left.
+    /// </summary>
+    [Fact]
+    public async Task ASessionOpenedAfterAnExitWasAskedForGetsExitingInsteadOfTheHello()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var asking = Session();
+        await dispatcher.OpenSessionAsync(asking, CancellationToken.None);
+        await dispatcher.DispatchAsync(asking, IpcMessage.Create(MessageTypes.HostShutdown, new { }), CancellationToken.None);
+
+        var late = Session();
+        await dispatcher.OpenSessionAsync(late, CancellationToken.None);
+
+        Assert.Equal([MessageTypes.HostExiting], late.Frames.Select(f => f.Type));
+    }
+
     [Fact]
     public async Task ABurstOfSettingsChangesAnnouncesThePackagesOnceAndNotAgainWhenNothingChanged()
     {
