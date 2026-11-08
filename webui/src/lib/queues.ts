@@ -78,20 +78,24 @@ export function queueForm(queue: Queue | null, queueCount: number): QueueForm {
 
 export type QueuePolicy = { name: string; maxConcurrentDownloads: number; quotaEnabled: boolean; quotaBytes?: number; quotaWindowHours?: number };
 
+function digits(text: string): boolean {
+  return /^\d+$/.test(text.trim());
+}
+
 /** The desktop's checks and messages. The quota numbers are only read, and only sent, while the limit is on. */
 export function checkQueueForm(form: QueueForm): { error: string } | { policy: QueuePolicy } {
   const name = form.name.trim();
   if (!name) return { error: 'Enter a queue name.' };
   if (name.length > 80) return { error: 'The queue name can have 80 characters at most.' };
-  const max = Number(form.max);
-  if (form.max.trim() === '' || !Number.isInteger(max) || max < 1 || max > 16) return { error: 'Simultaneous downloads must be between 1 and 16.' };
+  const max = digits(form.max) ? Number(form.max.trim()) : NaN;
+  if (!Number.isInteger(max) || max < 1 || max > 16) return { error: 'Simultaneous downloads must be between 1 and 16.' };
   if (!form.quotaEnabled) return { policy: { name, maxConcurrentDownloads: max, quotaEnabled: false } };
-  const mb = Number(form.quotaMb.trim().replace(',', '.'));
-  if (form.quotaMb.trim() === '' || !Number.isFinite(mb) || mb <= 0 || mb > MAX_QUOTA_MB) return { error: 'The quota must be a positive number of MB, up to 10,485,760.' };
+  const mb = /^\d+([.,]\d+)?$/.test(form.quotaMb.trim()) ? Number(form.quotaMb.trim().replace(',', '.')) : NaN;
+  if (!Number.isFinite(mb) || mb <= 0 || mb > MAX_QUOTA_MB) return { error: 'The quota must be a positive number of MB, up to 10,485,760.' };
   const quotaBytes = Math.round(mb * 1024 * 1024);
   if (quotaBytes < 1) return { error: 'The quota must be large enough to represent at least one byte.' };
-  const hours = Number(form.quotaHours);
-  if (form.quotaHours.trim() === '' || !Number.isInteger(hours) || hours < 1 || hours > MAX_QUOTA_HOURS) return { error: 'The quota window must be between 1 and 8,760 hours.' };
+  const hours = digits(form.quotaHours) ? Number(form.quotaHours.trim()) : NaN;
+  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_QUOTA_HOURS) return { error: 'The quota window must be between 1 and 8,760 hours.' };
   return { policy: { name, maxConcurrentDownloads: max, quotaEnabled: true, quotaBytes, quotaWindowHours: hours } };
 }
 
@@ -116,9 +120,15 @@ export function selectedDays(days: string | undefined): Set<string> {
   return new Set(normalizeDays(days).split(','));
 }
 
-/** Ticks or unticks one day. Unticking the last one gives an empty list, which the host and the form read as every day. */
+/** The ticked days as the form shows them: unlike selectedDays, an empty list shows none ticked (the desktop's day buttons). */
+export function tickedDays(days: string | undefined): Set<string> {
+  const picked = new Set((days ?? '').split(/[,;]/).map((d) => d.trim().slice(0, 3).toLowerCase()).filter(Boolean));
+  return new Set(DAY_NAMES.filter((d) => picked.has(d.toLowerCase())));
+}
+
+/** Ticks or unticks one day. Unticking the last one gives an empty list (none shown ticked); it is saved as every day. */
 export function toggleDay(days: string, day: string): string {
-  const set = selectedDays(days);
+  const set = tickedDays(days);
   if (set.has(day)) set.delete(day);
   else set.add(day);
   return DAY_NAMES.filter((d) => set.has(d)).join(',');
@@ -167,7 +177,7 @@ export function newScheduleDraft(queueId: number, id: string, retryLimit: number
 
 export function editScheduleDraft(schedule: Schedule, retryLimit: number | undefined): ScheduleDraft {
   return {
-    schedule: JSON.parse(JSON.stringify(schedule)) as Schedule,
+    schedule: { ...(JSON.parse(JSON.stringify(schedule)) as Schedule), days: normalizeDays(schedule.days) },
     options: runOptions(schedule, retryLimit),
     isNew: false,
     baseline: JSON.parse(JSON.stringify(schedule)) as Schedule,
@@ -186,8 +196,8 @@ function validDate(text: string): boolean {
 }
 
 function wholeNumber(text: string, min: number, max: number): number | null {
-  if (text.trim() === '') return null;
-  const value = Number(text);
+  if (!digits(text)) return null;
+  const value = Number(text.trim());
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
 
@@ -226,6 +236,13 @@ export function checkScheduleDraft(
   if (stopTime) saved.stopTime = stopTime; else delete saved.stopTime;
   if (repeat !== null) saved.repeatEveryMinutes = repeat; else delete saved.repeatEveryMinutes;
   return { schedule: saved, retryLimit: retry };
+}
+
+/** Before a schedule save writes a queue's retry limit: has another client changed that limit since the form opened? */
+export function retryConflict(queue: Pick<Queue, 'name' | 'retryLimit'> | undefined, draft: Pick<ScheduleDraft, 'retryInitial'>): { error: string } | null {
+  if (!queue) return null;
+  if ((queue.retryLimit ?? null) === draft.retryInitial) return null;
+  return { error: `Queue '${queue.name}' retry policy changed elsewhere; its unsaved queue edits were not applied.` };
 }
 
 /** Everything the user can edit on a schedule; the run history is the host's. */

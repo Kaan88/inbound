@@ -41,3 +41,23 @@ describe('a draft with no changed retry limit leaves the queue alone', () => {
     expect(draft.retryInitial).toBe(3);
   });
 });
+
+import { checkQueueForm as cqf, queueForm as qf, retryConflict, tickedDays, toggleDay as td } from '../src/lib/queues';
+
+describe('review round 2', () => {
+  it('shows no day ticked after unticking the last one', () => {
+    expect([...tickedDays(td('Mon', 'Mon'))]).toEqual([]);
+    expect(td('Mon', 'Tue')).toBe('Mon,Tue');
+  });
+  it('refuses number forms the desktop refuses', () => {
+    const f = qf(null, 1);
+    expect('error' in cqf({ ...f, max: '1e1' })).toBe(true);
+    expect('error' in cqf({ ...f, max: '+5' })).toBe(true);
+    expect('error' in cqf({ ...f, quotaEnabled: true, quotaMb: '0x10' })).toBe(true);
+    expect('error' in cqf({ ...f, quotaEnabled: true, quotaMb: '1,5' })).toBe(false);
+  });
+  it('detects a retry limit changed elsewhere', () => {
+    expect(retryConflict({ name: 'Main', retryLimit: 5 }, { retryInitial: 3 })).toMatchObject({ error: expect.stringContaining('retry policy changed elsewhere') });
+    expect(retryConflict({ name: 'Main', retryLimit: undefined }, { retryInitial: null })).toBeNull();
+  });
+});

@@ -33,7 +33,7 @@
     if (!canMoveFile(files, index, delta)) return;
     files = moveFile(files, index, delta);
     orderDirty = true;
-    message = 'File order unsaved. Click Save to save.';
+    message = 'File order unsaved. Click Apply to save.';
   }
 
   function stage(destination: number | null) {
@@ -66,6 +66,12 @@
           failed.add(id);
         }
       }
+      // A move that failed stays in the list so it can be seen and tried again.
+      for (const id of failed) {
+        const job = store.model.jobs[id];
+        if (job && !files.some((j) => j.id === id)) files = [...files, job];
+        delete staged[id];
+      }
       if (orderDirty && failed.size === 0) {
         if (!sameMembers) errors.push(`${name} membership changed while applying order. The order was left untouched; close this window and set it again.`);
         else {
@@ -85,8 +91,8 @@
   }
 </script>
 
-<Dialog title="Downloads in {queue?.name ?? 'this queue'}" {onclose} wide>
-  <p class="mb-2 text-[13px]">All downloads in this queue, also finished and failed ones. Set the order of waiting downloads with the same priority, or move a download to another queue. Running downloads go on. Save applies the changes.</p>
+<Dialog title="Downloads in this queue" {onclose} wide>
+  <p class="mb-2 text-[13px]">All downloads in this queue, also finished and failed ones. Set the order of waiting downloads with the same priority, or move a download to another queue. Running downloads go on. Apply saves the changes.</p>
   {#if files.length === 0}
     <p class="card px-4 py-6 text-center text-[13px] text-muted">No downloads in this queue.</p>
   {:else}
@@ -118,9 +124,9 @@
     </div>
     <button class="btn" disabled={index < 0 || target === null} onclick={() => stage(target)}>Move</button>
   </div>
-  <p class="hint mt-3" aria-live="polite">{message || (dirty ? 'Changes not saved yet.' : `${downloadsText(files.length)} in this queue. The order counts among downloads with the same priority.`)}</p>
+  <p class="hint mt-3" aria-live="polite">{message || (dirty ? 'Changes not saved yet. Apply saves them; Close discards them.' : `${downloadsText(files.length)} in this queue. The order counts among downloads with the same priority.`)}</p>
   {#snippet footer()}
-    <button class="btn-primary" disabled={!dirty || busy} onclick={save}>Save</button>
+    <button class="btn-primary" disabled={!dirty || busy} onclick={save}>Apply</button>
     <button class="btn" onclick={onclose}>Close</button>
   {/snippet}
 </Dialog>
