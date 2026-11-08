@@ -125,7 +125,8 @@
   let passwordFromEnvironment = $state(false);
   let pairing = $state<{ code: string; expiresAt: string } | null>(null);
   let now = $state(Date.now());
-  let tokens = $state<{ id: string; name: string; createdAt: string; lastUsedAt?: string }[]>([]);
+  let tokens = $state<{ id: string; name: string; createdAt: string; lastUsedAt?: string; role?: string }[]>([]);
+  const roleNames: Record<string, string> = { extension: 'Browser extension', remoteClient: 'Desktop app' };
   // The clock runs only while a pairing code is showing.
   $effect(() => tickUntil(pairing ? Date.parse(pairing.expiresAt) : 0, 1000, (time) => (now = time)));
 
@@ -365,7 +366,7 @@
         {#each tokens as token (token.id)}
           <li class="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
             <span class="min-w-0 flex-1"><span class="block truncate font-semibold">{token.name}</span>
-              <span class="block text-[12px] text-muted">Paired {dateTime(token.createdAt)}{token.lastUsedAt ? ` · last used ${dateTime(token.lastUsedAt)}` : ' · not used yet'}</span></span>
+              <span class="block text-[12px] text-muted">{token.role && roleNames[token.role] ? `${roleNames[token.role]} · ` : ''}Paired {dateTime(token.createdAt)}{token.lastUsedAt ? ` · last used ${dateTime(token.lastUsedAt)}` : ' · not used yet'}</span></span>
             <button class="btn-danger" onclick={() => revoke(token.id)}>Remove</button>
           </li>
         {:else}

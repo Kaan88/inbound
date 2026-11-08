@@ -248,7 +248,7 @@ note that the token and cookies cross the network unencrypted.
   server's card shows the state. One place not answering leaves the other's list.
 
 The server's side (pairing, the token, the extension role with `folders.browse`, CORS for our extension ids
-and any `moz-extension://` origin) is in `docs/ipc-protocol.md` (Sign-in and paired browsers).
+and any `moz-extension://` origin) is in `docs/ipc-protocol.md` (Sign-in and paired apps).
 `scripts/server-smoke.mjs` runs `transport.ts` against a running test server (pair, folders, handoff,
 duplicate, list, delete, a refused command, a removed token).
 

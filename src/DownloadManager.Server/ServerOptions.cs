@@ -82,6 +82,12 @@ public sealed record ServerOptions
     /// <summary>Names a browser may use for this server besides an IP address and <c>localhost</c> (<see cref="OriginCheck"/>).</summary>
     public IReadOnlyList<string> AllowedHostNames { get; init; } = [];
 
+    /// <summary>
+    /// Which kind of server this is, in <c>/api/auth/status</c>, so the web UI's texts fit it: <c>server</c> for this
+    /// headless server (Docker). The Windows app's web bridge (D8) will say <c>windows</c>. Not read from the environment.
+    /// </summary>
+    public string HostKind { get; init; } = "server";
+
     /// <summary>Where downloads go until a client changes it: the first root.</summary>
     public string DefaultDownloadDirectory => Roots.Count > 0 ? Roots[0] : DefaultRoot;
 

@@ -21,8 +21,9 @@ namespace DownloadManager.Server.Auth;
 /// counts as wrong from its start until it turns out right, so parallel guesses can't all slip past the wait.</item>
 /// <item>A changed password also unpairs every browser extension, unless the change asks to keep them.</item>
 /// <item>Only <c>/health</c>, the sign-in page's own files under <c>/signin/</c> and the sign-in calls answer without a
-/// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c>
-/// only (<see cref="Pairing"/>).</item>
+/// session. A paired app uses a bearer token instead, on <see cref="IsTokenPath">its paths</see> only
+/// (<see cref="Pairing"/>): the browser extension on <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c>, a desktop
+/// app (<see cref="TokenRoles.RemoteClient"/>) on those and on <c>GET /api/ws</c>.</item>
 /// </list>
 /// </summary>
 public sealed class ServerAuth
@@ -189,18 +190,25 @@ public sealed class ServerAuth
     public Func<HttpContext, Func<Task>, Task> Middleware => async (context, next) =>
     {
         var request = context.Request;
-        // A paired extension: its token, on POST /api/ipc and DELETE /api/pair/self only, whether sign-in is on or not.
-        if (IsTokenPath(request.Path) && request.Headers.Authorization.Count > 0)
+        // A paired app: its token, on its paths only, whether sign-in is on or not. On /api/ws only a bearer header
+        // counts: a browser behind a proxy's own password sends that proxy's Basic header there, with its cookie.
+        if (IsTokenPath(request.Path) && request.Headers.Authorization.Count > 0 &&
+            (!request.Path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) ||
+             request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)))
         {
-            var header = request.Headers.Authorization.ToString();
-            var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? Pairing.Authenticate(header[7..].Trim()) : null;
-            if (token is null)
+            if (BearerToken(context) is not { } token)
             {
                 await Refuse(context, StatusCodes.Status401Unauthorized, "This browser isn't paired with the server, or its pairing was removed. Pair it again.").ConfigureAwait(false);
                 return;
             }
 
-            context.Items[TokenItem] = token;
+            // The extension's token keeps to POST /api/ipc and its own Unpair; the WebSocket is a desktop app's.
+            if (request.Path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase) && token.Role != TokenRoles.RemoteClient)
+            {
+                await Refuse(context, StatusCodes.Status403Forbidden, "A paired browser extension can't open this.").ConfigureAwait(false);
+                return;
+            }
+
             await next().ConfigureAwait(false);
             return;
         }
@@ -228,9 +236,31 @@ public sealed class ServerAuth
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
     };
 
-    /// <summary>The paths a paired browser's bearer token opens.</summary>
+    /// <summary>The paths a paired app's bearer token is read on (the extension's role is kept off <c>/api/ws</c> above).</summary>
     internal static bool IsTokenPath(PathString path) =>
-        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals(PairSelfPath, StringComparison.OrdinalIgnoreCase);
+        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals(PairSelfPath, StringComparison.OrdinalIgnoreCase) ||
+        path.Equals(WebSocketPath, StringComparison.OrdinalIgnoreCase);
+
+    public const string WebSocketPath = "/api/ws";
+
+    /// <summary>
+    /// The paired app whose bearer token this request carries on one of <see cref="IsTokenPath">its paths</see>, or
+    /// null: no token, an unknown or removed one, or another path. Kept on the request, so the origin check
+    /// (<see cref="HasValidToken"/>) and the gate check it once.
+    /// </summary>
+    internal TokenDto? BearerToken(HttpContext context)
+    {
+        if (TokenOf(context) is { } known) return known;
+        if (!IsTokenPath(context.Request.Path)) return null;
+        var header = context.Request.Headers.Authorization.ToString();
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
+        var token = Pairing.Authenticate(header[7..].Trim());
+        if (token is not null) context.Items[TokenItem] = token;
+        return token;
+    }
+
+    /// <summary>For <see cref="OriginCheck"/>: whether the request carries a valid token on a token path.</summary>
+    public bool HasValidToken(HttpContext context) => BearerToken(context) is not null;
 
     internal static Session? SessionOf(HttpContext context) => context.Items.TryGetValue(SessionItem, out var value) ? value as Session : null;
 
@@ -292,6 +322,8 @@ public sealed class ServerAuth
         setupCodeNeeded = SetupNeeded && NeedsSetupCode(context),
         passwordFromEnvironment = PasswordFromEnvironment,
         sessionEndsAt = SessionOf(context) is { } session ? Sessions.AbsoluteEnd(session) : (DateTimeOffset?)null,
+        // Which kind of server this is, for the sign-in page's texts (ServerOptions.HostKind).
+        hostKind = _options.HostKind,
         // Only for a browser that may use the server: a version tells a stranger which flaws to try.
         version = !Required || SessionOf(context) is not null ? Protocol.HostVersion : null,
     };
@@ -309,6 +341,10 @@ public sealed class ServerAuth
     {
         public string? Code { get; set; }
         public string? Name { get; set; }
+        /// <summary>Only with <see cref="Role"/> <see cref="TokenRoles.RemoteClient"/>: the server's sign-in password.</summary>
+        public string? Password { get; set; }
+        /// <summary>Left out (or <see cref="TokenRoles.Extension"/>) for the extension's code; <see cref="TokenRoles.RemoteClient"/> for a desktop app.</summary>
+        public string? Role { get; set; }
     }
 
     private async Task<IResult> SetupAsync(HttpContext context)
@@ -430,6 +466,9 @@ public sealed class ServerAuth
     {
         var form = await ReadAsync<PairForm>(context).ConfigureAwait(false);
         if (form is null) return Error(StatusCodes.Status400BadRequest, "A JSON body with the code is expected.");
+        // A code always makes an extension token: what a code was shown for can't be raised by the one who types it.
+        if (form.Role == TokenRoles.RemoteClient) return await PairRemoteClientAsync(context, form).ConfigureAwait(false);
+        if (form.Role is not (null or TokenRoles.Extension)) return Error(StatusCodes.Status400BadRequest, "That role isn't one this server pairs.");
         var address = AddressOf(context);
         if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
         if (Pairing.Redeem(form.Code, form.Name) is not { } paired)
@@ -440,7 +479,58 @@ public sealed class ServerAuth
 
         Limiter.Succeeded(address);
         _log.Info($"A browser was paired: {paired.Record.Name} ({paired.Record.Id}).");
-        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name });
+        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role });
+    }
+
+    /// <summary>
+    /// A desktop app pairing with the server's password (design D9, section 4): a <see cref="TokenRoles.RemoteClient"/>
+    /// token, which has a signed-in browser's rights. The password is checked as on the sign-in page, with the same
+    /// waits: a wrong one counts as a wrong sign-in from that address, and the try counts as wrong from its start. The
+    /// code is not looked at. With sign-in off there is no password, so there is no such pairing either.
+    /// </summary>
+    private async Task<IResult> PairRemoteClientAsync(HttpContext context, PairForm form)
+    {
+        if (!Required) return Error(StatusCodes.Status400BadRequest, "Sign-in is turned off on this server, so a desktop app can't pair with a password.");
+        if (SetupNeeded) return Error(StatusCodes.Status409Conflict, "No password is set yet. Set one in the web UI first.");
+        var address = AddressOf(context);
+        if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
+
+        var checkedAgainst = Store.Password;
+        if (!await PasswordHash.VerifyAsync(form.Password, checkedAgainst, context.RequestAborted).ConfigureAwait(false))
+            return WrongPairingPassword(address, ifWrong);
+
+        (string Token, TokenDto Record) paired;
+        // The password change's gate: a change made during the slow check makes this password wrong after all, as a
+        // sign-in's session would be (StartSession). One made after the token is saved removes it with the others,
+        // unless that change keeps the paired apps.
+        await _passwordGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
+        try
+        {
+            if (!ReferenceEquals(Store.Password, checkedAgainst)) return WrongPairingPassword(address, ifWrong);
+            try
+            {
+                paired = Pairing.Issue(TokenRoles.RemoteClient, form.Name);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log.Error($"The sign-in file could not be saved: {ex.GetType().Name}");
+                return Error(StatusCodes.Status500InternalServerError, "The pairing could not be saved. Check the data folder's space and permissions.");
+            }
+        }
+        finally
+        {
+            _passwordGate.Release();
+        }
+
+        Limiter.Succeeded(address);
+        _log.Info($"A desktop app was paired: {paired.Record.Name} ({paired.Record.Id}).");
+        return Results.Json(new { ok = true, token = paired.Token, id = paired.Record.Id, name = paired.Record.Name, role = paired.Record.Role });
+    }
+
+    private IResult WrongPairingPassword(string address, TimeSpan ifWrong)
+    {
+        _log.Warn($"A desktop app's pairing with a wrong password from {address} ({Limiter.Failures(address)} in a row).");
+        return Error(StatusCodes.Status401Unauthorized, "That password is wrong.", ifWrong);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------------------

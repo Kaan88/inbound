@@ -26,7 +26,8 @@ namespace DownloadManager.Server;
 /// provider) behind HTTP instead of a named pipe, without the Windows parts (tray, sounds, clipboard, sleep prevention,
 /// shutdown actions, start at sign-in, native-host registration, updater).
 /// <list type="bullet">
-/// <item><c>GET /api/ws</c>: WebSocket, one envelope per text message; hello and snapshot, then events.</item>
+/// <item><c>GET /api/ws</c>: WebSocket, one envelope per text message; hello and snapshot, then events. With
+/// <c>?hello=1</c> the client's first message is <c>client.hello</c>, as on the desktop's hello pipe.</item>
 /// <item><c>POST /api/ipc</c>: one request envelope, one reply.</item>
 /// <item><c>GET /health</c>: liveness, no sign-in.</item>
 /// <item>Everything else: the static web UI from <c>wwwroot</c>.</item>
@@ -296,7 +297,7 @@ public sealed class ServerApp : IAsyncDisposable
         web.Use(SecurityHeaders.Middleware);
         web.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         web.Use(ExtensionCors.Middleware);
-        web.Use(OriginCheck.Middleware(options.AllowedHostNames));
+        web.Use(OriginCheck.Middleware(options.AllowedHostNames, auth.HasValidToken));
         web.Use(auth.Middleware);
 
         var stopping = web.Lifetime.ApplicationStopping;
@@ -304,7 +305,7 @@ public sealed class ServerApp : IAsyncDisposable
         auth.Map(web);
         uploads.Map(web);
 
-        web.Map("/api/ws", async context =>
+        web.Map(ServerAuth.WebSocketPath, async context =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
             {
@@ -313,11 +314,22 @@ public sealed class ServerApp : IAsyncDisposable
                 return;
             }
 
-            // Signing out, a changed password or the session's absolute end closes the socket too.
+            // Signing out, a changed password or the session's absolute end closes the socket too. A desktop app's
+            // token (the gate let no other role through) closes it when the token is revoked, by a password change too.
             var session = ServerAuth.SessionOf(context);
+            var tokenEnded = ServerAuth.TokenOf(context) is { } token ? auth.Pairing.Lifetime(token.Id) : CancellationToken.None;
+            if (tokenEnded.IsCancellationRequested)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { ok = false, error = "This app's pairing was removed. Pair it again." }).ConfigureAwait(false);
+                return;
+            }
+
+            // PERF.7 on the WebSocket: a client that asks with ?hello=1 says first what it wants (no snapshot, no events).
+            var clientSpeaksFirst = context.Request.Query["hello"] == "1";
             using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
             using var lifetime = session is null
-                ? CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping)
+                ? CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping, tokenEnded)
                 : CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping, session.Ended);
             if (session is not null)
             {
@@ -332,7 +344,7 @@ public sealed class ServerApp : IAsyncDisposable
             try
             {
                 await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token,
-                    session is null ? null : () => auth.Sessions.Touch(session)).ConfigureAwait(false);
+                    session is null ? null : () => auth.Sessions.Touch(session), clientSpeaksFirst).ConfigureAwait(false);
             }
             finally
             {
@@ -365,8 +377,9 @@ public sealed class ServerApp : IAsyncDisposable
                 return;
             }
 
-            // A paired extension's token opens its role only, both ways (NativeBridgePolicy.ServerExtension).
-            var paired = ServerAuth.TokenOf(context) is not null;
+            // A paired extension's token opens its role only, both ways (NativeBridgePolicy.ServerExtension). A desktop
+            // app's token has a signed-in browser's rights, as on /api/ws.
+            var paired = ServerAuth.TokenOf(context) is { } token && token.Role == TokenRoles.Extension;
             if (paired && !NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, request))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -504,14 +517,24 @@ public sealed class ServerStartException(string message) : Exception(message);
 /// The browser extension is the one other origin let through, and only where it has its own credential
 /// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c> with a bearer token, and
 /// <c>/api/pair</c> with a code.
+/// <para>
+/// An app that isn't a browser (the desktop app managing a server, design D9) may use any name the user typed,
+/// such as <c>http://homeserver:8080</c>, when it sends no <c>Origin</c> and either a valid token or a pairing request
+/// (<see cref="CarriesOwnCredential"/>). A rebinding page gains nothing from that: the token paths are a POST, a
+/// DELETE and a WebSocket, and a browser always sends <c>Origin</c> for those, its own page's included; a page has no
+/// valid token to send anyway; and <c>POST /api/pair</c> without a code or password opens nothing (it is also a POST,
+/// so a page sends <c>Origin</c> there too). Any request with an <c>Origin</c> still meets both rules above.
+/// </para>
 /// </summary>
 public static class OriginCheck
 {
     public const string HostsVariable = "DOWNLOADMANAGER_HOSTS";
 
-    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames) => async (context, next) =>
+    /// <param name="hasValidToken">Whether the request carries a paired app's valid token on a token path (<see cref="ServerAuth.HasValidToken"/>).</param>
+    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames, Func<HttpContext, bool> hasValidToken) => async (context, next) =>
     {
         if (context.Request.Path.StartsWithSegments("/api") && !ExtensionCors.Admits(context.Request) &&
+            !CarriesOwnCredential(context, hasValidToken) &&
             Refusal(context.Request, allowedNames) is { } refusal)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -521,6 +544,18 @@ public static class OriginCheck
 
         await next().ConfigureAwait(false);
     };
+
+    /// <summary>
+    /// No <c>Origin</c> (so not a browser's page, see above) and a credential of its own: a valid token, or
+    /// <c>POST /api/pair</c>, where the code or password is the credential and wrong ones make the address wait.
+    /// </summary>
+    internal static bool CarriesOwnCredential(HttpContext context, Func<HttpContext, bool> hasValidToken)
+    {
+        var request = context.Request;
+        if (!string.IsNullOrEmpty(request.Headers.Origin.ToString())) return false;
+        if (HttpMethods.IsPost(request.Method) && request.Path.Equals("/api/pair", StringComparison.OrdinalIgnoreCase)) return true;
+        return hasValidToken(context);
+    }
 
     public static List<string> ParseHosts(string? value) =>
         (value ?? string.Empty).Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();

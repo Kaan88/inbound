@@ -46,7 +46,12 @@ unchanged is fine. The desktop Host can do all of these.
 - `GET /api/ws` is a WebSocket. Each text message carries exactly one envelope, as JSON, with no length prefix (the
   WebSocket frames it). Binary messages and messages over 8 MB close the connection. On connect the server sends
   `server.hello` and `jobs.snapshot`, then replies and events, exactly as on the pipe, and the one-command-at-a-time
-  rule below holds per WebSocket.
+  rule below holds per WebSocket. `GET /api/ws?hello=1` works like the hello pipe instead (PERF.7): the client speaks
+  first, and its first message must be `client.hello` with `{ "snapshot": bool, "events": bool }` (both true when
+  left out), within 5 seconds. The server then sends `server.hello`, `jobs.snapshot` only if `snapshot` is true, and
+  broadcasts only if `events` is true. Another first message closes the socket (policy violation); a first message
+  on another protocol version gets `server.hello` and `server.incompatible`, then the socket closes. Without the
+  flag nothing changes, so the web UI needs no change.
 - `POST /api/ipc` takes one envelope as the request body and answers with the one reply envelope. There is no hello,
   no snapshot and no events. A request with another version gets `server.incompatible` back. It is for short-lived
   clients that needn't hold a connection.
@@ -54,32 +59,37 @@ unchanged is fine. The desktop Host can do all of these.
 - A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
   origin. Every request to `/api/`, with an `Origin` or without (a page's same-origin `GET` carries none), must name
   the server in its `Host` by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else gets
-  403. The one exception is below: a paired extension's `POST /api/ipc`, `POST /api/pair` and
-  `DELETE /api/pair/self`.
+  403. There are two exceptions. A paired extension's `POST /api/ipc`, `POST /api/pair` and `DELETE /api/pair/self`
+  (below). And an app that isn't a browser, such as the desktop app managing a server by name
+  (`http://homeserver:8080`), may use any name when its request carries no `Origin` and either a valid token on a
+  token path (`GET /api/ws`, `POST /api/ipc`, `DELETE /api/pair/self`) or is `POST /api/pair`. A page that points
+  its own name at the server (DNS rebinding) gains nothing from this: a browser always sends `Origin` on a POST, a
+  DELETE and a WebSocket upgrade, its own page's too, and a page has no valid token. A request with an `Origin`, a
+  token or not, meets both rules.
 - Sign-in (D2) is on by default; see the next section.
 
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
 request, update itself or run programs a client names, so those commands answer as described above.
 
-### Sign-in and paired browsers (D2)
+### Sign-in and paired apps (D2, D9)
 
 With sign-in on (the default), every path except `/health`, `/favicon.svg`, `/theme.js`, `/signin/...` and the calls
-below needs a session cookie or, for `POST /api/ipc` and `DELETE /api/pair/self` only, a paired browser's token. Without one, `/api/...` answers
+below needs a session cookie or, on the token paths only, a paired app's token (see "A paired token" below). Without one, `/api/...` answers
 401 with `{"ok":false,"error":...,"signIn":"/signin/"}`, a page `GET` is sent to `/signin/` (302), and the WebSocket
 upgrade is refused with 401. A failure always answers `{"ok":false,"error":"...","retryAfterSeconds":n?}`; a wait after
 wrong tries is 429 with `Retry-After`.
 
 | Call | Session? | Body / answer |
 | --- | --- | --- |
-| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, and `version` only for a signed-in browser |
+| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge will say `windows`), and `version` only for a signed-in browser |
 | `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
 | `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
 | `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
-| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, and every paired browser is unpaired unless `keepPairedBrowsers` is true. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
+| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, and every paired app (extensions and desktop apps) is unpaired unless `keepPairedBrowsers` is true; their WebSockets close. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
-| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired browsers (`id`, `name`, `createdAt`, `lastUsedAt`), and revoking one. |
-| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. 1,000 wrong codes (from all addresses together) end the code. |
-| `DELETE /api/pair/self` | token | the extension's Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
+| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired apps (`id`, `name`, `createdAt`, `lastUsedAt`, `role`: `extension` or `remoteClient`), and revoking one, which also closes its WebSockets. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, and gets a `remoteClient` token. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
+| `DELETE /api/pair/self` | token | the app's own Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), closes its WebSockets, and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
 | `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
 
 - **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
@@ -111,10 +121,21 @@ wrong tries is 429 with `Retry-After`.
 - **Setup code:** asked of every browser except one on the server's own machine connecting directly: a connection
   from a listed proxy, or with `X-Forwarded-For` / `Forwarded`, always needs it.
 - **Origin:** every state change and the WebSocket upgrade must carry the server's own origin (above).
-- **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` (and for unpairing itself), and only for what the extension
-  role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
-  `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
-  comes without settings. Only the token's SHA-256 is stored. Requests from our Chrome extension ids
+- **A paired token** (`Authorization: Bearer ibt_...`) has a role, kept with its hash in `auth.json`. A record
+  without one is the extension's, so files from before roles read as they did, and a role this version doesn't know
+  opens nothing.
+  - `extension` (from a code) is for `POST /api/ipc` (and for unpairing itself), and only for what the extension
+    role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
+    `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
+    comes without settings. `GET /api/ws` with it is refused (403).
+  - `remoteClient` (from the password, for a desktop app managing the server) has a signed-in browser's rights on
+    `GET /api/ws` (with or without `?hello=1`) and `POST /api/ipc`, and can unpair itself. It is not a session: the
+    other calls in the table still want the cookie. Its WebSockets close when it is revoked, unpaired, or removed by
+    a password change.
+  - On `GET /api/ws` only a `Bearer` header is read as a token, so a browser behind a proxy that sends its own
+    `Authorization: Basic` keeps using its cookie there.
+
+  Only the token's SHA-256 is stored. Requests from our Chrome extension ids
   (`chrome-extension://`, the store and the unpacked id) and from any `moz-extension://` origin (Firefox gives each
   install a random id) pass the origin check for `POST /api/ipc` and `DELETE /api/pair/self` with a bearer token,
   which the sign-in gate then checks, and for `POST /api/pair`, where the one-time code is the credential. They get
