@@ -55,9 +55,9 @@ export const DEFAULT_EXCLUDED_EXTENSIONS: readonly string[] = [
 
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  // Off until the user turns it on in Settings, next to the explanation of what it shares. The popup,
-  // the toolbar badge and a once-per-session note say so, so it cannot look like a silent failure.
-  autoIntercept: false,
+  // On from a fresh install (owner decision, 2026-11-08; 0.4.0 had it off). Settings opens on install
+  // with the explanation of what it shares, and turning it off there is one click.
+  autoIntercept: true,
   startMode: "now",
   destinationMode: "default",
   defaultTarget: "local",

@@ -72,7 +72,7 @@ test('a fresh install starts with the new rules and nothing to store', () => {
   assert.equal(changed, false);
   assert.deepEqual(settings.interceptedExtensions, []);
   assert.ok(settings.excludedExtensions.includes('html'));
-  assert.equal(settings.autoIntercept, false);
+  assert.equal(settings.autoIntercept, true);
   assert.equal(settings.destinationMode, 'default');
   assert.equal(settings.rulesVersion, RULES_VERSION);
 });

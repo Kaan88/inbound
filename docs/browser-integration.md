@@ -123,9 +123,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `data:` downloads made by the page itself, is noted with the reason; the popup shows the recent ones.
   A notification says so too for a rule the user set (an excluded site or type, a type missing from their
   own allow-list), but not for the default exclusions, a pause or a held Delete, which are expected.
-- **On or off at a glance.** Automatic sending starts off on a fresh install, beside the explanation of
-  what it shares (kept from 0.4.0: sending cookies to the app is the user's choice; an upgrade from before
-  0.4.0 that never saved settings keeps catching). While it is off or paused the toolbar badge reads OFF, the popup and Settings say so in
+- **On or off at a glance.** Automatic sending starts on for a fresh install (owner decision, 2026-11-08;
+  0.4.0 started it off), and Settings opens on install beside the explanation of what it shares; an
+  update keeps the user's saved choice. While it is off or paused the toolbar badge reads OFF, the popup and Settings say so in
   words with a way to turn it on, and the first download of a browser session that stays in the browser
   because of it raises one notification.
 
@@ -270,8 +270,8 @@ permissions already cover every http and https address. `docs/chrome-store/LISTI
 for each. What the extension does with data is in
 `docs/chrome-extension-privacy.md`; keep both true when behaviour changes.
 
-Automatic catching is off until the user turns it on in Settings, which opens on
-first install and explains beside the checkbox what it shares.
+Automatic catching is on from a fresh install; Settings opens on first install and explains beside the
+checkbox what it shares, so it can be turned off before the first download.
 
 ## Security boundaries
 

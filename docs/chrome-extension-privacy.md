@@ -34,9 +34,10 @@ it with: the app or the server does the downloading.
 The extension reads cookie values only at that moment, not while you browse. A download is sent in one
 of these ways:
 
-- **Automatically**, only if you turn on "Automatically send downloads to the desktop app" in Settings.
-  It is off until you do. (A copy installed before version 0.4.0 had it on by default, and updating that
-  copy keeps it on.) Downloads that match your rules then stop in Chrome and start again in the app, and
+- **Automatically**, while "Automatically send downloads to the desktop app" is on in Settings. It is on
+  from a fresh install (versions 0.4.0 to 0.4.x started with it off; an update keeps whatever you chose),
+  and Settings opens on install with this explanation, so you can turn it off before your first download.
+  Downloads that match your rules then stop in Chrome and start again in the app, and
   they leave Chrome's download list.
 - **From the right-click menu**, when you choose "Download with Inbound Download Manager" and confirm.
   At the click, the extension notes which cookie store and top-level site the link belongs to, so it can

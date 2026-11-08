@@ -206,8 +206,8 @@ async function loadSettings(): Promise<void> {
 }
 
 /**
- * The toolbar shows "OFF" whenever downloads are not being caught automatically, so a fresh install
- * (automatic sending starts off) or a pause cannot be mistaken for the extension failing.
+ * The toolbar shows "OFF" whenever downloads are not being caught automatically, so automatic sending
+ * turned off in Settings or a pause cannot be mistaken for the extension failing.
  */
 function updateBadge(): void {
   const action = (chrome as { action?: typeof chrome.action }).action;
