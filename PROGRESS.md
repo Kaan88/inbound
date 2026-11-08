@@ -1,5 +1,13 @@
 # Progress — session handoff
 
+### UI.R21 "Apply to all": connection changes reach running provider, protected and FTP downloads (2026-11-08, branch `owner-engine`)
+
+- Owner decision (2026-11-08): "Apply to all". Before, a changed connections-per-download reached only the user's own running HTTP downloads; provider and protected jobs were left out because their real host and the provider's cap are known only to the run (the job's own address is a reference or masked).
+- **Built:** a provider run now keeps its link's host and the provider's per-file cap in memory (`JobRuntime.RunLink`), so a running TorBox job takes the new count at once, clamped by the cap (16) and the host limit of that link. A change before the run has its link is taken when the link comes. A protected (pasted provider) link follows unless its count was chosen by hand, capped at 16. New workers come from the existing steal path and queue on the per-host fair limiter; no link refresh is asked for or counted. FTP is one connection by design (the FTP engine has no segments), so a change while one runs is a no-op; written up in `docs/architecture.md`.
+- **Tests (Release):** Core 869/869, Engine 161/161, TorBox 323/323. Integration 1,236/1,239 on the first full run: `RuntimeAndContractsNameNoConcreteProvider` caught a provider name in a new comment (fixed, passes); `FtpRequiresLoginAndResumesFromPartialBytes` failed once under the full run and passed 4 of 4 alone; `HostGoldenFramesTests.AScriptedSessionSendsTheSameFrames` expects `nativeHostRegistered: false` and this PC's user registry has the installed app's Chrome registration (environmental, not from this change).
+- **New tests, each run 10 times:** Engine `ARaisedCountOnAProviderLinkStaysWithinTheHostLimit` and `EveryCheckpointDuringAConnectionChangeResumesToTheRightFile` 10/10; Integration `AChangedConnectionCountReachesARunningTorBoxDownloadWithinItsCap`, `ARaisedCountOnARunningTorBoxDownloadStaysWithinThePerHostLimit`, `AChangeBeforeAProviderRunHasItsLinkIsTakenWhenTheLinkComes`, `AChangedConnectionCountReachesARunningProtectedLinkWithinTheProviderCap`, `AChangedConnectionCountLeavesARunningFtpDownloadAlone` and the three `KilledWhileAConnectionChangeReachesAProviderDownload_TheCheckpointHoldsAndTheBytesMatch` cells (real Host, MockTorBox, killed right after the change is saved, while the new workers connect, and after a checkpoint with 12 split ranges) 10/10. Results in `artifacts\owner-engine\`.
+- Not checked on screen; no live TorBox run.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):
