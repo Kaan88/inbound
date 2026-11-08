@@ -8,10 +8,14 @@ const root = path.join(__dirname, '..');
 const chromeManifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 test('EXT.E1: the Firefox manifest is the Chrome one with its own ID, an event page and no key', async () => {
-  const { firefoxManifest, FIREFOX_EXTENSION_ID } = await import(pathToFileURL(path.join(root, 'scripts', 'build.mjs')).href);
+  const { firefoxManifest, FIREFOX_EXTENSION_ID, FIREFOX_UPDATE_URL } = await import(pathToFileURL(path.join(root, 'scripts', 'build.mjs')).href);
   const manifest = firefoxManifest(chromeManifest);
   assert.equal(FIREFOX_EXTENSION_ID, 'inbound-bridge@kaan88');
   assert.equal(manifest.browser_specific_settings.gecko.id, FIREFOX_EXTENSION_ID);
+  // Self-distributed: Firefox updates it from the file on main (an https address is required).
+  assert.equal(manifest.browser_specific_settings.gecko.update_url, FIREFOX_UPDATE_URL);
+  assert.match(FIREFOX_UPDATE_URL, /^https:\/\/raw\.githubusercontent\.com\/Kaan88\/inbound\/main\//);
+  assert.equal('update_url' in (chromeManifest.browser_specific_settings?.gecko ?? {}), false);
   assert.deepEqual(manifest.background, { scripts: ['background.js'] });
   assert.equal('key' in manifest, false);
   assert.equal('minimum_chrome_version' in manifest, false);

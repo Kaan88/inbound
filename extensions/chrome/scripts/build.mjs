@@ -17,6 +17,11 @@ const dist = path.join(root, target === "firefox" ? "dist-firefox" : "dist");
 // (BrowserBridge.FirefoxExtensionId).
 export const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 
+// The Firefox add-on is self-distributed (unlisted on addons.mozilla.org): Setup ships the signed XPI and the
+// GitHub release carries it. Firefox checks this file for newer versions; scripts/sign-extension-firefox.ps1
+// writes it, and a release squash puts it on main, so it lists only XPIs already published.
+export const FIREFOX_UPDATE_URL = "https://raw.githubusercontent.com/Kaan88/inbound/main/extensions/firefox-updates.json";
+
 const staticFiles = [
   "popup.html",
   "options.html",
@@ -44,6 +49,7 @@ export function firefoxManifest(chromeManifest) {
       // data_collection_permissions, which addons.mozilla.org asks every new add-on for, needs Firefox 140
       // (also an ESR); storage.session and MV3 host permissions as used here are older.
       strict_min_version: "140.0",
+      update_url: FIREFOX_UPDATE_URL,
       // Nothing is sent to the developer; details go only to the desktop app on this computer or the
       // user's own paired server.
       data_collection_permissions: { required: ["none"] },

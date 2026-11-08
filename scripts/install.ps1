@@ -122,8 +122,9 @@ Browser extension:
   4. Select: $extensionTarget
   5. Confirm the extension ID is $extensionId
 
-  Firefox: install Inbound Download Manager from Firefox Add-ons:
-    https://addons.mozilla.org/firefox/addon/inbound-download-manager/
+  Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,
+    https://github.com/Kaan88/inbound/releases/latest
+  and drag it onto a Firefox window. Firefox updates it after that.
 
 Native host registration (Chrome and Edge share one manifest; Firefox has its own):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager
