@@ -77,8 +77,16 @@ internal static class LiveAccount
     public const long KeptArchiveSize = 1_291_466;
     public const string KeptArchiveMd5 = "27f461ea38147b50776e4feaabd36f74";
 
-    public static bool IsKept(string? name) =>
-        name is not null && name.TrimStart().StartsWith(KeptPrefix, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The prefix as a whole word: the name is the prefix or goes on with something other than a letter or digit,
+    /// so <c>inbound-live-check-archive.zip</c> is kept and <c>inbound-live-checkpoint</c> is not.
+    /// </summary>
+    public static bool IsKept(string? name)
+    {
+        var trimmed = name?.TrimStart();
+        if (trimmed is null || !trimmed.StartsWith(KeptPrefix, StringComparison.OrdinalIgnoreCase)) return false;
+        return trimmed.Length == KeptPrefix.Length || !char.IsLetterOrDigit(trimmed[KeptPrefix.Length]);
+    }
 
     /// <summary>
     /// The only way a test removes an item: it looks the item up first and leaves a kept one alone, because a

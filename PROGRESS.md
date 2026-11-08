@@ -6,6 +6,7 @@
 - A fresh `mylist` read: `cached: true`, `airlocked: true`, tag `inbound-live-check`, one 1,291,466-byte zip. `expires_at` still said 2026-12-08 after Airlock; whether Airlock lifts it is unverified.
 - Live tests now remove items only through `LiveAccount.RemoveUnlessKeptAsync`, which skips `inbound-live-check*` names. `KeptArchiveTests`: 9 pass without a key; with the key all 10 pass, including the live read of the item. LiveTests project without a key: 9 passed, 30 skipped.
 - API calls: 7 in all (2 refused submissions, 1 submission, 1 read, 1 edit, 1 read, 1 list from the live test). No key or link was printed, logged or committed.
+- Review fixes (2026-11-08): TB.L2 is now **partial**, not done: the keeping past 30 days is unverified until a read after 2026-12-08, and Airlock's meaning is the owner's description (TorBox's schema has only an undescribed `airlocked` field). The removal guard now scans subfolders, catches any `RemoveAsync` mention outside the helper's body (spaced calls, method groups), `RemoteQueueAction.Remove`, `controlqueued` and any "delete" string, with sample-text tests for each. The kept-name rule needs a non-letter, non-digit after the prefix. The live read compares TorBox's md5 when given, and a new live test downloads the file and checks its md5 (not yet run: no key in this session). Docs say the protection covers live test cleanup only. LiveTests project without a key: 24 passed, 31 skipped.
 
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
