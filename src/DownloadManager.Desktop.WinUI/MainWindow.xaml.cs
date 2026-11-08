@@ -814,7 +814,10 @@ public sealed partial class MainWindow : Window
         if (e.Key == Windows.System.VirtualKey.Delete && SelectedJobs.Count > 0)
         {
             e.Handled = true;
-            DeleteButton_Click(sender, e);
+            // Shift+Delete asks with "Delete from disk" ticked; plain Delete leaves it unticked (UI.R20).
+            var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            _ = ConfirmDeleteAsync(deleteFromDisk: shift);
         }
     }
 
@@ -4677,7 +4680,11 @@ public sealed partial class MainWindow : Window
             job => job.CanResume, id => _connection.ResumeAsync(id));
     }
 
-    private async void DeleteButton_Click(object sender, RoutedEventArgs e)
+    private async void DeleteButton_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
+
+    /// <summary>Asks before deleting the selection. <paramref name="deleteFromDisk"/> is the box's starting state:
+    /// only Shift+Delete starts it ticked, so a plain Delete never removes finished files without a click.</summary>
+    private async Task ConfirmDeleteAsync(bool deleteFromDisk)
     {
         var selection = SelectedJobs;
         if (selection.Count == 0)
@@ -4688,9 +4695,10 @@ public sealed partial class MainWindow : Window
 
         var deleteFiles = new CheckBox
         {
-            Content = "Also delete the downloaded files and any partial data from disk",
-            IsChecked = true,
+            Content = "Delete from disk: the downloaded files and any partial data",
+            IsChecked = deleteFromDisk,
         };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(deleteFiles, "DeleteFromDiskBox");
         // Unfinished downloads only have partial data, which is removed anyway.
         var anyCompleted = selection.Any(job => job.State == "completed" && !job.FileRemovedAfterExtraction);
 
