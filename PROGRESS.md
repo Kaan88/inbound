@@ -10,6 +10,7 @@
 - A4.D: spanned zip sets (`name.z01` ... `name.zip`) are one set, opened from `name.zip`; a missing middle or last part is named. WinZip has no command line here, so the tests build spanned sets by hand; the bundled 7-Zip 26.04 lists and extracts them.
 - Tests: Core 819, Engine 149, Archives 321, TorBox 323, Integration 1,103, all passed.
 - Not done: the owner's on-screen checks; a live TorBox check of TB.S1/TB.S2; a spanned set made by a real zip tool.
+- Review fixes: `.rev` files now go only with RAR sets, so a 7z, zip or split set called `name` leaves a `name.rev` beside it alone (new Archives theory and an Integration test with a zip). `scripts\ui-keyboard-check.ps1` now needs `-PathPart` naming the test instance's folder, refuses the installed app, and stops if a delete dialog is still open before sending the next key. `dm remote add` and `dm remote retry` refuse `--link-password-for-archives` without `--link-password-stdin` instead of ignoring it (exit 2; covered in the CLI test), and the main usage text shows they go together. A spanned zip with locked headers and no password now names the gaps it can see from the file names, as a RAR set does. 7-Zip has no zip it calls header-encrypted, so no test reaches that path. After the fixes: Archives 329, Integration 1,104, all passed.
 
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
