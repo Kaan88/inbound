@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Inbound Download Manager Bridge",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Sends browser downloads to the Inbound Download Manager desktop app for Windows, which must be installed separately.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmG4waHibc8Up6F9xU4twyDKCyajkWeYaQHvmAZvQztyjc2kkQZiJJXeySKAE2n/tGbLzL04T2jkyIce/UgvWoVGHixBDued40qAlxQY6KuWlJ5bD/NrpXHAWQng9u1/ZHk/1UeIl9TQT27ZpObBzCKpyoHU7whOPex0OOvRSrtkjpE6cD4IZ/KxEOzMbA4Iz4MTj0mTPpbJu6dwc5fLRV9bkFT8XOdj2BM9MCy+EGwaIihv9TlJfT47R4LkO5MfRxHvIwa2eW7r3o9w8PI3PVYnLOkeqIozcrHQ9I018ft7C4phNNLtkuAGBj8Z8nzLQlTRqgZgpwGnixeXvPHHQPwIDAQAB",
   "minimum_chrome_version": "109",
