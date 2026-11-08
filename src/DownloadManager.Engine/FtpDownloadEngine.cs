@@ -67,6 +67,12 @@ public sealed class FtpDownloadEngine : IDownloadEngine
                     total = response.ContentLength;
                 }
 
+                if (offset > 0)
+                {
+                    // The server took REST: a later stop (a lowered limit's requeue among them) keeps the data.
+                    job.ResumeSupported = true;
+                }
+
                 await using var source = response.GetResponseStream();
                 await using (var destination = new FileStream(
                                  job.PartFilePath,
@@ -124,6 +130,7 @@ public sealed class FtpDownloadEngine : IDownloadEngine
                 IsRestartUnsupported(ex))
             {
                 // Some servers reject REST. Restart from zero once.
+                job.ResumeSupported = false;
                 DeleteFileQuietly(job.PartFilePath);
                 offset = 0;
                 received = 0;

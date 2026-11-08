@@ -97,6 +97,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Url = job.Url;
         State = job.State;
         StateText = job.QueueRetryAt is not null ? "Queue retry scheduled"
+            : JobNotes.WaitingText(job) is { } waiting ? waiting
             : IsProviderFile && job.State == "downloading" ? "Downloading locally"
             : ToDisplayState(job.State);
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;

@@ -21,7 +21,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private readonly EngineOptions _options;
     private readonly IDownloadCheckpointStore? _checkpoints;
     private readonly IFreeSpaceProvider _freeSpace;
-    private readonly HostConnectionLimiter _hostLimiter;
+    private readonly FairHostConnectionLimiter _hostLimiter;
+    private readonly object _runsSync = new();
+    private readonly Dictionary<Guid, SegmentedRun> _segmentedRuns = new();
     private readonly bool _ownsClient;
     private readonly object _clientSync = new();
     private readonly List<HttpClient> _retiredClients = new();
@@ -44,7 +46,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         _checkpoints = checkpoints;
         _mediaCheckpoints = mediaCheckpoints;
         _freeSpace = freeSpace ?? DriveFreeSpaceProvider.Instance;
-        _hostLimiter = new HostConnectionLimiter(_options.MaxConnectionsPerHost);
+        _hostLimiter = new FairHostConnectionLimiter(_options.MaxConnectionsPerHost);
+        _hostLimiter.WaitingChanged += jobId => HostWaitChanged?.Invoke(jobId);
         _ffmpegPath = _options.FfmpegPath;
         _muxer = muxer ?? new FfmpegMediaMuxer(() => _ffmpegPath);
         if (handler is null)
@@ -129,6 +132,24 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     public int HostConnectionLimit => _hostLimiter.Limit;
 
     public int HostConnectionPeak => _hostLimiter.Peak;
+
+    /// <summary>Connections out right now, across every host.</summary>
+    public int HostConnectionsActive => _hostLimiter.Active;
+
+    public event Action<Guid>? HostWaitChanged;
+
+    public string? WaitingForHost(Guid jobId) => _hostLimiter.WaitingHost(jobId);
+
+    public void ConnectionsChanged(Guid jobId)
+    {
+        SegmentedRun? run;
+        lock (_runsSync)
+        {
+            _segmentedRuns.TryGetValue(jobId, out run);
+        }
+
+        run?.Wake();
+    }
 
     private HttpClient CurrentClient()
     {
@@ -354,7 +375,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     {
         reporter.Report(force: true, state.Bytes > 0 ? "Resuming" : "Connecting");
 
-        using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
+        // One stream can't hand its range to anyone, so it never yields; a fair share still gets it in first.
+        using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), job.Id, yieldable: false, cancellationToken)
             .ConfigureAwait(false);
         using var response = await SendWithRedirectsAsync(job, state.Bytes, cancellationToken).ConfigureAwait(false);
         var status = (int)response.StatusCode;
@@ -1423,6 +1445,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 using var request = BuildRequest(
                     job, segmentUri, rangeStart, SameAuthority(job.Url, segmentUri), rangeEnd,
                     includeValidators: false);
+                // A media job fetches one fragment at a time, so this is one connection per job under the
+                // host's cap. Taken before the timeout starts: waiting for a turn is not a slow server.
+                using var hostSlot = await _hostLimiter.AcquireAsync(segmentUri.Host, job.Id, yieldable: false, cancellationToken)
+                    .ConfigureAwait(false);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_options.ReadTimeout);
                 using var response = await SendTrackedAsync(job, request, timeout.Token)
@@ -1437,6 +1463,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 {
                     if (status >= 500 && attempt < _options.MaxAttempts)
                     {
+                        // Not this job's connection while it only waits.
+                        hostSlot.Dispose();
                         await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
                             .ConfigureAwait(false);
                         continue;
@@ -2147,6 +2175,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         using var request = BuildRequest(
             job, segment.Uri, start, SameAuthority(job.Url, segment.Uri), end,
             includeValidators: false);
+        // As for HLS fragments: one at a time per job, under the host's cap.
+        using var hostSlot = await _hostLimiter.AcquireAsync(segment.Uri.Host, job.Id, yieldable: false, cancellationToken)
+            .ConfigureAwait(false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.ReadTimeout);
         using var response = await SendTrackedAsync(job, request, timeout.Token)
@@ -3058,14 +3089,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         run.Cancellation = linked;
         var workerCount = Math.Max(1, Math.Min(job.RequestedConnections, Math.Max(1, segments.Count)));
-        var tasks = Enumerable.Range(0, workerCount)
-            .Select(_ => RunSegmentWorkerAsync(run, linked.Token))
-            .ToArray();
+        lock (_runsSync)
+        {
+            _segmentedRuns[job.Id] = run;
+        }
+
         DownloadResult? failure = null;
 
         try
         {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await SuperviseSegmentWorkersAsync(run, workerCount, linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -3087,6 +3120,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
         finally
         {
+            lock (_runsSync)
+            {
+                if (_segmentedRuns.TryGetValue(job.Id, out var current) && ReferenceEquals(current, run))
+                {
+                    _segmentedRuns.Remove(job.Id);
+                }
+            }
+
             if (run.Unsupported || failure is not null)
             {
                 linked.Cancel();
@@ -3094,7 +3135,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
             try
             {
-                await Task.WhenAll(tasks).ConfigureAwait(false);
+                await Task.WhenAll(run.Workers()).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -3188,7 +3229,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     {
         try
         {
-            using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), cancellationToken)
+            using var hostSlot = await _hostLimiter.AcquireAsync(HostOf(job), job.Id, yieldable: false, cancellationToken)
                 .ConfigureAwait(false);
             using var response = await SendWithRedirectsAsync(job, 0, cancellationToken, rangeEnd: 0)
                 .ConfigureAwait(false);
@@ -3260,39 +3301,188 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// Runs the workers, and adds some when the job's connection count goes up while it runs (UI.R21). The new
+    /// ones take an unclaimed range or split a running one through <see cref="TryStealSegment"/>, the path a
+    /// worker that ran out of work already takes, so no checkpoint shape is new. A lower count lets workers above
+    /// it stop once their current range is done (see <see cref="RunSegmentWorkerAsync"/>); none is cut short.
+    /// </summary>
+    private async Task SuperviseSegmentWorkersAsync(SegmentedRun run, int initialWorkers, CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < initialWorkers; i++)
+        {
+            run.StartWorker(() => RunSegmentWorkerAsync(run, cancellationToken));
+        }
+
+        while (true)
+        {
+            var current = run.Workers();
+            var all = Task.WhenAll(current);
+            var woken = run.WakeTask();
+            if (await Task.WhenAny(all, woken).ConfigureAwait(false) == all)
+            {
+                if (run.Workers().Length == current.Length)
+                {
+                    // Throws the first worker's failure, as before.
+                    await all.ConfigureAwait(false);
+                    return;
+                }
+
+                continue;
+            }
+
+            run.ResetWake();
+            if (cancellationToken.IsCancellationRequested || current.Any(task => task.IsFaulted))
+            {
+                continue;
+            }
+
+            int toAdd;
+            lock (run.Sync)
+            {
+                toAdd = HasWorkLocked(run) ? run.TargetWorkers - run.LiveWorkers : 0;
+            }
+
+            for (var i = 0; i < toAdd; i++)
+            {
+                run.StartWorker(() => RunSegmentWorkerAsync(run, cancellationToken));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called under <see cref="SegmentedRun.Sync"/> after the run's work shrank (a claim, a split, written bytes).
+    /// When a worker is waiting for a connection and nothing is left that it could take, returns the source to
+    /// cancel so that wait ends: otherwise the connection may go to another job first, and this job, with every
+    /// byte fetched, would wait for one it no longer needs.
+    /// </summary>
+    private static CancellationTokenSource? IdleWaitersToReleaseLocked(SegmentedRun run)
+        => run.PendingAcquires > 0 && !HasWorkLocked(run) ? run.SwapNoWorkLocked() : null;
+
+    /// <summary>A range nobody is on, or one long enough that splitting it is worth a connection.</summary>
+    private static bool HasWorkLocked(SegmentedRun run)
+    {
+        foreach (var segment in run.Segments)
+        {
+            var remaining = segment.End - (segment.Start + segment.Completed) + 1;
+            if (remaining <= 0) continue;
+            if (!run.Claimed.Contains(segment) || remaining >= MinimumStealBytes) return true;
+        }
+
+        return false;
+    }
+
+    private static SegmentCheckpoint? ClaimUnclaimedSegment(SegmentedRun run)
+    {
+        lock (run.Sync)
+        {
+            foreach (var candidate in run.Segments)
+            {
+                if (run.Claimed.Contains(candidate))
+                {
+                    continue;
+                }
+
+                if (candidate.Completed < candidate.End - candidate.Start + 1)
+                {
+                    run.Claimed.Add(candidate);
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// One worker: a connection first, then a range. Taking the connection first matters (UI.B7): a worker that
+    /// waits for one holds no range, so this job's other workers can take that range meanwhile.
+    /// </summary>
     private async Task RunSegmentWorkerAsync(
         SegmentedRun run,
         CancellationToken cancellationToken)
     {
-        while (true)
+        var retired = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            SegmentCheckpoint? work = null;
-            lock (run.Sync)
+            while (true)
             {
-                foreach (var candidate in run.Segments)
+                cancellationToken.ThrowIfCancellationRequested();
+                CancellationToken noWork;
+                lock (run.Sync)
                 {
-                    if (run.Claimed.Contains(candidate))
+                    // The connection count went down: the workers above it stop between ranges.
+                    if (run.LiveWorkers > run.TargetWorkers)
                     {
-                        continue;
+                        run.LiveWorkers--;
+                        retired = true;
+                        return;
                     }
 
-                    if (candidate.Completed < candidate.End - candidate.Start + 1)
+                    if (!HasWorkLocked(run))
                     {
-                        run.Claimed.Add(candidate);
-                        work = candidate;
-                        break;
+                        return;
+                    }
+
+                    run.PendingAcquires++;
+                    noWork = run.NoWorkToken;
+                }
+
+                HostSlot slot;
+                try
+                {
+                    using var acquireToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, noWork);
+                    slot = await _hostLimiter.AcquireAsync(run.Host, run.Job.Id, yieldable: true, acquireToken.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (noWork.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    // The other workers took or finished everything meanwhile: look again, which normally ends here.
+                    continue;
+                }
+                finally
+                {
+                    lock (run.Sync)
+                    {
+                        run.PendingAcquires--;
                     }
                 }
-            }
 
-            work ??= TryStealSegment(run);
-            if (work is null)
+                SegmentCheckpoint? work;
+                CancellationTokenSource? idle;
+                try
+                {
+                    work = ClaimUnclaimedSegment(run) ?? TryStealSegment(run);
+                    lock (run.Sync)
+                    {
+                        idle = IdleWaitersToReleaseLocked(run);
+                    }
+                }
+                catch
+                {
+                    slot.Dispose();
+                    throw;
+                }
+
+                idle?.Cancel();
+                if (work is null)
+                {
+                    slot.Dispose();
+                    return;
+                }
+
+                await DownloadSegmentAsync(run, work, slot, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (!retired)
             {
-                return;
+                lock (run.Sync)
+                {
+                    run.LiveWorkers--;
+                }
             }
-
-            await DownloadSegmentAsync(run, work, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -3345,14 +3535,22 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// Downloads one range, starting on <paramref name="slot"/>, which this method now owns. When the limiter
+    /// asks for the connection back, the worker stops at the last byte it wrote and lets go of the range: the
+    /// range's <see cref="SegmentCheckpoint.Completed"/> prefix is everything before that byte, so what is left
+    /// is the range from there on, which any worker of this job continues. That is the split at the write
+    /// offset; it needs no new segment, so every checkpoint written before, during or after it is one an
+    /// ordinary pause could have left.
+    /// </summary>
     private async Task DownloadSegmentAsync(
         SegmentedRun run,
         SegmentCheckpoint segment,
+        HostSlot? slot,
         CancellationToken cancellationToken)
     {
         var job = run.Job;
         var attempt = 0;
-        Interlocked.Increment(ref run.ActiveConnections);
         try
         {
             while (true)
@@ -3374,12 +3572,23 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                 cancellationToken.ThrowIfCancellationRequested();
                 attempt++;
+                // A retry waits for a connection like anyone else, still holding its range.
+                slot ??= await _hostLimiter.AcquireAsync(run.Host, job.Id, yieldable: true, cancellationToken)
+                    .ConfigureAwait(false);
+                Interlocked.Increment(ref run.ActiveConnections);
+                var yielded = false;
+                // Set while this worker writes to its own file or checkpoint: a failure there is a real one even
+                // with a yield pending, since a yield never cancels those (they keep the job's token).
+                var localWork = false;
+                TimeSpan? retryDelay = null;
                 try
                 {
-                    using var hostSlot = await _hostLimiter.AcquireAsync(run.Host, cancellationToken)
-                        .ConfigureAwait(false);
+                    // Everything that only waits on the network may be cut short for a yield. The file write and
+                    // the checkpoint keep the job's own token: a yield never leaves a write half done.
+                    using var attemptToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, slot.YieldToken);
+                    var token = attemptToken.Token;
                     using var response = await SendWithRedirectsAsync(
-                        job, offset, cancellationToken, requestEnd).ConfigureAwait(false);
+                        job, offset, token, requestEnd).ConfigureAwait(false);
                     var status = (int)response.StatusCode;
 
                     if (status is 200 or 206 && LooksLikeErrorBody(job, response) is { } errorBody)
@@ -3486,16 +3695,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             retryable: true);
                     }
 
-                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                    var stream = await response.Content.ReadAsStreamAsync(token)
                         .ConfigureAwait(false);
                     var buffer = new byte[_options.BufferSize];
                     var writeOffset = offset;
                     var truncated = false;
                     while (true)
                     {
-                        var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken)
+                        var read = await stream.ReadAsync(buffer.AsMemory(), token)
                             .AsTask()
-                            .WaitAsync(_options.ReadTimeout, cancellationToken)
+                            .WaitAsync(_options.ReadTimeout, token)
                             .ConfigureAwait(false);
                         if (read == 0)
                         {
@@ -3520,8 +3729,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             truncated = true;
                         }
 
-                        await run.RateLimiter.WaitAsync(allowed, cancellationToken).ConfigureAwait(false);
-                        await SharedRateLimiter.WaitAsync(allowed, cancellationToken).ConfigureAwait(false);
+                        // Bytes read but not yet written are simply fetched again after a yield here.
+                        await run.RateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
+                        await SharedRateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
+                        localWork = true;
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
                                 buffer.AsMemory(0, allowed),
@@ -3530,19 +3741,30 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             .ConfigureAwait(false);
                         writeOffset += allowed;
 
+                        CancellationTokenSource? idle;
                         lock (run.Sync)
                         {
                             segment.Completed += allowed;
                             run.AggregateBytes += allowed;
+                            // This range just got too short to split: a worker waiting to split it can stop.
+                            idle = IdleWaitersToReleaseLocked(run);
                         }
+
+                        idle?.Cancel();
 
                         run.Reporter.Report(force: false, "Downloading");
                         await MaybeSaveSegmentedCheckpointAsync(run, cancellationToken)
                             .ConfigureAwait(false);
+                        localWork = false;
 
                         if (truncated)
                         {
                             break;
+                        }
+
+                        if (slot.YieldRequested)
+                        {
+                            throw new OperationCanceledException(token);
                         }
                     }
 
@@ -3560,6 +3782,10 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             retryable: true);
                     }
                 }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && slot.YieldRequested)
+                {
+                    yielded = true;
+                }
                 catch (OperationCanceledException)
                 {
                     throw;
@@ -3575,29 +3801,59 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         throw;
                     }
 
-                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None)
-                        .ConfigureAwait(false);
-                    await Task.Delay(RetryPolicy.Delay(attempt, _options, ex.RetryAfter), cancellationToken)
-                        .ConfigureAwait(false);
+                    retryDelay = RetryPolicy.Delay(attempt, _options, ex.RetryAfter);
                 }
                 catch (Exception ex)
                 {
-                    var failure = MapException(ex, out var retryable);
-                    if (!retryable || attempt >= _options.MaxAttempts)
+                    // A yield that cut a request short can surface as another failure; it is still only a yield.
+                    // A failed write or checkpoint save is not one of those, so it is never taken for a yield.
+                    if (!localWork && !cancellationToken.IsCancellationRequested && slot.YieldRequested)
                     {
-                        throw new SegmentFailureException(failure, retryable);
+                        yielded = true;
+                    }
+                    else
+                    {
+                        var failure = MapException(ex, out var retryable);
+                        if (!retryable || attempt >= _options.MaxAttempts)
+                        {
+                            throw new SegmentFailureException(failure, retryable);
+                        }
+
+                        retryDelay = RetryPolicy.Delay(attempt, _options);
+                    }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref run.ActiveConnections);
+                    slot.Dispose();
+                    slot = null;
+                }
+
+                if (yielded)
+                {
+                    lock (run.Sync)
+                    {
+                        run.Claimed.Remove(segment);
                     }
 
+                    run.Reporter.Report(force: true, "Downloading");
+                    // The connection is already back with the limiter, so the job that wanted it isn't kept
+                    // waiting on this flush. Saving now records the bytes this connection got before it went.
+                    await SaveSegmentedCheckpointAsync(run, CancellationToken.None).ConfigureAwait(false);
+                    return;
+                }
+
+                if (retryDelay is { } delay)
+                {
                     await SaveSegmentedCheckpointAsync(run, CancellationToken.None)
                         .ConfigureAwait(false);
-                    await Task.Delay(RetryPolicy.Delay(attempt, _options), cancellationToken)
-                        .ConfigureAwait(false);
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
         finally
         {
-            Interlocked.Decrement(ref run.ActiveConnections);
+            slot?.Dispose();
         }
     }
 
@@ -3920,6 +4176,83 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         public bool FileClosed { get; set; }
         /// <summary>Whether the last flush before closing worked. If not, an older checkpoint is the honest one.</summary>
         public bool FileDurable { get; set; }
+
+        private readonly List<Task> _workers = new();
+        private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private CancellationTokenSource _noWork = new();
+
+        /// <summary>Workers waiting for a connection while holding no range. Read and written under <see cref="Sync"/>.</summary>
+        public int PendingAcquires { get; set; }
+
+        /// <summary>Cancelled once nothing is left that a waiting worker could take. Read under <see cref="Sync"/>.</summary>
+        public CancellationToken NoWorkToken => _noWork.Token;
+
+        /// <summary>
+        /// Swaps in a fresh token and returns the old source for the caller to cancel after letting go of
+        /// <see cref="Sync"/>: cancelling runs the limiter's abandon, which must not run under this lock.
+        /// </summary>
+        public CancellationTokenSource SwapNoWorkLocked()
+        {
+            var stale = _noWork;
+            _noWork = new CancellationTokenSource();
+            return stale;
+        }
+
+        /// <summary>Workers started and not yet retired or finished. Read and written under <see cref="Sync"/>.</summary>
+        public int LiveWorkers { get; set; }
+
+        /// <summary>The job's connection count, read live: the user can change it while the job runs.</summary>
+        public int TargetWorkers => Math.Clamp(Job.RequestedConnections, 1, 32);
+
+        /// <summary>Counted before the worker's task exists, so a worker that finishes at once can't take the count below zero.</summary>
+        public void StartWorker(Func<Task> worker)
+        {
+            lock (Sync)
+            {
+                LiveWorkers++;
+            }
+
+            var task = worker();
+            lock (Sync)
+            {
+                _workers.Add(task);
+            }
+        }
+
+        public Task[] Workers()
+        {
+            lock (Sync)
+            {
+                return _workers.ToArray();
+            }
+        }
+
+        public Task WakeTask()
+        {
+            lock (Sync)
+            {
+                return _wake.Task;
+            }
+        }
+
+        public void ResetWake()
+        {
+            lock (Sync)
+            {
+                if (_wake.Task.IsCompleted)
+                {
+                    _wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+            }
+        }
+
+        public void Wake()
+        {
+            lock (Sync)
+            {
+                _wake.TrySetResult();
+            }
+        }
     }
 
     private sealed class SegmentedReporter

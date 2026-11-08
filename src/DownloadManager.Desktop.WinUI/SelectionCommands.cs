@@ -65,10 +65,18 @@ internal static class JobNotes
     /// <summary>The Host's words, with any address taken out. Null when it has nothing to say.</summary>
     public static string? Note(JobDto job)
     {
+        // The wait for a connection is the row's status itself, so it isn't said twice.
+        if (WaitingText(job) is not null) return job.FileRemovedAfterExtraction ? RemovedWords : null;
         var note = UrlRedactor.HideAddresses(job.StatusNote);
         if (!string.IsNullOrWhiteSpace(note)) return note;
         return job.FileRemovedAfterExtraction ? RemovedWords : null;
     }
+
+    /// <summary>UI.B7: what a running download waiting for a free connection to its host says. The host name only.</summary>
+    public static string? WaitingText(JobDto job)
+        => job.State is "connecting" or "downloading" or "retryWaiting" && !string.IsNullOrWhiteSpace(job.WaitingForHost)
+            ? $"Waiting for a connection to {job.WaitingForHost}"
+            : null;
 
     /// <summary>The note goes first, because the Description column is often cut short.</summary>
     public static string Description(string? note, string? own)

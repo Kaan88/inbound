@@ -314,6 +314,9 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
     /// <summary>
     /// Killed with one file of a package finished and another part way. The finished one is not
     /// fetched again or touched, the other goes on, and the package keeps its three children.
+    /// TEST.1: the two big files are held by the mock CDN after 512 KB, enough for progress past 64 KB to be
+    /// reported before they stall. So the small one is the only one that can finish, and it can only do so if it
+    /// gets a connection while the other two hold the rest (UI.B7).
     /// </summary>
     [Fact]
     public async Task KilledWithAPackageHalfDone_TheFinishedFileIsKeptAndTheRestGoOn()
@@ -325,6 +328,8 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         var other = NewFile("Half/other.bin", 2 * 1024 * Kb, 58);
         var item = Mock.AddItem(RemoteItemKind.Torrent, "Half", [small, big, other]);
         Mock.CdnBytesPerSecond = 128 * Kb;
+        Mock.HoldFile(big, 512 * Kb);
+        Mock.HoldFile(other, 512 * Kb);
 
         var job = (await connection.AskAsync<RemoteAddResultDto>(MessageTypes.RemoteAdd, new RemoteAddRequestDto
         {
@@ -340,7 +345,9 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         {
             seen = await ProviderJobsAsync(connection);
             if (seen.Count(child => child.State == "completed") == 1 && seen.Any(child => child.State != "completed" && child.ReceivedBytes > 64 * Kb)) break;
-            Assert.True(DateTimeOffset.UtcNow < deadline, "The package never got half done.");
+            Assert.True(DateTimeOffset.UtcNow < deadline, "The package never got half done: " + string.Join("; ",
+                seen.Select(child => $"{Path.GetFileName(child.FinalFilePath)} {child.State} {child.ReceivedBytes} conn {child.ActiveConnections}/{child.RequestedConnections} {child.StatusNote}")) +
+                $"; held big {Mock.HeldBytesSent(big)}, other {Mock.HeldBytesSent(other)}");
             await Task.Delay(20);
         }
 
@@ -349,6 +356,7 @@ public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifeti
         var smallPath = Path.Combine(host.Destination, "Half", "small.bin");
         var writtenAt = File.GetLastWriteTimeUtc(smallPath);
         await host.KillAsync();
+        Mock.ReleaseAll();
         Mock.CdnBytesPerSecond = null;
         var linksForSmall = Mock.IssuedLinks.Count(link => link.File.Id == small.Id);
 
