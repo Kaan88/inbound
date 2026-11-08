@@ -10,6 +10,7 @@
   import { buildRows, selectedJobIds, type Row, type SortKey, type ViewKey } from '../lib/views';
   import ArchivePassword from './ArchivePassword.svelte';
   import JobDetails from './JobDetails.svelte';
+  import PackageDialog from './PackageDialog.svelte';
   import RemoteActions from './RemoteActions.svelte';
 
   let { view, search, onadd }: { view: ViewKey; search: string; onadd: () => void } = $props();
@@ -21,6 +22,7 @@
   let confirmDelete = $state<{ ids: string[]; completedOnly: boolean } | null>(null);
   let deleteFile = $state(false);
   let details = $state<string | null>(null);
+  let packageOpen = $state<string | null>(null);
   let remoteOpen = $state<RemoteJob | null>(null);
   let passwordFor = $state<ArchiveSet | null>(null);
 
@@ -38,6 +40,14 @@
   const showExtraction = $derived(archiveByJob.size > 0);
   const needPassword = $derived(Object.values(store.model.archives).filter((set) => set.needsPassword && !set.hasPassword && set.state !== 'completed'));
   const defaultQueue = $derived(store.model.settings?.queues.find((queue) => queue.id === (store.model.settings?.defaultQueueId ?? 0)));
+
+  // A toast's Show opens that download.
+  $effect(() => {
+    if (store.showJob) {
+      details = store.showJob;
+      store.showJob = null;
+    }
+  });
 
   // A row that left the view leaves the selection.
   $effect(() => {
@@ -235,6 +245,7 @@
           <Icon name="package" size={16} class="shrink-0 text-icon-media" />
           <span class="truncate font-semibold" title={row.group.name}>{row.group.name}</span>
           <span class="shrink-0 text-[11px] text-muted">{summary.done}/{summary.count}</span>
+          <button class="shrink-0 rounded border border-divider px-1.5 text-[11px] hover:bg-hover" onclick={(event) => { event.stopPropagation(); packageOpen = row.group.id; }}>Progress details</button>
         </span>
         <span class="cell-size tabular text-right">{bytes(summary.totalBytes)}</span>
         <span class="cell-status min-w-0">
@@ -306,9 +317,14 @@
   </Dialog>
 {/if}
 
-{#if details && store.model.jobs[details]}
-  <JobDetails job={store.model.jobs[details]} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+{#if packageOpen}
+  <PackageDialog groupId={packageOpen} onclose={() => (packageOpen = null)} onopenfile={(id) => { details = id; }} />
 {/if}
+
+{#if details}
+  <JobDetails jobId={details} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+{/if}
+
 
 {#if remoteOpen}
   <RemoteActions remote={store.model.remoteJobs[remoteOpen.id] ?? remoteOpen} onclose={() => (remoteOpen = null)} />
