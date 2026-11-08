@@ -126,8 +126,20 @@
 
 #### Questions for the owner (2026-11-08 run)
 
-- UI.R21: should a lower limit also requeue an FTP download that has never resumed? Today it keeps running, because
-  a server that refuses REST would make it start again from zero.
+Each has a default already in place; nothing waits on the answer unless it says so.
+
+- **Firefox (EXT.E1), needs you:** upload the zip from `scripts\package-extension-firefox.ps1` (`artifacts\firefox-addon`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
+- **EXT.B1 live check, needs you:** computer use can only look at Edge, not click in it. The fix is in the extension build on `dev` (catch everything except an exclude list, a note when a download stays in the browser, cookies for the final address). To check the file host's Direct Download button, load `extensions\chrome\dist` in your Edge, or click the button while I watch the extension's log.
+- **Privacy policy:** `docs\chrome-extension-privacy.md` changed (final-address cookies, "left in browser" notes, the folder window, popup actions). The online copy needs updating when this ships.
+- **Automatic sending on a fresh install:** still off (the 0.4.0 privacy choice), now clearly shown as OFF in the popup. Turn it on by default?
+- **TorBox per-file cap (TB.L1):** now 16, from your measurement. Sources disagree: a note in `docs\plans\torbox-integration.md` marked as from TorBox support says at most 4 per file; a TorBox staff reply on its feature board (2024-03-10) says no explicit limit, only fair use. Keep 16 or go back to 4?
+- **TorBox host limit:** the per-host limit (8 by default) still caps the TorBox CDN host overall, so one TorBox file gets 16 only if you raise it in Options. Give TorBox CDN hosts a higher default of their own?
+- **Delete (UI.R20):** Delete now opens unticked and Shift+Delete ticked. The context menu and File menu "Remove" still just remove the row and keep the files, with no dialog. Is that what you want?
+- **Lowering the simultaneous limit (UI.R21):** downloads whose server hasn't said whether it can resume, and FTP downloads that have never resumed, keep running (stopping them could lose their data or start them over). Requeue them anyway?
+- **Media downloads:** HLS/DASH fragment requests now count under the per-host cap, one connection per media job (cost under 1 µs per request). Keep it?
+- **Connections for running downloads:** a changed count reaches running downloads only for your own HTTP downloads; TorBox, protected and FTP downloads keep the count they started with. Acceptable?
+- **Full queues:** should moving a running download into a queue that's already full also send its newest extra download back to Queued? (Now only settings saves and queue changes do.)
+- **Server program settings (D1a):** a network server refuses settings that run programs (post-download command, FFmpeg path, update feed and key, system completion actions). Allow them for a signed-in admin later, or keep them refused?
 
 ### Owner's remaining checks (2026-11-08)
 
