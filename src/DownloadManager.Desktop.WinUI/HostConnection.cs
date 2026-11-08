@@ -51,6 +51,10 @@ public sealed class HostConnection : IAsyncDisposable
     public Task<IpcMessage> GetStatisticsAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.StatisticsGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 
+    /// <summary>UI.R24: the Host's last hour of total download speed.</summary>
+    public Task<IpcMessage> GetSpeedHistoryAsync(CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.SpeedHistoryGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
+
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
 
