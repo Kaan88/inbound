@@ -3412,46 +3412,47 @@ public sealed partial class DownloadManagerService
                 if (runtime.Preempted && !_shuttingDown)
                 {
                     // A lower limit stopped it before its transfer began: back in the queue, as if never picked.
+                    // It was saved and announced as Queued by whoever stopped it; the Schedule below runs as for a cancel.
                     runtime.Preempted = false;
                     runtime.PauseRequested = false;
                     runtime.ResumeWhenStopped = false;
                     job.State = DownloadState.Queued;
                     job.Touch();
                     runtime.Starting = false;
-                    // Saved and announced as Queued already, by whoever stopped it.
-                    return;
                 }
-
-                if (runtime.PauseRequested || _shuttingDown)
+                else
                 {
-                    if (runtime.ResumeWhenStopped && !_shuttingDown)
+                    if (runtime.PauseRequested || _shuttingDown)
                     {
-                        runtime.PauseRequested = false;
-                        runtime.ResumeWhenStopped = false;
+                        if (runtime.ResumeWhenStopped && !_shuttingDown)
+                        {
+                            runtime.PauseRequested = false;
+                            runtime.ResumeWhenStopped = false;
+                        }
+                        else
+                        {
+                            job.State = DownloadState.Paused;
+                            job.BytesPerSecond = null;
+                            job.EstimatedRemaining = null;
+                            job.ActiveConnections = 0;
+                            job.Touch();
+                            runtime.Starting = false;
+                            return;
+                        }
                     }
-                    else
-                    {
-                        job.State = DownloadState.Paused;
-                        job.BytesPerSecond = null;
-                        job.EstimatedRemaining = null;
-                        job.ActiveConnections = 0;
-                        job.Touch();
-                        runtime.Starting = false;
-                        return;
-                    }
-                }
 
-                runtime.Cts?.Dispose();
-                cts = new CancellationTokenSource();
-                runtime.Cts = cts;
-                job.KeepCheckpointAfterFinalize = true;
-                job.State = DownloadState.Connecting;
-                job.Failure = null;
-                job.StartedAt ??= DateTimeOffset.UtcNow;
-                job.CompletedAt = null;
-                job.FileRemovedAfterExtraction = false;
-                job.ActiveConnections = 0;
-                job.Touch();
+                    runtime.Cts?.Dispose();
+                    cts = new CancellationTokenSource();
+                    runtime.Cts = cts;
+                    job.KeepCheckpointAfterFinalize = true;
+                    job.State = DownloadState.Connecting;
+                    job.Failure = null;
+                    job.StartedAt ??= DateTimeOffset.UtcNow;
+                    job.CompletedAt = null;
+                    job.FileRemovedAfterExtraction = false;
+                    job.ActiveConnections = 0;
+                    job.Touch();
+                }
             }
         }
 
