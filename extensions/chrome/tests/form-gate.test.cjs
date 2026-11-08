@@ -276,6 +276,41 @@ test('EXT.B2 folder window: the This PC / Server choice is held while the folder
   }
 });
 
+test('folder window: Download and Choose... wait for the request, so an early click cannot go to This PC instead of the server', async () => {
+  const handoff = deferred();
+  let confirmed;
+  const page = installPage('?id=h1', {
+    'dm.getHandoff': () => handoff.promise,
+    'dm.pickFolder': async () => assert.fail('no dialog before the request has loaded'),
+    'dm.confirmHandoff': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    loadTs('handoff.ts');
+    const ready = page.domReady();
+    const confirm = page.el('confirm'), browse = page.el('browseDestination');
+    assert.equal(confirm.disabled, true);
+    assert.equal(browse.disabled, true);
+    assert.equal(await confirm.click(), 'ignored');
+    assert.equal(await browse.click(), 'ignored');
+    await page.key({ key: 'Enter', target: page.el('fileName') });
+    // Even a click that reaches the handlers does nothing yet.
+    await confirm.dispatch('click');
+    await browse.dispatch('click');
+    assert.deepEqual(page.sent, ['dm.getHandoff']);
+
+    handoff.resolve({ ok: true, held: false, handoff: { id: 'h1', url: 'https://example.test/a.zip' }, defaults: { destination: '/downloads' },
+      target: 'server', targets: [{ id: 'local', label: 'This PC', chooser: 'dialog', defaultFolder: 'D:\\Default', favorites: [] },
+        { id: 'server', label: 'Server', chooser: 'list', defaultFolder: '/downloads', favorites: [] }] });
+    await ready;
+    assert.equal(confirm.disabled, false);
+    assert.equal(browse.disabled, false);
+    await confirm.click();
+    assert.equal(confirmed.target, 'server');
+  } finally {
+    page.restore();
+  }
+});
+
 test('EXT.B2 folder window: an expired request keeps Send off after a pick', async () => {
   const page = installPage('?id=h1', {
     'dm.getHandoff': async () => ({ ok: false, error: 'expired' }),
