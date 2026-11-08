@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { bytes } from '../lib/format';
+  import { latest } from '../lib/latest';
   import { store } from '../lib/store.svelte';
   import type { FolderBrowseResult, FolderSpace } from '../lib/types';
   import Dialog from './Dialog.svelte';
@@ -17,6 +18,8 @@
   let newName = $state('');
   let creating = $state(false);
   let spaces = $state<Record<string, FolderSpace>>({});
+  // Only the newest browse or create shows its reply (lib/latest.ts).
+  const requests = latest();
 
   const favorites = $derived.by(() => {
     const settings = store.model.settings;
@@ -31,33 +34,37 @@
   const isFavorite = $derived(!!listing?.path && (store.model.settings?.favoriteFolders ?? []).some((f) => f.path === listing!.path));
 
   async function browse(path: string | null | undefined) {
+    const current = requests.begin();
     busy = true;
     error = '';
     try {
       const result = await store.ask<FolderBrowseResult>('folders.browse', { path: path || null });
+      if (!current()) return;
       listing = result;
       typed = result.path ?? '';
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (current()) error = e instanceof Error ? e.message : String(e);
     } finally {
-      busy = false;
+      if (current()) busy = false;
     }
   }
 
   async function create() {
     if (!listing?.path || !newName.trim()) return;
+    const current = requests.begin();
     busy = true;
     error = '';
     try {
       const result = await store.ask<FolderBrowseResult>('folders.create', { parent: listing.path, name: newName.trim() });
+      if (!current()) return;
       listing = result;
       typed = result.path ?? '';
       newName = '';
       creating = false;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (current()) error = e instanceof Error ? e.message : String(e);
     } finally {
-      busy = false;
+      if (current()) busy = false;
     }
   }
 
