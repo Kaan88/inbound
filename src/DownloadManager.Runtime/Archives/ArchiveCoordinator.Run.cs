@@ -426,7 +426,7 @@ public sealed partial class ArchiveCoordinator
     private List<string> RecoveryVolumesLocked(ArchiveSetRecord set, IReadOnlyCollection<string> read)
     {
         // Only RAR writes .rev files: a 7z, zip or split set called "name" must not take a user's own name.rev.
-        var names = set.Volumes.Append(set.FirstVolumeName).Concat(read).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var names = set.Volumes.Append(set.FirstVolumeName).Concat(read).Distinct(PathNames.Comparer).ToList();
         if (ArchiveVolumes.FindSet(names, set.FirstVolumeName) is not { } own || !ArchiveVolumes.HasRarRecoveryVolumes(own)) return [];
 
         string[] present;
@@ -446,13 +446,13 @@ public sealed partial class ArchiveCoordinator
         lock (_sync)
         {
             others = _sets.Values
-                .Where(other => other.Id != set.Id && string.Equals(other.Directory, set.Directory, StringComparison.OrdinalIgnoreCase))
+                .Where(other => other.Id != set.Id && PathNames.Same(other.Directory, set.Directory))
                 .Select(other => other.BaseName)
                 .ToList();
         }
 
         return ArchiveVolumes.RecoveryVolumes(set.BaseName, present, others)
-            .Where(name => !read.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .Where(name => !read.Contains(name, PathNames.Comparer))
             .ToList();
     }
 
