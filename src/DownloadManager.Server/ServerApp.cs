@@ -149,7 +149,7 @@ public sealed class ServerApp : IAsyncDisposable
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
             mediaCheckpoints: mediaCheckpoints,
-            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(),
+            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget),
             linkBroker: remote.Broker,
             linkSecrets: remote.Registry)
         {
