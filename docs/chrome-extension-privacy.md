@@ -1,7 +1,8 @@
 # Privacy policy: Inbound Download Manager Bridge
 
-This policy covers the Inbound Download Manager Bridge extension for Chrome, and what the Inbound
-Download Manager desktop app does with the data the extension gives it.
+This policy covers the Inbound Download Manager Bridge extension for Chrome (also used in Edge, and built
+for Firefox), and what the Inbound Download Manager desktop app does with the data the extension gives it.
+Where it says Chrome, the same holds for the other browsers.
 
 **No data about you reaches the developer.** The extension has no analytics, telemetry, advertising or
 crash reporting, and the developer runs no server that receives data from it or from the desktop app.
@@ -22,8 +23,10 @@ stay in Chrome. The extension makes no network requests of its own: the app does
 - the address of the page it came from, and the referrer
 - the suggested file name, file type and size
 - your browser's user agent
-- the cookies Chrome holds for the file's address. These can include the cookies that keep you signed
-  in to that site. They are used so the app can download files that need your own login.
+- the cookies Chrome holds for the file's address, and for its final address when that is on the same
+  site (the same origin). These can include the cookies that keep you signed in to that site. They are
+  used so the app can download files that need your own login. Cookies for a final address on another
+  site are not read.
 
 The extension reads cookie values only at that moment, not while you browse. A download is sent in one
 of these ways:
@@ -39,8 +42,10 @@ of these ways:
 
 **Downloads you do not send:** while automatic sending is on and not paused, the extension looks at each
 new Chrome download's address, final address, referrer, file name and type to apply your rules.
-Downloads that do not match stay in Chrome. This is not kept or sent to the app, and cookies are not read
-for them. To find out whether you held Delete, the extension first asks its script in each open tab about
+Downloads that do not match stay in Chrome, and cookies are not read for them. So that the toolbar popup
+can say why a download stayed in Chrome, the extension keeps the file name and the reason (for example a
+site on your exclude list, or automatic sending being off) for the last five such downloads in Chrome's
+session storage, which Chrome clears when it closes. None of this is sent to the app. To find out whether you held Delete, the extension first asks its script in each open tab about
 the download's address; the script compares it with the link you clicked and keeps nothing.
 
 **Links on a page:** when you open Download All, the extension reads the addresses of the current page's
@@ -63,11 +68,17 @@ until the app accepts it: its address, page address, referrer, user agent, file 
 to use, but no cookie values. If you cancel, it stays there until you close Chrome. Chrome's sync storage is
 not used.
 
-**What the app gives the extension:** to show recent downloads in the toolbar popup, the app sends the
-extension its download list, including downloads you did not send from Chrome: addresses, page addresses,
-file names, folders and progress. Its replies can also include the app's settings, such as recent
-addresses and any site login usernames, which the extension ignores. Passwords and cookies are not
-included. The extension keeps the list only in memory and sends it nowhere else.
+**What the app gives the extension:** to show downloads in the toolbar popup, the app sends the extension
+its download list, including downloads you did not send from Chrome: addresses, page addresses, file
+names, folders and progress. The popup shows the newest 20 and lets you pause, resume or delete them in the
+app, and, only if you tick "Delete the file too", delete the file. When the folder window opens, the app
+sends the default download folder and your favorite folders. The app's other settings, passwords and
+cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
+else.
+
+**Asking for a folder:** if you choose "Ask each time" in Settings, a caught download waits, paused, in
+Chrome while its window is open. Its address, page address, referrer, user agent, file name, size and type
+are kept in Chrome's session storage until you choose Download or Keep in browser, or close the window.
 
 The extension does not run in Incognito windows. YouTube is not supported.
 
