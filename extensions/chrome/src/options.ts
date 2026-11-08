@@ -257,7 +257,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ? "Not paired. Downloads go to this PC."
         : response.revoked
         ? "Unpaired. Downloads go to this PC. The server removed this browser's pairing too, so its token no longer works there."
-        : "Unpaired. Downloads go to this PC. The server could not be told, so remove this browser from its Paired browsers list too, so its token stops working there.";
+        : "Unpaired. Downloads go to this PC. The server could not be told, so remove this browser from its Paired apps list too, so its token stops working there.";
     } catch (error) {
       result.textContent = error instanceof Error ? error.message : String(error);
     }

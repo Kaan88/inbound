@@ -222,7 +222,7 @@ automatic downloads back to this PC, and asks the server to remove the token too
 with the same `Authorization: Bearer <token>` as `/api/ipc` (no body, `credentials: "omit"`,
 `redirect: "error"`, a 4-second limit; the token is forgotten here first, whatever the answer). On 204
 Settings says the server removed the pairing too; on anything else (no answer, an older server without the
-call, a token already removed) it says to remove this browser from the web UI's Paired browsers list.
+call, a token already removed) it says to remove this browser from the web UI's Paired apps list.
 Only `options.html` may pair or unpair. A plain-http address that is not loopback gets a one-line
 note that the token and cookies cross the network unencrypted.
 

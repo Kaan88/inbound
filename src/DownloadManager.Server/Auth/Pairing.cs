@@ -140,13 +140,22 @@ public sealed class Pairing(AuthStore store, TimeProvider time)
         return true;
     }
 
-    /// <summary>Unpairs every app (after a password change); how many there were.</summary>
-    public int RevokeAll()
+    /// <summary>
+    /// Unpairs every app after a password change; how many there were. <paramref name="keepExtensions"/> keeps the
+    /// browser extensions' tokens only: a desktop app's token was made with the password and has a signed-in browser's
+    /// rights, so it goes with the old password as the sessions do (and so does a role this version doesn't know).
+    /// </summary>
+    public int RevokeAll(bool keepExtensions = false)
     {
-        var removed = store.RemoveAllTokens();
+        var removed = keepExtensions
+            ? store.RemoveTokens(token => TokenRoles.Of(token) != TokenRoles.Extension)
+            : store.RemoveAllTokens();
         EndRemoved();
         return removed;
     }
+
+    /// <summary>Notes that the token with this id is in use without a request (its WebSocket is open).</summary>
+    public void Touch(string id) => store.TouchToken(id, time.GetUtcNow());
 
     /// <summary>
     /// Cancelled when the token with this id is revoked, by a password change too, or pushed out by newer ones; already

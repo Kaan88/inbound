@@ -81,14 +81,14 @@ wrong tries is 429 with `Retry-After`.
 
 | Call | Session? | Body / answer |
 | --- | --- | --- |
-| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge will say `windows`), and `version` only for a signed-in browser |
+| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge will say `windows`), and `version` only for a signed-in browser. `hostKind` is shown to anyone because the sign-in page and a desktop app that hasn't paired yet need it; it tells a stranger whether this is a server or a Windows PC, not which version runs there. |
 | `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
 | `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
 | `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
-| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, and every paired app (extensions and desktop apps) is unpaired unless `keepPairedBrowsers` is true; their WebSockets close. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
+| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, every paired desktop app (`remoteClient`, made with the old password) is unpaired, and so is every browser extension unless `keepPairedBrowsers` is true; their WebSockets and running `/api/ipc` requests end. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
-| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired apps (`id`, `name`, `createdAt`, `lastUsedAt`, `role`: `extension` or `remoteClient`), and revoking one, which also closes its WebSockets. |
-| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, and gets a `remoteClient` token. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
+| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired apps (`id`, `name`, `createdAt`, `lastUsedAt`, `role`: `extension` or `remoteClient`), and revoking one, which also closes its WebSockets and ends its running `/api/ipc` requests (401). An open WebSocket counts as use on the sessions' 10-minute beat, so a desktop app that stays connected keeps a current `lastUsedAt` and isn't the first pushed out when a 51st app pairs. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, with no `Origin` header, and gets a `remoteClient` token; with an `Origin` (a page or an extension) it is 403. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
 | `DELETE /api/pair/self` | token | the app's own Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), closes its WebSockets, and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
 | `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
 
@@ -130,10 +130,15 @@ wrong tries is 429 with `Retry-After`.
     comes without settings. `GET /api/ws` with it is refused (403).
   - `remoteClient` (from the password, for a desktop app managing the server) has a signed-in browser's rights on
     `GET /api/ws` (with or without `?hello=1`) and `POST /api/ipc`, and can unpair itself. It is not a session: the
-    other calls in the table still want the cookie. Its WebSockets close when it is revoked, unpaired, or removed by
-    a password change.
-  - On `GET /api/ws` only a `Bearer` header is read as a token, so a browser behind a proxy that sends its own
-    `Authorization: Basic` keeps using its cookie there.
+    other calls in the table still want the cookie. Its WebSockets close, and its running `POST /api/ipc` requests
+    end with 401, when it is revoked, unpaired, or removed by a password change (always, whatever
+    `keepPairedBrowsers` says).
+  - On `GET /api/ws` only `Authorization: Bearer ibt_...` is read as a token, so a browser behind a proxy that sends
+    its own header (`Basic` for the proxy's password, or a `Bearer` token of the proxy's own) keeps using its cookie
+    there.
+  - Turning sign-in off and on again keeps the paired tokens, though the sessions are dropped: a desktop app's token
+    was made with the password that is still in force, so its holder could pair again anyway. A password change, on
+    the page or in the environment, removes them.
 
   Only the token's SHA-256 is stored. Requests from our Chrome extension ids
   (`chrome-extension://`, the store and the unpacked id) and from any `moz-extension://` origin (Firefox gives each
