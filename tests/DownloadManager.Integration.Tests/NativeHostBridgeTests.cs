@@ -42,6 +42,7 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
     public void Anything_else_is_refused_including_no_caller_at_all(params string[] arguments) =>
         Assert.Null(BrowserBridge.TrustedCaller(arguments));
 
+    [Trait("Platform", "Windows")]
     [Theory]
     [InlineData("--parent-window=0")]
     [InlineData("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/", "--parent-window=0")]
@@ -64,6 +65,7 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
         }
     }
 
+    [Trait("Platform", "Windows")]
     [Fact]
     public async Task Firefox_with_the_trusted_add_on_ID_reaches_the_Host()
     {
@@ -79,6 +81,7 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
 
     // ---- What the popup and the folder window may ask --------------------------------------------
 
+    [Trait("Platform", "Windows")]
     [Fact]
     public async Task The_folder_window_gets_the_default_folder_and_favorites_and_nothing_else()
     {
@@ -112,6 +115,7 @@ public sealed class NativeHostBridgeTests : IAsyncLifetime
         finally { await StopAsync(native); }
     }
 
+    [Trait("Platform", "Windows")]
     [Fact]
     public async Task The_popup_can_pause_resume_and_delete_a_download_and_its_file()
     {

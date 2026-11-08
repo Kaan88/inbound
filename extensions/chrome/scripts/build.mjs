@@ -38,11 +38,16 @@ export function firefoxManifest(chromeManifest) {
   manifest.browser_specific_settings = {
     gecko: {
       id: FIREFOX_EXTENSION_ID,
-      // storage.session and MV3 host permissions as used here.
-      strict_min_version: "128.0",
-      // Nothing is sent to the developer; details go only to the desktop app on this computer.
+      // data_collection_permissions, which addons.mozilla.org asks every new add-on for, needs Firefox 140
+      // (also an ESR); storage.session and MV3 host permissions as used here are older.
+      strict_min_version: "140.0",
+      // Nothing is sent to the developer; details go only to the desktop app on this computer or the
+      // user's own paired server.
       data_collection_permissions: { required: ["none"] },
     },
+    // Firefox for Android has the key from 142. The add-on is not built for Android (no native app there),
+    // but addons.mozilla.org checks the Android minimum too.
+    gecko_android: { strict_min_version: "142.0" },
   };
   return manifest;
 }

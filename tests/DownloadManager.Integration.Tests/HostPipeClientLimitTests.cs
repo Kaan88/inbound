@@ -8,6 +8,7 @@ namespace DownloadManager.Integration.Tests;
 /// only eight, the main window and seven open progress windows left the browser bridge and the CLI with no way
 /// in (found in the PERF.2 soak: "All pipe instances are busy"). The real Host must take many more.
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed class HostPipeClientLimitTests : IAsyncLifetime
 {
     private TestServerHost _server = null!;

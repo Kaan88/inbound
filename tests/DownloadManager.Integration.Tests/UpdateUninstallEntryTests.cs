@@ -11,6 +11,7 @@ namespace DownloadManager.Integration.Tests;
 /// HKCU\Software\AppDataLow\InboundDownloadManagerTests\ (writable at any integrity level) through
 /// -UninstallKey; the real uninstall key is never read or written.
 /// </summary>
+[Trait("Platform", "Windows")]
 [SupportedOSPlatform("windows")]
 public sealed class UpdateUninstallEntryTests : IDisposable
 {
