@@ -202,4 +202,79 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
             await Hashing.Sha256FileAsync(done.FinalFilePath));
     }
+
+    /// <summary>
+    /// Only the per-host limit changes, the default stays: a running provider job's record follows the new effective
+    /// count (min of default, host limit and cap), so what it shows is what it gets.
+    /// </summary>
+    [Fact]
+    public async Task ALoweredPerHostLimitAloneReachesARunningTorBoxDownload()
+    {
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 8);
+        await SetConnectionsAsync(rig.Ctx, 8, perHost: 32);
+        const int size = 8 * Mb;
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Live/per-host.bin", size, seed: 966);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Live", [file]);
+        rig.Mock.CdnBytesPerSecond = 128 * 1024;
+
+        var added = await rig.AddAsync(item, file, maxConnections: 32);
+        await rig.Ctx.WaitFor(added.Id, j => j.State == "downloading" && j.ActiveConnections >= 4, TimeSpan.FromSeconds(30));
+        Assert.Equal(8, rig.Ctx.Service.GetJob(added.Id)!.RequestedConnections);
+
+        var settings = rig.Ctx.Service.GetSnapshot().Settings;
+        settings.MaxConnectionsPerHost = 3;
+        Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        Assert.Equal(3, rig.Ctx.Service.GetJob(added.Id)!.RequestedConnections);
+
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(120));
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(3, completed.RequestedConnections);
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
+        Assert.Equal(1, rig.Mock.Calls("GET torrents/requestdl"));
+    }
+
+    /// <summary>
+    /// The last run's link must not decide a new run's count: a change after a resume, before the new link comes,
+    /// leaves the record alone (the earlier link's cap of 3 would have given 3) and the run takes it with its link.
+    /// The link is dropped when the run is scheduled and again before the broker is asked; this test can only reach
+    /// the second point, so it guards the resume path rather than the short gap before link preparation starts.
+    /// </summary>
+    [Fact]
+    public async Task AChangeAfterAResumeIgnoresThePreviousRunsLink()
+    {
+        const int size = 8 * Mb;
+        const string name = "live-stale-link.bin";
+        var url = $"{_server.BaseAddress}/file/{name}?size={size}&seed=967&bps=262144";
+        var calls = 0;
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondAsked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var broker = new ScriptedBroker(async (_, cancellationToken) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) return RemoteLinkResolution.Link(url, maxConnections: 3);
+            secondAsked.TrySetResult();
+            await gate.Task.WaitAsync(cancellationToken);
+            return RemoteLinkResolution.Link(url);
+        });
+        await using var ctx = await ServiceContext.CreateAsync(_server, linkBroker: broker);
+        await SetConnectionsAsync(ctx, 2, perHost: 8);
+        var id = AddedJob(await ctx.Service.AddRemoteJobsAsync([RemoteFile(ctx, "1", name, size: size, maxConnections: 16)], "remote:job-1")).Id;
+        await ctx.WaitFor(id, j => j.State == "downloading" && j.ReceivedBytes > 256 * 1024, TimeSpan.FromSeconds(30));
+        Assert.Equal(2, ctx.Service.GetJob(id)!.RequestedConnections);
+
+        Assert.True((await ctx.Service.PauseAsync(id)).Ok);
+        await ctx.WaitFor(id, j => j.State == "paused", TimeSpan.FromSeconds(30));
+        Assert.True((await ctx.Service.ResumeAsync(id)).Ok);
+        await secondAsked.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+        await SetConnectionsAsync(ctx, 6);
+        Assert.Equal(2, ctx.Service.GetJob(id)!.RequestedConnections);
+        gate.SetResult();
+
+        var done = await ctx.WaitFor(id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(90));
+        Assert.Equal("completed", done.State);
+        Assert.Equal(6, done.RequestedConnections);
+        Assert.Equal(Sha256Of(967, size), await Hashing.Sha256FileAsync(done.FinalFilePath));
+        Assert.Equal(2, broker.PrepareCalls);
+        Assert.Equal(0, broker.RefreshCalls);
+    }
 }

@@ -1394,7 +1394,8 @@ public sealed partial class DownloadManagerService
             // What each download would have got from the old default, read before the settings change.
             // UI.R21: running ones too, provider and protected links among them ("Apply to all", owner 2026-11-08);
             // a segmented transfer takes the new count without stopping.
-            var candidates = _settings.DefaultConnections == next.DefaultConnections
+            // Any input of DefaultConnectionsLocked counts: the default, the per-host limit and the connection profiles.
+            var candidates = !ConnectionInputsChanged(_settings, next)
                 ? []
                 : _jobs.Values.Where(runtime => IsUnstartedForConnections(runtime) || IsRunningForConnections(runtime))
                     .Select(runtime => (Runtime: runtime, Old: DefaultConnectionsLocked(runtime, _settings.DefaultConnections)))
@@ -3431,6 +3432,9 @@ public sealed partial class DownloadManagerService
             foreach (var runtime in toStart)
             {
                 runtime.Starting = true;
+                // The last run's link is no guide to this one's host or cap; a change before the new link comes is
+                // taken when it comes (UI.R21).
+                runtime.RunLink = null;
             }
         }
 
@@ -4068,6 +4072,13 @@ public sealed partial class DownloadManagerService
             await _mediaCheckpoints.DeleteAsync(job.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Whether a download's default count could differ between the two settings (UI.R21).</summary>
+    private static bool ConnectionInputsChanged(AppSettings before, AppSettings after) =>
+        before.DefaultConnections != after.DefaultConnections ||
+        before.MaxConnectionsPerHost != after.MaxConnectionsPerHost ||
+        !before.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections))
+            .SequenceEqual(after.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections)));
 
     /// <summary>
     /// Running downloads whose count a changed default may follow (UI.R21): the user's own HTTP downloads, provider

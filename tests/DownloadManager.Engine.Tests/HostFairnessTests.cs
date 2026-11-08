@@ -281,11 +281,13 @@ public sealed class HostFairnessTests(TestServerFixture fixture, ITestOutputHelp
 
         job.RequestedConnections = 8;
         engine.ConnectionsChanged(job.Id);
-        await UntilAsync(() => engine.HostConnectionsActive == 3 || run.IsCompleted, "a third connection");
+        await UntilAsync(() => Volatile.Read(ref most) >= 3 || run.IsCompleted, "a third connection");
+        // Two connections need about 11 more seconds, so a run that ends first never took the raised count.
+        Assert.True(Volatile.Read(ref most) >= 3, $"the raised count never reached the transfer (at most {most} connections)");
 
         await AssertFileAsync(await run.WaitAsync(Patience), 861, size);
         Assert.True(engine.HostConnectionPeak <= 3, $"host peak {engine.HostConnectionPeak}");
-        Assert.True(Volatile.Read(ref most) <= 3, $"{most} connections on one job");
+        Assert.Equal(3, Volatile.Read(ref most));
         Assert.Equal(0, engine.HostConnectionsActive);
     }
 
