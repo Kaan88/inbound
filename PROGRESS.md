@@ -81,7 +81,10 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
   - While idle, the Host's handle count rises about 12 a minute and then falls back at once (749 to 443 in the
     first idle run; 782 to 446 in the second). The handles are released, not leaked. Their source is not found.
 - **Tests:** on the final code, with no failures and no reruns: Core 863, Engine 157, Integration 1,224,
-  Archives 329, Containers 183, TorBox 323 (`tests-*run2*.txt` in the evidence folder).
+  Archives 329, Containers 183, TorBox 323 (`tests-*run2*.txt` in the evidence folder). After the review fixes
+  (UI.B14 sources, UP.B2 rollback test, UI.B15 reset order, `perf-window.sh` label), 2026-11-08: Core 863,
+  Engine 158, Integration 1,231, no failures; Archives, Containers and TorBox not rerun. The window was not
+  started to check the labels or completion windows by eye.
 - **Not done:**
   - The soak's full 8 hours.
   - A soak on the fixed build.
