@@ -263,9 +263,12 @@ internal sealed class RemoteClient : IAsyncDisposable
     internal static ArchiveActionResult ReadArchiveActionReply(IpcMessage reply)
         => Read(reply, ArchiveMessageTypes.ActionResult, error => new ArchiveActionResult { Error = error }, raw => raw.GetPayload<ArchiveActionResult>());
 
-    private static ArchiveListReply ReadArchiveList(IpcMessage reply) => reply.Type == ArchiveMessageTypes.ListResult
-        ? new ArchiveListReply(null, reply.GetPayload<ArchiveListResult>().Sets)
-        : new ArchiveListReply(RemoteText.Failure(reply.GetPayload<ArchiveActionResult>().Error));
+    private static ArchiveListReply ReadArchiveList(IpcMessage reply)
+    {
+        if (reply.Type != ArchiveMessageTypes.ListResult) return new ArchiveListReply(RemoteText.Failure(reply.GetPayload<ArchiveActionResult>().Error));
+        var list = reply.GetPayload<ArchiveListResult>();
+        return new ArchiveListReply(null, list.Sets) { PackagesWithPassword = list.PackagesWithPassword ?? [] };
+    }
 
     /// <summary>The password goes only into this one message. An empty one clears what is on record.</summary>
     public Task<ArchiveActionResult> SetArchivePasswordAsync(ArchiveSetPasswordRequest request, CancellationToken cancellationToken = default)
@@ -790,6 +793,9 @@ internal interface IRemoteClassifier : IAsyncDisposable
 internal sealed record ArchiveListReply(string? Error, List<ArchiveSetDto> Sets)
 {
     public ArchiveListReply(string? error) : this(error, []) { }
+
+    /// <summary>Packages the Host holds an archive password for. Empty from a Host that doesn't say.</summary>
+    public List<Guid> PackagesWithPassword { get; init; } = [];
 
     public bool Ok => Error is null;
 }

@@ -103,7 +103,7 @@ internal static partial class ArchiveText
                     : ("Downloaded", RemoteRowTone.Neutral);
 
             case "waiting":
-                if (set.DownloadingVolumes.Count > 0) return ($"Waiting: {Parts(set.DownloadingVolumes)} downloading", RemoteRowTone.Waiting);
+                if (set.DownloadingVolumes.Count > 0) return ($"Waiting: {Parts(set.DownloadingVolumes)} {UnfinishedWord(set)}", RemoteRowTone.Waiting);
                 if (set.FailedVolumes.Count > 0) return ($"Waiting: {Parts(set.FailedVolumes)} didn't download", RemoteRowTone.Waiting);
                 if (set.MissingVolumes.Count > 0) return ($"Waiting: {Parts(set.MissingVolumes)} missing", RemoteRowTone.Waiting);
                 return ("Waiting for extraction", RemoteRowTone.Waiting);
@@ -158,6 +158,25 @@ internal static partial class ArchiveText
         else if (set.HasPassword && set.State is not "completed") lines.Add("A password is saved for this archive.");
         if (set.State == "failed" && set.FailureKind is not ("cancelled" or "missingVolume")) lines.Add("The downloaded files are fine, and they are kept.");
         return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>
+    /// What the unfinished parts are doing, in the Host's own order: "downloading" while any runs; otherwise each kind
+    /// there is, joined with "or", so a paused part is never called queued.
+    /// </summary>
+    private static string UnfinishedWord(ArchiveSetDto set)
+    {
+        bool In(List<string> list, string name) => list.Contains(name, StringComparer.OrdinalIgnoreCase);
+        var paused = set.DownloadingVolumes.Where(name => In(set.PausedVolumes, name)).ToList();
+        var held = set.DownloadingVolumes.Where(name => !In(set.PausedVolumes, name) && In(set.HeldVolumes, name)).ToList();
+        var queued = set.DownloadingVolumes.Where(name => !In(set.PausedVolumes, name) && !In(set.HeldVolumes, name) && In(set.QueuedVolumes, name)).ToList();
+        if (paused.Count + held.Count + queued.Count < set.DownloadingVolumes.Count) return "downloading";
+
+        var words = new List<string>();
+        if (paused.Count > 0) words.Add("paused");
+        if (held.Count > 0) words.Add("not started");
+        if (queued.Count > 0) words.Add("queued");
+        return string.Join(" or ", words);
     }
 
     /// <summary>One or two names cut down to what tells volumes apart, otherwise a count. A list cell has no room for more.</summary>

@@ -115,6 +115,65 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         Assert.Equal(job.Id, session.Frames[2].GetPayload<JobEventDto>().Job.Id);
     }
 
+    // ---- PERF.7: what a client.hello asks for ------------------------------------------------------
+
+    [Fact]
+    public async Task AClientThatAsksForNoSnapshotGetsTheHelloThenItsEventsAndReplies()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+
+        await dispatcher.OpenSessionAsync(session, new ClientHelloDto { Snapshot = false }, CancellationToken.None);
+        var job = new JobDto { Id = Guid.NewGuid(), FileName = "after.bin" };
+        dispatcher.BroadcastJobChanged(new JobChangeEventArgs(job, "updated"));
+        var reply = await AskAsync(dispatcher, session, MessageTypes.HostPing, new { });
+
+        Assert.Equal(MessageTypes.HostActionResult, reply.Type);
+        Assert.Equal([MessageTypes.ServerHello, MessageTypes.JobEvent, MessageTypes.HostActionResult], session.Frames.Select(f => f.Type));
+        Assert.Equal(job.Id, session.Frames[1].GetPayload<JobEventDto>().Job.Id);
+    }
+
+    [Fact]
+    public async Task AClientThatAsksForNoEventsGetsNoBroadcastsNotEvenTheExitButStillItsReplies()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var session = Session();
+
+        await dispatcher.OpenSessionAsync(session, new ClientHelloDto { Snapshot = false, Events = false }, CancellationToken.None);
+        dispatcher.BroadcastJobChanged(new JobChangeEventArgs(new JobDto { Id = Guid.NewGuid(), FileName = "unseen.bin" }, "updated"));
+        await dispatcher.NotifyExitingAsync(TimeSpan.FromSeconds(2));
+        var query = await AskAsync(dispatcher, session, MessageTypes.JobsQuery, new { });
+
+        // The list is still there for the asking, as the CLI's list asks for it.
+        Assert.Equal(MessageTypes.JobsSnapshot, query.Type);
+        Assert.Equal([MessageTypes.ServerHello, MessageTypes.JobsSnapshot], session.Frames.Select(f => f.Type));
+        Assert.Equal(query.Id, session.Frames[1].Id);
+        dispatcher.CloseSession(session);
+    }
+
+    [Fact]
+    public async Task AClientHelloLeftAtItsDefaultsGetsWhatTheMainPipeGives()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var defaults = Session();
+        var none = Session();
+
+        // As a client.hello with an empty payload ({}) reads.
+        await dispatcher.OpenSessionAsync(defaults, JsonSerializer.Deserialize<ClientHelloDto>("{}", IpcJson.Options), CancellationToken.None);
+        await dispatcher.OpenSessionAsync(none, null, CancellationToken.None);
+        var job = new JobDto { Id = Guid.NewGuid(), FileName = "both.bin" };
+        dispatcher.BroadcastJobChanged(new JobChangeEventArgs(job, "updated"));
+
+        foreach (var session in new[] { defaults, none })
+        {
+            await session.UntilAsync(frames => frames.Count >= 3);
+            Assert.Equal([MessageTypes.ServerHello, MessageTypes.JobsSnapshot, MessageTypes.JobEvent], session.Frames.Select(f => f.Type));
+        }
+    }
+
     [Fact]
     public async Task ASnapshotTooLargeForAFrameIsSentWithoutTheFailureWords()
     {
@@ -160,6 +219,45 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         Assert.Equal("platform:shutdown", ordered[^1]);
         Assert.Equal(2, ordered.Count(entry => entry.EndsWith(":" + MessageTypes.HostExiting, StringComparison.Ordinal)));
         Assert.Equal(4, ordered.Count);
+    }
+
+    /// <summary>
+    /// UI.B12 on a clean exit: a Host started while this one is exiting must not get the hello, or it takes this one
+    /// for a running copy, asks it for a window and quits, and then no Host is left.
+    /// </summary>
+    [Fact]
+    public async Task ASessionOpenedAfterAnExitWasAskedForGetsExitingInsteadOfTheHello()
+    {
+        var service = await ServiceAsync();
+        var dispatcher = Dispatcher(service);
+        var asking = Session();
+        await dispatcher.OpenSessionAsync(asking, CancellationToken.None);
+        await dispatcher.DispatchAsync(asking, IpcMessage.Create(MessageTypes.HostShutdown, new { }), CancellationToken.None);
+
+        var late = Session();
+        await dispatcher.OpenSessionAsync(late, CancellationToken.None);
+
+        Assert.Equal([MessageTypes.HostExiting], late.Frames.Select(f => f.Type));
+    }
+
+    [Fact]
+    public async Task AWindowAskedForAfterAnExitBeganIsNotOpenedAndTheAskerIsToldItIsExiting()
+    {
+        var service = await ServiceAsync();
+        var platform = new FakePlatform(PlatformCapabilities.Desktop, _timeline);
+        var dispatcher = Dispatcher(service, platform);
+        // A probe that asked for no events is not registered, so the exiting broadcast can't reach it.
+        var probe = Session();
+        await dispatcher.OpenSessionAsync(probe, new ClientHelloDto { Snapshot = false, Events = false }, CancellationToken.None);
+        var asking = Session();
+        await dispatcher.OpenSessionAsync(asking, CancellationToken.None);
+        await dispatcher.DispatchAsync(asking, IpcMessage.Create(MessageTypes.HostShutdown, new { }), CancellationToken.None);
+
+        await dispatcher.DispatchAsync(probe, IpcMessage.Create(MessageTypes.HostOpenUi, new HostActionRequest { Action = string.Empty }), CancellationToken.None);
+        await probe.UntilAsync(frames => frames.Any(f => f.Type == MessageTypes.HostExiting));
+
+        Assert.Empty(platform.Opened);
+        Assert.DoesNotContain(probe.Frames, f => f.Type == MessageTypes.HostActionResult);
     }
 
     [Fact]

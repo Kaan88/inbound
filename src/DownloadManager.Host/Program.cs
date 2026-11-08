@@ -38,12 +38,30 @@ internal static class Program
         var configureStartup = args.FirstOrDefault(arg =>
             arg.StartsWith("--configure-sign-in-launch=", StringComparison.OrdinalIgnoreCase));
         using var mutex = new Mutex(initiallyOwned: true, PipeNames.MutexName(), out var createdNew);
+        string? takeOverNote = null;
         if (!createdNew)
         {
             // Never rewrite settings behind a running service's single-writer authority.
             if (configureStartup is not null) return 1;
-            NotifyExistingInstance();
-            return 0;
+            switch (WaitForExistingInstance(mutex, TimeSpan.FromSeconds(5), out var sawExiting))
+            {
+                case ExistingInstance.Answered:
+                    TryLogBeforeStart("Another Host is running for this profile; asked it to open its window and exiting.");
+                    return 0;
+                case ExistingInstance.Busy:
+                    TryLogBeforeStart(sawExiting
+                        ? $"Another Host is exiting but still held this profile after {ExitingWait.TotalSeconds:0} seconds; exiting."
+                        : "Another Host holds this profile but did not answer within 5 seconds; exiting.");
+                    return 0;
+                case ExistingInstance.Abandoned:
+                    takeOverNote = "The previous Host ended without releasing this profile (killed or crashed); taking over.";
+                    break;
+                default:
+                    takeOverNote = sawExiting
+                        ? "The previous Host finished exiting while this one was starting; taking over."
+                        : "The previous Host released this profile while this one was starting; taking over.";
+                    break;
+            }
         }
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
@@ -65,6 +83,7 @@ internal static class Program
 
         var log = new FileLogger(paths.LogsDirectory);
         log.Info($"Host starting; version {Protocol.HostVersion}, state '{paths.Root}'.");
+        if (takeOverNote is not null) log.Info(takeOverNote);
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             log.Error($"Unhandled exception: {e.ExceptionObject}");
@@ -306,7 +325,7 @@ internal static class Program
 
             log.Info("Host ready.");
             // Start Menu / desktop shortcuts pass --open so a fresh start shows the window;
-            // a second launch already opens it through NotifyExistingInstance.
+            // a second launch already opens it through ProbeExistingInstance.
             if (args.Contains("--open", StringComparer.OrdinalIgnoreCase))
             {
                 controller.OpenUi();
@@ -416,20 +435,128 @@ internal static class Program
         }
     }
 
-    private static void NotifyExistingInstance()
+    private enum ExistingInstance
+    {
+        Answered,
+        Busy,
+        Released,
+        Abandoned,
+    }
+
+    private enum Probe
+    {
+        NoAnswer,
+        Answered,
+        Exiting,
+    }
+
+    /// <summary>
+    /// UI.B12: the mutex outlives a Host killed with taskkill /F until Windows has closed its handles, so a start
+    /// in that moment used to find it, take the dying process for a running copy and exit with 0. A live copy
+    /// answers on its pipe; a dying one doesn't, and its mutex is soon released or abandoned. Whichever comes
+    /// first within the wait decides. A copy that holds the mutex and never answers (still starting, or hung)
+    /// keeps it: two Hosts on one profile would break the single writer. A copy that says it is exiting (the user
+    /// asked it to) gets up to <see cref="ExitingWait"/> more to finish its shutdown and let go.
+    /// </summary>
+    private static ExistingInstance WaitForExistingInstance(Mutex mutex, TimeSpan wait, out bool sawExiting)
+    {
+        var deadline = DateTimeOffset.UtcNow + wait;
+        sawExiting = false;
+        while (true)
+        {
+            try
+            {
+                if (mutex.WaitOne(TimeSpan.FromMilliseconds(200))) return ExistingInstance.Released;
+            }
+            catch (AbandonedMutexException)
+            {
+                // The wait still acquired it.
+                return ExistingInstance.Abandoned;
+            }
+
+            switch (ProbeExistingInstance(TimeSpan.FromMilliseconds(300)))
+            {
+                case Probe.Answered:
+                    return ExistingInstance.Answered;
+                case Probe.Exiting when !sawExiting:
+                    sawExiting = true;
+                    var exitingDeadline = DateTimeOffset.UtcNow + ExitingWait;
+                    if (exitingDeadline > deadline) deadline = exitingDeadline;
+                    break;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline) return ExistingInstance.Busy;
+        }
+    }
+
+    /// <summary>A clean exit stops downloads and saves their state before it lets go of the profile.</summary>
+    private static readonly TimeSpan ExitingWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>For the exits before the Host's own log exists. A second copy appends to the running one's file.</summary>
+    private static void TryLogBeforeStart(string message)
+    {
+        try
+        {
+            var paths = StoragePaths.CreateDefault();
+            new FileLogger(paths.LogsDirectory).Info(message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // There is nowhere to log this.
+        }
+    }
+
+    /// <summary>
+    /// Asks a running copy to open its window. The request is written only after the copy's hello, so it goes once,
+    /// and only to a copy that is serving: a pipe end that a dying process still holds can accept a connection but
+    /// never sends a frame, and a copy that is exiting sends host.exiting instead of the hello.
+    /// </summary>
+    private static Probe ProbeExistingInstance(TimeSpan connectTimeout)
     {
         IpcClient? client = null;
         try
         {
-            client = IpcClient.ConnectAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
-            var message = IpcMessage.Create(MessageTypes.HostOpenUi,
-                new HostActionRequest { Action = string.Empty });
-            client.SendAsync(message).GetAwaiter().GetResult();
-            client.ReadAsync().Wait(TimeSpan.FromSeconds(2));
+            // PERF.7: no snapshot. Events stay on so a host.exiting broadcast reaches the probe (UI.B12); an older Host sends
+            // the snapshot anyway, and the reply loop below reads past it.
+            client = IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = true }, connectTimeout)
+                .GetAwaiter().GetResult();
+            using (var hello = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+            {
+                var first = client.ReadAsync(hello.Token).GetAwaiter().GetResult();
+                if (first is null) return Probe.NoAnswer;
+                if (first.Type == MessageTypes.HostExiting) return Probe.Exiting;
+                if (first.Type != MessageTypes.ServerHello) return Probe.NoAnswer;
+            }
+
+            // The copy said hello, so it is serving; the reply only tells whether an exit began in between. A slow
+            // reply still counts as answered: asking again would open a second window.
+            var request = IpcMessage.Create(MessageTypes.HostOpenUi, new HostActionRequest { Action = string.Empty });
+            using var reply = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try
+            {
+                client.SendAsync(request, reply.Token).GetAwaiter().GetResult();
+                while (client.ReadAsync(reply.Token).GetAwaiter().GetResult() is { } frame)
+                {
+                    if (frame.Type == MessageTypes.HostExiting) return Probe.Exiting;
+                    if (frame.ReplyTo == request.Id) return Probe.Answered;
+                }
+
+                // It closed the pipe after the request: an exit began in between.
+                return Probe.Exiting;
+            }
+            catch (OperationCanceledException)
+            {
+                return Probe.Answered;
+            }
+            catch (IOException)
+            {
+                return Probe.Exiting;
+            }
         }
         catch (Exception)
         {
-            // The existing process may still be starting; it will be found by the next attempt.
+            // No pipe, no frame, or it closed under us: the copy is still starting or already going.
+            return Probe.NoAnswer;
         }
         finally
         {

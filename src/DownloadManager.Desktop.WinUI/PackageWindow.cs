@@ -31,6 +31,12 @@ internal sealed class PackageWindow : Window
     private bool _closed;
     private bool _groupKnown;
     private bool _passwordSavedHere;
+
+    /// <summary>The Host's list said it holds a password for this package, set or no set.</summary>
+    private bool _passwordOnRecord;
+
+    /// <summary>A password was saved or cleared in this window: its section stays, so its message stays readable.</summary>
+    private bool _passwordActedHere;
     private bool _showingSaved;
     private bool _hostConnected;
     private bool _archivesRead;
@@ -157,7 +163,10 @@ internal sealed class PackageWindow : Window
             if (_closed) return;
             if (type == "removed") _jobs.Remove(job.Id);
             else _jobs[job.Id] = job;
-            if (_members.Contains(job.Id)) Render();
+            if (!_members.Contains(job.Id)) return;
+            Render();
+            // A name learned or changed can make the archive section apply.
+            RenderArchives();
         });
         _connection.ConnectionChanged += (connected, error) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -314,7 +323,9 @@ internal sealed class PackageWindow : Window
         if (_closed || read != _archiveRead || !reply.Ok) return;
         _archivesRead = true;
         _archives.ArchivesSupported = true;
+        _passwordOnRecord = reply.PackagesWithPassword.Contains(_packageId);
         _archives.ApplyArchiveList(reply.Sets);
+        RenderArchives();
     }
 
     /// <summary>Answers in words either way. No exception's words reach a message, because a password passes through here.</summary>
@@ -339,11 +350,14 @@ internal sealed class PackageWindow : Window
 
     private void RenderArchives()
     {
-        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown ? Visibility.Visible : Visibility.Collapsed;
         var sets = PackageSets();
+        var names = _members.Select(id => _jobs.TryGetValue(id, out var job) ? job.FileName : null).ToList();
+        // A password on record shows the section even with no archive left, so it can still be cleared.
+        var hasArchives = PackageArchiveSection.Show(names, sets.Count, _passwordSavedHere || _passwordOnRecord || sets.Any(set => set.HasPassword));
+        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown && (hasArchives || _passwordActedHere) ? Visibility.Visible : Visibility.Collapsed;
 
         // The Host says whether a password is held only through a set, and a new package may have none yet.
-        _clearPassword.IsEnabled = _passwordSavedHere || sets.Count == 0 || sets.Any(set => set.HasPassword);
+        _clearPassword.IsEnabled = _passwordSavedHere || _passwordOnRecord || sets.Count == 0 || sets.Any(set => set.HasPassword);
 
         var lines = sets.Take(6).Select(set => $"{set.Name}: {ArchiveText.FullWithNote(set)}").ToList();
         if (sets.Count > 6) lines.Add($"and {sets.Count - 6} more");
@@ -373,6 +387,7 @@ internal sealed class PackageWindow : Window
         _archivePassword.Password = string.Empty;
         if (password.Length == 0) return;
         _showingSaved = false;
+        _passwordActedHere = true;
         _passwordStatus.Show("Saving the archive password…");
         var result = await SendArchivePasswordAsync(password);
         password = string.Empty;
@@ -393,12 +408,14 @@ internal sealed class PackageWindow : Window
     private async Task ClearArchivePasswordAsync()
     {
         _showingSaved = false;
+        _passwordActedHere = true;
         _passwordStatus.Show("Clearing the archive password…");
         var result = await SendArchivePasswordAsync(string.Empty);
         if (_closed) return;
         if (result.Ok)
         {
             _passwordSavedHere = false;
+            _passwordOnRecord = false;
             _passwordStatus.Show("Any archive password saved for this package is gone.");
         }
         else

@@ -40,7 +40,7 @@ docker run -d --name inbound --init -p 8080:8080 \
 Sign-in is on by default; the first visit sets the password, with a setup code from `docker logs`. Settings, compose,
 backup (the data folder holds the key to the saved secrets) and a reverse proxy for HTTPS are in
 [docs/docker.md](docs/docker.md); `docker/compose.example.yml` is a starting point. The image is published only when
-a version tag is pushed. 0.6.0 publishes it for linux/amd64 only.
+a version tag is pushed, for linux/amd64 only.
 
 ## Build
 

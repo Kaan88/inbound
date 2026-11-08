@@ -134,9 +134,25 @@ export function archiveTone(set: ArchiveSet): Tone {
   }
 }
 
+/** What a set's unfinished parts do when none of them runs, as the Host words it (UI.R23); null while any part runs. */
+export function unfinishedShort(set: ArchiveSet): string | null {
+  const has = (list: string[] | undefined, name: string) => (list ?? []).some((item) => item.toLowerCase() === name.toLowerCase());
+  const kinds = new Set<string>();
+  for (const name of set.downloadingVolumes) {
+    if (has(set.pausedVolumes, name)) kinds.add('paused');
+    else if (has(set.heldVolumes, name)) kinds.add('held');
+    else if (has(set.queuedVolumes, name)) kinds.add('queued');
+    else return null;
+  }
+  if (kinds.size === 0) return null;
+  if (kinds.size > 1) return 'Parts not downloading';
+  if (kinds.has('paused')) return 'Parts paused';
+  return kinds.has('held') ? 'Parts not started' : 'Parts waiting to download';
+}
+
 export function archiveShort(set: ArchiveSet): string {
   switch (set.state) {
-    case 'downloading': return 'Downloading parts';
+    case 'downloading': return unfinishedShort(set) ?? 'Downloading parts';
     case 'downloaded': return 'Not extracted';
     case 'waiting': return set.needsPassword && !set.hasPassword ? 'Needs password' : 'Waiting';
     case 'extracting': return set.percent !== undefined && set.percent !== null ? `Extracting ${set.percent}%` : 'Extracting';

@@ -229,7 +229,79 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         await Task.Run(() => gone.WaitOne(TimeSpan.FromSeconds(30)));
     }
 
+    /// <summary>
+    /// taskkill /F, as a user or a script does it, and back at once: the process may still be exiting, with its
+    /// mutex still open, when the next start comes. Returns the killed process so a test can wait for it.
+    /// </summary>
+    public async Task<Process> TaskkillWithoutWaitingAsync()
+    {
+        var process = _process!;
+        using (var taskkill = Process.Start(new ProcessStartInfo("taskkill.exe")
+        {
+            ArgumentList = { "/F", "/PID", process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("taskkill did not start."))
+        {
+            await taskkill.WaitForExitAsync();
+            Assert.Equal(0, taskkill.ExitCode);
+        }
+
+        _process = null;
+        await CloseConnectionsAsync();
+        return process;
+    }
+
+    /// <summary>
+    /// A user's exit (host.shutdown), and back at once: the next start comes while this one is still shutting down,
+    /// with its pipe and mutex still open. Returns the exiting process so a test can wait for it.
+    /// </summary>
+    public async Task<Process> ExitWithoutWaitingAsync()
+    {
+        var process = _process!;
+        await using (var connection = await ConnectAsync())
+        {
+            await connection.AskAsync<HostActionResult>(MessageTypes.HostShutdown, new { });
+        }
+
+        _process = null;
+        await CloseConnectionsAsync();
+        return process;
+    }
+
     public Task RestartAsync() => LaunchAsync();
+
+    /// <summary>The Host's single-instance mutex in this profile, named as <see cref="PipeNames.MutexName"/> names it there.</summary>
+    public string MutexName
+    {
+        get
+        {
+            var identity = $"{Environment.UserDomainName}\\{Environment.UserName}\nInstance:{Instance}";
+            var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+            return $"Local\\DownloadManager.Host.{Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant()}";
+        }
+    }
+
+    /// <summary>A start that is expected to end by itself: its exit code, or a timeout.</summary>
+    public async Task<int> StartExpectingExitAsync(TimeSpan wait)
+    {
+        var info = Prepare(HostExecutable);
+        info.ArgumentList.Add("--background");
+        using var process = Process.Start(info) ?? throw new InvalidOperationException("The Host did not start.");
+        using var timeout = new CancellationTokenSource(wait);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            return process.ExitCode;
+        }
+        catch (OperationCanceledException)
+        {
+            Abandon(process);
+            throw new TimeoutException("The Host kept running.");
+        }
+    }
 
     /// <summary>A clean exit, through the same message a user's exit takes.</summary>
     public async Task StopAsync()

@@ -406,7 +406,7 @@ export async function pairWithServer(address: string, code: string, name: string
   const normalized = normalizeServerAddress(address);
   if (!normalized.ok) throw new Error(normalized.error);
   const cleanCode = normalizePairingCode(code);
-  if (!cleanCode) throw new Error("The pairing code has 8 letters and digits. Show one in the web UI under Settings, Paired browsers.");
+  if (!cleanCode) throw new Error("The pairing code has 8 letters and digits. Show one in the web UI under Settings, Sign-in and browsers.");
 
   let answer: { status: number; body: any };
   try {

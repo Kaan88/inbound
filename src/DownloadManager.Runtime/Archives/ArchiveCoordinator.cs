@@ -69,6 +69,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
     private readonly ConcurrentDictionary<Guid, ExtractionProgress> _live = new();
     private readonly Channel<Trigger> _triggers = Channel.CreateUnbounded<Trigger>(new UnboundedChannelOptions { SingleReader = true });
     private ArchiveSettings _settings = new();
+
+    /// <summary>Which queues are stopped, so a volume waiting in one is not said to be about to download. Guarded by <see cref="_sync"/>.</summary>
+    private StoppedQueues _stoppedQueues = StoppedQueues.None;
     private Task _worker = Task.CompletedTask;
     private volatile bool _stopping;
     private int _shutdownStarted;
@@ -88,6 +91,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         _time = timeProvider ?? TimeProvider.System;
         _service.JobChanged += OnJobChanged;
         _service.PackageCompleted += OnPackageCompleted;
+        _service.SettingsChanged += OnSettingsChanged;
     }
 
     /// <summary>A set's whole state changed. Handlers run on the caller's thread and must not block.</summary>
@@ -129,6 +133,33 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
     private sealed record TidyTrigger : Trigger;
 
+    /// <summary>Counts again every set with unfinished volume downloads, for what doesn't come as a job change.</summary>
+    private sealed record RecountUnfinishedTrigger : Trigger;
+
+    /// <summary>The queues that are stopped, and whether a job whose queue isn't listed falls back to a stopped one.</summary>
+    private sealed record StoppedQueues(IReadOnlySet<int> Stopped, IReadOnlySet<int> Known, bool FallbackStopped)
+    {
+        public static readonly StoppedQueues None = new(new HashSet<int>(), new HashSet<int>(), false);
+
+        /// <summary>The same choice the scheduler makes: the job's queue, else the default one, else the first.</summary>
+        public static StoppedQueues From(IReadOnlyList<(int Id, bool IsRunning)> queues, int defaultQueueId)
+        {
+            if (queues.Count == 0) return None;
+            var fallback = queues.Any(queue => queue.Id == defaultQueueId) ? queues.First(queue => queue.Id == defaultQueueId) : queues[0];
+            return new(
+                queues.Where(queue => !queue.IsRunning).Select(queue => queue.Id).ToHashSet(),
+                queues.Select(queue => queue.Id).ToHashSet(),
+                !fallback.IsRunning);
+        }
+
+        /// <summary>A job outside the queues (not queued) is never held by one.</summary>
+        public bool Holds(JobDto job) =>
+            job.IsQueued && (Known.Contains(job.QueueId) ? Stopped.Contains(job.QueueId) : FallbackStopped);
+
+        public bool SameAs(StoppedQueues other) =>
+            FallbackStopped == other.FallbackStopped && Stopped.SetEquals(other.Stopped) && Known.SetEquals(other.Known);
+    }
+
     /// <summary>
     /// Recovers from whatever a crash left, then starts work. A set interrupted while extracting
     /// goes back to waiting and runs again: nothing it did before the crash counts.
@@ -145,6 +176,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         var sets = await _store.LoadSetsAsync(cancellationToken).ConfigureAwait(false);
         var passwords = await _store.LoadPackagePasswordsAsync(cancellationToken).ConfigureAwait(false);
         var snapshot = _service.GetSnapshot();
+        var stoppedQueues = StoppedQueues.From([.. snapshot.Settings.Queues.Select(queue => (queue.Id, queue.IsRunning))], snapshot.Settings.DefaultQueueId);
+        lock (_sync) _stoppedQueues = stoppedQueues;
         var packageIds = _service.GetDownloadGroups().Select(group => group.Id).ToHashSet();
         var jobIds = snapshot.Jobs.Select(job => job.Id).ToHashSet();
         lock (_sync) _unreadable.UnionWith(_store.UnreadableSets);
@@ -208,6 +241,10 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         // First: a set left waiting by a download removed before this start must not run now.
         _triggers.Writer.TryWrite(new TidyTrigger());
+
+        // A set saved by an older version, or before a queue was stopped, has its unfinished volumes counted afresh:
+        // a paused download raises nothing at a start.
+        _triggers.Writer.TryWrite(new RecountUnfinishedTrigger());
         foreach (var id in resumeDeletes) _triggers.Writer.TryWrite(new ResumeDeletesTrigger(id));
 
         // Finishes a crash separated from their intent. Each is counted once, by job and time.
@@ -225,6 +262,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
         _service.JobChanged -= OnJobChanged;
         _service.PackageCompleted -= OnPackageCompleted;
+        _service.SettingsChanged -= OnSettingsChanged;
 
         RunningExtraction[] running;
         lock (_sync)
@@ -262,6 +300,19 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         _triggers.Writer.TryWrite(new JobTrigger(e.Job, e.ChangeType));
     }
 
+    /// <summary>Only a queue starting or stopping matters here, and it comes as no job change. Must not block.</summary>
+    private void OnSettingsChanged(object? sender, AppSettings settings)
+    {
+        var next = StoppedQueues.From([.. settings.Queues.Select(queue => (queue.Id, queue.IsRunning))], settings.DefaultQueueId);
+        lock (_sync)
+        {
+            if (_stoppedQueues.SameAs(next)) return;
+            _stoppedQueues = next;
+        }
+
+        _triggers.Writer.TryWrite(new RecountUnfinishedTrigger());
+    }
+
     private void OnPackageCompleted(object? sender, PackageCompletedEventArgs e) => _triggers.Writer.TryWrite(new PackageTrigger(e, IsNews: true));
 
     private void Wake() => _triggers.Writer.TryWrite(new WakeTrigger());
@@ -296,6 +347,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                     case TidyTrigger:
                         await DropSetsWithoutDownloadsAsync().ConfigureAwait(false);
                         break;
+                    case RecountUnfinishedTrigger:
+                        await RecountUnfinishedAsync().ConfigureAwait(false);
+                        break;
                 }
 
                 await StartReadySetsAsync().ConfigureAwait(false);
@@ -306,6 +360,23 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                 _log?.Invoke($"Archive work failed: {exception.GetType().Name}: {exception.Message}");
             }
         }
+    }
+
+    /// <summary>Brings every set that waits for a volume download in line with what those downloads do now.</summary>
+    private async Task RecountUnfinishedAsync()
+    {
+        List<Guid> ids;
+        lock (_sync)
+        {
+            ids = _sets.Values
+                .Where(set => !set.Removed && set.DownloadingVolumes.Count > 0 && set.State is not (ArchiveSetState.Completed or ArchiveSetState.Extracting))
+                .Select(set => set.Id)
+                .ToList();
+        }
+
+        if (ids.Count == 0) return;
+        var jobs = _service.GetSnapshot().Jobs;
+        foreach (var id in ids) await RefreshAsync(id, jobs).ConfigureAwait(false);
     }
 
     private void RaisePackageExamined(PackageCompletedEventArgs package)
@@ -490,6 +561,11 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         var present = new List<string>();
         var downloading = new List<string>();
+        var paused = new List<string>();
+        var queued = new List<string>();
+        var held = new List<string>();
+        StoppedQueues stoppedQueues;
+        lock (_sync) stoppedQueues = _stoppedQueues;
         var failed = new List<string>();
         var missing = new List<string>(set.MissingVolumes);
         var jobIds = new List<Guid>();
@@ -497,7 +573,19 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         {
             var jobs = view.JobsNamed(member);
             jobIds.AddRange(jobs.Select(job => job.Id));
-            if (jobs.Any(job => job.State is not ("completed" or "failed" or "cancelled"))) downloading.Add(member);
+            var unfinished = jobs.Where(job => job.State is not ("completed" or "failed" or "cancelled")).ToList();
+            if (unfinished.Count > 0)
+            {
+                downloading.Add(member);
+                // Said apart so the text can name what holds it up: a paused download won't come on its own, and
+                // nor does one added to start later or waiting in a stopped queue (the scheduler skips both).
+                if (unfinished.All(job => job.State == "paused")) paused.Add(member);
+                else if (unfinished.All(job => job.State is "paused" or "queued"))
+                {
+                    if (unfinished.Any(job => job.State == "queued" && !IsHeld(job, stoppedQueues))) queued.Add(member);
+                    else held.Add(member);
+                }
+            }
             else if (view.IsOnDisk(member)) present.Add(member);
             else if (jobs.Any(job => job.State is "failed" or "cancelled")) failed.Add(member);
             else missing.Add(member);
@@ -510,6 +598,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         next.Volumes = present;
         next.DownloadingVolumes = downloading;
+        next.PausedVolumes = paused;
+        next.QueuedVolumes = queued;
+        next.HeldVolumes = held;
         next.FailedVolumes = failed;
         next.MissingVolumes = missing;
         next.JobIds = jobIds.Distinct().ToList();
@@ -536,6 +627,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
                 break;
         }
     }
+
+    private static bool IsHeld(JobDto job, StoppedQueues stoppedQueues) =>
+        string.Equals(job.StartMode, "later", StringComparison.OrdinalIgnoreCase) || stoppedQueues.Holds(job);
 
     private async Task RefreshAsync(Guid id, IReadOnlyList<JobDto> jobs)
     {
@@ -578,6 +672,9 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
             {
                 next.Volumes = [];
                 next.DownloadingVolumes = [];
+                next.PausedVolumes = [];
+                next.QueuedVolumes = [];
+                next.HeldVolumes = [];
                 next.FailedVolumes = [];
                 next.JobIds = [];
                 next.MissingVolumes = [next.FirstVolumeName];

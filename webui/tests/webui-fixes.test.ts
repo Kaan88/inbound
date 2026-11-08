@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { archiveShort } from '../src/lib/format';
+import type { ArchiveSet } from '../src/lib/types';
 import { withoutAdded, type AddLine } from '../src/lib/addlines';
 import { newUuid } from '../src/lib/ids';
 import { latest } from '../src/lib/latest';
@@ -67,5 +69,29 @@ describe('latest', () => {
     const second = requests.begin();
     expect(first()).toBe(false);
     expect(second()).toBe(true);
+  });
+});
+
+describe('archiveShort for a set still downloading (UI.R23)', () => {
+  const set = (change: Partial<ArchiveSet>): ArchiveSet => ({
+    state: 'downloading',
+    downloadingVolumes: ['m.part1.rar', 'm.part2.rar'],
+    ...change,
+  }) as ArchiveSet;
+
+  it('says the parts are downloading while any of them runs', () => {
+    expect(archiveShort(set({}))).toBe('Downloading parts');
+    expect(archiveShort(set({ pausedVolumes: ['m.part1.rar'] }))).toBe('Downloading parts');
+  });
+
+  it('names paused, not started and waiting parts, and a mix of them', () => {
+    expect(archiveShort(set({ pausedVolumes: ['m.part1.rar', 'M.PART2.RAR'] }))).toBe('Parts paused');
+    expect(archiveShort(set({ heldVolumes: ['m.part1.rar', 'm.part2.rar'] }))).toBe('Parts not started');
+    expect(archiveShort(set({ queuedVolumes: ['m.part1.rar', 'm.part2.rar'] }))).toBe('Parts waiting to download');
+    expect(archiveShort(set({ pausedVolumes: ['m.part1.rar'], queuedVolumes: ['m.part2.rar'] }))).toBe('Parts not downloading');
+  });
+
+  it('reads a server that sends no such lists as before', () => {
+    expect(archiveShort(set({ pausedVolumes: undefined, heldVolumes: undefined, queuedVolumes: undefined }))).toBe('Downloading parts');
   });
 });

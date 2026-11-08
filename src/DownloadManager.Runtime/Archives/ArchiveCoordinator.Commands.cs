@@ -20,6 +20,15 @@ public sealed partial class ArchiveCoordinator
         }
     }
 
+    /// <summary>Packages that have an archive password on record, or may have one in a file that can't be read now.</summary>
+    public List<Guid> PackagesWithPassword()
+    {
+        lock (_sync)
+        {
+            return [.. _packagePasswords.Keys.Union(_unreadablePackagePasswords)];
+        }
+    }
+
     public ArchiveSetDto? Find(Guid id)
     {
         lock (_sync)
@@ -627,6 +636,9 @@ public sealed partial class ArchiveCoordinator
             Volumes = [.. set.Volumes.Select(ExtractionSafety.SafeForDisplay)],
             MissingVolumes = [.. set.MissingVolumes.Select(ExtractionSafety.SafeForDisplay)],
             DownloadingVolumes = [.. set.DownloadingVolumes.Select(ExtractionSafety.SafeForDisplay)],
+            PausedVolumes = [.. set.PausedVolumes.Select(ExtractionSafety.SafeForDisplay)],
+            QueuedVolumes = [.. set.QueuedVolumes.Select(ExtractionSafety.SafeForDisplay)],
+            HeldVolumes = [.. set.HeldVolumes.Select(ExtractionSafety.SafeForDisplay)],
             FailedVolumes = [.. set.FailedVolumes.Select(ExtractionSafety.SafeForDisplay)],
             Phase = live is null ? null : JsonNamingPolicy.CamelCase.ConvertName(live.Phase.ToString()),
             Percent = live?.Percent,
@@ -653,7 +665,7 @@ public sealed partial class ArchiveCoordinator
         switch (set.State)
         {
             case ArchiveSetState.Downloading:
-                if (set.DownloadingVolumes.Count > 0) return $"Downloading: {Names(set.DownloadingVolumes)}";
+                if (set.DownloadingVolumes.Count > 0) return DescribeUnfinished(set);
                 return set.FailedVolumes.Count > 0 ? $"Download failed: {Names(set.FailedVolumes)}" : "Not downloaded yet";
 
             case ArchiveSetState.Downloaded:
@@ -661,7 +673,7 @@ public sealed partial class ArchiveCoordinator
                 return gaps.Count > 0 ? $"Downloaded, but missing: {Names(gaps)}" : "Downloaded";
 
             case ArchiveSetState.Waiting:
-                if (set.DownloadingVolumes.Count > 0) return $"Waiting for extraction: still downloading {Names(set.DownloadingVolumes)}";
+                if (set.DownloadingVolumes.Count > 0) return $"Waiting for extraction: {DescribeUnfinishedInWaiting(set)}";
                 if (set.FailedVolumes.Count > 0) return $"Waiting for extraction: the download failed for {Names(set.FailedVolumes)}";
                 if (set.MissingVolumes.Count > 0) return $"Waiting for extraction: missing {Names(set.MissingVolumes)}";
                 return "Waiting for extraction: next in line";
@@ -703,6 +715,42 @@ public sealed partial class ArchiveCoordinator
                 // The tool's reason can start with the same label. Once is enough.
                 return set.FailureMessage.StartsWith($"{label}: ", StringComparison.OrdinalIgnoreCase) ? set.FailureMessage : $"{label}: {set.FailureMessage}";
         }
+    }
+
+    /// <summary>Running, waiting and paused volume downloads, each named under what they are doing.</summary>
+    private static string DescribeUnfinished(ArchiveSetRecord set)
+    {
+        var (running, queued, held, paused) = SplitUnfinished(set);
+        var parts = new List<string>();
+        if (running.Count > 0) parts.Add($"Downloading: {Names(running)}");
+        if (queued.Count > 0) parts.Add($"Waiting for download: {Names(queued)}");
+        if (held.Count > 0) parts.Add($"Not started: {Names(held)}");
+        if (paused.Count > 0) parts.Add($"Paused: {Names(paused)}");
+        return string.Join("; ", parts);
+    }
+
+    private static string DescribeUnfinishedInWaiting(ArchiveSetRecord set)
+    {
+        var (running, queued, held, paused) = SplitUnfinished(set);
+        var parts = new List<string>();
+        if (running.Count > 0) parts.Add($"still downloading {Names(running)}");
+        if (queued.Count > 0) parts.Add($"{Names(queued)} waiting to download");
+        if (held.Count > 0) parts.Add($"{Names(held)} not started");
+        if (paused.Count > 0) parts.Add($"{Names(paused)} paused");
+        return string.Join("; ", parts);
+    }
+
+    /// <summary>
+    /// Each unfinished volume under one heading. Paused wins, then not started (it won't start by itself), then
+    /// waiting to download; the rest are running.
+    /// </summary>
+    private static (List<string> Running, List<string> Queued, List<string> Held, List<string> Paused) SplitUnfinished(ArchiveSetRecord set)
+    {
+        var paused = set.DownloadingVolumes.Where(name => set.PausedVolumes.Contains(name, PathNames.Comparer)).ToList();
+        var held = set.DownloadingVolumes.Where(name => !paused.Contains(name, PathNames.Comparer) && set.HeldVolumes.Contains(name, PathNames.Comparer)).ToList();
+        var queued = set.DownloadingVolumes.Where(name => !paused.Contains(name, PathNames.Comparer) && !held.Contains(name, PathNames.Comparer) && set.QueuedVolumes.Contains(name, PathNames.Comparer)).ToList();
+        var running = set.DownloadingVolumes.Where(name => !paused.Contains(name, PathNames.Comparer) && !held.Contains(name, PathNames.Comparer) && !queued.Contains(name, PathNames.Comparer)).ToList();
+        return (running, queued, held, paused);
     }
 
     private static string Names(IReadOnlyList<string> names)

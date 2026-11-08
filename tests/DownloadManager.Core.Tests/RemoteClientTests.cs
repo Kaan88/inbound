@@ -49,14 +49,17 @@ public sealed class RemoteClientTests
     {
         var set = new ArchiveSetDto { Id = Guid.NewGuid(), Name = "archive", State = "downloaded" };
 
-        var listed = RemoteClient.ReadArchiveListReply(IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = [set] }));
+        var package = Guid.NewGuid();
+        var listed = RemoteClient.ReadArchiveListReply(IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = [set], PackagesWithPassword = [package] }));
         var unknown = RemoteClient.ReadArchiveListReply(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }));
         var saved = RemoteClient.ReadArchiveActionReply(IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Ok = true, Set = set }));
         var refused = RemoteClient.ReadArchiveActionReply(IpcMessage.Create(MessageTypes.HostActionResult, new HostActionResult { Ok = false, Message = "Unknown message type." }));
 
         Assert.True(listed.Ok);
         Assert.Equal(set.Id, Assert.Single(listed.Sets).Id);
+        Assert.Equal([package], listed.PackagesWithPassword);
         Assert.Equal(RemoteText.HostDoesNotOffer, unknown.Error);
+        Assert.Empty(unknown.PackagesWithPassword);
         Assert.True(saved.Ok);
         Assert.Equal(set.Id, saved.Set?.Id);
         Assert.False(refused.Ok);

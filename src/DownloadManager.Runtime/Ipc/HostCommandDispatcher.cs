@@ -29,6 +29,7 @@ public sealed partial class HostCommandDispatcher
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _groupsGate = new();
     private int _updateWindowOpened;
+    private int _exiting;
     private List<DownloadGroupDto>? _lastGroups;
     private int _groupsBroadcastPending;
 
@@ -101,9 +102,28 @@ public sealed partial class HostCommandDispatcher
     /// promised the snapshot before any event. Start the session's writer after this returns. A session that fails
     /// here stays registered until <see cref="CloseSession"/>.
     /// </summary>
-    public async Task OpenSessionAsync(IClientSession client, CancellationToken cancellationToken)
+    public Task OpenSessionAsync(IClientSession client, CancellationToken cancellationToken)
+        => OpenSessionAsync(client, null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="OpenSessionAsync(IClientSession, CancellationToken)"/>, with what the client asked for in its
+    /// <c>client.hello</c> (PERF.7); null is everything, as before. Without the snapshot only the hello is sent. Without
+    /// events the session is never registered, so no broadcast reaches it; its replies still do.
+    /// </summary>
+    public async Task OpenSessionAsync(IClientSession client, ClientHelloDto? options, CancellationToken cancellationToken)
     {
-        _sessions[client.Id] = client;
+        // PERF.7: a client that asked for no events is never registered, so no broadcast reaches it.
+        if (options?.Events ?? true) _sessions[client.Id] = client;
+        // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
+        // starting meanwhile does not take this one for a running copy and quit. Registered first and read after,
+        // and NotifyExitingAsync sets it before it reads the sessions: a registered session either sees it here or is
+        // told there; one without events learns it from host.openUi's answer.
+        if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
+        {
+            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         await client.SendDirectAsync(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto
         {
             HostVersion = Protocol.HostVersion,
@@ -112,7 +132,7 @@ public sealed partial class HostCommandDispatcher
             Capabilities = Capabilities,
         }), cancellationToken).ConfigureAwait(false);
 
-        await SendSnapshotAsync(client, cancellationToken).ConfigureAwait(false);
+        if (options?.Snapshot ?? true) await SendSnapshotAsync(client, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>No more broadcasts go to this session.</summary>
@@ -453,6 +473,14 @@ public sealed partial class HostCommandDispatcher
                         break;
                     }
 
+                    // UI.B12: a Host that is exiting opens no window and says so, so a starting copy that asked does not
+                    // take it for a running one, whatever its client.hello asked for.
+                    if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
+                    {
+                        await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
+                        break;
+                    }
+
                     var open = message.GetPayload<HostActionRequest>();
                     _platform.OpenUi(string.IsNullOrWhiteSpace(open.Action) ? null : open.Action);
                     await Reply(client, message, MessageTypes.HostActionResult,
@@ -632,6 +660,7 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public async Task NotifyExitingAsync(TimeSpan timeout)
     {
+        Interlocked.Exchange(ref _exiting, 1);
         using var cts = new CancellationTokenSource(timeout);
         var message = IpcMessage.Create(MessageTypes.HostExiting, new { });
         await Task.WhenAll(_sessions.Values.Select(async client =>
