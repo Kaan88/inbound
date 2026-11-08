@@ -195,7 +195,12 @@ internal sealed class RemoteClient : IAsyncDisposable
         return result;
     }
 
-    /// <summary>Deletes the item from the provider for good. Ask the user first.</summary>
+    /// <summary>TB.S1: starts the job's entry in the provider's queue now.</summary>
+    public async Task<RemoteActionResultDto> StartQueuedAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => Feed(await SlowAsync(MessageTypes.RemoteStartQueued, new RemoteJobIdRequest { JobId = jobId },
+            MessageTypes.RemoteActionResult, FailedAction, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Deletes the item from the provider for good, or, for a job waiting in its queue, takes that entry out. Ask the user first.</summary>
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(Guid jobId, bool confirmed, CancellationToken cancellationToken = default)
         => Feed(await SlowAsync(MessageTypes.RemoteDeleteRemote, new RemoteDeleteRequest { JobId = jobId, Confirmed = confirmed },
             MessageTypes.RemoteActionResult, FailedAction, cancellationToken).ConfigureAwait(false));

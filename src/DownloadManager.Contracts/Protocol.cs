@@ -99,6 +99,8 @@ public static class MessageTypes
     public const string RemoteCheckNow = "remote.checkNow";
     public const string RemoteRemove = "remote.remove";
     public const string RemoteDeleteRemote = "remote.deleteRemote";
+    /// <summary>Starts a job's entry waiting in the provider's queue (TB.S1). Payload <c>RemoteJobIdRequest</c>.</summary>
+    public const string RemoteStartQueued = "remote.startQueued";
     public const string RemoteActionResult = "remote.actionResult";
     public const string RemoteArchivePassword = "remote.archivePassword";
     public const string RemoteContainerPreview = "remote.container.preview";

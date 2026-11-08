@@ -1913,13 +1913,14 @@ internal static partial class Program
               dm remote classify <link>
               dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
                           [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
-                          [--archive-password-stdin]
+                          [--link-password-for-archives] [--archive-password-stdin]
               dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
               dm remote list
               dm remote files <id>
               dm remote select <id> all|<file-id>...
-              dm remote retry <id> [--approve-uncached] [--link-password-stdin]
+              dm remote retry <id> [--approve-uncached] [--link-password-stdin [--link-password-for-archives]]
               dm remote check [<id>]
+              dm remote start-queued <id>
               dm remote remove <id> [--delete-from-provider --yes]
               dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
               dm remote archive-password <id>   (from standard input; empty clears it)

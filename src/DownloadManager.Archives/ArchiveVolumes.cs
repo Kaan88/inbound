@@ -136,6 +136,35 @@ public static partial class ArchiveVolumes
             .ToList();
     }
 
+    /// <summary>
+    /// TB.S3: the RAR recovery volumes (<c>.rev</c>) among these names that belong to the set called
+    /// <paramref name="baseName"/>, such as <c>name.part01.rev</c>, <c>name.rev</c> or the older <c>name1_3_1.rev</c>. They
+    /// rebuild missing volumes and hold nothing of their own, so they go when the set's archives are deleted. Only the
+    /// name forms RAR writes are taken: <c>name2.rev</c> beside a set called <c>name</c> is not this set's, nor anything a
+    /// longer set name in <paramref name="otherBaseNames"/> could claim. Reads no files.
+    /// </summary>
+    public static IReadOnlyList<string> RecoveryVolumes(string baseName, IEnumerable<string> fileNames, IEnumerable<string>? otherBaseNames = null)
+    {
+        if (string.IsNullOrEmpty(baseName)) return [];
+        var others = (otherBaseNames ?? [])
+            .Where(other => !string.Equals(other, baseName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return fileNames
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrEmpty(name) && IsRecoveryOf(baseName, name!) && !others.Any(other => IsRecoveryOf(other, name!)))
+            .Select(name => name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsRecoveryOf(string baseName, string name)
+    {
+        if (!name.EndsWith(".rev", StringComparison.OrdinalIgnoreCase) || name.Length <= baseName.Length + ".rev".Length - 1) return false;
+        var stem = name[..^".rev".Length];
+        return stem.StartsWith(baseName, StringComparison.OrdinalIgnoreCase) && RecoverySuffix().IsMatch(stem[baseName.Length..]);
+    }
+
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
     public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName, Func<string, bool>? isWholeArchive = null) =>
         Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
@@ -265,4 +294,8 @@ public static partial class ArchiveVolumes
 
     [GeneratedRegex(@"^(?<base>.+\.(?:7z|zip|rar|tar))\.(?<number>\d{3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SplitVolume();
+
+    /// <summary>What follows a set's base name in a recovery volume's name: nothing, .partN, .N, .rNN, or RAR 3's N_N[_N].</summary>
+    [GeneratedRegex(@"^(?:|\.part\d{1,4}|\.\d{1,4}|\.[r-z]\d{2}|\d{1,4}(?:_\d{1,4}){1,2})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RecoverySuffix();
 }

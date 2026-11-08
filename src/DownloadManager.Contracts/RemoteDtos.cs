@@ -134,6 +134,11 @@ public sealed class RemoteAddRequestDto
     public string? LinkPassword { get; set; }
     /// <summary>For the archives this brings, not for the link. Kept encrypted, and only <c>hasArchivePassword</c> ever comes back.</summary>
     public string? ArchivePassword { get; set; }
+    /// <summary>
+    /// TB.S2: the user agreed to have <see cref="LinkPassword"/> tried on this job's own archives too. Only offered:
+    /// an <see cref="ArchivePassword"/>, or one the package already has, wins. Never kept as a list or tried elsewhere.
+    /// </summary>
+    public bool LinkPasswordForArchives { get; set; }
 
     public override string ToString() => "[remote add]";
 }
@@ -297,6 +302,8 @@ public sealed class RemoteRetryRequest
     public Guid JobId { get; set; }
     /// <summary>For a failure that asked for one. It is the source site's password for the link, not an archive password.</summary>
     public string? LinkPassword { get; set; }
+    /// <summary>TB.S2: also offer <see cref="LinkPassword"/> to this job's own archives, unless they have a password already.</summary>
+    public bool LinkPasswordForArchives { get; set; }
     /// <summary>Also the way to approve a job waiting with approvalNeeded.</summary>
     public bool? ApproveUncached { get; set; }
 
