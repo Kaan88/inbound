@@ -1,4 +1,5 @@
 using DownloadManager.Contracts;
+using DownloadManager.Core;
 using DownloadManager.Runtime;
 using TestServer;
 
@@ -62,6 +63,33 @@ public sealed class SpeedHistoryTests
     }
 
     [Fact]
+    public void ADownloadThatGoesQuietStopsCountingWhileAnotherKeepsReporting()
+    {
+        // A runner that hangs after a pause never reports or stops; its last figure must not stay in the total.
+        var history = new SpeedHistory(T0);
+        var hung = Guid.NewGuid();
+        var busy = Guid.NewGuid();
+        history.Report(hung, 1000, T0.AddSeconds(1));
+        for (var s = 1; s <= 8; s++) history.Report(busy, 500, T0.AddSeconds(s).AddMilliseconds(500));
+        var values = history.Read(T0.AddSeconds(8)).BytesPerSecond;
+        Assert.Equal(new long[] { 0, 1500, 1500, 1500, 500, 500, 500, 500, 500 }, values);
+    }
+
+    [Fact]
+    public void AReportAfterAQuietSpellCountsAgain()
+    {
+        var history = new SpeedHistory(T0);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        history.Report(a, 1000, T0.AddSeconds(1));
+        history.Report(b, 500, T0.AddSeconds(1));
+        history.Report(b, 500, T0.AddSeconds(5));
+        history.Report(a, 1000, T0.AddSeconds(6));
+        var values = history.Read(T0.AddSeconds(6)).BytesPerSecond;
+        Assert.Equal(new long[] { 0, 1500, 1500, 1500, 0, 500, 1500 }, values);
+    }
+
+    [Fact]
     public void OnlyTheLastHourIsKeptAcrossTheRing()
     {
         var history = new SpeedHistory(T0);
@@ -121,6 +149,62 @@ public sealed partial class RuntimeServiceTests
     }
 }
 
+/// <summary>UI.R24: the cases a review found (2026-11-08).</summary>
+public sealed partial class RuntimeServiceTests
+{
+    [Fact]
+    public async Task AnAes128SegmentReportsWhileItArrives()
+    {
+        // The first segment comes at 48 KiB/s (about 3.7 s). It is decrypted only once whole, so before the fix the
+        // job sat at 0 bytes, and the speed history read 0 after two seconds, while it was still downloading.
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        using var http = new HttpClient();
+        using var expectedJson = System.Text.Json.JsonDocument.Parse(
+            await http.GetStringAsync($"{_server.BaseAddress}/hls/expected"));
+        var expectedHash = expectedJson.RootElement.GetProperty("sha256").GetString();
+        var response = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/hls/aes-slow.m3u8",
+            DestinationDirectory = ctx.Destination,
+            FileName = "hls-aes-slow.m3u8",
+            Source = "cli",
+        });
+        Assert.True(response.Accepted, response.Error);
+        var firstSegment = new FileInfo(Path.Combine(AppContext.BaseDirectory, "hls", "aes0.ts")).Length;
+
+        var partway = await ctx.WaitFor(response.Job!.Id,
+            j => j.ReceivedBytes > 0 && j.ReceivedBytes < firstSegment / 2, TimeSpan.FromSeconds(20));
+        Assert.True(partway.BytesPerSecond > 0);
+        await ctx.WaitFor(response.Job.Id, j => j.ReceivedBytes > firstSegment * 3 / 4 || j.State == "completed",
+            TimeSpan.FromSeconds(20));
+        var history = ctx.Service.GetSpeedHistory().BytesPerSecond;
+        // The last whole seconds were all inside the slow segment's download.
+        Assert.All(history.SkipLast(1).TakeLast(2), value => Assert.True(value > 0, $"history {string.Join(",", history)}"));
+
+        var completed = await ctx.WaitFor(response.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("completed", completed.State);
+        Assert.Equal(expectedHash, await Hashing.Sha256FileAsync(completed.FinalFilePath));
+    }
+
+    [Fact]
+    public async Task APausedDownloadLeavesTheTotalWhileAnotherRuns()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var paused = await AddSlowAsync(ctx, "history-paused.bin", 8 * Mb, 952, 512 * 1024, 1);
+        var running = await AddSlowAsync(ctx, "history-running.bin", 8 * Mb, 953, 64 * 1024, 1);
+        await ctx.WaitFor(paused.Id, j => j.State == "downloading" && j.ReceivedBytes > 1 * Mb, TimeSpan.FromSeconds(30));
+        await ctx.WaitFor(running.Id, j => j.State == "downloading" && j.ReceivedBytes > 64 * 1024, TimeSpan.FromSeconds(30));
+        Assert.Contains(ctx.Service.GetSpeedHistory().BytesPerSecond.TakeLast(3), value => value > 256 * 1024);
+
+        Assert.True((await ctx.Service.PauseAsync(paused.Id)).Ok);
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        var history = ctx.Service.GetSpeedHistory().BytesPerSecond;
+        // The second just closed holds only the 64 KiB/s download.
+        Assert.InRange(history[^2], 1, 160 * 1024);
+        Assert.Equal("downloading", ctx.Service.GetJob(running.Id)!.State);
+    }
+}
+
 /// <summary>UI.R24 through the real Host's pipe.</summary>
 [Trait("Platform", "Windows")]
 public sealed class HostSpeedHistoryTests : IAsyncLifetime
@@ -143,5 +227,26 @@ public sealed class HostSpeedHistoryTests : IAsyncLifetime
         Assert.InRange(history.BytesPerSecond.Count, 1, SpeedHistory.Seconds);
         Assert.InRange(history.Start, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow);
         Assert.All(history.BytesPerSecond, value => Assert.Equal(0, value));
+
+        // A download through the Host shows in the history the next window reads.
+        var added = await connection.AskAsync<AddJobResponse>(MessageTypes.JobAdd, new AddJobRequest
+        {
+            Url = $"{_server.BaseAddress}/slow/host-history.bin?size={4 * 1024 * 1024}&seed=954&bps={256 * 1024}",
+            DestinationDirectory = host.Destination,
+            FileName = "host-history.bin",
+            Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        SpeedHistoryDto later;
+        do
+        {
+            await Task.Delay(250);
+            later = (await connection.RequestAsync(MessageTypes.SpeedHistoryGet, new { })).GetPayload<SpeedHistoryDto>();
+        }
+        while (!later.BytesPerSecond.TakeLast(3).Any(value => value > 64 * 1024) && DateTimeOffset.UtcNow < deadline);
+
+        Assert.Equal(history.Start, later.Start);
+        Assert.Contains(later.BytesPerSecond.TakeLast(3), value => value > 64 * 1024);
     }
 }
