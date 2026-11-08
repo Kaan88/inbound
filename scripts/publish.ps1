@@ -121,8 +121,11 @@ Get-ChildItem -LiteralPath $Output -Directory | Where-Object { $_.Name -notin @(
     }
     if (-not (Get-ChildItem -LiteralPath $_.FullName -Force)) { Remove-Item -LiteralPath $_.FullName -Force }
 }
-foreach ($name in $winuiStrings) {
-    if (-not (Test-Path -LiteralPath (Join-Path $Output "en-us\$name") -PathType Leaf)) { throw "WinUI's English strings are missing: en-us\$name" }
+# Only a self-contained publish carries WinUI's files; otherwise the Windows App SDK runtime provides them.
+if ($SelfContained) {
+    foreach ($name in $winuiStrings) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Output "en-us\$name") -PathType Leaf)) { throw "WinUI's English strings are missing: en-us\$name" }
+    }
 }
 
 Push-Location (Join-Path $root "extensions\chrome")

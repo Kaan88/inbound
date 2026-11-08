@@ -113,7 +113,8 @@ Inbound Download Manager installed at:
   $appDir
 
 Browser extension:
-  Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store.
+  Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store:
+    https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm
   Or, in Chrome, load the unpacked copy:
   1. Open chrome://extensions
   2. Enable Developer mode
@@ -121,7 +122,8 @@ Browser extension:
   4. Select: $extensionTarget
   5. Confirm the extension ID is $extensionId
 
-  Firefox: the Firefox add-on is not published yet.
+  Firefox: install Inbound Download Manager from Firefox Add-ons:
+    https://addons.mozilla.org/firefox/addon/inbound-download-manager/
 
 Native host registration (Chrome and Edge share one manifest; Firefox has its own):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager
