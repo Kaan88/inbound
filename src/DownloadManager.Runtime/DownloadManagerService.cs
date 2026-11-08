@@ -93,6 +93,7 @@ public sealed partial class DownloadManagerService
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
         _linkBroker = linkBroker;
         _linkSecrets = linkSecrets;
+        _engine.HostWaitChanged += OnHostWaitChanged;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
@@ -718,6 +719,13 @@ public sealed partial class DownloadManagerService
             }
 
             runtime.PauseRequested = true;
+            if (runtime.Preempted)
+            {
+                // The user's pause wins over the limit's requeue that is still winding down.
+                runtime.Preempted = false;
+                runtime.ResumeWhenStopped = false;
+            }
+
             runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Paused;
             runtime.Job.BytesPerSecond = null;
@@ -1321,12 +1329,14 @@ public sealed partial class DownloadManagerService
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
         List<JobRuntime> reconnected;
+        List<JobRuntime> running;
         lock (_sync)
         {
             // What each unstarted download would have got from the old default, read before the settings change.
+            // UI.R21: running ones too; a segmented transfer takes the new count without stopping.
             var unstarted = _settings.DefaultConnections == next.DefaultConnections
                 ? []
-                : _jobs.Values.Where(IsUnstartedForConnections)
+                : _jobs.Values.Where(runtime => IsUnstartedForConnections(runtime) || IsRunningForConnections(runtime))
                     .Select(runtime => (Runtime: runtime, Uri: Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var uri) ? uri : null))
                     .Where(item => item.Uri is not null)
                     .Select(item => (item.Runtime, item.Uri, Old: Math.Clamp(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(item.Uri!)), 1, 32)))
@@ -1343,6 +1353,7 @@ public sealed partial class DownloadManagerService
                 runtime.Job.RequestedConnections = connections;
                 reconnected.Add(runtime);
             }
+            running = reconnected.Where(IsRunningForConnections).ToList();
             var queueNames = next.Queues.ToDictionary(q => q.Id, q => q.Name);
             foreach (var runtime in _jobs.Values)
             {
@@ -1365,6 +1376,11 @@ public sealed partial class DownloadManagerService
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "updated");
         }
+        foreach (var runtime in running)
+        {
+            _engine.ConnectionsChanged(runtime.Job.Id);
+        }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -1587,6 +1603,7 @@ public sealed partial class DownloadManagerService
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "updated");
         }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
@@ -3392,6 +3409,19 @@ public sealed partial class DownloadManagerService
             }
             else
             {
+                if (runtime.Preempted && !_shuttingDown)
+                {
+                    // A lower limit stopped it before its transfer began: back in the queue, as if never picked.
+                    runtime.Preempted = false;
+                    runtime.PauseRequested = false;
+                    runtime.ResumeWhenStopped = false;
+                    job.State = DownloadState.Queued;
+                    job.Touch();
+                    runtime.Starting = false;
+                    // Saved and announced as Queued already, by whoever stopped it.
+                    return;
+                }
+
                 if (runtime.PauseRequested || _shuttingDown)
                 {
                     if (runtime.ResumeWhenStopped && !_shuttingDown)
@@ -3458,6 +3488,7 @@ public sealed partial class DownloadManagerService
                 job.BytesPerSecond = p.BytesPerSecond;
                 job.EstimatedRemaining = p.EstimatedRemaining;
                 job.ActiveConnections = p.ActiveConnections;
+                runtime.LastPhase = p.Phase;
                 // Follow the engine's phase so a job waiting between retries (or still
                 // connecting) is not shown as downloading at 0 B/s.
                 if (job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
@@ -3541,7 +3572,9 @@ public sealed partial class DownloadManagerService
             job.BytesPerSecond = null;
             job.EstimatedRemaining = null;
             job.ActiveConnections = 0;
-            job.ActiveConnections = 0;
+            job.WaitingForHost = null;
+            runtime.LastPhase = null;
+            runtime.Preempted = false;
 
             // The file is where it landed, whatever else happened while it got there.
             if (result.Success)
@@ -3951,6 +3984,16 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
+    /// <summary>
+    /// Running HTTP downloads of the user's own, whose count a changed default may follow. Provider and protected
+    /// links keep the cap set when their run began, as unstarted ones do.
+    /// </summary>
+    private static bool IsRunningForConnections(JobRuntime runtime) =>
+        (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
+        !runtime.PauseRequested && !runtime.CancelRequested &&
+        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null &&
+        !runtime.Job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsUnstartedForConnections(JobRuntime runtime) =>
         runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
         runtime.Job.ReceivedBytes == 0 &&
@@ -4190,6 +4233,7 @@ public sealed partial class DownloadManagerService
             LastModified = job.LastModified,
             RequestedConnections = job.RequestedConnections,
             ActiveConnections = job.ActiveConnections,
+            WaitingForHost = WaitingHostShown(job),
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
             CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),
@@ -4217,7 +4261,9 @@ public sealed partial class DownloadManagerService
             IsRemote = job.RemoteSource is not null,
             RemoteProvider = job.RemoteSource?.Provider,
             FileRemovedAfterExtraction = job.FileRemovedAfterExtraction,
-            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction" : null,
+            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction"
+                : WaitingHostShown(job) is { } waitingHost ? WaitingForConnectionText(waitingHost)
+                : null,
             Failure = job.Failure is null
                 ? null
                 : new FailureDto
@@ -4543,6 +4589,13 @@ public sealed partial class DownloadManagerService
         public bool AdmissionSuspended { get; set; }
         public bool PauseRequested { get; set; }
         public bool ResumeWhenStopped { get; set; }
+        /// <summary>
+        /// Stopped by a lower simultaneous-downloads limit (UI.R21), not by the user: it goes back to Queued with
+        /// its data, and a stop that lands before the transfer starts must not let it run anyway.
+        /// </summary>
+        public bool Preempted { get; set; }
+        /// <summary>The engine's last phase, so a limit change leaves a job alone while it verifies or muxes.</summary>
+        public string? LastPhase { get; set; }
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
         public bool CancelledForRemoval { get; set; }

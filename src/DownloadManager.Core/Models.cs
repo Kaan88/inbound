@@ -190,6 +190,13 @@ public sealed class DownloadJob
     [JsonIgnore]
     public bool KeepCheckpointAfterFinalize { get; set; }
 
+    /// <summary>
+    /// The host this running job waits on for a free connection while it holds none (UI.B7). Runtime only: a
+    /// restarted job waits again or doesn't, so nothing about it is worth saving.
+    /// </summary>
+    [JsonIgnore]
+    public string? WaitingForHost { get; set; }
+
     /// <summary>The user removed this job. A restart finishes that instead of bringing the job back.</summary>
     public bool RemovalPending { get; set; }
 

@@ -49,6 +49,11 @@ public sealed class JobDto
     public string? LastModified { get; set; }
     public int RequestedConnections { get; set; }
     public int ActiveConnections { get; set; }
+    /// <summary>
+    /// The host name (never the address) this running download is waiting on for a free connection while it
+    /// has none. Null otherwise. Added in protocol 1 without a bump: older clients ignore it.
+    /// </summary>
+    public string? WaitingForHost { get; set; }
     public double? BytesPerSecond { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
     public bool? ResumeSupported { get; set; }
