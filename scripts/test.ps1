@@ -27,6 +27,9 @@ try {
     try {
         npx tsc --noEmit
         if ($LASTEXITCODE -ne 0) { throw "Extension typecheck failed." }
+        # The extension's own unit tests (node:test with a mocked chrome API).
+        npm test
+        if ($LASTEXITCODE -ne 0) { throw "Extension tests failed." }
     }
     finally {
         Pop-Location

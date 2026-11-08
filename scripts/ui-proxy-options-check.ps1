@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # Runs against its own test instance, so the installed app and its settings are never touched.
+    [string]$Instance = 'proxycheck'
 )
 
 # Opens Options in the live WinUI window and verifies the Proxy controls exist with
@@ -21,6 +23,9 @@ $uiExe = (Get-ChildItem (Join-Path $root "src\DownloadManager.Desktop.WinUI\bin\
     -Filter DownloadManager.Desktop.WinUI.exe | Select-Object -First 1).FullName
 $cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\dm.exe"
 if (-not (Test-Path $cliExe)) { $cliExe = Join-Path $root "src\DownloadManager.Cli\bin\$Configuration\net10.0\DownloadManager.Cli.exe" }
+$previousData = $env:DOWNLOADMANAGER_DATA; $previousInstance = $env:DOWNLOADMANAGER_INSTANCE; $env:DOWNLOADMANAGER_INSTANCE = $Instance
+$env:DOWNLOADMANAGER_DATA = Join-Path $root "artifacts\$Instance\data"
+New-Item -ItemType Directory -Path $env:DOWNLOADMANAGER_DATA -Force | Out-Null
 $hostProc = Start-Process $hostExe -ArgumentList '--background' -PassThru -WindowStyle Hidden
 Start-Sleep 4
 # Remember the user's proxy settings and restore them afterwards. A test password is only
@@ -173,5 +178,6 @@ finally {
     $log | Set-Content -Path $OutFile
     Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue
     Stop-Process -Id $hostProc.Id -Force -ErrorAction SilentlyContinue
-    Get-Process DownloadManager.Host -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Last: the settings restore above still needs this run's test instance.
+    $env:DOWNLOADMANAGER_DATA = $previousData; $env:DOWNLOADMANAGER_INSTANCE = $previousInstance
 }

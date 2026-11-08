@@ -11,7 +11,13 @@ if ($installRoot -eq [IO.Path]::GetPathRoot($installRoot).TrimEnd('\')) {
 }
 $appDir = Join-Path $installRoot "app"
 
-Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |
+# Ask this install's Host to finish its writes and exit, as Setup does, before anything is stopped.
+$cli = Join-Path $appDir "DownloadManager.Cli.exe"
+if (Test-Path $cli) { & $cli host shutdown --no-start 2>$null | Out-Null; Start-Sleep -Seconds 2 }
+# Then only copies running from this install: a test instance or a build elsewhere is someone else's.
+$ownRoot = [IO.Path]::GetFullPath($installRoot).TrimEnd('\') + '\'
+Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI, DownloadManager.NativeHost -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($ownRoot, [StringComparison]::OrdinalIgnoreCase) } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 

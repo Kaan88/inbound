@@ -4,7 +4,9 @@ param(
     [int]$BytesPerSecond = 262144,
     [int[]]$KillAtPercent = @(20, 50, 80),
     [int[]]$Connections = @(1, 8),
-    [string]$AppDir
+    [string]$AppDir,
+    # A test instance name: with it, the matrix's Host gets its own pipe and runs beside an installed copy.
+    [string]$Instance = ("killmatrix" + (Get-Random -Minimum 1000 -Maximum 9999))
 )
 
 # Kill/restart matrix (ROADMAP P2.7 / P5.6 / X.5): for each connection count, downloads a
@@ -22,16 +24,17 @@ $serverExe = Join-Path $root "tools\TestServer\bin\Release\net10.0\TestServer.ex
 foreach ($exe in $hostExe, $cliExe, $serverExe) {
     if (-not (Test-Path $exe)) { throw "Missing $exe (build Release first)." }
 }
-if (Get-Process DownloadManager.Host -ErrorAction SilentlyContinue) {
-    throw "A Download Manager Host is already running; exit it first (tray > Exit)."
-}
+# Only this matrix's own Host counts: with DOWNLOADMANAGER_INSTANCE set, other copies (the installed app,
+# other test instances) use other pipes and are left alone.
 
 $work = Join-Path $root ("artifacts\kill-restart\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $data = Join-Path $work "data"
 $downloads = Join-Path $work "downloads"
 New-Item -ItemType Directory -Path $data, $downloads -Force | Out-Null
 $previousData = $env:DOWNLOADMANAGER_DATA
+$previousInstance = $env:DOWNLOADMANAGER_INSTANCE
 $env:DOWNLOADMANAGER_DATA = $data
+$env:DOWNLOADMANAGER_INSTANCE = $Instance
 $port = Get-Random -Minimum 20000 -Maximum 40000
 $base = "http://127.0.0.1:$port"
 $size = $SizeMiB * 1MB
@@ -106,6 +109,13 @@ try {
             $hostProcess.WaitForExit(10000) | Out-Null
             $before = $job.receivedBytes
             $partBytes = if (Test-Path $job.partFilePath) { (Get-Item $job.partFilePath).Length } else { -1 }
+            # What the next Host can trust, read before it starts: "kept after restart" is read once the job
+            # is already moving again, so it can be higher than this.
+            $checkpointFile = Join-Path $data ("checkpoints\" + ([guid]$id).ToString('N') + ".json")
+            $checkpointBytes = -1
+            if (Test-Path $checkpointFile) {
+                try { $checkpointBytes = [long](((Get-Content $checkpointFile -Raw | ConvertFrom-Json).segments | Measure-Object -Property completed -Sum).Sum) } catch { }
+            }
 
             $hostProcess = StartHost
             $after = JobStatus $id
@@ -116,11 +126,11 @@ try {
             }
             $row = [pscustomobject]@{
                 connections = $connectionCount; killAt = "$percent%"; bytesAtKill = $before
-                partFileBytes = $partBytes; keptAfterRestart = $kept; stateAfterRestart = $after.state
+                partFileBytes = $partBytes; checkpointBytes = $checkpointBytes; keptAfterRestart = $kept; stateAfterRestart = $after.state
             }
             $results.Add($row)
-            Write-Host ("  killed at {0}%: reported {1:N0}, part {2:N0}, kept after restart {3:N0} ({4})" -f `
-                $percent, $before, $partBytes, $kept, $after.state)
+            Write-Host ("  killed at {0}%: reported {1:N0}, part {2:N0}, checkpoint {3:N0}, kept after restart {4:N0} ({5})" -f `
+                $percent, $before, $partBytes, $checkpointBytes, $kept, $after.state)
             if ($kept -le 0) { Fail "c=$connectionCount kill $percent%: progress was not preserved" }
             if ($kept -gt $size) { Fail "c=$connectionCount kill $percent%: kept bytes exceed the file size" }
         }
@@ -140,6 +150,8 @@ try {
         if (-not $ok) { Fail "c=$connectionCount hash mismatch (expected $expected)" }
         $leftover = Get-ChildItem $downloads -Filter '*.part' -ErrorAction SilentlyContinue
         if ($leftover) { Fail "c=$connectionCount left .part files: $($leftover.Name -join ', ')" }
+        $leftCheckpoint = Join-Path $data ("checkpoints\" + ([guid]$id).ToString('N') + ".json")
+        if (Test-Path $leftCheckpoint) { Fail "c=$connectionCount left its checkpoint: $leftCheckpoint" }
     }
 }
 finally {
@@ -159,6 +171,7 @@ finally {
     }
     finally {
         $env:DOWNLOADMANAGER_DATA = $previousData
+        $env:DOWNLOADMANAGER_INSTANCE = $previousInstance
     }
 }
 
