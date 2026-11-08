@@ -19,6 +19,7 @@ namespace DownloadManager.Integration.Tests;
 /// and a kill during the extraction of a local archive is in
 /// <see cref="RuntimeArchiveHostTests.KillingTheHostMidExtractionTakesTheToolWithItAndTheNextHostFinishes"/>.
 /// </summary>
+[Trait("Platform", "Windows")]
 [Collection("runtime-archive")]
 public sealed class HostKillMatrixTests(ITestOutputHelper output) : IAsyncLifetime
 {

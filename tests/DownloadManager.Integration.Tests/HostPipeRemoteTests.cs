@@ -12,6 +12,7 @@ namespace DownloadManager.Integration.Tests;
 /// place of the provider. Nothing here reaches the real provider, the installed app or real state:
 /// each test has its own profile, and every value is invented.
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed class HostPipeRemoteTests : IAsyncLifetime
 {
     private const string Key = "5e2f7c1a-93bd-4a60-8c17-0fd2b6e4a913";

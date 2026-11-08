@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -53,7 +54,8 @@ public sealed class StagingArea
     {
         var fullRoot = Path.GetFullPath(stagingRoot);
         var fullDestination = NormalizeDestination(destination);
-        if (!string.Equals(Path.GetPathRoot(fullRoot), Path.GetPathRoot(fullDestination), StringComparison.OrdinalIgnoreCase))
+        // On Linux the volume is the mount that holds the folder, not "/": in a container /downloads is its own mount.
+        if (!Volumes.Same(fullRoot, fullDestination))
         {
             throw new ExtractionException(ExtractionFailureKind.Unknown, "The staging folder must be on the same volume as the destination.");
         }
@@ -167,7 +169,7 @@ public sealed class StagingArea
             {
                 if (entry.Source is null || entry.Target is null || ExtractionSafety.DescribeUnsafePath(entry.Source) is not null) continue;
                 var target = Path.GetFullPath(entry.Target);
-                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!target.StartsWith(root, PathNames.Comparison)) continue;
                 if (File.Exists(Path.Combine(folder, PayloadName, entry.Source)) || !File.Exists(target)) continue;
 
                 // An overwrite whose original is no longer displaced was already rolled back, so
@@ -224,7 +226,7 @@ public sealed class StagingArea
             try
             {
                 var target = Path.GetFullPath(Path.Combine(destination, Path.GetRelativePath(displaced, file)));
-                if (!target.StartsWith(ExtractionSafety.WithSeparator(destination), StringComparison.OrdinalIgnoreCase) || PassesThroughLink(destination, target))
+                if (!target.StartsWith(ExtractionSafety.WithSeparator(destination), PathNames.Comparison) || PassesThroughLink(destination, target))
                 {
                     restored = false;
                     continue;
@@ -291,7 +293,9 @@ public sealed class StagingArea
 
     private static string FolderId(string firstVolume, string destination)
     {
-        var key = (Path.GetFullPath(firstVolume) + "\n" + destination).ToUpperInvariant();
+        // Windows folds case, so the same folder written two ways must give one id. Linux keeps them apart: two ids.
+        var key = Path.GetFullPath(firstVolume) + "\n" + destination;
+        if (OperatingSystem.IsWindows()) key = key.ToUpperInvariant();
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
     }
 }

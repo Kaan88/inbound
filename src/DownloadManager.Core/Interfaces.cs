@@ -166,24 +166,8 @@ public sealed class DriveFreeSpaceProvider : IFreeSpaceProvider
 {
     public static DriveFreeSpaceProvider Instance { get; } = new();
 
-    public long? GetAvailableFreeSpace(string directory)
-    {
-        try
-        {
-            var full = Path.GetFullPath(directory);
-            var root = Path.GetPathRoot(full);
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                return null;
-            }
-
-            return new DriveInfo(root).AvailableFreeSpace;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    /// <summary>The volume's own mount on Linux, not the path's first part (<see cref="Volumes.RootOf"/>).</summary>
+    public long? GetAvailableFreeSpace(string directory) => Volumes.AvailableBytes(directory);
 }
 
 public interface IMediaMuxer

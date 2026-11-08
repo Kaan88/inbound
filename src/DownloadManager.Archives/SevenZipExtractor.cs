@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -23,16 +24,77 @@ public sealed record SevenZipExtractorOptions
     internal Action<string>? FlushOverride { get; init; }
 }
 
-/// <summary>Where the bundled 7-Zip lives.</summary>
+/// <summary>
+/// Where 7-Zip is. On Windows it is the copy bundled in <c>tools\7-Zip</c> (<c>7z.exe</c> with its <c>7z.dll</c>). Elsewhere it
+/// is the official Linux build, <c>7zz</c>, which is one file with its formats built in: <see cref="EnvironmentVariable"/>
+/// first, then <c>tools/7-Zip/7zz</c> next to the program (where a container image puts it), then <c>7zz</c> and <c>7z</c>
+/// on <c>PATH</c>.
+/// </summary>
 public static class SevenZipTool
 {
-    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", "7z.exe");
+    /// <summary>An explicit 7-Zip program for a server, such as <c>/usr/bin/7zz</c>. Read off Windows only.</summary>
+    public const string EnvironmentVariable = "DOWNLOADMANAGER_7ZIP";
 
-    /// <summary>The program to run, or null when it or its 7z.dll is missing.</summary>
+    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", OperatingSystem.IsWindows() ? "7z.exe" : "7zz");
+
+    /// <summary>The program to run, or null when it is missing (on Windows, also when its 7z.dll is).</summary>
     public static string? Find(string? toolPath = null)
     {
-        var path = Path.GetFullPath(toolPath ?? BundledPath);
-        return File.Exists(path) && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "7z.dll")) ? path : null;
+        if (OperatingSystem.IsWindows())
+        {
+            var path = Path.GetFullPath(toolPath ?? BundledPath);
+            return File.Exists(path) && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "7z.dll")) ? path : null;
+        }
+
+        if (toolPath is not null)
+        {
+            var path = Path.GetFullPath(toolPath);
+            return File.Exists(path) ? path : null;
+        }
+
+        return Locate(Environment.GetEnvironmentVariable(EnvironmentVariable), Environment.GetEnvironmentVariable("PATH"));
+    }
+
+    /// <summary>Off Windows: the variable's program, else the bundled 7zz, else 7zz then 7z on <paramref name="path"/>.</summary>
+    internal static string? Locate(string? configured, string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            // Named on purpose, so a wrong name is reported as missing rather than quietly replaced by another 7-Zip.
+            var full = Path.GetFullPath(configured.Trim());
+            return File.Exists(full) ? full : null;
+        }
+
+        return File.Exists(BundledPath) ? BundledPath : FindOnPath("7zz", path) ?? FindOnPath("7z", path);
+    }
+
+    /// <summary>What to tell the user when <see cref="Find"/> finds nothing. Windows has a copy to repair; a server has one to install.</summary>
+    public static string MissingMessage => OperatingSystem.IsWindows()
+        ? "The bundled 7-Zip is missing. Repair or reinstall Inbound."
+        : $"7-Zip was not found. Install 7zz, the official 7-Zip for Linux, on PATH, or set {EnvironmentVariable} to it.";
+
+    /// <summary>What to tell the user about the copy <see cref="Find"/> found.</summary>
+    public static string FoundMessage(string path) => OperatingSystem.IsWindows()
+        ? "Extraction uses the 7-Zip that comes with Inbound."
+        : $"Extraction uses 7-Zip at {path}.";
+
+    /// <summary>The first <paramref name="name"/> in a folder of the <c>PATH</c> value, or null.</summary>
+    internal static string? FindOnPath(string name, string? path)
+    {
+        foreach (var directory in (path ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(directory.Trim(), name);
+                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+            catch (ArgumentException)
+            {
+                // A PATH entry with characters a path can't hold names nothing.
+            }
+        }
+
+        return null;
     }
 }
 
@@ -111,7 +173,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
             if (request.MakeDurable)
             {
-                var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(StringComparer.OrdinalIgnoreCase);
+                var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(PathNames.Comparer);
                 flushed &= FlushAll(folders, FlushDirectory, cancellationToken);
             }
 
@@ -207,7 +269,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
     private string FindTool() =>
         SevenZipTool.Find(_options.ToolPath)
-        ?? throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, "The bundled 7-Zip is missing. Repair or reinstall Inbound.");
+        ?? throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, SevenZipTool.MissingMessage);
 
     private static void RequireReady(ArchiveProbe probe, string firstVolume, ToolPassword secret)
     {

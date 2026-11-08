@@ -22,6 +22,7 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public async Task APipeWithEveryInstanceTakenStillExistsAndOneNobodyMadeDoesNot()
     {
         var name = "inbound-test-" + Guid.NewGuid().ToString("N");

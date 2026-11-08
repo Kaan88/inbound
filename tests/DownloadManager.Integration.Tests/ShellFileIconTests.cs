@@ -4,6 +4,7 @@ using DownloadManager.Desktop.WinUI;
 
 namespace DownloadManager.Integration.Tests;
 
+[Trait("Platform", "Windows")]
 public sealed class ShellFileIconTests
 {
     [Fact]

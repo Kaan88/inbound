@@ -92,7 +92,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         var given = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = run.PathOf("later.rar"), Password = Secret });
         Assert.True(given.Ok, given.Error);
         Assert.True(given.Set!.HasPassword);
-        Assert.Contains("dpapi:v1:", run.RecordText(given.Set.Id));
+        Assert.Contains(SecretProtector.Current.Prefix, run.RecordText(given.Set.Id));
         Assert.DoesNotContain(Secret, run.StateText());
 
         await run.DownloadAsync("later.rar", RarBuilder.Rar4Encrypted("data.txt", Text, Secret));
@@ -733,14 +733,14 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         await run.WaitForJobAsync(job.Id, "completed");
         var listed = await run.WaitForStateAsync("downloaded");
         await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { SetId = listed.Id, Password = Secret });
-        Assert.Contains("dpapi:v1:", run.RecordText(listed.Id));
+        Assert.Contains(SecretProtector.Current.Prefix, run.RecordText(listed.Id));
 
         var removed = await run.Archives.RemoveAsync(listed.Id);
 
         Assert.True(removed.Ok, removed.Error);
         Assert.Empty(run.Archives.List());
         Assert.True(File.Exists(run.PathOf("kept.rar")));
-        Assert.DoesNotContain("dpapi:v1:", run.RecordText(listed.Id));
+        Assert.DoesNotContain(SecretProtector.Current.Prefix, run.RecordText(listed.Id));
 
         // The next start's sweep sees the same finished download and leaves it off the list.
         await run.RestartAsync();
@@ -1252,7 +1252,7 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
 
         var none = run.Archives.GetSettings().Tool;
         Assert.False(none.Found);
-        Assert.Contains("missing", none.Message);
+        Assert.Equal(SevenZipTool.MissingMessage, none.Message);
 
         var archive = run.WriteFile("once.rar", OneFileRar());
         await run.Archives.ExtractAsync(new ArchiveExtractRequest { FilePath = archive });
@@ -1417,8 +1417,18 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         var upper = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = run.PathOf("V.PART10.RAR"), Password = Secret });
 
         Assert.Equal(first.Set!.Id, other.Set!.Id);
-        Assert.Equal(first.Set.Id, upper.Set!.Id);
-        Assert.Single(run.Archives.List());
+        if (OperatingSystem.IsWindows())
+        {
+            // One file to NTFS, so one set.
+            Assert.Equal(first.Set.Id, upper.Set!.Id);
+            Assert.Single(run.Archives.List());
+            return;
+        }
+
+        // On Linux V.PART10.RAR is another file than v.part10.rar, for the same volume number, so it is another set:
+        // one set never holds two files for one volume (ArchiveVolumes.Group).
+        Assert.NotEqual(first.Set.Id, upper.Set!.Id);
+        Assert.Equal(2, run.Archives.List().Count);
     }
 
     // ----- IPC, in process. RuntimeArchiveHostTests goes through a real pipe. -----

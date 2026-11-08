@@ -126,7 +126,7 @@ public class JDownloaderBridgeTests
         Assert.Equal("/flash/add", post.Uri.AbsolutePath);
         var url = post.Form["urls"];
         Assert.StartsWith("file:/", url, StringComparison.Ordinal);
-        Assert.DoesNotContain("file:///", url, StringComparison.Ordinal);
+        if (OperatingSystem.IsWindows()) Assert.DoesNotContain("file:///", url, StringComparison.Ordinal);
         Assert.EndsWith("my%20links.CCF", url, StringComparison.Ordinal);
     }
 
@@ -135,8 +135,22 @@ public class JDownloaderBridgeTests
     [InlineData(@"C:\a b%20c.ccf", "file:/C:/a%20b%2520c.ccf")]
     [InlineData(@"C:\dir\sub dir\links.ccf", "file:/C:/dir/sub%20dir/links.ccf")]
     [InlineData(@"C:\caf#é?.ccf", "file:/C:/caf%23%C3%A9%3F.ccf")]
+    [Trait("Platform", "Windows")]
     public void A_file_url_leads_back_to_exactly_the_file_chosen(string path, string url)
     {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.Equal(url, JDownloaderBridge.ToFileUrl(path));
+        Assert.Equal(path, new Uri(url).LocalPath);
+    }
+
+    [Theory]
+    [InlineData("/x%41.ccf", "file:///x%2541.ccf")]
+    [InlineData("/a b%20c.ccf", "file:///a%20b%2520c.ccf")]
+    [InlineData("/dir/sub dir/links.ccf", "file:///dir/sub%20dir/links.ccf")]
+    [InlineData("/caf#é?.ccf", "file:///caf%23%C3%A9%3F.ccf")]
+    public void Off_windows_a_file_url_leads_back_to_exactly_the_file_chosen(string path, string url)
+    {
+        if (OperatingSystem.IsWindows()) return;
         Assert.Equal(url, JDownloaderBridge.ToFileUrl(path));
         Assert.Equal(path, new Uri(url).LocalPath);
     }

@@ -1,18 +1,34 @@
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace DownloadManager.Persistence;
 
 /// <summary>
-/// Per-user Windows DPAPI protection for stored site-login passwords. The
-/// ciphertext is bound to the current Windows user and to an application
-/// entropy value; plaintext never enters settings JSON.
+/// Seals every secret the stores keep: site-login and proxy passwords, request headers, protected addresses, provider
+/// keys, remote inputs and archive passwords. Each kind has its own purpose bytes, so a blob of one kind never opens as
+/// another. Plaintext never enters the JSON files, and a value that doesn't open reads as nothing, never as itself.
+/// The sealing itself is an <see cref="ISecretProtector"/>, one per process: Windows DPAPI by default on Windows
+/// (<see cref="DpapiSecretProtector"/>); a server picks the AES-GCM key file in its data folder
+/// (<see cref="AesGcmSecretProtector"/>) with <see cref="Use"/> before any store opens. Off Windows nothing is chosen by
+/// default, and sealing then throws rather than write a secret in the clear.
 /// </summary>
 public static class SecretProtector
 {
-    private const string Prefix = "dpapi:v1:";
-    private const int CryptProtectUiForbidden = 0x1;
+    private static ISecretProtector _current = OperatingSystem.IsWindows()
+        ? new DpapiSecretProtector()
+        : new UnavailableSecretProtector();
+
+    /// <summary>What seals and opens secrets in this process.</summary>
+    public static ISecretProtector Current => Volatile.Read(ref _current);
+
+    /// <summary>
+    /// Chooses the protector for this process. Call before any store opens: a value sealed by one protector doesn't open
+    /// with another. Tests that need one (Linux, a server) call it once per process.
+    /// </summary>
+    public static void Use(ISecretProtector protector)
+    {
+        ArgumentNullException.ThrowIfNull(protector);
+        Volatile.Write(ref _current, protector);
+    }
 
     private static readonly byte[] Entropy =
         Encoding.UTF8.GetBytes("DownloadManager.SiteLogin.v1");
@@ -77,8 +93,6 @@ public static class SecretProtector
     public static string ProtectRemoteArchivePassword(string plaintext) => Protect(plaintext, RemoteArchivePasswordEntropy);
     public static string? UnprotectRemoteArchivePassword(string? protectedValue) => Unprotect(protectedValue, RemoteArchivePasswordEntropy);
 
-    public static bool IsProtected(string? value) => value?.StartsWith(Prefix, StringComparison.Ordinal) == true;
-
     public static string Protect(string plaintext) => Protect(plaintext, Entropy);
 
     public static string? Unprotect(string? protectedValue) => Unprotect(protectedValue, Entropy);
@@ -96,108 +110,26 @@ public static class SecretProtector
 
     public static string? UnprotectArchivePassword(string? protectedValue) => Unprotect(protectedValue, ArchivePasswordEntropy);
 
-    private static string Protect(string plaintext, byte[] entropy)
-    {
-        var cipher = Transform(Encoding.UTF8.GetBytes(plaintext), protect: true, entropy);
-        return Prefix + Convert.ToBase64String(cipher);
-    }
+    /// <summary>Whether a value is a sealed blob of any protector this app has used, so it is never sealed twice.</summary>
+    public static bool IsProtected(string? value) =>
+        value is not null &&
+        (value.StartsWith(DpapiSecretProtector.BlobPrefix, StringComparison.Ordinal) ||
+         value.StartsWith(AesGcmSecretProtector.BlobPrefix, StringComparison.Ordinal));
 
-    private static string? Unprotect(string? protectedValue, byte[] entropy)
-    {
-        if (string.IsNullOrWhiteSpace(protectedValue) ||
-            !protectedValue.StartsWith(Prefix, StringComparison.Ordinal))
-        {
-            return null;
-        }
+    private static string Protect(string plaintext, byte[] entropy) => Current.Protect(plaintext, entropy);
 
-        try
-        {
-            var cipher = Convert.FromBase64String(protectedValue[Prefix.Length..]);
-            return Encoding.UTF8.GetString(Transform(cipher, protect: false, entropy));
-        }
-        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    private static string? Unprotect(string? protectedValue, byte[] entropy) =>
+        string.IsNullOrWhiteSpace(protectedValue) ? null : Current.Unprotect(protectedValue, entropy);
+}
 
-    private static byte[] Transform(byte[] input, bool protect, byte[] entropy)
-    {
-        var inputBlob = CreateBlob(input);
-        var entropyBlob = CreateBlob(entropy);
-        try
-        {
-            DataBlob output;
-            var ok = protect
-                ? CryptProtectData(ref inputBlob, "Download Manager site login", ref entropyBlob,
-                    IntPtr.Zero, IntPtr.Zero, CryptProtectUiForbidden, out output)
-                : CryptUnprotectData(ref inputBlob, IntPtr.Zero, ref entropyBlob,
-                    IntPtr.Zero, IntPtr.Zero, CryptProtectUiForbidden, out output);
-            if (!ok)
-            {
-                throw new CryptographicException(Marshal.GetLastWin32Error());
-            }
+/// <summary>Off Windows until a server chooses its key file: nothing is sealed, so nothing is written in the clear.</summary>
+internal sealed class UnavailableSecretProtector : ISecretProtector
+{
+    public string Prefix => "none:";
 
-            try
-            {
-                var result = new byte[output.Length];
-                Marshal.Copy(output.Data, result, 0, output.Length);
-                return result;
-            }
-            finally
-            {
-                LocalFree(output.Data);
-            }
-        }
-        finally
-        {
-            FreeBlob(inputBlob);
-            FreeBlob(entropyBlob);
-        }
-    }
+    public string Protect(string plaintext, ReadOnlySpan<byte> purpose) =>
+        throw new InvalidOperationException(
+            "No secret protector is set up on this system, so a password or key can't be saved. The server sets one from its key file at start.");
 
-    private static DataBlob CreateBlob(byte[] bytes)
-    {
-        var data = Marshal.AllocHGlobal(bytes.Length);
-        Marshal.Copy(bytes, 0, data, bytes.Length);
-        return new DataBlob { Length = bytes.Length, Data = data };
-    }
-
-    private static void FreeBlob(DataBlob blob)
-    {
-        if (blob.Data != IntPtr.Zero)
-        {
-            Marshal.FreeHGlobal(blob.Data);
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct DataBlob
-    {
-        public int Length;
-        public IntPtr Data;
-    }
-
-    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool CryptProtectData(
-        ref DataBlob dataIn,
-        string? description,
-        ref DataBlob entropy,
-        IntPtr reserved,
-        IntPtr prompt,
-        int flags,
-        out DataBlob dataOut);
-
-    [DllImport("crypt32.dll", SetLastError = true)]
-    private static extern bool CryptUnprotectData(
-        ref DataBlob dataIn,
-        IntPtr description,
-        ref DataBlob entropy,
-        IntPtr reserved,
-        IntPtr prompt,
-        int flags,
-        out DataBlob dataOut);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr LocalFree(IntPtr memory);
+    public string? Unprotect(string protectedValue, ReadOnlySpan<byte> purpose) => null;
 }

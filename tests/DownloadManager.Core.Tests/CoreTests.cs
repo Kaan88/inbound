@@ -229,6 +229,7 @@ public sealed class ShellActionsTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public void RevealFileFallsBackToFolderWhenMissing()
     {
         var path = @"C:\Downloads\missing.bin";

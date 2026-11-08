@@ -3,6 +3,7 @@ using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
 using DownloadManager.Persistence;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -142,7 +143,7 @@ public sealed partial class ArchiveCoordinator
 
         var setPassword = request.PackageId is null ? request.Password : null;
         var sets = new Dictionary<Guid, ArchiveSetDto>();
-        foreach (var inFolder in targets.Where(target => Path.GetDirectoryName(target) is not null).GroupBy(target => Path.GetDirectoryName(target)!, StringComparer.OrdinalIgnoreCase))
+        foreach (var inFolder in targets.Where(target => Path.GetDirectoryName(target) is not null).GroupBy(target => Path.GetDirectoryName(target)!, PathNames.Comparer))
         {
             var view = ArchiveDirectoryView.Read(inFolder.Key, jobs);
             foreach (var target in inFolder)
@@ -221,7 +222,7 @@ public sealed partial class ArchiveCoordinator
             ClearFailure(next);
             if (!string.IsNullOrEmpty(password)) next.ProtectedPassword = SecretProtector.ProtectArchivePassword(password);
 
-            foreach (var job in jobs.Where(job => job.State == "completed" && job.CompletedAt is not null && set.Members.Contains(Path.GetFileName(job.FinalFilePath), StringComparer.OrdinalIgnoreCase)))
+            foreach (var job in jobs.Where(job => job.State == "completed" && job.CompletedAt is not null && set.Members.Contains(Path.GetFileName(job.FinalFilePath), PathNames.Comparer)))
             {
                 next.SeenJobs[job.Id] = job.CompletedAt!.Value;
             }
@@ -540,7 +541,7 @@ public sealed partial class ArchiveCoordinator
         {
             Found = found is not null,
             Path = found,
-            Message = found is null ? "The bundled 7-Zip is missing. Repair or reinstall Inbound." : "Extraction uses the 7-Zip that comes with Inbound.",
+            Message = found is null ? SevenZipTool.MissingMessage : SevenZipTool.FoundMessage(found),
         };
     }
 

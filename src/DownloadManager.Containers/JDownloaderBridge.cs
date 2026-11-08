@@ -257,12 +257,29 @@ public sealed class JDownloaderBridge : IDisposable
     internal static string? ToFileUrl(string path)
     {
         var segments = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (segments.Length < 2 || segments[0].Length != 2 || !char.IsAsciiLetter(segments[0][0]) || segments[0][1] != ':')
+        string url;
+        if (OperatingSystem.IsWindows())
         {
-            return null;
+            if (segments.Length < 2 || segments[0].Length != 2 || !char.IsAsciiLetter(segments[0][0]) || segments[0][1] != ':')
+            {
+                return null;
+            }
+
+            url = "file:/" + segments[0] + "/" + string.Join('/', segments.Skip(1).Select(Uri.EscapeDataString));
+        }
+        else
+        {
+            // A rooted Linux path splits into an empty first part. .NET on Linux can't read the short file:/ form back
+            // (the check below would then refuse every path), so this is file:/// with an empty host, which Java reads
+            // as the same file.
+            if (segments.Length < 2 || segments[0].Length != 0)
+            {
+                return null;
+            }
+
+            url = "file:///" + string.Join('/', segments.Skip(1).Select(Uri.EscapeDataString));
         }
 
-        var url = "file:/" + segments[0] + "/" + string.Join('/', segments.Skip(1).Select(Uri.EscapeDataString));
         return Uri.TryCreate(url, UriKind.Absolute, out var parsed) && string.Equals(parsed.LocalPath, path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar), StringComparison.Ordinal)
             ? url
             : null;

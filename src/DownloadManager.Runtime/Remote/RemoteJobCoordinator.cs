@@ -832,8 +832,20 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             }, null, classification.Kind);
     }
 
-    private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// On a server, the folders whose files a client may have it read (a .torrent file given by its path). A client
+    /// there is not the machine's user. Null on the desktop, where any file the user names may be read.
+    /// </summary>
+    public PathRoots? Roots { get; set; }
+
+    private async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
     {
+        if (Roots is { } roots)
+        {
+            if (roots.Allowed(path) is not { } inside) return (null, "That .torrent file is outside the folders this server may use.");
+            path = inside;
+        }
+
         try
         {
             var info = new FileInfo(path);

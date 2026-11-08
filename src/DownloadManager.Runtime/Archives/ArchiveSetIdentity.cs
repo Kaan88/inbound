@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -35,8 +36,12 @@ internal static partial class ArchiveSetIdentity
     /// </summary>
     public static string KeyFor(string directory, ArchiveVolumeSet set) => KeyFor(directory, FirstName(set));
 
-    public static string KeyFor(string directory, string firstVolumeName) =>
-        (NormalizeDirectory(directory) + "|" + firstVolumeName).ToUpperInvariant();
+    /// <remarks>Folded to capitals on Windows only, where a.rar and A.RAR are one file. On Linux they are two sets.</remarks>
+    public static string KeyFor(string directory, string firstVolumeName)
+    {
+        var key = NormalizeDirectory(directory) + "|" + firstVolumeName;
+        return OperatingSystem.IsWindows() ? key.ToUpperInvariant() : key;
+    }
 
     /// <summary>The same set gets the same id on every start, so its claim and its file are one thing.</summary>
     public static Guid IdFor(string key) =>
@@ -87,7 +92,7 @@ internal sealed class ArchiveDirectoryView
     public static ArchiveDirectoryView Read(string directory, IEnumerable<JobDto> allJobs, IEnumerable<string>? expectedNames = null)
     {
         var folder = ArchiveSetIdentity.NormalizeDirectory(directory);
-        var onDisk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var onDisk = new HashSet<string>(PathNames.Comparer);
         try
         {
             if (System.IO.Directory.Exists(folder))
@@ -101,12 +106,12 @@ internal sealed class ArchiveDirectoryView
             onDisk.Clear();
         }
 
-        var jobsByName = new Dictionary<string, List<JobDto>>(StringComparer.OrdinalIgnoreCase);
+        var jobsByName = new Dictionary<string, List<JobDto>>(PathNames.Comparer);
         foreach (var job in allJobs)
         {
             if (string.IsNullOrEmpty(job.FinalFilePath)) continue;
             var parent = Path.GetDirectoryName(job.FinalFilePath);
-            if (parent is null || !string.Equals(ArchiveSetIdentity.NormalizeDirectory(parent), folder, StringComparison.OrdinalIgnoreCase)) continue;
+            if (parent is null || !PathNames.Same(ArchiveSetIdentity.NormalizeDirectory(parent), folder)) continue;
             var name = Path.GetFileName(job.FinalFilePath);
             if (!jobsByName.TryGetValue(name, out var list)) jobsByName[name] = list = [];
             list.Add(job);
@@ -119,7 +124,7 @@ internal sealed class ArchiveDirectoryView
     }
 
     public ArchiveVolumeSet? FindSet(string fileName) =>
-        Sets.FirstOrDefault(set => set.Members.Contains(fileName, StringComparer.OrdinalIgnoreCase));
+        Sets.FirstOrDefault(set => set.Members.Contains(fileName, PathNames.Comparer));
 
     /// <summary>
     /// A set whose first volume really exists goes first: a later volume with nothing before it works out
@@ -153,8 +158,9 @@ internal sealed class ArchiveDirectoryView
         return Sets.FirstOrDefault(candidate =>
             candidate is { Scheme: ArchiveVolumeScheme.PartNumbered, FirstVolume: { } first } &&
             ArchiveSetIdentity.BaseOfFirstPart(first) is { } candidateBase &&
+            // A base, not a file name: bases match ignoring case, as ArchiveVolumes groups them.
             string.Equals(candidateBase, baseName, StringComparison.OrdinalIgnoreCase) &&
-            (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, StringComparer.OrdinalIgnoreCase))));
+            (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, PathNames.Comparer))));
     }
 }
 
@@ -165,7 +171,7 @@ internal sealed class ArchiveDirectoryView
 internal static class VolumeHeaders
 {
     private const int MostRemembered = 4096;
-    private static readonly ConcurrentDictionary<string, (long Length, long Ticks, bool Whole)> Known = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (long Length, long Ticks, bool Whole)> Known = new(PathNames.Comparer);
 
     public static bool SaysWholeArchive(string path)
     {

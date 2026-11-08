@@ -44,6 +44,14 @@ public sealed partial class HostCommandDispatcher
     public ArchiveIpcDispatcher? Archives { get; init; }
 
     /// <summary>
+    /// Answers <c>folders.browse</c> and <c>folders.create</c> where the platform offers folder browsing
+    /// (<see cref="PlatformCapabilities.SupportsFolderBrowse"/>). Null, or a platform without it, refuses them.
+    /// </summary>
+    public FolderBrowser? Folders { get; init; }
+
+    private FolderBrowser? AvailableFolders => _platform.Capabilities.SupportsFolderBrowse ? Folders : null;
+
+    /// <summary>
     /// What the hello offers. It is a set: clients look a name up (<c>Contains</c>) and never read a position. The desktop
     /// Host's list is still exactly the one it has sent since protocol 1, in that order, and a new name is only ever
     /// appended. A platform without something leaves its name out, so on one without a tray the names after
@@ -57,6 +65,7 @@ public sealed partial class HostCommandDispatcher
             if (_platform.Capabilities.SupportsTray) capabilities.Add("tray");
             capabilities.Add("status");
             if (_remote is not null) capabilities.Add("remote");
+            if (AvailableFolders is not null) capabilities.Add("folders");
             return capabilities;
         }
     }
@@ -397,6 +406,12 @@ public sealed partial class HostCommandDispatcher
                         .ConfigureAwait(false);
                     break;
 
+                case MessageTypes.FoldersBrowse:
+                case MessageTypes.FoldersCreate:
+                    await Reply(client, message, MessageTypes.FoldersBrowseResult,
+                        await BrowseFoldersAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
                     if (!_platform.Capabilities.SupportsProgramSettings &&
@@ -483,6 +498,21 @@ public sealed partial class HostCommandDispatcher
             await Reply(client, message, MessageTypes.HostActionResult,
                 new HostActionResult { Ok = false, Message = reason }).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Off the dispatcher's thread: a folder on a share that doesn't answer can take a while to list.</summary>
+    private async Task<FolderBrowseResult> BrowseFoldersAsync(IpcMessage message, CancellationToken cancellationToken)
+    {
+        if (AvailableFolders is not { } folders)
+            return new FolderBrowseResult { Error = "Folder browsing is not available here." };
+        if (message.Type == MessageTypes.FoldersCreate)
+        {
+            var create = message.GetPayload<FolderCreateRequest>();
+            return await Task.Run(() => folders.Create(create.Parent, create.Name), cancellationToken).ConfigureAwait(false);
+        }
+
+        var browse = message.Payload is null ? new FolderBrowseRequest() : message.GetPayload<FolderBrowseRequest>();
+        return await Task.Run(() => folders.Browse(browse.Path), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
