@@ -15,7 +15,8 @@ Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction Sil
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
-# Chrome and Edge each have a key; keep in step with BrowserBridge.NativeHostKeyPaths.
+# Chrome and Edge each have a key pointing at one manifest; Firefox has its own key and manifest.
+# Keep in step with BrowserBridge.NativeHostKeyPaths and BrowserBridge.FirefoxNativeHostKeyPath.
 # A key is removed only when it points at this install's manifest or at a file that no longer exists,
 # so another program's working registration under the same name is left alone.
 function Test-NativeKeyIsOurs([string]$registered, [string]$ownManifest) {
@@ -28,13 +29,16 @@ function Test-NativeKeyIsOurs([string]$registered, [string]$ownManifest) {
 }
 
 $hostName = "com.kaank.downloadmanager"
-$ownManifest = Join-Path $installRoot "native-host\$hostName.json"
+$chromiumManifest = Join-Path $installRoot "native-host\$hostName.json"
+$firefoxManifest = Join-Path $installRoot "native-host\$hostName.firefox.json"
 $nativeKeys = [ordered]@{
-    "Chrome" = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
-    "Edge"   = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+    "Chrome"  = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+    "Edge"    = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+    "Firefox" = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
 }
 foreach ($browser in $nativeKeys.Keys) {
     $nativeKey = $nativeKeys[$browser]
+    $ownManifest = if ($browser -eq "Firefox") { $firefoxManifest } else { $chromiumManifest }
     if (-not (Test-Path $nativeKey)) { continue }
     $registered = (Get-Item $nativeKey).GetValue("")
     if (-not (Test-NativeKeyIsOurs $registered $ownManifest)) {

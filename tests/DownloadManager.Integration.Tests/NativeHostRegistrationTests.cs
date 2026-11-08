@@ -338,7 +338,8 @@ public sealed class NativeHostRegistrationTests
     [Fact]
     public void Setup_registers_both_keys_with_the_same_manifest()
     {
-        var lines = SetupKeyLines();
+        // Firefox's key points at a manifest of its own; see the Firefox tests below.
+        var lines = SetupKeyLines().Where(l => !l.Contains(@"Software\Mozilla")).ToList();
 
         Assert.Equal(2, lines.Count);
         foreach (var path in BrowserBridge.NativeHostKeyPaths)
@@ -367,6 +368,86 @@ public sealed class NativeHostRegistrationTests
             code);
         Assert.Contains(@"RemoveNativeHostKey('Software\Google\Chrome\NativeMessagingHosts\{#NativeHostName}');", code);
         Assert.Contains(@"RemoveNativeHostKey('Software\Microsoft\Edge\NativeMessagingHosts\{#NativeHostName}');", code);
+    }
+
+    // --- Firefox (EXT.E1): its own key and its own manifest, optional like Edge's ---
+
+    private const string FakeFirefoxKey = @"HKCU:\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager";
+
+    [Fact]
+    public void Setup_registers_firefox_at_its_own_manifest_which_names_the_add_on_id()
+    {
+        var line = Assert.Single(SetupKeyLines(), l => l.Contains(@"Software\Mozilla"));
+        var expected = BrowserBridge.FirefoxNativeHostKeyPath.Replace("com.kaank.downloadmanager", "{#NativeHostName}");
+        Assert.Contains($"Subkey: \"{expected}\"", line);
+        Assert.Contains(@"ValueData: ""{app}\native-host\{#NativeHostName}.firefox.json""", line);
+        Assert.Contains("noerror", line);
+        Assert.DoesNotContain("uninsdeletekey", line);
+
+        var code = Code(@"installer\DownloadManager.iss", "//");
+        Assert.Contains($"#define FirefoxExtensionId \"{BrowserBridge.FirefoxExtensionId}\"", code);
+        Assert.Contains(@"WriteUtf8(ManifestDir + '\{#NativeHostName}.firefox.json',", code);
+        Assert.Contains(@"'  ""allowed_extensions"": [ ""{#FirefoxExtensionId}"" ]'", code);
+        Assert.Contains(@"RemoveFirefoxNativeHostKey('Software\Mozilla\NativeMessagingHosts\{#NativeHostName}');", code);
+        Assert.Matches(
+            @"RegQueryStringValue\(HKCU, SubKey, '', Registered\) and FileExists\(Registered\) and\s+\(CompareText\(Registered, ExpandConstant\('\{app\}\\native-host\\\{#NativeHostName\}\.firefox\.json'\)\) <> 0\) then\s+exit;\s+RegDeleteKeyIncludingSubkeys\(HKCU, SubKey\);",
+            code);
+    }
+
+    [Fact]
+    public void Register_script_writes_the_firefox_manifest_and_key()
+    {
+        using var sandbox = new ScriptSandbox();
+
+        var result = RunWithFakeRegistry(sandbox.Root, ScriptPath("register-native-host.ps1"), $"-AppDir '{sandbox.AppDir}' -Force");
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        var firefoxManifest = Path.Combine(sandbox.Root, "native-host", BrowserBridge.FirefoxManifestFileName);
+        Assert.Equal(firefoxManifest, result.Hive[FakeFirefoxKey]);
+        Assert.Contains("for Chrome and Edge and Firefox", result.Output);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(firefoxManifest));
+        Assert.Equal(BrowserBridge.FirefoxExtensionId, Assert.Single(manifest.RootElement.GetProperty("allowed_extensions").EnumerateArray()).GetString());
+        Assert.False(manifest.RootElement.TryGetProperty("allowed_origins", out _));
+        Assert.Equal(Path.Combine(sandbox.AppDir, "DownloadManager.NativeHost.exe"), manifest.RootElement.GetProperty("path").GetString());
+    }
+
+    [Fact]
+    public void Register_script_survives_a_denied_firefox_key()
+    {
+        using var sandbox = new ScriptSandbox();
+
+        var result = RunWithFakeRegistry(
+            sandbox.Root, ScriptPath("register-native-host.ps1"), $"-AppDir '{sandbox.AppDir}' -Force", deniedKeys: FakeFirefoxKey);
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        Assert.False(result.Hive.ContainsKey(FakeFirefoxKey));
+        Assert.Equal(sandbox.ManifestPath, result.Hive[FakeChromeKey]);
+        Assert.Contains("Could not register com.kaank.downloadmanager for Firefox", result.Output);
+    }
+
+    [Fact]
+    public void Register_script_refuses_another_programs_firefox_registration()
+    {
+        using var sandbox = new ScriptSandbox();
+        var other = Path.Combine(sandbox.Root, "other.json");
+        File.WriteAllText(other, "{}");
+
+        var result = RunWithFakeRegistry(
+            sandbox.Root, ScriptPath("register-native-host.ps1"), $"-AppDir '{sandbox.AppDir}'",
+            new Dictionary<string, string> { [FakeFirefoxKey] = other });
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("A different native host is already registered for: Firefox", result.Output);
+        Assert.Empty(result.Writes);
+    }
+
+    [Fact]
+    public void Uninstall_checks_firefox_against_its_own_manifest()
+    {
+        var script = Code(@"scripts\uninstall.ps1", "#");
+        Assert.Contains(@"""Firefox"" = ""HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName""", script);
+        Assert.Contains(@"$firefoxManifest = Join-Path $installRoot ""native-host\$hostName.firefox.json""", script);
+        Assert.Contains(@"$ownManifest = if ($browser -eq ""Firefox"") { $firefoxManifest } else { $chromiumManifest }", script);
     }
 
     [Fact]
