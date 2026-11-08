@@ -3,7 +3,7 @@
 ### Streams A1, A2 and C merged into `dev` (2026-11-08)
 
 - Merged after each stream's review fixes: `stream-a` (A1), `stream-a2` (A2), `stream-c` (extension). Only PROGRESS and ROADMAP conflicted, plus one stream-c command (`settings.downloadFolders`) that was added to the old pipe server; it now lives in `HostCommandDispatcher` with the other commands.
-- Full run on the merged branch, all green with no reruns: Core 863, Engine 154, Integration 1,215, TorBox 323, Archives 329, Containers 183, extension 92 (tsc clean). Logs: `artifacts\campaign61108-merged\` (trx per suite).
+- Full run on the merged branch, all green with no reruns: Core 863, Engine 154, Integration 1,215, TorBox 323, Archives 329, Containers 183, extension 92 (tsc clean). Logs: `artifacts\campaign\20261108-merged\` (trx per suite).
 - Running next: the UI walkthrough in dark and light, the independent recovery check, the extension end to end in Chrome for Testing, PERF.5/PERF.2/PERF.3 and the UP.B2 fix; D1b on `stream-b`.
 
 ### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
