@@ -14,7 +14,7 @@ To build (each recorded in ROADMAP):
 - **Web UI sessions** survive a server restart (same 24 h idle / 7 day lengths).
 - **Pairing:** an extension's token can revoke itself, so Unpair also removes it on the server.
 - **Docker:** default PUID/PGID 1000; Dependabot opens update PRs for the digest-pinned base images.
-- **TorBox:** keep one small archive in the account for live extraction checks, kept out of any test cleanup ("yes add one and airlock it").
+- **TorBox:** keep one small archive in the account for live extraction checks, kept out of any test cleanup, with TorBox's Airlock turned on for it ("yes add one and airlock it"; owner: Airlock is a TorBox feature that keeps a file from being deleted after 30 days).
 
 Kept as they are: CLI downloads get no completion window while the window is closed; no cap on segment retries while bytes arrive; downloads that can't resume keep running when the simultaneous limit drops; no separate per-host default for TorBox ("don't seperate hosters, options changes for all"); media downloads count under the per-host limit; program-running settings stay refused on a network server; the setup code for a first remote setup; minimum password 8; tokens don't expire; any Firefox extension may try to pair (the code is the credential); the This PC / Server pick is per download; a failed target leaves the download in the browser; root (PUID=0) refused; FFmpeg not in the image; a lost `secrets.key` stops the server; no extraction where the hard-link check can't run. Close button: the owner never needed two clicks (TEST.4 is a script-only effect).
 Later: a live expiring-link check with a real TorBox download (only the mock so far); the arm64 image; the second 8-hour soak runs without anything waiting for it.
