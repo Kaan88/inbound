@@ -157,7 +157,10 @@ internal sealed class PackageWindow : Window
             if (_closed) return;
             if (type == "removed") _jobs.Remove(job.Id);
             else _jobs[job.Id] = job;
-            if (_members.Contains(job.Id)) Render();
+            if (!_members.Contains(job.Id)) return;
+            Render();
+            // A name learned or changed can make the archive section apply.
+            RenderArchives();
         });
         _connection.ConnectionChanged += (connected, error) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -339,8 +342,10 @@ internal sealed class PackageWindow : Window
 
     private void RenderArchives()
     {
-        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown ? Visibility.Visible : Visibility.Collapsed;
         var sets = PackageSets();
+        var names = _members.Select(id => _jobs.TryGetValue(id, out var job) ? job.FileName : null).ToList();
+        var hasArchives = PackageArchiveSection.Show(names, sets.Count, _passwordSavedHere || sets.Any(set => set.HasPassword));
+        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown && hasArchives ? Visibility.Visible : Visibility.Collapsed;
 
         // The Host says whether a password is held only through a set, and a new package may have none yet.
         _clearPassword.IsEnabled = _passwordSavedHere || sets.Count == 0 || sets.Any(set => set.HasPassword);

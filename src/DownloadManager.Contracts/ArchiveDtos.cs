@@ -53,6 +53,13 @@ public sealed class ArchiveSetDto
     public List<string> Volumes { get; set; } = [];
     public List<string> MissingVolumes { get; set; } = [];
     public List<string> DownloadingVolumes { get; set; } = [];
+
+    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads are all paused.</summary>
+    public List<string> PausedVolumes { get; set; } = [];
+
+    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads wait in a queue, none running.</summary>
+    public List<string> QueuedVolumes { get; set; } = [];
+
     public List<string> FailedVolumes { get; set; } = [];
 
     /// <summary><c>probing</c>, <c>extracting</c>, <c>verifying</c> or <c>finalizing</c> while extracting.</summary>

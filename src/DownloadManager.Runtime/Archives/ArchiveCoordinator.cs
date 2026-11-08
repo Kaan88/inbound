@@ -490,6 +490,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         var present = new List<string>();
         var downloading = new List<string>();
+        var paused = new List<string>();
+        var queued = new List<string>();
         var failed = new List<string>();
         var missing = new List<string>(set.MissingVolumes);
         var jobIds = new List<Guid>();
@@ -497,7 +499,14 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         {
             var jobs = view.JobsNamed(member);
             jobIds.AddRange(jobs.Select(job => job.Id));
-            if (jobs.Any(job => job.State is not ("completed" or "failed" or "cancelled"))) downloading.Add(member);
+            var unfinished = jobs.Where(job => job.State is not ("completed" or "failed" or "cancelled")).ToList();
+            if (unfinished.Count > 0)
+            {
+                downloading.Add(member);
+                // Said apart so the text can name what holds it up: a paused download won't come on its own.
+                if (unfinished.All(job => job.State == "paused")) paused.Add(member);
+                else if (unfinished.All(job => job.State is "paused" or "queued")) queued.Add(member);
+            }
             else if (view.IsOnDisk(member)) present.Add(member);
             else if (jobs.Any(job => job.State is "failed" or "cancelled")) failed.Add(member);
             else missing.Add(member);
@@ -510,6 +519,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
 
         next.Volumes = present;
         next.DownloadingVolumes = downloading;
+        next.PausedVolumes = paused;
+        next.QueuedVolumes = queued;
         next.FailedVolumes = failed;
         next.MissingVolumes = missing;
         next.JobIds = jobIds.Distinct().ToList();
@@ -578,6 +589,8 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
             {
                 next.Volumes = [];
                 next.DownloadingVolumes = [];
+                next.PausedVolumes = [];
+                next.QueuedVolumes = [];
                 next.FailedVolumes = [];
                 next.JobIds = [];
                 next.MissingVolumes = [next.FirstVolumeName];

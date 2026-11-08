@@ -1,4 +1,3 @@
-using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -11,11 +10,12 @@ namespace DownloadManager.Desktop.WinUI;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private const long MegabytePerSecond = 1024 * 1024;
+    private const long MegabytePerSecond = SpeedLimitText.MegabytePerSecond;
     private static readonly int[] DownloadChoices = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16];
     private static readonly int[] ConnectionChoices = [1, 2, 4, 6, 8, 12, 16, 24, 32];
     private static readonly int[] SpeedChoices = [1, 2, 5, 10, 20, 30, 50, 70, 100, 200, 500];
     private bool _savingLimit;
+    private RadioMenuFlyoutItem? _otherSpeed;
 
     private void InitializeLimitMenus()
     {
@@ -31,9 +31,11 @@ public sealed partial class MainWindow
             SpeedLimitMenu.Items.Add(LimitItem($"{value} MB/s", "Speed", value * MegabytePerSecond,
                 settings => settings.GlobalSpeedLimitBytesPerSecond = value * MegabytePerSecond));
         SpeedLimitMenu.Items.Add(new MenuFlyoutSeparator());
-        var custom = new MenuFlyoutItem { Text = "Other…" };
+        // In the same group as the presets: it carries the mark when the cap is none of them.
+        var custom = new RadioMenuFlyoutItem { Text = "Other…", GroupName = "LimitSpeed" };
         custom.Click += async (_, _) => await AskCustomSpeedAsync();
         SpeedLimitMenu.Items.Add(custom);
+        _otherSpeed = custom;
         UpdateLimitButtons();
     }
 
@@ -56,6 +58,12 @@ public sealed partial class MainWindow
         Tick(DownloadsLimitMenu, settings.MaxConcurrentDownloads);
         Tick(ConnectionsLimitMenu, settings.DefaultConnections);
         Tick(SpeedLimitMenu, speed);
+        if (_otherSpeed is not null)
+        {
+            var presets = SpeedChoices.Select(value => value * MegabytePerSecond);
+            _otherSpeed.Text = SpeedLimitText.OtherLabel(speed, presets);
+            _otherSpeed.IsChecked = !SpeedLimitText.IsPreset(speed, presets);
+        }
     }
 
     private static void Tick(MenuFlyoutSubItem menu, long value)
@@ -64,13 +72,7 @@ public sealed partial class MainWindow
             item.IsChecked = item.Tag is long tag && tag == value;
     }
 
-    internal static string SpeedText(long bytesPerSecond)
-    {
-        var megabytes = bytesPerSecond / (double)MegabytePerSecond;
-        return megabytes >= 1
-            ? $"{megabytes.ToString("0.##", CultureInfo.CurrentCulture)} MB/s"
-            : $"{(bytesPerSecond / 1024d).ToString("0.#", CultureInfo.CurrentCulture)} KB/s";
-    }
+    internal static string SpeedText(long bytesPerSecond) => SpeedLimitText.Speed(bytesPerSecond);
 
     private async Task AskCustomSpeedAsync()
     {
