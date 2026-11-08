@@ -104,6 +104,9 @@ public sealed class HostPipeServer
     /// </summary>
     internal const int MaxClients = 64;
 
+    /// <summary>How long the hello pipe waits for a client's <c>client.hello</c> before closing the connection.</summary>
+    internal static readonly TimeSpan ClientHelloTimeout = TimeSpan.FromSeconds(5);
+
     private static NamedPipeServerStream CreatePipe(string pipeName)
     {
         var security = PipeSecurityFactory.CreateForCurrentUser();
@@ -133,7 +136,22 @@ public sealed class HostPipeServer
             IpcMessage? incompatible = null;
             if (clientSpeaksFirst)
             {
-                var first = await IpcFraming.ReadAsync(client.Stream, serverToken).ConfigureAwait(false);
+                IpcMessage? first;
+                using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(serverToken))
+                {
+                    // A client that connects and never says hello would hold a pipe instance until it went away.
+                    deadline.CancelAfter(ClientHelloTimeout);
+                    try
+                    {
+                        first = await IpcFraming.ReadAsync(client.Stream, deadline.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!serverToken.IsCancellationRequested)
+                    {
+                        _log.Warn($"A client on the hello pipe sent no {MessageTypes.ClientHello} within {ClientHelloTimeout.TotalSeconds:0} s; closed.");
+                        return;
+                    }
+                }
+
                 if (first is null)
                 {
                     return;
@@ -147,7 +165,8 @@ public sealed class HostPipeServer
                 }
                 else if (first.Type != MessageTypes.ClientHello)
                 {
-                    _log.Warn($"A client on the hello pipe sent '{(first.Type.Length > 64 ? first.Type[..64] : first.Type)}' first instead of {MessageTypes.ClientHello}; closed.");
+                    var type = first.Type ?? "(no type)";
+                    _log.Warn($"A client on the hello pipe sent '{(type.Length > 64 ? type[..64] : type)}' first instead of {MessageTypes.ClientHello}; closed.");
                     return;
                 }
                 else
