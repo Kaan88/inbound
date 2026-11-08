@@ -43,6 +43,14 @@ Review of this branch (2026-11-08), each finding checked against the code:
 - Review fixes: a folder typed in Save in before the late `dm.targets` answer is kept (a later target switch still shows that target's default); Unpair with nothing paired says "Not paired" rather than advising removal on a server; `revokeSelf` time-out and wrong-token 401 are tested. Open for the owner: Unpair forgets the token before calling `DELETE /api/pair/self` (the stated order was the reverse), so no download can use the token meanwhile; the end state is the same either way.
 - Evidence: extension `npx tsc --noEmit` clean, `npm test` 143/143 (new: 3 page tests in `form-gate.test.cjs`, 9 in `server-target.test.cjs`, 1 in `transport.test.cjs`; 13 in all), `npm run build` and `npm run build:firefox` succeed. Docs: `docs/browser-integration.md`, `docs/chrome-extension-privacy.md`. Not checked on screen.
 
+### TorBox kept archive, TB.L2 (2026-11-08, branch `owner-torbox-file`)
+
+- Added web download `inbound-live-check-archive.zip` (id 2240130) to the account and turned Airlock on ("yes add one and airlock it"). Content: a 1.29 MB public domain zip from archive.org (Project Gutenberg eBook 14838), no password. TorBox can't take a local file, GitHub and sqlite.org links were refused, so not our own zip.
+- A fresh `mylist` read: `cached: true`, `airlocked: true`, tag `inbound-live-check`, one 1,291,466-byte zip. `expires_at` still said 2026-12-08 after Airlock; whether Airlock lifts it is unverified.
+- Live tests now remove items only through `LiveAccount.RemoveUnlessKeptAsync`, which skips `inbound-live-check*` names. `KeptArchiveTests`: 9 pass without a key; with the key all 10 pass, including the live read of the item. LiveTests project without a key: 9 passed, 30 skipped.
+- API calls: 7 in all (2 refused submissions, 1 submission, 1 read, 1 edit, 1 read, 1 list from the live test). No key or link was printed, logged or committed.
+- Review fixes (2026-11-08): TB.L2 is now **partial**, not done: the keeping past 30 days is unverified until a read after 2026-12-08, and Airlock's meaning is the owner's description (TorBox's schema has only an undescribed `airlocked` field). The removal guard now scans subfolders, catches any `RemoveAsync` mention outside the helper's body (spaced calls, method groups), `RemoteQueueAction.Remove`, `controlqueued` and any "delete" string, with sample-text tests for each. The kept-name rule needs a non-letter, non-digit after the prefix. The live read compares TorBox's md5 when given, and a new live test downloads the file and checks its md5 (not yet run: no key in this session). Docs say the protection covers live test cleanup only. LiveTests project without a key: 24 passed, 31 skipped.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):

@@ -24,8 +24,10 @@ public sealed class LiveSubmitTests(ITestOutputHelper output)
             var answer = await client.SubmitAsync(new RemoteSubmission { Kind = kind, Link = link, OnlyIfCached = true });
             if (answer.Ref is { } created)
             {
-                await client.RemoveAsync(created);
-                Assert.Fail("Asked only if cached, for content that can't be, and it created an item. It was removed.");
+                var removed = await LiveAccount.RemoveUnlessKeptAsync(client, created);
+                Assert.Fail(removed
+                    ? "Asked only if cached, for content that can't be, and it created an item. It was removed."
+                    : "Asked only if cached, for content that can't be, and it answered with an item that is kept or already gone. Nothing was removed.");
             }
         }
         catch (RemoteProviderException ex)
