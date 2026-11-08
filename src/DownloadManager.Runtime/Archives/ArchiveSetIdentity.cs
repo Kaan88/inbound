@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -34,8 +35,12 @@ internal static partial class ArchiveSetIdentity
     /// </summary>
     public static string KeyFor(string directory, ArchiveVolumeSet set) => KeyFor(directory, FirstName(set));
 
-    public static string KeyFor(string directory, string firstVolumeName) =>
-        (NormalizeDirectory(directory) + "|" + firstVolumeName).ToUpperInvariant();
+    /// <remarks>Folded to capitals on Windows only, where a.rar and A.RAR are one file. On Linux they are two sets.</remarks>
+    public static string KeyFor(string directory, string firstVolumeName)
+    {
+        var key = NormalizeDirectory(directory) + "|" + firstVolumeName;
+        return OperatingSystem.IsWindows() ? key.ToUpperInvariant() : key;
+    }
 
     /// <summary>The same set gets the same id on every start, so its claim and its file are one thing.</summary>
     public static Guid IdFor(string key) =>
@@ -82,7 +87,7 @@ internal sealed class ArchiveDirectoryView
     public static ArchiveDirectoryView Read(string directory, IEnumerable<JobDto> allJobs, IEnumerable<string>? expectedNames = null)
     {
         var folder = ArchiveSetIdentity.NormalizeDirectory(directory);
-        var onDisk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var onDisk = new HashSet<string>(PathNames.Comparer);
         try
         {
             if (System.IO.Directory.Exists(folder))
@@ -101,7 +106,7 @@ internal sealed class ArchiveDirectoryView
         {
             if (string.IsNullOrEmpty(job.FinalFilePath)) continue;
             var parent = Path.GetDirectoryName(job.FinalFilePath);
-            if (parent is null || !string.Equals(ArchiveSetIdentity.NormalizeDirectory(parent), folder, StringComparison.OrdinalIgnoreCase)) continue;
+            if (parent is null || !PathNames.Same(ArchiveSetIdentity.NormalizeDirectory(parent), folder)) continue;
             var name = Path.GetFileName(job.FinalFilePath);
             if (!jobsByName.TryGetValue(name, out var list)) jobsByName[name] = list = [];
             list.Add(job);

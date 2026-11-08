@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -358,7 +359,7 @@ public sealed partial class ArchiveCoordinator : IAsyncDisposable, IPackagePassw
         {
             return _sets.Values.FirstOrDefault(record => record.Key == key)
                 ?? _sets.Values.FirstOrDefault(record =>
-                    string.Equals(ArchiveSetIdentity.NormalizeDirectory(record.Directory), view.Directory, StringComparison.OrdinalIgnoreCase) &&
+                    PathNames.Same(ArchiveSetIdentity.NormalizeDirectory(record.Directory), view.Directory) &&
                     ReferenceEquals(view.FindFor(record), set));
         }
     }
