@@ -183,11 +183,14 @@ await capture('05-delete-dialog', signedIn, async (p) => {
   await p.getByRole('toolbar').getByRole('button', { name: 'Delete', exact: true }).click();
   await p.waitForSelector('[role="dialog"]');
 });
-await capture('06-job-details', signedIn, async (p) => {
+await capture('06-job-details', signedIn, async (p, v) => {
   await app(p, '#/all');
   const expand = p.getByRole('button', { name: 'Expand' }).first();
   if (await expand.count()) await expand.click();
-  await p.locator('[role="grid"] [role="row"]', { hasText: 'holiday-video' }).last().dblclick();
+  // A tap opens it on a phone; a double-click with a mouse.
+  const row = p.locator('[role="grid"] [role="row"]', { hasText: 'holiday-video' }).last();
+  if (v.hasTouch) await row.tap();
+  else await row.dblclick();
   await p.waitForSelector('[role="dialog"]');
 });
 await capture('07-add-links', signedIn, async (p) => {

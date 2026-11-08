@@ -1,5 +1,46 @@
 # Progress — session handoff
 
+### D2 web UI with sign-in and pairing, on `webui` (2026-11-08)
+
+- **Server sign-in** (`src/DownloadManager.Server/Auth`), on by default: one password (setup page, or
+  `DOWNLOADMANAGER_PASSWORD` / `_FILE`), PBKDF2-SHA256 600k in `<data>/auth.json`; a setup code from the server log
+  for a browser that isn't on the server's machine; `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`,
+  `Secure` on HTTPS, `X-Forwarded-Proto` only with `DOWNLOADMANAGER_TRUST_PROXY=1`), 24 h idle and 7 days at most,
+  sign-out and password change close the session's WebSockets; growing waits per address; only `/health`, the
+  sign-in page, `/favicon.svg` and `/theme.js` public. `DOWNLOADMANAGER_AUTH=off` brings back the D1b loopback rule.
+- **Pairing** for the extension: an 8-character code for 10 minutes, `POST /api/pair` gives a token (hash stored),
+  listed and revocable, allowed only the extension's commands plus `folders.browse` on `POST /api/ipc`; CORS for our
+  extension ids. The extension's own server transport is not built (Stream C).
+- **Web UI** in `webui/` (Svelte 5.57.3, Vite 8.3.6, Tailwind 4.3.5, exact versions, `npm ci` works offline from the
+  lockfile), built into the server's `wwwroot` by its csproj; `scripts\build.ps1` builds it first. Every planned
+  screen: list with live progress, packages, views and bulk actions; add links incl. magnets, provider links and
+  torrent upload; extraction and its password; queues and scheduler; settings, favorites, site logins, proxy,
+  extraction, read-only program settings; sign-in, password change, pairing; My TorBox and hoster status; the
+  server folder browser wherever a folder is chosen. Both themes from the `App.xaml` tokens; phone layout at 390 px
+  (tap opens a download there).
+- **Evidence:** Server.Tests 57/57 (`AuthTests` 11, `PairingTests` 5). webui: vitest 34/34, `npm run check` 0
+  errors and 0 warnings. `npm run screens` (Playwright Chromium 158) against the server with a temp data folder and
+  roots under `artifacts\webui-run\`, the TestServer with its mock TorBox, and a local file server with a test 7z:
+  26 screens at 1360 and 390 px in dark and light (`artifacts\webui\`, looked at), no console error, page error or
+  sideways scroll, and end to end: the archive password extracted the 7z, pause and resume, delete without the
+  file left it on disk, a `.torrent` upload reached the mock provider, site login and proxy passwords saved
+  write-only, a pairing code from the page gave a token that was refused `settings.get` and answered 401 once
+  removed, sign-out. Nothing ran against the real TorBox, and nothing in a container yet.
+- **Found and fixed by the walk:** the sign-in page had no styles (Tailwind didn't scan `src/` from the sign-in
+  build's root); long paths widened the folder browser and settings on a phone; selecting a package in Finished also
+  selected its unfinished files, so Delete would have removed them (now a package row stands for its files in that
+  view, vitest); phone toolbar buttons had no accessible name; a phone had no way to open a download (no
+  double-click); a past provider wait was shown as "Waiting until".
+- **Not delegated:** the review delegation to a cheaper model was not done; this session has no agent tool. The work
+  is unreviewed.
+- **Questions for the owner (safer choice taken):** the setup code from the log for a browser elsewhere; session
+  lengths (24 h idle, 7 days); sign-in off only by `DOWNLOADMANAGER_AUTH=off`, not from the web UI; password at least
+  8 characters; at most 50 paired browsers (the oldest goes); `moz-extension://` origins let in on `/api/pair` and on
+  `/api/ipc` with a token, since Firefox ids are random; the server version hidden from browsers that aren't signed
+  in.
+- **Next:** D3 (Dockerfile and compose, the web UI built in a Node stage), the extension's server transport, D4 on the
+  test VM.
+
 ### D1b merged into `dev` (2026-11-08)
 
 - `stream-b` (the headless server and its Linux replacements, with review fixes) merged. Conflicts: the spanned-zip grouping now uses the OS-aware name comparer from D1b, the service keeps stream-c's `NativeHostState` next to D1b's `Roots`, and the server no longer sets the old `NativeHostRegistered` property (unset reads as not registered).

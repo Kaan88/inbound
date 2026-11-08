@@ -1,8 +1,54 @@
 # Plan: headless server, web UI and Docker (D1 to D4)
 
 Status: plan, 2026-11-07. D1a (the shared command dispatcher) and D1b (the server and the Linux replacements) are
-built on `stream-b`, 2026-11-08; what D1b holds is described in the next section. D2 to D4 are not started. ROADMAP D1
-to D4 and PERF.1 to PERF.3 track it.
+built on `stream-b`, 2026-11-08; what D1b holds is described below. D2 (sign-in, browser pairing and the web UI) is
+built on `webui`, 2026-11-08, in the next section. D3 and D4 are not started. ROADMAP D1 to D4 and PERF.1 to PERF.3
+track it.
+
+## D2: what was built (2026-11-08)
+
+- **Sign-in** (`src/DownloadManager.Server/Auth`), on by default. One user. The password is set on the setup page the
+  first time, or comes from `DOWNLOADMANAGER_PASSWORD` / `DOWNLOADMANAGER_PASSWORD_FILE` (then the page can't change
+  it). PBKDF2-SHA256 with 600,000 iterations in `<data>/auth.json`. A browser that isn't on the server's own machine
+  (or reaches it through a proxy) also needs the setup code the server writes to its log at start, so whoever reaches
+  a fresh server first over the network can't claim it. Sessions: 256-bit ids in an `HttpOnly`, `SameSite=Strict`
+  cookie (`Secure` over HTTPS; `X-Forwarded-Proto` believed only with `DOWNLOADMANAGER_TRUST_PROXY=1`), 24 hours idle
+  and 7 days at most, kept in memory as hashes; sign-out and a password change end them and close their WebSockets.
+  Wrong tries make the client address wait 1, 2, 4 ... seconds up to 5 minutes. Only `/health`, the sign-in page and
+  its assets, `/favicon.svg` and `/theme.js` answer without a session. With sign-in on, the server may listen beyond
+  loopback (the default `0.0.0.0:8080` works); `DOWNLOADMANAGER_AUTH=off` turns it off and brings back the D1b rule
+  (loopback only unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1`). The status call tells the version only to a
+  signed-in browser. Evidence: `AuthTests` (11) in Server.Tests.
+- **Browser pairing:** Settings, Sign-in and browsers, "Pair a browser" shows an 8-character code for ten minutes,
+  once. The extension sends it to `POST /api/pair` and gets a long token (only its hash is kept), listed by name with
+  when it was paired and last used, and removable. The token works only on `POST /api/ipc` and only for the
+  extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
+  never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
+  (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side
+  (choosing the server, entering the code, sending there) is Stream C's transport work and is not built here.
+- **Torrent upload:** `POST /api/upload/torrent` keeps the file in `<data>/uploads` (removed after a day, at most 200),
+  a folder only the provider coordinator may read besides the roots.
+- **Web UI** (`webui/`, Svelte 5, Vite 8, Tailwind 4, exact versions in `package-lock.json`): built to
+  `webui/dist`, which the server's build copies into `wwwroot` (`webui/README.md` has the order and the commands;
+  `scripts/build.ps1` builds it first). The sign-in page is its own build under `/signin/`. Screens, in the planned
+  order: the download list with live progress, packages, the state views and bulk pause, resume and delete (with
+  "delete the files too" unticked by default); add links (single, batch, magnets, provider and hoster links, a
+  `.torrent` upload with its files to choose, the not-cached approval); extraction status and the password prompt;
+  queues and the scheduler; settings, favorite folders, site logins, proxy and extraction, with the program-running
+  settings shown read-only and why; My TorBox (key, plan, what is in the account with Download, hoster status). The
+  folder browser (favorites with free space, the allowed roots, create a folder, check a typed path) opens wherever
+  a folder is chosen. Colors are the desktop's `App.xaml` tokens as CSS variables in both themes; the layout works at
+  390 pixels wide. The protocol client reconnects with waits of 0.5 s doubling to 15 s, and sends the calls that wait
+  on the network through `POST /api/ipc` so they don't hold up the WebSocket's queue.
+  Evidence: vitest 34 (protocol client: replies, timeouts, reconnect waits, signed out, incompatible; model; views;
+  add routing; format; store); `npm run check` clean; `npm run screens` over 26 screens at desktop and phone width in
+  both themes with no console error, page error or sideways scroll, plus the actions it checks end to end (extraction
+  after the password, pause and resume, delete without the file, torrent upload to the mock provider, site login and
+  proxy saved write-only, pairing and revoking, sign-out), against the server with a temp data folder, the
+  TestServer and its mock TorBox. Screenshots: `artifacts\webui\` (not committed).
+- **Not done here:** the Dockerfile and compose (D3, which builds the web UI in a Node stage from the lockfile before
+  `dotnet publish`), the run on the Linux VM and against the real TorBox (D4), and the extension's server transport.
+
 
 ## D1b: what was built (2026-11-08)
 
@@ -39,10 +85,10 @@ and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows 
   an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. That stops another web page, including one that
   points its own name at the server (DNS rebinding), from driving it through the user's browser.
 
-**There is no sign-in yet (D2).** Anyone who can reach the port can do everything a client can: add and delete
-downloads, write files anywhere in the roots, change settings, enter or replace the TorBox key and site logins. The server therefore refuses
-to listen on anything but loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and logs a warning when
-it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep the port on a trusted home network.
+**Sign-in (D2) is on by default.** With it turned off (`DOWNLOADMANAGER_AUTH=off`), anyone who can reach the port can
+do everything a client can: add and delete downloads, write files anywhere in the roots, change settings, enter or
+replace the TorBox key and site logins. The server then refuses to listen on anything but loopback unless
+`DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set too, and logs a warning when it is.
 
 ### The Linux replacements
 
@@ -134,8 +180,8 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 
 ## D2 Web UI
 
-- **Technology:** TypeScript, as in the extension, with Preact and esbuild: a small bundle and a short
-  toolchain. Served by the Server as static files. Owner decision.
+- **Technology:** Svelte 5 with Vite and Tailwind CSS (owner, 2026-11-08: "whatever is fancy"), built to static
+  files the Server serves. Built: see "D2: what was built" above.
 - **Screens, in this order:**
   1. Download list with live progress, packages, the state views and bulk actions.
   2. Add links: single, batch, and TorBox links, magnets and torrent-file upload.
@@ -148,10 +194,11 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
   free space (the UI.R9 and UI.R10 calls), can create a folder, and checks a typed path. Nothing outside the
   roots is reachable, with symlinks resolved before the check.
 - **Sign-in:** one user. A password is set on first open, or from an environment variable, and stored hashed.
-  Session cookie (`HttpOnly`, `SameSite=Strict`), origin check on every change, a short lock-out after failed
-  tries. Only `/health` answers without signing in. TLS comes from a reverse proxy; the docs show one.
-- **Browser extension:** native messaging cannot reach a container. Sending from Chrome to the server would
-  need the extension to call it over HTTPS with a token. That comes later, as its own item.
+  Session cookie (`HttpOnly`, `SameSite=Strict`), origin check on every change, a growing wait after failed
+  tries. Only `/health` and the sign-in page answer without signing in. TLS comes from a reverse proxy (D3 docs).
+- **Browser extension:** native messaging cannot reach a container. The server side is built: pairing by a one-time
+  code, and a token for `POST /api/ipc` limited to the extension's commands. The extension's transport is its own
+  item.
 
 ## D3 Docker
 
