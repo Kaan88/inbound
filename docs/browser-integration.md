@@ -105,6 +105,8 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   (`DownloadItem.cookieStoreId`, a container tab's container), on the automatic and the "ask" paths alike;
   Chromium has no such field and reads the default store. Firefox may install the extension without access to sites;
   then Settings shows "Allow access to all sites", which asks with `permissions.request` from the click.
+  Meanwhile a download from a site without access (`permissions.contains` for its origin) is not caught: it
+  stays in the browser, unpaused, with a note, since its cookies could not be read. Chromium is not asked.
 - **Registration.** Firefox lists add-on IDs (`allowed_extensions`) where Chrome lists origins, so it has a
   manifest of its own, `native-host\com.kaank.downloadmanager.firefox.json`, under its own key
   `HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager`. Setup and
