@@ -3,11 +3,12 @@ using System.Text.RegularExpressions;
 namespace DownloadManager.Desktop.WinUI;
 
 // The web UI messages of the Host (webui.*). They are pipe-only: the Host refuses them to a web or token
-// session. These types follow the agreed contract field for field; when the contract's own types are in
-// DownloadManager.Contracts, this file's copies of the types are deleted and nothing else changes.
+// session. These types follow the agreed contract field for field. They are named ...Wire on purpose, so they can't
+// silently shadow the contract's own types (DownloadManager.Contracts: WebUiStatusDto and so on) when those arrive:
+// at the merge, delete the Wire types and use the contract's, and the build then points at every place left.
 
 /// <summary>The message names of the web UI commands.</summary>
-internal static class WebUiMessageTypes
+internal static class WebUiWireTypes
 {
     public const string Get = "webui.get";
     public const string Set = "webui.set";
@@ -15,10 +16,16 @@ internal static class WebUiMessageTypes
     public const string Recheck = "webui.recheck";
     public const string OpenTicket = "webui.openTicket";
     public const string Changed = "webui.changed";
+
+    /// <summary>The reply to get, set, setPassword and recheck.</summary>
+    public const string Status = "webui.status";
+
+    /// <summary>The reply to openTicket.</summary>
+    public const string Ticket = "webui.ticket";
 }
 
 /// <summary>What the Host says about the web UI: <c>webui.get</c> and <c>webui.changed</c>.</summary>
-internal sealed class WebUiStatusDto
+internal sealed class WebUiStatusWire
 {
     public bool Enabled { get; set; }
     public int Port { get; set; } = WebUiForm.DefaultPort;
@@ -26,14 +33,14 @@ internal sealed class WebUiStatusDto
     public bool HasPassword { get; set; }
 
     /// <summary><c>off</c>, <c>starting</c>, <c>running</c> or <c>failed</c>.</summary>
-    public string State { get; set; } = WebUiStates.Off;
+    public string State { get; set; } = WebUiWireStates.Off;
     public string? Error { get; set; }
 
     /// <summary>The web UI listens on this PC only, because the firewall rule is missing.</summary>
     public bool LocalOnly { get; set; }
 
     /// <summary><c>ready</c>, <c>missing</c> or <c>unknown</c>.</summary>
-    public string Firewall { get; set; } = WebUiFirewallStates.Unknown;
+    public string Firewall { get; set; } = WebUiWireFirewall.Unknown;
 
     /// <summary>The addresses to type on another device, empty while <see cref="LocalOnly"/>.</summary>
     public List<string> Addresses { get; set; } = [];
@@ -41,9 +48,15 @@ internal sealed class WebUiStatusDto
     /// <summary>Full path of the program the firewall rule names.</summary>
     public string BridgePath { get; set; } = string.Empty;
     public string RuleName { get; set; } = WebUiForm.DefaultRuleName;
+
+    /// <summary>
+    /// The Host refused the request this reply answers: an <see cref="Error"/> on a status that isn't a failed start
+    /// (nothing changed then).
+    /// </summary>
+    public bool IsRefusal => !string.IsNullOrWhiteSpace(Error) && State != WebUiWireStates.Failed && State != WebUiWireStates.Starting;
 }
 
-internal static class WebUiStates
+internal static class WebUiWireStates
 {
     public const string Off = "off";
     public const string Starting = "starting";
@@ -51,7 +64,7 @@ internal static class WebUiStates
     public const string Failed = "failed";
 }
 
-internal static class WebUiFirewallStates
+internal static class WebUiWireFirewall
 {
     public const string Ready = "ready";
     public const string Missing = "missing";
@@ -59,7 +72,7 @@ internal static class WebUiFirewallStates
 }
 
 /// <summary><c>webui.set</c>: only the fields that change.</summary>
-internal sealed class WebUiSetRequest
+internal sealed class WebUiSetWire
 {
     public bool? Enabled { get; set; }
     public int? Port { get; set; }
@@ -67,19 +80,23 @@ internal sealed class WebUiSetRequest
 }
 
 /// <summary><c>webui.setPassword</c>. The password goes only into this message.</summary>
-internal sealed class WebUiSetPasswordRequest
+internal sealed class WebUiPasswordWire
 {
     public string Password { get; set; } = string.Empty;
 }
 
 /// <summary>The reply of <c>webui.openTicket</c>.</summary>
-internal sealed class WebUiTicketDto
+internal sealed class WebUiTicketWire
 {
-    public string Url { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string? Error { get; set; }
 }
 
 /// <summary>The kinds of network Windows sorts connections into.</summary>
 internal enum NetworkProfile { Private, Public, Domain }
+
+/// <summary>One connected network: its name in Windows and its kind.</summary>
+internal sealed record NetworkEntry(string Name, NetworkProfile Kind);
 
 /// <summary>The checks and the words of the Options page that don't need a window.</summary>
 internal static partial class WebUiForm
@@ -141,7 +158,7 @@ internal static partial class WebUiForm
     /// What to send for the box, port and names, or null when nothing changed. A problem comes back in
     /// <paramref name="problem"/>; the box can't be ticked on without a password.
     /// </summary>
-    public static WebUiSetRequest? Changes(WebUiStatusDto saved, bool enabled, double port, string? namesText, out string? problem)
+    public static WebUiSetWire? Changes(WebUiStatusWire saved, bool enabled, double port, string? namesText, out string? problem)
     {
         problem = PortProblem(port);
         if (problem is not null) return null;
@@ -153,7 +170,7 @@ internal static partial class WebUiForm
             return null;
         }
 
-        var request = new WebUiSetRequest();
+        var request = new WebUiSetWire();
         var changed = false;
         if (enabled != saved.Enabled) { request.Enabled = enabled; changed = true; }
         if ((int)port != saved.Port) { request.Port = (int)port; changed = true; }
@@ -167,10 +184,11 @@ internal static partial class WebUiForm
     }
 
     /// <summary>The addresses to type on another device. While the web UI listens on this PC only, the address of this PC.</summary>
-    public static List<string> AddressesToType(WebUiStatusDto status)
+    public static List<string> AddressesToType(WebUiStatusWire status)
     {
-        if (status.State != WebUiStates.Running) return [];
-        if (status.LocalOnly || status.Addresses.Count == 0) return [$"http://localhost:{status.Port}/"];
+        if (status.State != WebUiWireStates.Running) return [];
+        // While it listens on this PC only, no address works on another device, so none is offered.
+        if (status.LocalOnly) return [];
         var all = new List<string>(status.Addresses);
         foreach (var name in status.AlsoReachableAs)
         {
@@ -181,43 +199,50 @@ internal static partial class WebUiForm
         return all;
     }
 
-    public static (string Text, bool IsProblem) StateText(WebUiStatusDto status) => status.State switch
+    public static (string Text, bool IsProblem) StateText(WebUiStatusWire status) => status.State switch
     {
-        WebUiStates.Starting => ("Starting…", false),
-        WebUiStates.Running when status.LocalOnly => ("On, but only this PC can reach it until Windows Firewall allows it (below).", false),
-        WebUiStates.Running => ("On. Other devices on your network can open it.", false),
-        WebUiStates.Failed => ($"It couldn't start. {FailureWords(status.Error)}", true),
+        WebUiWireStates.Starting => ("Starting…", false),
+        WebUiWireStates.Running when status.LocalOnly => ("On, but only this PC can reach it until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.", false),
+        WebUiWireStates.Running => ("On. Other devices on your network can open it.", false),
+        WebUiWireStates.Failed => ($"It couldn't start. {FailureWords(status.Error)}", true),
         _ => ("Off. Nothing is running and no port is open.", false),
     };
 
     private static string FailureWords(string? error)
         => string.IsNullOrWhiteSpace(error) ? "Check that no other program uses this port, then try again." : error.Trim();
 
-    public static string PasswordText(WebUiStatusDto status)
+    public static string PasswordText(WebUiStatusWire status)
         => status.HasPassword ? "A password is set." : "No password is set yet. Set one before turning this on.";
 
-    public static string FirewallText(WebUiStatusDto status) => status.Firewall switch
+    public static string FirewallText(WebUiStatusWire status) => status.Firewall switch
     {
-        WebUiFirewallStates.Ready => "Windows Firewall allows other devices to reach this.",
-        WebUiFirewallStates.Missing => "Windows Firewall isn't set to allow this yet, so other devices can't reach it.",
+        WebUiWireFirewall.Ready => "Windows Firewall allows other devices to reach this.",
+        WebUiWireFirewall.Missing => "Windows Firewall isn't set to allow this yet, so other devices can't reach it.",
         _ => "Whether Windows Firewall allows this couldn't be read.",
     };
 
     public const string PublicNetworkNote =
-        "This PC's network is set to Public. Windows treats Public networks as untrusted. Setting the network to Private in Windows Settings is the safer fix; or tick \"Also allow on Public networks\" below.";
+        "Every network this PC is on is set to Public. Windows treats Public networks as untrusted. Setting your home network to Private in Windows Settings is the safer fix; or tick \"Also allow on Public networks\" below.";
 
-    /// <summary>The wording of the network type line; the profiles are null when they could not be read.</summary>
-    public static string ProfileText(IReadOnlyList<NetworkProfile>? profiles)
+    /// <summary>The note applies only when no connected network is Private or Domain: one Public adapter (a VPN, say) is not a reason.</summary>
+    public static bool ShowPublicNote(IReadOnlyList<NetworkEntry>? networks)
+        => networks is { Count: > 0 } && networks.All(network => network.Kind == NetworkProfile.Public);
+
+    /// <summary>The wording of the network type line; the networks are null when they could not be read.</summary>
+    public static string ProfileText(IReadOnlyList<NetworkEntry>? networks)
     {
-        if (profiles is null) return "Network type: couldn't be read.";
-        if (profiles.Count == 0) return "Network type: this PC isn't connected to a network.";
-        return "Network type: " + string.Join(", ", profiles.Distinct().Select(profile => profile switch
-        {
-            NetworkProfile.Private => "Private",
-            NetworkProfile.Public => "Public",
-            _ => "Domain",
-        })) + ".";
+        if (networks is null) return "Network type: couldn't be read.";
+        if (networks.Count == 0) return "Network type: this PC isn't connected to a network.";
+        return "Network type: " + string.Join(", ", networks.Select(network =>
+            $"{(string.IsNullOrWhiteSpace(network.Name) ? "network" : network.Name)} is {KindText(network.Kind)}")) + ".";
     }
+
+    private static string KindText(NetworkProfile kind) => kind switch
+    {
+        NetworkProfile.Private => "Private",
+        NetworkProfile.Public => "Public",
+        _ => "Domain",
+    };
 
     /// <summary>Opening the browser needs the Host's own sign-in link: this PC, http, the port, no credentials.</summary>
     public static bool IsLocalSignInUrl(string? url, int port)

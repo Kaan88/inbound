@@ -624,7 +624,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                 var change = message.GetPayload<ArchiveChangedDto>();
                 _post(() => State.Apply(change));
             }
-            else if (message.Type == WebUiMessageTypes.Changed)
+            else if (message.Type == WebUiWireTypes.Changed)
             {
                 RaiseWebUiChanged(message);
             }

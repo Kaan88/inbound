@@ -103,6 +103,12 @@ allow rule. So the bridge never listens beyond this PC until the rule check pass
   through one UAC prompt, removes any inbound block rules Windows made for the bridge exe, and adds one inbound allow
   rule: the bridge exe, TCP, that port, local subnet. Profile: Private by default, with Public added if the user
   ticks it (many home PCs are set to Public).
+- As built, the one elevated program is System32 Windows PowerShell (fixed arguments, an encoded script), not netsh:
+  one prompt has to remove only the block rules and replace this app's own rule, which netsh can't do in one
+  command, and a netsh script file would be a user-writable file. The script uses the firewall module of System32
+  only (it sets the module path and imports it by full path), compares the program and rule name exactly (no
+  patterns), accepts only the fixed rule name and a program inside this app's own folder, and never trusts the
+  Host for either. Open question for the owner: keep PowerShell, or accept a cmd-free netsh sequence with several prompts.
 - The page shows whether the rule exists and offers it again when the port changes. Uninstall leaves the rule (it
   names a program that no longer exists); a note in INSTALL.txt says how to remove it.
 

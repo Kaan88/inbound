@@ -4,7 +4,7 @@ using DownloadManager.Contracts;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>What a web UI call came to: the status the Host sent back, or words for the user.</summary>
-internal sealed record WebUiResult(WebUiStatusDto? Status, string? Error)
+internal sealed record WebUiResult(WebUiStatusWire? Status, string? Error)
 {
     public bool Ok => Error is null;
 }
@@ -19,26 +19,26 @@ internal sealed record WebUiTicketResult(string? Url, string? Error)
 internal sealed partial class RemoteClient
 {
     /// <summary>The web UI changed on the Host: its state, address, password or firewall. Raised on the UI thread.</summary>
-    public event Action<WebUiStatusDto>? WebUiChanged;
+    public event Action<WebUiStatusWire>? WebUiChanged;
 
     public Task<WebUiResult> GetWebUiAsync(CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.Get, new { }, cancellationToken);
+        => WebUiCallAsync(WebUiWireTypes.Get, new { }, cancellationToken);
 
-    public Task<WebUiResult> SetWebUiAsync(WebUiSetRequest request, CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.Set, request, cancellationToken);
+    public Task<WebUiResult> SetWebUiAsync(WebUiSetWire request, CancellationToken cancellationToken = default)
+        => WebUiCallAsync(WebUiWireTypes.Set, request, cancellationToken);
 
     /// <summary>The password goes only into this one message. Nothing here keeps it.</summary>
     public Task<WebUiResult> SetWebUiPasswordAsync(string password, CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.SetPassword, new WebUiSetPasswordRequest { Password = password }, cancellationToken);
+        => WebUiCallAsync(WebUiWireTypes.SetPassword, new WebUiPasswordWire { Password = password }, cancellationToken);
 
     /// <summary>Reads the firewall rule again, for example after this window added it.</summary>
     public Task<WebUiResult> RecheckWebUiAsync(CancellationToken cancellationToken = default)
-        => WebUiCallAsync(WebUiMessageTypes.Recheck, new { }, cancellationToken);
+        => WebUiCallAsync(WebUiWireTypes.Recheck, new { }, cancellationToken);
 
     /// <summary>A link on this PC that signs in once and expires after a minute.</summary>
     public async Task<WebUiTicketResult> OpenWebUiTicketAsync(CancellationToken cancellationToken = default)
     {
-        var result = await WebUiCoreAsync(WebUiMessageTypes.OpenTicket, new { }, cancellationToken, readTicket: true).ConfigureAwait(false);
+        var result = await WebUiCoreAsync(WebUiWireTypes.OpenTicket, new { }, cancellationToken, readTicket: true).ConfigureAwait(false);
         return result.Error is not null ? new WebUiTicketResult(null, result.Error) : new WebUiTicketResult(result.Ticket, null);
     }
 
@@ -88,13 +88,19 @@ internal sealed partial class RemoteClient
 
             if (readTicket)
             {
-                var ticket = reply.GetPayload<WebUiTicketDto>();
+                var ticket = reply.GetPayload<WebUiTicketWire>();
+                if (!string.IsNullOrWhiteSpace(ticket.Error)) return new WebUiCallResult(null, null, ticket.Error.Trim());
                 return string.IsNullOrWhiteSpace(ticket.Url)
                     ? new WebUiCallResult(null, null, RemoteText.HostUnreadable)
                     : new WebUiCallResult(null, ticket.Url, null);
             }
 
-            return new WebUiCallResult(reply.GetPayload<WebUiStatusDto>(), null, null);
+            // A refusal comes as a status with the Host's words in Error and nothing changed (the state isn't a failed
+            // start); it is not a success whose payload happens to carry a status.
+            var status = reply.GetPayload<WebUiStatusWire>();
+            return status.IsRefusal
+                ? new WebUiCallResult(null, null, status.Error!.Trim())
+                : new WebUiCallResult(status, null, null);
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException or InvalidOperationException)
         {
@@ -107,12 +113,12 @@ internal sealed partial class RemoteClient
 
     private void RaiseWebUiChanged(IpcMessage message)
     {
-        var status = message.GetPayload<WebUiStatusDto>();
+        var status = message.GetPayload<WebUiStatusWire>();
         _post(() => WebUiChanged?.Invoke(status));
     }
 
     /// <summary>What <see cref="ReadWebUiReply"/> found.</summary>
-    internal readonly record struct WebUiCallResult(WebUiStatusDto? Status, string? Ticket, string? Error)
+    internal readonly record struct WebUiCallResult(WebUiStatusWire? Status, string? Ticket, string? Error)
     {
         public static implicit operator WebUiResult(WebUiCallResult result) => new(result.Status, result.Error);
     }
