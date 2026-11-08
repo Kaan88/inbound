@@ -1,5 +1,17 @@
 # Progress — session handoff
 
+### Test campaign merged into `dev` (2026-11-08)
+
+- Merged after review fixes: `campaign-recovery` (independent recovery check), `campaign-ext` (extension end to end in Chrome for Testing, EXT.B2), `campaign-ui` (dark and light walkthrough, UI.B8 dialog guard, layout and script fixes) and `perf` (UP.B2, PERF.2/3/5, UI.B13 to UI.B15, PERF.7).
+- Row numbers clashed between the tracks and were renumbered before merging: recovery's exit-pause and silent-Host rows are UI.B11 and UI.B12; perf's pipe-client, CLI-source and segment rows are UI.B13 to UI.B15, its WM_CLOSE row TEST.4 and its speed-graph idea UI.R24.
+- Review fixes, each checked against the code before changing it:
+  - recovery: the uninstall script's own-install check now needs a trailing `\` (a sibling folder such as `...Manager2` matched before); the proxy check restores the caller's instance variables.
+  - extension: Send and Browse share one state gate (a failed send during a pick could leave Send off for good, or turn it on while the app's folder dialog was open). Keep in browser and Escape now wait for a send in flight (it could keep the file in the browser and add it to the app too). The batch window redraws its rows after a send. The tests drive the real page code; the old substring test is gone.
+  - UI: the dialog check was right (an open dialog's popup child is the `ContentDialog`, shown with a trace build); the shared `ShowDialogAsync` helper now covers delete, messages, questions and the address dialog, and treats any failure to show as "not confirmed". `ui-drive.ps1` no longer presses title-bar buttons, clicks only when the test UI is at the point (checked again right before the click), and `closewin:` needs a title.
+  - perf: CLI `add-batch` and `import` send their own sources (`cliBatch`, `cliImport`), so a running main window no longer opens a completion window per job and imports stay out of recent addresses; the UP.B2 rollback test now reaches the rollback; a segment attempt that gets bytes on its last allowed try retries; `perf-window.sh` labels its rows right.
+- Full run on the merged branch, all green with no reruns: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 41, extension 103. Results: `artifacts\campaign61108-merged-campaign\` (trx).
+- Still running: the 8-hour PERF.2 soak (old build, ends about 10:19 UTC) and the `webui` branch (D2 web UI, D3 Docker, the extension's server transport, D4).
+
 ### D1b merged into `dev` (2026-11-08)
 
 - `stream-b` (the headless server and its Linux replacements, with review fixes) merged. Conflicts: the spanned-zip grouping now uses the OS-aware name comparer from D1b, the service keeps stream-c's `NativeHostState` next to D1b's `Roots`, and the server no longer sets the old `NativeHostRegistered` property (unset reads as not registered).

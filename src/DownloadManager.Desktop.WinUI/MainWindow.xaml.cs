@@ -4735,9 +4735,10 @@ public sealed partial class MainWindow : Window
         {
             return await dialog.ShowAsync();
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        catch (Exception)
         {
-            // A dialog this check could not see was open after all.
+            // A dialog this check could not see was open after all. Any exception type: WinUI does not document which
+            // one a second ShowAsync throws, and one escaping an async void click handler would end the window.
             return null;
         }
         finally
