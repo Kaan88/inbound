@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace DownloadManager.Server.Auth;
 
-/// <summary>A paired browser's token, as saved: its SHA-256 only, never the token.</summary>
+/// <summary>A paired app's token, as saved: its SHA-256 only, never the token.</summary>
 public sealed class TokenRecord
 {
     public string Id { get; set; } = string.Empty;
@@ -13,6 +13,31 @@ public sealed class TokenRecord
     public string Hash { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>
+    /// What the token may do (<see cref="TokenRoles"/>). Left out for the browser extension, so <c>auth.json</c> files
+    /// written before roles existed read as they always did, and an older server reading a newer file sees every token
+    /// as an extension's (fewer rights, never more).
+    /// </summary>
+    public string? Role { get; set; }
+}
+
+/// <summary>The roles a paired token can have.</summary>
+public static class TokenRoles
+{
+    /// <summary>The browser extension: the extension's commands only (<c>NativeBridgePolicy.ServerExtension</c>), on <c>POST /api/ipc</c>.</summary>
+    public const string Extension = "extension";
+
+    /// <summary>A desktop app managing this server: a signed-in browser's rights, on <c>/api/ws</c> and <c>POST /api/ipc</c>.</summary>
+    public const string RemoteClient = "remoteClient";
+
+    /// <summary>The role a saved record has: none means the extension; one this version doesn't know means none at all (null).</summary>
+    public static string? Of(TokenRecord record) => record.Role switch
+    {
+        null or "" or Extension => Extension,
+        RemoteClient => RemoteClient,
+        _ => null,
+    };
 }
 
 public sealed class AuthFile
@@ -23,7 +48,7 @@ public sealed class AuthFile
 }
 
 /// <summary>
-/// <c>auth.json</c> in the data folder: the password's hash and the paired browsers' token hashes. Neither can be
+/// <c>auth.json</c> in the data folder: the password's hash and the paired apps' token hashes and roles. Neither can be
 /// turned back into what it was made from. Written to a temporary file next to it, flushed, then moved over it, so a
 /// kill at any point leaves the old file or the new one; owner-only (mode 600) off Windows. A change that can't be
 /// saved is undone in memory too, so what is in force is always what the file says.
@@ -113,16 +138,36 @@ public sealed class AuthStore
         }
     }
 
-    /// <summary>Removes every paired browser's token; how many there were.</summary>
-    public int RemoveAllTokens()
+    /// <summary>Removes every paired app's token; how many there were.</summary>
+    public int RemoveAllTokens() => RemoveTokens(_ => true);
+
+    /// <summary>Removes the tokens that <paramref name="which"/> picks; how many there were.</summary>
+    public int RemoveTokens(Func<TokenRecord, bool> which)
     {
         lock (_gate)
         {
             var before = _file.Tokens;
-            if (before.Count == 0) return 0;
-            _file.Tokens = [];
+            var kept = before.Where(token => !which(token)).ToList();
+            var removed = before.Count - kept.Count;
+            if (removed == 0) return 0;
+            _file.Tokens = kept;
             SaveOrUndo(() => _file.Tokens = before);
-            return before.Count;
+            return removed;
+        }
+    }
+
+    /// <summary>
+    /// Notes a use of this token that isn't a request (its WebSocket is still open), saved as <see cref="FindToken"/>
+    /// saves: at most once a minute. False when the token is gone.
+    /// </summary>
+    public bool TouchToken(string id, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            var token = _file.Tokens.FirstOrDefault(token => token.Id == id);
+            if (token is null) return false;
+            NoteUse(token, now);
+            return true;
         }
     }
 
@@ -157,24 +202,27 @@ public sealed class AuthStore
                 }
 
                 if (!CryptographicOperations.FixedTimeEquals(stored, hash)) continue;
-                var save = token.LastUsedAt is not { } last || now - last > TimeSpan.FromMinutes(1);
-                token.LastUsedAt = now;
-                if (save)
-                {
-                    try
-                    {
-                        Save();
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        // The last-used time is only shown; a failed save must not refuse the request.
-                    }
-                }
-
+                NoteUse(token, now);
                 return Copy(token);
             }
 
             return null;
+        }
+    }
+
+    /// <summary>Under the lock: the token's last use is now; saved when the saved one is over a minute old.</summary>
+    private void NoteUse(TokenRecord token, DateTimeOffset now)
+    {
+        var save = token.LastUsedAt is not { } last || now - last > TimeSpan.FromMinutes(1);
+        token.LastUsedAt = now;
+        if (!save) return;
+        try
+        {
+            Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The last-used time is only shown (and orders which token goes first); a failed save must not refuse the request.
         }
     }
 
@@ -185,6 +233,7 @@ public sealed class AuthStore
         Hash = token.Hash,
         CreatedAt = token.CreatedAt,
         LastUsedAt = token.LastUsedAt,
+        Role = token.Role,
     };
 
     private void Save() => AtomicFile.Write(_path, JsonSerializer.SerializeToUtf8Bytes(_file, Json));

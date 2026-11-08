@@ -259,14 +259,15 @@
 
   const manualProxy = $derived(form?.proxy.mode === 'manual');
 
-  // Sign-in and paired browsers
+  // Sign-in and paired apps
   let current = $state('');
   let next = $state('');
   let keepPaired = $state(false);
   let passwordFromEnvironment = $state(false);
   let pairing = $state<{ code: string; expiresAt: string } | null>(null);
   let now = $state(Date.now());
-  let tokens = $state<{ id: string; name: string; createdAt: string; lastUsedAt?: string }[]>([]);
+  let tokens = $state<{ id: string; name: string; createdAt: string; lastUsedAt?: string; role?: string }[]>([]);
+  const roleNames: Record<string, string> = { extension: 'Browser extension', remoteClient: 'Desktop app' };
   // The clock runs only while a pairing code is showing.
   $effect(() => tickUntil(pairing ? Date.parse(pairing.expiresAt) : 0, 1000, (time) => (now = time)));
 
@@ -300,7 +301,7 @@
       keepPaired = false;
       const unpaired = result.unpaired ?? 0;
       store.toast(unpaired > 0
-        ? `Password changed. Other browsers were signed out and ${unpaired} paired browser${unpaired === 1 ? ' was' : 's were'} removed.`
+        ? `Password changed. Other browsers were signed out and ${unpaired} paired app${unpaired === 1 ? ' was' : 's were'} removed.`
         : 'Password changed. Other browsers were signed out.');
       void loadSignIn();
     } catch (error) {
@@ -562,14 +563,14 @@
           <div><label class="label" for="pw-current">Current password</label><input id="pw-current" class="field" type="password" bind:value={current} autocomplete="current-password" /></div>
           <div><label class="label" for="pw-new">New password (8 characters or more)</label><input id="pw-new" class="field" type="password" bind:value={next} autocomplete="new-password" minlength="8" /></div>
           <label class="flex items-start gap-2 text-[13px] sm:col-span-2"><input type="checkbox" class="mt-0.5" bind:checked={keepPaired} />
-            <span>Keep the paired browsers<span class="hint block">Otherwise they are removed and pair again, in case someone who knew the old password paired one.</span></span></label>
+            <span>Keep the paired browser extensions<span class="hint block">Otherwise they are removed and pair again, in case someone who knew the old password paired one. Desktop apps are always removed and pair again with the new password.</span></span></label>
           <div class="sm:col-span-2"><button class="btn-primary" type="submit" disabled={!current || next.length < 8}>Change password</button>
             <span class="hint ml-2">Other browsers are signed out.</span></div>
         </form>
       {/if}
 
-      <h2 class="mb-2 text-[15px] font-semibold">Paired browsers</h2>
-      <p class="hint mb-3">A paired browser extension can send downloads here and pause, resume or delete them. It can't see your settings or logins.</p>
+      <h2 class="mb-2 text-[15px] font-semibold">Paired apps</h2>
+      <p class="hint mb-3">A browser extension can send downloads here and pause, resume or delete them. It can't see your settings or logins. A desktop app can do everything a signed-in browser can, settings and logins included. Remove any you don't know.</p>
       {#if pairing}
         <div class="card mb-3 p-4 text-center">
           <p class="mb-1 text-[13px]">In the extension's settings, choose this server and enter:</p>
@@ -584,11 +585,11 @@
         {#each tokens as token (token.id)}
           <li class="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
             <span class="min-w-0 flex-1"><span class="block truncate font-semibold">{token.name}</span>
-              <span class="block text-[12px] text-muted">Paired {dateTime(token.createdAt)}{token.lastUsedAt ? ` · last used ${dateTime(token.lastUsedAt)}` : ' · not used yet'}</span></span>
+              <span class="block text-[12px] text-muted">{token.role && roleNames[token.role] ? `${roleNames[token.role]} · ` : ''}Paired {dateTime(token.createdAt)}{token.lastUsedAt ? ` · last used ${dateTime(token.lastUsedAt)}` : ' · not used yet'}</span></span>
             <button class="btn-danger" onclick={() => revoke(token.id)}>Remove</button>
           </li>
         {:else}
-          <li class="px-3 py-6 text-center text-[13px] text-muted">No browser is paired.</li>
+          <li class="px-3 py-6 text-center text-[13px] text-muted">No app is paired.</li>
         {/each}
       </ul>
 
