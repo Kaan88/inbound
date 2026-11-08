@@ -36,9 +36,12 @@ internal static class DialogGuard
     /// ContentDialog is open on its window.</summary>
     public static async Task<ContentDialogResult?> ShowAsync(ContentDialog dialog)
     {
+        // A desktop app's dialog cannot show without its window's XamlRoot (ShowAsync throws), and without one the
+        // check above has no window to look at. Every dialog here sets it, which a test checks; one that did not would
+        // be refused rather than shown unchecked.
         var root = dialog.XamlRoot;
-        if (IsOpen(root)) return null;
-        if (root is not null) Showing.Add(root);
+        if (root is null || IsOpen(root)) return null;
+        Showing.Add(root);
         try
         {
             return await dialog.ShowAsync();
@@ -51,7 +54,7 @@ internal static class DialogGuard
         }
         finally
         {
-            if (root is not null) Showing.Remove(root);
+            Showing.Remove(root);
         }
     }
 

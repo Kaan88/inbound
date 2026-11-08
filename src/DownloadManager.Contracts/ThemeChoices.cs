@@ -29,6 +29,15 @@ public static class ThemeChoices
         null => null,
     };
 
+    /// <summary>The kept View > Dark Mode value for <paramref name="theme"/>: true for Dark, false for Light, null for
+    /// System, which the menu toggle never sets.</summary>
+    public static bool? ToDarkMode(string? theme) => Normalize(theme) switch
+    {
+        Dark => true,
+        Light => false,
+        _ => null,
+    };
+
     /// <summary>Whether a window is dark: <paramref name="theme"/> itself, or Windows' app theme for System.</summary>
     public static bool IsDark(string? theme, bool windowsUsesDark) => Normalize(theme) switch
     {

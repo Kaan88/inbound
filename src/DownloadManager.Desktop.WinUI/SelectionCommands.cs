@@ -100,3 +100,13 @@ internal static class ProgressBarRules
     public static bool ShowsMovingBar(string state, long? totalBytes)
         => totalBytes is not > 0 && state is "connecting" or "downloading" or "verifying";
 }
+
+/// <summary>What Delete… acts on (UI.R25). Nothing here touches the UI.</summary>
+internal static class DeleteRules
+{
+    /// <summary>The selected downloads; or, from the list's context menu when only an archive record is selected,
+    /// the download behind it, as the context menu's Remove did. The File menu, toolbar and Delete key act on the
+    /// selection only, so for them a selection of side rows alone removes those rows.</summary>
+    public static IReadOnlyList<T> Targets<T>(IReadOnlyList<T> selected, T? recordDownload, bool fromContextMenu) where T : class
+        => selected.Count > 0 ? selected : fromContextMenu && recordDownload is not null ? [recordDownload] : [];
+}

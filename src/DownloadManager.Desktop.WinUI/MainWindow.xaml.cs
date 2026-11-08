@@ -232,8 +232,8 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        // Closing the window hides it. Downloads and the browser bridge stay alive
-        // in the background host; Exit is an explicit tray/menu action.
+        // Closing the window hides it, and by default (PERF.5) also ends this process. Downloads and the browser
+        // bridge stay alive in the background host; Exit is an explicit tray/menu action.
         SaveUiState(sender);
         args.Cancel = true;
         // PERF.5 option: end the window's process, so the GPU driver's threads and the window's memory go with it.
@@ -262,6 +262,8 @@ public sealed partial class MainWindow : Window
             _uiState.HideCategories = _hideCategories;
             _uiState.ShowSpeedGraph = ShowSpeedGraphMenuItem.IsChecked;
             _uiState.SpeedGraphExpanded = SpeedGraph.IsExpanded;
+            // AppTheme writes the start-up hint itself; this keeps a save from here putting an older one back.
+            _uiState.Theme = AppTheme.Choice;
             UiStateStore.Save(_uiState);
         }
         catch (Exception ex)
@@ -978,7 +980,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(new MenuFlyoutSeparator());
         // One way to take rows off the list: the Delete dialog, as the toolbar and the Delete key do (owner, 2026-11-08:
         // "just delete? seems remove seems redundant").
-        flyout.Items.Add(_menuDelete = CreateContextItem("Delete…", MenuDelete_Click));
+        flyout.Items.Add(_menuDelete = CreateContextItem("Delete…", MenuContextDelete_Click));
         _menuDelete.KeyboardAcceleratorTextOverride = "Delete";
         var separatorAfterRemove = new MenuFlyoutSeparator();
         flyout.Items.Add(separatorAfterRemove);
@@ -1968,6 +1970,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The File and list menus' Delete: the same dialog as the toolbar's Delete and the Delete key.</summary>
     private async void MenuDelete_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
+
+    // A record's row in the context menu acts on the download behind it, as the other file commands there do.
+    private async void MenuContextDelete_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false, fromContextMenu: true);
     private void MenuOptions_Click(object sender, RoutedEventArgs e) => _ = ShowSettingsDialogAsync();
 
     private async void MenuPauseAll_Click(object sender, RoutedEventArgs e)
@@ -2177,44 +2182,54 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>View > Dark Mode: a quick way to set the Theme setting to Dark or Light (UI.R23).</summary>
-    private async void MenuDarkMode_Click(object sender, RoutedEventArgs e)
+    /// <summary>View > Dark Mode: a quick way to set the Theme setting to Dark or Light (UI.R23). The choice is kept in
+    /// ui-state.json until the Host has saved it, the same way as the old value on upgrade, so a snapshot that arrives
+    /// first, or a failed save, cannot put the previous theme back, and a pending older value is never sent over it.</summary>
+    private void MenuDarkMode_Click(object sender, RoutedEventArgs e)
     {
         var choice = DarkModeMenuItem.IsChecked ? ThemeChoices.Dark : ThemeChoices.Light;
         AppTheme.Use(choice);
-        await SaveThemeAsync(choice);
+        _uiState.DarkMode = ThemeChoices.ToDarkMode(choice);
+        SaveUiState();
+        if (!_savingKeptTheme) _ = SaveKeptThemeAsync();
     }
 
-    private bool _migratingTheme;
+    private bool _savingKeptTheme;
 
-    /// <summary>Uses the settings' Theme. The first time, a View > Dark Mode choice the window kept in ui-state.json
-    /// before the setting was the source becomes the setting, so nobody's look changes on upgrade.</summary>
+    /// <summary>Uses the settings' Theme. While a View > Dark Mode choice is kept in ui-state.json (from before the
+    /// setting was the source, or one the Host has yet to save), that one is used and saved as the setting, so nobody's
+    /// look changes on upgrade and a click is not undone by a snapshot.</summary>
     private void FollowThemeSetting(SettingsDto settings)
     {
         if (ThemeChoices.FromDarkMode(_uiState.DarkMode) is { } kept)
         {
             AppTheme.Use(kept);
-            if (!_migratingTheme) _ = MigrateDarkModeAsync(kept);
+            if (!_savingKeptTheme) _ = SaveKeptThemeAsync();
             return;
         }
 
         AppTheme.Use(settings.Theme);
     }
 
-    private async Task MigrateDarkModeAsync(string theme)
+    /// <summary>Saves the kept choice as the Theme setting, then forgets it. A click while a save is under way changes
+    /// the kept value, and the loop saves that one too before it stops. UI thread only, like every other use of
+    /// _uiState. A failed save keeps the value, and the next snapshot tries again.</summary>
+    private async Task SaveKeptThemeAsync()
     {
-        _migratingTheme = true;
+        _savingKeptTheme = true;
         try
         {
-            // Kept in ui-state.json until the Host has saved it, so a failed save is tried again on the next snapshot.
-            if (!await SaveThemeAsync(theme)) return;
-            _uiState.DarkMode = null;
-            _uiState.Theme = theme;
-            SaveUiState();
+            while (ThemeChoices.FromDarkMode(_uiState.DarkMode) is { } kept)
+            {
+                if (!await SaveThemeAsync(kept)) return;
+                if (ThemeChoices.FromDarkMode(_uiState.DarkMode) != kept) continue;
+                _uiState.DarkMode = null;
+                SaveUiState();
+            }
         }
         finally
         {
-            _migratingTheme = false;
+            _savingKeptTheme = false;
         }
     }
 
@@ -4444,6 +4459,12 @@ public sealed partial class MainWindow : Window
                     return (update.Error ?? "The host rejected the settings.", -1);
 
                 _settings = update.Settings;
+                // The Theme saved here is the user's latest choice, so a View > Dark Mode one still kept is dropped.
+                if (_uiState.DarkMode is not null)
+                {
+                    _uiState.DarkMode = null;
+                    SaveUiState();
+                }
                 AppTheme.Use(update.Settings.Theme);
                 UpdateLimitButtons();
                 // UI.B6: a new default folder moves the category folders that sat under the old one. Show what the
@@ -4776,12 +4797,12 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Asks before deleting the selection. <paramref name="deleteFromDisk"/> is the box's starting state:
     /// only Shift+Delete starts it ticked, so a plain Delete never removes finished files without a click.</summary>
-    private async Task ConfirmDeleteAsync(bool deleteFromDisk)
+    private async Task ConfirmDeleteAsync(bool deleteFromDisk, bool fromContextMenu = false)
     {
         // The toolbar can still be invoked behind an open dialog (UI Automation, a screen reader), so a Delete then
         // does nothing (UI.B8); ShowDialogAsync below refuses it too.
         if (IsContentDialogOpen()) return;
-        var selection = SelectedJobs;
+        var selection = DeleteRules.Targets(SelectedJobs, RecordDownload, fromContextMenu);
         if (selection.Count == 0)
         {
             if (FirstLocalRow is null) await RemoveSideRowsAsync();

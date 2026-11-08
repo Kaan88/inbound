@@ -51,15 +51,24 @@ internal static class AppTheme
         ApplyToAll();
     }
 
-    private static bool? _migrationPending;
+    private static bool _migrated;
 
     /// <summary>For a window in a process of its own (a download's or a package's): follows the Theme setting from the
-    /// Host's settings, unless the main window has yet to move an old View > Dark Mode value into it. That one keeps
-    /// the old value until then.</summary>
+    /// Host's settings, unless the main window has yet to save a View > Dark Mode choice it keeps in ui-state.json.
+    /// That one is used until then. ui-state.json is read again on each snapshot until the choice has gone, so a window
+    /// opened before the main window saved it follows the setting from the next snapshot on.</summary>
     public static void FollowSettings(SettingsDto settings)
     {
-        _migrationPending ??= UiStateStore.Load().DarkMode is not null;
-        if (_migrationPending == true) return;
+        if (!_migrated)
+        {
+            var kept = ThemeChoices.FromDarkMode(UiStateStore.Load().DarkMode);
+            if (kept is not null)
+            {
+                Use(kept);
+                return;
+            }
+            _migrated = true;
+        }
         Use(settings.Theme);
     }
 
