@@ -109,6 +109,13 @@ try {
             $hostProcess.WaitForExit(10000) | Out-Null
             $before = $job.receivedBytes
             $partBytes = if (Test-Path $job.partFilePath) { (Get-Item $job.partFilePath).Length } else { -1 }
+            # What the next Host can trust, read before it starts: "kept after restart" is read once the job
+            # is already moving again, so it can be higher than this.
+            $checkpointFile = Join-Path $data ("checkpoints\" + ([guid]$id).ToString('N') + ".json")
+            $checkpointBytes = -1
+            if (Test-Path $checkpointFile) {
+                try { $checkpointBytes = [long](((Get-Content $checkpointFile -Raw | ConvertFrom-Json).segments | Measure-Object -Property completed -Sum).Sum) } catch { }
+            }
 
             $hostProcess = StartHost
             $after = JobStatus $id
@@ -119,11 +126,11 @@ try {
             }
             $row = [pscustomobject]@{
                 connections = $connectionCount; killAt = "$percent%"; bytesAtKill = $before
-                partFileBytes = $partBytes; keptAfterRestart = $kept; stateAfterRestart = $after.state
+                partFileBytes = $partBytes; checkpointBytes = $checkpointBytes; keptAfterRestart = $kept; stateAfterRestart = $after.state
             }
             $results.Add($row)
-            Write-Host ("  killed at {0}%: reported {1:N0}, part {2:N0}, kept after restart {3:N0} ({4})" -f `
-                $percent, $before, $partBytes, $kept, $after.state)
+            Write-Host ("  killed at {0}%: reported {1:N0}, part {2:N0}, checkpoint {3:N0}, kept after restart {4:N0} ({5})" -f `
+                $percent, $before, $partBytes, $checkpointBytes, $kept, $after.state)
             if ($kept -le 0) { Fail "c=$connectionCount kill $percent%: progress was not preserved" }
             if ($kept -gt $size) { Fail "c=$connectionCount kill $percent%: kept bytes exceed the file size" }
         }
@@ -143,6 +150,8 @@ try {
         if (-not $ok) { Fail "c=$connectionCount hash mismatch (expected $expected)" }
         $leftover = Get-ChildItem $downloads -Filter '*.part' -ErrorAction SilentlyContinue
         if ($leftover) { Fail "c=$connectionCount left .part files: $($leftover.Name -join ', ')" }
+        $leftCheckpoint = Join-Path $data ("checkpoints\" + ([guid]$id).ToString('N') + ".json")
+        if (Test-Path $leftCheckpoint) { Fail "c=$connectionCount left its checkpoint: $leftCheckpoint" }
     }
 }
 finally {
