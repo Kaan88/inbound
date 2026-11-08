@@ -398,6 +398,49 @@ public sealed partial class RuntimeServiceTests
         await rig.AssertNothingLeakedAsync();
     }
 
+    [Fact]
+    public async Task OnAServerAProviderAddOutsideTheRootsIsRefusedBeforeAnyProviderCallAndCreatesNoFolder()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var roots = new PathRoots([rig.Destination]);
+        rig.Ctx.Service.Roots = roots;
+        rig.Jobs.DestinationRoots = roots;
+        var outside = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"outside-{Guid.NewGuid():N}");
+        var (link, _, _) = rig.ScriptHoster("fenced", MockTorBoxState.CachedReady);
+
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = link, Destination = outside });
+
+        Assert.Equal(PathRoots.OutsideMessage, added.Error);
+        Assert.Null(added.Job);
+        Assert.Empty(rig.Mock.Submissions);
+        Assert.False(Directory.Exists(outside), "the refused folder was created");
+    }
+
+    [Fact]
+    public async Task OnAServerAFileOutsideTheRootsIsNeverWaitedForAndItsFolderIsNeverCreated()
+    {
+        // Only the service knows the roots here, as for a job saved before the coordinator checked them.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        rig.Ctx.Service.Roots = new PathRoots([rig.Destination]);
+        var outside = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"outside-{Guid.NewGuid():N}");
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "fenced.bin", 32 * Kb, seed: 31);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "fenced", [file]);
+
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest
+        {
+            Input = $"https://torbox.app/download?type=torrents&id={item.Id}",
+            Selection = RemoteSelectionMode.All,
+            Destination = outside,
+        });
+        Assert.True(added.Error is null, added.Error);
+        await rig.RunAsync();
+        await rig.AdvanceAsync(120);
+
+        Assert.Empty(rig.Children());
+        Assert.NotEqual(RemoteJobState.LocalStarted, rig.View(added.Job!.Id).State);
+        Assert.False(Directory.Exists(outside), "the refused folder was created");
+    }
+
     [Theory]
     [InlineData("torrents", RemoteItemKind.Torrent)]
     [InlineData("web_downloads", RemoteItemKind.WebDownload)]

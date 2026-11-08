@@ -584,6 +584,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return new RemoteAddResult { Error = "The destination has to be a full path." };
         }
 
+        if (!string.IsNullOrEmpty(request.Destination) && DestinationRoots is { } destinationRoots &&
+            destinationRoots.Allowed(request.Destination) is null)
+        {
+            // Checked here, before any provider call or quota is spent, and again for each file when it is added.
+            return new RemoteAddResult { Error = PathRoots.OutsideMessage };
+        }
+
         if (request.StartMode is not ("startNow" or "queue" or "later"))
         {
             return new RemoteAddResult { Error = "The start mode has to be startNow, queue or later." };
@@ -841,6 +848,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// there is not the machine's user. Null on the desktop, where any file the user names may be read.
     /// </summary>
     public PathRoots? Roots { get; set; }
+
+    /// <summary>
+    /// On a server, the folders a client may have downloads saved in (<c>DOWNLOADMANAGER_ROOTS</c>, without the upload
+    /// folder). A destination outside them is refused before the provider is asked for anything. Null on the desktop.
+    /// </summary>
+    public PathRoots? DestinationRoots { get; set; }
 
     /// <summary>
     /// On a server, turns a reference to a file a client uploaded (the server's own form, such as <c>upload:…</c>) into
