@@ -98,7 +98,7 @@ public sealed class UpdateUninstallEntryTests : IDisposable
     }
 
     [Fact]
-    public void A_failed_update_leaves_the_entry_at_the_old_version()
+    public void An_update_that_fails_before_the_entry_is_reached_leaves_it_alone()
     {
         CreateEntry(Install + @"\", "0.5.2", major: 0, minor: 5);
         var (package, resultPath) = BuildUpdate("throw 'register failed'");
@@ -109,6 +109,31 @@ public sealed class UpdateUninstallEntryTests : IDisposable
         using var entry = Registry.CurrentUser.OpenSubKey(EntryKey)!;
         Assert.Equal("0.5.2", entry.GetValue("DisplayVersion"));
         Assert.Contains("\"failed\"", File.ReadAllText(resultPath));
+    }
+
+    [Fact]
+    public void A_failed_update_puts_the_entry_back_at_the_old_version()
+    {
+        // The whole script, failing after the entry was updated: the new "Host" starts and exits with an error
+        // code, so Confirm-Started throws and the rollback runs. The stand-in is a copy of where.exe, which
+        // exits at once with code 1 on --background; it opens no window, and the old version restarted by the
+        // rollback is the same stand-in, so no failure message box is shown either.
+        CreateEntry(Install + @"\", "0.5.2", major: 0, minor: 5);
+        var standIn = File.ReadAllBytes(Path.Combine(Environment.SystemDirectory, "where.exe"));
+        var (package, resultPath) = BuildUpdate("# no registration in this test", standIn);
+
+        var result = RunUpdate(package, resultPath, "0.6.1", noStart: false);
+
+        Assert.True(result.ExitCode == 1, result.Output);
+        var outcome = File.ReadAllText(resultPath);
+        Assert.Contains("\"failed\"", outcome);
+        Assert.Contains("did not start", outcome);
+        using var entry = Registry.CurrentUser.OpenSubKey(EntryKey)!;
+        Assert.Equal("0.5.2", entry.GetValue("DisplayVersion"));
+        Assert.Equal(0, entry.GetValue("MajorVersion"));
+        Assert.Equal(5, entry.GetValue("MinorVersion"));
+        Assert.Equal(RegistryValueKind.DWord, entry.GetValueKind("MinorVersion"));
+        Assert.Contains("0.5.2", File.ReadAllText(Path.Combine(Install, "install.json")));
     }
 
     [Fact]
@@ -159,25 +184,29 @@ public sealed class UpdateUninstallEntryTests : IDisposable
         entry.SetValue("MinorVersion", minor, RegistryValueKind.DWord);
     }
 
-    private (string Package, string ResultPath) BuildUpdate(string registerScript)
+    /// <param name="hostExecutable">The bytes of both versions' Host; text stand-ins when null, for runs with -NoStart.</param>
+    private (string Package, string ResultPath) BuildUpdate(string registerScript, byte[]? hostExecutable = null)
     {
         Directory.CreateDirectory(Path.Combine(Install, "app"));
-        File.WriteAllText(Path.Combine(Install, "app", "DownloadManager.Host.exe"), "old");
+        if (hostExecutable is null) File.WriteAllText(Path.Combine(Install, "app", "DownloadManager.Host.exe"), "old");
+        else File.WriteAllBytes(Path.Combine(Install, "app", "DownloadManager.Host.exe"), hostExecutable);
         File.WriteAllText(Path.Combine(Install, "install.json"), """{ "version": "0.5.2" }""");
 
         var package = Path.Combine(_root, "package");
         Directory.CreateDirectory(Path.Combine(package, "app"));
-        File.WriteAllText(Path.Combine(package, "app", "DownloadManager.Host.exe"), "new");
+        if (hostExecutable is null) File.WriteAllText(Path.Combine(package, "app", "DownloadManager.Host.exe"), "new");
+        else File.WriteAllBytes(Path.Combine(package, "app", "DownloadManager.Host.exe"), hostExecutable);
         // Run by the script; a stand-in, so nothing here registers a browser bridge.
         File.WriteAllText(Path.Combine(package, "register-native-host.ps1"), registerScript);
         return (package, Path.Combine(_root, "updates", "result.json"));
     }
 
-    private (int ExitCode, string Output) RunUpdate(string package, string resultPath, string version)
+    private (int ExitCode, string Output) RunUpdate(string package, string resultPath, string version, bool noStart = true)
     {
         var probe = Path.Combine(_root, "run.ps1");
+        var start = noStart ? " -NoStart" : string.Empty;
         File.WriteAllText(probe, $"""
-            & '{ScriptPath()}' -PackageDir '{package}' -InstallRoot '{Install}' -Version '{version}' -ResultPath '{resultPath}' -NoStart -UninstallKey '{EntryPath}'
+            & '{ScriptPath()}' -PackageDir '{package}' -InstallRoot '{Install}' -Version '{version}' -ResultPath '{resultPath}'{start} -UninstallKey '{EntryPath}'
             exit $LASTEXITCODE
             """);
         return RunPowerShell(probe);
