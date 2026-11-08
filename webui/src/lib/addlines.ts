@@ -75,3 +75,16 @@ export function kindWord(line: AddLine, provider: string): string {
 export function showsAddress(line: AddLine): boolean {
   return line.result?.kind === 'ordinaryLink' && line.result.ok !== false;
 }
+
+/**
+ * The dialog after a partly failed add: the lines that were added are taken out of both the list and the text, so
+ * pressing Add again sends only the ones that failed. Other text lines are kept as typed.
+ */
+export function withoutAdded(lines: AddLine[], text: string, added: Iterable<string>): { lines: AddLine[]; text: string } {
+  const gone = new Set(added);
+  if (gone.size === 0) return { lines, text };
+  return {
+    lines: lines.filter((line) => !gone.has(line.input)).map((line, index) => ({ ...line, position: index + 1 })),
+    text: text.split(/\r?\n/).filter((raw) => !gone.has(raw.trim())).join('\n'),
+  };
+}
