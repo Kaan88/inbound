@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Runtime.InteropServices;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -714,13 +713,7 @@ public sealed partial class MainWindow
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
-        try
-        {
-            return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException)
-        {
-            return false;
-        }
+        // Refused while another dialog is open, which counts as Cancel. DialogGuard never throws.
+        return await DialogGuard.ConfirmAsync(dialog);
     }
 }
