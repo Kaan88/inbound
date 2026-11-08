@@ -57,8 +57,11 @@ public sealed class ArchiveSetDto
     /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads are all paused.</summary>
     public List<string> PausedVolumes { get; set; } = [];
 
-    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads wait in a queue, none running.</summary>
+    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads wait in a running queue, none running.</summary>
     public List<string> QueuedVolumes { get; set; } = [];
+
+    /// <summary>The part of <see cref="DownloadingVolumes"/> that won't start by itself: added to start later, or in a stopped queue.</summary>
+    public List<string> HeldVolumes { get; set; } = [];
 
     public List<string> FailedVolumes { get; set; } = [];
 
@@ -111,6 +114,12 @@ public sealed class ArchiveChangedDto
 public sealed class ArchiveListResult
 {
     public List<ArchiveSetDto> Sets { get; set; } = [];
+
+    /// <summary>
+    /// Packages with an archive password on record, or with one in a file that can't be read now, whether or not
+    /// any set of theirs is listed. Lets a client offer to clear it. Added without a protocol bump.
+    /// </summary>
+    public List<Guid> PackagesWithPassword { get; set; } = [];
 }
 
 public sealed class ArchiveToolStatusDto

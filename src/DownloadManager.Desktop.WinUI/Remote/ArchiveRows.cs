@@ -160,16 +160,26 @@ internal static partial class ArchiveText
         return string.Join(Environment.NewLine, lines);
     }
 
-    /// <summary>One or two names cut down to what tells volumes apart, otherwise a count. A list cell has no room for more.</summary>
-    /// <summary>"paused" or "queued" only when every unfinished part is; otherwise something is still downloading.</summary>
+    /// <summary>
+    /// What the unfinished parts are doing, in the Host's own order: "downloading" while any runs; otherwise each kind
+    /// there is, joined with "or", so a paused part is never called queued.
+    /// </summary>
     private static string UnfinishedWord(ArchiveSetDto set)
     {
-        var paused = set.DownloadingVolumes.Count(name => set.PausedVolumes.Contains(name, StringComparer.OrdinalIgnoreCase));
-        var queued = set.DownloadingVolumes.Count(name => set.QueuedVolumes.Contains(name, StringComparer.OrdinalIgnoreCase));
-        if (paused == set.DownloadingVolumes.Count) return "paused";
-        return paused + queued == set.DownloadingVolumes.Count ? "queued" : "downloading";
+        bool In(List<string> list, string name) => list.Contains(name, StringComparer.OrdinalIgnoreCase);
+        var paused = set.DownloadingVolumes.Where(name => In(set.PausedVolumes, name)).ToList();
+        var held = set.DownloadingVolumes.Where(name => !In(set.PausedVolumes, name) && In(set.HeldVolumes, name)).ToList();
+        var queued = set.DownloadingVolumes.Where(name => !In(set.PausedVolumes, name) && !In(set.HeldVolumes, name) && In(set.QueuedVolumes, name)).ToList();
+        if (paused.Count + held.Count + queued.Count < set.DownloadingVolumes.Count) return "downloading";
+
+        var words = new List<string>();
+        if (paused.Count > 0) words.Add("paused");
+        if (held.Count > 0) words.Add("not started");
+        if (queued.Count > 0) words.Add("queued");
+        return string.Join(" or ", words);
     }
 
+    /// <summary>One or two names cut down to what tells volumes apart, otherwise a count. A list cell has no room for more.</summary>
     private static string Parts(IReadOnlyList<string> names) => names.Count switch
     {
         0 => string.Empty,

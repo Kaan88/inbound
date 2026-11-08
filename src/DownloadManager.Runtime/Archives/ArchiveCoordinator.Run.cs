@@ -135,6 +135,7 @@ public sealed partial class ArchiveCoordinator
                 next.DownloadingVolumes = [];
                 next.PausedVolumes = [];
                 next.QueuedVolumes = [];
+                next.HeldVolumes = [];
                 next.FailedVolumes = [];
                 next.MissingVolumes = [next.FirstVolumeName];
             }
@@ -373,6 +374,7 @@ public sealed partial class ArchiveCoordinator
             next.DownloadingVolumes = [];
             next.PausedVolumes = [];
             next.QueuedVolumes = [];
+            next.HeldVolumes = [];
             next.FailedVolumes = [];
             next.MissingVolumes = [];
             next.FilesWritten = result.Files.Count(file => file.Outcome == ExtractedFileOutcome.Written);

@@ -50,7 +50,7 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                         request.Id);
 
                 case ArchiveMessageTypes.List:
-                    return IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = coordinator.List() }, request.Id);
+                    return IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = coordinator.List(), PackagesWithPassword = coordinator.PackagesWithPassword() }, request.Id);
 
                 case ArchiveMessageTypes.Extract:
                     var extract = request.GetPayload<ArchiveExtractRequest>();

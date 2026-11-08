@@ -102,8 +102,14 @@ public sealed class ArchiveSetRecord
     /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads are all paused.</summary>
     public List<string> PausedVolumes { get; set; } = [];
 
-    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads wait in a queue, none running.</summary>
+    /// <summary>The part of <see cref="DownloadingVolumes"/> whose downloads wait in a running queue, none running.</summary>
     public List<string> QueuedVolumes { get; set; } = [];
+
+    /// <summary>
+    /// The part of <see cref="DownloadingVolumes"/> whose downloads won't start by themselves: added to start later,
+    /// or in a stopped queue (paused ones may be among them), none running and none waiting to start.
+    /// </summary>
+    public List<string> HeldVolumes { get; set; } = [];
 
     /// <summary>Volumes whose download failed or was cancelled, leaving no file.</summary>
     public List<string> FailedVolumes { get; set; } = [];
@@ -159,6 +165,7 @@ public sealed class ArchiveSetRecord
         copy.DownloadingVolumes = [.. DownloadingVolumes];
         copy.PausedVolumes = [.. PausedVolumes];
         copy.QueuedVolumes = [.. QueuedVolumes];
+        copy.HeldVolumes = [.. HeldVolumes];
         copy.FailedVolumes = [.. FailedVolumes];
         copy.ToolMissingVolumes = [.. ToolMissingVolumes];
         copy.SeenJobs = new Dictionary<Guid, DateTimeOffset>(SeenJobs);
