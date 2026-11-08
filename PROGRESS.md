@@ -61,7 +61,7 @@
 - **The release assets above were built before these fixes and have to be rebuilt.**
 - **Not done:**
   - The clean-install and upgrade run with the Setup rebuilt after the review fixes. The run with the earlier 0.6.0 Setup passed (TEST.2, evidence in `artifacts\campaign\20261108-final\vm-0.5.3-to-0.6.0\`): 0.5.3 to 0.6.0 kept both jobs, wrote the Chrome, Edge and Firefox keys, and turned PERF.5 on once. Uninstall kept the state and stopped only the installed Host.
-  - The PERF.2 rerun on `dev`: started 2026-11-08 10:50 UTC as `soak-fixed` (`artifacts\soak\soak-fixed\` in the `dev` worktree, a test instance, stops by itself about 18:50 UTC; `bash scripts/soak.sh --stop soak-fixed` stops it earlier). Summarise with `python -I scripts/soak-summary.py artifacts/soak/soak-fixed`.
+  - PERF.2 rerun on `dev` (`soak-fixed`): stopped after an hour (10:50 to 11:53 UTC) by the owner's choice. Both processes ran throughout; the Host rose 147.5 to 190.1 MB (+24 MB/h, like the 8-hour run), the window 302.5 to 331.9 MB. Summary in `artifacts\soak\soak-fixed\summary.txt`; payload deleted.
   - EXT.B3 (Firefox), which needs this build installed.
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
