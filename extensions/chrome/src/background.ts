@@ -671,10 +671,6 @@ function handleNativeEvent(message: Envelope): void {
   }
 }
 
-async function cookieHeaders(url: string): Promise<Record<string, string>> {
-  return browserCookieHeaders(url);
-}
-
 function baseName(value: string): string {
   try {
     const path = new URL(value).pathname;
@@ -817,6 +813,9 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
           packageName = pageUrl ? new URL(pageUrl).host : "Links";
         }
       }
+      // The page's own cookie store: on Firefox a container tab's links need that container's cookies, not the
+      // default store's. A tab whose store can't be found sends no cookies rather than another identity's.
+      const cookieContext = typeof message.tabId === "number" ? await cookieContextForFrame(message.tabId) : {};
       for (const item of urls) {
         try {
           const ack = await requestHandoff(transport, {
@@ -831,7 +830,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
               : inferFileName(item.url, "link"),
             startMode,
             isAutoIntercept: false,
-            headers: await cookieHeaders(item.url),
+            headers: await browserCookieHeaders(item.url, cookieContext),
             destinationDirectory: destination,
             packageKey,
             packageName,
