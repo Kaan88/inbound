@@ -1,4 +1,4 @@
-# Builds the server image for linux/amd64 and linux/arm64 and pushes it to ghcr.io/kaan88/inbound when a version tag
+# Builds the server image for linux/amd64 (arm64 is not published yet: never run) and pushes it to ghcr.io/kaan88/inbound when a version tag
 # (v*) is pushed (D3). Nothing else starts it. Actions are pinned to the commit of the release named beside each.
 name: Docker image
 
@@ -29,9 +29,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -59,7 +56,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           provenance: mode=max
           sbom: true

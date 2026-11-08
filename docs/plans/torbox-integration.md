@@ -2,7 +2,7 @@
 
 **Goal name:** TorBox Integration
 **Branch:** `feature/torbox-integration`. Commit here only.
-**Full requirements:** the owner's brief, `C:\Users\kaank\Downloads\torbox.md`, with a copy at `notes-local/torbox-brief.md`. The brief decides any conflict with this plan.
+**Full requirements:** the owner's brief, kept outside the repository. The brief decides any conflict with this plan.
 **Done means:** scenarios A to J (end of this file) pass with recorded evidence, the regression suites pass, and tracking files are current.
 
 ## Rules for this work
@@ -15,12 +15,12 @@
 
 ## Secrets
 
-The owner's test file is `C:\Users\kaank\Desktop\credentials.keep.txt`. It holds an API key, CDN links, a magnet, a torrent link and MEGA links. Treat all of it as secret.
+The owner's test file is kept outside the repository. It holds an API key, CDN links, a magnet, a torrent link and MEGA links. Treat all of it as secret.
 
 - Never print its values in output, logs, commits, fixtures, screenshots or docs. This includes subagent prompts: give agents the path to a fixture, or an environment variable name, never the value.
 - **The sample CDN links carry the account API key in their `token` parameter**, and `requestdl` takes the key as a `token` query parameter. So a direct link is itself a credential. It must never be written to job JSON, logs, IPC snapshots, list export, or a "copy address" action.
 - MEGA links hold their decryption key after `#`. Treat original inputs as secret too.
-- JDownloader's logs and `cfg` folder may hold the key. Do not read them unless needed, and redact if you do.
+- Another download manager's logs and settings folder may hold the key. Do not read them unless needed, and redact if you do.
 - Live tests take the key from `TORBOX_API_KEY` only. They carry their own xUnit trait and are off by default. Normal tests must pass without the file.
 
 ## Live test budget
@@ -36,7 +36,7 @@ Not allowed:
 - Retrying a submission that may have succeeded, without reconciling first.
 - Continuing after a quota error. Record it and use mocks.
 
-Do not assume any supplied link works. If the CDN links have expired, get new ones through the API. The file has no Copy JDownloader Folder Link: for scenario A, build one from a real `mylist` id, which is the same URL shape.
+Do not assume any supplied link works. If the CDN links have expired, get new ones through the API. The file has no TorBox folder link: for scenario A, build one from a real `mylist` id, which is the same URL shape.
 
 ## Kept archive for live extraction checks
 
@@ -51,15 +51,15 @@ Owner, 2026-11-08: "yes add one and airlock it". Airlock, as the owner describes
 
 ## What is already known
 
-**Evidence labels:** [API] read from `https://api.torbox.app/openapi.json` on 2026-11-06. The docs site renders by script, so use this schema. [JD] strings read with `javap` from the installed plugins, not yet run. [Support] TorBox support articles. [Inferred] needs testing.
+**Evidence labels:** [API] read from `https://api.torbox.app/openapi.json` on 2026-11-06. The docs site renders by script, so use this schema. [Other] read from another download manager's TorBox support for its API usage, not run. [Support] TorBox support articles. [Inferred] needs testing.
 
 - [API] Base `https://api.torbox.app/v1/api`, bearer auth, `requestdl` also requires `token` in the query.
 - [API] Three families share a shape: `torrents`, `webdl`, `usenet`, each with create, async create, control, `requestdl`, `requestdl/batch`, `mylist`, `checkcached`. `mylist` takes `id`, `bypass_cache`, `offset`, `limit`. `checkcached` takes `hash`, `format`, `list_files`. Also `webdl/hosters`, `torrents/torrentinfo`, `user/me`, `user/stats`.
 - [API] Response bodies and status values are not yet confirmed. Read the schema and a live `mylist`. Do not invent fields.
-- [JD] Plugins at `%LOCALAPPDATA%\JDownloader 2\jd\plugins\decrypter\TorboxAppCrawler.class` and `...\hoster\TorboxApp.class`. `javap` is at `C:\Users\kaank\tools\jdk\jdk-21.0.13+9\bin\javap.exe`. See Phase 0 for the full research.
-- [JD] Folder link pattern: `/download?id=<digits>&type=(torrents|web_downloads|usenet_downloads)...`. It is resolved through the user's own `mylist` for that type, so it is **an account-scoped reference, not a public share**. Its `name` is not used for identity.
-- [JD] File data read from `files[]`: `id`, `name`, `short_name`, `size`, `md5`, plus an infected flag. JD's stable identity is type, download id and file id or path. It requests a fresh link per download.
-- [JD, Inferred] It spaces web download creation by about 65 s, uses `bypass_cache=true` while waiting, and reads `cached`, `download_finished`, `download_state`, `download_present`, `progress`. Confirm in bytecode. It also stores a download password for retries; find out what that password is for.
+- [Other] Another download manager's TorBox support was read for its API usage; findings are folded into the plan.
+- [Other] Folder link pattern: `/download?id=<digits>&type=(torrents|web_downloads|usenet_downloads)...`. It is resolved through the user's own `mylist` for that type, so it is **an account-scoped reference, not a public share**. Its `name` is not used for identity.
+- [Other] File data read from `files[]`: `id`, `name`, `short_name`, `size`, `md5`, plus an infected flag. Its stable identity is type, download id and file id or path. It requests a fresh link per download.
+- [Other, Inferred] It spaces web download creation by about 65 s, uses `bypass_cache=true` while waiting, and reads `cached`, `download_finished`, `download_state`, `download_present`, `progress`. Confirm live. It also stores a download password for retries; find out what that password is for.
 - [Support] Links last 3 hours, use at most 4 connections per file, and do not share one link across apps or devices.
   - Update 2026-11-08 (TB.L1): a live measurement on one cached 300 MB file got HTTP 206 on 1, 2, 4, 8 and 16 parallel range
     requests (about 6.4 MB/s each, 92.4 MB/s at 16) with no refusal, and TorBox staff on its feature board (2024-03-10)
@@ -110,7 +110,7 @@ The Host stays the only owner of provider state, secrets and scheduling. The eng
 
 ## Design decisions (after research, 2026-11-06)
 
-These are binding. Research notes are in `notes-local/` (`torbox-code-audit.md`, `torbox-research-jd-plugins.md`, `torbox-research-api.md`, `torbox-research-containers-extraction.md`).
+These are binding. Research notes are kept outside the repository.
 
 **TorBox facts that shape the code.** Ready means `download_present` and (`cached` or `download_finished`), with a file list, and is checked first. Otherwise, failed means a non-empty `error` or a state starting `failed`. Web hash = md5 of the exact original URL; torrent hash = btih. The CDN sends no ETag, and `md5` is usually null, so identity is size, then Last-Modified, then md5 when present. Space web download creation about 65 s per account, reserved before the POST. Poll at `eta` clamped to 15 to 60 s, otherwise 30 s. Before calling an item gone, check `mylist`, then `queued/getqueued` by hash, then allow 1 minute of grace. `Retry-After` counts only on a 429.
 
@@ -148,14 +148,7 @@ These are binding. Research notes are in `notes-local/` (`torbox-code-audit.md`,
 
 Work in this order. Each phase ends with a build, its tests, a commit and a `PROGRESS.md` entry.
 
-**0. Research on the owner's installed JDownloader.** This is authorized by the owner and comes before any design is final. Inspect the real install at `%LOCALAPPDATA%\JDownloader 2` directly:
-- `TorboxApp` and `TorboxAppCrawler` in full: every API call, its order, polling and waits, error handling, link refresh, connection limits, password handling.
-- LinkGrabber routing, magnet and hoster routing, package and archive metadata, the container importers (DLC, CCF, RSDF), and archive extraction with passwords. These live in `Core.jar`, `JDownloader.jar` and `jd\plugins`.
-- Tools: `javap` first, and a Java decompiler if it helps. Ghidra and its MCP are also authorized and may be used wherever they help, for native parts especially. Inspect the Ghidra MCP's configuration first and do not disturb its existing project; use a new project.
-- Run JDownloader itself to compare behaviour against ours, with the owner's links. Leave its settings and account setup as they are unless a comparison needs a change, and restore them after.
-- Label each finding as verified in JDownloader, verified in TorBox docs, inferred, or excluded. Do not copy JDownloader code or ship its binaries.
-
-Then confirm the facts above. Record JD and reverse-engineering notes in `notes-local/torbox-research.md`, which stays out of the public repo. Public docs state interoperability facts only and do not describe other products' internals. Update the state table and the file fields. Save anonymised sample responses as test fixtures, with ids, names and links replaced.
+**0. Research.** Done. Another download manager's TorBox support was read for its API usage; findings are folded into the plan. Then confirm the facts above. Label each finding as verified in TorBox docs, verified live, inferred, or excluded. Public docs state interoperability facts only, do not describe other products' internals and copy no other product's code. Update the state table and the file fields. Save anonymised sample responses as test fixtures, with ids, names and links replaced.
 
 **1. Package gap check.** Test the existing packages against brief section 10: aggregates, parent controls, mixed states, child retry, restart, queue and priority. Fix gaps only. Mark the ROADMAP note done or updated.
 
@@ -175,7 +168,7 @@ Then confirm the facts above. Record JD and reverse-engineering notes in `notes-
 - Passwords: per package or archive, protected at rest, never logged. Try passing them without the command line first. If UnRAR needs `-p`, document it as a tool limitation. No guessing or password lists.
 - Works on ordinary downloads too, with Extract in the context menu. Generate fixtures at test time with `Rar.exe` if present, and skip with a clear reason if not.
 
-**7. Containers.** Import preview, classification, reasons for rejected links, routing through the same flow. Do RSDF and CCF first. Investigate DLC separately. Do not take any private key or application secret out of JDownloader, and do not call its service while impersonating it. If standalone DLC is not possible on those terms, ship a clearly labelled "not supported" message or an optional import through the owner's running JDownloader, and record it for the owner.
+**7. Containers.** Import preview, classification, reasons for rejected links, routing through the same flow. Do RSDF and CCF first. Investigate DLC separately. Do not take any private key or application secret out of another download manager, and do not call its service while impersonating it. If standalone DLC is not possible on those terms, ship a clearly labelled "not supported" message or an optional import through another download manager the owner runs, and record it for the owner.
 
 **8. WinUI.** My TorBox (Torrents, Web Downloads, Usenet) with refresh, files, selection, destination and Check Now. Add entry points: account, add link, add magnet, import torrent, import container, browse, extract. Remote stages shown as words, never as local progress. Light and dark themes, DPI, keyboard, accessible names. No controls that do nothing. Follow `docs/design-guidelines.md`. Check real screens with the sandbox profile (`DOWNLOADMANAGER_INSTANCE=uiqa`), never the installed app's state.
 
@@ -205,7 +198,7 @@ Update the existing entries, not a new system: ROADMAP A1 to A5 and the grouped-
 
 | | Scenario | Must show |
 |---|---|---|
-| A | Copy JDownloader Folder Link | Paste, select files, download with folder structure kept |
+| A | TorBox folder link | Paste, select files, download with folder structure kept |
 | B | Cached hoster link | Cache confirmed, downloads without any hoster protocol |
 | C | Uncached hoster link | Submitted, remote state shown, polled, local start when ready |
 | D | TorBox failure | Real cause shown, safe stop, no direct attempt |
@@ -213,7 +206,7 @@ Update the existing entries, not a new system: ROADMAP A1 to A5 and the grouped-
 | F | Expired link | Fresh link, validated, safe resume or restart, no corruption |
 | G | Password RAR | Detected, asks, extracts safely, result shown |
 | H | Multi-part RAR | Waits for all volumes, one set, no duplicated output |
-| I | JD container | Links and packages shown, compatible ones sent through TorBox |
+| I | Container file | Links and packages shown, compatible ones sent through TorBox |
 | J | Restart | Remote reference restored, monitoring resumes, no second submit |
 
 Second-provider check: review that a new provider would need only an implementation, a capability declaration and a resolver.

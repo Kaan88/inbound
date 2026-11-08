@@ -10,7 +10,7 @@ What is inside:
 - the official 7-Zip 26.04 for Linux (`7zz`) in `/app/tools/7-Zip`, for extraction (its license is next to it);
 - no FFmpeg (see "Adding FFmpeg").
 
-Image: `ghcr.io/kaan88/inbound` for `linux/amd64` and `linux/arm64`, built when a version tag is pushed
+Image: `ghcr.io/kaan88/inbound` for `linux/amd64` (arm64 is not published yet), built when a version tag is pushed
 (`.github/workflows/docker.yml`). Tags: the version (`0.6.0`), the minor line (`0.6`) and `latest` (not for a
 pre-release such as `v0.6.0-rc1`).
 
@@ -164,7 +164,7 @@ The server finds `ffmpeg` on `PATH`.
 
 ```sh
 docker build -t inbound .
-docker buildx build --platform linux/amd64,linux/arm64 -t inbound .     # needs QEMU/binfmt for arm64
+docker buildx build --platform linux/arm64 -t inbound .     # untested; needs QEMU/binfmt
 ```
 
 The build context is an allowlist (`.dockerignore`): only `Directory.Build.props`, the server's projects, `webui/`

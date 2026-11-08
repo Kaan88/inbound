@@ -15,7 +15,8 @@ release file was downloaded, and that count includes update checks.
 
 It sends downloads from Chrome to the Inbound Download Manager desktop app for Windows, on the same
 computer, using Chrome's native messaging. The app must be installed separately. Without it, downloads
-stay in Chrome. The extension makes no network requests of its own, except to an Inbound server you paired
+stay in Chrome. The toolbar popup also lists the app's newest 20 downloads and can pause, resume, retry or
+delete them (see "What the app gives the extension"). The extension makes no network requests of its own, except to an Inbound server you paired
 it with: the app or the server does the downloading.
 
 ## What it reads, and when
@@ -46,7 +47,9 @@ of these ways:
 
 **Downloads you do not send:** while automatic sending is on and not paused, the extension looks at each
 new Chrome download's address, final address, referrer, file name and type to apply your rules.
-Downloads that do not match stay in Chrome, and cookies are not read for them. So that the toolbar popup
+Downloads that do not match stay in Chrome, and cookies are not read for them. A download from a site the
+extension has no access to (for example after you withdrew its site access, or set it to "on click") also
+stays in Chrome, with a note, because its cookies cannot be read; nothing is sent for it. So that the toolbar popup
 can say why a download stayed in Chrome, the extension keeps the file name and the reason (for example a
 site on your exclude list, or automatic sending being off) for the last five such downloads in Chrome's
 session storage, which Chrome clears when it closes. None of this is sent to the app. To find out whether you held Delete, the extension first asks its script in each open tab about
@@ -74,7 +77,7 @@ not used.
 
 **What the app gives the extension:** to show downloads in the toolbar popup, the app sends the extension
 its download list, including downloads you did not send from Chrome: addresses, page addresses, file
-names, folders and progress. The popup shows the newest 20 and lets you pause, resume or delete them in the
+names, folders and progress. The popup shows the newest 20 and lets you pause, resume, retry or delete them in the
 app, and, only if you tick "Delete the file too", delete the file. When the folder window opens, the app
 sends the default download folder and your favorite folders. The app's other settings, passwords and
 cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere

@@ -2,6 +2,8 @@
 
 Owner direction (2026-11-05): the owner prefers the current Inbound design; keep our own design and behavior. `implemented` still needs linked acceptance evidence.
 
+Release status (2026-11-08): the last release is v0.6.0 (extension 0.5.0), published 2026-11-08. It adds the headless server, web UI and Docker image for linux/amd64 (ROADMAP D1–D4; D1 is still in progress). in Edge the owner checked automatic catching; Firefox is not checked with 0.6.0 (EXT.B3). Clean install, upgrade and uninstall passed on a fresh Windows VM (TEST.2). The older dated entries below are history. ROADMAP and PROGRESS hold the current status of each item.
+
 
 
 Consolidated checkpoint (2026-11-05): full solution Release build0warnings/errors; Core88, engine57, integration91 and extension34 tests pass. Light main/graph/statistics rendered in isolated QA; completed-byte restart defect fixed and regression covered. Full UI/DPI/lifecycle/fault acceptance and unified Scheduler review remain open. Latest public release stays0.1.4; no0.1.5 package yet. See PROGRESS.md for logs and limitations.
@@ -124,8 +126,8 @@ SDK, or presentation types.
 | 8 | Queues + scheduler | done | Named queues, caps, start/stop, reassignment, schedules, quotas, completion actions, Download Later, sleep prevention, and DST behavior verified (E9/E10/E13/E16/E22/E23) |
 | 9 | Media downloading | done | HLS/DASH assembly (SegmentTemplate, Timeline, SegmentList, SegmentBase byte ranges), A/V muxing (DASH and HLS alternate audio), fragment recovery, token refresh, live exclusion, DRM detection, and HLS AES-128 key rotation verified (E24-E32/E55/E57-E59); dynamic/live, multi-period, hierarchical SIDX, and DRM decryption remain excluded |
 | 10 | Download All; site grabber removed | done / scoped | Download All collection/filter/handoff is done (G1/E31); site grabber G2–G4 was removed by owner decision and is out of scope |
-| 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI audit remains; Edge supported (ROADMAP EXT.E1, real check pending); Firefox built and registered, not signed or checked in Firefox (EXT.E1) |
-| 12 | Final visual/behavioral audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (checklist/live UIA dump), U3, U4, U5, U6 and U7 (accessibility/contrast/DPI simulation/localization audit); clean-Windows acceptance remains (E52–E54/E85–E88) |
+| 11 | Remaining compatibility/integration | in progress | FTP (E42), hooks (E43), CLI (E44), profiles (E45), settings transfer (E46), repair (E47), upgrade/uninstall (E48), installer-only updater check/download/install/rollback/notifications/gating (E49–E51) verified; final UI audit remains; Edge automatic catching checked by the owner (ROADMAP EXT.E1); Firefox built, registered and accepted by the app from 0.6.0, not yet checked in Firefox (EXT.B3) |
+| 12 | Final visual/behavioral audit | in progress | Live UI audit closed M1/M2/M4/M5/M14, U1/U2 (checklist/live UIA dump), U3, U4, U5, U6 and U7 (accessibility/contrast/DPI simulation/localization audit); clean install, upgrade and uninstall passed on a fresh Windows VM (TEST.2); the final audit remains (E52–E54/E85–E88) |
 
 ## Major decisions
 
