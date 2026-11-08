@@ -293,12 +293,32 @@ public sealed partial class MainWindow : Window
 
         RebuildVisible(selectedId);
         UpdateStatusText();
+        TraceFirstList(snapshot.Jobs.Count);
 
         if (_pendingSettingsOpen)
         {
             _pendingSettingsOpen = false;
             _ = ShowSettingsDialogAsync();
         }
+    }
+
+    private bool _firstListTraced;
+
+    /// <summary>
+    /// PERF.5: the cold-open time is measured to the first frame drawn with the list in it, so a start is timed the
+    /// same way however many jobs there are. Two lines in ui-trace.log, once per process.
+    /// </summary>
+    private void TraceFirstList(int jobs)
+    {
+        if (_firstListTraced) return;
+        _firstListTraced = true;
+        UiTrace.Write($"First snapshot applied: {jobs} jobs, {_visibleJobs.Count} rows");
+        void OnRendering(object? sender, object e)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
+            UiTrace.Write("First frame with the list");
+        }
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
     }
 
     private void ApplyJobEvent(JobDto job, string changeType)

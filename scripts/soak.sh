@@ -21,7 +21,7 @@
 #   stop          create this file to stop the soak
 set -u
 
-NAME=soak; MINUTES=480; JOBS=5000; PORT=5231; UI=0; ADD_EVERY=20; KEEP_STREAM=40; STOP=""
+NAME=soak; MINUTES=480; JOBS=5000; PORT=5231; UI=0; ADD_EVERY=20; KEEP_STREAM=40; STOP=""; BIN_FROM=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME=$2; shift 2 ;;
@@ -31,6 +31,7 @@ while [ $# -gt 0 ]; do
     --ui) UI=1; shift ;;
     --add-every) ADD_EVERY=$2; shift 2 ;;
     --stop) STOP=$2; shift 2 ;;
+    --bin-from) BIN_FROM=$2; shift 2 ;;   # reuse the binaries of an earlier run (an older build)
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -48,10 +49,14 @@ LOG="$OUT/driver.log"
 log() { echo "$(date -u +%FT%TZ) $*" >> "$LOG"; }
 
 # Private copies of the build outputs.
-cp -r "$ROOT/src/DownloadManager.Host/bin/Release/net10.0-windows" "$OUT/bin/host"
-cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$OUT/bin/host/desktop"
-cp -r "$ROOT/src/DownloadManager.Cli/bin/Release/net10.0" "$OUT/bin/cli"
-cp -r "$ROOT/tools/TestServer/bin/Release/net10.0" "$OUT/bin/testserver"
+if [ -n "$BIN_FROM" ]; then
+  cp -r "$ROOT/artifacts/soak/$BIN_FROM/bin/." "$OUT/bin/"
+else
+  cp -r "$ROOT/src/DownloadManager.Host/bin/Release/net10.0-windows" "$OUT/bin/host"
+  cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$OUT/bin/host/desktop"
+  cp -r "$ROOT/src/DownloadManager.Cli/bin/Release/net10.0" "$OUT/bin/cli"
+  cp -r "$ROOT/tools/TestServer/bin/Release/net10.0" "$OUT/bin/testserver"
+fi
 H="$OUT/bin/host/DownloadManager.Host.exe"
 C="$OUT/bin/cli/DownloadManager.Cli.exe"
 T="$OUT/bin/testserver/TestServer.exe"
@@ -63,7 +68,7 @@ export DOWNLOADMANAGER_DATA=$(cygpath -w "$OUT/data")
 export DOWNLOADMANAGER_GC_LOG=$(cygpath -w "$OUT/gc.csv")
 DEST=$(cygpath -w "$OUT/downloads")
 BASE="http://127.0.0.1:$PORT"
-log "start name=$NAME minutes=$MINUTES jobs=$JOBS port=$PORT ui=$UI instance=$DOWNLOADMANAGER_INSTANCE"
+log "start name=$NAME minutes=$MINUTES jobs=$JOBS port=$PORT ui=$UI instance=$DOWNLOADMANAGER_INSTANCE bin-from=${BIN_FROM:-worktree}"
 log "gc env: $(env | grep -E '^DOTNET_(GC|gc)' | tr '\n' ' ')"
 
 cli() { timeout 120 "$C" "$@" 2>>"$OUT/cli-errors.log"; }
