@@ -264,9 +264,9 @@
 
     {#if !browsable}
       <div class="card p-4 text-[13px]">
-        <p class="mb-2">{account.keyUnreadable ? `The ${name} API key is saved, but the server can't read it.` : account.hasKey ? `${name} doesn't offer a list of what is on its account.` : `No usable ${name} API key is saved. Add it in Settings.`}</p>
+        <p class="mb-2">{account.keyUnreadable ? `The ${name} API key is saved, but the server can't read it.` : account.hasKey ? `${name} doesn't offer a list of what is on its account.` : `No usable ${name} API key is saved. Add it in Options.`}</p>
         {#if !account.hasKey || account.keyUnreadable}
-          <p class="mb-3 text-muted">Add the key under Settings, {name} account, to see what is in your account here.</p>
+          <p class="mb-3 text-muted">Add the key under Options, {name} account, to see what is in your account here.</p>
           <a class="btn-primary inline-flex" href="#/settings" onclick={() => (store.settingsPage = `provider:${account.provider}`)}>Open {name} account</a>
         {/if}
       </div>

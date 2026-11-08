@@ -867,11 +867,11 @@
   <a class="toolbtn" title="Open Download Manager settings" href="#/settings"><Icon name="settings" class="text-icon-neutral" /><span>Options</span></a>
   <a class="toolbtn" title="Manage scheduled queue runs" href="#/queues"><Icon name="calendar" class="text-icon-info" /><span>Scheduler</span></a>
   <span class="toolsep"></span>
-  <span class="inline-flex">
+  <span class="inline-flex shrink-0">
     <button class="toolbtn" title="Start the selected queue" disabled={!connected || !settings} onclick={() => void queueAction('start', queueTarget)}><Icon name="play" class="text-icon-start" /><span>Start Queue</span></button>
     {#if queues.length > 1}<button class="toolcaret" aria-label="Start a queue" title="Start a queue" onclick={(event) => toolbarMenu(event, 'Start a queue', queueMenu('start'))}><Icon name="chevron-down" size={12} /></button>{/if}
   </span>
-  <span class="inline-flex">
+  <span class="inline-flex shrink-0">
     <button class="toolbtn" title="Stop the selected queue and pause its downloads" disabled={!connected || !settings} onclick={() => void queueAction('stop', queueTarget)}><Icon name="stop" class="text-icon-pause" /><span>Stop Queue</span></button>
     {#if queues.length > 1}<button class="toolcaret" aria-label="Stop a queue" title="Stop a queue" onclick={(event) => toolbarMenu(event, 'Stop a queue', queueMenu('stop'))}><Icon name="chevron-down" size={12} /></button>{/if}
   </span>
@@ -1096,6 +1096,8 @@
     justify-content: center;
     gap: 2px;
     min-width: 64px;
+    /* The bar scrolls sideways when its buttons are too many for the width; they must not shrink into one another. */
+    flex-shrink: 0;
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 11.5px;
@@ -1108,6 +1110,7 @@
   .toolbtn:disabled { opacity: 0.4; cursor: default; }
   .toolcaret {
     display: inline-flex;
+    flex-shrink: 0;
     align-items: center;
     padding: 0 2px;
     margin-left: -2px;

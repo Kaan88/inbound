@@ -347,3 +347,20 @@ export function applyForm(settings: Settings, form: OptionsForm): void {
   settings.customCategories = defined;
   settings.deleteCategoryIds = removed;
 }
+
+/**
+ * Where a change of the page address (Back, Forward, a typed address) would go, when it has to wait for the Options
+ * question "Leave without saving?"; null when it may go on. The shell calls this before it swaps the screen: a
+ * listener of the Options screen cannot run first, because the browser calls a window's listeners in the order they
+ * were added and the shell's is the older one.
+ */
+export function heldLeave(newURL: string, dirty: boolean, asking: boolean): string | null {
+  if (!dirty || asking) return null;
+  let to = '';
+  try {
+    to = new URL(newURL).hash;
+  } catch {
+    return null;
+  }
+  return to === '#/settings' ? null : to || '#/all';
+}
