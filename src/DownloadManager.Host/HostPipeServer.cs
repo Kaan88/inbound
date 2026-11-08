@@ -19,6 +19,7 @@ public sealed class HostPipeServer
     private readonly ConcurrentDictionary<Guid, PipeClientSession> _clients = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _acceptLoop;
+    private Task? _helloAcceptLoop;
 
     public HostPipeServer(HostCommandDispatcher dispatcher, FileLogger log)
     {
@@ -26,11 +27,17 @@ public sealed class HostPipeServer
         _log = log;
     }
 
-    /// <summary>Starts accepting. The dispatcher is started first, so the first client misses no broadcast.</summary>
+    /// <summary>
+    /// Starts accepting on both pipes. The dispatcher is started first, so the first client misses no broadcast. The
+    /// hello pipe's first instance is created first, so wherever the main pipe is there the hello pipe is too, and a
+    /// client that finds only the main pipe knows the Host is older (<see cref="IpcClient.ConnectAsync(ClientHelloDto, TimeSpan?, CancellationToken)"/>).
+    /// </summary>
     public void Start()
     {
-        _acceptLoop = AcceptLoopAsync(_cts.Token);
+        _helloAcceptLoop = AcceptLoopAsync(PipeNames.HostHelloPipe(), clientSpeaksFirst: true, _cts.Token);
+        _acceptLoop = AcceptLoopAsync(PipeNames.HostPipe(), clientSpeaksFirst: false, _cts.Token);
         _log.Info($"IPC server listening on pipe '{PipeNames.HostPipe()}'.");
+        _log.Info($"IPC server listening for client hellos on '{PipeNames.HostHelloPipe()}'.");
     }
 
     public async Task StopAsync()
@@ -41,11 +48,12 @@ public sealed class HostPipeServer
             client.Complete();
         }
 
-        if (_acceptLoop is not null)
+        foreach (var loop in new[] { _acceptLoop, _helloAcceptLoop })
         {
+            if (loop is null) continue;
             try
             {
-                await _acceptLoop.ConfigureAwait(false);
+                await loop.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -54,17 +62,17 @@ public sealed class HostPipeServer
         }
     }
 
-    private async Task AcceptLoopAsync(CancellationToken cancellationToken)
+    private async Task AcceptLoopAsync(string pipeName, bool clientSpeaksFirst, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             NamedPipeServerStream? pipe = null;
             try
             {
-                pipe = CreatePipe();
+                pipe = CreatePipe(pipeName);
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
                 var client = new PipeClientSession(pipe, _log);
-                _ = HandleClientAsync(client, cancellationToken);
+                _ = HandleClientAsync(client, clientSpeaksFirst, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -91,16 +99,17 @@ public sealed class HostPipeServer
     /// How many clients can be connected at once. Every progress or completion window is a window process with
     /// a connection of its own, besides the main window, the browser bridge and the CLI. At 8, the main window
     /// and seven open progress windows left the browser bridge and the CLI unable to connect at all (PERF.2
-    /// soak). The pipe is the current user's only, so this guards against a runaway, not another user.
+    /// soak). The pipe is the current user's only, so this guards against a runaway, not another user. Each of the
+    /// two pipes has its own limit.
     /// </summary>
     internal const int MaxClients = 64;
 
-    private static NamedPipeServerStream CreatePipe()
+    private static NamedPipeServerStream CreatePipe(string pipeName)
     {
         var security = PipeSecurityFactory.CreateForCurrentUser();
 
         return NamedPipeServerStreamAcl.Create(
-            PipeNames.HostPipe(),
+            pipeName,
             PipeDirection.InOut,
             MaxClients,
             PipeTransmissionMode.Byte,
@@ -110,14 +119,49 @@ public sealed class HostPipeServer
             security);
     }
 
-    private async Task HandleClientAsync(PipeClientSession client, CancellationToken serverToken)
+    /// <param name="clientSpeaksFirst">
+    /// The hello pipe (PERF.7): the client's first frame is <c>client.hello</c>, read before the Host sends anything, and
+    /// says whether this connection gets the snapshot and the events. On the main pipe everyone gets both, as always.
+    /// </param>
+    private async Task HandleClientAsync(PipeClientSession client, bool clientSpeaksFirst, CancellationToken serverToken)
     {
         _clients[client.Id] = client;
         Task? writerTask = null;
         try
         {
-            await _dispatcher.OpenSessionAsync(client, serverToken).ConfigureAwait(false);
+            ClientHelloDto? options = null;
+            IpcMessage? incompatible = null;
+            if (clientSpeaksFirst)
+            {
+                var first = await IpcFraming.ReadAsync(client.Stream, serverToken).ConfigureAwait(false);
+                if (first is null)
+                {
+                    return;
+                }
+
+                if (first.V != Protocol.Version)
+                {
+                    // Answered after the hello, which carries this Host's version, and then closed; nothing else is sent.
+                    incompatible = first;
+                    options = new ClientHelloDto { Snapshot = false, Events = false };
+                }
+                else if (first.Type != MessageTypes.ClientHello)
+                {
+                    _log.Warn($"A client on the hello pipe sent '{(first.Type.Length > 64 ? first.Type[..64] : first.Type)}' first instead of {MessageTypes.ClientHello}; closed.");
+                    return;
+                }
+                else
+                {
+                    options = first.Payload is null ? new ClientHelloDto() : first.GetPayload<ClientHelloDto>();
+                }
+            }
+
+            await _dispatcher.OpenSessionAsync(client, options, serverToken).ConfigureAwait(false);
             writerTask = client.RunWriterAsync(serverToken);
+            if (incompatible is not null && _dispatcher.RejectIfIncompatible(client, incompatible))
+            {
+                return;
+            }
 
             Task<IpcMessage?>? pendingRead = null;
             while (!serverToken.IsCancellationRequested)

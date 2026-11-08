@@ -102,9 +102,18 @@ public sealed partial class HostCommandDispatcher
     /// promised the snapshot before any event. Start the session's writer after this returns. A session that fails
     /// here stays registered until <see cref="CloseSession"/>.
     /// </summary>
-    public async Task OpenSessionAsync(IClientSession client, CancellationToken cancellationToken)
+    public Task OpenSessionAsync(IClientSession client, CancellationToken cancellationToken)
+        => OpenSessionAsync(client, null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="OpenSessionAsync(IClientSession, CancellationToken)"/>, with what the client asked for in its
+    /// <c>client.hello</c> (PERF.7); null is everything, as before. Without the snapshot only the hello is sent. Without
+    /// events the session is never registered, so no broadcast reaches it; its replies still do.
+    /// </summary>
+    public async Task OpenSessionAsync(IClientSession client, ClientHelloDto? options, CancellationToken cancellationToken)
     {
-        _sessions[client.Id] = client;
+        // PERF.7: a client that asked for no events is never registered, so no broadcast reaches it.
+        if (options?.Events ?? true) _sessions[client.Id] = client;
         // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
         // starting meanwhile does not take this one for a running copy and quit. Registered first and read after,
         // and NotifyExitingAsync sets it before it reads the sessions: a session either sees it here or is told there.
@@ -122,7 +131,7 @@ public sealed partial class HostCommandDispatcher
             Capabilities = Capabilities,
         }), cancellationToken).ConfigureAwait(false);
 
-        await SendSnapshotAsync(client, cancellationToken).ConfigureAwait(false);
+        if (options?.Snapshot ?? true) await SendSnapshotAsync(client, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>No more broadcasts go to this session.</summary>

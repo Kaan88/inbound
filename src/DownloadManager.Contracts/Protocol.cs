@@ -1,5 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -19,6 +21,11 @@ public static class MessageTypes
 {
     public const string ServerHello = "server.hello";
     public const string ServerIncompatible = "server.incompatible";
+    /// <summary>
+    /// PERF.7: the first frame on the Host's hello pipe (<see cref="PipeNames.HostHelloPipe"/>), sent by the client before the
+    /// Host says anything, with a <see cref="ClientHelloDto"/>. Never sent on the main pipe, where the Host speaks first.
+    /// </summary>
+    public const string ClientHello = "client.hello";
     public const string JobsSnapshot = "jobs.snapshot";
     public const string JobEvent = "job.event";
     public const string JobAdd = "job.add";
@@ -248,6 +255,12 @@ public static class PipeNames
 
     public static string HostPipe() => $"DownloadManager-{CurrentUserKey()}";
 
+    /// <summary>
+    /// PERF.7: the Host's second pipe, same ACL, where the client speaks first with <c>client.hello</c> and so can ask for
+    /// no snapshot or no events. The main pipe is unchanged, so a client that doesn't know this one never sees it.
+    /// </summary>
+    public static string HostHelloPipe() => $"{HostPipe()}-hello";
+
     public static string MutexName() => $"Local\\DownloadManager.Host.{CurrentUserKey()}";
 }
 
@@ -262,20 +275,59 @@ public sealed class IpcClient : IAsyncDisposable
 
     public bool IsConnected => _pipe.IsConnected;
 
+    /// <summary>
+    /// Whether <c>jobs.snapshot</c> follows <c>server.hello</c> on this connection. True on the main pipe, and on the hello
+    /// pipe when the client asked for it; false when it asked for none.
+    /// </summary>
+    public bool SnapshotFollowsHello { get; private init; } = true;
+
     public static async Task<IpcClient> ConnectAsync(
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
+        => new(await OpenAsync(PipeNames.HostPipe(), timeout, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// PERF.7: connects to the hello pipe and sends <paramref name="hello"/> first, so the Host leaves out what the client
+    /// doesn't want. Read <c>server.hello</c> next as on the main pipe, then the snapshot only if
+    /// <see cref="SnapshotFollowsHello"/>. A Host from before the hello pipe has only the main pipe; this then connects
+    /// there, and the snapshot and events follow as they always did.
+    /// </summary>
+    public static async Task<IpcClient> ConnectAsync(
+        ClientHelloDto hello,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (OperatingSystem.IsWindows() && !PipeProbe.Exists(PipeNames.HostHelloPipe()) && PipeProbe.Exists(PipeNames.HostPipe()))
+        {
+            return await ConnectAsync(timeout, cancellationToken).ConfigureAwait(false);
+        }
+
+        var pipe = await OpenAsync(PipeNames.HostHelloPipe(), timeout, cancellationToken).ConfigureAwait(false);
+        var client = new IpcClient(pipe) { SnapshotFollowsHello = hello.Snapshot };
+        try
+        {
+            await client.SendAsync(IpcMessage.Create(MessageTypes.ClientHello, hello), cancellationToken).ConfigureAwait(false);
+            return client;
+        }
+        catch
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<NamedPipeClientStream> OpenAsync(string name, TimeSpan? timeout, CancellationToken cancellationToken)
     {
         var pipe = new NamedPipeClientStream(
             ".",
-            PipeNames.HostPipe(),
+            name,
             PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.WriteThrough);
         try
         {
             await pipe.ConnectAsync((int)(timeout ?? TimeSpan.FromSeconds(5)).TotalMilliseconds, cancellationToken)
                 .ConfigureAwait(false);
-            return new IpcClient(pipe);
+            return pipe;
         }
         catch
         {
@@ -294,4 +346,22 @@ public sealed class IpcClient : IAsyncDisposable
     {
         await _pipe.DisposeAsync().ConfigureAwait(false);
     }
+}
+
+/// <summary>Whether a pipe exists, without connecting to it or taking an instance. Windows only.</summary>
+internal static class PipeProbe
+{
+    private const int FileNotFound = 2;
+
+    [SupportedOSPlatform("windows")]
+    public static bool Exists(string name)
+    {
+        // A busy pipe (every instance taken) times out here and still exists; only "not found" means it isn't there.
+        if (WaitNamedPipe($@"\\.\pipe\{name}", 1)) return true;
+        return Marshal.GetLastPInvokeError() != FileNotFound;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "WaitNamedPipeW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WaitNamedPipe(string name, uint timeoutMilliseconds);
 }

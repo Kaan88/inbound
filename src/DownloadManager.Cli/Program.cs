@@ -2058,7 +2058,10 @@ internal sealed class CliClient : IAsyncDisposable
         IpcClient? client = null;
         try
         {
-            client = await IpcClient.ConnectAsync(TimeSpan.FromMilliseconds(700)).ConfigureAwait(false);
+            // PERF.7: one command per run, and a command that needs the list asks jobs.query for it, so neither the
+            // greeting's snapshot nor the events are wanted.
+            client = await IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = false },
+                TimeSpan.FromMilliseconds(700)).ConfigureAwait(false);
             var hello = await client.ReadAsync().ConfigureAwait(false);
             if (hello is null || hello.Type != MessageTypes.ServerHello)
             {
@@ -2073,8 +2076,8 @@ internal sealed class CliClient : IAsyncDisposable
                     $"Protocol mismatch: client {Protocol.Version}, host {hello.V}.");
             }
 
-            // Consume the initial snapshot.
-            await client.ReadAsync().ConfigureAwait(false);
+            // An older Host sends the snapshot anyway.
+            if (client.SnapshotFollowsHello) await client.ReadAsync().ConfigureAwait(false);
             return client;
         }
         catch
