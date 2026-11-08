@@ -37,7 +37,7 @@ describe('ticks (A11)', () => {
     expect(defaultSelected(answered('x', { kind: 'hosterLink', hosterAvailable: false }), true)).toBe(false);
     expect(defaultSelected(answered('x', { kind: 'hosterLink', hosterDailyLinksLeft: 0 }), true)).toBe(false);
     expect(defaultSelected(answered('x', { kind: 'hosterLink', hosterAvailable: true }), true)).toBe(true);
-    expect(defaultSelected(answered('x', { kind: 'folderLink', itemId: '1' }), true)).toBe(true);
+    expect(defaultSelected(answered('x', { kind: 'folderLink', itemId: '1', itemKind: 'torrent', provider: 'p' }), true)).toBe(true);
     expect(defaultSelected(answered('https://a/b', { kind: 'ordinaryLink' }, { listed: true }), true)).toBe(false);
     expect(defaultSelected(answered('https://a/b', { kind: 'ordinaryLink' }, { listed: true }), false)).toBe(true);
     expect(defaultSelected({ ...newLine('x', 1) }, true)).toBe(true);
@@ -312,5 +312,29 @@ describe('keys (A27)', () => {
     expect(opensAddUrl({ key: 'n', code: 'KeyN', altKey: true, ctrlKey: true })).toBe(false);
     expect(opensAddUrl({ key: 'n', code: 'KeyN', altKey: true, shiftKey: true })).toBe(false);
     expect(opensAddUrl({ key: 'n', code: 'KeyN' })).toBe(false);
+  });
+});
+
+describe('review fixes', () => {
+  it('removes only whole links, so a handled prefix cannot cut a failed link', () => {
+    expect(removeInputs('https://x/a\nhttps://x/a/b', ['https://x/a'])).toBe('https://x/a/b');
+    expect(removeInputs('see https://x/a/b https://x/a', ['https://x/a'])).toBe('see https://x/a/b');
+  });
+
+  it('keeps a closing bracket that belongs to the address', () => {
+    expect(extractInputs('go to https://site/Page_(film).')).toEqual(['https://site/Page_(film)']);
+    expect(extractInputs('(see https://site/a)')).toEqual(['https://site/a']);
+  });
+
+  it('finds an existing job even when another has no url', () => {
+    const jobs = [{ id: '1', state: 'queued' }, { id: '2', url: 'https://x/f', state: 'queued' }] as never[];
+    expect((findExisting(jobs, 'https://x/f') as { id: string }).id).toBe('2');
+  });
+
+  it('sends ids when a torrent file has no path, never an empty chosen list', () => {
+    const line = { input: 'x', position: 1, direct: false, error: null, result: { ok: true, kind: 'torrentFile', files: [
+      { fileId: 'a', size: 1, name: 'a' }, { fileId: 'b', size: 2, name: 'b', relativePath: 'd/b' }, { fileId: 'c', size: 3, name: 'c', relativePath: 'd/c' }] } } as never;
+    expect(fileChoiceFrom(line, new Set(['a', 'b']))).toEqual({ selection: 'chosen', fileIds: ['a', 'b'] });
+    expect(fileChoiceFrom(line, new Set(['b', 'c']))).toEqual({ selection: 'chosen', filePaths: [{ path: 'd/b', size: 2 }, { path: 'd/c', size: 3 }] });
   });
 });

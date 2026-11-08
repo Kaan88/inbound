@@ -33,9 +33,10 @@
 
   // Recently used destinations that are not favorites, as the desktop's folder menu lists them.
   const recent = $derived.by(() => {
-    const saved = favorites.map((f) => f.path.toLowerCase());
-    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !saved.includes(path.toLowerCase()));
-    return list.slice(0, 10);
+    const same = (path: string) => path.replace(/[\/]+$/, '').toLowerCase();
+    const saved = favorites.map((f) => same(f.path));
+    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !saved.includes(same(path)));
+    return list;
   });
 
   const isFavorite = $derived(!!listing?.path && (store.model.settings?.favoriteFolders ?? []).some((f) => f.path === listing!.path));

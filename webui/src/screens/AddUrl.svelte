@@ -8,6 +8,7 @@
     serverNameToShow, validUserName, type ConflictPolicy, type FileInfo,
   } from '../lib/addflow';
   import { hideAddresses, isMagnet } from '../lib/addview';
+  import { statusText } from '../lib/format';
   import { submitsOnEnter } from '../lib/keys';
   import { store } from '../lib/store.svelte';
   import type { ClassifyResult, Job } from '../lib/types';
@@ -64,17 +65,8 @@
   let saving = $state(false);
   let failure = $state('');
 
-  const shownAddress = $derived(result?.kind === 'providerDirectLink' ? result.displayHost ?? 'This link' : urlWithoutSecrets(url));
-
-  function urlWithoutSecrets(value: string): string {
-    // The query and any sign-in in the address can hold a key; only the part before them is shown.
-    try {
-      const parsed = new URL(value);
-      return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search || parsed.hash ? '?…' : ''}`;
-    } catch {
-      return value;
-    }
-  }
+  // Like the desktop: only an address that can hold a provider's key is hidden; an ordinary one is shown in full.
+  const shownAddress = $derived(result?.kind === 'providerDirectLink' ? result.displayHost ?? 'This link' : url);
 
   // ---- Step 1 ----
 
@@ -209,6 +201,8 @@
     }, '');
     creating = false;
     if (!saved) { categoryError = "The category wasn't saved."; return; }
+    // The new category reaches the list with the next snapshot; wait for it so the box doesn't show blank.
+    for (let wait = 0; wait < 20 && !categories.some((c) => c.id === id); wait++) await new Promise((r) => setTimeout(r, 100));
     categoryId = id;
     useCategoryFolder(true);
     newCategoryName = '';
@@ -249,12 +243,12 @@
       });
       if (!reply.accepted) throw new Error(reply.error ?? 'The server rejected the request.');
       store.toast(reply.duplicate ? 'That download was already queued.' : 'Added 1 download.');
+      password = '';
       onclose();
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
       step = 'info';
     } finally {
-      password = '';
       saving = false;
     }
   }
@@ -262,6 +256,7 @@
   function selectExisting() {
     if (existing) {
       store.revealId = existing.id;
+      store.toast(`It is already in the list as ${existing.fileName}.`);
       location.hash = '#/all';
     }
 
@@ -294,7 +289,7 @@
       <label class="mt-2 flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={direct} /> Download directly, not through {providerName}</label>
     {/if}
   {:else if step === 'duplicate'}
-    <p class="text-[13px]">{existing?.fileName} ({existing ? existing.state : ''}) is already in the list for this URL.</p>
+    <p class="text-[13px]">{existing?.fileName} ({existing ? statusText(existing) : ''}) is already in the list for this URL.</p>
   {:else}
     {#if failure}<p class="mb-3 rounded border border-icon-danger/50 bg-highlight px-3 py-2 text-[13px] text-error" role="alert">{failure}</p>{/if}
     <div class="space-y-3">
@@ -370,8 +365,8 @@
       <button class="btn" onclick={selectExisting}>Select existing</button>
       <button class="btn" onclick={onclose}>Cancel</button>
     {:else}
-      <button class="btn-primary" disabled={saving} onclick={() => start(false)}>{saving ? 'Adding…' : 'Start download'}</button>
-      <button class="btn" disabled={saving} onclick={() => start(true)}>Download later</button>
+      <button class="btn-primary" disabled={saving || creating} onclick={() => start(false)}>{saving ? 'Adding…' : 'Start download'}</button>
+      <button class="btn" disabled={saving || creating} onclick={() => start(true)}>Download later</button>
       <button class="btn" onclick={onclose}>Cancel</button>
     {/if}
   {/snippet}

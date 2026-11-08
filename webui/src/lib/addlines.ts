@@ -56,8 +56,10 @@ export function routeOf(line: AddLine): Route {
     case 'magnet':
     case 'torrentFile':
     case 'hosterLink':
-    case 'folderLink':
       return 'provider';
+    case 'folderLink':
+      // Only a folder link that names its provider, item kind and item can be added.
+      return result.itemId && result.itemKind && result.provider ? 'provider' : 'none';
     default:
       // Includes any kind this build has never heard of.
       return 'none';
@@ -93,6 +95,28 @@ export function withoutAdded(lines: AddLine[], text: string, added: Iterable<str
   if (gone.size === 0) return { lines, text };
   return {
     lines: lines.filter((line) => !gone.has(line.input)).map((line, index) => ({ ...line, position: index + 1 })),
-    text: text.split(/\r?\n/).filter((raw) => !gone.has(raw.trim())).join('\n'),
+    text: removeInputs(text, gone),
   };
+}
+
+/**
+ * The pasted text without the links that were handled, so adding again sends only the rest. A link goes only as a whole
+ * word (between spaces or line ends), so one that starts like a failed one cannot cut it. Other text is kept as typed.
+ */
+export function removeInputs(text: string, handled: Iterable<string>): string {
+  const gone = [...handled].filter((input) => input);
+  const kept: string[] = [];
+  for (const original of text.split(/\r?\n/)) {
+    let line = original;
+    for (const input of gone) {
+      const escaped = input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      line = line.replace(new RegExp(`(^|\\s)${escaped}(?=$|\\s)`, 'g'), '$1');
+    }
+
+    // A line that held only handled links disappears; a blank line the user typed stays.
+    if (original.trim() && !line.trim()) continue;
+    kept.push(line.trimEnd());
+  }
+
+  return kept.join('\n');
 }
