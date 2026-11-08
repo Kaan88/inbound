@@ -385,6 +385,14 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     return false;
   }
 
+  // Firefox (no held file name) can run without access to the site, and then no cookies can be read: a
+  // download that needs a sign-in would go to the app without one while the browser's working copy is
+  // cancelled. It stays in the browser instead. Chromium grants site access at install and is not asked.
+  if (!holdsName && !await canReadCookiesFor(item.url)) {
+    await noteLeftInBrowser(fileName, "The extension has no access to this site, so its sign-in could not be sent. Allow site access in the extension's Settings.", false);
+    return false;
+  }
+
   try {
     await chrome.downloads.pause(item.id);
   } catch {
@@ -1219,6 +1227,20 @@ function serverStatus(): { address: string; name?: string; pairedAt?: number; co
 
 function fromPage(sender: chrome.runtime.MessageSender | undefined, page: string): boolean {
   return sender?.id === chrome.runtime.id && (sender.url ?? "").split(/[?#]/)[0] === chrome.runtime.getURL(page);
+}
+
+/** Whether the extension has host access to this address's site, which reading its cookies needs. */
+async function canReadCookiesFor(url: string): Promise<boolean> {
+  let origin: string;
+  try {
+    const parsed = new URL(url);
+    origin = `${parsed.protocol}//${parsed.hostname}/*`;
+  } catch { return true; }
+  try {
+    return chrome.permissions?.contains ? await chrome.permissions.contains({ origins: [origin] }) : true;
+  } catch {
+    return true;
+  }
 }
 
 /**
