@@ -4,7 +4,7 @@
 
 - `webui` (D2 web UI with sign-in and pairing, D3 Docker image and compose, the extension's server transport, D4 on the VM) merged into `dev`. The extension's folder and batch windows conflicted (the EXT.B2 gate against the This PC / Server choice) and were combined by hand. A review of that merge found real gaps, now fixed: the target radios stayed live during a folder pick or a send (a local folder could go into a server request), the server folder list could stay open during a send, and a request for a server unpaired meanwhile went to this PC with its server folder (now refused).
 - Full runs on merged `dev`:
-  - Windows, all green: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 71; extension 130; web UI 37, `svelte-check` clean. Results in `artifacts\campaign61108-merged-webui\`.
+  - Windows, all green: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 71; extension 130; web UI 37, `svelte-check` clean. Results in `artifacts\campaign\20261108-merged-webui\`.
   - Linux (the owner's VM, .NET 10 SDK container, `Platform!=Windows`): Core 862, Engine 159, Archives 274 (52 skipped, need Rar.exe), Containers 183, TorBox 323, Server 71, Integration 1,090 (7 skipped). The first Integration run failed 50 tests that need the Windows Host or registry and had no Windows tag; they are tagged now.
 - Firefox: addons.mozilla.org warned that `data_collection_permissions` needs Firefox 140 (Android 142) while the manifest said 128. The build now asks for 140.0 and `gecko_android` 142.0. Its warnings about `cookies.getPartitionKey` and `downloads.onDeterminingFilename` stay: the code checks for both and Firefox takes the other path.
 - Owner answers, 2026-11-08:
