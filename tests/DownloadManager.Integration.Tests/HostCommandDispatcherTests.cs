@@ -241,6 +241,26 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AWindowAskedForAfterAnExitBeganIsNotOpenedAndTheAskerIsToldItIsExiting()
+    {
+        var service = await ServiceAsync();
+        var platform = new FakePlatform(PlatformCapabilities.Desktop, _timeline);
+        var dispatcher = Dispatcher(service, platform);
+        // A probe that asked for no events is not registered, so the exiting broadcast can't reach it.
+        var probe = Session();
+        await dispatcher.OpenSessionAsync(probe, new ClientHelloDto { Snapshot = false, Events = false }, CancellationToken.None);
+        var asking = Session();
+        await dispatcher.OpenSessionAsync(asking, CancellationToken.None);
+        await dispatcher.DispatchAsync(asking, IpcMessage.Create(MessageTypes.HostShutdown, new { }), CancellationToken.None);
+
+        await dispatcher.DispatchAsync(probe, IpcMessage.Create(MessageTypes.HostOpenUi, new HostActionRequest { Action = string.Empty }), CancellationToken.None);
+        await probe.UntilAsync(frames => frames.Any(f => f.Type == MessageTypes.HostExiting));
+
+        Assert.Empty(platform.Opened);
+        Assert.DoesNotContain(probe.Frames, f => f.Type == MessageTypes.HostActionResult);
+    }
+
+    [Fact]
     public async Task ABurstOfSettingsChangesAnnouncesThePackagesOnceAndNotAgainWhenNothingChanged()
     {
         var service = await ServiceAsync();

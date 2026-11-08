@@ -516,9 +516,9 @@ internal static class Program
         IpcClient? client = null;
         try
         {
-            // PERF.7: the probe needs the hello and one reply, so no snapshot or events (an older Host sends them anyway,
-            // and the reply loop below reads past them).
-            client = IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = false }, connectTimeout)
+            // PERF.7: no snapshot. Events stay on so a host.exiting broadcast reaches the probe (UI.B12); an older Host sends
+            // the snapshot anyway, and the reply loop below reads past it.
+            client = IpcClient.ConnectAsync(new ClientHelloDto { Snapshot = false, Events = true }, connectTimeout)
                 .GetAwaiter().GetResult();
             using (var hello = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
             {
