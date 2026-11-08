@@ -187,6 +187,10 @@ note that the token and cookies cross the network unencrypted.
   dialog for This PC, and for the server a list of its folders one level at a time (`folders.browse` through
   `dm.browseServerFolders`, which only `handoff.html` and `batch.html` may use; the server limits it to its
   roots). The window starts on the default target. A folder chosen there is for that download only.
+  Both windows fill the folder field (Save in, in Download All) with the chosen target's default folder and
+  show the other target's default on a switch; Download All gets them from `dm.targets`, which only
+  `batch.html` may use and which asks the desktop app for its folders even with no server paired. The folder
+  is sent only when it was changed, so an untouched field still lets the app or the server decide.
 - **The popup** lists the newest 20 of each place, labelled This PC or Server, and sends Pause, Resume, Retry
   and Delete to the place the download is in. Without the desktop app here, its card is hidden and the
   server's card shows the state. One place not answering leaves the other's list.

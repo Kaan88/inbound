@@ -934,10 +934,9 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.targets": {
-      // The batch window's choice of target. Without a server there is nothing to choose and nothing to ask.
-      if (!server) {
-        return { ok: true, targets: [{ id: "local", label: TARGET_LABELS.local, chooser: "dialog", defaultFolder: "", favorites: [] }], target: "local" };
-      }
+      // The batch window's choice of target, each with its default folder, as the folder window gets them.
+      // Without a server this is one request to the desktop app, for its default folder.
+      if (!fromPage(sender, "batch.html")) return { ok: false, error: "Only the Download All window can do that." };
       return { ok: true, ...await handoffTargets() };
     }
 
