@@ -68,9 +68,9 @@ public static partial class ExtractionSafety
         }
 
         // Linux keeps a backslash as part of a name, so "a\b" is one file there and a folder and a file on Windows.
-        // Which one the archive meant can't be told, and a guess could put a file where the listing didn't say. 7-Zip
-        // on Linux lists folders with "/", so an ordinary archive never meets this. Checked last, so a traversal or a
-        // device name is still named as such.
+        // Which one the archive meant can't be told, and a guess could put a file where the listing didn't say. A zip
+        // made on Windows is the exception: its listing reads the backslash as a folder separator first, so it never
+        // reaches this. Checked last, so a traversal or a device name is still named as such.
         if (!OperatingSystem.IsWindows() && path.Contains('\\')) return "backslash in name";
 
         return null;
@@ -188,6 +188,86 @@ public static partial class ExtractionSafety
 
     /// <summary>Free bytes on the volume holding a path (its own mount on Linux), or null when that cannot be told, as on a network share.</summary>
     public static long? AvailableBytes(string path) => Volumes.AvailableBytes(path);
+
+    /// <summary>
+    /// Off Windows, moves what 7-Zip wrote under a zip's Windows names (<c>dir\a.txt</c>, one name there) into the
+    /// folders those names mean (<c>dir/a.txt</c>), as <see cref="ArchiveProbe.NameFixes"/> lists them, so that
+    /// <see cref="WalkStaging"/> then finds what the listing names and checks it as usual. Every target was checked with
+    /// the listing already. Nothing is followed: a link anywhere in staging stops this before a folder is made or a file
+    /// moved. A target outside the payload folder is refused, and so is a file whose target is already there; a folder joins one.
+    /// </summary>
+    public static void ApplyNameFixes(string payloadRoot, IReadOnlyList<ArchiveNameFix> fixes)
+    {
+        if (fixes.Count == 0) return;
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(payloadRoot));
+        var prefix = root + Path.DirectorySeparatorChar;
+
+        string Inside(string relative)
+        {
+            var full = Path.GetFullPath(Path.Combine(root, relative));
+            if (!full.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"An entry's folders lead outside the extraction folder: {SafeForDisplay(relative)}");
+            }
+
+            return full;
+        }
+
+        try
+        {
+            var everything = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false };
+            foreach (var item in new DirectoryInfo(root).EnumerateFileSystemInfos("*", everything))
+            {
+                if ((item.Attributes & FileAttributes.ReparsePoint) != 0 || item.LinkTarget is not null)
+                {
+                    throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Extraction produced a link: {SafeForDisplay(Path.GetRelativePath(root, item.FullName))}");
+                }
+            }
+
+            foreach (var fix in fixes.Where(fix => !fix.IsFolder))
+            {
+                var written = Inside(fix.Written);
+                // One that didn't come out is named by the walk, as a listed file that was not extracted.
+                if (!File.Exists(written)) continue;
+                var target = Inside(fix.Path);
+                if (File.Exists(target) || Directory.Exists(target))
+                {
+                    throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"Two entries in the archive name the same file: {SafeForDisplay(fix.Path)}");
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(written, target);
+            }
+
+            foreach (var fix in fixes.Where(fix => fix.IsFolder))
+            {
+                var written = Inside(fix.Written);
+                Directory.CreateDirectory(Inside(fix.Path));
+                // Empty by now: 7-Zip writes dir\a.txt beside dir\, not in it. One that still holds something throws.
+                if (Directory.Exists(written)) Directory.Delete(written, recursive: false);
+            }
+
+            // A file listed as "a\b/c.txt" with no entry for "a\b" leaves 7-Zip's own folder "a\b" empty once c.txt has
+            // moved. Deepest first, and only empty ones: anything still in one is refused by the walk.
+            var leftovers = new DirectoryInfo(root).EnumerateDirectories("*", everything)
+                .Where(folder => folder.Name.Contains('\\'))
+                .Select(folder => folder.FullName)
+                .OrderByDescending(folder => folder.Length)
+                .ToList();
+            foreach (var folder in leftovers)
+            {
+                if (!Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder, recursive: false);
+            }
+        }
+        catch (IOException exception)
+        {
+            throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"An entry with backslashes in its name could not be put in its folders: {exception.GetType().Name}.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw MapIoFailure(exception, "putting entries in their folders");
+        }
+    }
 
     /// <summary>
     /// Walks what was really written. Refuses reparse points, hard links, unsafe names, hidden data

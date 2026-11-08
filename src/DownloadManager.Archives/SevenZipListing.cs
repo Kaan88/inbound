@@ -15,9 +15,18 @@ internal sealed class SevenZipListing
     private readonly Dictionary<string, ArchiveEntry> _entries = new(StringComparer.Ordinal);
     private readonly List<string> _problems = [];
     private readonly List<string> _missingVolumes = [];
+    private readonly List<ArchiveNameFix> _nameFixes = [];
+    private readonly bool _backslashIsAName;
 
-    private SevenZipListing()
+    /// <summary>
+    /// The hosts 7-Zip names for a zip entry made where a backslash separates folders and can't be part of a name.
+    /// Anything else, Unix above all, may hold a backslash in a name, so there it stays one (and is refused).
+    /// </summary>
+    private static readonly HashSet<string> WindowsHosts = new(StringComparer.Ordinal) { "FAT", "NTFS", "VFAT", "HPFS" };
+
+    private SevenZipListing(bool backslashIsAName)
     {
+        _backslashIsAName = backslashIsAName;
     }
 
     /// <summary>The innermost format, such as <c>Rar5</c>, <c>7z</c> or <c>zip</c>. A split set shows <c>Split</c> first, then what it holds.</summary>
@@ -49,9 +58,19 @@ internal sealed class SevenZipListing
 
     public IReadOnlyList<ArchiveEntry> Entries => _entries.Values.ToList();
 
-    public static SevenZipListing Parse(string output)
+    /// <summary>See <see cref="ArchiveProbe.NameFixes"/>.</summary>
+    public IReadOnlyList<ArchiveNameFix> NameFixes => _nameFixes;
+
+    public static SevenZipListing Parse(string output) => Parse(output, !OperatingSystem.IsWindows());
+
+    /// <param name="output">What <c>7z l -slt</c> printed.</param>
+    /// <param name="backslashIsAName">
+    /// True where 7-Zip keeps a zip's backslashes in names, which is every system but Windows (checked with 7-Zip 26.04
+    /// on Linux). Tests pass it to check either way on any system.
+    /// </param>
+    public static SevenZipListing Parse(string output, bool backslashIsAName)
     {
-        var listing = new SevenZipListing();
+        var listing = new SevenZipListing(backslashIsAName);
         var lines = output.TrimStart('﻿').Split('\n').Select(line => line.TrimEnd('\r')).ToList();
         var start = lines.IndexOf(EntriesStart);
         listing.ReadArchiveSection(start < 0 ? lines : lines.Take(start));
@@ -164,6 +183,17 @@ internal sealed class SevenZipListing
             !long.TryParse(sizeText, NumberStyles.None, CultureInfo.InvariantCulture, out size))
         {
             HasUnknownLines = true;
+        }
+
+        // A zip made on Windows (PowerShell 5.1's Compress-Archive, for one) can put a backslash between folders. Where
+        // 7-Zip keeps it in the name, the entry is listed by the folders it means, so every check below and in
+        // ExtractionSafety sees those, and the extractor moves what 7-Zip wrote to match (ArchiveProbe.NameFixes).
+        if (_backslashIsAName && path.Contains('\\') && Type.Equals("zip", StringComparison.OrdinalIgnoreCase) &&
+            block.TryGetValue("Host OS", out var host) && WindowsHosts.Contains(host))
+        {
+            var written = path;
+            path = path.Replace('\\', '/').TrimEnd('/');
+            _nameFixes.Add(new ArchiveNameFix(written, path, kind == ArchiveEntryKind.Directory));
         }
 
         var entry = new ArchiveEntry(path, size, kind, Flag(block, "Encrypted"), target);

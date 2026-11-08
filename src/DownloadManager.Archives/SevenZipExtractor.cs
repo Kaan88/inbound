@@ -146,6 +146,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             progress?.Report(new ExtractionProgress(ExtractionPhase.Extracting, 100));
 
             progress?.Report(new ExtractionProgress(ExtractionPhase.Verifying));
+            ExtractionSafety.ApplyNameFixes(staging.PayloadFolder, probe.NameFixes);
             var content = ExtractionSafety.WalkStaging(staging.PayloadFolder, probe, limits);
             MarkFromZone(firstVolume, staging.PayloadFolder, content);
 
@@ -394,6 +395,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             ListingHasRepeatedNames = listing.HasRepeatedNames,
             HoldsDataStreams = listing.HoldsDataStreams,
             VolumesRead = volumesRead,
+            NameFixes = stream ? [] : listing.NameFixes,
         };
     }
 
