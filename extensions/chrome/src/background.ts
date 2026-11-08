@@ -784,6 +784,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
 
       const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
       const startMode = message.startMode === "later" ? "later" : "now";
+      if (serverGone(message.target)) return { ok: false, error: SERVER_GONE };
       const transport = transportFor(chosenTarget(message.target));
       const destination = typeof message.destination === "string" && message.destination.trim()
         ? message.destination.trim()
@@ -976,6 +977,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const destination = typeof message.destination === "string"
         ? message.destination.trim()
         : "";
+      if (serverGone(message.target)) return { ok: false, error: SERVER_GONE };
       if (confirmingHandoffs.has(id)) {
         return { ok: false, error: "This download is being sent already." };
       }
@@ -1099,6 +1101,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (!type || !/^[0-9a-f-]{32,36}$/i.test(jobId)) {
         return { ok: false, error: "Unknown download action." };
       }
+      if (serverGone(message.target)) return { ok: false, error: SERVER_GONE };
       const transport = transportFor(chosenTarget(message.target));
       // A failed connection throws, and the message listener turns it into a readable error.
       const reply = await transport.request(type, {
@@ -1174,6 +1177,16 @@ async function handoffTargets(): Promise<{ targets: HandoffTarget[]; target: Tar
     ? { id, label: TARGET_LABELS.server, chooser: "list", address: paired!.address, ...remote! }
     : { id, label: TARGET_LABELS.local, chooser: "dialog", ...local });
   return { targets, target: initialTarget(settings.defaultTarget, offered) };
+}
+
+const SERVER_GONE = "The server is not paired any more. Choose This PC, or pair the server again in Settings.";
+
+/**
+ * A page asked for the server, but none is paired now (unpaired while the window was open). Refused rather
+ * than sent to this PC: the request may carry a server folder, and the user chose the server.
+ */
+function serverGone(value: unknown): boolean {
+  return value === "server" && !server;
 }
 
 /** A target a page asked for: the server only while one is paired, otherwise this PC. */

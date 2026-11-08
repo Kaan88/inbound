@@ -1,6 +1,6 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import { renderTargetChoice, ServerFolderBrowser, type OfferedTarget } from "./destination-target";
+import { renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget } from "./destination-target";
 import type { TargetId } from "./transport";
 
 interface PendingHandoff {
@@ -46,6 +46,7 @@ function renderButtons(): void {
   browseDestinationButton.disabled = !gate.canPick;
   // Keep in browser during a send could keep the file in the browser and add it to the app too.
   keepButton.disabled = gate.sending;
+  setTargetChoiceEnabled(targetChoice, gate.canPick);
 }
 
 function markUnavailable(message: string): void {
@@ -111,7 +112,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (unavailable || finished) return;
+  if (unavailable || finished || !gate.canSend) return;
+  // The server's folder list stays shut while a send runs: a folder picked then would not be the one sent.
+  serverFolders.close();
   await gate.send(sendToApp);
 });
 

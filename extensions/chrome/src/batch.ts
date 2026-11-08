@@ -1,6 +1,6 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import { renderTargetChoice, ServerFolderBrowser, type OfferedTarget } from "./destination-target";
+import { renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget } from "./destination-target";
 import type { TargetId } from "./transport";
 
 interface PageLink {
@@ -88,6 +88,7 @@ function updateSelection(visible: PageLink[] = visibleLinks()): void {
   confirmButton.disabled = !gate.canSend || selected.size === 0;
   browseDestinationButton.disabled = !gate.canPick;
   cancelButton.disabled = gate.sending;
+  setTargetChoiceEnabled(document.getElementById("targetChoice") as HTMLElement, gate.canPick);
 }
 
 function render(): void {
@@ -205,10 +206,12 @@ selectAll.addEventListener("change", () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (selected.size === 0) {
+  if (selected.size === 0 || !gate.canSend) {
     return;
   }
 
+  // The server's folder list stays shut while a send runs: a folder picked then would not be the one sent.
+  serverFolders.close();
   await gate.send(sendToApp);
 });
 
