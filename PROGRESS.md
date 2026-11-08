@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Web UI in the Windows app, and remote management (2026-11-08, requested)
+
+- Owner, 2026-11-08: "put webui to installer too. have it be possible to enable webui from desktop app. like how qbittorrent does." and "since host is separate, like transmission, have desktop or webui be able to connect to each other easily. maybe I want to manage my homeserver from my desktop ui or vice versa." Recorded as ROADMAP D8 and D9; the design goes to the owner before it is built. The 0.6.3 release stays paused.
+- 2026-11-09: mapped the Host, server, window, web UI and packaging, and how qBittorrent and Transmission do it; wrote `docs/plans/remote-management.md`; three reviewers found that the first draft would have let a browser run programs on the PC (open-when-done, schedules), act on files outside its folders, and leak the Windows sign-in hash through UNC paths. The revised design uses a bridge process started by the Host, web-role rights with an allow-list, text checks on paths, and a firewall step that clears block rules. Two questions wait for the owner. REV.4 (no internet mark on downloads) recorded.
+
 ### Paused: 0.6.3 release half done (2026-11-08)
 
 - Owner paused the session ("pause here, I have more ideas suddenly. save work"). Nothing of 0.6.3 is pushed or released.
