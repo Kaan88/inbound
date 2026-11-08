@@ -2,7 +2,8 @@
 
 Status: plan, 2026-11-07. D1a (the shared command dispatcher) and D1b (the server and the Linux replacements) are
 built on `stream-b`, 2026-11-08; what D1b holds is described below. D2 (sign-in, browser pairing and the web UI) is
-built on `webui`, 2026-11-08, in the next section. D3 and D4 are not started. ROADMAP D1 to D4 and PERF.1 to PERF.3
+built on `webui`, 2026-11-08, in the next section. D3 (the image, compose and the GHCR workflow) is built on `webui`,
+2026-11-08, in the section after it. D4 is not started. ROADMAP D1 to D4 and PERF.1 to PERF.3
 track it.
 
 ## D2: what was built (2026-11-08)
@@ -46,8 +47,69 @@ track it.
   after the password, pause and resume, delete without the file, torrent upload to the mock provider, site login and
   proxy saved write-only, pairing and revoking, sign-out), against the server with a temp data folder, the
   TestServer and its mock TorBox. Screenshots: `artifacts\webui\` (not committed).
-- **Not done here:** the Dockerfile and compose (D3, which builds the web UI in a Node stage from the lockfile before
-  `dotnet publish`), the run on the Linux VM and against the real TorBox (D4), and the extension's server transport.
+- **Not done here:** the Dockerfile and compose (D3, in the next section), the run against the real TorBox (D4), and
+  the extension's server transport.
+
+
+## D3: what was built (2026-11-08)
+
+`Dockerfile`, `.dockerignore`, `docker/` and `.github/workflows/docker.yml` on `webui`; how to run it is in
+`docs/docker.md`.
+
+- **Image:** four stages. Node 24 (Alpine) builds the web UI with `npm ci --ignore-scripts` from the lockfile; a
+  second stage fetches the official 7-Zip 26.04 for Linux (`7z2604-linux-x64.tar.xz` / `-arm64.tar.xz` from
+  7-zip.org) and checks its SHA-256 (computed from the downloads and equal to the digests GitHub lists for the same
+  files on the `ip7z/7zip` 26.04 release); the .NET 10 SDK publishes the server for `TARGETARCH` (`linux-x64`,
+  `linux-arm64`, framework-dependent) with `-p:BundleWindows7Zip=false`, so `7z.exe`/`7z.dll` stay out (the build
+  fails if a Windows file is found); the runtime is `mcr.microsoft.com/dotnet/aspnet:10.0` (Ubuntu 24.04). The first
+  three run on the build machine's architecture, and the last runs no command, so a cross build needs no emulation.
+  Base images are pinned by their multi-architecture digest. Not chiseled: the entrypoint needs a shell, `chown` and
+  `setpriv` to give `/data` to `PUID:PGID` and drop root, which a chiseled image (no shell, fixed user) can't do.
+- **Entrypoint** (`docker/entrypoint.sh`): as root, `chown -R` of the data folder only when something in it has
+  another owner, `700` on a new data folder, download roots never changed recursively (an empty unwritable one is
+  given to the user, otherwise a warning), `PUID`/`PGID` of 0 refused (exit 2), then `setpriv --reuid --regid
+  --clear-groups --no-new-privs`. Started with `--user`, it changes nothing.
+- **Also:** volumes `/data` and `/downloads`, `EXPOSE 8080`, a `HEALTHCHECK` on `/health` through bash's `/dev/tcp`
+  (no curl in the image), OCI labels (source, version, revision; no license label, since the repository names
+  none), `ASPNETCORE_HTTP_PORTS` cleared so only `DOWNLOADMANAGER_URLS` says where it listens. No `DOTNET_` GC
+  settings: measured, they save about 4 MiB. FFmpeg is left out (Ubuntu's package adds 425 MB); `docs/docker.md`
+  shows the two-line image that adds it.
+- **Build context:** `.dockerignore` is an allowlist (the server's projects, `webui/`, `Directory.Build.props`, the
+  two scripts), with build output, `node_modules`, keys, `.env` files and anything named like credentials or secrets
+  dropped inside those too.
+- **Compose:** `docker/compose.example.yml` with both volumes, `PUID`/`PGID`, `TZ`, the password as a Docker secret
+  (`DOWNLOADMANAGER_PASSWORD_FILE`), sign-in on, `init: true`, and a commented Caddy proxy; `docs/docker.md` adds
+  Traefik labels.
+- **GHCR workflow:** on a `v*` tag push only, QEMU and Buildx, `linux/amd64,linux/arm64`, pushed to
+  `ghcr.io/kaan88/inbound` with the version, the minor line and `latest` (not for a pre-release tag), `GITHUB_TOKEN`
+  with `packages: write`, provenance `mode=max` and an SBOM. Actions pinned to release commits. Never run; not linted
+  (no actionlint on this PC; the inputs were checked against each action's `action.yml` at the pinned commit).
+
+Evidence, on the owner's Linux VM (x86_64, Docker 29, BuildKit 0.34), from a `git archive` of `webui`:
+
+- `docker build` of `inbound-test:dev` passed; context 2.09 MB. A context check with decoy files named like the main
+  checkout's secrets and local folders (`credentials.txt`, `secrets/`, `notes-local/`, `reverse-engineering/`,
+  `artifacts/`, `.env`, `*.pem`, `*.key`, `auth.json`, `bin/`, `obj/`, `node_modules/`, `webui/dist/`) sent 191 files
+  and none of the decoys. `docker history` shows only the COPY layers and the ENV/LABEL lines; a `find` over the image
+  for credential, secret, key, pem, pfx, p12, `.env` and `auth.json` names found only the base image's
+  `UserSecrets.dll` and `/usr/lib/ssl/cert.pem`.
+- Run with `-p 18080:8080`, `PUID`/`PGID` of the VM user and `TZ=Europe/Istanbul`: healthy in under 15 s, the server
+  as uid 1000 (only `docker-init` as root), log times in +03:00, `secrets.key` 600 and `auth.json` 600, data folder
+  700. With curl from the VM: `/health` 200; IPC without a session 401; setup with a wrong code 403, with the code
+  from the log 200 and an `HttpOnly` session cookie; `host.status` 200; `folders.browse` lists `/downloads` and
+  refuses `/data`; another `Origin` 403; the web UI index 200 with its Svelte bundle; `/signin/` 200 without a
+  session; the WebSocket upgrade 101; sign-out, then 401; a wrong password 401, the right one 200; a `job.add` of
+  the 1.5 MB 7-Zip archive finished in `/downloads`, owned by the VM user, with the pinned SHA-256 and no part file
+  left. The random test password appeared in neither `docker logs` nor the log files.
+- Restart with the same `PUID`: no chown. `docker stop`: "Server stopping", "Server stopped", exit 0. `PUID=1001` on
+  a data folder owned by 1000: chowned, the server as 1001. `PUID=0`: exit 2. `--user 1000:1000`: no entrypoint
+  work, the server as 1000.
+- Idle memory over about 6 minutes (`docker stats` every 10 s): fresh 34.4 MiB average (max 37.8), after the checks
+  53.9 MiB (max 60.5), `DOTNET_gcServer=0` 30.0, with `GCConserveMemory=7` 29.9; CPU about 0.02%. Target under 100 MB:
+  met. Image 350 MB (base 342 MB).
+- **arm64:** no image built. The VM has no QEMU/binfmt for arm64 and none was installed. The arm64 7-Zip download and
+  hash check and the `linux-arm64` publish ran on the VM (build stages with `TARGETARCH=arm64`, output to the cache
+  only); the arm64 runtime stage, which only copies files, was not built or run.
 
 
 ## D1b: what was built (2026-11-08)
@@ -209,9 +271,10 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
   - Volumes `/data` and `/downloads`, port 8080, a `HEALTHCHECK` on `/health`.
   - Built for `linux/amd64` and `linux/arm64`.
 - **Compose:** an example file with the two volumes and the password variable.
-- **Publishing:** an image on GHCR (`ghcr.io/kaan88/inbound`) built on each tag, if the owner wants it
-  public. That is a public step, so it waits for a yes.
-- **Target:** under 100 MB of memory when idle in the container, measured in D4.
+- **Publishing:** an image on GHCR (`ghcr.io/kaan88/inbound`) built on each tag (owner: yes, 2026-11-08). The
+  workflow is written; it runs only when the owner pushes a `v*` tag.
+- **Target:** under 100 MB of memory when idle in the container: 34 MiB fresh, 54 MiB after use (D3, above); D4
+  measures it during a download.
 
 ## D4 End-to-end test
 

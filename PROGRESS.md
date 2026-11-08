@@ -1,5 +1,32 @@
 # Progress — session handoff
 
+### D3 Docker image, compose and GHCR workflow, on `webui` (2026-11-08)
+
+- **Built:** `Dockerfile` (Node 24 web UI stage from the lockfile; official 7-Zip 26.04 `7zz` for x64/arm64 with a
+  checked SHA-256 from 7-zip.org, equal to GitHub's release digests; .NET 10 SDK cross-publish for `TARGETARCH` with
+  `-p:BundleWindows7Zip=false`, a new switch in the Archives csproj, so no `7z.exe`/`7z.dll` in the image; runtime
+  `aspnet:10.0` on Ubuntu 24.04; base images pinned by digest), `docker/entrypoint.sh` (`PUID`/`PGID`, chown of
+  `/data` only when needed, `setpriv` with no new privileges), `docker/healthcheck.sh` (no curl), allowlist
+  `.dockerignore`, `.gitattributes` (LF for the files read in Linux), `docker/compose.example.yml`,
+  `.github/workflows/docker.yml` (on `v*` tags only; never run), `docs/docker.md`, a README section.
+- **Evidence (owner's VM, `inbound-test:dev`, port 18080):** build passed, context 2.09 MB, decoy secrets and local
+  folders kept out of the context, nothing of ours named like a key or credential in the image or its history;
+  healthy, runs as the VM user; `/health`, setup with the log's code, sign-in, sign-out, wrong password, origin
+  refusal, roots limit, WebSocket 101 and a real 1.5 MB download (right SHA-256 and owner) checked with curl; the test
+  password in no log; restart, `docker stop` (exit 0), a `PUID` change, `PUID=0` (exit 2) and `--user` checked. Idle
+  memory over about 6 minutes: 34.4 MiB fresh, 53.9 MiB after use; workstation GC or conserve-memory save about
+  4 MiB, so none is set. Image 350 MB (base 342). FFmpeg would add 425 MB: left out, documented.
+- **Not done:** no arm64 image (no QEMU on the VM; not installed). The arm64 7-Zip check and `linux-arm64` publish
+  ran as build stages only. The workflow is not linted (no actionlint offline); its inputs were checked against each
+  action's `action.yml` at the pinned commits. Not delegated to a cheaper reviewer (no agent tool in this session).
+- **On the VM:** kept the `inbound-test:dev` image and the files in `~/inbound-d3` for D4, removed every container made; the
+  `node:24-alpine` base image pulled for the build is left there (not labelled, so not removed); build cache left.
+- **Questions for the owner (safer choice taken):** no `org.opencontainers.image.licenses` label, since the repository
+  names no license; base images pinned by digest (reproducible, but security fixes need a bump: add Dependabot or
+  Renovate?); default `PUID`/`PGID` 1654 (the image's `app` user; the compose example uses 1000); a new data folder is
+  made 700; `PUID=0` refused; FFmpeg not in the image; `latest` not moved by a pre-release tag; provenance `mode=max`
+  and an SBOM in the published image.
+
 ### D2 web UI with sign-in and pairing, on `webui` (2026-11-08)
 
 - **Server sign-in** (`src/DownloadManager.Server/Auth`), on by default: one password (setup page, or
