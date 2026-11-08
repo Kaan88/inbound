@@ -42,7 +42,7 @@ export interface Job {
   isRemote?: boolean;
   remoteProvider?: string;
   queueRetryAt?: string;
-  /** False when the download was taken out of its queue (the Q column is then empty). Older servers leave it out: queued. */
+  /** False when the download was taken out of its queue (the Q column is then empty). Older servers leave it out (then it is true). */
   isQueued?: boolean;
   pageUrl?: string;
   canCancel?: boolean;
