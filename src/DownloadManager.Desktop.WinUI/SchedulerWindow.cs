@@ -890,7 +890,8 @@ public sealed class SchedulerWindow : Window
             {
                 "create" => "Queue created.",
                 "delete" => "Queue deleted.",
-                _ => "Queue renamed.", // The only other action this path sends is a rename ("policy").
+                "policy" => "Queue renamed.", // The rename is the only call that sends "policy".
+                _ => "Queue updated.",
             };
         }
         catch (Exception ex) { _status.Text = "Could not update queue: " + ex.Message; }
