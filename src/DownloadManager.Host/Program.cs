@@ -92,6 +92,8 @@ internal static class Program
                 return 0;
             }
 
+            // Measurement aid for soak runs; does nothing unless DOWNLOADMANAGER_GC_LOG is set.
+            using var gcLog = GcMemoryLog.StartFromEnvironment(log.Info);
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
