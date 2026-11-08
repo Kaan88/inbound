@@ -9,7 +9,24 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!--
+    The web UI (D2) is built by Node in webui\ (npm ci; npm run build) into webui\dist; no Node runs here. When
+    webui\dist exists, its files are what this project serves from wwwroot, in a build as in a publish, and the
+    placeholder pages in wwwroot are left out. Without it (a build on a machine with no Node, the Linux test
+    container) the placeholder says how to build the UI. The Docker image (D3) runs the Node build first.
+  -->
+  <PropertyGroup>
+    <WebUiDist>$(MSBuildThisFileDirectory)..\..\webui\dist\</WebUiDist>
+    <WebUiBuilt Condition="Exists('$(WebUiDist)index.html') And Exists('$(WebUiDist)signin\index.html')">true</WebUiBuilt>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(WebUiBuilt)' == 'true'">
+    <Content Remove="wwwroot\**" />
+    <None Remove="wwwroot\**" />
+    <Content Include="$(WebUiDist)**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(WebUiBuilt)' != 'true'">
     <!-- Served from next to the program (ServerApp sets the web root there), in a build as in a publish. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -8,8 +8,13 @@ public enum BridgeRole
 {
     /// <summary>The browser extension, through the native-messaging host.</summary>
     BrowserExtension,
-    // The server's bridge (PLAN.md stream C transport and D2) adds its own role here, with what only
-    // it may send, such as browsing the server's folders.
+
+    /// <summary>
+    /// The browser extension talking to the headless server with a paired token (D2): everything the native
+    /// host lets through, plus <c>folders.browse</c>, which only the server answers and which the extension's
+    /// "ask where to save" needs there in place of the folder dialog. Nothing else; never <c>folders.create</c>.
+    /// </summary>
+    ServerExtension,
 }
 
 /// <summary>
@@ -55,12 +60,16 @@ public static class NativeBridgePolicy
     public static bool AllowFrom(BridgeRole role, string? messageType) => role switch
     {
         BridgeRole.BrowserExtension => messageType is not null && FromExtensionTypes.Contains(messageType),
+        BridgeRole.ServerExtension => messageType is not null &&
+            (FromExtensionTypes.Contains(messageType) || messageType == MessageTypes.FoldersBrowse),
         _ => false,
     };
 
     public static bool AllowTo(BridgeRole role, string? messageType) => role switch
     {
         BridgeRole.BrowserExtension => messageType is not null && ToExtensionTypes.Contains(messageType),
+        BridgeRole.ServerExtension => messageType is not null &&
+            (ToExtensionTypes.Contains(messageType) || messageType == MessageTypes.FoldersBrowseResult),
         _ => false,
     };
 
@@ -86,7 +95,7 @@ public static class NativeBridgePolicy
     public static bool AllowFrom(BridgeRole role, IpcMessage message)
     {
         if (!AllowFrom(role, message.Type)) return false;
-        if (role != BridgeRole.BrowserExtension || !SingleJobActions.Contains(message.Type)) return true;
+        if (role is not (BridgeRole.BrowserExtension or BridgeRole.ServerExtension) || !SingleJobActions.Contains(message.Type)) return true;
         if (message.Payload is not { ValueKind: JsonValueKind.Object } payload) return false;
 
         var namesOneJob = false;

@@ -48,6 +48,8 @@ internal sealed class ServerHarness : IAsyncDisposable
             DataDirectory = Path.Combine(work, "data"),
             Roots = [Path.Combine(work, "downloads")],
             Urls = ["http://127.0.0.1:0"],
+            // The D1b tests drive the protocol itself; the sign-in tests turn it on (AuthTests).
+            SignInRequired = false,
         };
         if (change is not null) options = change(options);
         var app = await ServerApp.StartAsync(options, logToConsole: false);
@@ -56,10 +58,15 @@ internal sealed class ServerHarness : IAsyncDisposable
 
     public Uri WebSocketAddress => new UriBuilder(Base) { Scheme = "ws", Path = "/api/ws" }.Uri;
 
-    public async Task<WsClient> ConnectAsync(string? origin = null)
+    public async Task<WsClient> ConnectAsync(string? origin = null, string? sessionCookie = null)
     {
         var socket = new ClientWebSocket();
         if (origin is not null) socket.Options.SetRequestHeader("Origin", origin);
+        if (sessionCookie is not null)
+        {
+            socket.Options.Cookies = new System.Net.CookieContainer();
+            socket.Options.Cookies.Add(Base, new System.Net.Cookie(Auth.ServerAuth.CookieName, sessionCookie));
+        }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync(WebSocketAddress, timeout.Token);
         return new WsClient(socket);

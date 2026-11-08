@@ -67,11 +67,14 @@ public sealed class ServerProtocolTests
     }
 
     [Fact]
-    public async Task TheStaticPageIsServedAndSaysThereIsNoSignInYet()
+    public async Task TheWebUiPageIsServed()
     {
+        // The built web UI when webui/dist exists at build time, otherwise the placeholder that says how to build it.
         await using var server = await ServerHarness.StartAsync();
-        var page = await server.Http.GetStringAsync("/");
-        Assert.Contains("no sign-in yet", page);
+        using var response = await server.Http.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("<title>Inbound</title>", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
