@@ -398,3 +398,90 @@ code {
 .state-banner { margin: 8px 0 0; font-weight: 600; }
 .state-banner[data-on="false"] { color: var(--warn); }
 .state-banner[data-on="true"] { color: var(--ok); }
+
+/* EXT.R1: the server as a second place to save to. */
+.target-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.target-field legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.target-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.target-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.target-option .muted {
+  overflow-wrap: anywhere;
+}
+
+.folder-browser {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin: -4px 0 12px;
+  background: var(--panel-2);
+}
+
+.folder-browser-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.folder-browser-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.folder-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.folder-entry {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  overflow-wrap: anywhere;
+}
+
+.folder-entry:hover,
+.folder-entry:focus-visible {
+  background: var(--panel);
+}
+
+.target-tag {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  align-self: center;
+}
+
+.job-list li:has(.target-tag) { grid-template-columns: minmax(0, 1fr) auto auto; }

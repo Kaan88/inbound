@@ -1,0 +1,41 @@
+# The Docker build context is an allowlist (D3): everything is left out, then only what the image is built from comes
+# back. So secrets, credentials, browser profiles, artifacts, local notes and test output in the working folder can't
+# reach the context, whatever they are called. Add a path here only when the Dockerfile needs it.
+*
+
+!Directory.Build.props
+!docker/entrypoint.sh
+!docker/healthcheck.sh
+!webui/
+!src/DownloadManager.Core/
+!src/DownloadManager.Contracts/
+!src/DownloadManager.Engine/
+!src/DownloadManager.Persistence/
+!src/DownloadManager.Runtime/
+!src/DownloadManager.Archives/
+!src/DownloadManager.Containers/
+!src/DownloadManager.Providers.TorBox/
+!src/DownloadManager.Server/
+!src/DownloadManager.Host/RemoteProviderSetup.cs
+
+# Inside what came back: build output, installed packages and anything that looks like a secret stay out.
+**/bin/
+**/obj/
+**/node_modules/
+webui/dist/
+webui/test-results/
+webui/playwright-report/
+**/TestResults/
+**/*.log
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.pfx
+**/*.p12
+**/secrets/
+**/secrets.*
+**/credentials*
+**/*credentials*
+**/auth.json
+**/*.user

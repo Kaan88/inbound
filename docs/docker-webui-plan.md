@@ -1,8 +1,175 @@
 # Plan: headless server, web UI and Docker (D1 to D4)
 
 Status: plan, 2026-11-07. D1a (the shared command dispatcher) and D1b (the server and the Linux replacements) are
-built on `stream-b`, 2026-11-08; what D1b holds is described in the next section. D2 to D4 are not started. ROADMAP D1
-to D4 and PERF.1 to PERF.3 track it.
+built on `stream-b`, 2026-11-08; what D1b holds is described below. D2 (sign-in, browser pairing and the web UI) is
+built on `webui`, 2026-11-08, in the next section. D3 (the image, compose and the GHCR workflow) is built on `webui`,
+2026-11-08, in the section after it. D4 (the run on the owner's VM through the web UI) is done, 2026-11-08, in
+the section after that. ROADMAP D1 to D4 and PERF.1 to PERF.3
+track it.
+
+## D2: what was built (2026-11-08)
+
+- **Sign-in** (`src/DownloadManager.Server/Auth`), on by default. One user. The password is set on the setup page the
+  first time, or comes from `DOWNLOADMANAGER_PASSWORD` / `DOWNLOADMANAGER_PASSWORD_FILE` (then the page can't change
+  it). PBKDF2-SHA256 with 600,000 iterations in `<data>/auth.json`. A browser that isn't on the server's own machine
+  (or reaches it through a proxy) also needs the setup code the server writes to its log at start, so whoever reaches
+  a fresh server first over the network can't claim it. Sessions: 256-bit ids in an `HttpOnly`, `SameSite=Strict`
+  cookie (`Secure` over HTTPS; `X-Forwarded-*` believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY` lists by
+  address or network), 24 hours idle
+  and 7 days at most, kept in memory as hashes; sign-out and a password change end them and close their WebSockets.
+  Wrong tries make the client address wait 1, 2, 4 ... seconds up to 5 minutes; a try counts as wrong from its start,
+  so a burst of parallel guesses gets one check, and an IPv6 client counts by its /64. A password change also unpairs
+  the extensions unless the user keeps them. Only `/health`, the sign-in page and
+  its assets, `/favicon.svg` and `/theme.js` answer without a session. With sign-in on, the server may listen beyond
+  loopback (the default `0.0.0.0:8080` works); `DOWNLOADMANAGER_AUTH=off` turns it off and brings back the D1b rule
+  (loopback only unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1`). The status call tells the version only to a
+  signed-in browser. Evidence: `AuthTests` (11) in Server.Tests.
+- **Browser pairing:** Settings, Sign-in and browsers, "Pair a browser" shows an 8-character code for ten minutes,
+  once. The extension sends it to `POST /api/pair` and gets a long token (only its hash is kept), listed by name with
+  when it was paired and last used, and removable. The token works only on `POST /api/ipc` and only for the
+  extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
+  never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
+  (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side is
+  built too (stream C transport, next item).
+- **The extension's server transport (EXT.R1, 2026-11-08):** `extensions/chrome/src/transport.ts` with
+  `NativeTransport` (this PC) and `ServerTransport` (`POST /api/ipc` with the bearer token, no cookies, no redirects).
+  The extension's Settings has an "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI,
+  Unpair) and "Automatic downloads go to: This PC / The server" (This PC by default). The folder window and Download
+  All offer This PC or Server when both can work, each with its default folder, and Choose… lists the server's
+  folders; the popup lists both, labelled. Any failure leaves the download in the browser, never sent to the other
+  place. Details: `docs/browser-integration.md`, "Sending to the user's own server". Evidence: npm tests
+  (`transport.test.cjs` 13, `server-target.test.cjs` 13), Server.Tests `ExtensionTransportTests` (3),
+  `scripts/server-smoke.mjs` against a running server (12 steps), and Chrome for Testing with the built extension
+  against a loopback test server: paired from Settings, an automatic download and an "ask each time" download landed
+  on the server with matching SHA-256 (PROGRESS).
+- **Torrent upload:** `POST /api/upload/torrent` keeps the file in `<data>/uploads` (removed after a day, at most 200),
+  a folder only the provider coordinator may read besides the roots. The answer is a reference (`upload:<id>`), not
+  the path, so a client doesn't learn where the data folder is.
+- **Web UI** (`webui/`, Svelte 5, Vite 8, Tailwind 4, exact versions in `package-lock.json`): built to
+  `webui/dist`, which the server's build copies into `wwwroot` (`webui/README.md` has the order and the commands;
+  `scripts/build.ps1` builds it first). The sign-in page is its own build under `/signin/`. Screens, in the planned
+  order: the download list with live progress, packages, the state views and bulk pause, resume and delete (with
+  "delete the files too" unticked by default); add links (single, batch, magnets, provider and hoster links, a
+  `.torrent` upload with its files to choose, the not-cached approval); extraction status and the password prompt;
+  queues and the scheduler; settings, favorite folders, site logins, proxy and extraction, with the program-running
+  settings shown read-only and why; My TorBox (key, plan, what is in the account with Download, hoster status). The
+  folder browser (favorites with free space, the allowed roots, create a folder, check a typed path) opens wherever
+  a folder is chosen. Colors are the desktop's `App.xaml` tokens as CSS variables in both themes; the layout works at
+  390 pixels wide. The protocol client reconnects with waits of 0.5 s doubling to 15 s, and sends the calls that wait
+  on the network through `POST /api/ipc` so they don't hold up the WebSocket's queue.
+  Evidence: vitest 34 (protocol client: replies, timeouts, reconnect waits, signed out, incompatible; model; views;
+  add routing; format; store); `npm run check` clean; `npm run screens` over 26 screens at desktop and phone width in
+  both themes with no console error, page error or sideways scroll, plus the actions it checks end to end (extraction
+  after the password, pause and resume, delete without the file, torrent upload to the mock provider, site login and
+  proxy saved write-only, pairing and revoking, sign-out), against the server with a temp data folder, the
+  TestServer and its mock TorBox. Screenshots: `artifacts\webui\` (not committed).
+- **Not done here:** the Dockerfile and compose (D3, in the next section) and the run against the real TorBox (D4).
+
+
+## D3: what was built (2026-11-08)
+
+`Dockerfile`, `.dockerignore`, `docker/` and `.github/workflows/docker.yml` on `webui`; how to run it is in
+`docs/docker.md`.
+
+- **Image:** four stages. Node 24 (Alpine) builds the web UI with `npm ci --ignore-scripts` from the lockfile; a
+  second stage fetches the official 7-Zip 26.04 for Linux (`7z2604-linux-x64.tar.xz` / `-arm64.tar.xz` from
+  7-zip.org) and checks its SHA-256 (computed from the downloads and equal to the digests GitHub lists for the same
+  files on the `ip7z/7zip` 26.04 release); the .NET 10 SDK publishes the server for `TARGETARCH` (`linux-x64`,
+  `linux-arm64`, framework-dependent) with `-p:BundleWindows7Zip=false`, so `7z.exe`/`7z.dll` stay out (the build
+  fails if a Windows file is found); the runtime is `mcr.microsoft.com/dotnet/aspnet:10.0` (Ubuntu 24.04). The first
+  three run on the build machine's architecture, and the last runs no command, so a cross build needs no emulation.
+  Base images are pinned by their multi-architecture digest. Not chiseled: the entrypoint needs a shell, `chown` and
+  `setpriv` to give `/data` to `PUID:PGID` and drop root, which a chiseled image (no shell, fixed user) can't do.
+- **Entrypoint** (`docker/entrypoint.sh`): as root, `chown -R` of the data folder only when something in it has
+  another owner, `700` on a new data folder, download roots never changed recursively (an empty unwritable one is
+  given to the user, otherwise a warning), `PUID`/`PGID` of 0 refused (exit 2), then `setpriv --reuid --regid
+  --clear-groups --no-new-privs`. Started with `--user`, it changes nothing.
+- **Also:** volumes `/data` and `/downloads`, `EXPOSE 8080`, a `HEALTHCHECK` on `/health` through bash's `/dev/tcp`
+  (no curl in the image), OCI labels (source, version, revision; no license label, since the repository names
+  none), `ASPNETCORE_HTTP_PORTS` cleared so only `DOWNLOADMANAGER_URLS` says where it listens. No `DOTNET_` GC
+  settings: measured, they save about 4 MiB. FFmpeg is left out (Ubuntu's package adds 425 MB); `docs/docker.md`
+  shows the two-line image that adds it.
+- **Build context:** `.dockerignore` is an allowlist (the server's projects, `webui/`, `Directory.Build.props`, the
+  two scripts), with build output, `node_modules`, keys, `.env` files and anything named like credentials or secrets
+  dropped inside those too.
+- **Compose:** `docker/compose.example.yml` with both volumes, `PUID`/`PGID`, `TZ`, the password as a Docker secret
+  (`DOWNLOADMANAGER_PASSWORD_FILE`), sign-in on, `init: true`, and a commented Caddy proxy; `docs/docker.md` adds
+  Traefik labels.
+- **GHCR workflow:** on a `v*` tag push only, QEMU and Buildx, `linux/amd64,linux/arm64`, pushed to
+  `ghcr.io/kaan88/inbound` with the version, the minor line and `latest` (not for a pre-release tag), `GITHUB_TOKEN`
+  with `packages: write`, provenance `mode=max` and an SBOM. Actions pinned to release commits. Never run; not linted
+  (no actionlint on this PC; the inputs were checked against each action's `action.yml` at the pinned commit).
+
+Evidence, on the owner's Linux VM (x86_64, Docker 29, BuildKit 0.34), from a `git archive` of `webui`:
+
+- `docker build` of `inbound-test:dev` passed; context 2.09 MB. A context check with decoy files named like the main
+  checkout's secrets and local folders (`credentials.txt`, `secrets/`, `notes-local/`, `reverse-engineering/`,
+  `artifacts/`, `.env`, `*.pem`, `*.key`, `auth.json`, `bin/`, `obj/`, `node_modules/`, `webui/dist/`) sent 191 files
+  and none of the decoys. `docker history` shows only the COPY layers and the ENV/LABEL lines; a `find` over the image
+  for credential, secret, key, pem, pfx, p12, `.env` and `auth.json` names found only the base image's
+  `UserSecrets.dll` and `/usr/lib/ssl/cert.pem`.
+- Run with `-p 18080:8080`, `PUID`/`PGID` of the VM user and `TZ=Europe/Istanbul`: healthy in under 15 s, the server
+  as uid 1000 (only `docker-init` as root), log times in +03:00, `secrets.key` 600 and `auth.json` 600, data folder
+  700. With curl from the VM: `/health` 200; IPC without a session 401; setup with a wrong code 403, with the code
+  from the log 200 and an `HttpOnly` session cookie; `host.status` 200; `folders.browse` lists `/downloads` and
+  refuses `/data`; another `Origin` 403; the web UI index 200 with its Svelte bundle; `/signin/` 200 without a
+  session; the WebSocket upgrade 101; sign-out, then 401; a wrong password 401, the right one 200; a `job.add` of
+  the 1.5 MB 7-Zip archive finished in `/downloads`, owned by the VM user, with the pinned SHA-256 and no part file
+  left. The random test password appeared in neither `docker logs` nor the log files.
+- Restart with the same `PUID`: no chown. `docker stop`: "Server stopping", "Server stopped", exit 0. `PUID=1001` on
+  a data folder owned by 1000: chowned, the server as 1001. `PUID=0`: exit 2. `--user 1000:1000`: no entrypoint
+  work, the server as 1000.
+- Idle memory over about 6 minutes (`docker stats` every 10 s): fresh 34.4 MiB average (max 37.8), after the checks
+  53.9 MiB (max 60.5), `DOTNET_gcServer=0` 30.0, with `GCConserveMemory=7` 29.9; CPU about 0.02%. Target under 100 MB:
+  met. Image 350 MB (base 342 MB).
+- **arm64:** no image built. The VM has no QEMU/binfmt for arm64 and none was installed. The arm64 7-Zip download and
+  hash check and the `linux-arm64` publish ran on the VM (build stages with `TARGETARCH=arm64`, output to the cache
+  only); the arm64 runtime stage, which only copies files, was not built or run.
+
+
+## D4: what was run (2026-11-08)
+
+On the owner's Linux VM (x86_64, Docker 29) with `inbound-test:dev` built from `webui` `e8324ae` (only the
+TestServer changed since D3's image), started with sign-in on, `-p 18080:8080`, `PUID`/`PGID` of the VM user and
+`TZ`, its volumes in a test folder. The web UI was driven from this PC over the LAN with Playwright's headless
+Chromium; the VM's address is kept out of the repository and the screenshots.
+
+- **First open:** the setup page asked for the setup code (the browser is not on the server's machine); with the
+  code from `docker logs` and a throwaway password it signed in. Session cookie `HttpOnly`, `SameSite=Strict`.
+  Sign-out answered `/api/ipc` with 401; signing in again worked. From this PC, `/api/ipc` without a cookie 401,
+  with another `Origin` 403.
+- **TorBox, live:** the key was typed into My TorBox, Account; the server checked it (plan shown) and never sent it
+  back. In my account listed the torrents; a small cached item (3 files, 18.4 MB) was downloaded with Download, then
+  Choose files (all) through the default queue: three runs, each with a fresh link ("torbox gave a link for this
+  run"), about 4 MB/s, valid JPEGs owned by the VM user, no part file. About eight TorBox calls in all; nothing
+  added to the account.
+- **Extraction:** the TorBox item has no archive, so a 3-volume RAR5 with a password and a zip, made on this PC,
+  were served over HTTP by a labelled Node container on a test network on the VM. With "Allow downloads from
+  addresses on the local network" and "Extract archives when their downloads finish" on: the zip extracted by
+  itself, the RAR asked for its password in the list, extracted after it, and both gave files with the original
+  SHA-256.
+- **Expiring-link refresh:** a live link can't be made to expire, so a second server container was pointed at the
+  mock TorBox (`tools/TestServer --torbox`, in the same network namespace, `DOWNLOADMANAGER_TORBOX_API` on
+  loopback) with the new `--first-link-dies-after 3000000`: the first CDN link dies mid-download and answers 403
+  after that. Through its web UI: Download, choose one 8 MiB file; the server logged "the link was refused
+  (Forbidden, HTTP 403), so asking for a fresh one, 1 of 2", got a new link and finished; SHA-256 equal to the
+  mock's content.
+- **No token:** the key, the key without dashes and its first 6 characters (read into a variable, never printed)
+  were searched for: 0 hits in `docker logs` (both servers and the file server), the log files and every other file
+  in the data folder, the downloads, `docker history --no-trunc` and `docker inspect` of the image and the
+  container, and all 4,054 files of the image's own file system. The mock's key was in neither server log either.
+- **Memory** (`docker stats`, every 10 s idle, every 2 to 3 s during downloads): idle after sign-in and settings,
+  29 samples, 44.0 MiB average (42.6 to 45.5), CPU 0.016%. During the TorBox download and the extractions up to 87
+  MiB. During a 400 MB download over 8 connections at about 8 MB/s: 87 to 106 MiB, of which anonymous memory 50 to
+  56 MiB; the rest is page cache of the written file. Idle after all of it (the 400 MB file deleted through the web
+  UI with its file): 100.8 MiB (100.6 to 101.8), CPU 0.016%: 64 MiB anonymous, 33 MiB shared memory that is .NET's
+  W^X double mapping of compiled code (`/memfd:doublemapper`, 201 mappings), 4 MiB kernel; 23 MiB of inactive page
+  cache is left out by `docker stats`. The target of under 100 MB idle is met before use and reached after it.
+- **Cleanup:** the test containers, the test network and the test folder (downloads, data with the sealed key)
+  removed; the image kept; other containers untouched; disk free unchanged (8.8 GB).
+
+Not done: the extension against this server over the LAN (EXT.R1 was checked against a loopback server); arm64;
+an archive coming from TorBox itself; a live link expiring on its own.
 
 ## D1b: what was built (2026-11-08)
 
@@ -35,14 +202,15 @@ and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows 
   shares) can't give this guarantee, so the data belongs on a local volume.
 - **Listening:** the loopback rule below is checked on the configured addresses before starting and again on the
   addresses Kestrel reports once it listens; a refusal stops it at once.
-- **Origin check:** a browser request to `/api/` must come from the server's own origin and must name the server by
-  an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. That stops another web page, including one that
-  points its own name at the server (DNS rebinding), from driving it through the user's browser.
+- **Origin check:** a browser request to `/api/` must come from the server's own origin, and every `/api/` request
+  must name the server by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`, `Origin` or not. That
+  stops another web page, including one that points its own name at the server (DNS rebinding), from driving it
+  through the user's browser or reading its `GET` answers.
 
-**There is no sign-in yet (D2).** Anyone who can reach the port can do everything a client can: add and delete
-downloads, write files anywhere in the roots, change settings, enter or replace the TorBox key and site logins. The server therefore refuses
-to listen on anything but loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and logs a warning when
-it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep the port on a trusted home network.
+**Sign-in (D2) is on by default.** With it turned off (`DOWNLOADMANAGER_AUTH=off`), anyone who can reach the port can
+do everything a client can: add and delete downloads, write files anywhere in the roots, change settings, enter or
+replace the TorBox key and site logins. The server then refuses to listen on anything but loopback unless
+`DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set too, and logs a warning when it is.
 
 ### The Linux replacements
 
@@ -134,8 +302,8 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 
 ## D2 Web UI
 
-- **Technology:** TypeScript, as in the extension, with Preact and esbuild: a small bundle and a short
-  toolchain. Served by the Server as static files. Owner decision.
+- **Technology:** Svelte 5 with Vite and Tailwind CSS (owner, 2026-11-08: "whatever is fancy"), built to static
+  files the Server serves. Built: see "D2: what was built" above.
 - **Screens, in this order:**
   1. Download list with live progress, packages, the state views and bulk actions.
   2. Add links: single, batch, and TorBox links, magnets and torrent-file upload.
@@ -148,10 +316,11 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
   free space (the UI.R9 and UI.R10 calls), can create a folder, and checks a typed path. Nothing outside the
   roots is reachable, with symlinks resolved before the check.
 - **Sign-in:** one user. A password is set on first open, or from an environment variable, and stored hashed.
-  Session cookie (`HttpOnly`, `SameSite=Strict`), origin check on every change, a short lock-out after failed
-  tries. Only `/health` answers without signing in. TLS comes from a reverse proxy; the docs show one.
-- **Browser extension:** native messaging cannot reach a container. Sending from Chrome to the server would
-  need the extension to call it over HTTPS with a token. That comes later, as its own item.
+  Session cookie (`HttpOnly`, `SameSite=Strict`), origin check on every change, a growing wait after failed
+  tries. Only `/health` and the sign-in page answer without signing in. TLS comes from a reverse proxy (D3 docs).
+- **Browser extension:** native messaging cannot reach a container. Built: pairing by a one-time code, a token for
+  `POST /api/ipc` limited to the extension's commands, and the extension's server transport with the This PC /
+  Server choice (EXT.R1).
 
 ## D3 Docker
 
@@ -162,9 +331,10 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
   - Volumes `/data` and `/downloads`, port 8080, a `HEALTHCHECK` on `/health`.
   - Built for `linux/amd64` and `linux/arm64`.
 - **Compose:** an example file with the two volumes and the password variable.
-- **Publishing:** an image on GHCR (`ghcr.io/kaan88/inbound`) built on each tag, if the owner wants it
-  public. That is a public step, so it waits for a yes.
-- **Target:** under 100 MB of memory when idle in the container, measured in D4.
+- **Publishing:** an image on GHCR (`ghcr.io/kaan88/inbound`) built on each tag (owner: yes, 2026-11-08). The
+  workflow is written; it runs only when the owner pushes a `v*` tag.
+- **Target:** under 100 MB of memory when idle in the container: 34 MiB fresh, 54 MiB after use (D3, above); D4:
+  44 MiB before use, up to 106 MiB during a 400 MB download, 101 MiB idle after a full session (64 MiB anonymous).
 
 ## D4 End-to-end test
 

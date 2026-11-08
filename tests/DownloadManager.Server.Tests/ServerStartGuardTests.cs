@@ -33,7 +33,7 @@ public sealed class ServerStartGuardTests
     [Fact]
     public void TheAddressesKestrelReallyListensOnAreCheckedWithTheSameRule()
     {
-        var options = new ServerOptions { Urls = ["http://127.0.0.1:0"] };
+        var options = new ServerOptions { Urls = ["http://127.0.0.1:0"], SignInRequired = false };
         Assert.Null(options.DescribeUnsafeBinding(["http://127.0.0.1:41234", "http://[::1]:41234"]));
         Assert.Contains(ServerOptions.AllowUnauthenticatedVariable, options.DescribeUnsafeBinding(["http://127.0.0.1:1", "http://0.0.0.0:41234"]));
         Assert.Null((options with { AllowUnauthenticated = true }).DescribeUnsafeBinding(["http://0.0.0.0:41234"]));

@@ -1,2 +1,6 @@
-# Shell scripts run under bash, which does not accept CRLF line endings.
+# Files read inside a Linux container keep LF line endings in every checkout and in git archive (D3).
+Dockerfile text eol=lf
+.dockerignore text eol=lf
 *.sh text eol=lf
+docker/** text eol=lf
+.github/workflows/*.yml text eol=lf

@@ -22,6 +22,22 @@ To load it from source, build it (see below), open `chrome://extensions`, turn o
 
 What the extension does with data is in its [privacy policy](docs/chrome-extension-privacy.md).
 
+## Docker (headless server and web UI)
+
+The same download engine also runs as a headless server with a web UI, in a container for a home server or NAS:
+
+```sh
+docker run -d --name inbound --init -p 8080:8080 \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v ~/inbound/data:/data -v ~/downloads:/downloads \
+  ghcr.io/kaan88/inbound:latest
+```
+
+Sign-in is on by default; the first visit sets the password, with a setup code from `docker logs`. Settings, compose,
+backup (the data folder holds the key to the saved secrets) and a reverse proxy for HTTPS are in
+[docs/docker.md](docs/docker.md); `docker/compose.example.yml` is a starting point. The image is published only when
+a version tag is pushed.
+
 ## Build
 
 Prerequisites:
@@ -75,5 +91,6 @@ docs/                              architecture and operation docs
 - `PROGRESS.md` — session handoff and current state
 - `CLAUDE.md` — agent onboarding
 - `docs/architecture.md` — process boundaries and IPC
+- `docs/docker.md` — running the server in Docker
 - `docs/browser-integration.md` — handoff constraints and protocol
 - `docs/chrome-extension-privacy.md` — extension privacy policy

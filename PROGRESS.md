@@ -12,6 +12,227 @@
 - Full run on the merged branch, all green with no reruns: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 41, extension 103. Results: `artifacts\campaign\20261108-merged-campaign\` (trx).
 - Still running: the 8-hour PERF.2 soak (old build, ends about 10:19 UTC) and the `webui` branch (D2 web UI, D3 Docker, the extension's server transport, D4).
 
+### D4: end to end on the owner's VM through the web UI, from this PC (2026-11-08, `webui`)
+
+Image `inbound-test:dev` rebuilt on the VM from `webui` `e8324ae` (`REVISION` label set; only the TestServer changed
+since the D2-fix image, so the server layers came from the cache). Run with sign-in on, `-p 18080:8080`, `PUID`/`PGID`
+of the VM user, `TZ`, volumes in a test folder, label `inbound-test`. Driven from this PC over the LAN with
+Playwright's headless Chromium (a driver script in the session scratchpad, not committed); the VM address is in no
+tracked file, screenshot or file name.
+
+- **First open:** setup code field shown (browser not on the server's machine), code from `docker logs`, throwaway
+  password set; cookie `HttpOnly`, `SameSite=Strict`. Sign-out, then `/api/ipc` 401; sign-in again worked. From this
+  PC without a cookie 401, with a foreign `Origin` 403.
+- **TorBox (live, minimal):** key read from the owner's credentials file into the page without printing it, saved in
+  My TorBox; the page showed "Saved on the server" and the plan, and the key was nowhere in the page. In my account
+  listed the torrents (one call); a small cached item already in the account (3 files, 18.4 MB) went through
+  Download, Choose files (all), the default queue: three runs, each "torbox gave a link for this run", about 4 MB/s,
+  two valid JPEGs (end marker `FFD9`) and a 20-byte README, owned by the VM user, no `.part` left. About eight
+  TorBox calls; nothing added to or deleted from the account.
+- **Extraction (stand-in):** the TorBox item has no archive. A 3-volume RAR5 with a password (WinRAR's `Rar.exe`
+  here, `-v500k -p`) and a plain zip, 1.2 MB of random data and a text file, were served over HTTP by a labelled Node
+  container (`node:24-alpine`, already on the VM) on a labelled test network. Added through Add links (the RAR as
+  package `d4-sample`). The zip extracted by itself; the RAR showed "needs a password to extract", the password went
+  in through the prompt, and it extracted. Both outputs have the originals' SHA-256 (`87a0c016…`, `d4abd5a9…`).
+- **Expiring-link refresh (mock):** a live link can't be made to expire on demand. New TestServer option
+  `--first-link-dies-after <bytes>` (commit `e8324ae`): the mock's first CDN link stops after that many bytes, cuts
+  its connections and answers 403 after. A second server container pointed at the mock (`DOWNLOADMANAGER_INSTANCE`,
+  `DOWNLOADMANAGER_TORBOX_API` on loopback; the TestServer in the same network namespace, built for Linux in an SDK
+  container) was set up through its own web UI (port 18081) with the mock key. Download, choose `sub/video.bin`
+  (8 MiB): "the link was refused (Forbidden, HTTP 403), so asking for a fresh one, 1 of 2", a new link, Completed;
+  SHA-256 `1b30edc3…` equal to the mock's generated content.
+- **No token:** the key, the key without dashes and its first 6 characters, held in shell variables and never
+  printed: 0 in `docker logs` of both servers and the file server, 0 files in the data folder (logs, settings,
+  jobs, remote state), 0 in the downloads, 0 in `docker history --no-trunc` and `docker inspect` of the image and the
+  container, 0 of the image's 4,054 files (searched inside a throwaway container with `find -xdev`; a first `grep -r /`
+  found only its own `/proc/1/cmdline`). The mock key was in neither mock-server log.
+- **Memory (`docker stats`):** idle after sign-in and settings, 29 samples every 10 s: 44.0 MiB average (42.6 to
+  45.5), CPU 0.016%. TorBox download and extractions (every 2 to 3 s): up to 87 MiB. A 400 MB download from the file
+  server (8 ranges of 50 MiB, about 8 MB/s, SHA-256 checked): 87 to 106 MiB; the cgroup's anonymous memory went
+  only from 50 to 56 MiB, the rest is page cache of the written file. Idle after the whole session, with the 400 MB
+  file deleted through the web UI with its file: 100.8 MiB (100.6 to 101.8), CPU 0.016%. Of that, 64 MiB anonymous,
+  33 MiB shared memory that is .NET's W^X double mapping of compiled code (`/memfd:doublemapper`, 201 mappings in a
+  fresh server), 4 MiB kernel. Target under 100 MB idle: met before use, reached after a full session.
+- **Cleanup:** the test containers, the test network and `~/inbound-d4` (downloads, data with the sealed key,
+  sources, mock build) removed; `inbound-test:dev` kept; class-compass and komodo untouched; 8.8 GB free, as before.
+
+Evidence: `artifacts\d4\` in the worktree (ignored): the screenshots (the account's item list among them, so keep
+it local), the four memory CSVs, both servers' logs with addresses replaced. ROADMAP D2 and D4 and
+`docs/docker-webui-plan.md` updated. Not run again: the Windows or Linux test suites (only the TestServer's
+`Program.cs` changed; it builds on Windows and in the Linux SDK container). Not delegated to a cheaper reviewer (no
+agent tool in this session).
+
+Seen, not fixed (the tested image stays as built): the delete toast says "Deleted 1 download and their files" for
+one download; "Put each kind of file in its category's folder" is on by default on the server, yet the zip and RAR
+went to `/downloads` itself (not checked whether the server has category folders at all).
+
+Questions for the owner (safer choice taken): (1) The refresh was shown with the mock, not a live link; is that
+enough, or should a later run leave a live download paused past the link's lifetime? (2) Should a small archive
+(a few MB) be kept in the TorBox account for future live extraction checks? None was added. (3) Idle after use is
+about 101 MiB by `docker stats`; `DOTNET_EnableWriteXorExecute=0` would drop the 33 MiB double mapping but turns off
+a hardening feature, so it was not tried; PERF.3 can measure it if wanted.
+
+### D2 / EXT.R1 review fixes: sign-in waits, trusted proxies, bodies, auth.json, upload references (2026-11-08, `webui`)
+
+Sixteen reviewer findings on `git diff dev...webui`, each checked against the code. Fixed (commit `a7aba23`):
+
+- **Waits a burst can't skip (high):** sign-in, setup code, password change and pairing all checked the wait, then
+  awaited the PBKDF2 check, and counted the failure only after it, so parallel guesses all passed the check. Now
+  `SignInLimiter.Begin` counts a try as wrong when it starts and `Succeeded` clears it. IPv6 clients count by
+  their /64. `AuthHardeningTests.ABurstOfParallelWrongPasswordsGetsOneCheckAndTheRestWait` (8 parallel wrong
+  sign-ins: 1 × 401, 7 × 429; 6 pairing codes: 1 × 401, 5 × 429).
+- **Proxy trust (two medium, one low):** `DOWNLOADMANAGER_TRUST_PROXY=1` believed `X-Forwarded-For` from anyone, so
+  a client reaching the port directly got a fresh address per try and could send `127.0.0.1` to skip the setup
+  code. It now takes the proxy's address or network (`172.30.0.10`, `172.30.0.0/24`); `1`, `/0` and nonsense stop
+  the start (exit 2). The setup code goes by the real peer, noted before the forwarded-headers middleware, and is
+  always asked through a listed proxy. A same-host proxy that adds no header can't be detected; docs/docker.md says
+  to list it (`127.0.0.1`) or use `DOWNLOADMANAGER_PASSWORD_FILE`. Compose example: Caddy with a fixed address.
+- **Bodies:** setup, sign-in and pairing JSON is read up to 16 KB, chunked or not (was Content-Length only, 8 MB).
+- **auth.json:** a password, token add, remove or remove-all that can't be saved is undone in memory; the endpoint
+  answers 500 and nothing changes.
+- **Password change** unpairs every extension unless `keepPairedBrowsers` (web UI checkbox "Keep the paired
+  browsers"); answers `{ok, unpaired}`.
+- **Host check without Origin:** a rebinding page's same-origin GET carried no Origin and was let through with
+  sign-in off. Every `/api/` request now needs a known host name.
+- **Pairing DoS:** 10 wrong codes from anyone ended the owner's code; now 1,000 (under 10^-9 chance of a hit).
+- **Upload path:** `/api/upload/torrent` answers `upload:<id>`; `RemoteJobCoordinator.ResolveReference` maps it.
+- **Idle wake-ups:** the sign-in and Settings countdowns run only while counting (`webui/src/lib/ticker.ts`).
+- **Extension:** `chrome.storage.local.setAccessLevel({accessLevel: "TRUSTED_CONTEXTS"})` at start, awaited before a
+  token is written (content scripts use no storage); the pairing test asserts it, and its title says what it checks.
+
+Evidence: Server.Tests 71/71 on Windows and 71/71 on Linux (the owner's VM, SDK container, `Platform!=Windows`);
+new `AuthHardeningTests` (11). Integration remote and dispatcher tests 279/279 (Windows). webui vitest 37/37 (new
+`ticker.test.ts` 3), `svelte-check` 0 errors, `npm run build`; extension npm 118/118, `tsc --noEmit` clean.
+Image `inbound-test:dev` rebuilt on the VM; in it: `TRUST_PROXY=1` exit 2 with the message; a proxy listed
+elsewhere: `X-Forwarded-For: 127.0.0.1` still needs the setup code, four tries with new forwarded addresses
+`403 429 429 429`; the bridge gateway listed: forwarded addresses believed (`403 429 403 429`, two addresses in
+the log), setup code still asked; a chunked 64 KB sign-in body 400. Containers removed; disk unchanged (8.8 GB free).
+
+Not done: the Playwright screens walk was not rerun (the upload and password screens changed only in what they
+send; the server tests cover the calls). Not delegated to a cheaper reviewer (no agent tool in this session).
+
+Questions for the owner (safer choice taken): (1) `DOWNLOADMANAGER_TRUST_PROXY=1` is refused instead of meaning
+"trust everyone"; the proxy's address is needed. (2) A password change unpairs the extensions unless kept. (3) No
+count across all addresses: it would let anyone keep the owner waiting; devices sharing one IPv6 /64 share a wait.
+(4) 1,000 wrong pairing codes end a code. (5) A same-host proxy without forwarding headers must be listed; the
+server can't tell.
+
+### EXT.R1 server target: the extension's transport, pairing and This PC / Server choice, on `webui` (2026-11-08)
+
+- **Built (extensions/chrome):** `src/transport.ts` with `NativeTransport` (the native-messaging code moved out of
+  `background.ts`, same behaviour) and `ServerTransport` (`POST <address>/api/ipc`, `Authorization: Bearer`,
+  `credentials: "omit"`, `redirect: "error"`, time limit; 401 means "pair again"); address and code normalising,
+  `pairWithServer` (`/api/pair`, then one ping before anything is stored), the target rules. Settings: an
+  "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI, Unpair; a note for plain
+  http beyond loopback) and "Automatic downloads go to: This PC / The server" (`settings.defaultTarget`, This PC by
+  default). Pair asks the browser for that host only (`permissions.request`). The folder window and Download All
+  show "Save to" only when both targets can work (the server alone when the desktop app is not installed here),
+  with each target's default folder and favorites; Choose… is the app's dialog for This PC and a folder list
+  (`folders.browse`, new `src/destination-target.ts`) for the server. The popup lists the newest 20 of each place,
+  labelled, with a server card, and sends actions to the right place. Any failure resumes the download in the
+  browser; nothing is ever sent to the other place instead. Firefox build too (`dist-firefox`). Test helpers moved
+  to `tests/harness.cjs`; the "no network requests" test now allows one `fetch`, the transport's.
+- **Evidence:** npm 118/118 (92 before + `transport.test.cjs` 13 + `server-target.test.cjs` 13; a mutation that
+  sent automatic catches to this PC failed 4 of them); `tsc --noEmit` clean; both builds. Server.Tests 60/60 (new
+  `ExtensionTransportTests` 3). `scripts/server-smoke.mjs` against a test server (`DownloadManager.Server` on
+  127.0.0.1:18480, data under `artifacts\ext-smoke`): 12/12 steps (sign in, code, pair with the code typed with a
+  dash in lower case, default folder, roots, handoff, duplicate, list without settings, delete, `job.add` refused,
+  token removed in the web UI, then 401 "pair again"). Chrome for Testing (fresh profile, `dist` loaded, downloads
+  folder in `artifacts`): paired from the real Settings page ("Paired with the server at 127.0.0.1:18480 as "Chrome
+  on Windows". It is answering."); automatic sending to the server: `browser-to-server.bin` (3 MiB) completed on
+  the server, SHA-256 05445bb3…0704e5 equal, the browser's entry removed, notification "Sent to the Inbound server";
+  repeated with the same address: a second job "browser-to-server (1).bin", completed; "ask each time": the window
+  showed no choice and the server's default folder (CfT has no native host registered, so only the server was
+  offered, as designed), Choose… listed the server's root with free space, Download sent it, `asked.bin` (1 MiB)
+  completed with SHA-256 c5c2a841…5d70 equal; the popup showed the server card and hid the desktop app's. CfT
+  reported "Specified native messaging host not found", so it never reached the installed app. Screenshots and
+  logs: `artifacts\ext-smoke\out` (not committed).
+- **Not explained:** one automatic attempt (the second CfT run, the same address as the first run, right after
+  the session was restored) left no trace: no request reached the file server, no browser entry, no note in the
+  popup. The first run had used CDP `Browser.setDownloadBehavior`, which takes downloads away from the extension,
+  and its result is discarded. Two later attempts, one with the same address, worked. Worth one more look in a
+  real Chrome.
+- **Not done:** no real Firefox or Edge run; no browser against the Docker server over the LAN (only loopback);
+  the two-target window was checked by tests, not on screen (CfT had no native host). Not delegated to a cheaper
+  reviewer (no agent tool in this session).
+- **Questions for the owner (safer choice taken):** (1) no `optional_host_permissions` entry: the required
+  `http://*/*`/`https://*/*` already cover any server, so Chrome would only warn about a duplicate; pairing still
+  asks for the one host (matters in Firefox). (2) No fallback to the other place when the chosen one fails; the
+  download stays in the browser. (3) The token is kept in `chrome.storage.local` as is (not synced, not encrypted
+  by the extension). (4) Unpair can't revoke the token on the server (a token can't revoke itself); Settings says
+  to remove it in the web UI. (5) The window's This PC / Server pick is for that download only and does not change
+  the default. (6) The popup asks the server once a second while open, like the desktop app. (7) The extension
+  version stays 0.4.0; the store listing's cookie and host-permission lines were updated, but the store's data
+  disclosure should be reviewed before a store upload, since a user's server is a new recipient.
+
+### D3 Docker image, compose and GHCR workflow, on `webui` (2026-11-08)
+
+- **Built:** `Dockerfile` (Node 24 web UI stage from the lockfile; official 7-Zip 26.04 `7zz` for x64/arm64 with a
+  checked SHA-256 from 7-zip.org, equal to GitHub's release digests; .NET 10 SDK cross-publish for `TARGETARCH` with
+  `-p:BundleWindows7Zip=false`, a new switch in the Archives csproj, so no `7z.exe`/`7z.dll` in the image; runtime
+  `aspnet:10.0` on Ubuntu 24.04; base images pinned by digest), `docker/entrypoint.sh` (`PUID`/`PGID`, chown of
+  `/data` only when needed, `setpriv` with no new privileges), `docker/healthcheck.sh` (no curl), allowlist
+  `.dockerignore`, `.gitattributes` (LF for the files read in Linux), `docker/compose.example.yml`,
+  `.github/workflows/docker.yml` (on `v*` tags only; never run), `docs/docker.md`, a README section.
+- **Evidence (owner's VM, `inbound-test:dev`, port 18080):** build passed, context 2.09 MB, decoy secrets and local
+  folders kept out of the context, nothing of ours named like a key or credential in the image or its history;
+  healthy, runs as the VM user; `/health`, setup with the log's code, sign-in, sign-out, wrong password, origin
+  refusal, roots limit, WebSocket 101 and a real 1.5 MB download (right SHA-256 and owner) checked with curl; the test
+  password in no log; restart, `docker stop` (exit 0), a `PUID` change, `PUID=0` (exit 2) and `--user` checked. Idle
+  memory over about 6 minutes: 34.4 MiB fresh, 53.9 MiB after use; workstation GC or conserve-memory save about
+  4 MiB, so none is set. Image 350 MB (base 342). FFmpeg would add 425 MB: left out, documented.
+- **Not done:** no arm64 image (no QEMU on the VM; not installed). The arm64 7-Zip check and `linux-arm64` publish
+  ran as build stages only. The workflow is not linted (no actionlint offline); its inputs were checked against each
+  action's `action.yml` at the pinned commits. Not delegated to a cheaper reviewer (no agent tool in this session).
+- **On the VM:** kept the `inbound-test:dev` image and the files in `~/inbound-d3` for D4, removed every container made; the
+  `node:24-alpine` base image pulled for the build is left there (not labelled, so not removed); build cache left.
+- **Questions for the owner (safer choice taken):** no `org.opencontainers.image.licenses` label, since the repository
+  names no license; base images pinned by digest (reproducible, but security fixes need a bump: add Dependabot or
+  Renovate?); default `PUID`/`PGID` 1654 (the image's `app` user; the compose example uses 1000); a new data folder is
+  made 700; `PUID=0` refused; FFmpeg not in the image; `latest` not moved by a pre-release tag; provenance `mode=max`
+  and an SBOM in the published image.
+
+### D2 web UI with sign-in and pairing, on `webui` (2026-11-08)
+
+- **Server sign-in** (`src/DownloadManager.Server/Auth`), on by default: one password (setup page, or
+  `DOWNLOADMANAGER_PASSWORD` / `_FILE`), PBKDF2-SHA256 600k in `<data>/auth.json`; a setup code from the server log
+  for a browser that isn't on the server's machine; `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`,
+  `Secure` on HTTPS, `X-Forwarded-Proto` only with `DOWNLOADMANAGER_TRUST_PROXY=1`), 24 h idle and 7 days at most,
+  sign-out and password change close the session's WebSockets; growing waits per address; only `/health`, the
+  sign-in page, `/favicon.svg` and `/theme.js` public. `DOWNLOADMANAGER_AUTH=off` brings back the D1b loopback rule.
+- **Pairing** for the extension: an 8-character code for 10 minutes, `POST /api/pair` gives a token (hash stored),
+  listed and revocable, allowed only the extension's commands plus `folders.browse` on `POST /api/ipc`; CORS for our
+  extension ids. The extension's own server transport is not built (Stream C).
+- **Web UI** in `webui/` (Svelte 5.57.3, Vite 8.3.6, Tailwind 4.3.5, exact versions, `npm ci` works offline from the
+  lockfile), built into the server's `wwwroot` by its csproj; `scripts\build.ps1` builds it first. Every planned
+  screen: list with live progress, packages, views and bulk actions; add links incl. magnets, provider links and
+  torrent upload; extraction and its password; queues and scheduler; settings, favorites, site logins, proxy,
+  extraction, read-only program settings; sign-in, password change, pairing; My TorBox and hoster status; the
+  server folder browser wherever a folder is chosen. Both themes from the `App.xaml` tokens; phone layout at 390 px
+  (tap opens a download there).
+- **Evidence:** Server.Tests 57/57 (`AuthTests` 11, `PairingTests` 5). webui: vitest 34/34, `npm run check` 0
+  errors and 0 warnings. `npm run screens` (Playwright Chromium 158) against the server with a temp data folder and
+  roots under `artifacts\webui-run\`, the TestServer with its mock TorBox, and a local file server with a test 7z:
+  26 screens at 1360 and 390 px in dark and light (`artifacts\webui\`, looked at), no console error, page error or
+  sideways scroll, and end to end: the archive password extracted the 7z, pause and resume, delete without the
+  file left it on disk, a `.torrent` upload reached the mock provider, site login and proxy passwords saved
+  write-only, a pairing code from the page gave a token that was refused `settings.get` and answered 401 once
+  removed, sign-out. Nothing ran against the real TorBox, and nothing in a container yet.
+- **Found and fixed by the walk:** the sign-in page had no styles (Tailwind didn't scan `src/` from the sign-in
+  build's root); long paths widened the folder browser and settings on a phone; selecting a package in Finished also
+  selected its unfinished files, so Delete would have removed them (now a package row stands for its files in that
+  view, vitest); phone toolbar buttons had no accessible name; a phone had no way to open a download (no
+  double-click); a past provider wait was shown as "Waiting until".
+- **Not delegated:** the review delegation to a cheaper model was not done; this session has no agent tool. The work
+  is unreviewed.
+- **Questions for the owner (safer choice taken):** the setup code from the log for a browser elsewhere; session
+  lengths (24 h idle, 7 days); sign-in off only by `DOWNLOADMANAGER_AUTH=off`, not from the web UI; password at least
+  8 characters; at most 50 paired browsers (the oldest goes); `moz-extension://` origins let in on `/api/pair` and on
+  `/api/ipc` with a token, since Firefox ids are random; the server version hidden from browsers that aren't signed
+  in.
+- **Next:** D3 (Dockerfile and compose, the web UI built in a Node stage), the extension's server transport, D4 on the
+  test VM.
+
 ### D1b merged into `dev` (2026-11-08)
 
 - `stream-b` (the headless server and its Linux replacements, with review fixes) merged. Conflicts: the spanned-zip grouping now uses the OS-aware name comparer from D1b, the service keeps stream-c's `NativeHostState` next to D1b's `Roots`, and the server no longer sets the old `NativeHostRegistered` property (unset reads as not registered).
