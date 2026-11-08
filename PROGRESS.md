@@ -420,6 +420,7 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
     about 10:19 UTC. To stop it earlier, run `bash scripts/soak.sh --stop soak-8h` from the worktree. That
     creates the `stop` file, and the driver then shuts down its own Host, window and TestServer.
   - It runs the build of `eb4404a`, from before the fixes below, so it measures the old Host.
+  - **Full 8 hours (476 one-minute samples, `soak-8h-summary-final.txt`):** Host private MB 178.4 first, 382.0 last, mean 326.8, max 642.8, trend +22.4 MB/h; handles 490 to 498, threads 17 to 18; CPU 0.45 s a minute. Window private MB 305.3 to 317.1 (trend +0.8 MB/h), handles 1,307 to 1,331. Host GC: 410.6 MB allocated a minute, heap mean 173.6 MB, max 573.9, trend +13.2 MB/h, pause 0.03%. Both processes ran to the end. The Host trend is not yet told apart from the list growing to 5,000 jobs; a rerun on `dev` is still to do. Evidence copied to `artifacts\evidence\perf\` in the main checkout.
   - First 142 minutes (`soak-8h-summary-at-*.txt` in the evidence folder):
     - Host: private mean 256 MB, max 552 MB, trend -10 MB/h; handles 490 to 495; threads 17 to 18; 0.43 s CPU
       a minute.
