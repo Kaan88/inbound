@@ -27,7 +27,7 @@ internal interface IRemotePipe : IAsyncDisposable
 /// that fails is never sent again by itself, because an add or a delete may have reached the Host.
 /// Nothing here writes a log, and no exception's words reach a message: a key or password passes through.
 /// </summary>
-internal sealed class RemoteClient : IAsyncDisposable
+internal sealed partial class RemoteClient : IAsyncDisposable
 {
     private const int MostSlowCalls = 3;
 
@@ -623,6 +623,10 @@ internal sealed class RemoteClient : IAsyncDisposable
             {
                 var change = message.GetPayload<ArchiveChangedDto>();
                 _post(() => State.Apply(change));
+            }
+            else if (message.Type == WebUiMessageTypes.Changed)
+            {
+                RaiseWebUiChanged(message);
             }
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException)

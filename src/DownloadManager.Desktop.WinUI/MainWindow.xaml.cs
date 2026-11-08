@@ -3901,10 +3901,14 @@ public sealed partial class MainWindow : Window
                 window.AddPage("Extraction", "\uE7B8", extraction.Controls);
             }
 
+            var webUi = new WebUiOptionsPage(_remote) { PageIndex = nextPage + (extraction is null ? 0 : 1) };
+            window.AddPage("Web UI", "", webUi.Controls);
+
             window.Closed += (_, _) =>
             {
                 foreach (var (page, _) in accountPages) page.Close();
                 extraction?.Close();
+                webUi.Close();
             };
 
             static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
@@ -3918,6 +3922,8 @@ public sealed partial class MainWindow : Window
                 }
                 if (extraction?.Validate() is { } extractionProblem)
                     return (extractionProblem, extractionPageIndex);
+                if (webUi.Validate() is { } webUiProblem)
+                    return (webUiProblem, webUi.PageIndex);
                 if (!soundEditor.TryApplyTo(settings.EventSoundFiles, out var soundError))
                     return (soundError ?? "Invalid sound choice.", SoundsPage);
                 foreach (var row in loginRows)
@@ -4039,7 +4045,9 @@ public sealed partial class MainWindow : Window
                 foreach (var (category, box) in categoryBoxes)
                     box.Text = update.Settings.CategoryFolders.TryGetValue(category, out var saved) ? saved : string.Empty;
                 var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
+                var webUiSaveProblem = await webUi.SaveAsync();
                 await RefreshAsync();
+                if (webUiSaveProblem is not null) return (webUiSaveProblem, webUi.PageIndex);
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
