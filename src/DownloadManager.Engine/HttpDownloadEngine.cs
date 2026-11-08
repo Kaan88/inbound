@@ -3098,11 +3098,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         run.Reporter = reporter;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         run.Cancellation = linked;
-        var workerCount = Math.Max(1, Math.Min(job.RequestedConnections, Math.Max(1, segments.Count)));
+        // Registered before the count is read: a change that lands after the read finds the run and wakes it, and one
+        // that lands before is in the count, so neither is lost.
         lock (_runsSync)
         {
             _segmentedRuns[job.Id] = run;
         }
+
+        var workerCount = Math.Max(1, Math.Min(run.TargetWorkers, Math.Max(1, segments.Count)));
 
         DownloadResult? failure = null;
 
@@ -3456,6 +3459,23 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     {
                         run.PendingAcquires--;
                     }
+                }
+
+                // The count may have gone down while this worker waited for its connection: it stops here, before
+                // taking a range, rather than after one more.
+                lock (run.Sync)
+                {
+                    if (run.LiveWorkers > run.TargetWorkers)
+                    {
+                        run.LiveWorkers--;
+                        retired = true;
+                    }
+                }
+
+                if (retired)
+                {
+                    slot.Dispose();
+                    return;
                 }
 
                 SegmentCheckpoint? work;

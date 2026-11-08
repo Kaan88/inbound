@@ -1403,23 +1403,25 @@ public sealed partial class DownloadManagerService
         List<JobRuntime> running;
         lock (_sync)
         {
-            // What each unstarted download would have got from the old default, read before the settings change.
-            // UI.R21: running ones too; a segmented transfer takes the new count without stopping.
-            var unstarted = _settings.DefaultConnections == next.DefaultConnections
+            // What each download would have got from the old default, read before the settings change.
+            // UI.R21: running ones too, provider and protected links among them ("Apply to all", owner 2026-11-08);
+            // a segmented transfer takes the new count without stopping.
+            // Any input of DefaultConnectionsLocked counts: the default, the per-host limit and the connection profiles.
+            var candidates = !ConnectionInputsChanged(_settings, next)
                 ? []
                 : _jobs.Values.Where(runtime => IsUnstartedForConnections(runtime) || IsRunningForConnections(runtime))
-                    .Select(runtime => (Runtime: runtime, Uri: Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var uri) ? uri : null))
-                    .Where(item => item.Uri is not null)
-                    .Select(item => (item.Runtime, item.Uri, Old: Math.Clamp(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(item.Uri!)), 1, 32)))
+                    .Select(runtime => (Runtime: runtime, Old: DefaultConnectionsLocked(runtime, _settings.DefaultConnections)))
+                    .Where(item => item.Old is not null)
                     .ToList();
             _settings = next;
             reconnected = [];
             // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
-            // (not what the old default gave it) keeps it; provider downloads keep their provider's cap.
-            foreach (var (runtime, uri, previous) in unstarted)
+            // (not what the old default gave it) keeps it. A provider job's count is never chosen by hand (TB.L1),
+            // so a running one always follows, within its provider's cap.
+            foreach (var (runtime, previous) in candidates)
             {
-                if (runtime.Job.RequestedConnections != previous) continue;
-                var connections = Math.Clamp(Math.Min(next.DefaultConnections, EffectiveConnectionLimit(uri!)), 1, 32);
+                if (runtime.Job.RemoteSource is null && runtime.Job.RequestedConnections != previous) continue;
+                if (DefaultConnectionsLocked(runtime, next.DefaultConnections) is not { } connections) continue;
                 if (connections == runtime.Job.RequestedConnections) continue;
                 runtime.Job.RequestedConnections = connections;
                 reconnected.Add(runtime);
@@ -3456,6 +3458,9 @@ public sealed partial class DownloadManagerService
             foreach (var runtime in toStart)
             {
                 runtime.Starting = true;
+                // The last run's link is no guide to this one's host or cap; a change before the new link comes is
+                // taken when it comes (UI.R21).
+                runtime.RunLink = null;
             }
         }
 
@@ -4101,22 +4106,64 @@ public sealed partial class DownloadManagerService
         }
     }
 
+    /// <summary>Whether a download's default count could differ between the two settings (UI.R21).</summary>
+    private static bool ConnectionInputsChanged(AppSettings before, AppSettings after) =>
+        before.DefaultConnections != after.DefaultConnections ||
+        before.MaxConnectionsPerHost != after.MaxConnectionsPerHost ||
+        !before.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections))
+            .SequenceEqual(after.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections)));
+
     /// <summary>
-    /// Running HTTP downloads of the user's own, whose count a changed default may follow. Provider and protected
-    /// links keep the cap set when their run began, as unstarted ones do.
+    /// Running downloads whose count a changed default may follow (UI.R21): the user's own HTTP downloads, provider
+    /// jobs and protected (pasted provider) links. Not FTP: an FTP download is one connection by design
+    /// (the FTP engine has no segments), so for a running one the change is a
+    /// no-op and its record is left as it is.
     /// </summary>
     private static bool IsRunningForConnections(JobRuntime runtime) =>
         (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
         !runtime.PauseRequested && !runtime.CancelRequested &&
-        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null &&
         !runtime.Job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
+    /// <summary>
+    /// Waiting, never begun, not a provider job: a new default connection count can still apply to it. A provider
+    /// job takes the current default afresh on each run (<see cref="ProviderConnectionsLocked"/>).
+    /// </summary>
     private static bool IsUnstartedForConnections(JobRuntime runtime) =>
         runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
         runtime.Job.ReceivedBytes == 0 &&
         !runtime.Starting && runtime.Runner is null or { IsCompleted: true } &&
-        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null;
+        runtime.Job.RemoteSource is null;
+
+    /// <summary>
+    /// The count a default of <paramref name="defaultConnections"/> gives this job under the current settings, or
+    /// null when that can't be known yet. Each kind is clamped as its run clamps it: the user's own by the host's
+    /// limit, a protected link also by <see cref="ProviderLinks.MaxConnections"/>, and a provider job by the host
+    /// and cap of its current run's link. Before a provider run has its link, null: the run then takes the new
+    /// default itself. Call under <see cref="_sync"/>.
+    /// </summary>
+    private int? DefaultConnectionsLocked(JobRuntime runtime, int defaultConnections)
+    {
+        var job = runtime.Job;
+        Uri? address;
+        var cap = int.MaxValue;
+        if (job.RemoteSource is not null)
+        {
+            if (runtime.RunLink is not { } link) return null;
+            (address, cap) = link;
+        }
+        else if (job.ProtectedUrl is not null)
+        {
+            cap = ProviderLinks.MaxConnections;
+            if (!Uri.TryCreate(job.ProtectedUrl, UriKind.Absolute, out address) &&
+                !Uri.TryCreate(job.Url, UriKind.Absolute, out address)) return null;
+        }
+        else if (!Uri.TryCreate(job.Url, UriKind.Absolute, out address))
+        {
+            return null;
+        }
+
+        return Math.Clamp(Math.Min(Math.Min(defaultConnections, EffectiveConnectionLimit(address)), cap), 1, 32);
+    }
 
         private int EffectiveConnectionLimit(Uri uri)
     {
@@ -4747,6 +4794,11 @@ public sealed partial class DownloadManagerService
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
         public bool CancelledForRemoval { get; set; }
+        /// <summary>
+        /// A provider run's link host and the provider's per-file cap, in memory only, so a changed default can
+        /// reach the running transfer within that cap (UI.R21). Null until the run has its link. Under <c>_sync</c>.
+        /// </summary>
+        public (Uri Address, int Cap)? RunLink { get; set; }
     }
 
     private sealed class InlineProgress<T>(Action<T> action) : IProgress<T>

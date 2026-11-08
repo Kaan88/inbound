@@ -260,6 +260,134 @@ public sealed class HostFairnessTests(TestServerFixture fixture, ITestOutputHelp
     }
 
     /// <summary>
+    /// UI.R21 "Apply to all": a provider job's transfer goes to the link of its run (<see cref="DownloadJob.ResolvedUrl"/>)
+    /// while its own address is a reference. A raised count reaches it the same way, and the new workers still queue
+    /// for the host's connections: with a host limit of 3, a count of 8 never has more than 3 out.
+    /// </summary>
+    [Fact]
+    public async Task ARaisedCountOnAProviderLinkStaysWithinTheHostLimit()
+    {
+        const int size = 6 * Megabyte;
+        var engine = Engine(hostLimit: 3);
+        var job = ProviderJob("live-host.bin", size, 861, 256 * 1024, 2);
+        var bytes = 0L;
+        var most = 0;
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p =>
+        {
+            Volatile.Write(ref bytes, p.ReceivedBytes);
+            InterlockedMax(ref most, p.ActiveConnections);
+        }), CancellationToken.None);
+        await UntilAsync(() => Volatile.Read(ref bytes) > Megabyte / 2, "the job to be under way");
+
+        job.RequestedConnections = 8;
+        engine.ConnectionsChanged(job.Id);
+        await UntilAsync(() => Volatile.Read(ref most) >= 3 || run.IsCompleted, "a third connection");
+        // Two connections need about 11 more seconds, so a run that ends first never took the raised count.
+        Assert.True(Volatile.Read(ref most) >= 3, $"the raised count never reached the transfer (at most {most} connections)");
+
+        await AssertFileAsync(await run.WaitAsync(Patience), 861, size);
+        Assert.True(engine.HostConnectionPeak <= 3, $"host peak {engine.HostConnectionPeak}");
+        Assert.Equal(3, Volatile.Read(ref most));
+        Assert.Equal(0, engine.HostConnectionsActive);
+    }
+
+    /// <summary>
+    /// Kill at any point while a connection change splits a provider job's ranges: the checkpoint on disk and the
+    /// part file, taken as a killed process leaves them (checkpoint first, then the file, which only gains bytes),
+    /// must resume to exactly the right file, here with yet another count. Snapshots are taken while the new
+    /// workers connect and split, and after the count is lowered again.
+    /// </summary>
+    [Fact]
+    public async Task EveryCheckpointDuringAConnectionChangeResumesToTheRightFile()
+    {
+        const int size = 6 * Megabyte;
+        var engine = Engine(hostLimit: 8, checkpointInterval: TimeSpan.FromMilliseconds(100));
+        var job = ProviderJob("live-kill.bin", size, 871, 256 * 1024, 2);
+        var bytes = 0L;
+        var run = engine.ExecuteAsync(job, null, new SyncProgress(p => Volatile.Write(ref bytes, p.ReceivedBytes)), CancellationToken.None);
+        await UntilAsync(() => Volatile.Read(ref bytes) > Megabyte / 2, "the job to be under way");
+
+        var snapshots = new List<(DownloadCheckpoint Checkpoint, string Part)>();
+        async Task SnapshotAsync()
+        {
+            var checkpoint = await ReadCheckpointAsync(job.Id);
+            if (checkpoint is null || run.IsCompleted) return;
+            var copy = Path.Combine(_root, $"snapshot-{snapshots.Count}.part");
+            await using (var source = new FileStream(job.PartFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            await using (var target = File.Create(copy))
+            {
+                await source.CopyToAsync(target);
+            }
+
+            snapshots.Add((checkpoint, copy));
+        }
+
+        job.RequestedConnections = 8;
+        engine.ConnectionsChanged(job.Id);
+        for (var i = 0; i < 6; i++)
+        {
+            await SnapshotAsync();
+            await Task.Delay(40 * (i + 1));
+        }
+
+        job.RequestedConnections = 1;
+        engine.ConnectionsChanged(job.Id);
+        for (var i = 0; i < 3; i++)
+        {
+            await SnapshotAsync();
+            await Task.Delay(150);
+        }
+
+        await AssertFileAsync(await run.WaitAsync(Patience), 871, size);
+        Assert.True(snapshots.Count >= 3, $"only {snapshots.Count} snapshots before the job finished");
+        Assert.Contains(snapshots, snapshot => snapshot.Checkpoint.Segments.Count > 2);
+
+        var resumer = Engine(hostLimit: 8);
+        for (var i = 0; i < snapshots.Count; i++)
+        {
+            var (checkpoint, part) = snapshots[i];
+            var resumed = ProviderJob($"live-kill-{i}.bin", size, 871, 0, 3);
+            resumed.Id = Guid.NewGuid();
+            File.Move(part, resumed.PartFilePath);
+            checkpoint.JobId = resumed.Id;
+            await AssertFileAsync(await resumer.ExecuteAsync(resumed, checkpoint, null, CancellationToken.None).WaitAsync(Patience), 871, size);
+        }
+    }
+
+    private async Task<DownloadCheckpoint?> ReadCheckpointAsync(Guid id)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await Checkpoints.LoadAsync(id);
+            }
+            catch (IOException) when (attempt < 20)
+            {
+                // Replaced under us; a killed process leaves either version whole.
+                await Task.Delay(5);
+            }
+        }
+    }
+
+    /// <summary>A provider job as the runtime runs it: a reference address, and the run's link to transfer from.</summary>
+    private DownloadJob ProviderJob(string name, int size, int seed, int bps, int connections)
+    {
+        var job = Job(name, size, seed, bps, connections);
+        job.ResolvedUrl = job.Url;
+        job.Url = $"remote://torbox/torrents/77/{seed}";
+        return job;
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref target)) && Interlocked.CompareExchange(ref target, value, current) != current)
+        {
+        }
+    }
+
+    /// <summary>
     /// A segmented job whose worker still waits for a connection when its last range is nearly done must not
     /// wait for it once nothing is left to take: the free connection can go to another job first, and before the
     /// fix the finished job then sat in its run until some other download let a connection go.
