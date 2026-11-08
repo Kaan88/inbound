@@ -182,6 +182,7 @@
     anchor = row.id;
     cursor = row.id;
     selected = next;
+    grid?.focus({ preventScroll: true });
   }
 
   function toggleAll() {
@@ -670,7 +671,8 @@
       selected = new Set(rows.map((r) => r.id));
       return;
     }
-    if (onControl) return;
+    // A box or button that has the focus answers Space and Enter itself; every other key is the list's.
+    if (onControl && (event.key === ' ' || event.key === 'Enter')) return;
     if (event.key === ' ') {
       event.preventDefault();
       const row = rows[index];
