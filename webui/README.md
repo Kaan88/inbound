@@ -48,11 +48,15 @@ DOWNLOADMANAGER_TORBOX_API=http://127.0.0.1:18731/torbox/v1/api/ \
 ## Screens check
 
 `npm run screens` (`scripts/screens.mjs`, Playwright's Chromium) walks every screen against such a server and saves
-screenshots at 1360 and 390 pixels wide, dark and light, into `artifacts\webui\`. It sets the test server's password
-on a first run, seeds downloads through the UI, then does a few things end to end: enters an archive password and
-checks the extraction, pauses and resumes, deletes without the file, uploads a `.torrent` file, saves a site login and
-a proxy password, pairs a browser token and checks what it may do, revokes it, and signs out. It reports any console
-error, page error or sideways scroll.
+screenshots at 1360 and 390 pixels wide, dark and light, into `artifacts\webui\`: the list (row menu, toolbar More menu,
+delete and cancel-package dialogs, package and download details), the Add menu and every add dialog, Extractions, Queues,
+every Options page, My TorBox and Statistics. It sets the test server's password on a first run, seeds downloads through
+the Add URL and Add links dialogs, then does a few things end to end: enters an archive password and checks the
+extraction, stops and resumes, deletes without the file, uploads a `.torrent` file and chooses its files, saves a site
+login and a proxy password in one Options draft (Apply), checks that Cancel and Back ask before dropping a draft, pairs a
+browser token and checks what it may do, revokes it, and signs out. It prints how many steps passed and failed, and any
+console error, page error, sideways scroll or overlapping toolbar buttons. `INBOUND_ONLY=<regex>` walks only the screens
+(or `e2e:` checks) whose name matches, against the state an earlier run left.
 
 | Variable | Meaning |
 | --- | --- |
