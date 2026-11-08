@@ -276,6 +276,41 @@ test('EXT.B2 folder window: the This PC / Server choice is held while the folder
   }
 });
 
+test('folder window: Download and Choose... wait for the request, so an early click cannot go to This PC instead of the server', async () => {
+  const handoff = deferred();
+  let confirmed;
+  const page = installPage('?id=h1', {
+    'dm.getHandoff': () => handoff.promise,
+    'dm.pickFolder': async () => assert.fail('no dialog before the request has loaded'),
+    'dm.confirmHandoff': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    loadTs('handoff.ts');
+    const ready = page.domReady();
+    const confirm = page.el('confirm'), browse = page.el('browseDestination');
+    assert.equal(confirm.disabled, true);
+    assert.equal(browse.disabled, true);
+    assert.equal(await confirm.click(), 'ignored');
+    assert.equal(await browse.click(), 'ignored');
+    await page.key({ key: 'Enter', target: page.el('fileName') });
+    // Even a click that reaches the handlers does nothing yet.
+    await confirm.dispatch('click');
+    await browse.dispatch('click');
+    assert.deepEqual(page.sent, ['dm.getHandoff']);
+
+    handoff.resolve({ ok: true, held: false, handoff: { id: 'h1', url: 'https://example.test/a.zip' }, defaults: { destination: '/downloads' },
+      target: 'server', targets: [{ id: 'local', label: 'This PC', chooser: 'dialog', defaultFolder: 'D:\\Default', favorites: [] },
+        { id: 'server', label: 'Server', chooser: 'list', defaultFolder: '/downloads', favorites: [] }] });
+    await ready;
+    assert.equal(confirm.disabled, false);
+    assert.equal(browse.disabled, false);
+    await confirm.click();
+    assert.equal(confirmed.target, 'server');
+  } finally {
+    page.restore();
+  }
+});
+
 test('EXT.B2 folder window: an expired request keeps Send off after a pick', async () => {
   const page = installPage('?id=h1', {
     'dm.getHandoff': async () => ({ ok: false, error: 'expired' }),
@@ -398,6 +433,36 @@ test('Download All: a folder typed before the late target list arrives is kept, 
     server.checked = true;
     await server.dispatch('change');
     assert.equal(page.el('destination').value, '/downloads');
+  } finally {
+    page.restore();
+  }
+});
+
+test('EXT.B2 Download All: a target list that arrives during a This PC pick does not switch to the server under it', async () => {
+  const targets = deferred();
+  const pick = deferred();
+  let confirmed;
+  const page = await openBatchWindow({
+    'dm.targets': () => targets.promise,
+    'dm.pickFolder': () => pick.promise,
+    'dm.confirmBatch': async message => { confirmed = message; return { ok: false, error: 'rejected' }; },
+  });
+  try {
+    const picking = page.el('browseDestination').click();
+    // The server is the default target, and its list arrives while the desktop app's dialog is open.
+    targets.resolve({ ...BATCH_TARGETS, target: 'server' });
+    await tick();
+    await tick();
+    pick.resolve({ ok: true, path: 'E:\\Picked' });
+    await picking;
+    assert.equal(page.el('destination').value, 'E:\\Picked');
+    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
+    assert.equal(radios.length, 2, 'the choice is shown once the pick ends');
+    assert.ok(radios.every(radio => !radio.disabled));
+    assert.equal(radios.find(radio => radio.checked)?.value, 'local');
+    await page.el('confirm').click();
+    assert.equal(confirmed.target, 'local', 'a This PC folder is never sent to the server');
+    assert.equal(confirmed.destination, 'E:\\Picked');
   } finally {
     page.restore();
   }
