@@ -837,15 +837,15 @@ internal sealed record AddFileChoice(string Selection, IReadOnlyList<string>? Fi
 internal static class AddRequests
 {
     /// <param name="files">Null leaves the choice of files to the Host.</param>
-    /// <param name="linkPasswordForArchives">TB.S2: the user agreed to have the link's password tried on its own archives.</param>
-    public static RemoteAddRequestDto ForLine(AddLine line, string? destination, int queueId, bool startLater, string? linkPassword, AddFileChoice? files = null, bool linkPasswordForArchives = false) => new()
+    /// <param name="archivePassword">For this link's own archives, typed apart from the site's password.</param>
+    public static RemoteAddRequestDto ForLine(AddLine line, string? destination, int queueId, bool startLater, string? linkPassword, AddFileChoice? files = null, string? archivePassword = null) => new()
     {
         Input = line.Input,
         Destination = destination,
         QueueId = queueId,
         StartMode = startLater ? "later" : "startNow",
         LinkPassword = linkPassword,
-        LinkPasswordForArchives = linkPassword is not null && linkPasswordForArchives,
+        ArchivePassword = archivePassword,
         ApproveUncached = true,
         Selection = files?.Selection,
         FileIds = files?.FileIds?.ToList(),

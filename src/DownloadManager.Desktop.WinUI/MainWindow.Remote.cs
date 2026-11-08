@@ -560,10 +560,10 @@ public sealed partial class MainWindow
     private async Task EnterLinkPasswordAsync(RemoteJobDto job)
     {
         var provider = RemoteText.ProviderName(job);
-        var box = new PasswordBox { Header = "Link password", PasswordRevealMode = PasswordRevealMode.Hidden };
-        AutomationProperties.SetName(box, "Link password");
-        // TB.S2: the user's own choice, for this item's archives only.
-        var forArchives = new CheckBox { Content = "Also try it on this item's own archives" };
+        var box = new PasswordBox { Header = "Site password", PasswordRevealMode = PasswordRevealMode.Hidden };
+        AutomationProperties.SetName(box, "Site password");
+        // TB.S2: the user's own choice, for this item's archives only, and only while they have no password of their own.
+        var forArchives = new CheckBox { Content = "Use it as the archive password too" };
         var panel = new StackPanel { Spacing = 10, Children = { new TextBlock { Text = RemoteText.LinkPasswordHint(job), TextWrapping = TextWrapping.Wrap }, box } };
         if (!job.HasArchivePassword) panel.Children.Add(forArchives);
         var dialog = new ContentDialog

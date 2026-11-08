@@ -1,5 +1,14 @@
 # Progress — session handoff
 
+### After 0.6.0: password boxes, Firefox popup size, target switch (2026-11-08, `dev`)
+
+- TB.S4 (owner): in Add Links a hoster link's password section has an archive password box first, a tick to use it as the site password too, and a separate site password box. The two never stand in for each other unless ticked. The retry dialog and the web UI's Add Links say the same. Core and Integration tests pass; not seen on screen.
+- EXT.B4 (owner's screenshot): Firefox opened the popup small with a scroll bar. The popup's size caps in `vw`/`vh` clamped it to Firefox's first, small layout viewport. They are fixed sizes now; measured in a stand-in viewport, not yet in a real Firefox popup.
+- EXT.B5 (owner): Firefox shows its own Save dialog before the extension can catch the download, and the app then ignores the folder chosen there. Recorded; the approach waits for the owner.
+- EXT.R6 (owner): the popup has a This PC / Server switch once a server is paired. It sets the same default target as Settings.
+- The owner asked whether the extension got more controls: EXT.R2 (the newest 20 downloads with pause, resume, retry and delete) shipped in extension 0.5.0. In the owner's Firefox the small popup hid that list below the scroll.
+- `npm test` 151 pass, Chrome and Firefox builds made; Core 895 pass; the TB.S2 and new archive-password Integration tests pass.
+
 ### 0.6.0 released (2026-11-08, squashed to `main`, tag `v0.6.0`)
 
 - All work branches are merged into `dev`: streams A to C, the campaign, perf, webui, Edge, and the six owner-answer branches. Their worktrees and branches are removed. The evidence they held is in `artifacts\evidence\<branch>\` in the main checkout: logs, trx files and summaries, with no payloads or browser profiles. It was scanned for credentials and none were found.
@@ -78,7 +87,12 @@
     - UI.R6: the Size, Time left and Transfer rate values share a right edge with their headers.
     - TEST.3: a Chrome for Testing handoff went through the test registration, and Chrome's key was unchanged.
   - TorBox live, read-only: 45 of 45 pass after updating three tests that expected the old cap of 4, and one that expected the old key form in links. TorBox now gives a torrent link the key without dashes when asked that way (TB.L3), which doesn't affect the app.
-  - TB.S1's queue read checked live; Start now and Remove couldn't be, with nothing queued. TB.S2 is blocked: no password-protected hoster link.
+  - TB.S1's queue read checked live; Start now and Remove couldn't be, with nothing queued. TB.S2 is blocked: no password-protected hoster link (later verified by the owner, below).
+- Owner answers and checks (2026-11-08):
+  - Done by the owner's word: EXT.S2 and EXT.E1 (the owner does the store and AMO side), D.PLAN. UI.B3 confirmed. TB.F4's open choice settled: "fine", as built.
+  - TB.S2 verified by the owner: a gofile link worked, but only with "Also try it on this link's own archives" ticked. The site password itself is the hoster link's password, not an archive's, so its archive most likely had the password.
+  - TB.L2 removed from the roadmap (owner: "TB.L2, remove", read as the row). Nothing was deleted from the TorBox account, and `KeptArchiveTests` still use the archive.
+  - D3a and D2a run with the published 0.6.0 image on the owner's Linux VM, D3b read from GitHub's run list. Default user 1000:1000, PUID 1234 honoured, PUID 0 refused with exit 2. A sign-in survives `docker restart`, and after signing out the cookie stays signed out across one. Evidence in `artifacts\evidence\dev-final\vm-d2a-d3a\`. The test containers, folders and image were removed afterwards (`cleanup-check.txt`).
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 
