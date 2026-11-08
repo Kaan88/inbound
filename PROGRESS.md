@@ -1,5 +1,53 @@
 # Progress — session handoff
 
+### EXT.R1 server target: the extension's transport, pairing and This PC / Server choice, on `webui` (2026-11-08)
+
+- **Built (extensions/chrome):** `src/transport.ts` with `NativeTransport` (the native-messaging code moved out of
+  `background.ts`, same behaviour) and `ServerTransport` (`POST <address>/api/ipc`, `Authorization: Bearer`,
+  `credentials: "omit"`, `redirect: "error"`, time limit; 401 means "pair again"); address and code normalising,
+  `pairWithServer` (`/api/pair`, then one ping before anything is stored), the target rules. Settings: an
+  "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI, Unpair; a note for plain
+  http beyond loopback) and "Automatic downloads go to: This PC / The server" (`settings.defaultTarget`, This PC by
+  default). Pair asks the browser for that host only (`permissions.request`). The folder window and Download All
+  show "Save to" only when both targets can work (the server alone when the desktop app is not installed here),
+  with each target's default folder and favorites; Choose… is the app's dialog for This PC and a folder list
+  (`folders.browse`, new `src/destination-target.ts`) for the server. The popup lists the newest 20 of each place,
+  labelled, with a server card, and sends actions to the right place. Any failure resumes the download in the
+  browser; nothing is ever sent to the other place instead. Firefox build too (`dist-firefox`). Test helpers moved
+  to `tests/harness.cjs`; the "no network requests" test now allows one `fetch`, the transport's.
+- **Evidence:** npm 118/118 (92 before + `transport.test.cjs` 13 + `server-target.test.cjs` 13; a mutation that
+  sent automatic catches to this PC failed 4 of them); `tsc --noEmit` clean; both builds. Server.Tests 60/60 (new
+  `ExtensionTransportTests` 3). `scripts/server-smoke.mjs` against a test server (`DownloadManager.Server` on
+  127.0.0.1:18480, data under `artifacts\ext-smoke`): 12/12 steps (sign in, code, pair with the code typed with a
+  dash in lower case, default folder, roots, handoff, duplicate, list without settings, delete, `job.add` refused,
+  token removed in the web UI, then 401 "pair again"). Chrome for Testing (fresh profile, `dist` loaded, downloads
+  folder in `artifacts`): paired from the real Settings page ("Paired with the server at 127.0.0.1:18480 as "Chrome
+  on Windows". It is answering."); automatic sending to the server: `browser-to-server.bin` (3 MiB) completed on
+  the server, SHA-256 05445bb3…0704e5 equal, the browser's entry removed, notification "Sent to the Inbound server";
+  repeated with the same address: a second job "browser-to-server (1).bin", completed; "ask each time": the window
+  showed no choice and the server's default folder (CfT has no native host registered, so only the server was
+  offered, as designed), Choose… listed the server's root with free space, Download sent it, `asked.bin` (1 MiB)
+  completed with SHA-256 c5c2a841…5d70 equal; the popup showed the server card and hid the desktop app's. CfT
+  reported "Specified native messaging host not found", so it never reached the installed app. Screenshots and
+  logs: `artifacts\ext-smoke\out` (not committed).
+- **Not explained:** one automatic attempt (the second CfT run, the same address as the first run, right after
+  the session was restored) left no trace: no request reached the file server, no browser entry, no note in the
+  popup. The first run had used CDP `Browser.setDownloadBehavior`, which takes downloads away from the extension,
+  and its result is discarded. Two later attempts, one with the same address, worked. Worth one more look in a
+  real Chrome.
+- **Not done:** no real Firefox or Edge run; no browser against the Docker server over the LAN (only loopback);
+  the two-target window was checked by tests, not on screen (CfT had no native host). Not delegated to a cheaper
+  reviewer (no agent tool in this session).
+- **Questions for the owner (safer choice taken):** (1) no `optional_host_permissions` entry: the required
+  `http://*/*`/`https://*/*` already cover any server, so Chrome would only warn about a duplicate; pairing still
+  asks for the one host (matters in Firefox). (2) No fallback to the other place when the chosen one fails; the
+  download stays in the browser. (3) The token is kept in `chrome.storage.local` as is (not synced, not encrypted
+  by the extension). (4) Unpair can't revoke the token on the server (a token can't revoke itself); Settings says
+  to remove it in the web UI. (5) The window's This PC / Server pick is for that download only and does not change
+  the default. (6) The popup asks the server once a second while open, like the desktop app. (7) The extension
+  version stays 0.4.0; the store listing's cookie and host-permission lines were updated, but the store's data
+  disclosure should be reviewed before a store upload, since a user's server is a new recipient.
+
 ### D3 Docker image, compose and GHCR workflow, on `webui` (2026-11-08)
 
 - **Built:** `Dockerfile` (Node 24 web UI stage from the lockfile; official 7-Zip 26.04 `7zz` for x64/arm64 with a
