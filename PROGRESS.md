@@ -1,5 +1,16 @@
 # Progress — session handoff
 
+### Stream A2: Shift+Delete, TorBox cap and queue, FTP speed limit, counters, spanned zips (2026-11-08, branch `stream-a2`)
+
+- UI.R20: Shift+Delete asks with "Delete from disk" ticked; the Delete key and the toolbar Delete ask with it unticked (it used to start ticked). Checked with `scripts\ui-keyboard-check.ps1` on a test instance.
+- TB.L1: the live measurement (one cached 300 MB file, 1 to 16 parallel range requests, all HTTP 206, about 6.4 MB/s per connection, 92.4 MB/s at 16) is recorded. The TorBox per-file cap is now 16, and provider jobs take the smallest of the user's connections per download, the host limit and that cap on every run. The per-host limit (default 8) still caps one host overall. The plan doc's older note of "4 per file" from TorBox support and a TorBox staff reply saying there is no explicit limit disagree; both are noted in ROADMAP.
+- TB.S1 to TB.S3: My TorBox can start an item waiting in TorBox's queue or remove it from the queue (`queued/controlqueued`, sourced from TorBox's API schema); a link's hoster password can be offered to that link's own archives, opt-in; a set's `.rev` recovery volumes go with it when archive deletion is on. Mock tests only, no live calls this round.
+- PERF.6: FTP downloads now follow the per-download speed limit and the shared total cap, which covers HTTP and FTP together.
+- UI.R6: live counters (main list Size, Time left, Transfer rate and their headers; details values and segment rows; the progress window; the speed graph) are right-aligned so they no longer move when the digit count changes. Checked by UIA bounds on a test instance; not checked by the owner, at high DPI or in light mode.
+- A4.D: spanned zip sets (`name.z01` ... `name.zip`) are one set, opened from `name.zip`; a missing middle or last part is named. WinZip has no command line here, so the tests build spanned sets by hand; the bundled 7-Zip 26.04 lists and extracts them.
+- Tests: Core 819, Engine 149, Archives 321, TorBox 323, Integration 1,103, all passed.
+- Not done: the owner's on-screen checks; a live TorBox check of TB.S1/TB.S2; a spanned set made by a real zip tool.
+
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
 - Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.
