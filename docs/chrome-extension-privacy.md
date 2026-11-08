@@ -55,6 +55,16 @@ site on your exclude list, or automatic sending being off) for the last five suc
 session storage, which Chrome clears when it closes. None of this is sent to the app. To find out whether you held Delete, the extension first asks its script in each open tab about
 the download's address; the script compares it with the link you clicked and keeps nothing.
 
+**In Firefox only, page and frame loads:** Firefox shows its own Save dialog before an extension hears of a
+download, so the Firefox version looks at the response to each page or frame you load over http or https,
+whether automatic sending is on or off. It reads the address and these response headers: the file type,
+`Content-Disposition` (the file name), the size and whether the response is compressed. From them it decides
+only whether Firefox would save the response rather than show it. For a normal page it stops there, keeps
+nothing and sends nothing. A response Firefox would save is treated like any other new download: while automatic
+sending is on, it goes through your rules, and if they say to catch it, it is sent with the details listed
+above, including the cookies for its site. Otherwise Firefox goes on as it would have. The Chrome and Edge
+versions don't do this.
+
 **Links on a page:** when you open Download All, the extension reads the addresses of the current page's
 links, images, video and audio, and their labels. It does not look at them until you open it. They stay in
 that window. Links that point to files start out ticked, and you can untick any of them. Only the addresses
