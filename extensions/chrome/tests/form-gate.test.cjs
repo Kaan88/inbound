@@ -146,7 +146,7 @@ async function openFolderWindow(handlers = {}) {
 
 test('EXT.B2 folder window: a send that fails while Browse was tried leaves Send and Browse usable', async () => {
   const send = deferred();
-  const page = await openFolderWindow({ 'dm.confirmHandoff': () => send.promise, 'dm.pickFolder': async () => assert.fail('no pick during a send') });
+  const page = await openFolderWindow({ 'dm.confirmHandoff': () => send.promise, 'dm.pickFolder': async () => ({ ok: true, path: 'Z:\\Wrong' }) });
   try {
     const confirm = page.el('confirm'), browse = page.el('browseDestination');
     assert.equal(confirm.disabled, false);
@@ -201,6 +201,46 @@ test('EXT.B2 folder window: a cancelled or failed pick gives Send back', async (
     assert.equal(page.el('browseDestination').disabled, false);
     assert.equal(page.el('destination').value, 'D:\\Default');
     assert.equal(page.el('error').textContent, 'picker gone');
+  } finally {
+    page.restore();
+  }
+});
+
+test('EXT.B2 folder window: a cancelled pick on a valid request gives Send and Browse back', async () => {
+  const page = await openFolderWindow({ 'dm.pickFolder': async () => ({ ok: true, cancelled: true }) });
+  try {
+    await page.el('browseDestination').click();
+    assert.equal(page.el('confirm').disabled, false);
+    assert.equal(page.el('browseDestination').disabled, false);
+    assert.equal(page.el('destination').value, 'D:\\Default');
+  } finally {
+    page.restore();
+  }
+});
+
+test('EXT.B2 folder window: Keep in browser and Escape do nothing while a send is in flight', async () => {
+  const send = deferred();
+  const page = installPage('?id=h1', {
+    'dm.getHandoff': async () => ({ ok: true, held: true, handoff: { id: 'h1', url: 'https://example.test/a.zip' }, defaults: { destination: 'D:\\Default' } }),
+    'dm.confirmHandoff': () => send.promise,
+    'dm.keepInBrowser': async () => ({ ok: true }),
+  });
+  // A held request opens a keep-alive port with a 20 s ping timer; no port here, so the test can exit.
+  global.chrome.runtime.connect = () => { throw new Error('no port in this test'); };
+  try {
+    loadTs('handoff.ts');
+    await page.domReady();
+    const keep = page.el('keepInBrowser');
+    assert.equal(keep.disabled, false);
+    const sending = page.el('confirm').click();
+    assert.equal(keep.disabled, true, 'Keep is held while the send is in flight');
+    await keep.click();
+    await page.key({ key: 'Escape', target: page.el('fileName') });
+    assert.equal(page.sent.includes('dm.keepInBrowser'), false);
+    assert.equal(page.closed, false);
+    send.resolve({ ok: false, error: 'The app is not running.' });
+    await sending;
+    assert.equal(keep.disabled, false, 'a failed send gives Keep back');
   } finally {
     page.restore();
   }
@@ -262,7 +302,7 @@ test('EXT.B2 batch window: Send is held while the dialog is open and released af
 
 test('EXT.B2 batch window: Browse and Cancel are held during a send, and a failed send releases them', async () => {
   const send = deferred();
-  const page = await openBatchWindow({ 'dm.confirmBatch': () => send.promise, 'dm.pickFolder': async () => assert.fail('no pick during a send') });
+  const page = await openBatchWindow({ 'dm.confirmBatch': () => send.promise, 'dm.pickFolder': async () => ({ ok: true, path: 'Z:\\Wrong' }) });
   try {
     const confirm = page.el('confirm'), browse = page.el('browseDestination');
     const sending = confirm.click();

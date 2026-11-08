@@ -35,6 +35,8 @@ const gate = new FormGate(renderButtons);
 function renderButtons(): void {
   confirmButton.disabled = unavailable || finished || !gate.canSend;
   browseDestinationButton.disabled = !gate.canPick;
+  // Keep in browser during a send could keep the file in the browser and add it to the app too.
+  keepButton.disabled = gate.sending;
 }
 
 function markUnavailable(message: string): void {
@@ -162,12 +164,13 @@ function holdWorker(reconnects = 0): void {
 }
 
 async function keepInBrowser(): Promise<void> {
-  if (finished || !held) return;
+  if (finished || !held || gate.sending) return;
   finished = true;
   try { await chrome.runtime.sendMessage({ type: "dm.keepInBrowser", id: handoffId }); } catch { /* closing the window does the same */ }
 }
 
 keepButton.addEventListener("click", async () => {
+  if (gate.sending) return;
   keepButton.disabled = true;
   await keepInBrowser();
   window.close();
@@ -180,6 +183,7 @@ favoritesSelect.addEventListener("change", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (gate.sending) return; // the send decides; closing now could also resume the browser's copy
     if (held) void keepInBrowser().then(() => window.close());
     else window.close();
   }
