@@ -378,6 +378,19 @@ public sealed partial class HostCommandDispatcher
                         }).ConfigureAwait(false);
                     break;
 
+                case MessageTypes.SettingsDownloadFolders:
+                    var folderSettings = _service.GetSnapshot().Settings;
+                    await Reply(client, message, MessageTypes.SettingsDownloadFoldersResult,
+                        new DownloadFoldersResult
+                        {
+                            Ok = true,
+                            DefaultFolder = folderSettings.DefaultDownloadDirectory,
+                            Favorites = folderSettings.FavoriteFolders
+                                .Select(favorite => new FavoriteFolderDto { Name = favorite.Name, Path = favorite.Path })
+                                .ToList(),
+                        }).ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.FolderSpace:
                     await Reply(client, message, MessageTypes.FolderSpaceResult,
                         await _service.GetFolderSpaceAsync(message.GetPayload<FolderSpaceRequest>(), cancellationToken).ConfigureAwait(false))

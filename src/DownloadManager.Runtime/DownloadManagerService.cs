@@ -101,7 +101,7 @@ public sealed partial class DownloadManagerService
 
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public bool TrayAvailable { get; set; }
-    public Func<bool>? NativeHostRegistered { get; set; }
+    public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
     public string StateDirectory => _paths.Root;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -4181,22 +4181,19 @@ public sealed partial class DownloadManagerService
         var active = _jobs.Values.Count(r => r.Job.State is DownloadState.Connecting or DownloadState.Downloading
             or DownloadState.RetryWaiting or DownloadState.Verifying);
         var queued = _jobs.Values.Count(r => r.Job.State == DownloadState.Queued);
+        var nativeHost = NativeHostState?.Invoke() ?? default;
         return new HostStatusDto
         {
             HostVersion = Protocol.HostVersion,
             ProtocolVersion = Protocol.Version,
             StartedAt = StartedAt,
             TrayAvailable = TrayAvailable,
-            NativeHostRegistered = NativeHostRegistered?.Invoke() ?? false,
+            NativeHostRegistered = nativeHost.IsRegistered,
             ActiveDownloads = active,
             QueuedDownloads = queued,
             TotalJobs = _jobs.Count,
             StateDirectory = _paths.Root,
-            BrowserIntegration = !_settings.BrowserIntegrationEnabled
-                ? "disabled"
-                : NativeHostRegistered?.Invoke() == true
-                    ? "connected"
-                    : "native host not registered",
+            BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
         };
     }

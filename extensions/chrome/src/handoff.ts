@@ -17,6 +17,13 @@ const browseDestinationButton = document.getElementById("browseDestination") as 
 const startSelect = document.getElementById("startMode") as HTMLSelectElement;
 const confirmButton = document.getElementById("confirm") as HTMLButtonElement;
 const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
+const keepButton = document.getElementById("keepInBrowser") as HTMLButtonElement;
+const favoritesField = document.getElementById("favoritesField") as HTMLLabelElement;
+const favoritesSelect = document.getElementById("favorites") as HTMLSelectElement;
+// The folder the window opened with. Sent only when changed, so the app keeps deciding the default.
+let defaultDestination = "";
+let held = false;
+let finished = false;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const successBox = document.getElementById("success") as HTMLParagraphElement;
 
@@ -43,7 +50,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const response = (await chrome.runtime.sendMessage({ type: "dm.getHandoff", id: handoffId })) as {
       ok?: boolean;
       handoff?: PendingHandoff;
-      defaults?: { destination?: string; startMode?: string };
+      held?: boolean;
+      defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string };
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -54,8 +62,24 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     urlInput.value = response.handoff.url;
     nameInput.value = response.handoff.suggestedFileName || "";
-    destinationInput.value = response.defaults?.destination ?? "";
+    defaultDestination = response.defaults?.destination ?? "";
+    destinationInput.value = defaultDestination;
     startSelect.value = response.defaults?.startMode === "later" ? "later" : "now";
+    const favorites = response.defaults?.favorites ?? [];
+    for (const favorite of favorites) {
+      const option = document.createElement("option");
+      option.value = favorite.path;
+      option.textContent = favorite.name === favorite.path ? favorite.path : `${favorite.name} (${favorite.path})`;
+      favoritesSelect.append(option);
+    }
+    favoritesField.classList.toggle("hidden", favorites.length === 0);
+    // A caught download waits in the browser while this window is open; leaving it there is a choice.
+    held = response.held === true;
+    if (held) holdWorker();
+    keepButton.classList.toggle("hidden", !held);
+    cancelButton.classList.toggle("hidden", held);
+    // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
+    void fitWindowToContent().catch(() => undefined);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
     confirmButton.disabled = true;
@@ -70,7 +94,7 @@ confirmButton.addEventListener("click", async () => {
       type: "dm.confirmHandoff",
       id: handoffId,
       fileName: nameInput.value.trim(),
-      destination: destinationInput.value.trim(),
+      destination: destinationInput.value.trim() === defaultDestination ? "" : destinationInput.value.trim(),
       startMode: startSelect.value,
     })) as {
       ok?: boolean;
@@ -90,6 +114,7 @@ confirmButton.addEventListener("click", async () => {
       return;
     }
 
+    finished = true;
     showSuccess(
       response.ack.duplicate
         ? "This request was already accepted."
@@ -104,8 +129,46 @@ confirmButton.addEventListener("click", async () => {
 
 cancelButton.addEventListener("click", () => window.close());
 
+/**
+ * While a caught download waits on this window, a port to the background worker stays open. Its pings
+ * keep the worker, which holds the browser's file-name callback in memory, from being stopped as idle;
+ * the port closing with this window tells the worker the window was closed without a choice.
+ */
+function holdWorker(reconnects = 0): void {
+  let port: chrome.runtime.Port;
+  try { port = chrome.runtime.connect({ name: `dm.handoff:${handoffId}` }); } catch { return; }
+  const timer = setInterval(() => {
+    try { port.postMessage({ type: "ping" }); } catch { /* reconnected below */ }
+  }, 20000);
+  port.onDisconnect.addListener(() => {
+    clearInterval(timer);
+    // The worker restarted anyway: tell the new one this window is still open. A few tries at most.
+    if (!finished && reconnects < 5) holdWorker(reconnects + 1);
+  });
+}
+
+async function keepInBrowser(): Promise<void> {
+  if (finished || !held) return;
+  finished = true;
+  try { await chrome.runtime.sendMessage({ type: "dm.keepInBrowser", id: handoffId }); } catch { /* closing the window does the same */ }
+}
+
+keepButton.addEventListener("click", async () => {
+  keepButton.disabled = true;
+  await keepInBrowser();
+  window.close();
+});
+
+favoritesSelect.addEventListener("change", () => {
+  if (favoritesSelect.value) destinationInput.value = favoritesSelect.value;
+  favoritesSelect.value = "";
+});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") window.close();
+  if (event.key === "Escape") {
+    if (held) void keepInBrowser().then(() => window.close());
+    else window.close();
+  }
   else if (event.key === "Enter" && !confirmButton.disabled &&
            (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
 });

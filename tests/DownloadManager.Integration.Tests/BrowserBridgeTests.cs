@@ -81,4 +81,20 @@ public sealed class BrowserBridgeTests
         Assert.Contains(BrowserBridge.StoreExtensionId, text);
         Assert.Contains(BrowserBridge.UnpackedExtensionId, text);
     }
+
+    [Theory]
+    [InlineData("installer", "DownloadManager.iss")]
+    [InlineData("scripts", "register-native-host.ps1")]
+    [InlineData("extensions", "chrome", "src", "connection-problem.ts")]
+    [InlineData("extensions", "chrome", "scripts", "build.mjs")]
+    public void Every_place_that_names_the_Firefox_id_agrees(params string[] path) =>
+        Assert.Contains($"\"{BrowserBridge.FirefoxExtensionId}\"", RepoFile(path));
+
+    [Fact]
+    public void The_Firefox_id_is_trusted_for_handoffs_exactly() // EXT.E1
+    {
+        Assert.True(BrowserBridge.IsTrustedExtensionId("inbound-bridge@kaan88"));
+        Assert.False(BrowserBridge.IsTrustedExtensionId("Inbound-Bridge@kaan88"));
+        Assert.False(BrowserBridge.IsTrustedExtensionId("inbound-bridge@kaan88 "));
+    }
 }
