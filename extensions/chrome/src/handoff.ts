@@ -77,6 +77,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     held = response.held === true;
     keepButton.classList.toggle("hidden", !held);
     cancelButton.classList.toggle("hidden", held);
+    // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
+    void fitWindowToContent().catch(() => undefined);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
     confirmButton.disabled = true;

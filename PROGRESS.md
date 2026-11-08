@@ -1,5 +1,22 @@
 # Progress — session handoff
 
+### Stream C: the extension, local parts (2026-11-08)
+
+- Edge: merged `feature/edge-support` (277bf73, 9381038, bc728d0, b996c90, 0f60dfe) into this branch (a143c47); its registration tests use their own fake store and registry, and pass.
+- EXT.B1: the extension now catches every file type except an editable exclude list (web pages, images); a copy still on the untouched old allow-list moves over once. A download left in the browser is noted in the popup with the reason (not for `blob:`/`data:`), with a notification for the user's own rules. The badge reads OFF while automatic sending is off or paused, and popup and Settings say so. Cookies of a same-origin final address are merged in without duplicates. Not yet checked live in the owner's Edge with the file host's Direct Download button.
+- EXT.R2: the popup lists the newest 20 of all downloads with Pause, Resume/Retry and Delete (with "Delete the file too"). `NativeBridgePolicy` is a role-based allow-list both ways; the new `settings.downloadFolders` returns only the default folder and favorites; snapshots still lose their settings.
+- EXT.R1 (this PC): "When sending a download: use the app's default folder / ask each time". Ask opens `handoff.html` with the default folder, favorites and Choose…. The place for the later "this PC or the server" choice is marked in `handoff.html` and Options.
+- EXT.E1 Firefox: `npm run build:firefox` writes `dist-firefox` (gecko id `inbound-bridge@kaan88`, event page, no key); a Firefox native manifest and the HKCU Mozilla key in Setup and the scripts; `scripts\package-extension-firefox.ps1` builds the AMO zip (not signed: needs the owner's account).
+- Security: the native host skipped its caller check when no `chrome-extension://` argument was given. It now accepts only a trusted Chrome/Edge origin or the trusted gecko id and exits otherwise (tested as a real process).
+- UI.R3 confirmed by tests (browser handoffs start at the default folder, also after a Host restart; a one-off folder is not kept). UI.R4 checked in code and by new `fit-window` tests; `handoff.html` refits after the favorites load. On-screen checks are left for the owner.
+- Tests: extension `tsc --noEmit` clean, npm 85 of 85, Chrome and Firefox builds succeed; solution build clean; Core 833 of 833; Integration 1,176 of 1,176 (full suite).
+
+#### Questions for the owner (stream C)
+
+- AMO signing: upload `artifactsirefox-addon` (from `scripts\package-extension-firefox.ps1`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
+- The privacy policy (`docs/chrome-extension-privacy.md`) changed (final-address cookies, the "left in browser" notes, folder window, popup actions); the online copy needs updating when this ships.
+- The EXT.B1 live check in your Edge with the file host's Direct Download button, when you are around.
+
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
 - Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.

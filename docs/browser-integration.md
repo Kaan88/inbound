@@ -17,12 +17,20 @@ Chrome version during Phase 4.
    without ever answering, so no bubble opens. When the browser keeps the
    download (filtered, bypassed, rejected, Host unreachable), the listener calls
    `suggest()` once and resumes. `downloads.setUiOptions` is not needed and is not used.
+   Firefox has no `onDeterminingFilename`; there the same code runs from
+   `downloads.onCreated`, pausing the download and then cancelling or resuming it.
 3. **`webRequest` is observational in MV3.** Blocking requires a
    policy-installed extension, so the extension does not use it and does not
    request the permission.
 4. **Cookies are readable with the `cookies` permission + host permissions.**
    `chrome.cookies.getAll({url})` gives the cookie set for the target; this is
-   the main way to transfer a browser session.
+   the main way to transfer a browser session. For an automatic catch the
+   extension reads the cookies of the download's address and, when the final
+   address is on the same origin, of that one too, merged without duplicates
+   (a cookie scoped to the final path is otherwise missed). A final address on
+   another origin adds none: the app starts again from the first address and
+   sends cookies only to that origin, so another site's cookies would go to the
+   wrong site and be useless there.
 5. **Headers may be partially hidden.** `extraHeaders` may be needed for
    `Cookie`/`Authorization`; we treat auth headers as sensitive and optional.
    Never log them.
@@ -77,6 +85,56 @@ Edge is a supported browser (owner decision 2026-11-06). It runs the same extens
   rather than showing one, skips isolated-data runs, and never replaces a registration whose manifest exists,
   so a broken one that still has its file stays named in the status until `repair.ps1` runs.
 - Evidence and what is still unverified are in `PROGRESS.md`.
+
+## Firefox
+
+Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same sources build it.
+
+- **Build.** `npm run build:firefox` (`scripts/build.mjs --target firefox`) writes `dist-firefox`. Its
+  manifest is the Chrome one with `browser_specific_settings.gecko.id` `inbound-bridge@kaan88`,
+  `background.scripts` instead of a service worker, and no `key` or `minimum_chrome_version`.
+  `scripts\package-extension-firefox.ps1` checks it and zips it for addons.mozilla.org (AMO) into
+  `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
+  unlisted version from the owner's AMO account; that has not been done.
+- **Differences handled in code.** No `downloads.onDeterminingFilename` (see above);
+  `cookies.getPartitionKey` is optional already. Firefox may install the extension without access to sites;
+  then Settings shows "Allow access to all sites", which asks with `permissions.request` from the click.
+- **Registration.** Firefox lists add-on IDs (`allowed_extensions`) where Chrome lists origins, so it has a
+  manifest of its own, `native-host\com.kaank.downloadmanager.firefox.json`, under its own key
+  `HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager`. Setup and
+  `register-native-host.ps1` (install, repair, updater) write both; the key is optional like Edge's, and
+  uninstall removes it only when it is this install's. The Host does not yet report or repair the Firefox
+  key (only Chrome's and Edge's).
+- **Not verified:** a run in a real Firefox, signing, and Firefox's install prompt for host permissions.
+
+## Which downloads are caught (EXT.B1)
+
+- **Rules.** Every file type is caught except a short, editable exclude list: web pages and their parts
+  (`html`, `php`, `js`, `css`, `json`, `xml`, …) and images (`jpg`, `png`, `gif`, `webp`, …), which "Save image
+  as" produces all the time. Before rules version 2 a fixed allow-list was used, which missed `flac`, `mp4`,
+  `pdf`, `epub` and others. A copy whose list is still exactly the old default moves to the new rules once;
+  an edited list is kept. Settings still offers "catch only these types" for anyone who wants an allow-list.
+- **Left in the browser, and why.** Each download the extension leaves to the browser, except `blob:` and
+  `data:` downloads made by the page itself, is noted with the reason; the popup shows the recent ones.
+  A notification says so too for a rule the user set (an excluded site or type, a type missing from their
+  own allow-list), but not for the default exclusions, a pause or a held Delete, which are expected.
+- **On or off at a glance.** Automatic sending starts off on a fresh install, beside the explanation of
+  what it shares. While it is off or paused the toolbar badge reads OFF, the popup and Settings say so in
+  words with a way to turn it on, and the first download of a browser session that stays in the browser
+  because of it raises one notification.
+
+## Choosing a folder (EXT.R1) and the popup's list (EXT.R2)
+
+- **When sending a download:** "Use the app's default folder" (default) or "Ask each time". Asking holds the
+  caught download, paused, while `handoff.html` shows the app's default folder (from
+  `settings.downloadFolders`, which returns only that and the favorite folders), the favorites and
+  Choose… (the app's folder picker). Download sends it and removes the browser's copy; Keep in browser, or
+  closing the window, gives it back to the browser. The pending entry is in session storage with the
+  browser's download id, so either still works after the worker restarts. A folder chosen there is for that
+  download only; the next window starts at the default folder again (UI.R3). The right-click menu always
+  asks. A "this PC or the server" choice goes above the folder once the server transport exists.
+- **Popup:** the newest 20 of all the app's downloads, whatever started them, with Pause, Resume (Retry for
+  a failed one) and Delete, which asks first and has "Delete the file too", unticked.
 
 ## Handoff flow (durable)
 
@@ -159,6 +217,16 @@ first install and explains beside the checkbox what it shares.
   invocation and by `allowed_origins`). Any other ID is refused, including a store package unpacked
   by hand, whose ID comes from its folder. Chrome reports that as `forbidden`, and the extension says
   which ID was refused. To test a store package unpacked: `docs/chrome-store/LISTING.md`.
+- The native host checks its own command line as well (`BrowserBridge.TrustedCaller`): a trusted
+  `chrome-extension://` origin (Chrome, Edge) or, as the last argument after the manifest path, the trusted
+  Firefox ID. Anything else, including no caller at all, exits with code 2 before the Host is started or a
+  frame is read. Until 2026-11-08 a command line without a `chrome-extension://` origin skipped this check,
+  so any local program could use the bridge's rights.
+- What crosses the bridge is an allow-list in both directions (`NativeBridgePolicy`, per `BridgeRole`):
+  from the extension `handoff.request`, `host.ping`, `host.openUi`, `host.pickFolder`, `jobs.query`,
+  `job.pause/resume/retry/cancel/remove` (remove with `deleteFile`) and `settings.downloadFolders`; to it only
+  the replies and events it reads. A snapshot loses its settings on the way. Provider (`remote.*`) and
+  archive messages never cross.
 - Inside the extension, content scripts can send only the messages they need
   (`CONTENT_SCRIPT_MESSAGES`), since they run alongside untrusted pages.
 - The host validates every field and enforces size/depth limits.
