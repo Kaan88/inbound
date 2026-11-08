@@ -4682,10 +4682,56 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
 
+    // Set while a dialog shown through ShowDialogAsync is open. The popup check below also sees dialogs shown elsewhere.
+    private bool _dialogShowing;
+
+    /// <summary>True while a ContentDialog is open on this window, whether or not it came through ShowDialogAsync.</summary>
+    private bool IsContentDialogOpen() =>
+        _dialogShowing ||
+        Content?.XamlRoot is { } root && VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Any(popup => HoldsContentDialog(popup.Child, 4));
+
+    // An open ContentDialog sits in a popup, as the popup's child or a few levels under it; flyouts and menus never hold one.
+    private static bool HoldsContentDialog(DependencyObject? element, int depth)
+    {
+        if (element is null) return false;
+        if (element is ContentDialog) return true;
+        if (depth == 0) return false;
+        var count = VisualTreeHelper.GetChildrenCount(element);
+        for (var i = 0; i < count; i++)
+        {
+            if (HoldsContentDialog(VisualTreeHelper.GetChild(element, i), depth - 1)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Shows <paramref name="dialog"/>, or returns null without showing it while another ContentDialog is open:
+    /// WinUI allows one at a time, and a second ShowAsync throws, which ends the window when nothing catches it (UI.B8).</summary>
+    private async Task<ContentDialogResult?> ShowDialogAsync(ContentDialog dialog)
+    {
+        if (IsContentDialogOpen()) return null;
+        _dialogShowing = true;
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            // A dialog this check could not see was open after all.
+            return null;
+        }
+        finally
+        {
+            _dialogShowing = false;
+        }
+    }
+
     /// <summary>Asks before deleting the selection. <paramref name="deleteFromDisk"/> is the box's starting state:
     /// only Shift+Delete starts it ticked, so a plain Delete never removes finished files without a click.</summary>
     private async Task ConfirmDeleteAsync(bool deleteFromDisk)
     {
+        // The toolbar can still be invoked behind an open dialog (UI Automation, a screen reader), so a Delete then
+        // does nothing (UI.B8); ShowDialogAsync below refuses it too.
+        if (IsContentDialogOpen()) return;
         var selection = SelectedJobs;
         if (selection.Count == 0)
         {
@@ -4727,7 +4773,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -4892,7 +4938,8 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            await dialog.ShowAsync();
+            // Refused while another dialog is open: the message then goes to the status bar, as when ShowAsync fails.
+            if (await ShowDialogAsync(dialog) is null) ShowPassingStatus($"{title}: {message}");
         }
         catch (Exception)
         {

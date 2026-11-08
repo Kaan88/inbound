@@ -1,5 +1,9 @@
+# Lists the menus, toolbar, categories, columns and row context menu of a running test UI and saves a screenshot.
+# Attaches only to a UI whose executable path contains -PathPart and refuses the installed app. Starts nothing, but it
+# opens menus and right-clicks a row, so use a test instance only.
 [CmdletBinding()]
 param(
+    [Parameter(Mandatory)][string]$PathPart,
     [string]$Screenshot = (Join-Path $env:TEMP 'downloadmanager-ui-inventory.png')
 )
 
@@ -19,10 +23,17 @@ public static class UiWin2 {
 }
 '@
 
-$proc = Get-Process DownloadManager.Desktop.WinUI -ErrorAction Stop
+$proc = Get-CimInstance Win32_Process -Filter "Name='DownloadManager.Desktop.WinUI.exe'" |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like "*$PathPart*" -and $_.CommandLine -notmatch '--job|update-progress' } |
+    Select-Object -First 1
+if (-not $proc) { Write-Output 'NO TEST UI'; exit 1 }
+if ($proc.ExecutablePath -like '*\Programs\Inbound Download Manager\*') { Write-Output 'REFUSED: that is the installed app, not a test instance'; exit 1 }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
-$pidCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $proc.Id)
-$win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCondition)
+$pidCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$proc.ProcessId)
+$win = $null
+foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCondition)) {
+    if ($candidate.Current.Name -eq 'Inbound Download Manager') { $win = $candidate; break }
+}
 if (-not $win) { Write-Output 'NO WINDOW'; exit 1 }
 $hwnd = [IntPtr]$win.Current.NativeWindowHandle
 [UiWin2]::ShowWindow($hwnd, 3) | Out-Null
