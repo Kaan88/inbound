@@ -106,7 +106,7 @@
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
       {@render link('#/queues', 'queues', 'calendar', 'Queues and scheduler')}
       {#if store.has('remote')}{@render link('#/provider', 'provider', 'key', `My ${providerName}`)}{/if}
-      {@render link('#/settings', 'settings', 'settings', 'Settings')}
+      {@render link('#/settings', 'settings', 'settings', 'Options')}
     </nav>
 
     <main class="min-w-0 flex-1 overflow-y-auto">

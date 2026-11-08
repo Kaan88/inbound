@@ -110,6 +110,13 @@ export interface FavoriteFolder {
   path: string;
 }
 
+export interface CategoryDefinition {
+  id: string;
+  name: string;
+  destinationDirectory?: string;
+  extensions: string[];
+}
+
 export interface ConnectionProfile {
   pattern: string;
   maxConnections: number;
@@ -141,6 +148,10 @@ export interface Settings {
   downloadGroups: DownloadGroup[];
   excludedFileExtensions: string[];
   excludedHosts: string[];
+  /** Built-in category name to its folder; a category left out uses the default folder. */
+  categoryFolders?: Record<string, string>;
+  customCategories?: CategoryDefinition[];
+  deleteCategoryIds?: string[];
   [key: string]: unknown;
 }
 
