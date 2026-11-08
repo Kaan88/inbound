@@ -18,6 +18,7 @@
 
     <section class="card form-card">
       <h2>Integration</h2>
+      <p id="autoBanner" class="state-banner" data-on="false">Automatic sending: checking…</p>
       <label class="check">
         <input id="enabled" type="checkbox" />
         <span>Allow automatic sending (right-click and Download all links work either way)</span>
@@ -43,18 +44,28 @@
         </select>
       </label>
 
-      <p class="muted small">New downloads use the app's default folder. To use a different folder for one download, right-click its link and choose Download with Inbound Download Manager.</p>
+      <label class="field">
+        <span>When sending a download</span>
+        <select id="destinationMode">
+          <option value="default">Use the app's default folder</option>
+          <option value="ask">Ask each time</option>
+        </select>
+      </label>
+      <p class="muted small">"Ask each time" opens a small window for each caught download, starting at the app's default folder, with Choose… for another folder and Keep in browser to leave it to the browser. The folder you choose there is for that download only. The right-click menu always asks.</p>
+      <!-- EXT.R1, later (PLAN.md stream C, transport): a "Send to: this PC / the server" choice goes here once the server transport exists. -->
+
     </section>
 
     <section class="card form-card">
       <h2>File and site rules</h2>
       <label class="field">
-        <span>Catch these file types (comma-separated; empty means all). Files with no file type are also caught, unless they are web pages.</span>
+        <span>Catch only these file types (comma-separated). Leave it empty to catch every file type that is not on the list below; files with no file type are also caught, unless they are web pages.</span>
         <textarea id="interceptedExtensions" rows="4" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span>Never catch these file types</span>
         <textarea id="excludedExtensions" rows="2" spellcheck="false"></textarea>
+        <button id="resetExcluded" class="link-button" type="button">Restore the default list</button>
       </label>
       <label class="field">
         <span>Never catch downloads from these sites (one per line or comma-separated)</span>
@@ -66,6 +77,15 @@
         catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
         it does not record what you type.
       </p>
+    </section>
+
+    <section id="siteAccessCard" class="card form-card hidden">
+      <h2>Access to sites</h2>
+      <p class="muted small">This browser has not given the extension access to the sites you download from, so it cannot read a site's cookies for the app or notice Delete held on a page. Downloads that need your login may fail in the app until you allow it.</p>
+      <div class="row">
+        <button id="grantSiteAccess" type="button">Allow access to all sites</button>
+      </div>
+      <p id="siteAccessResult" class="muted small"></p>
     </section>
 
     <section class="card form-card">

@@ -63,3 +63,36 @@ test('older browsers retain unpartitioned session cookies', async () => {
   try { assert.deepEqual(await browserCookieHeaders('https://example.test', await cookieContextForFrame(4)), { Cookie: 'session=saved' }); }
   finally { global.chrome = old; }
 });
+
+test('EXT.B1: cookies for a same-origin final address are added once, without duplicates', async () => {
+  const old = global.chrome;
+  const asked = [];
+  global.chrome = { cookies: { async getAll(query) {
+    asked.push(query.url);
+    return query.url.includes('/files/')
+      ? [{ name: 'session', value: 's', path: '/', domain: 'site.test' }, { name: 'file_token', value: 't', path: '/files', domain: 'site.test' }]
+      : [{ name: 'session', value: 's', path: '/', domain: 'site.test' }];
+  } } };
+  try {
+    assert.deepEqual(await browserCookieHeaders('https://site.test/dl?id=1', {}, 'https://site.test/files/a.flac'),
+      { Cookie: 'file_token=t; session=s' });
+    assert.deepEqual(asked, ['https://site.test/dl?id=1', 'https://site.test/files/a.flac']);
+  } finally { global.chrome = old; }
+});
+
+test('a final address on another site adds none of its cookies, so they never reach the first site', async () => {
+  const old = global.chrome;
+  const asked = [];
+  global.chrome = { cookies: { async getAll(query) {
+    asked.push(query.url);
+    return query.url.startsWith('https://cdn.other.test')
+      ? [{ name: 'cdn_secret', value: 'x', path: '/', domain: 'cdn.other.test' }]
+      : [{ name: 'session', value: 's', path: '/', domain: 'site.test' }];
+  } } };
+  try {
+    assert.deepEqual(await browserCookieHeaders('https://site.test/dl', {}, 'https://cdn.other.test/a.flac'), { Cookie: 'session=s' });
+    // Another port is another origin too.
+    assert.deepEqual(await browserCookieHeaders('https://site.test/dl', {}, 'https://site.test:8443/a.flac'), { Cookie: 'session=s' });
+    assert.deepEqual(asked, ['https://site.test/dl', 'https://site.test/dl']);
+  } finally { global.chrome = old; }
+});
