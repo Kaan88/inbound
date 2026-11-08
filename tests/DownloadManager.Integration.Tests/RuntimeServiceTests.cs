@@ -1106,17 +1106,36 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
             await Hashing.Sha256FileAsync(completed.FinalFilePath));
 
-        var later = await ctx.Service.AddJobAsync(new AddJobRequest
+        // A running FTP transfer takes its own limit live: 128 KB at 8 KB/s needs about 16 s, so lifting the
+        // limit once bytes flow must let the rest arrive well before the old limit would have.
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.GlobalSpeedLimitBytesPerSecond = null;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var own = await ctx.Service.AddJobAsync(new AddJobRequest
         {
-            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/plain.bin",
+            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
             DestinationDirectory = ctx.Destination,
             FileName = "ftp-own-limit.bin",
             Source = "cli",
-            StartMode = "later",
+            SpeedLimitBytesPerSecond = 8_192,
         });
-        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = later.Job!.Id, SpeedLimitBytesPerSecond = 16_384 });
+        Assert.True(own.Accepted, own.Error);
+        await ctx.WaitFor(own.Job!.Id, j => j.State == "downloading" && j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
+        await Task.Delay(500);
+        var before = ctx.Service.GetJob(own.Job.Id)!;
+        Assert.Equal("downloading", before.State);
+        Assert.True(before.ReceivedBytes < 96 * 1024, $"The 8 KB/s limit let {before.ReceivedBytes} bytes through.");
+
+        var lifted = System.Diagnostics.Stopwatch.StartNew();
+        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = own.Job.Id, SpeedLimitBytesPerSecond = 0 });
         Assert.True(update.Ok, update.Error);
-        Assert.Equal(16_384, update.Job!.SpeedLimitBytesPerSecond);
+        Assert.Null(update.Job!.SpeedLimitBytesPerSecond); // zero is stored as unlimited
+        var ownDone = await ctx.WaitFor(own.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("completed", ownDone.State);
+        Assert.True(lifted.Elapsed < TimeSpan.FromSeconds(5), $"The rest took {lifted.Elapsed} after the limit was lifted.");
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
+            await Hashing.Sha256FileAsync(ownDone.FinalFilePath));
     }
 
     [Fact]
