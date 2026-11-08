@@ -306,8 +306,10 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
     }
 
     /// <summary>A folder that can't be used is worth waiting for, such as a drive plugged in later. One path under a good folder isn't.</summary>
-    private static bool FolderCanBeUsed(string folder)
+    private bool FolderCanBeUsed(string folder)
     {
+        // On a server a folder outside the roots is refused, not waited for, and is never created.
+        if (Roots is { } roots && roots.Allowed(folder) is null) return false;
         try
         {
             Directory.CreateDirectory(folder);

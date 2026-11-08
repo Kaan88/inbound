@@ -167,6 +167,7 @@ public sealed class ServerApp : IAsyncDisposable
         // A .torrent file is read from the roots, or from the folder the web UI's uploads go to (and nowhere else).
         var uploads = TorrentUploads.Prepare(paths.Root);
         remoteJobs.Roots = new PathRoots([.. options.Roots, uploads.Directory]);
+        remoteJobs.DestinationRoots = roots;
         remoteJobs.ResolveReference = uploads.Resolve;
         var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info, roots: roots);
         service.DirectAddresses = remoteJobs;
