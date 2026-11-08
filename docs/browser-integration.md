@@ -170,8 +170,12 @@ all-sites host permission, Firefox may ask. The background then calls `POST /api
 name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
 `{address, token, id, name, pairedAt}` under `server` in `chrome.storage.local`. No page gets the token:
 `dm.status` and the other replies carry the address, name and state only. Unpair deletes it and sets
-automatic downloads back to this PC; the token can't revoke itself, so Settings says to remove it from the
-web UI too. Only `options.html` may pair or unpair. A plain-http address that is not loopback gets a one-line
+automatic downloads back to this PC, and asks the server to remove the token too: `DELETE /api/pair/self`
+with the same `Authorization: Bearer <token>` as `/api/ipc` (no body, `credentials: "omit"`,
+`redirect: "error"`, a 4-second limit; the token is forgotten here first, whatever the answer). On 204
+Settings says the server removed the pairing too; on anything else (no answer, an older server without the
+call, a token already removed) it says to remove this browser from the web UI's Paired browsers list.
+Only `options.html` may pair or unpair. A plain-http address that is not loopback gets a one-line
 note that the token and cookies cross the network unencrypted.
 
 **Which target:**
@@ -187,6 +191,10 @@ note that the token and cookies cross the network unencrypted.
   dialog for This PC, and for the server a list of its folders one level at a time (`folders.browse` through
   `dm.browseServerFolders`, which only `handoff.html` and `batch.html` may use; the server limits it to its
   roots). The window starts on the default target. A folder chosen there is for that download only.
+  Both windows fill the folder field (Save in, in Download All) with the chosen target's default folder and
+  show the other target's default on a switch; Download All gets them from `dm.targets`, which only
+  `batch.html` may use and which asks the desktop app for its folders even with no server paired. The folder
+  is sent only when it was changed, so an untouched field still lets the app or the server decide.
 - **The popup** lists the newest 20 of each place, labelled This PC or Server, and sends Pause, Resume, Retry
   and Delete to the place the download is in. Without the desktop app here, its card is hidden and the
   server's card shows the state. One place not answering leaves the other's list.

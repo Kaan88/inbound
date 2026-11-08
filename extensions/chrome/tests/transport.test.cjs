@@ -104,6 +104,28 @@ test('ServerTransport: no answer, a time-out and a non-envelope answer fail in t
   assert.equal(proxy.connected, false);
 });
 
+test('ServerTransport.revokeSelf: false when the server never answers within the time limit, or refuses the token', async () => {
+  let aborted = false;
+  const silent = new ServerTransport(PAIRING, (url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('aborted', 'AbortError')); });
+  }));
+  const started = Date.now();
+  assert.equal(await silent.revokeSelf(30), false);
+  assert.equal(aborted, true, 'the time limit aborts the request');
+  assert.ok(Date.now() - started < 2000, 'it does not wait past the time limit');
+
+  // A server that does not know this token (wrong or already removed) answers 401: not revoked by this call.
+  const seen = [];
+  const refusing = new ServerTransport({ ...PAIRING, token: 'ibt_' + 'z'.repeat(43) }, async (url, init) => {
+    seen.push(init.headers.Authorization);
+    return { status: init.headers.Authorization === `Bearer ${TOKEN}` ? 204 : 401, async text() { return ''; } };
+  });
+  assert.equal(await refusing.revokeSelf(1000), false);
+  assert.deepEqual(seen, ['Bearer ibt_' + 'z'.repeat(43)]);
+  const accepting = new ServerTransport(PAIRING, async () => ({ status: 204, async text() { return ''; } }));
+  assert.equal(await accepting.revokeSelf(1000), true);
+});
+
 test('server addresses: a scheme is added, paths and ports handled, credentials refused', () => {
   assert.deepEqual(normalizeServerAddress('192.168.1.20:8080'),
     { ok: true, origin: 'http://192.168.1.20:8080', pattern: 'http://192.168.1.20/*', cleartext: true });
