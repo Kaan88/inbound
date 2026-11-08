@@ -99,11 +99,54 @@ public static class WebSettingsRules
         return null;
     }
 
-    /// <summary>Puts the Host's own values in place of the browser's copy for <see cref="KeptByHost"/>.</summary>
+    /// <summary>
+    /// What a web session is not shown (<see cref="ForWeb"/>): the programs the Host runs and the update source, the
+    /// proxy's address and user, the site logins, the sound files, and the recent addresses and folders. They are
+    /// pipe-only or kept by the Host anyway, and an address the user used can carry a token.
+    /// </summary>
+    public static IReadOnlyList<string> Hidden { get; } =
+    [
+        nameof(SettingsDto.PostDownloadCommand),
+        nameof(SettingsDto.FfmpegPath),
+        nameof(SettingsDto.UpdateManifestUrl),
+        nameof(SettingsDto.Proxy),
+        nameof(SettingsDto.SiteLogins),
+        nameof(SettingsDto.EventSoundFiles),
+        nameof(SettingsDto.RecentDestinationDirectories),
+        nameof(SettingsDto.RecentUrls),
+    ];
+
+    /// <summary>A copy of <paramref name="settings"/> as a web session sees it, without what is <see cref="Hidden"/>. The proxy keeps its mode.</summary>
+    public static SettingsDto ForWeb(SettingsDto settings)
+    {
+        var copy = JsonSerializer.Deserialize<SettingsDto>(JsonSerializer.SerializeToElement(settings, IpcJson.Options), IpcJson.Options)!;
+        copy.PostDownloadCommand = null;
+        copy.FfmpegPath = null;
+        copy.UpdateManifestUrl = null;
+        copy.Proxy = new ProxyDto { Mode = settings.Proxy?.Mode ?? "none" };
+        copy.SiteLogins = [];
+        copy.EventSoundFiles = new(StringComparer.OrdinalIgnoreCase);
+        copy.RecentDestinationDirectories = [];
+        copy.RecentUrls = [];
+        return copy;
+    }
+
+    /// <summary>
+    /// Puts the Host's own values in place of the browser's copy for <see cref="KeptByHost"/>, and for what is
+    /// <see cref="Hidden"/> when the browser sends back what it was shown: it never had the real value to keep.
+    /// </summary>
     public static void KeepHostOwned(SettingsDto requested, SettingsDto current)
     {
         foreach (var name in KeptByHost)
         {
+            var property = typeof(SettingsDto).GetProperty(name)!;
+            property.SetValue(requested, property.GetValue(current));
+        }
+
+        var shown = ForWeb(current);
+        foreach (var name in Hidden.Except(KeptByHost))
+        {
+            if (!Same(name, requested, shown)) continue;
             var property = typeof(SettingsDto).GetProperty(name)!;
             property.SetValue(requested, property.GetValue(current));
         }

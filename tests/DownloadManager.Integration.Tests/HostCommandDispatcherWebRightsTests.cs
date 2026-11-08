@@ -24,7 +24,8 @@ public sealed partial class HostCommandDispatcherTests
 
     /// <summary>A desktop Host with web sessions, its download folder <see cref="Inside"/>; one web and one pipe session open.</summary>
     private async Task<Web> WebAsync(Func<JsonJobStore, Task>? seed = null, RemoteProviderRegistry? providers = null,
-        RemoteJobCoordinator? remoteJobs = null, ArchiveCoordinator? archives = null, DownloadManagerService? service = null)
+        RemoteJobCoordinator? remoteJobs = null, ArchiveCoordinator? archives = null, DownloadManagerService? service = null,
+        IReadOnlyList<string>? systemFolders = null)
     {
         Directory.CreateDirectory(Inside);
         Directory.CreateDirectory(Outside);
@@ -35,7 +36,7 @@ public sealed partial class HostCommandDispatcherTests
 
         var lookups = new List<string>();
         var profile = new WebSessionProfile(service, PlatformCapabilities.Desktop, archives, providers, remoteJobs,
-            linkTarget: path => { lock (lookups) lookups.Add(path); return null; });
+            linkTarget: path => { lock (lookups) lookups.Add(path); return null; }, systemFolders: systemFolders);
         var platform = new FakePlatform(PlatformCapabilities.Desktop, _timeline);
         var dispatcher = new HostCommandDispatcher(service, platform, new ListLog()) { WebSessions = profile.Rights };
         var web = Session();

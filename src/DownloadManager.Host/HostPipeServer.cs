@@ -251,7 +251,10 @@ public sealed class HostPipeServer
 
         public Stream Stream => pipe;
 
-        /// <summary>Cancelled by <see cref="Close"/>: the Host ends this connection.</summary>
+        /// <summary>
+        /// Cancelled by <see cref="Close"/>: the Host ends this connection at once, the writer too, so a client that has
+        /// stopped reading can't hold it open. What was still queued is not sent.
+        /// </summary>
         public CancellationToken Closing => _closing.Token;
 
         public override void Close()

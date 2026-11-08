@@ -29,6 +29,9 @@ public sealed class CallerScope(PathRoots roots)
     public const string OutsideJobRefused =
         "This download's file is outside the app's folders, so it can't be changed from another device.";
 
+    public const string CompletionActionsKeepAddress =
+        "This download opens its file or runs a program when it is done, so its address can only be changed in the app on this PC.";
+
     /// <summary>Why this address can't be used by such a caller, or null. Text only: the connection checks the rest.</summary>
     public static string? DescribeAddress(string? address)
     {

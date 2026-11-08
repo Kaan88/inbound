@@ -31,6 +31,14 @@ public sealed partial class HostCommandDispatcher
             return true;
         }
 
+        // Handing a container to another program on this PC lets that program fetch whatever it lists, from anywhere.
+        if (rights.Scope is not null && message.Type == MessageTypes.RemoteContainerSendToJd)
+        {
+            await Reply(client, message, MessageTypes.RemoteContainerSendResult,
+                new RemoteContainerSendResult { Status = "failed", Message = SendToOtherProgramUnavailable }).ConfigureAwait(false);
+            return true;
+        }
+
         var replyType = message.Type switch
         {
             MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountSetKey or

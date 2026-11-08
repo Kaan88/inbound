@@ -597,7 +597,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             destinationRoots.Allowed(request.Destination) is null)
         {
             // Checked here, before any provider call or quota is spent, and again for each file when it is added.
-            return new RemoteAddResult { Error = destinationRoots.OutsideText };
+            return new RemoteAddResult { Error = destinationRoots.OutsideTextFor(request.Destination) };
         }
 
         if (request.StartMode is not ("startNow" or "queue" or "later"))
