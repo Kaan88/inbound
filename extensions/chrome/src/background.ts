@@ -9,6 +9,11 @@ import {
   DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
 import { JOB_ACTION_MESSAGES, latestJobs, type JobAction, type JobSummary } from "./job-list";
+import {
+  NativeTransport, ServerTransport, SERVER_STORAGE_KEY, TARGET_LABELS, automaticTarget, availableTargets, extractError,
+  initialTarget, isNativeHostMissing, pairWithServer, pairingName, readPairing, type Envelope, type ServerPairing,
+  type TargetId, type Transport,
+} from "./transport";
 
 interface PendingHandoff {
   id: string;
@@ -34,14 +39,6 @@ interface LeftInBrowser {
   at: number;
 }
 
-interface NativeEnvelope {
-  v: number;
-  type: string;
-  id?: string;
-  replyTo?: string;
-  payload?: unknown;
-}
-
 // Content scripts run alongside pages this extension does not trust, so they get only what they
 // need. Everything else, cookies and settings above all, is for the extension's own pages.
 const CONTENT_SCRIPT_MESSAGES = new Set(["dm.getAutoSend"]);
@@ -51,17 +48,11 @@ let settings: Settings = DEFAULT_SETTINGS;
 let settingsLoaded = false;
 let settingsLoadPromise: Promise<void> | null = null;
 let pauseUntil = 0;
-let nativePort: chrome.runtime.Port | null = null;
-let lastNativeError = "";
 let lastJobs = new Map<string, JobSummary>();
-const pendingRequests = new Map<
-  string,
-  {
-    resolve: (payload: any) => void;
-    reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }
->();
+// This PC: the desktop app through native messaging. Its shared connection also brings the app's job events.
+const native = new NativeTransport(NATIVE_HOST, handleNativeEvent);
+// The user's own Inbound server, once paired from Settings (transport.ts); null otherwise.
+let server: ServerTransport | null = null;
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
 // File-name suggestions still owed to the browser for downloads held while the folder window is open.
@@ -191,6 +182,10 @@ async function loadSettings(): Promise<void> {
   }
   const normalized = await chrome.storage.local.get("pauseUntil");
   pauseUntil = typeof normalized.pauseUntil === "number" ? normalized.pauseUntil : 0;
+  const pairing = readPairing((await chrome.storage.local.get(SERVER_STORAGE_KEY))[SERVER_STORAGE_KEY]);
+  // The same pairing keeps its transport, so its connection state survives a settings reload.
+  if (!pairing) server = null;
+  else if (server?.pairing.token !== pairing.token || server.pairing.address !== pairing.address) server = new ServerTransport(pairing);
   try {
     const notes = (await chrome.storage.session.get(LEFT_IN_BROWSER_KEY))[LEFT_IN_BROWSER_KEY];
     leftInBrowser = Array.isArray(notes) ? notes.slice(0, 5) : [];
@@ -409,9 +404,11 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     downloadRequestIds.set(item.id, requestId);
   }
 
+  const transport = transportFor(automaticTarget(settings.defaultTarget, server !== null));
+  const where = targetWords(transport);
   let hostAccepted = false;
   try {
-    const ack = await requestHandoff({
+    const ack = await requestHandoff(transport, {
       requestId,
       extensionId: chrome.runtime.id,
       url: item.url,
@@ -427,23 +424,24 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
       headers: await browserCookieHeaders(item.url, {}, item.finalUrl),
     });
 
-    if (ack.accepted) {
+    if (ack?.accepted) {
       hostAccepted = true;
       const browserEntryRemoved = await removeAcceptedBrowserDownload(chrome.downloads, item.id);
       downloadRequestIds.delete(item.id);
       notify(
         browserEntryRemoved
-          ? ack.duplicate ? "Already in Inbound" : "Sent to Inbound"
-          : "Sent to Inbound, but still listed in your browser",
+          ? ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`
+          : `Sent to ${where.name}, but still listed in your browser`,
         browserEntryRemoved ? fileName : "The browser's copy could not be removed. Check the browser's download list.",
       );
       return true;
     } else {
       const resumed = await resumeInBrowser(item.id, fileName);
-      notify("Inbound did not accept the download", `${ack.error ?? "The app refused it."} ${resumed
+      const refusal = ack?.error ?? ack?.message ?? `The ${where.thing} refused it.`;
+      notify(`${where.subject} did not accept the download`, `${refusal} ${resumed
         ? "This download stays in your browser."
         : "The browser could not continue it: start it again from the browser's download list."}`);
-      lastNativeError = ack.error ?? "handoff rejected";
+      setLastError(transport, refusal);
     }
   } catch (error) {
     if (hostAccepted) {
@@ -455,8 +453,8 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     const resumed = await resumeInBrowser(item.id, fileName);
     downloadRequestIds.delete(item.id);
     const message = error instanceof Error ? error.message : String(error);
-    lastNativeError = message;
-    notify("Inbound unavailable", `${readableError(message)} ${resumed
+    setLastError(transport, message);
+    notify(where.unavailable, `${errorFor(transport, message)} ${resumed
       ? "This download stays in your browser."
       : "The browser could not continue it: start it again from the browser's download list."}`);
   }
@@ -574,167 +572,64 @@ async function handoffWindowClosed(id: string): Promise<void> {
   if (typeof pending?.browserDownloadId === "number") await keepInBrowser(pending);
 }
 
-async function requestHandoff(payload: Record<string, unknown>): Promise<any> {
+/** The transport for a target; the server only while one is paired. */
+function transportFor(target: TargetId | undefined): Transport {
+  return target === "server" && server ? server : native;
+}
+
+/** How notifications name where a download went. */
+function targetWords(transport: Transport): { name: string; subject: string; unavailable: string; thing: string } {
+  return transport.target === "server"
+    ? { name: "the Inbound server", subject: "The Inbound server", unavailable: "Inbound server unavailable", thing: "server" }
+    : { name: "Inbound", subject: "Inbound", unavailable: "Inbound unavailable", thing: "app" };
+}
+
+function setLastError(transport: Transport, message: string): void {
+  (transport as { lastError: string }).lastError = message;
+}
+
+/** An error ready to show: the desktop app's connection errors in plain words; the server's are plain already. */
+function errorFor(transport: Transport, message: string): string {
+  return transport.target === "server" ? message : readableError(message);
+}
+
+async function requestHandoff(transport: Transport, payload: Record<string, unknown>): Promise<any> {
   if ([payload.url, payload.finalUrl, payload.pageUrl].some(isUnsupportedUrl)) {
     throw new Error(UNSUPPORTED_SITE_MESSAGE);
   }
 
+  if (transport.target === "server") {
+    // One HTTP request; the request id makes a repeat harmless, but nothing here repeats it.
+    return await transport.send("handoff.request", payload, 15000, 0);
+  }
+
   try {
-    return await sendNative("handoff.request", payload, 15000, 1);
+    return await transport.send("handoff.request", payload, 15000, 1);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/native|not found|disconnected|host/i.test(message)) {
-      // One reconnect is already attempted inside sendNative; surface a usable error.
+      // One reconnect is already attempted inside send; surface a usable error.
       throw new Error(connectionProblem(message));
     }
     throw error;
   }
 }
 
-async function sendNative(
-  type: string,
-  payload: unknown,
-  timeoutMs = 12000,
-  retries = 1,
-): Promise<any> {
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await sendNativeOnce(type, payload, timeoutMs);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < retries) {
-        disconnectPort();
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-    }
-  }
-
-  throw lastError ?? new Error("Could not reach the desktop app.");
-}
-
-async function sendNativeOnce(type: string, payload: unknown, timeoutMs: number): Promise<any> {
-  const port = ensurePort();
-  const envelope: NativeEnvelope = {
-    v: 1,
-    type,
-    id: crypto.randomUUID(),
-    payload,
-  };
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingRequests.delete(envelope.id!);
-      reject(new Error("Timed out waiting for the desktop app."));
-    }, timeoutMs);
-
-    pendingRequests.set(envelope.id!, {
-      resolve: (result) => {
-        clearTimeout(timer);
-        resolve(result);
-      },
-      reject: (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-      timer,
-    });
-
-    try {
-      port.postMessage(envelope);
-    } catch (error) {
-      pendingRequests.delete(envelope.id!);
-      clearTimeout(timer);
-      reject(error instanceof Error ? error : new Error(String(error)));
-    }
-  });
-}
-
-function ensurePort(): chrome.runtime.Port {
-  if (nativePort) {
-    return nativePort;
-  }
-
-  const port = chrome.runtime.connectNative(NATIVE_HOST);
-  port.onMessage.addListener((message: NativeEnvelope) => {
-    handleNativeMessage(message);
-  });
-  port.onDisconnect.addListener(() => {
-    const message = chrome.runtime.lastError?.message ?? "Native host disconnected.";
-    lastNativeError = message;
-    nativePort = null;
-    rejectAll(new Error(message));
-  });
-  nativePort = port;
-  lastNativeError = "";
-  return port;
-}
-
-/**
- * One request on a native connection of its own, closed after the answer. The Host answers one
- * command at a time per connection, so anything that may take long (a folder picker left open, a
- * delete of a large file) goes here: on the shared connection it would hold up an automatic handoff
- * past its time limit, the browser would keep its copy, and the app could still take the queued one.
- */
-function requestOnOwnConnection(type: string, payload: unknown, timeoutMs: number, timeoutMessage: string): Promise<NativeEnvelope> {
-  const port = chrome.runtime.connectNative(NATIVE_HOST);
-  const id = crypto.randomUUID();
-  return new Promise((resolve, reject) => {
-    let finished = false;
-    const finish = (result: NativeEnvelope | null, error?: Error): void => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      try { port.disconnect(); } catch { /* already closed */ }
-      if (error || !result) reject(error ?? new Error(timeoutMessage)); else resolve(result);
-    };
-    const timer = setTimeout(() => finish(null, new Error(timeoutMessage)), timeoutMs);
-    port.onMessage.addListener((message: NativeEnvelope) => {
-      if (message.replyTo === id) finish(message);
-    });
-    port.onDisconnect.addListener(() => finish(null,
-      new Error(chrome.runtime.lastError?.message ?? "The connection to the desktop app closed.")));
-    try { port.postMessage({ v: 1, type, id, payload }); }
-    catch (error) { finish(null, error instanceof Error ? error : new Error(String(error))); }
-  });
+function sendNative(type: string, payload: unknown, timeoutMs = 12000, retries = 1): Promise<any> {
+  return native.send(type, payload, timeoutMs, retries);
 }
 
 async function pickNativeFolder(initialPath?: string): Promise<any> {
   // A modal picker can stay open for minutes.
-  const reply = await requestOnOwnConnection("host.pickFolder", { initialPath }, 120000, "Folder selection timed out.");
+  const reply = await native.request("host.pickFolder", { initialPath }, 120000, "Folder selection timed out.");
   if (reply.type !== "host.folderPicked") {
     throw new Error("This version of the desktop app cannot show a folder picker. Update the app.");
   }
   return reply.payload;
 }
 
-function disconnectPort(): void {
-  if (!nativePort) {
-    return;
-  }
-
-  try {
-    nativePort.disconnect();
-  } catch {
-    // ignore
-  }
-  nativePort = null;
-}
-
-function handleNativeMessage(message: NativeEnvelope): void {
-  if (message.replyTo) {
-    const pending = pendingRequests.get(message.replyTo);
-    if (pending) {
-      pendingRequests.delete(message.replyTo);
-      if (message.type === "handoff.error" || message.type === "server.incompatible") {
-        pending.reject(new Error(extractError(message.payload)));
-      } else {
-        pending.resolve(message.payload);
-      }
-      return;
-    }
-  }
-
+/** Messages on the desktop app's shared connection that answer no request. */
+function handleNativeEvent(message: Envelope): void {
   if (message.type === "job.event") {
     const event = message.payload as { job?: JobSummary; eventType?: string };
     if (event.job?.id) {
@@ -747,26 +642,6 @@ function handleNativeMessage(message: NativeEnvelope): void {
       }
     }
   }
-}
-
-function rejectAll(error: Error): void {
-  for (const pending of pendingRequests.values()) {
-    pending.reject(error);
-  }
-  pendingRequests.clear();
-}
-
-function extractError(payload: unknown): string {
-  if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
-    if (typeof record.error === "string") {
-      return record.error;
-    }
-    if (typeof record.message === "string") {
-      return record.message;
-    }
-  }
-  return "The native host reported an error.";
 }
 
 async function cookieHeaders(url: string): Promise<Record<string, string>> {
@@ -898,6 +773,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
 
       const pageUrl = typeof message.pageUrl === "string" ? message.pageUrl : undefined;
       const startMode = message.startMode === "later" ? "later" : "now";
+      const transport = transportFor(chosenTarget(message.target));
       const destination = typeof message.destination === "string" && message.destination.trim()
         ? message.destination.trim()
         : undefined;
@@ -915,7 +791,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       }
       for (const item of urls) {
         try {
-          const ack = await requestHandoff({
+          const ack = await requestHandoff(transport, {
             requestId: crypto.randomUUID(),
             extensionId: chrome.runtime.id,
             url: item.url,
@@ -936,7 +812,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             url: item.url,
             accepted: !!ack?.accepted,
             duplicate: !!ack?.duplicate,
-            error: ack?.error,
+            error: ack?.error ?? (ack?.accepted ? undefined : ack?.message),
             job: ack?.job,
           });
         } catch (error) {
@@ -959,10 +835,12 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
 
     case "dm.status":
       // The native port opens lazily; probe once so the popup does not report
-      // a working host as disconnected just because nothing used it yet.
-      if (nativePort === null) {
-        await sendNative("host.ping", {}, 3000, 0).catch(() => undefined);
-      }
+      // a working host as disconnected just because nothing used it yet. A paired server is asked
+      // each time, at the same time: it has no connection to keep open.
+      await Promise.all([
+        native.connected ? undefined : sendNative("host.ping", {}, 3000, 0).catch(() => undefined),
+        server?.send("host.ping", {}, 3000).catch(() => undefined),
+      ]);
       updateBadge();
       return {
         ok: true,
@@ -970,8 +848,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         enabled: settings.enabled,
         autoIntercept: settings.autoIntercept,
         automaticSending: automaticSendingActive(),
-        connected: nativePort !== null,
-        lastError: lastNativeError,
+        connected: native.connected,
+        lastError: native.lastError,
+        localMissing: localMissing(),
+        server: serverStatus(),
+        automaticTarget: automaticTarget(settings.defaultTarget, server !== null),
         pauseUntil,
         settings,
         siteAccess: await hasSiteAccess(),
@@ -998,6 +879,55 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return { ok: true, result };
     }
 
+    case "dm.browseServerFolders": {
+      const sourcePage = (sender?.url ?? "").split(/[?#]/)[0];
+      if (sender?.id !== chrome.runtime.id ||
+          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html")].includes(sourcePage ?? "")) {
+        return { ok: false, error: "Folder browsing is available from the download destination screen." };
+      }
+      if (!server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
+      // The server's allowed roots decide what can be listed (folders.browse); an empty path lists them.
+      const result = await server.send("folders.browse", { path: typeof message.path === "string" ? message.path : "" }, 8000);
+      return result && typeof result === "object" ? result : { ok: false, error: "The server did not list that folder." };
+    }
+
+    case "dm.pingServer": {
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can do that." };
+      if (!server) return { ok: false, error: "No server is paired." };
+      const result = await server.send("host.ping", {}, 5000);
+      return { ok: result?.ok !== false, server: serverStatus(), error: result?.ok === false ? extractError(result) : undefined };
+    }
+
+    case "dm.pairServer": {
+      // Only from Settings, which asked the browser for access to the server's address first, on the click.
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can pair a server." };
+      const pairing = await pairWithServer(String(message.address ?? ""), String(message.code ?? ""), pairingName(navigator.userAgent));
+      await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: pairing });
+      server = new ServerTransport(pairing);
+      server.connected = true;
+      return { ok: true, server: serverStatus() };
+    }
+
+    case "dm.unpairServer": {
+      if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can do that." };
+      // The token can't revoke itself: the server's web UI lists it under Paired browsers until removed there.
+      await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: null });
+      server = null;
+      if (settings.defaultTarget === "server") {
+        settings = { ...settings, defaultTarget: "local" };
+        await chrome.storage.local.set({ settings });
+      }
+      return { ok: true, settings, server: null };
+    }
+
+    case "dm.targets": {
+      // The batch window's choice of target. Without a server there is nothing to choose and nothing to ask.
+      if (!server) {
+        return { ok: true, targets: [{ id: "local", label: TARGET_LABELS.local, chooser: "dialog", defaultFolder: "", favorites: [] }], target: "local" };
+      }
+      return { ok: true, ...await handoffTargets() };
+    }
+
     case "dm.getHandoff": {
       const id = String(message.id ?? "");
       const pending = await pendingHandoff(id);
@@ -1005,17 +935,21 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         return { ok: false, error: "This download request has expired. Start again from the right-click menu." };
       }
       // The window starts at the app's default folder every time; a folder chosen for one download
-      // is never carried to the next (UI.R3). Favorites are offered beside it.
-      const folders = await downloadFolders();
+      // is never carried to the next (UI.R3). Favorites are offered beside it. With a paired server,
+      // each target brings its own default folder and favorites.
+      const choice = await handoffTargets();
+      const first = choice.targets.find((target) => target.id === choice.target) ?? choice.targets[0]!;
       return {
         ok: true,
         handoff: pending,
         held: typeof pending.browserDownloadId === "number",
         defaults: {
-          destination: folders.defaultFolder,
-          favorites: folders.favorites,
+          destination: first.defaultFolder,
+          favorites: first.favorites,
           startMode: settings.startMode,
         },
+        targets: choice.targets,
+        target: choice.target,
       };
     }
 
@@ -1034,9 +968,10 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         return { ok: false, error: "This download is being sent already." };
       }
       confirmingHandoffs.add(id);
+      const transport = transportFor(chosenTarget(message.target));
       let ack: any;
       try {
-        ack = await requestHandoff({
+        ack = await requestHandoff(transport, {
         requestId: crypto.randomUUID(),
         extensionId: chrome.runtime.id,
         url: pending.url,
@@ -1081,7 +1016,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         await chrome.storage.local.set({ settings });
       }
 
-      return { ok: true, ack };
+      return { ok: true, ack, target: transport.target };
     }
 
     case "dm.keepInBrowser": {
@@ -1110,14 +1045,39 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.jobs": {
-      try {
-        const snapshot = await sendNative("jobs.query", {}, 6000);
-        const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
-        lastJobs = new Map(jobs.map((job) => [job.id, job]));
-        return { ok: true, jobs };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
-      }
+      const local = (async (): Promise<JobsAnswer> => {
+        try {
+          const snapshot = await sendNative("jobs.query", {}, 6000);
+          const jobs = latestJobs((snapshot?.jobs ?? []) as JobSummary[]);
+          lastJobs = new Map(jobs.map((job) => [job.id, job]));
+          return { ok: true, jobs };
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: latestJobs([...lastJobs.values()]) };
+        }
+      })();
+      if (!server) return await local;
+
+      // EXT.R1: with a paired server the popup lists both, each download labelled with where it is.
+      const paired = server;
+      const remote = (async (): Promise<JobsAnswer> => {
+        try {
+          const snapshot = await paired.send("jobs.query", {}, 6000);
+          return { ok: true, jobs: latestJobs((snapshot?.jobs ?? []) as JobSummary[]) };
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error), jobs: [] };
+        }
+      })();
+      const [mine, theirs] = await Promise.all([local, remote]);
+      const groups: Array<JobsAnswer & { target: TargetId }> = [
+        ...(localMissing() ? [] : [{ target: "local" as TargetId, ...mine }]),
+        { target: "server" as TargetId, ...theirs },
+      ];
+      return {
+        ok: groups.some((group) => group.ok),
+        error: groups.find((group) => !group.ok)?.error,
+        jobs: groups.flatMap((group) => group.jobs.map((job) => ({ ...job, target: group.target }))),
+        groups: groups.map((group) => ({ target: group.target, label: TARGET_LABELS[group.target], ok: group.ok, error: group.error })),
+      };
     }
 
     case "dm.jobAction": {
@@ -1127,14 +1087,15 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (!type || !/^[0-9a-f-]{32,36}$/i.test(jobId)) {
         return { ok: false, error: "Unknown download action." };
       }
+      const transport = transportFor(chosenTarget(message.target));
       // A failed connection throws, and the message listener turns it into a readable error.
-      const reply = await requestOnOwnConnection(type, {
+      const reply = await transport.request(type, {
         jobId,
         // Deleting the file is asked for only with Delete, and only when the box was ticked.
         deleteFile: action === "remove" && message.deleteFile === true,
-      }, 10000, "Timed out waiting for the desktop app.");
+      }, 10000, transport.target === "server" ? "Timed out waiting for the Inbound server." : "Timed out waiting for the desktop app.");
       if (reply.type === "handoff.error" || reply.type === "server.incompatible") {
-        return { ok: false, error: readableError(extractError(reply.payload)) };
+        return { ok: false, error: errorFor(transport, extractError(reply.payload)) };
       }
       const result = reply.payload as any;
       return result?.ok === true
@@ -1152,10 +1113,10 @@ interface DownloadFolders {
   favorites: Array<{ name: string; path: string }>;
 }
 
-/** The app's default folder and favorite folders, or nothing when the app is too old or unreachable. */
-async function downloadFolders(): Promise<DownloadFolders> {
+/** The app's default folder and favorite folders, or nothing (and why) when the app is too old or unreachable. */
+async function downloadFolders(transport: Transport = native): Promise<DownloadFolders & { error?: string }> {
   try {
-    const result = await sendNative("settings.downloadFolders", {}, 4000, 0);
+    const result = await transport.send("settings.downloadFolders", {}, 4000, 0);
     if (result?.ok !== true) return { defaultFolder: "", favorites: [] };
     return {
       defaultFolder: typeof result.defaultFolder === "string" ? result.defaultFolder : "",
@@ -1164,9 +1125,64 @@ async function downloadFolders(): Promise<DownloadFolders> {
         .slice(0, 50)
         .map((item: any) => ({ name: typeof item.name === "string" && item.name.trim() ? item.name : item.path, path: item.path })),
     };
-  } catch {
-    return { defaultFolder: "", favorites: [] };
+  } catch (error) {
+    return { defaultFolder: "", favorites: [], error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+interface JobsAnswer {
+  ok: boolean;
+  error?: string;
+  jobs: JobSummary[];
+}
+
+interface HandoffTarget extends DownloadFolders {
+  id: TargetId;
+  label: string;
+  /** Where "Choose…" goes: the desktop app's folder dialog, or the server's folder list (folders.browse). */
+  chooser: "dialog" | "list";
+  /** The server's address, for the label. */
+  address?: string;
+  error?: string;
+}
+
+/**
+ * The targets the folder window (and the batch window) offer, each with its default folder and favorites,
+ * and the one to start on. Without a paired server this is exactly one request to the desktop app, as
+ * before pairing existed.
+ */
+async function handoffTargets(): Promise<{ targets: HandoffTarget[]; target: TargetId }> {
+  const paired = server;
+  const [local, remote] = await Promise.all([
+    downloadFolders(native),
+    paired ? downloadFolders(paired) : Promise.resolve(undefined),
+  ]);
+  const offered = availableTargets({ serverPaired: paired !== null, localMissing: isNativeHostMissing(local.error) });
+  const targets: HandoffTarget[] = offered.map((id): HandoffTarget => id === "server"
+    ? { id, label: TARGET_LABELS.server, chooser: "list", address: paired!.address, ...remote! }
+    : { id, label: TARGET_LABELS.local, chooser: "dialog", ...local });
+  return { targets, target: initialTarget(settings.defaultTarget, offered) };
+}
+
+/** A target a page asked for: the server only while one is paired, otherwise this PC. */
+function chosenTarget(value: unknown): TargetId {
+  return value === "server" && server ? "server" : "local";
+}
+
+/** Whether the desktop app is missing here while a server is paired, so the server is the only target. */
+function localMissing(): boolean {
+  return server !== null && isNativeHostMissing(native.lastError);
+}
+
+/** The paired server as Settings and the popup show it; never the token. */
+function serverStatus(): { address: string; name?: string; pairedAt?: number; connected: boolean; lastError: string } | null {
+  if (!server) return null;
+  const { address, name, pairedAt } = server.pairing as ServerPairing;
+  return { address, name, pairedAt, connected: server.connected, lastError: server.lastError };
+}
+
+function fromPage(sender: chrome.runtime.MessageSender | undefined, page: string): boolean {
+  return sender?.id === chrome.runtime.id && (sender.url ?? "").split(/[?#]/)[0] === chrome.runtime.getURL(page);
 }
 
 /**

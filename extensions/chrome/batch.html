@@ -34,6 +34,11 @@
     </section>
 
     <section class="card form-card batch-options">
+      <!-- EXT.R1: shown only when a server is paired and this PC can be used too. -->
+      <fieldset id="targetField" class="field target-field hidden">
+        <legend>Save to</legend>
+        <div id="targetChoice" class="target-choice"></div>
+      </fieldset>
       <label class="field">
         <span>Destination folder (optional)</span>
         <div class="destination-picker">
@@ -41,6 +46,7 @@
           <button id="browseDestination" type="button">Browse…</button>
         </div>
       </label>
+      <div id="serverFolders" class="hidden"></div>
       <label class="field">
         <span>Start</span>
         <select id="startMode">
@@ -50,7 +56,7 @@
       </label>
     </section>
 
-    <p class="muted small">Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you send two or more, the page's title names the group in the app. YouTube links are not listed.</p>
+    <p class="muted small">Sending a download gives the desktop app (or your server, when you send it there) its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you send two or more, the page's title names the group in the app. YouTube links are not listed.</p>
 
     <div class="actions">
       <button id="confirm" class="primary" type="button" disabled>Download selected</button>

@@ -25,8 +25,11 @@
         <span>File name</span>
         <input id="fileName" type="text" spellcheck="false" />
       </label>
-      <!-- EXT.R1, later (PLAN.md stream C, transport): the "Save to: this PC / the server" choice goes here,
-           above the folder, once the server transport exists. Until then everything goes to this PC. -->
+      <!-- EXT.R1: shown only when a server is paired and this PC can be used too. -->
+      <fieldset id="targetField" class="field target-field hidden">
+        <legend>Save to</legend>
+        <div id="targetChoice" class="target-choice"></div>
+      </fieldset>
       <label class="field">
         <span>Save in</span>
         <div class="destination-picker">
@@ -34,6 +37,7 @@
           <button id="browseDestination" type="button">Choose…</button>
         </div>
       </label>
+      <div id="serverFolders" class="hidden"></div>
       <label id="favoritesField" class="field hidden">
         <span>Favorite folders</span>
         <select id="favorites">
@@ -50,7 +54,8 @@
       <p id="hint" class="muted small">
         The folder applies to this download only; the next one starts at the default folder again. Your
         Start choice becomes the default for later downloads.
-        Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses.
+        <span id="localHint">Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses.</span>
+        <span id="serverHint" class="hidden">Sending a download to your server gives it the same details: the address, the page it came from, your browser's user agent and your cookies for that site. The server keeps them with the download, the cookies encrypted, until you remove it there, and sends the cookies only to that site.</span>
       </p>
     </section>
 
