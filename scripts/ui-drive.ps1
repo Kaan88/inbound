@@ -236,6 +236,9 @@ foreach ($step in $Do) {
             if (-not (@(AllHandles) -contains $atPoint)) { Write-Output "$($verb.ToUpper()) $arg skipped: another window is at that point"; continue }
             [UiDriveNative]::SetCursorPos($x, $y) | Out-Null
             Start-Sleep -Milliseconds 100
+            # Check again right before the click: a window can appear at the point during the pause.
+            $atPoint = [UiDriveNative]::Root([UiDriveNative]::WindowFromPoint($x, $y))
+            if (-not (@(AllHandles) -contains $atPoint)) { Write-Output "$($verb.ToUpper()) $arg skipped: another window is at that point"; continue }
             $down, $up = if ($verb -eq 'right') { 0x0008, 0x0010 } else { 0x0002, 0x0004 }
             [UiDriveNative]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
             [UiDriveNative]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero)
