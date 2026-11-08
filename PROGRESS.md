@@ -1,6 +1,6 @@
 # Progress — session handoff
 
-### 0.6.0 ready for review, not released (2026-11-08, branch `dev`)
+### 0.6.0 released (2026-11-08, squashed to `main`, tag `v0.6.0`)
 
 - All work branches are merged into `dev`: streams A to C, the campaign, perf, webui, Edge, and the six owner-answer branches. Their worktrees and branches are removed. The evidence they held is in `artifacts\evidence\<branch>\` in the main checkout: logs, trx files and summaries, with no payloads or browser profiles. It was scanned for credentials and none were found.
 - Fixes found while merging:
@@ -36,11 +36,12 @@
   | Integration | 1,118 (7 not run) |
 
   The VM's test image and folders are removed again. The owner's containers were not touched.
-- **Release assets:** built and checked, not uploaded. They are in `artifacts\release\v0.6.0\`:
-  - `DownloadManagerSetup-0.6.0.exe` (73.9 MB).
-  - `download-manager-0.6.0.zip` (self-contained).
+- **Release assets**, rebuilt from `056b424` after every fix below and uploaded to the GitHub release. They are in `artifacts\release\v0.6.0\`:
+  - `DownloadManagerSetup-0.6.0.exe`: 55,954,754 bytes, SHA-256 `20df0c69daaf2a3ad971b1d54d61fd6da303e8a4382bb053bbe1d5b8179b1adb`.
+  - `download-manager-0.6.0.zip` (self-contained): 79,240,453 bytes, SHA-256 `889c45a2b1ae8b71c0e562ced5fb19daee39b8f0614aaee505503d2b50a41e60`. Its binaries carry `0.6.0+056b424`.
   - `manifest.json`, signed with `secrets\update-signing.pem`. openssl verifies it with `public.pem`, which matches the key in `ReleaseUpdates.cs`.
-  - `SHA256SUMS`: all four hashes match.
+  - `SHA256SUMS`: all four hashes match (`sha256sum -c`; the file now has LF line ends).
+  - A token scan of the tree and the packages found none of the credentials file's values.
 - **Extension 0.5.0:**
   - `artifacts\chrome-store\inbound-bridge-0.5.0-chrome.zip`.
   - `artifacts\firefox-addon\inbound-bridge-0.5.0-firefox.zip` (unsigned, for AMO).
@@ -54,13 +55,19 @@
     - (2) The roots escape through provider adds, the one security finding, is fixed with two tests that fail without the fix.
     - (4) was real. My first check was wrong: its test zips held no backslash. Zips made on Windows now extract into their folders on Linux (ROADMAP REV.2): Archives 351/351 on Windows, and on the Linux VM 289 passed, 52 skipped, none failed, with every new test passing.
     - (5)–(10) are fixed; ROADMAP REV.2 has each one.
-  - Install folder trimmed (ROADMAP REV.3, owner's question): 281 MB to 201 MB, Setup 77.5 MB to 56.0 MB, by taking only the Windows App SDK parts the app uses and leaving out other languages and .NET's debugger files. Checked on a test instance; the clean install on the VM is next.
+  - Install folder trimmed (ROADMAP REV.3, owner's question): 281 MB to 201 MB, Setup 77.5 MB to 56.0 MB, by taking only the Windows App SDK parts the app uses and leaving out other languages and .NET's debugger files. Checked on a test instance and on the clean VM.
   - Not checked in a real browser: Firefox's `cookieStoreId`, `storage.local.setAccessLevel` and `permissions.contains`, which the extension tests stand in for.
   - Not seen on screen: the Options Theme box and the refused install dialog.
   - EXT.R5 (Chrome and Edge with site access withdrawn by the user): fixed before release; such a download now stays in the browser with a note.
-- **The release assets above were built before these fixes and have to be rebuilt.**
+- **After the review fixes** (`2adb35b`; later commits touch only the installer, docs and the window's trace file), every Windows suite passed: Core 895, Engine 162, TorBox 323, Archives 351, Containers 187, Server 86, Integration 1,268, and the extension's 151.
+- **Clean VM with the final build** (ROADMAP TEST.2, evidence in `artifacts\evidence\dev-final\vm-0.6.0-056b424\`):
+  - Setup took 0.5.3 to 0.6.0 and kept both jobs. Uninstall left no program folder and kept the state; a fresh install started with the kept jobs.
+  - The update helper took 0.5.3 to 0.6.0 (exit 0, result `succeeded`), and Settings > Apps showed 0.6.0 (UP.B2).
+  - The window started each time from a 199.3 MB folder (REV.3).
+  - Found and fixed on the way: the window's start-up trace was left in the install folder after uninstall. It now goes to the logs folder.
+- Owner, 2026-11-08: two ideas for later, recorded as ROADMAP D6 and D7.
 - **Not done:**
-  - The clean-install and upgrade run with the Setup rebuilt after the review fixes. The run with the earlier 0.6.0 Setup passed (TEST.2, evidence in `artifacts\campaign\20261108-final\vm-0.5.3-to-0.6.0\`): 0.5.3 to 0.6.0 kept both jobs, wrote the Chrome, Edge and Firefox keys, and turned PERF.5 on once. Uninstall kept the state and stopped only the installed Host.
+  - The owner's parts: the Chrome Web Store and AMO uploads of extension 0.5.0.
   - PERF.2 rerun on `dev` (`soak-fixed`): stopped after an hour (10:50 to 11:53 UTC) by the owner's choice. Both processes ran throughout; the Host rose 147.5 to 190.1 MB (+24 MB/h, like the 8-hour run), the window 302.5 to 331.9 MB. Summary in `artifacts\soak\soak-fixed\summary.txt`; payload deleted.
   - EXT.B3 (Firefox), which needs this build installed.
 
