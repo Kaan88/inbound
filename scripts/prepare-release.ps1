@@ -119,7 +119,8 @@ $checksumLines = foreach ($file in $checksumFiles) {
     $hash = (Get-FileHash -LiteralPath (Join-Path $stagingDir $file) -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash *$file"
 }
-[IO.File]::WriteAllLines((Join-Path $stagingDir "SHA256SUMS"), $checksumLines, [Text.UTF8Encoding]::new($false))
+# LF line ends, so `sha256sum -c` on Linux reads it as well as Windows tools do.
+[IO.File]::WriteAllText((Join-Path $stagingDir "SHA256SUMS"), (($checksumLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
 
 [IO.Directory]::Move($stagingDir, $outputDir)
 Write-Host "Prepared local release assets at $outputDir"
