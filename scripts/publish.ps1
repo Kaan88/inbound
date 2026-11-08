@@ -95,7 +95,9 @@ Publish-Project (Join-Path $root "src\DownloadManager.Cli\DownloadManager.Cli.cs
 # keeps its own runtimeconfig/deps (the Server's InvariantGlobalization applies to the Server alone).
 Push-Location (Join-Path $root "webui")
 try {
-    if (-not (Test-Path "node_modules")) {
+    # Install when node_modules is missing or older than the lock file (npm ci records its install in .package-lock.json).
+    $installStamp = "node_modules\.package-lock.json"
+    if (-not (Test-Path $installStamp) -or (Get-Item "package-lock.json").LastWriteTimeUtc -gt (Get-Item $installStamp).LastWriteTimeUtc) {
         npm ci
         if ($LASTEXITCODE -ne 0) { throw "Web UI dependency installation failed (npm ci)." }
     }
@@ -109,6 +111,12 @@ foreach ($page in @("index.html", "signin\index.html")) {
     if (-not (Test-Path -LiteralPath (Join-Path $root "webui\dist\$page") -PathType Leaf)) {
         throw "Web UI build did not produce webui\dist\$page"
     }
+}
+# The bridge cannot be self-contained inside a framework-dependent folder: its runtime files (hostfxr.dll, coreclr.dll)
+# would make the other apps look for their framework next to themselves and refuse to start. A plain build therefore
+# needs the ASP.NET Core 10 runtime on the PC for the web UI; release builds pass -SelfContained and need nothing.
+if (-not $SelfContained) {
+    Write-Warning "Plain build: the web UI bridge needs the ASP.NET Core 10 runtime installed. Use -SelfContained for a build that runs anywhere."
 }
 # Workstation GC and no IIS web.config: the bridge runs beside the desktop app, not in a data centre or under IIS.
 Publish-Project (Join-Path $root "src\DownloadManager.Server\DownloadManager.Server.csproj") @("-p:ServerGarbageCollection=false", "-p:IsTransformWebConfigDisabled=true")
