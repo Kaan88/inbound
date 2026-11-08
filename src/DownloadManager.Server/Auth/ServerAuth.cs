@@ -54,10 +54,10 @@ public sealed class ServerAuth
         _log = log;
         _time = options.Time;
         _options = options;
-        // Kept in the data folder beside auth.json, so a restart doesn't sign anyone out (owner, 2026-11-08).
+        // Kept in the data folder beside auth.json, so a restart doesn't sign anyone out (owner, 2026-11-08). With
+        // sign-in off there is nothing to keep, and the file goes (CreateAsync), so turning it on again restores nobody.
         Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout,
-            System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.Path)!, SessionStore.FileName),
-            () => SessionStore.StampOf(store.Password), log.Warn);
+            required ? SessionsPath(store) : null, () => SessionStore.StampOf(store.Password), log.Warn);
         Limiter = new SignInLimiter(_time);
         Pairing = new Pairing(store, _time);
     }
@@ -103,6 +103,20 @@ public sealed class ServerAuth
             }
         }
 
+        if (!options.SignInRequired && File.Exists(SessionsPath(store)))
+        {
+            try
+            {
+                File.Delete(SessionsPath(store));
+                log.Info("Sign-in is off, so the saved sessions were removed; every browser signs in again when it is turned on.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new ServerStartException(
+                    $"Sign-in is off, and the saved sessions {SessionsPath(store)} can't be removed ({ex.GetType().Name}); they would come back when it is turned on. Delete the file.");
+            }
+        }
+
         var auth = new ServerAuth(options.SignInRequired, store, fromEnvironment, options, log);
         if (!options.SignInRequired)
         {
@@ -120,6 +134,9 @@ public sealed class ServerAuth
 
         return auth;
     }
+
+    private static string SessionsPath(AuthStore store) =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.Path)!, SessionStore.FileName);
 
     private static string NewSetupCode()
     {
@@ -285,6 +302,7 @@ public sealed class ServerAuth
         var ifWrong = TimeSpan.Zero;
         if ((needsCode ? Limiter.Begin(address, out ifWrong) : Limiter.Wait(address)) is { } wait) return TooSoon(context, wait);
 
+        PasswordRecord record;
         await _passwordGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
         try
         {
@@ -304,7 +322,7 @@ public sealed class ServerAuth
             }
 
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
-            var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false);
+            record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "setup", context.RequestAborted).ConfigureAwait(false);
             if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
             _setupCode = null;
             _log.Info($"The sign-in password was set on the setup page from {address}.");
@@ -314,7 +332,8 @@ public sealed class ServerAuth
             _passwordGate.Release();
         }
 
-        StartSession(context);
+        if (!StartSession(context, record))
+            return Error(StatusCodes.Status409Conflict, "The password was changed just now. Sign in with the new one.");
         return Results.Json(new { ok = true });
     }
 
@@ -328,14 +347,17 @@ public sealed class ServerAuth
         // Counted as wrong before the slow check, so the tries waiting for it can't skip the wait.
         if (Limiter.Begin(address, out var ifWrong) is { } wait) return TooSoon(context, wait);
 
-        if (!await PasswordHash.VerifyAsync(form.Password, Store.Password, context.RequestAborted).ConfigureAwait(false))
+        // The record checked is the one the session is made under: a password changed during the slow check makes it
+        // wrong after all (StartSession), instead of giving a session the change has already ended the others for.
+        var checkedAgainst = Store.Password;
+        if (!await PasswordHash.VerifyAsync(form.Password, checkedAgainst, context.RequestAborted).ConfigureAwait(false) ||
+            !StartSession(context, checkedAgainst!))
         {
             _log.Warn($"A sign-in with a wrong password from {address} ({Limiter.Failures(address)} in a row).");
             return Error(StatusCodes.Status401Unauthorized, "That password is wrong.", ifWrong);
         }
 
         Limiter.Succeeded(address);
-        StartSession(context);
         return Results.Json(new { ok = true });
     }
 
@@ -358,16 +380,17 @@ public sealed class ServerAuth
             Limiter.Succeeded(address);
             if (PasswordHash.Problem(form.Password) is { } problem) return Error(StatusCodes.Status400BadRequest, problem);
             var record = await PasswordHash.CreateAsync(form.Password!, _time.GetUtcNow(), "changed", context.RequestAborted).ConfigureAwait(false);
-            if (!TrySave(() => Store.SetPassword(record))) return NotSaved();
+            // Every other browser signs in again with the new password; this one stays. The two happen as one step for
+            // the sessions file and for sign-ins under way (SessionStore.ChangePassword).
+            if (!Sessions.ChangePassword(() => TrySave(() => Store.SetPassword(record)), SessionOf(context))) return NotSaved();
         }
         finally
         {
             _passwordGate.Release();
         }
 
-        // Every other browser signs in again with the new password; this one stays. Someone who knew the old one may
-        // have paired an extension too, so those go as well unless the change says to keep them.
-        Sessions.RemoveAllExcept(SessionOf(context));
+        // Someone who knew the old password may have paired an extension too, so those go as well unless the change
+        // says to keep them.
         var unpaired = 0;
         if (!form.KeepPairedBrowsers && !TrySave(() => unpaired = Pairing.RevokeAll()))
         {
@@ -433,9 +456,11 @@ public sealed class ServerAuth
     private static IResult NotSaved() =>
         Error(StatusCodes.Status500InternalServerError, "The password could not be saved, so nothing was changed. Check the data folder's space and permissions.");
 
-    private void StartSession(HttpContext context)
+    /// <summary>Signs this browser in under <paramref name="password"/>; false when that is no longer the password in force.</summary>
+    private bool StartSession(HttpContext context, PasswordRecord password)
     {
-        var (id, session) = Sessions.Create();
+        if (Sessions.TryCreate(() => ReferenceEquals(Store.Password, password)) is not { } created) return false;
+        var (id, session) = created;
         context.Response.Cookies.Append(CookieName, id, new CookieOptions
         {
             HttpOnly = true,
@@ -445,6 +470,7 @@ public sealed class ServerAuth
             Expires = Sessions.AbsoluteEnd(session),
             IsEssential = true,
         });
+        return true;
     }
 
     private static void ExpireCookie(HttpContext context) =>

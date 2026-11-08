@@ -325,6 +325,9 @@ public sealed class ServerApp : IAsyncDisposable
                 session.SocketOpened();
             }
 
+            // An open socket is the session's activity even when the page sends nothing (it only listens to progress), so
+            // its last-seen time is refreshed on the sessions file's own beat; a kill then loses at most that much.
+            var seen = session is null ? Task.CompletedTask : KeepSeenAsync(auth.Sessions, session, options.Time, lifetime.Token);
             try
             {
                 await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token,
@@ -332,6 +335,8 @@ public sealed class ServerApp : IAsyncDisposable
             }
             finally
             {
+                lifetime.Cancel();
+                await seen.ConfigureAwait(false);
                 if (session is not null)
                 {
                     session.SocketClosed();
@@ -392,6 +397,20 @@ public sealed class ServerApp : IAsyncDisposable
         }
 
         return web;
+    }
+
+    /// <summary>Touches the session every <see cref="SessionStore.SaveEvery"/> while its socket is open (one wake-up per beat).</summary>
+    private static async Task KeepSeenAsync(SessionStore sessions, Session session, TimeProvider time, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(sessions.SaveEvery, time);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) sessions.Touch(session);
+        }
+        catch (OperationCanceledException)
+        {
+            // The socket closed.
+        }
     }
 
     private static async Task WriteEnvelopeAsync(HttpContext context, IpcMessage message, CancellationToken cancellationToken)

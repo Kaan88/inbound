@@ -80,11 +80,19 @@ wrong tries is 429 with `Retry-After`.
 - **Session:** a 256-bit random id in the `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`,
   `Secure` over HTTPS); the server keeps only its SHA-256. Sessions survive a restart: `<data>/sessions.json` (mode
   600 off Windows, written to a temporary file, flushed and moved over the old one) holds each session's hash, start
-  and last use, never the id. A sign-in, sign-out, password change or expiry is written at once; last-use times at
-  most every 10 minutes per session and on a clean stop, so a busy browser doesn't keep writing the disk (after a
-  kill, a session may end up to 10 minutes early). The file notes a stamp of the password (a SHA-256 of its salt and
-  hash): if the password changed while the server was down, every saved session is dropped. A damaged file is
-  deleted, and a write that fails deletes it too, so an ended session never comes back. A session ends after 24
+  and last use, never the id. A sign-in, sign-out or password change is written at once; an expired session is
+  refused at once and leaves the file at its next write or the next start. Last-use times are written at most every
+  10 minutes per session and on a clean stop, so a busy browser doesn't keep writing the disk; an open WebSocket
+  counts as use on the same 10-minute beat even when the page sends nothing, so after a kill a session may end up to
+  10 minutes early. A password change saves the new password and signs the other browsers out as one step for the
+  file, and a sign-in whose check began under the old password is refused. The file notes a stamp of the password (a
+  SHA-256 of its salt and hash): if the password changed while the server was down, every saved session is dropped.
+  A damaged file is deleted. A write that fails deletes the file, or empties it when it can't be deleted, so the
+  next start restores nobody; only a data folder that refuses all three keeps the old file, and the log then says to
+  delete it by hand. Off Windows the folder is flushed after each replace, so a power loss can't bring back the file
+  from before a sign-out (best effort, not run on Linux in this project's tests). With sign-in off
+  (`DOWNLOADMANAGER_AUTH=off`) sessions aren't kept and the file is removed at start, so turning sign-in on again
+  restores nobody. A session ends after 24
   hours without use (an open WebSocket counts as use) and 7 days after sign-in at most, across restarts, and its
   WebSockets close then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY`
   lists (addresses or networks; `1` is refused at start).

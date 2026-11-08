@@ -165,7 +165,7 @@ public sealed class AuthStore
                     {
                         Save();
                     }
-                    catch (IOException)
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
                         // The last-used time is only shown; a failed save must not refuse the request.
                     }
