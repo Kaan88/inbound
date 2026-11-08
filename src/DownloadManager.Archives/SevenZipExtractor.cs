@@ -262,7 +262,11 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
         if (headersEncrypted && !hasPassword)
         {
-            var nameGaps = isRar ? RarNameSet(firstVolume)?.MissingVolumes ?? [] : [];
+            // The names are all there is to go by before a password. A spanned zip's gaps count too (A4.D), though the
+            // bundled 7-Zip has no zip it calls header-encrypted, so this is for any that ever does.
+            var nameGaps = isRar
+                ? RarNameSet(firstVolume)?.MissingVolumes ?? []
+                : SpannedZipSet(firstVolume)?.MissingVolumes ?? [];
             return new ArchiveProbe
             {
                 FirstVolume = firstVolume,

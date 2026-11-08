@@ -98,6 +98,8 @@ internal static partial class Program
                     return RemoteUsage("remote add takes a link. --item, --provider, --offset and --limit aren't used by it.");
                 }
 
+                if (ArchivesFlagWithoutLinkPassword(args)) return RemoteUsage(ArchivesFlagNeedsLinkPassword);
+
                 return await RemoteAddAsync(client, args, ReadLinkArgument(words[1]), json).ConfigureAwait(false);
             }
 
@@ -185,6 +187,7 @@ internal static partial class Program
 
             case "retry":
             {
+                if (ArchivesFlagWithoutLinkPassword(args)) return RemoteUsage(ArchivesFlagNeedsLinkPassword);
                 if (await RemoteJobIdAsync(client, words, "remote retry <id> [--approve-uncached] [--link-password-stdin [--link-password-for-archives]]").ConfigureAwait(false) is not { } id)
                 {
                     return 2;
@@ -757,6 +760,14 @@ internal static partial class Program
 
         return word;
     }
+
+    private const string ArchivesFlagNeedsLinkPassword =
+        "--link-password-for-archives offers the password given with --link-password-stdin to the link's archives, so it needs --link-password-stdin too.";
+
+    /// <summary>TB.S2: the archives flag only widens a link password given here; on its own it would quietly do nothing.</summary>
+    private static bool ArchivesFlagWithoutLinkPassword(string[] args) =>
+        args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase) &&
+        !args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase);
 
     private static int RemoteUsage(string usage)
     {

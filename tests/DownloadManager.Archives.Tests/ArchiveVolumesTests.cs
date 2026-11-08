@@ -345,4 +345,16 @@ public sealed class ArchiveVolumesTests
         Assert.Equal(["a.part1.part1.rev"], ArchiveVolumes.RecoveryVolumes("a.part1", names, otherBaseNames: ["a"]));
         Assert.Empty(ArchiveVolumes.RecoveryVolumes(string.Empty, names));
     }
+
+    [Theory]
+    [InlineData(new[] { "a.rar" }, true)]
+    [InlineData(new[] { "a.part1.rar", "a.part2.rar" }, true)]
+    [InlineData(new[] { "a.rar", "a.r00" }, true)]
+    [InlineData(new[] { "a.001.rar", "a.002.rar" }, true)]
+    [InlineData(new[] { "a.7z" }, false)]
+    [InlineData(new[] { "a.zip" }, false)]
+    [InlineData(new[] { "a.7z.001", "a.7z.002" }, false)]
+    [InlineData(new[] { "a.z01", "a.zip" }, false)]
+    public void TbS3_OnlyRarSetsHaveRecoveryVolumes(string[] names, bool rar) =>
+        Assert.Equal(rar, ArchiveVolumes.HasRarRecoveryVolumes(Assert.Single(ArchiveVolumes.Group(names))));
 }

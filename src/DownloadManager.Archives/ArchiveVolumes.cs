@@ -189,6 +189,17 @@ public static partial class ArchiveVolumes
             .ToList();
     }
 
+    /// <summary>
+    /// Whether this set is one RAR wrote, the only kind that has <c>.rev</c> recovery volumes. A 7z, zip or split set
+    /// named <c>name</c> beside a <c>name.rev</c> is not that file's owner, so only RAR sets take theirs (TB.S3).
+    /// </summary>
+    public static bool HasRarRecoveryVolumes(ArchiveVolumeSet set) => set.Scheme switch
+    {
+        ArchiveVolumeScheme.PartNumbered or ArchiveVolumeScheme.OldStyle or ArchiveVolumeScheme.ThreeDigit => true,
+        ArchiveVolumeScheme.Single => set.Members.Count > 0 && set.Members[0].EndsWith(".rar", StringComparison.OrdinalIgnoreCase),
+        _ => false,
+    };
+
     private static bool IsRecoveryOf(string baseName, string name)
     {
         if (!name.EndsWith(".rev", StringComparison.OrdinalIgnoreCase) || name.Length <= baseName.Length + ".rev".Length - 1) return false;
