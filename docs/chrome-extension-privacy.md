@@ -94,7 +94,8 @@ address and a one-time code from the server's web UI. Until you do, nothing belo
 - **What the extension keeps:** the server's address, the name it was paired under, and a token the server
   gave it, in Chrome's local storage on this computer (not synced). The token lets the extension send
   downloads and use the popup's actions on that server, and nothing else. It is not encrypted by the
-  extension; anyone who can read your browser profile can read it. Unpair deletes it from the extension
+  extension; anyone who can read your browser profile can read it. In Chrome and Edge the extension's
+  scripts on web pages cannot read it; in Firefox they can (the extension's own script never does). Unpair deletes it from the extension
   and sends the token to the server once more, only to ask it to remove this pairing, so the token stops
   working there too. If the server can't be reached, Settings says so: then remove the browser from the
   web UI's Paired browsers list yourself.

@@ -199,7 +199,8 @@ export class NativeTransport implements Transport {
 
 /**
  * What pairing stores (chrome.storage.local, key SERVER_STORAGE_KEY). The token is never sent to the extension's pages
- * or to content scripts, and background.ts closes storage.local to content scripts.
+ * or to content scripts. On Chrome and Edge background.ts closes storage.local to content scripts; Firefox has no
+ * storage.local.setAccessLevel, so there content scripts can read it.
  */
 export interface ServerPairing {
   /** The server's origin, as normalizeServerAddress gives it: scheme, host and port, no path. */

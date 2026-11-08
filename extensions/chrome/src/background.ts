@@ -71,14 +71,19 @@ let leftInBrowser: LeftInBrowser[] = [];
 let badgeTimer: ReturnType<typeof setTimeout> | undefined;
 let autoSendSyncQueue: Promise<void> = Promise.resolve();
 // The paired server's token is kept in storage.local, and a content script runs on every page. Content scripts use no
-// storage at all, so storage.local is closed to them (Chrome lets them read it otherwise). Set at every start, and
-// waited for before a token is written.
+// storage at all, so on Chrome and Edge storage.local is closed to them (they could read it otherwise). Set at every
+// start, and waited for before a token is written. Firefox has no setAccessLevel: there content scripts can still read
+// storage.local, token included, and dm.status says so (storageClosedToPages: false). The extension's own content
+// script never reads it; only a compromised page process could.
 const storageRestricted = restrictStorageToExtension();
+let storageClosedToPages = false;
 async function restrictStorageToExtension(): Promise<void> {
+  if (typeof chrome.storage.local.setAccessLevel !== "function") return;
   try {
-    await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
+    await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+    storageClosedToPages = true;
   } catch {
-    // A browser without it keeps its default.
+    // Refused: the browser keeps its default, which lets content scripts read it.
   }
 }
 async function hasDeleteGesture(url: string): Promise<boolean> {
@@ -871,6 +876,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         pauseUntil,
         settings,
         siteAccess: await hasSiteAccess(),
+        storageClosedToPages: await storageRestricted.then(() => storageClosedToPages),
         leftInBrowser,
         jobs: latestJobs([...lastJobs.values()]),
       };
