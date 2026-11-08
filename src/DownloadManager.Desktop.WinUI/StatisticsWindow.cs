@@ -27,12 +27,7 @@ public sealed class StatisticsWindow : Window
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
         var root = new StackPanel { Spacing = 14, Margin = new Thickness(16) };
-        root.RequestedTheme = UiStateStore.Load().DarkMode switch
-        {
-            true => ElementTheme.Dark,
-            false => ElementTheme.Light,
-            null => ElementTheme.Default,
-        };
+        AppTheme.Track(root);
         root.Children.Add(new TextBlock
         {
             Text = "Download statistics", FontSize = 23,
@@ -67,18 +62,32 @@ public sealed class StatisticsWindow : Window
         });
         var scroller = new ScrollViewer
         {
-            RequestedTheme = root.RequestedTheme,
             Content = root,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalScrollMode = ScrollMode.Disabled,
         };
 
-        void ApplyBackground() => scroller.Background = InboundTheme.Brush("InboundSurfaceBrush", scroller);
-        scroller.ActualThemeChanged += (_, _) => ApplyBackground();
-        scroller.Loaded += (_, _) => ApplyBackground();
-        Content = scroller;
-        WindowLayout.ApplyChrome(this, root);
+        // UI.R23: a Close button at the bottom right, as Options and Scheduler have, outside the scrolling part.
+        var close = new Button { Content = "Close", MinWidth = 92, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(16, 8, 16, 16) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(close, "StatisticsCloseButton");
+        close.Click += (_, _) => Close();
+        var frame = new Grid();
+        frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        frame.Children.Add(scroller);
+        Grid.SetRow(close, 1);
+        frame.Children.Add(close);
+        frame.KeyboardAccelerators.Add(new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape });
+        frame.KeyboardAccelerators[0].Invoked += (_, args) => { args.Handled = true; Close(); };
+        frame.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+
+        AppTheme.Track(frame);
+        void ApplyBackground() => frame.Background = InboundTheme.Brush("InboundSurfaceBrush", frame);
+        frame.ActualThemeChanged += (_, _) => ApplyBackground();
+        frame.Loaded += (_, _) => ApplyBackground();
+        Content = frame;
+        WindowLayout.ApplyChrome(this, frame);
 
         Closed += async (_, _) =>
         {

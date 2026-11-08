@@ -108,12 +108,7 @@ public sealed class SchedulerWindow : Window
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
 
         var root = new Grid { Margin = new Thickness(14), ColumnSpacing = 14, RowSpacing = 10 };
-        root.RequestedTheme = UiStateStore.Load().DarkMode switch
-        {
-            true => ElementTheme.Dark,
-            false => ElementTheme.Light,
-            null => ElementTheme.Default,
-        };
+        AppTheme.Track(root);
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -192,8 +187,9 @@ public sealed class SchedulerWindow : Window
         root.Children.Add(bottom);
 
         _editorSurface.Content = root;
-        _editorSurface.RequestedTheme = root.RequestedTheme;
-        var windowFrame = new Border { Child = _editorSurface, RequestedTheme = root.RequestedTheme };
+        AppTheme.Track(_editorSurface);
+        var windowFrame = new Border { Child = _editorSurface };
+        AppTheme.Track(windowFrame);
         Content = windowFrame;
         WindowLayout.ApplyChrome(this, root);
         void ApplyBackground()
@@ -858,7 +854,7 @@ public sealed class SchedulerWindow : Window
             DefaultButton = ContentDialogButton.Close,
             RequestedTheme = ((FrameworkElement)Content).ActualTheme,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || choice.SelectedItem is not ComboBoxItem { Tag: int targetId }) return;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary || choice.SelectedItem is not ComboBoxItem { Tag: int targetId }) return;
         await QueueCrudAsync(new QueueActionRequest { Action = "delete", QueueId = queue.Id, MoveContentsToQueueId = targetId });
     }
 
@@ -875,7 +871,7 @@ public sealed class SchedulerWindow : Window
             DefaultButton = ContentDialogButton.Primary,
             RequestedTheme = ((FrameworkElement)Content).ActualTheme,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return null;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return null;
         var value = text.Text.Trim();
         if (value.Length is < 1 or > 80) { _status.Text = "Queue names must contain 1–80 characters."; return null; }
         return value;

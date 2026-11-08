@@ -209,22 +209,23 @@ internal sealed class AddLinksDialog
             }
         };
 
-        ContentDialogResult answer;
+        ContentDialogResult? answer;
         try
         {
-            answer = await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is already open over this window.
-            CouldNotOpen = true;
-            ClearPasswords();
-            return null;
+            answer = await DialogGuard.ShowAsync(dialog);
         }
         finally
         {
             _session.LinesChanged -= SyncRows;
             _session.LineChanged -= OnLineChanged;
+        }
+
+        if (answer is null)
+        {
+            // Refused or failed: another dialog is already open over this window (UI.B8).
+            CouldNotOpen = true;
+            ClearPasswords();
+            return null;
         }
 
         if (answer != ContentDialogResult.Primary)

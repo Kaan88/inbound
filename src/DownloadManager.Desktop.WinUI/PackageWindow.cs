@@ -71,8 +71,7 @@ internal sealed class PackageWindow : Window
     public PackageWindow(Guid packageId)
     {
         _packageId = packageId;
-        var theme = UiStateStore.Load().DarkMode;
-        _root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
+        AppTheme.Track(_root);
         Title = "Package status — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 720, 820);
         WindowPlacement.Track(this, "package");
@@ -141,6 +140,7 @@ internal sealed class PackageWindow : Window
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
+            AppTheme.FollowSettings(snapshot.Settings);
             _jobs.Clear();
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
@@ -525,7 +525,7 @@ internal sealed class PackageWindow : Window
             CloseButtonText = "Keep Downloading",
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
+        if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
     }
 
     private void OpenFileWindow(Guid jobId)

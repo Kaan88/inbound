@@ -52,9 +52,9 @@ public sealed partial class MainWindow : Window
         FolderChooser.Measure = paths => _connection.GetFolderSpaceAsync(paths);
         FolderChooser.Settings = () => _settings;
         FolderChooser.SaveFavorites = SaveFavoritesAsync;
-        RootGrid.RequestedTheme = _uiState.DarkMode is { } darkMode
-            ? (darkMode ? ElementTheme.Dark : ElementTheme.Light)
-            : ElementTheme.Default;
+        // UI.R23: the settings' Theme is the source; until they arrive, the theme last seen.
+        AppTheme.Track(RootGrid);
+        AppTheme.Changed += () => _uiState.Theme = AppTheme.Choice;
         SpeedGraph.Visibility = _uiState.ShowSpeedGraph ? Visibility.Visible : Visibility.Collapsed;
         ShowSpeedGraphMenuItem.IsChecked = _uiState.ShowSpeedGraph;
         SpeedGraph.IsExpanded = _uiState.SpeedGraphExpanded;
@@ -81,8 +81,6 @@ public sealed partial class MainWindow : Window
             DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
             ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);
             StatusBrushes.UseTheme(RootGrid.ActualTheme);
-            // They share the status colors, so they can't be left on the other theme.
-            foreach (var window in _providerWindows.Values) window.UseTheme(RootGrid.RequestedTheme);
         };
         DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;
         StatusBrushes.UseTheme(RootGrid.ActualTheme);
@@ -276,6 +274,7 @@ public sealed partial class MainWindow : Window
     {
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
+        FollowThemeSetting(snapshot.Settings);
         UpdateLimitButtons();
         _groups = snapshot.Settings.DownloadGroups;
         RefreshCustomCategories();
@@ -491,7 +490,7 @@ public sealed partial class MainWindow : Window
         Apply(FileDownloadNowItem, "Download Now", plan.LocalReason, rows.Any(row => row.CanResume));
         Apply(FileStopItem, "Stop Download", plan.LocalReason, rows.Any(row => row.CanPause));
         Apply(FileRedownloadItem, "Redownload", plan.FileReason);
-        Apply(FileRemoveItem, "Remove", plan.RemoveReason);
+        Apply(FileDeleteItem, "Delete…", plan.RemoveReason);
 
         static void Apply(MenuFlyoutItem item, string text, string? reason, bool canAct = true)
         {
@@ -977,7 +976,10 @@ public sealed partial class MainWindow : Window
         }
         flyout.Items.Add(_priorityMenu);
         flyout.Items.Add(new MenuFlyoutSeparator());
-        flyout.Items.Add(_menuRemove = CreateContextItem("Remove", MenuContextRemove_Click));
+        // One way to take rows off the list: the Delete dialog, as the toolbar and the Delete key do (owner, 2026-11-08:
+        // "just delete? seems remove seems redundant").
+        flyout.Items.Add(_menuDelete = CreateContextItem("Delete…", MenuDelete_Click));
+        _menuDelete.KeyboardAcceleratorTextOverride = "Delete";
         var separatorAfterRemove = new MenuFlyoutSeparator();
         flyout.Items.Add(separatorAfterRemove);
         var progressDetails = CreateContextItem("Progress Details…", MenuProgressDetails_Click);
@@ -987,7 +989,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuRenamePackage = CreateContextItem("Rename Package…", MenuRenamePackage_Click));
         flyout.Items.Add(CreateContextItem("Change Category…", MenuChangeCategory_Click));
         flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
-        _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuRemove, separatorAfterRemove, progressDetails, _menuProperties]);
+        _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuDelete, separatorAfterRemove, progressDetails, _menuProperties]);
         AddRemoteContextItems(flyout);
         JobsList.ContextFlyout = flyout;
     }
@@ -1003,7 +1005,7 @@ public sealed partial class MainWindow : Window
     private MenuFlyoutItem? _menuOpenWith;
     private MenuFlyoutItem? _menuOpenFolder;
     private MenuFlyoutItem? _menuShowDownload;
-    private MenuFlyoutItem? _menuRemove;
+    private MenuFlyoutItem? _menuDelete;
     private MenuFlyoutSeparator? _separatorAfterOpen;
 
     /// <summary>What a record's own row keeps for the one download behind it.</summary>
@@ -1152,7 +1154,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Keep Downloading",
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
         await RunOnSelectionAsync("Cancel Package", new GroupActionRequest { Action = "cancel" });
     }
 
@@ -1278,7 +1280,7 @@ public sealed partial class MainWindow : Window
             var stem = Path.GetFileNameWithoutExtension(nameBox.Text);
             nameBox.Select(0, stem.Length > 0 ? stem.Length : nameBox.Text.Length);
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary ||
             string.IsNullOrWhiteSpace(nameBox.Text) || string.IsNullOrWhiteSpace(folderBox.Text))
         {
             return;
@@ -1486,7 +1488,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary ||
             (string.IsNullOrWhiteSpace(input.Text) && !hidden))
         {
             return;
@@ -1573,7 +1575,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
             Title = title, Content = name, PrimaryButtonText = "OK", CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(name.Text)
+        return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(name.Text)
             ? name.Text.Trim() : null;
     }
 
@@ -1643,7 +1645,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(categoryBox);
         var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, RequestedTheme = RootGrid.ActualTheme,
             Title = "Change category", Content = panel, PrimaryButtonText = "Apply", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || categoryBox.SelectedItem is not ComboBoxItem { Tag: string categoryId }) return;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary || categoryBox.SelectedItem is not ComboBoxItem { Tag: string categoryId }) return;
         var errors = new List<string>();
         foreach (var job in selection)
         {
@@ -1741,7 +1743,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -1785,7 +1787,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary ||
             string.IsNullOrWhiteSpace(pathBox.Text))
         {
             return;
@@ -1823,7 +1825,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary ||
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary ||
             string.IsNullOrWhiteSpace(pathBox.Text))
         {
             return;
@@ -1861,7 +1863,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(confirm) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -1964,24 +1966,8 @@ public sealed partial class MainWindow : Window
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);
     private void MenuResume_Click(object sender, RoutedEventArgs e) => ResumeButton_Click(sender, e);
 
-    /// <summary>On a record's row this is the download behind it. The record has a line of its own, and goes with its download.</summary>
-    private async void MenuContextRemove_Click(object sender, RoutedEventArgs e)
-    {
-        if (RecordDownload is { } job) await RunBulkActionAsync([job], id => _connection.RemoveAsync(id, deleteFile: false), "Remove");
-        else MenuRemove_Click(sender, e);
-    }
-
-    private async void MenuRemove_Click(object sender, RoutedEventArgs e)
-    {
-        var selection = SelectedJobs;
-        if (selection.Count == 0)
-        {
-            if (FirstLocalRow is null) await RemoveSideRowsAsync();
-            return;
-        }
-
-        await RunBulkActionAsync(selection, id => _connection.RemoveAsync(id, deleteFile: false), "Remove");
-    }
+    /// <summary>The File and list menus' Delete: the same dialog as the toolbar's Delete and the Delete key.</summary>
+    private async void MenuDelete_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
     private void MenuOptions_Click(object sender, RoutedEventArgs e) => _ = ShowSettingsDialogAsync();
 
     private async void MenuPauseAll_Click(object sender, RoutedEventArgs e)
@@ -2033,7 +2019,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -2083,8 +2069,8 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        var choice = await dialog.ShowAsync();
-        if (choice == ContentDialogResult.None)
+        var choice = await DialogGuard.ShowAsync(dialog);
+        if (choice is null or ContentDialogResult.None)
         {
             return;
         }
@@ -2132,7 +2118,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        var result = await dialog.ShowAsync();
+        var result = await DialogGuard.ShowAsync(dialog);
         if (result == ContentDialogResult.Primary)
         {
             _search = box.Text.Trim();
@@ -2191,13 +2177,72 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void MenuDarkMode_Click(object sender, RoutedEventArgs e)
+    /// <summary>View > Dark Mode: a quick way to set the Theme setting to Dark or Light (UI.R23).</summary>
+    private async void MenuDarkMode_Click(object sender, RoutedEventArgs e)
     {
-        var dark = DarkModeMenuItem.IsChecked;
-        RootGrid.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
-        _uiState.DarkMode = dark;
-        ApplyTitleBarTheme(dark);
-        SaveUiState();
+        var choice = DarkModeMenuItem.IsChecked ? ThemeChoices.Dark : ThemeChoices.Light;
+        AppTheme.Use(choice);
+        await SaveThemeAsync(choice);
+    }
+
+    private bool _migratingTheme;
+
+    /// <summary>Uses the settings' Theme. The first time, a View > Dark Mode choice the window kept in ui-state.json
+    /// before the setting was the source becomes the setting, so nobody's look changes on upgrade.</summary>
+    private void FollowThemeSetting(SettingsDto settings)
+    {
+        if (ThemeChoices.FromDarkMode(_uiState.DarkMode) is { } kept)
+        {
+            AppTheme.Use(kept);
+            if (!_migratingTheme) _ = MigrateDarkModeAsync(kept);
+            return;
+        }
+
+        AppTheme.Use(settings.Theme);
+    }
+
+    private async Task MigrateDarkModeAsync(string theme)
+    {
+        _migratingTheme = true;
+        try
+        {
+            // Kept in ui-state.json until the Host has saved it, so a failed save is tried again on the next snapshot.
+            if (!await SaveThemeAsync(theme)) return;
+            _uiState.DarkMode = null;
+            _uiState.Theme = theme;
+            SaveUiState();
+        }
+        finally
+        {
+            _migratingTheme = false;
+        }
+    }
+
+    /// <summary>Saves <paramref name="theme"/> as the Theme setting, from the Host's latest settings so nothing changed
+    /// elsewhere is undone. False when the Host did not take it; the window keeps the theme either way.</summary>
+    private async Task<bool> SaveThemeAsync(string theme)
+    {
+        try
+        {
+            var latest = await _connection.RefreshAsync();
+            if (latest.Settings.Theme == theme)
+            {
+                _settings = latest.Settings;
+                return true;
+            }
+
+            var updated = CloneSettings(latest.Settings);
+            updated.Theme = theme;
+            var result = (await _connection.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
+            if (!result.Ok) return false;
+            _settings = result.Settings;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"Theme save failed: {ex.Message}");
+            return false;
+        }
     }
 
     private void ApplyTitleBarTheme(bool dark) => WindowLayout.ApplyTitleBar(this, dark);
@@ -2250,7 +2295,9 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Later",
                 DefaultButton = ContentDialogButton.Primary,
             };
-            var updateChoice = await dialog.ShowAsync();
+            var updateChoice = await DialogGuard.ShowAsync(dialog);
+            // Refused because another dialog is open: nothing was asked, so nothing is deferred either.
+            if (updateChoice is null) return;
             if (updateChoice != ContentDialogResult.Primary)
             {
                 await _connection.DeferUpdateAsync(check.AvailableVersion!);
@@ -2280,7 +2327,7 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Later",
                 DefaultButton = ContentDialogButton.Primary,
             };
-            if (await installDialog.ShowAsync() != ContentDialogResult.Primary)
+            if (await DialogGuard.ShowAsync(installDialog) != ContentDialogResult.Primary)
             {
                 await _connection.DeferUpdateAsync(check.AvailableVersion!);
                 return;
@@ -2304,7 +2351,7 @@ public sealed partial class MainWindow : Window
                     CloseButtonText = "Wait",
                     DefaultButton = ContentDialogButton.Close,
                 };
-                if (await forceDialog.ShowAsync() != ContentDialogResult.Primary)
+                if (await DialogGuard.ShowAsync(forceDialog) != ContentDialogResult.Primary)
                 {
                     return;
                 }
@@ -2447,7 +2494,7 @@ public sealed partial class MainWindow : Window
                     args.Cancel = true;
                 }
             };
-            if (await addressDialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (await DialogGuard.ShowAsync(addressDialog) != ContentDialogResult.Primary) return;
             url = urlBox.Text.Trim();
         }
 
@@ -2750,8 +2797,8 @@ public sealed partial class MainWindow : Window
         }
         dialog.PrimaryButtonClick += (_, args) => ValidateAuthentication(args);
         dialog.SecondaryButtonClick += (_, args) => ValidateAuthentication(args);
-        var downloadChoice = await dialog.ShowAsync();
-        if (downloadChoice == ContentDialogResult.None)
+        var downloadChoice = await DialogGuard.ShowAsync(dialog);
+        if (downloadChoice is null or ContentDialogResult.None)
         {
             return;
         }
@@ -2774,7 +2821,7 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
             };
-            var duplicateResult = await duplicateDialog.ShowAsync();
+            var duplicateResult = await DialogGuard.ShowAsync(duplicateDialog);
             if (duplicateResult == ContentDialogResult.Secondary)
             {
                 JobsList.SelectedItem = existing;
@@ -2923,7 +2970,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -2979,7 +3026,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        if (await review.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(review) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -3228,7 +3275,8 @@ public sealed partial class MainWindow : Window
             });
         }
 
-        var dialogResult = await dialog.ShowAsync();
+        var dialogResult = await DialogGuard.ShowAsync(dialog);
+        if (dialogResult is null) return;
         if (action == "files")
         {
             await ShowQueueFilesAsync(actionQueue);
@@ -3275,7 +3323,7 @@ public sealed partial class MainWindow : Window
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
-            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            if (await DialogGuard.ShowAsync(confirm) != ContentDialogResult.Primary)
             {
                 await ShowQueuesAsync();
                 return;
@@ -3435,7 +3483,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary)
             return false;
 
         // Rebase onto current settings after the modal editor closes so quota
@@ -3597,7 +3645,8 @@ public sealed partial class MainWindow : Window
             });
         }
 
-        var dialogResult = await dialog.ShowAsync();
+        var dialogResult = await DialogGuard.ShowAsync(dialog);
+        if (dialogResult is null) return;
         if (action == "edit" && actionId is Guid editId)
         {
             if (await ShowScheduleEditorAsync(editId))
@@ -3849,7 +3898,7 @@ public sealed partial class MainWindow : Window
             args.Cancel = !valid;
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || !valid)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary || !valid)
             return false;
 
         var latest = await _connection.RefreshAsync();
@@ -3951,7 +4000,7 @@ public sealed partial class MainWindow : Window
         // changes from the CLI), and Options would show and save the old values.
         await RefreshSettingsAsync();
         var settings = CloneSettings(_settings);
-        var window = new SettingsWindow(RootGrid.ActualTheme);
+        var window = new SettingsWindow();
         _settingsWindow = window;
         window.Closed += (_, _) => _settingsWindow = null;
         try
@@ -3985,6 +4034,19 @@ public sealed partial class MainWindow : Window
             var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
+            // UI.R23: the source of every window's theme. View > Dark Mode sets it too, so the box follows that.
+            string[] themeValues = [ThemeChoices.System, ThemeChoices.Light, ThemeChoices.Dark];
+            var themeBox = new ComboBox
+            {
+                Header = "Theme",
+                MinWidth = 200,
+                ItemsSource = new[] { "Same as Windows", "Light", "Dark" },
+                SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.Normalize(settings.Theme))),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(themeBox, "ThemeBox");
+            void FollowThemeMenu() => themeBox.SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, AppTheme.Choice));
+            AppTheme.Changed += FollowThemeMenu;
+            window.Closed += (_, _) => AppTheme.Changed -= FollowThemeMenu;
             var postDownload = new TextBox
             {
                 Header = "Run this program after each download (optional)",
@@ -4199,7 +4261,7 @@ public sealed partial class MainWindow : Window
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
-                SettingsWindow.Section("Window"), closeCompletely,
+                SettingsWindow.Section("Window"), themeBox, closeCompletely,
                 SettingsWindow.Section("Capturing downloads"), integration, clipboard);
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
                 SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.") };
@@ -4345,6 +4407,7 @@ public sealed partial class MainWindow : Window
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;
                 settings.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                settings.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
                 settings.UseCategoryFolders = useCategoryFolders.IsChecked == true;
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
                 settings.BrowserIntegrationEnabled = integration.IsChecked == true;
@@ -4381,6 +4444,7 @@ public sealed partial class MainWindow : Window
                     return (update.Error ?? "The host rejected the settings.", -1);
 
                 _settings = update.Settings;
+                AppTheme.Use(update.Settings.Theme);
                 UpdateLimitButtons();
                 // UI.B6: a new default folder moves the category folders that sat under the old one. Show what the
                 // Host saved, or the boxes keep the old paths and the next OK writes them back.
@@ -4488,7 +4552,7 @@ public sealed partial class MainWindow : Window
             RequestedTheme = RootGrid.ActualTheme,
             Content = panel, PrimaryButtonText = "Save", CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
 
         var failures = new List<string>();
         foreach (var change in stagedMembership)
@@ -4703,49 +4767,12 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteButton_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false);
 
-    // Set while a dialog shown through ShowDialogAsync is open. The popup check below also sees dialogs shown elsewhere.
-    private bool _dialogShowing;
-
     /// <summary>True while a ContentDialog is open on this window, whether or not it came through ShowDialogAsync.</summary>
-    private bool IsContentDialogOpen() =>
-        _dialogShowing ||
-        Content?.XamlRoot is { } root && VisualTreeHelper.GetOpenPopupsForXamlRoot(root).Any(popup => HoldsContentDialog(popup.Child, 4));
+    private bool IsContentDialogOpen() => DialogGuard.IsOpen(Content?.XamlRoot);
 
-    // An open ContentDialog sits in a popup, as the popup's child or a few levels under it; flyouts and menus never hold one.
-    private static bool HoldsContentDialog(DependencyObject? element, int depth)
-    {
-        if (element is null) return false;
-        if (element is ContentDialog) return true;
-        if (depth == 0) return false;
-        var count = VisualTreeHelper.GetChildrenCount(element);
-        for (var i = 0; i < count; i++)
-        {
-            if (HoldsContentDialog(VisualTreeHelper.GetChild(element, i), depth - 1)) return true;
-        }
-        return false;
-    }
-
-    /// <summary>Shows <paramref name="dialog"/>, or returns null without showing it while another ContentDialog is open:
-    /// WinUI allows one at a time, and a second ShowAsync throws, which ends the window when nothing catches it (UI.B8).</summary>
-    private async Task<ContentDialogResult?> ShowDialogAsync(ContentDialog dialog)
-    {
-        if (IsContentDialogOpen()) return null;
-        _dialogShowing = true;
-        try
-        {
-            return await dialog.ShowAsync();
-        }
-        catch (Exception)
-        {
-            // A dialog this check could not see was open after all. Any exception type: WinUI does not document which
-            // one a second ShowAsync throws, and one escaping an async void click handler would end the window.
-            return null;
-        }
-        finally
-        {
-            _dialogShowing = false;
-        }
-    }
+    /// <summary>Shows <paramref name="dialog"/>, or returns null without showing it while another ContentDialog is open
+    /// (UI.B8). See <see cref="DialogGuard"/>.</summary>
+    private static Task<ContentDialogResult?> ShowDialogAsync(ContentDialog dialog) => DialogGuard.ShowAsync(dialog);
 
     /// <summary>Asks before deleting the selection. <paramref name="deleteFromDisk"/> is the box's starting state:
     /// only Shift+Delete starts it ticked, so a plain Delete never removes finished files without a click.</summary>

@@ -412,7 +412,6 @@ public sealed partial class MainWindow
     private void HideLocalContextItemsIfRemoteOnly()
     {
         var behind = ArchiveRules.DownloadsBehind(OnlySelectedRecords, _jobsById.ContainsKey).Count;
-        if (_menuRemove is not null) _menuRemove.Text = RecordDownload is null ? "Remove" : "Remove Download";
         if (FirstLocalRow is null && (SelectedRemoteRows.Count > 0 || SelectedArchiveRows.Count > 0))
         {
             foreach (var item in _localContextItems) item.Visibility = Visibility.Collapsed;
@@ -581,15 +580,8 @@ public sealed partial class MainWindow
         };
         box.PasswordChanged += (_, _) => dialog.IsPrimaryButtonEnabled = box.Password.Length > 0;
         dialog.Opened += (_, _) => box.Focus(FocusState.Programmatic);
-        ContentDialogResult answer;
-        try
-        {
-            answer = await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException)
-        {
-            return;
-        }
+        // Null when another dialog is open over this window (UI.B8); the check below treats that as cancel.
+        var answer = await DialogGuard.ShowAsync(dialog);
 
         // Out of the box before anything is sent, whatever the answer turns out to be.
         var password = box.Password;
@@ -724,7 +716,7 @@ public sealed partial class MainWindow
         };
         try
         {
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
         }
         catch (Exception ex) when (ex is InvalidOperationException or COMException)
         {

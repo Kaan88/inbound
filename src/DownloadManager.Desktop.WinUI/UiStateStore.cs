@@ -27,7 +27,13 @@ internal sealed class UiState
     public bool HideCategories { get; set; }
     public bool ShowSpeedGraph { get; set; } = true;
     public bool SpeedGraphExpanded { get; set; } = true;
+    /// <summary>View > Dark Mode from before the Theme setting was the source (UI.R23). Moved into the setting once,
+    /// then cleared; null when it was never set or has moved.</summary>
     public bool? DarkMode { get; set; }
+
+    /// <summary>The Theme setting last seen (System, Light or Dark): a start-up hint only, so a window opened before
+    /// the Host's settings arrive does not flash the other theme. The setting is the source.</summary>
+    public string? Theme { get; set; }
     public List<Guid> ExpandedPackages { get; set; } = new();
 }
 

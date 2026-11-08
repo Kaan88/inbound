@@ -32,8 +32,7 @@ public sealed partial class DownloadWindow : Window
         _manual = manual;
         InitializeComponent();
         FileIconHeader.DataContext = _iconJob;
-        var theme = UiStateStore.Load().DarkMode;
-        Root.RequestedTheme = theme is { } dark ? (dark ? ElementTheme.Dark : ElementTheme.Light) : ElementTheme.Default;
+        AppTheme.Track(Root);
         WindowLayout.ResizeForDpi(this, 720, 700);
         WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
@@ -45,6 +44,7 @@ public sealed partial class DownloadWindow : Window
         {
             if (_closed) return;
             _settings = snapshot.Settings;
+            AppTheme.FollowSettings(snapshot.Settings);
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;
             var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == _jobId);
             if (job is null) ShowRemoved();
@@ -299,7 +299,7 @@ public sealed partial class DownloadWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await confirm.ShowAsync() != ContentDialogResult.Primary || _closed || _job is null) return;
+        if (await DialogGuard.ShowAsync(confirm) != ContentDialogResult.Primary || _closed || _job is null) return;
         try
         {
             var reply = await _connection.RemoveAsync(_jobId, deleteFile: !_job.FileRemovedAfterExtraction);
@@ -325,7 +325,7 @@ public sealed partial class DownloadWindow : Window
             CloseButtonText = "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await confirm.ShowAsync() == ContentDialogResult.Primary && _job?.CanCancel == true)
+        if (await DialogGuard.ShowAsync(confirm) == ContentDialogResult.Primary && _job?.CanCancel == true)
             await RunAsync(() => _connection.CancelAsync(_jobId));
     }
 
