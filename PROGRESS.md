@@ -52,12 +52,12 @@
     - Haiku reviewed the extension, WinUI and web UI diffs. It found one more gap, fixed on `dev`: Download All read the default cookie store on Firefox.
   - The owner's ultrareview: 10 findings. Three were the same as mine: (1) is my 3, (3) is my 12, and (8) is next to my 4.
     - (2) The roots escape through provider adds, the one security finding, is fixed with two tests that fail without the fix.
-    - (4) was real. My first check was wrong: its test zips held no backslash. Zips made on Windows should now extract into their folders on Linux (ROADMAP REV.2). Windows tests pass; the Linux run is still to do.
+    - (4) was real. My first check was wrong: its test zips held no backslash. Zips made on Windows now extract into their folders on Linux (ROADMAP REV.2): Archives 351/351 on Windows, and on the Linux VM 289 passed, 52 skipped, none failed, with every new test passing.
     - (5)–(10) are fixed; ROADMAP REV.2 has each one.
-  - Seen once in eight Archives runs, with no message captured: `Rar5ExtractionTests.HeaderPasswordExtracts` failed, then passed alone and in seven full runs. Unexplained; watch for it.
+  - Install folder trimmed (ROADMAP REV.3, owner's question): 281 MB to 201 MB, Setup 77.5 MB to 56.0 MB, by taking only the Windows App SDK parts the app uses and leaving out other languages and .NET's debugger files. Checked on a test instance; the clean install on the VM is next.
   - Not checked in a real browser: Firefox's `cookieStoreId`, `storage.local.setAccessLevel` and `permissions.contains`, which the extension tests stand in for.
   - Not seen on screen: the Options Theme box and the refused install dialog.
-  - New open item: EXT.R3 (Chrome and Edge with site access withdrawn by the user).
+  - EXT.R5 (Chrome and Edge with site access withdrawn by the user): fixed before release; such a download now stays in the browser with a note.
 - **The release assets above were built before these fixes and have to be rebuilt.**
 - **Not done:**
   - The clean-install and upgrade run with the Setup rebuilt after the review fixes. The run with the earlier 0.6.0 Setup passed (TEST.2, evidence in `artifacts\campaign\20261108-final\vm-0.5.3-to-0.6.0\`): 0.5.3 to 0.6.0 kept both jobs, wrote the Chrome, Edge and Firefox keys, and turned PERF.5 on once. Uninstall kept the state and stopped only the installed Host.

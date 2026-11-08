@@ -9,6 +9,8 @@
     <Product>Inbound Download Manager</Product>
     <Copyright>Private use</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
+    <!-- The app is English only, so the framework's translated resources are not shipped. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <AnalysisLevel>latest</AnalysisLevel>
   </PropertyGroup>
 </Project>

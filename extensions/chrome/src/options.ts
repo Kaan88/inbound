@@ -98,7 +98,8 @@ function showCleartextNote(): void {
 
 /**
  * Firefox can install the extension without access to sites, and then cookies cannot be read and the
- * page script does not run. Chrome and Edge grant it at install, so the card stays hidden there.
+ * page script does not run. Chrome and Edge grant it at install, so there the card shows only after the
+ * user has withdrawn it.
  */
 async function showSiteAccess(): Promise<void> {
   const card = byId<HTMLElement>("siteAccessCard");
