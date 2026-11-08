@@ -21,13 +21,16 @@ namespace DownloadManager.Server.Auth;
 /// counts as wrong from its start until it turns out right, so parallel guesses can't all slip past the wait.</item>
 /// <item>A changed password also unpairs every browser extension, unless the change asks to keep them.</item>
 /// <item>Only <c>/health</c>, the sign-in page's own files under <c>/signin/</c> and the sign-in calls answer without a
-/// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> only (<see cref="Pairing"/>).</item>
+/// session. A paired browser extension uses a bearer token on <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c>
+/// only (<see cref="Pairing"/>).</item>
 /// </list>
 /// </summary>
 public sealed class ServerAuth
 {
     public const string CookieName = "inbound_session";
     public const string SignInPath = "/signin/";
+    /// <summary>Where a paired extension unpairs itself (<c>DELETE</c>, with its own token).</summary>
+    public const string PairSelfPath = "/api/pair/self";
     internal const string SessionItem = "inbound.session";
     internal const string TokenItem = "inbound.token";
     /// <summary>The address the connection really came from, noted before a trusted proxy's headers replace it.</summary>
@@ -51,7 +54,10 @@ public sealed class ServerAuth
         _log = log;
         _time = options.Time;
         _options = options;
-        Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout);
+        // Kept in the data folder beside auth.json, so a restart doesn't sign anyone out (owner, 2026-11-08).
+        Sessions = new SessionStore(_time, options.SessionIdleTimeout, options.SessionAbsoluteTimeout,
+            System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.Path)!, SessionStore.FileName),
+            () => SessionStore.StampOf(store.Password), log.Warn);
         Limiter = new SignInLimiter(_time);
         Pairing = new Pairing(store, _time);
     }
@@ -145,8 +151,8 @@ public sealed class ServerAuth
     public Func<HttpContext, Func<Task>, Task> Middleware => async (context, next) =>
     {
         var request = context.Request;
-        // A paired extension: its token, on POST /api/ipc only, whether sign-in is on or not.
-        if (request.Path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) && request.Headers.Authorization.Count > 0)
+        // A paired extension: its token, on POST /api/ipc and DELETE /api/pair/self only, whether sign-in is on or not.
+        if (IsTokenPath(request.Path) && request.Headers.Authorization.Count > 0)
         {
             var header = request.Headers.Authorization.ToString();
             var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? Pairing.Authenticate(header[7..].Trim()) : null;
@@ -184,6 +190,10 @@ public sealed class ServerAuth
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
     };
 
+    /// <summary>The paths a paired browser's bearer token opens.</summary>
+    internal static bool IsTokenPath(PathString path) =>
+        path.Equals("/api/ipc", StringComparison.OrdinalIgnoreCase) || path.Equals(PairSelfPath, StringComparison.OrdinalIgnoreCase);
+
     internal static Session? SessionOf(HttpContext context) => context.Items.TryGetValue(SessionItem, out var value) ? value as Session : null;
 
     internal static TokenDto? TokenOf(HttpContext context) => context.Items.TryGetValue(TokenItem, out var value) ? value as TokenDto : null;
@@ -218,6 +228,22 @@ public sealed class ServerAuth
                 ? Results.Json(new { ok = true })
                 : Results.Json(new { ok = false, error = "No paired browser has that id." }, statusCode: StatusCodes.Status404NotFound));
         web.MapPost("/api/pair", (Func<HttpContext, Task<IResult>>)PairAsync);
+        web.MapDelete(PairSelfPath, (HttpContext context) => UnpairSelf(context));
+    }
+
+    /// <summary>
+    /// The extension's Unpair: the token that authenticated this request (the gate above checked it, as on
+    /// <c>/api/ipc</c>) removes its own record, and only its own: the id comes from the token, never from the request.
+    /// A session cookie doesn't count here; without a token it is 401.
+    /// </summary>
+    private IResult UnpairSelf(HttpContext context)
+    {
+        if (TokenOf(context) is not { } token)
+            return Error(StatusCodes.Status401Unauthorized, "Only a paired browser can unpair itself, with its own token.");
+        if (!TrySave(() => Pairing.Revoke(token.Id)))
+            return Error(StatusCodes.Status500InternalServerError, "The pairing could not be removed. Check the data folder's space and permissions.");
+        _log.Info($"A browser unpaired itself: {token.Name} ({token.Id}).");
+        return Results.NoContent();
     }
 
     private object Status(HttpContext context) => new

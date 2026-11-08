@@ -419,6 +419,16 @@ public sealed class ServerApp : IAsyncDisposable
         await Step(() => _archives.ShutdownAsync(CancellationToken.None), "Archive shutdown").ConfigureAwait(false);
         await Step(() => _remoteJobs.StopAsync(), "Remote jobs shutdown").ConfigureAwait(false);
         await Step(() => _service.ShutdownAsync(CancellationToken.None), "Service shutdown").ConfigureAwait(false);
+        // Last-seen times not yet written (they are saved at most every few minutes while the server runs).
+        try
+        {
+            Auth?.Sessions.Flush();
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Sessions flush: {ex.GetType().Name}");
+        }
+
         _remoteCommands.Dispose();
         _remote.Dispose();
         _engine.Dispose();
@@ -472,7 +482,8 @@ public sealed class ServerStartException(string message) : Exception(message);
 /// <c>Origin</c> or without, must address the server by an IP address, by <c>localhost</c>, or by a name listed in
 /// <c>DOWNLOADMANAGER_HOSTS</c> (separated by <c>;</c> or <c>,</c>): a rebinding page can only use a name of its own.
 /// The browser extension is the one other origin let through, and only where it has its own credential
-/// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> with a bearer token, and <c>/api/pair</c> with a code.
+/// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c> with a bearer token, and
+/// <c>/api/pair</c> with a code.
 /// </summary>
 public static class OriginCheck
 {
