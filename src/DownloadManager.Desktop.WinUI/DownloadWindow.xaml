@@ -50,7 +50,7 @@
                         <TextBox x:Name="SpeedLimitInput" Header="Maximum download speed (KB/s)"
                                  PlaceholderText="Enter a positive number" IsEnabled="False" />
                         <TextBlock x:Name="SpeedLimitNotice"
-                                   Text="Applies to ordinary HTTP/HTTPS file downloads. FTP, HLS, and DASH transfers do not support this control."
+                                   Text="Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
                                    TextWrapping="Wrap" FontSize="12"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Button x:Name="ApplySpeedLimitButton" Content="Apply speed limit"
