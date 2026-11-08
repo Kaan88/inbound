@@ -59,16 +59,24 @@ public static partial class ArchiveVolumes
             .Distinct(PathNames.Comparer)
             .ToList();
 
+        // A set's names may differ in case (Film.PART1.RAR, film.part2.rar), so bases are matched ignoring it. On a file
+        // system that keeps case, two files can also differ only by it (Movie.part1.rar next to movie.part1.rar): grouping
+        // those ignoring case would make one set with two first volumes, and tie one's download to the other's cleanup.
+        // So in a folder that holds such a pair, bases are matched exactly. Windows never has one: NTFS keeps one file.
+        var grouping = names.Count == names.Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
         var oldStyleBases = names
             .Select(name => OldStyleVolume().Match(name))
             .Where(match => match.Success && IsLetter(match, 'r'))
             .Select(match => match.Groups["base"].Value)
-            .ToHashSet(PathNames.Comparer);
+            .ToHashSet(grouping);
 
-        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(PathNames.Comparer);
-        var parts = new Dictionary<string, List<(string Digits, string Name)>>(PathNames.Comparer);
-        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(PathNames.Comparer);
-        var splits = new Dictionary<string, List<(int Number, string Name)>>(PathNames.Comparer);
+        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(grouping);
+        var parts = new Dictionary<string, List<(string Digits, string Name)>>(grouping);
+        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(grouping);
+        var splits = new Dictionary<string, List<(int Number, string Name)>>(grouping);
         var singles = new List<string>();
         var otherSingles = new List<(string Stem, string Name)>();
 

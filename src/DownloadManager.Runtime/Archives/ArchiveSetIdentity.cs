@@ -153,7 +153,8 @@ internal sealed class ArchiveDirectoryView
         return Sets.FirstOrDefault(candidate =>
             candidate is { Scheme: ArchiveVolumeScheme.PartNumbered, FirstVolume: { } first } &&
             ArchiveSetIdentity.BaseOfFirstPart(first) is { } candidateBase &&
-            string.Equals(candidateBase, baseName, PathNames.Comparison) &&
+            // A base, not a file name: bases match ignoring case, as ArchiveVolumes groups them.
+            string.Equals(candidateBase, baseName, StringComparison.OrdinalIgnoreCase) &&
             (record.Volumes.Count == 0 || record.Volumes.Any(volume => candidate.Members.Contains(volume, PathNames.Comparer))));
     }
 }
