@@ -1,5 +1,7 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
+import { renderTargetChoice, ServerFolderBrowser, type OfferedTarget } from "./destination-target";
+import type { TargetId } from "./transport";
 
 interface PendingHandoff {
   id: string;
@@ -21,8 +23,15 @@ const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
 const keepButton = document.getElementById("keepInBrowser") as HTMLButtonElement;
 const favoritesField = document.getElementById("favoritesField") as HTMLLabelElement;
 const favoritesSelect = document.getElementById("favorites") as HTMLSelectElement;
-// The folder the window opened with. Sent only when changed, so the app keeps deciding the default.
+const targetField = document.getElementById("targetField") as HTMLFieldSetElement;
+const targetChoice = document.getElementById("targetChoice") as HTMLDivElement;
+const localHint = document.getElementById("localHint") as HTMLSpanElement;
+const serverHint = document.getElementById("serverHint") as HTMLSpanElement;
+// The folder the window opened with, for the target chosen. Sent only when changed, so the app (or the
+// server) keeps deciding the default.
 let defaultDestination = "";
+let targets: OfferedTarget[] = [];
+let target: TargetId = "local";
 let held = false;
 let finished = false;
 // There is no request to confirm (no id, expired, or the worker could not be reached).
@@ -69,6 +78,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       handoff?: PendingHandoff;
       held?: boolean;
       defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string };
+      targets?: OfferedTarget[];
+      target?: TargetId;
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -78,17 +89,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     urlInput.value = response.handoff.url;
     nameInput.value = response.handoff.suggestedFileName || "";
-    defaultDestination = response.defaults?.destination ?? "";
-    destinationInput.value = defaultDestination;
     startSelect.value = response.defaults?.startMode === "later" ? "later" : "now";
-    const favorites = response.defaults?.favorites ?? [];
-    for (const favorite of favorites) {
-      const option = document.createElement("option");
-      option.value = favorite.path;
-      option.textContent = favorite.name === favorite.path ? favorite.path : `${favorite.name} (${favorite.path})`;
-      favoritesSelect.append(option);
-    }
-    favoritesField.classList.toggle("hidden", favorites.length === 0);
+    // EXT.R1: This PC or the paired server, each with its own default folder. One target: no choice shown.
+    targets = Array.isArray(response.targets) && response.targets.length > 0
+      ? response.targets
+      : [{ id: "local", label: "This PC", chooser: "dialog", defaultFolder: response.defaults?.destination ?? "",
+        favorites: response.defaults?.favorites ?? [] }];
+    const first = targets.find((offered) => offered.id === response.target) ?? targets[0]!;
+    renderTargetChoice(targetField, targetChoice, targets, first.id, useTarget);
+    useTarget(first);
     // A caught download waits in the browser while this window is open; leaving it there is a choice.
     held = response.held === true;
     if (held) holdWorker();
@@ -115,6 +124,7 @@ async function sendToApp(): Promise<void> {
       fileName: nameInput.value.trim(),
       destination: destinationInput.value.trim() === defaultDestination ? "" : destinationInput.value.trim(),
       startMode: startSelect.value,
+      target,
     })) as {
       ok?: boolean;
       ack?: { accepted?: boolean; duplicate?: boolean; error?: string; job?: { fileName?: string } };
@@ -127,7 +137,8 @@ async function sendToApp(): Promise<void> {
     }
 
     if (!response.ack?.accepted) {
-      showError(response.ack?.error || "Inbound Download Manager rejected this request.");
+      showError(response.ack?.error || (response.ack as { message?: string } | undefined)?.message ||
+        (target === "server" ? "The Inbound server rejected this request." : "Inbound Download Manager rejected this request."));
       return;
     }
 
@@ -191,7 +202,41 @@ document.addEventListener("keydown", (event) => {
            (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
 });
 
+const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
+  destinationInput.value = path;
+}, showError);
+
+/** Switches the window to one target: its default folder, its favorites, its wording. */
+function useTarget(offered: OfferedTarget): void {
+  target = offered.id;
+  defaultDestination = offered.defaultFolder ?? "";
+  destinationInput.value = defaultDestination;
+  destinationInput.placeholder = offered.id === "server" ? "The server's default folder" : "The app's default folder";
+  serverFolders.close();
+  favoritesSelect.replaceChildren(favoritesSelect.options[0] ?? new Option("Pick a favorite folder…", ""));
+  for (const favorite of offered.favorites ?? []) {
+    const option = document.createElement("option");
+    option.value = favorite.path;
+    option.textContent = favorite.name === favorite.path ? favorite.path : `${favorite.name} (${favorite.path})`;
+    favoritesSelect.append(option);
+  }
+  favoritesField.classList.toggle("hidden", (offered.favorites ?? []).length === 0);
+  // The server did not answer when the window opened: say so now rather than only after Download.
+  if (offered.id === "server" && offered.error) showError(offered.error);
+  else errorBox.classList.add("hidden");
+  localHint.classList.toggle("hidden", offered.id === "server");
+  serverHint.classList.toggle("hidden", offered.id !== "server");
+  void fitWindowToContent().catch(() => undefined);
+}
+
 browseDestinationButton.addEventListener("click", async () => {
+  // This PC: the desktop app's folder dialog. The server: its own folders, listed here.
+  if (target === "server") {
+    if (!gate.canPick) return;
+    if (serverFolders.isOpen) serverFolders.close();
+    else void serverFolders.open(destinationInput.value).then(() => fitWindowToContent().catch(() => undefined));
+    return;
+  }
   await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
 });
 import { fitWindowToContent } from "./fit-window";

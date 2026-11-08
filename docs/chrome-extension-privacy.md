@@ -5,7 +5,9 @@ for Firefox), and what the Inbound Download Manager desktop app does with the da
 Where it says Chrome, the same holds for the other browsers.
 
 **No data about you reaches the developer.** The extension has no analytics, telemetry, advertising or
-crash reporting, and the developer runs no server that receives data from it or from the desktop app.
+crash reporting, and the developer runs no server that receives data from it or from the desktop app. If you
+pair the extension with an Inbound server of your own (the Docker or Linux version), it also sends downloads
+there; that server is yours, not the developer's (see "Sending to your own server").
 GitHub, which hosts the app's updates, shows the developer only a total count of how many times each
 release file was downloaded, and that count includes update checks.
 
@@ -13,7 +15,8 @@ release file was downloaded, and that count includes update checks.
 
 It sends downloads from Chrome to the Inbound Download Manager desktop app for Windows, on the same
 computer, using Chrome's native messaging. The app must be installed separately. Without it, downloads
-stay in Chrome. The extension makes no network requests of its own: the app does the downloading.
+stay in Chrome. The extension makes no network requests of its own, except to an Inbound server you paired
+it with: the app or the server does the downloading.
 
 ## What it reads, and when
 
@@ -82,6 +85,31 @@ are kept in Chrome's session storage until you choose Download or Keep in browse
 
 The extension does not run in Incognito windows. YouTube is not supported.
 
+## Sending to your own server (optional)
+
+In Settings, under Inbound server, you can pair the extension with an Inbound server you run, by typing its
+address and a one-time code from the server's web UI. Until you do, nothing below happens.
+
+- **What the extension keeps:** the server's address, the name it was paired under, and a token the server
+  gave it, in Chrome's local storage on this computer (not synced). The token lets the extension send
+  downloads and use the popup's actions on that server, and nothing else. It is not encrypted by the
+  extension; anyone who can read your browser profile can read it. Unpair deletes it from the extension;
+  remove the browser from the web UI's Paired browsers list too, so the token stops working there.
+- **What goes to the server:** for each download you send there (automatically, if you chose the server
+  for automatic downloads, or by choosing Server in the folder window), the same details as for the
+  desktop app, listed above, your cookies for that site included. The extension asks Chrome for access to
+  the server's address when you pair. Its requests carry the token, never Chrome's cookies for the
+  server. If the address starts with http://, the token and these details cross your network
+  unencrypted; use https:// when the network is not only yours.
+- **What the server gives the extension:** its download list for the popup (the newest 20, labelled
+  Server), its default folder and favorite folders for the folder window, and the names of its folders
+  under its download folders when you choose Choose… there.
+- **What the server keeps:** like the desktop app, a record of each download in its data folder until you
+  remove it there, the cookies encrypted with a key kept in the same data folder (anyone who can read the
+  whole data folder can read them). Its logs do not contain cookies or the token.
+- A download meant for the server that the server does not take stays in Chrome. It is never sent to the
+  desktop app instead, and the other way round.
+
 ## What the desktop app keeps
 
 The app stores each download's record on your computer, in
@@ -127,6 +155,10 @@ tray icon, then delete that folder.
   Options. These requests contain no data about you or your downloads beyond what any web request reveals,
   such as your IP address.
 
+- **Your own Inbound server**, if you paired one, for the downloads you send there (see "Sending to your own
+  server"). Anything between this computer and the server, such as a reverse proxy, sees what the server sees
+  unless the connection uses https.
+
 Your data is not sold, not used for advertising or credit decisions, and not read by the developer. It is
 not transferred except as described above.
 
@@ -138,7 +170,8 @@ including the Limited Use requirements.
 
 In the extension's Settings you can turn automatic sending on or off, limit it to certain file types (a file
 whose name has no extension is still sent, unless it is a web page), and exclude sites. You can pause catching
-for five minutes from the toolbar popup. Removing the extension stops it reading or sending anything. Downloads
+for five minutes from the toolbar popup. You can pair or unpair your own server, and choose whether automatic
+downloads go to this computer or to it. Removing the extension stops it reading or sending anything. Downloads
 already in the app stay there, keep running, and keep their saved cookies until you remove them.
 
 ## Changes and contact

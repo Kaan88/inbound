@@ -79,7 +79,12 @@ function fakeElement(id) {
   const classes = new Set();
   const element = {
     id, value: '', disabled: false, checked: false, indeterminate: false, textContent: '', title: '', className: '', type: '',
-    children: [],
+    children: [], placeholder: '', attributes: {},
+    // A select's first option ("Pick a favorite folder..."), which the folder window keeps when it lists favorites.
+    options: [{ value: '', textContent: '' }],
+    setAttribute: (name, value) => { element.attributes[name] = String(value); },
+    getAttribute: name => element.attributes[name] ?? null,
+    removeAttribute: name => { delete element.attributes[name]; },
     classList: {
       add: name => classes.add(name),
       remove: name => classes.delete(name),

@@ -6,12 +6,19 @@ import { isUnsupportedUrl } from "./unsupported-sites";
 export type StartMode = "now" | "later";
 /** "default": send straight to the app's default folder. "ask": open the folder window first. */
 export type DestinationMode = "default" | "ask";
+/** Where a download goes: the desktop app on this PC, or the user's paired Inbound server (transport.ts). */
+export type DefaultTarget = "local" | "server";
 
 export interface Settings {
   enabled: boolean;
   autoIntercept: boolean;
   startMode: StartMode;
   destinationMode: DestinationMode;
+  /**
+   * Where automatic catches go, and which target the folder window starts on. "server" counts only while a
+   * server is paired; otherwise everything goes to this PC.
+   */
+  defaultTarget: DefaultTarget;
   /** Empty means every file type that is not excluded. */
   interceptedExtensions: string[];
   excludedExtensions: string[];
@@ -53,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoIntercept: false,
   startMode: "now",
   destinationMode: "default",
+  defaultTarget: "local",
   interceptedExtensions: [],
   excludedExtensions: [...DEFAULT_EXCLUDED_EXTENSIONS],
   excludedHosts: [],
@@ -78,6 +86,7 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...stored };
   if (settings.destinationMode !== "ask") settings.destinationMode = "default";
+  if (settings.defaultTarget !== "server") settings.defaultTarget = "local";
   if ((stored.rulesVersion ?? 1) >= RULES_VERSION) {
     return { settings, changed: false };
   }

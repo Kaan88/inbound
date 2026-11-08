@@ -474,6 +474,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyAsync(string? text, CancellationToken cancellationToken = default)
     {
+        text = Resolve(text);
         var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
         return first.Kind == RemoteInputKind.OrdinaryLink
             ? RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false))
@@ -486,9 +487,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         var plain = await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false);
         List<RemoteClassifierProvider>? withHosters = null;
         var answers = new List<RemoteInputClassification>(inputs.Count);
-        foreach (var input in inputs)
+        foreach (var given in inputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var input = Resolve(given);
             var first = RemoteInputClassifier.Classify(input, plain);
             if (first.Kind == RemoteInputKind.OrdinaryLink)
             {
@@ -510,6 +512,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default)
     {
+        text = Resolve(text);
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
@@ -750,6 +753,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
+        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
@@ -837,6 +841,15 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// there is not the machine's user. Null on the desktop, where any file the user names may be read.
     /// </summary>
     public PathRoots? Roots { get; set; }
+
+    /// <summary>
+    /// On a server, turns a reference to a file a client uploaded (the server's own form, such as <c>upload:…</c>) into
+    /// that file's path, or gives null for anything else. The client then never learns where the server keeps it.
+    /// </summary>
+    public Func<string, string?>? ResolveReference { get; set; }
+
+    private string? Resolve(string? text) =>
+        text is not null && ResolveReference is { } resolve && resolve(text.Trim()) is { } path ? path : text;
 
     private async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
     {

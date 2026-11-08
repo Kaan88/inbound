@@ -14,7 +14,9 @@ namespace DownloadManager.Server;
 /// </summary>
 internal static class WebSocketTransport
 {
-    public static async Task RunAsync(WebSocket socket, HostCommandDispatcher dispatcher, IHostLog log, CancellationToken cancellationToken)
+    /// <param name="onMessage">Called for each message the client sends (the session's activity).</param>
+    public static async Task RunAsync(WebSocket socket, HostCommandDispatcher dispatcher, IHostLog log, CancellationToken cancellationToken,
+        Action? onMessage = null)
     {
         await using var client = new WebSocketClientSession(socket, log);
         Task? writer = null;
@@ -29,6 +31,7 @@ internal static class WebSocketTransport
                 var message = await (pendingRead ?? ReadAsync(socket, cancellationToken)).ConfigureAwait(false);
                 pendingRead = null;
                 if (message is null) break;
+                onMessage?.Invoke();
                 if (dispatcher.RejectIfIncompatible(client, message)) break;
 
                 if (HostCommandDispatcher.NeedsLifetime(message.Type))

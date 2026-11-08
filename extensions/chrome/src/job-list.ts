@@ -2,6 +2,8 @@
 
 export interface JobSummary {
   id: string;
+  /** Where the download is, when a server is paired too ("local" or "server"); absent means this PC. */
+  target?: "local" | "server";
   fileName: string;
   state: string;
   receivedBytes: number;
@@ -42,6 +44,18 @@ export function latestJobs(jobs: readonly JobSummary[], limit = POPUP_JOB_LIMIT)
     .sort((left, right) => createdTime(right.job) - createdTime(left.job) || left.index - right.index)
     .slice(0, limit)
     .map((entry) => entry.job);
+}
+
+/**
+ * The popup's list when a server is paired too: the newest of each place, this PC first, so one busy place
+ * can't push the other out of view. Without targets it is latestJobs.
+ */
+export function latestJobsByTarget(jobs: readonly JobSummary[], limit = POPUP_JOB_LIMIT): JobSummary[] {
+  if (!jobs.some((job) => job?.target === "server")) return latestJobs(jobs, limit);
+  return [
+    ...latestJobs(jobs.filter((job) => job?.target !== "server"), limit),
+    ...latestJobs(jobs.filter((job) => job?.target === "server"), limit),
+  ];
 }
 
 /** Pause or resume (retry for a failed one), then delete; only what the app says the job allows. */

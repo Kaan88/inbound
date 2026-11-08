@@ -1,5 +1,7 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
+import { renderTargetChoice, ServerFolderBrowser, type OfferedTarget } from "./destination-target";
+import type { TargetId } from "./transport";
 
 interface PageLink {
   url: string;
@@ -41,6 +43,8 @@ const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const successBox = document.getElementById("success") as HTMLParagraphElement;
 
+// EXT.R1: where the batch goes. The background offers the paired server beside this PC.
+let target: TargetId = "local";
 let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
@@ -220,6 +224,7 @@ async function sendToApp(): Promise<void> {
       tabId: Number.isFinite(requestedTabId) ? requestedTabId : undefined,
       destination: destinationInput.value.trim(),
       startMode: startSelect.value,
+      target,
       urls: [...selected].map((url) => ({ url })),
     })) as BatchResponse;
 
@@ -251,9 +256,41 @@ async function sendToApp(): Promise<void> {
 
 cancelButton.addEventListener("click", () => window.close());
 
+const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
+  destinationInput.value = path;
+}, showError);
+
+function useTarget(offered: OfferedTarget): void {
+  target = offered.id;
+  serverFolders.close();
+  // A folder typed for one target means nothing on the other.
+  destinationInput.value = "";
+  destinationInput.placeholder = offered.id === "server" ? "Use the server's default folder" : "Use the app's default folder";
+}
+
+async function loadTargets(): Promise<void> {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "dm.targets" }) as { ok?: boolean; targets?: OfferedTarget[]; target?: TargetId };
+    const offered = response?.ok && Array.isArray(response.targets) ? response.targets : [];
+    if (offered.length === 0) return;
+    const first = offered.find((item) => item.id === response.target) ?? offered[0]!;
+    renderTargetChoice(document.getElementById("targetField") as HTMLElement, document.getElementById("targetChoice") as HTMLElement,
+      offered, first.id, useTarget);
+    useTarget(first);
+  } catch { /* this PC, as before a server could be paired */ }
+}
+
 browseDestinationButton.addEventListener("click", async () => {
+  if (target === "server") {
+    if (!gate.canPick) return;
+    if (serverFolders.isOpen) serverFolders.close();
+    else void serverFolders.open(destinationInput.value);
+    return;
+  }
   await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
 });
+
+void loadTargets();
 
 void loadLinks();
 import { fitWindowToContent } from "./fit-window";
