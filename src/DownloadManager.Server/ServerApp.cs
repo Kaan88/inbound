@@ -1,0 +1,377 @@
+using System.Net.WebSockets;
+using System.Text.Json;
+using DownloadManager.Contracts;
+using DownloadManager.Core;
+using DownloadManager.Host;
+using DownloadManager.Persistence;
+using DownloadManager.Runtime;
+using DownloadManager.Runtime.Archives;
+using DownloadManager.Runtime.Ipc;
+using DownloadManager.Runtime.Remote;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace DownloadManager.Server;
+
+/// <summary>
+/// The headless server: what the desktop Host runs (Runtime, Engine, Persistence, Archives, Containers and the TorBox
+/// provider) behind HTTP instead of a named pipe, without the Windows parts (tray, sounds, clipboard, sleep prevention,
+/// shutdown actions, start at sign-in, native-host registration, updater).
+/// <list type="bullet">
+/// <item><c>GET /api/ws</c>: WebSocket, one envelope per text message; hello and snapshot, then events.</item>
+/// <item><c>POST /api/ipc</c>: one request envelope, one reply.</item>
+/// <item><c>GET /health</c>: liveness, no sign-in.</item>
+/// <item>Everything else: the static web UI from <c>wwwroot</c>.</item>
+/// </list>
+/// There is no sign-in yet (D2): <see cref="ServerOptions.DescribeUnsafeBinding"/> keeps it on loopback unless that is
+/// explicitly allowed, and the <see cref="OriginCheck"/> keeps other web pages from driving it through a browser.
+/// </summary>
+public sealed class ServerApp : IAsyncDisposable
+{
+    private readonly WebApplication _web;
+    private readonly ServerLog _log;
+    private readonly DownloadManagerService _service;
+    private readonly HostCommandDispatcher _dispatcher;
+    private readonly ArchiveCoordinator _archives;
+    private readonly RemoteJobCoordinator _remoteJobs;
+    private readonly RemoteCommands _remoteCommands;
+    private readonly RemoteProviderSetup _remote;
+    private readonly HttpDownloadEngine _engine;
+    private int _stopped;
+
+    private ServerApp(WebApplication web, ServerLog log, DownloadManagerService service, HostCommandDispatcher dispatcher,
+        ArchiveCoordinator archives, RemoteJobCoordinator remoteJobs, RemoteCommands remoteCommands, RemoteProviderSetup remote,
+        HttpDownloadEngine engine, StoragePaths paths)
+    {
+        _web = web;
+        _log = log;
+        _service = service;
+        _dispatcher = dispatcher;
+        _archives = archives;
+        _remoteJobs = remoteJobs;
+        _remoteCommands = remoteCommands;
+        _remote = remote;
+        _engine = engine;
+        Paths = paths;
+    }
+
+    public StoragePaths Paths { get; }
+
+    public DownloadManagerService Service => _service;
+
+    /// <summary>Where Kestrel really listens, with the port it chose for <c>:0</c>.</summary>
+    public IReadOnlyList<Uri> Addresses =>
+        _web.Services.GetService(typeof(IServer)) is IServer server && server.Features.Get<IServerAddressesFeature>() is { } feature
+            ? feature.Addresses.Select(address => new Uri(address)).ToList()
+            : [];
+
+    /// <summary>Composes everything and starts listening. Throws <see cref="ServerStartException"/> for a configuration it refuses.</summary>
+    public static async Task<ServerApp> StartAsync(ServerOptions options, bool logToConsole = true, CancellationToken cancellationToken = default)
+    {
+        if (options.DescribeUnsafeBinding() is { } refusal) throw new ServerStartException(refusal);
+
+        var paths = new StoragePaths(Path.GetFullPath(options.DataDirectory));
+        paths.EnsureCreated();
+        var log = new ServerLog(paths.LogsDirectory, logToConsole);
+        log.Info($"Server starting; version {Protocol.HostVersion}, state '{paths.Root}', roots {string.Join(", ", options.Roots)}.");
+        if (options.AllowUnauthenticated)
+            log.Warn("No sign-in: anyone who can reach this server controls it. Keep it off networks you don't trust.");
+
+        // Before any store opens: everything secret the stores read or write is sealed with this key.
+        var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
+        SecretProtector.Use(AesGcmSecretProtector.OpenOrCreate(keyFile, log.Warn));
+
+        await SeedFirstStartAsync(paths, options, cancellationToken).ConfigureAwait(false);
+
+        var jobStore = new JsonJobStore(paths, log.Info);
+        var checkpoints = new JsonCheckpointStore(paths);
+        var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
+        var settingsStore = new JsonSettingsStore(paths);
+        var engine = new HttpDownloadEngine(
+            new EngineOptions
+            {
+                MaxAttempts = 5,
+                InitialRetryDelay = TimeSpan.FromSeconds(2),
+                MaxRetryDelay = TimeSpan.FromSeconds(60),
+                ConnectTimeout = TimeSpan.FromSeconds(20),
+                ReadTimeout = TimeSpan.FromSeconds(90),
+                AllowLocalNetwork = true,
+            },
+            checkpoints: checkpoints,
+            mediaCheckpoints: mediaCheckpoints);
+        var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
+        log.Secrets = remote.Registry;
+
+        // No completion actions, sleep prevention or post-download command: those start programs or act on the machine,
+        // which a server's clients may not ask for (PlatformCapabilities.SupportsProgramSettings is off).
+        var service = new DownloadManagerService(
+            paths, jobStore, checkpoints, settingsStore, engine, log.Info,
+            mediaCheckpoints: mediaCheckpoints,
+            ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(),
+            linkBroker: remote.Broker,
+            linkSecrets: remote.Registry);
+        foreach (var provider in remote.Registry.All)
+        {
+            // Addresses saved earlier may turn out to hold a key that was only just entered.
+            if (provider.Account is { } account)
+                account.Changed += (_, _) => _ = Observe(service.ProtectStoredSecretsAsync(), log, "Protecting saved addresses");
+        }
+
+        var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
+        var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
+        var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
+        service.DirectAddresses = remoteJobs;
+        await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
+        var archivesStarted = false;
+        try
+        {
+            await archives.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            archivesStarted = true;
+        }
+        catch (Exception ex)
+        {
+            log.Error($"Archive extraction could not start: {ex.GetType().Name}");
+            await archives.ShutdownAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        var remoteStarted = false;
+        try
+        {
+            await remoteJobs.StartAsync().ConfigureAwait(false);
+            remoteStarted = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.Warn($"Remote jobs could not start: {ex.GetType().Name}");
+        }
+
+        service.NativeHostRegistered = static () => false;
+        service.TrayAvailable = false;
+
+        var dispatcher = new HostCommandDispatcher(service, new ServerPlatform(), log, remoteStarted ? remoteCommands : null)
+        {
+            Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
+            Folders = new FolderBrowser(options.Roots),
+        };
+        archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
+        service.SettingsChanged += (_, _) => log.Info("Settings updated.");
+        dispatcher.Start();
+
+        var web = BuildWeb(options, dispatcher, log);
+        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths);
+        try
+        {
+            await web.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        log.Info($"Server ready on {string.Join(", ", app.Addresses)}.");
+        return app;
+    }
+
+    /// <summary>Waits until the process is asked to stop (Ctrl+C, SIGTERM from <c>docker stop</c>).</summary>
+    public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => _web.WaitForShutdownAsync(cancellationToken);
+
+    /// <summary>A fresh data folder starts with downloads in the first root and nothing that wants a desktop.</summary>
+    private static async Task SeedFirstStartAsync(StoragePaths paths, ServerOptions options, CancellationToken cancellationToken)
+    {
+        if (File.Exists(paths.SettingsFile)) return;
+        var store = new JsonSettingsStore(paths);
+        var settings = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
+        settings.DefaultDownloadDirectory = Path.GetFullPath(options.DefaultDownloadDirectory);
+        settings.NotifyOnCompletion = false;
+        settings.PlayCompletionSound = false;
+        settings.ClipboardMonitoring = false;
+        settings.LaunchAtStartup = false;
+        await store.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static WebApplication BuildWeb(ServerOptions options, HostCommandDispatcher dispatcher, ServerLog log)
+    {
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = AppContext.BaseDirectory,
+            WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot"),
+        });
+        builder.WebHost.UseUrls([.. options.Urls]);
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = Protocol.MaxFrameBytes);
+        // The server's own log carries what matters; ASP.NET's request logging would repeat addresses it can't redact.
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
+
+        var web = builder.Build();
+        web.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
+        web.Use(OriginCheck.Middleware(options.AllowedHostNames));
+
+        var stopping = web.Lifetime.ApplicationStopping;
+        web.MapGet("/health", () => Results.Json(new { status = "ok", version = Protocol.HostVersion }));
+
+        web.Map("/api/ws", async context =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("A WebSocket upgrade is expected here.").ConfigureAwait(false);
+                return;
+            }
+
+            using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);
+            await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token).ConfigureAwait(false);
+        });
+
+        web.MapPost("/api/ipc", async context =>
+        {
+            IpcMessage? request;
+            try
+            {
+                request = await JsonSerializer.DeserializeAsync<IpcMessage>(context.Request.Body, IpcJson.Options, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch (JsonException)
+            {
+                request = null;
+            }
+
+            if (request is null || string.IsNullOrWhiteSpace(request.Type) || string.IsNullOrWhiteSpace(request.Id))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsJsonAsync(new { error = "One IPC envelope with v, type and id is expected." }).ConfigureAwait(false);
+                return;
+            }
+
+            var session = new OneShotSession(request.Id);
+            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);
+            if (!dispatcher.RejectIfIncompatible(session, request))
+                await dispatcher.DispatchAsync(session, request, lifetime.Token).ConfigureAwait(false);
+
+            var reply = await session.Reply.WaitAsync(TimeSpan.FromMinutes(5), lifetime.Token).ConfigureAwait(false);
+            context.Response.ContentType = "application/json";
+            await JsonSerializer.SerializeAsync(context.Response.Body, reply, IpcJson.Options, lifetime.Token).ConfigureAwait(false);
+        });
+
+        if (Directory.Exists(builder.Environment.WebRootPath))
+        {
+            web.UseDefaultFiles();
+            web.UseStaticFiles(new StaticFileOptions { FileProvider = new PhysicalFileProvider(builder.Environment.WebRootPath) });
+        }
+
+        return web;
+    }
+
+    /// <summary>Stops listening first, so no client sees a half-stopped service, then the rest in the Host's order.</summary>
+    public async Task StopAsync()
+    {
+        if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
+        _log.Info("Server stopping.");
+        _dispatcher.Stop();
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _web.StopAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Web shutdown: {ex.GetType().Name}");
+        }
+
+        await Step(() => _archives.ShutdownAsync(CancellationToken.None), "Archive shutdown").ConfigureAwait(false);
+        await Step(() => _remoteJobs.StopAsync(), "Remote jobs shutdown").ConfigureAwait(false);
+        await Step(() => _service.ShutdownAsync(CancellationToken.None), "Service shutdown").ConfigureAwait(false);
+        _remoteCommands.Dispose();
+        _remote.Dispose();
+        _engine.Dispose();
+        _log.Info("Server stopped.");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+        await _web.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private async Task Step(Func<Task> step, string name)
+    {
+        try
+        {
+            await step().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"{name}: {ex.GetType().Name}");
+        }
+    }
+
+    private static async Task Observe(Task task, ServerLog log, string what)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            log.Error($"{what} failed: {ex.GetType().Name}");
+        }
+    }
+}
+
+/// <summary>A configuration the server refuses to start with. The message says what to change.</summary>
+public sealed class ServerStartException(string message) : Exception(message);
+
+/// <summary>
+/// Refuses a request to <c>/api/</c> that a web page on another site made through the user's browser: a WebSocket
+/// upgrade or a POST whose <c>Origin</c> isn't this server's own. A request without an <c>Origin</c> (curl, the CLI, a
+/// test) passes, because a browser always sends one for these. Until D2's sign-in this is what keeps a page the user
+/// happens to open from driving the server on their network.
+/// A page can also make its own name point at this server (DNS rebinding), and then its origin and the Host header
+/// agree. So a browser request must also address the server by an IP address, by <c>localhost</c>, or by a name listed
+/// in <c>DOWNLOADMANAGER_HOSTS</c> (separated by <c>;</c> or <c>,</c>): a rebinding page can only use a name of its own.
+/// </summary>
+public static class OriginCheck
+{
+    public const string HostsVariable = "DOWNLOADMANAGER_HOSTS";
+
+    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames) => async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api") && Refusal(context.Request, allowedNames) is { } refusal)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync(refusal).ConfigureAwait(false);
+            return;
+        }
+
+        await next().ConfigureAwait(false);
+    };
+
+    public static List<string> ParseHosts(string? value) =>
+        (value ?? string.Empty).Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>Why the request is refused, or null.</summary>
+    public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames)
+    {
+        var origin = request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin)) return null;
+        var own = $"{request.Scheme}://{request.Host.Value}";
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var from) || !Uri.TryCreate(own, UriKind.Absolute, out var self) ||
+            !string.Equals(from.Scheme, self.Scheme, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(from.Host, self.Host, StringComparison.OrdinalIgnoreCase) ||
+            from.Port != self.Port)
+            return "Requests from another site are refused.";
+
+        var name = self.IdnHost;
+        if (self.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 ||
+            string.Equals(name, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            allowedNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+            return null;
+        return $"This server isn't known by the name {name}. Use its IP address, or add the name to {HostsVariable}.";
+    }
+}
