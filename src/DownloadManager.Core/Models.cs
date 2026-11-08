@@ -53,6 +53,13 @@ public enum DownloadSource
     ClipboardMonitor,
     Import,
     Remote,
+    /// <summary>
+    /// UI.B14: CLI add-batch. Headless like <see cref="Cli"/> (no progress window per job), and unlike a single CLI
+    /// add, a running main window opens no completion window per job either: a long batch would flood windows.
+    /// </summary>
+    CliBatch,
+    /// <summary>UI.B14: CLI import of a list. Headless and without per-job completion windows, like <see cref="CliBatch"/>.</summary>
+    CliImport,
 }
 
 public enum StartMode

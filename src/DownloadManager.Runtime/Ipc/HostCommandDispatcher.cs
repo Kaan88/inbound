@@ -189,7 +189,7 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.HostStatus:
                     await Reply(client, message, MessageTypes.HostStatusResult,
-                        _service.GetSnapshot().Status).ConfigureAwait(false);
+                        _service.GetStatus()).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.HostCleanOrphans:
@@ -355,7 +355,7 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.UpdateDefer:
                     if (!_platform.Capabilities.SupportsUpdater)
                     {
-                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = UpdatesUnavailable, Settings = _service.GetSnapshot().Settings }).ConfigureAwait(false);
+                        await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = UpdatesUnavailable, Settings = _service.GetSettings() }).ConfigureAwait(false);
                         break;
                     }
 
@@ -383,12 +383,12 @@ public sealed partial class HostCommandDispatcher
                         new SettingsResult
                         {
                             Ok = true,
-                            Settings = _service.GetSnapshot().Settings,
+                            Settings = _service.GetSettings(),
                         }).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.SettingsDownloadFolders:
-                    var folderSettings = _service.GetSnapshot().Settings;
+                    var folderSettings = _service.GetSettings();
                     await Reply(client, message, MessageTypes.SettingsDownloadFoldersResult,
                         new DownloadFoldersResult
                         {
@@ -415,7 +415,7 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
                     if (!_platform.Capabilities.SupportsProgramSettings &&
-                        _service.GetSnapshot().Settings is var currentSettings && ChangesProgramSettings(update.Settings, currentSettings))
+                        _service.GetSettings() is var currentSettings && ChangesProgramSettings(update.Settings, currentSettings))
                     {
                         await Reply(client, message, MessageTypes.SettingsResult,
                             new SettingsResult { Error = ProgramSettingsUnavailable, Settings = currentSettings }).ConfigureAwait(false);
@@ -568,7 +568,7 @@ public sealed partial class HostCommandDispatcher
             return;
         }
 
-        var settings = _service.GetSnapshot().Settings;
+        var settings = _service.GetSettings();
         if (!settings.BrowserIntegrationEnabled)
         {
             await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck

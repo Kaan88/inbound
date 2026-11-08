@@ -70,6 +70,98 @@
 - Review fixes to `ui-drive.ps1`: `~` prefix matches could press the title-bar Minimize/Maximize/Close; `click:`/`right:` sent real mouse input without checking the test UI was in front and could click an offscreen element; `closewin:` with no title closed every secondary window. All fixed; the offscreen refusal was not exercised (no offscreen match came up).
 - Not done: high-DPI runs (only simulated by the accessibility script), the owner's look at the screenshots, the other dialogs' UI.B8 guard (about 40 `ShowAsync` calls; owner question whether to convert all).
 
+### Performance campaign: soak, GC, closing the window, UP.B2 (branch `perf`, 2026-11-08)
+
+Evidence: `artifacts\campaign\20261108-perf\` and `artifacts\soak\` in the `perf` worktree (not tracked). Other
+work ran on this PC at the same time and loaded the CPU, so timings are from a busy machine; each timing below
+was repeated (three runs, or two GC runs) and the repeats agreed.
+
+- **UP.B2 (implemented, automated tests):** the update helper writes the new version into Setup's uninstall
+  entry (`DisplayVersion`, and the major/minor DWORDs when present) under
+  `HKCU\...\Uninstall\{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}_is1`, only when the key exists and its
+  `InstallLocation` is the folder being updated; it never creates the key, and a failed update restores the old
+  values. `UpdateUninstallEntryTests` (7) use a fake key through the test-only `-UninstallKey` parameter; 4 fail
+  on the old script, and the rollback test fails without the script's restore call. Not yet seen on a real in-app update.
+- **PERF.2 soak (partial, running):** `scripts/soak.sh` (Git Bash) runs a test instance with 5,040 jobs and a
+  new TestServer download every 20 s in six kinds (segmented, 503 then served, cut short, slow, no ranges, 500
+  forever), and writes `samples.csv` (Host, window, TestServer: private bytes, working set, handles, threads,
+  CPU, every minute) and `gc.csv` (the Host's GC every minute, `DOWNLOADMANAGER_GC_LOG`).
+  - The 8-hour run is `artifacts\soak\soak-8h\` in the worktree. It started 02:17 UTC and stops by itself at
+    about 10:19 UTC. To stop it earlier, run `bash scripts/soak.sh --stop soak-8h` from the worktree. That
+    creates the `stop` file, and the driver then shuts down its own Host, window and TestServer.
+  - It runs the build of `eb4404a`, from before the fixes below, so it measures the old Host.
+  - First 142 minutes (`soak-8h-summary-at-*.txt` in the evidence folder):
+    - Host: private mean 256 MB, max 552 MB, trend -10 MB/h; handles 490 to 495; threads 17 to 18; 0.43 s CPU
+      a minute.
+    - Window, hidden after 02:59: 305 to 315 MB (+3 MB/h); 0.53 s CPU a minute with 5,000 jobs while downloads
+      stream.
+    - No CLI errors.
+    - The Host's GC heap swings between about 100 and 450 MB and comes back down. This is snapshot garbage
+      (PERF.7), not a leak.
+    - The soak's TestServer was replaced twice while running (driver.log). Its content cache was the problem,
+      now fixed.
+- **Fixed on the way:**
+  - The tray's once-a-second count and the settings reads built a full snapshot. In 16-minute runs with 5,000
+    jobs this changed the Host from 394 to 199 MB allocated a minute, private mean from 182 to 165 MB, and max
+    from 308 to 214 MB.
+  - UI.B13: the pipe took only 8 clients; now 64.
+  - UI.B14: CLI `add-batch`/`import` opened windows. They now send sources of their own (`cliBatch`,
+    `cliImport`): no progress or completion window per job, the same list labels as before.
+  - UI.B15: segment retries now start over after progress, and the TestServer resets only responses it cuts.
+  - The TestServer's content cache: from 3.2 GB to a 256 MB cap.
+- **PERF.3 (implemented):** the Host now runs with `GCConserveMemory=5`. Default GC, two runs:
+  - private mean 165 and 167 MB, max 214 and 224 MB, committed 140 and 134 MB;
+  - CPU 0.38 to 0.39 s a minute.
+
+  With `GCConserveMemory=5`, two runs:
+  - private mean 104 and 98 MB, max 132 and 130 MB, committed 86 and 85 MB;
+  - CPU 0.37 to 0.40 s a minute;
+  - gen2 collections 2.4 times as often, GC pause 0.03%.
+
+  The built Host with the setting in its runtimeconfig had a private mean of 118 MB, max 148 MB and
+  0.37 s a minute. Measured and not kept: `gcConcurrent=0` (150 MB), and server GC (129 MB, 50 threads).
+  Test: `HostGcSettingsTests`.
+- **PERF.5, "Closing the window ends it":** the option stays off by default for now. The numbers below come from
+  `scripts/perf-window.sh`, and ROADMAP PERF.5 has the details.
+  - Open time, measured to the first frame that shows the list. Each figure is the range of three runs.
+
+    | Jobs | Option on (a cold start) | Option off (showing the hidden window) |
+    | --- | --- | --- |
+    | 0 | 656–667 ms | 289–312 ms |
+    | 500 | 644–688 ms | 311–329 ms |
+    | 5,000 | 1,065–1,129 ms | 390–465 ms |
+
+  - 30 minutes idle with 500 jobs and the window closed:
+    - Option on: no window process at all. The Host used 0.01 s CPU, 0.3 context switches a second and 52 MB.
+    - Option off: the hidden window used 3.0 s CPU (6.1 s an hour), averaged 120 context switches a second
+      (max 205) and held 201 MB. The Host was the same as with the option on.
+  - What is lost with the option on:
+    - the speed graph's history;
+    - completion windows for jobs added from the CLI;
+    - selection, scroll position and open secondary windows.
+
+    Everything else lives in the Host: downloads, the tray, sounds, the browser handoff, the clipboard monitor,
+    and TorBox and remote state.
+  - Recommendation: on by default. It saves about 120 wake-ups a second, 6 s of CPU an hour and 200 MB, at a
+    cost of about 0.35 to 0.65 s per open. The default is left for the owner to change.
+- **Recorded:**
+  - PERF.7: every pipe connection gets the full snapshot, about 8.5 MB with 5,040 jobs.
+  - UI.R24: an idea, keeping the speed history in the Host.
+  - TEST.4: UI Automation can't close the window, and the first posted WM_CLOSE is ignored.
+  - While idle, the Host's handle count rises about 12 a minute and then falls back at once (749 to 443 in the
+    first idle run; 782 to 446 in the second). The handles are released, not leaked. Their source is not found.
+- **Tests:** on the final code, with no failures and no reruns: Core 863, Engine 157, Integration 1,224,
+  Archives 329, Containers 183, TorBox 323 (`tests-*run2*.txt` in the evidence folder). After the review fixes
+  (UI.B14 sources, UP.B2 rollback test, UI.B15 reset order, `perf-window.sh` label), 2026-11-08: Core 863,
+  Engine 158, Integration 1,231, no failures; Archives, Containers and TorBox not rerun. The window was not
+  started to check the labels or completion windows by eye.
+- **Not done:**
+  - The soak's full 8 hours.
+  - A soak on the fixed build.
+  - Checking UP.B2 on a real in-app update.
+  - The TEST.4 root cause.
+  - The review delegation in CLAUDE.md: this workflow step had no way to start a reviewer agent.
+
 ### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
 
 - VM: VirtualBox on E:, Windows 11 Enterprise LTSC evaluation from Microsoft, a new standard user, snapshot `clean-install`. Commands go in through the desktop session's Run dialog (VirtualBox keyboard input) because starting processes through the guest additions fails in this guest; files go both ways through the guest additions.

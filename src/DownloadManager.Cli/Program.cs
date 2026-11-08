@@ -301,7 +301,9 @@ internal static partial class Program
                             StartMode = startOverride ?? entry.StartMode,
                             ConflictPolicy = entry.ConflictPolicy,
                             ExpectedSha256 = entry.ExpectedSha256,
-                            Source = "import",
+                            // UI.B14: headless, and no completion window per job either (DownloadWindows,
+                            // MainWindow), which a long list would flood. Shown as "App", as "import" was.
+                            Source = "cliImport",
                         }).ConfigureAwait(false);
                         var result = reply.GetPayload<AddJobResponse>();
                         if (result.Accepted)
@@ -1202,7 +1204,9 @@ internal static partial class Program
                     DestinationDirectory = destination,
                     StartMode = startMode,
                     ConflictPolicy = conflict ?? "rename",
-                    Source = "batch",
+                    // UI.B14: headless, with no completion window per job (see DownloadWindows): a batch of
+                    // 1,000 must not open 1,000 progress or completion windows, each its own window process.
+                    Source = "cliBatch",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
                     Priority = priority,

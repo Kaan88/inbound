@@ -3556,6 +3556,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 long length;
                 long offset;
                 long requestEnd;
+                long completedBefore;
                 lock (run.Sync)
                 {
                     length = segment.End - segment.Start + 1;
@@ -3564,6 +3565,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         break;
                     }
 
+                    completedBefore = segment.Completed;
                     offset = segment.Start + segment.Completed;
                     requestEnd = segment.End;
                 }
@@ -3794,6 +3796,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 }
                 catch (SegmentFailureException ex)
                 {
+                    // Before the limit is checked, so an attempt that got bytes on the last try allowed still retries.
+                    if (SegmentProgressed(run, segment, completedBefore)) attempt = 0;
                     if (!ex.Retryable || attempt >= _options.MaxAttempts)
                     {
                         throw;
@@ -3812,6 +3816,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     else
                     {
                         var failure = MapException(ex, out var retryable);
+                        if (SegmentProgressed(run, segment, completedBefore)) attempt = 0;
                         if (!retryable || attempt >= _options.MaxAttempts)
                         {
                             throw new SegmentFailureException(failure, retryable);
@@ -3852,6 +3857,20 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         finally
         {
             slot?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Whether this attempt got the segment new bytes. A failure after progress starts the count of attempts over,
+    /// and is checked before the limit, so an attempt that got bytes doesn't count against it even on the last try
+    /// allowed: a server that cuts every response short still delivers the segment a piece at a time, and only
+    /// attempts that get nothing use the retry budget up (UI.B15).
+    /// </summary>
+    private static bool SegmentProgressed(SegmentedRun run, SegmentCheckpoint segment, long completedBefore)
+    {
+        lock (run.Sync)
+        {
+            return segment.Completed > completedBefore;
         }
     }
 

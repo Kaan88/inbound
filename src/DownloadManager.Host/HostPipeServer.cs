@@ -87,6 +87,14 @@ public sealed class HostPipeServer
         }
     }
 
+    /// <summary>
+    /// How many clients can be connected at once. Every progress or completion window is a window process with
+    /// a connection of its own, besides the main window, the browser bridge and the CLI. At 8, the main window
+    /// and seven open progress windows left the browser bridge and the CLI unable to connect at all (PERF.2
+    /// soak). The pipe is the current user's only, so this guards against a runaway, not another user.
+    /// </summary>
+    internal const int MaxClients = 64;
+
     private static NamedPipeServerStream CreatePipe()
     {
         var security = PipeSecurityFactory.CreateForCurrentUser();
@@ -94,7 +102,7 @@ public sealed class HostPipeServer
         return NamedPipeServerStreamAcl.Create(
             PipeNames.HostPipe(),
             PipeDirection.InOut,
-            8,
+            MaxClients,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous,
             64 * 1024,

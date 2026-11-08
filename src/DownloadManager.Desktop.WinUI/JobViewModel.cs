@@ -453,7 +453,8 @@ public sealed class JobViewModel : INotifyPropertyChanged
             "chromeAuto" => "Browser",
             "clipboard" => "Clipboard",
             "cli" => "CLI",
-            "batch" => "Batch",
+            "batch" or "cliBatch" => "Batch",
+            // An import, from the app or the CLI ("cliImport"), has always been shown as App.
             _ => "App",
         };
 
