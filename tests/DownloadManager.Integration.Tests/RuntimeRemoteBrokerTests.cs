@@ -576,18 +576,39 @@ public sealed partial class RuntimeServiceTests
     [Fact]
     public async Task TheProvidersConnectionLimitIsAppliedEvenToASavedHigherOne()
     {
-        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 8);
-        const int size = 16 * Mb;
+        // TorBox's cap (16, TB.L1) is above the default host limit, so both user limits are raised past it here.
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 32);
+        var settings = rig.Ctx.Service.GetSnapshot().Settings;
+        settings.MaxConnectionsPerHost = 32;
+        Assert.True((await rig.Ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        const int size = 32 * Mb;
         var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/capped.bin", size, seed: 917);
         var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
         rig.Mock.CdnBytesPerSecond = 2 * Mb;
 
-        var added = await rig.AddAsync(item, file, maxConnections: 8);
-        Assert.Equal(8, added.RequestedConnections);
+        var added = await rig.AddAsync(item, file, maxConnections: 32);
+        Assert.Equal(32, added.RequestedConnections);
         var completed = await rig.Ctx.WaitFor(added.Id, j => j.State == "completed", TimeSpan.FromSeconds(60));
 
-        Assert.Equal(4, completed.RequestedConnections);
-        Assert.InRange(rig.Mock.PeakCdnConnections, 2, 4);
+        Assert.Equal(16, completed.RequestedConnections);
+        Assert.InRange(rig.Mock.PeakCdnConnections, 2, 16);
+    }
+
+    [Fact]
+    public async Task AJobSavedUnderALowerCapTakesTheUsersCountUpToTheProvidersCap()
+    {
+        // TB.L1: a job added while the cap was 4 keeps 4 in its record; its next run uses min(user's count, cap).
+        await using var rig = await TorBoxRig.CreateAsync(_server, connections: 6);
+        const int size = 8 * Mb;
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "Pack/older.bin", size, seed: 918);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "Pack", [file]);
+
+        var added = await rig.AddAsync(item, file, maxConnections: 4);
+        Assert.Equal(4, added.RequestedConnections);
+        var completed = await rig.Ctx.WaitFor(added.Id, j => j.State == "completed", TimeSpan.FromSeconds(60));
+
+        Assert.Equal(6, completed.RequestedConnections);
+        Assert.Equal(Sha256Of(file.Content), await Hashing.Sha256FileAsync(completed.FinalFilePath));
     }
 
     [Fact]
@@ -947,7 +968,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("[link]", resolution.ToString());
         Assert.False(resolution.ResetLocalData);
         Assert.Equal(file.Size, resolution.ExpectedTotalBytes);
-        Assert.Equal(4, resolution.MaxConnections);
+        Assert.Equal(16, resolution.MaxConnections);
     }
 
     [Theory]
