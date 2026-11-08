@@ -31,8 +31,8 @@ track it.
   once. The extension sends it to `POST /api/pair` and gets a long token (only its hash is kept), listed by name with
   when it was paired and last used, and removable. The extension's Unpair calls `DELETE /api/pair/self` with its
   own token, which removes that token's record only and answers 204 (`PairSelfTests`, 3; documented in
-  `docs/ipc-protocol.md`). The token works only on `POST /api/ipc` (and that call) and only for the
-  extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
+  `docs/ipc-protocol.md`). The token works only on `POST /api/ipc` and on `DELETE /api/pair/self` (its own Unpair), and on
+  `/api/ipc` only for the extension's commands plus `folders.browse` (`BridgeRole.ServerExtension`); replies are filtered the same way, so it
   never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
   (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side is
   built too (stream C transport, next item).

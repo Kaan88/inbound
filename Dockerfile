@@ -9,12 +9,15 @@
 # own, and it runs no command, so a cross build needs no emulation. Nothing in the image needs Node at run time.
 #
 # Base images are pinned by digest (the multi-architecture index), written out in each FROM line so Dependabot
-# (.github/dependabot.yml) can propose new digests; node appears twice and both lines must stay the same. To update
-# one by hand: docker buildx imagetools inspect <image:tag>, take the top "Digest", and change it here. docs/docker.md
+# (.github/dependabot.yml) can propose new digests. Each image is named once: the two Node stages start from the
+# node-base stage, so one digest serves both and a Dependabot PR can't leave them apart. To update one by hand: docker buildx imagetools inspect <image:tag>, take the top "Digest", and change it here. docs/docker.md
 # has the list and how to update 7-Zip.
 
+# ---- Node, for the two stages below ---------------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS node-base
+
 # ---- Web UI: static files only ---------------------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS webui
+FROM node-base AS webui
 WORKDIR /webui
 COPY webui/package.json webui/package-lock.json ./
 # Exactly the lockfile; no install scripts run (none of these packages needs one: the native parts are prebuilt).
@@ -26,7 +29,7 @@ RUN npm run build && test -f dist/index.html && test -f dist/signin/index.html
 # Source: https://www.7-zip.org/download.html, files https://www.7-zip.org/a/7z2604-linux-<arch>.tar.xz (7-Zip 26.04).
 # The hashes below were computed from those downloads on 2026-11-08 and equal the "digest" GitHub lists for the same
 # files on the official release https://github.com/ip7z/7zip/releases/tag/26.04.
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS sevenzip
+FROM node-base AS sevenzip
 ARG TARGETARCH
 ARG SEVENZIP_VERSION=2604
 ARG SEVENZIP_SHA256_X64=fc0327ba27e89bd086cf426dff17d77de582953cdbbc10a6576540a06853ffcd

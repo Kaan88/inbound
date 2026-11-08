@@ -20,5 +20,42 @@ internal static class AtomicFile
         // UnixCreateMode applies only when the file is new; a temporary file left by a kill keeps its old mode.
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         File.Move(temp, path, overwrite: true);
+        if (!OperatingSystem.IsWindows()) SyncDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
     }
+
+    /// <summary>
+    /// Off Windows a rename is durable only once its directory is flushed too; without this a power loss soon after can
+    /// bring the old file back (a session that signed out, say). .NET can't open a directory, so libc does it. Best
+    /// effort: a system without these calls, or a folder that refuses, keeps the rename as it is.
+    /// Not run on this project's Windows test machine; the Linux image is where it applies.
+    /// </summary>
+    private static void SyncDirectory(string directory)
+    {
+        try
+        {
+            var fd = open(directory, 0 /* O_RDONLY */);
+            if (fd < 0) return;
+            try
+            {
+                _ = fsync(fd);
+            }
+            finally
+            {
+                _ = close(fd);
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Not a libc system.
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int open([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, int flags);
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int fsync(int fd);
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int close(int fd);
 }

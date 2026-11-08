@@ -2,11 +2,12 @@
 
 ### Owner answers built on the server side (`owner-server`, 2026-11-08)
 
-- **D2a, sessions survive a restart:** `<data>/sessions.json` with hashes only (never a cookie's id), atomic and mode 600, restored at start without expired ones; sign-in, sign-out, password change and expiry written at once, last-use times at most every 10 minutes and on a clean stop. A password changed while the server was down drops them. `SessionPersistenceTests` (5).
+- **D2a, sessions survive a restart:** `<data>/sessions.json` with hashes only (never a cookie's id), atomic and mode 600, restored at start without expired ones; sign-in, sign-out and password change written at once (an expired one leaves the file at the next write or start), last-use times at most every 10 minutes and on a clean stop, and for an open WebSocket on the same beat. A password changed while the server was down drops them. `SessionPersistenceTests` (5), `SessionDurabilityTests` (5).
+- **Review fixes (2026-11-08):** a password change and a racing sign-in or save can't leave an old session under the new stamp (one lock; the sign-in is checked against the password it verified); a listening WebSocket refreshes last-seen; a failed write deletes or empties the file and a folder refusing both is logged; directory fsync after a replace off Windows (libc, best effort, **not run on Linux**); sign-in off removes the saved sessions; `AuthStore.FindToken` also swallows `UnauthorizedAccessException`; Node is named once in the Dockerfile (a `node-base` stage) so a Dependabot PR can't split the two stages (**image not rebuilt**, no Docker here); an upgrade note for the old 1654 default in `docs/docker.md`, and the entrypoint's warning names the folder's owner; doc wording on expiry and the token's scope corrected.
 - **D2b, `DELETE /api/pair/self`:** the extension's Unpair; the bearer token authenticates as on `/api/ipc` and removes only its own record, 204. CORS for our extension origins. `PairSelfTests` (3). Contract in `docs/ipc-protocol.md`.
 - **D3a, PUID/PGID 1000:** Dockerfile, entrypoint and docs; ids used only as numbers, so an existing account with that id changes nothing. **Partial: the image was not rebuilt or run** (no Docker on this PC).
 - **D3b, Dependabot:** `.github/dependabot.yml` for `docker` and `github-actions`, weekly, majors of the base images ignored, nothing auto-merges. The base images moved from `ARG`s into the `FROM` lines so Dependabot can read them. Not checked on GitHub.
-- Tests (Windows, Release): Server.Tests 79/79, Core 869/869. No review by a cheaper model: this agent had no way to start one.
+- Tests (Windows, Release): Server.Tests 84/84 after the review fixes (79 before), Core 869/869. No review by a cheaper model: this agent had no way to start one.
 
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 

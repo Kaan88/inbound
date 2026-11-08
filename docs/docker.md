@@ -80,6 +80,12 @@ The container starts as root only to prepare these, then runs the server as `PUI
   when nothing is mounted) is given to the user; otherwise the log warns that `PUID:PGID` can't write there.
 - Started with `--user` (or `user:` in compose), the container changes no owners and runs as that user.
 
+**Upgrading from an image whose default user was 1654.** Earlier images ran as `1654:1654` when `PUID`/`PGID` were
+not set; the default is `1000:1000` now. `/data` follows on its own (above), but a download folder that already holds
+files is never changed, so with a named volume at `/downloads` the log warns that `1000:1000` can't write there (it
+names the folder's owner) and downloads fail. Either keep the old user with `-e PUID=1654 -e PGID=1654`, or give the
+volume to the new one once: `docker run --rm -v <volume>:/downloads alpine chown -R 1000:1000 /downloads`.
+
 ## Backup
 
 Stop the container, then copy the whole data folder:

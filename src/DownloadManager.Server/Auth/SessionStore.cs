@@ -50,12 +50,14 @@ public sealed class Session
 /// <para>
 /// With a file (<see cref="FileName"/> in the data folder) the sessions survive a restart: the file holds each
 /// session's hash, when it began and when it was last seen, never the id itself, written atomically (temporary file,
-/// flush, replace) and owner-only (mode 600) off Windows. A new session, a sign-out, a password change and an expiry
-/// are written at once. Last-seen times are written at most once per <see cref="SaveEvery"/> per session, and on a
-/// clean stop (<see cref="Flush"/>), so a busy browser doesn't keep the disk awake; after a kill a session may end up
-/// to that much earlier than it would have. The file also notes a stamp of the password it was written under: a
-/// password changed while the server was down (by <c>DOWNLOADMANAGER_PASSWORD</c>, or a deleted <c>auth.json</c>)
-/// drops every saved session. A damaged file is deleted, and everyone signs in again.
+/// flush, replace) and owner-only (mode 600) off Windows. A new session, a sign-out and a password change are written
+/// at once. An expired session leaves the file at the next write or start (it is refused before then all the same).
+/// Last-seen times are written at most once per <see cref="SaveEvery"/> per session, and on a clean stop
+/// (<see cref="Flush"/>), so a busy browser doesn't keep the disk awake; an open WebSocket refreshes its session's time
+/// on that same beat (the server's socket loop), so after a kill a session may end up to that much earlier than it
+/// would have. The file also notes a stamp of the password it was written under: a password changed while the server
+/// was down (by <c>DOWNLOADMANAGER_PASSWORD</c>, or a deleted <c>auth.json</c>) drops every saved session. A damaged
+/// file is deleted, and everyone signs in again.
 /// </para>
 /// </summary>
 public sealed class SessionStore
@@ -106,16 +108,44 @@ public sealed class SessionStore
         password is null ? null : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(password.Salt + ":" + password.Hash)));
 
     /// <summary>A new session and the id to put in the cookie.</summary>
-    public (string Id, Session Session) Create()
+    public (string Id, Session Session) Create() => TryCreate(() => true)!.Value;
+
+    /// <summary>
+    /// A new session, if <paramref name="stillValid"/> holds once nothing else can change the sessions: a sign-in passes
+    /// "the password it checked is still the one in force", so one that raced a password change can't outlive it
+    /// (<see cref="ChangePassword"/> holds the same lock). Null when it no longer holds.
+    /// </summary>
+    public (string Id, Session Session)? TryCreate(Func<bool> stillValid)
     {
-        var id = Base64Url(RandomNumberGenerator.GetBytes(32));
-        var key = KeyFor(id);
-        var now = _time.GetUtcNow();
-        var session = new Session(key, now, now);
-        _sessions[key] = session;
-        PruneWithoutSaving();
-        Save();
-        return (id, session);
+        lock (_saveGate)
+        {
+            if (!stillValid()) return null;
+            var id = Base64Url(RandomNumberGenerator.GetBytes(32));
+            var key = KeyFor(id);
+            var now = _time.GetUtcNow();
+            var session = new Session(key, now, now);
+            _sessions[key] = session;
+            PruneWithoutSaving();
+            Save();
+            return (id, session);
+        }
+    }
+
+    /// <summary>
+    /// A password change: <paramref name="setPassword"/> saves the new password, then every browser but
+    /// <paramref name="keep"/> is signed out and the file written, all under the lock every write of the file takes. So
+    /// no write can put the new password's stamp beside a session that should have ended, and no sign-in checked against
+    /// the old password can add one in between. False, with nothing changed, when the password couldn't be saved. A kill
+    /// between the two writes leaves the old stamp in the sessions file, which drops every session at the next start.
+    /// </summary>
+    public bool ChangePassword(Func<bool> setPassword, Session? keep)
+    {
+        lock (_saveGate)
+        {
+            if (!setPassword()) return false;
+            RemoveAllExcept(keep);
+            return true;
+        }
     }
 
     /// <summary>The live session for this cookie value, touched; null when there is none or it has expired.</summary>
@@ -156,17 +186,19 @@ public sealed class SessionStore
         Save();
     }
 
-    /// <summary>Signs out every browser but <paramref name="keep"/> (after a password change).</summary>
+    /// <summary>Signs out every browser but <paramref name="keep"/> (after a password change: <see cref="ChangePassword"/>).</summary>
     public void RemoveAllExcept(Session? keep)
     {
-        var removed = false;
-        foreach (var session in _sessions.Values)
+        lock (_saveGate)
         {
-            if (!ReferenceEquals(session, keep)) removed |= RemoveWithoutSaving(session);
-        }
+            foreach (var session in _sessions.Values)
+            {
+                if (!ReferenceEquals(session, keep)) RemoveWithoutSaving(session);
+            }
 
-        // Written even when nothing was removed: the stamp of the new password goes into the file with the kept session.
-        if (removed || keep is not null) Save();
+            // Written even when nothing was removed: the stamp of the new password goes into the file.
+            Save();
+        }
     }
 
     /// <summary>
@@ -267,7 +299,8 @@ public sealed class SessionStore
 
     /// <summary>
     /// Writes every session. A write that fails must not bring back a session that ended (a sign-out, a password
-    /// change), so the file is then deleted: everyone signs in again after a restart, which is the safe side.
+    /// change), so the file is then deleted, or emptied when it can't be deleted: everyone signs in again after a
+    /// restart, which is the safe side. Only a folder that refuses all three leaves the old file; that is logged.
     /// </summary>
     private void Save()
     {
@@ -305,10 +338,22 @@ public sealed class SessionStore
         try
         {
             File.Delete(_path!);
+            return;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _warn($"The sessions file {_path} could not be removed either ({ex.GetType().Name}).");
+            // Emptied instead below: an empty file reads as damaged, and a damaged file restores nobody.
+        }
+
+        try
+        {
+            File.WriteAllBytes(_path!, []);
+            _warn($"The sessions file {_path} could not be removed, so it was emptied.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _warn($"The sessions file {_path} could not be removed or emptied ({ex.GetType().Name}). A restart may bring back " +
+                  "browsers that signed out since it was last written: delete it by hand before the server starts again.");
         }
     }
 

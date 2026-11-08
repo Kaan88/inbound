@@ -58,7 +58,7 @@ for root in $roots; do
         if [ -z "$(ls -A "$root")" ]; then
             chown "$uid:$gid" "$root"
         else
-            say "warning: user $uid:$gid can't write to $root. Set PUID/PGID to its owner, or change its owner."
+            say "warning: user $uid:$gid can't write to $root (owned by $(stat -c %u:%g "$root")). Set PUID/PGID to its owner, or change its owner. Earlier images ran as 1654:1654 by default (see Upgrading in docs/docker.md)."
         fi
     fi
 done
