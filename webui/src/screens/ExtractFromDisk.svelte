@@ -24,6 +24,8 @@
     if ((result.ignored?.length ?? 0) > 0) problem = summary;
     else {
       store.toast(summary || 'Extraction asked for.');
+      // A file from disk has no download behind it, so only the Extractions list shows its record.
+      if (location.hash !== '#/extractions') location.hash = '#/extractions';
       onclose();
     }
   }

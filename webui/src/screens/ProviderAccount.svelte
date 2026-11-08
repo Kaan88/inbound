@@ -15,6 +15,7 @@
   let busy = $state(false);
   let result = $state('');
   let resultIsProblem = $state(false);
+  let lastFailure = '';
   let confirmClear = $state(false);
 
   function show(text: string, problem = false) {
@@ -29,7 +30,8 @@
       const reply = await store.ask<R>(type, { provider: account.provider, ...payload });
       return reply;
     } catch (error) {
-      show(failureText(error instanceof Error ? error.message : String(error), null, name), true);
+      lastFailure = failureText(error instanceof Error ? error.message : String(error), null, name);
+      show(lastFailure, true);
       return null;
     } finally {
       busy = false;
@@ -39,14 +41,13 @@
   async function save() {
     const typed = key.trim();
     if (!typed) return;
-    // Out of the box before anything is sent, whatever the answer turns out to be.
-    keyDraft[account.provider] = '';
     const saved = await call('remote.account.setKey', { key: typed }, 'Saving the key…');
-    if (!saved) return;
+    if (!saved) return; // the typed key stays in the box so it can be tried again
+    keyDraft[account.provider] = '';
     store.keyEpoch++;
     const checked = await call<{ accounts?: RemoteAccount[] }>('remote.account.validate', {}, `Asking ${name}…`);
     if (checked) show(`Key saved. ${validated(checked.accounts?.[0] ?? account)}`);
-    else show(`Key saved, but ${name} didn't accept it yet. ${result}`, true);
+    else show(`Key saved, but ${name} didn't accept it yet. ${lastFailure}`, true);
   }
 
   async function validate() {
@@ -83,7 +84,7 @@
   <button class="btn" disabled={busy || !view.canValidate} onclick={refresh}><Icon name="refresh" size={15} class="text-icon-info" /> Refresh</button>
   <button class="btn-danger" disabled={busy || !view.canClear} aria-label="Clear the saved {name} API key" onclick={() => (confirmClear = true)}>Clear key…</button>
 </div>
-{#if key.trim()}<p class="mb-2 text-[12.5px] tone-waiting" role="status">This key isn't saved yet. Select Save key, or it is lost when you close this page.</p>{/if}
+{#if key.trim()}<p class="mb-2 text-[12.5px] tone-waiting" role="status">This key isn't saved yet. Select Save key to keep it.</p>{/if}
 {#if result}<p class="mb-2 text-[12.5px] {resultIsProblem ? 'text-error' : 'text-muted'}" role="status">{result}</p>{/if}
 <p class="hint mb-5">These buttons take effect straight away. The key is kept sealed on the server and is never sent back to a browser.</p>
 

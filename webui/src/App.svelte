@@ -4,6 +4,7 @@
   import { speed } from './lib/format';
   import { store, type Theme } from './lib/store.svelte';
   import { counts, views, type ViewKey } from './lib/views';
+  import { noticeBoard, noticeWatchingSince } from './lib/archives';
   import { canBrowse, providerNameOf, showsWaiting } from './lib/remote';
   import AddLinks from './screens/AddLinks.svelte';
   import ListScreen from './screens/ListScreen.svelte';
@@ -38,6 +39,10 @@
     return () => removeEventListener('hashchange', changed);
   });
 
+  // The extraction notices are kept up to date on every screen, not only while the list shows.
+  $effect(() => {
+    noticeBoard.update(Object.values(store.model.archives), noticeWatchingSince, store.model.settings?.notifyOnCompletion !== false);
+  });
   const count = $derived(counts(store.model));
   // The Waiting entry shows for an account with a usable key, or with jobs left from before a key was cleared; My <provider>
   // for each account that can list its items (the desktop's rule).
