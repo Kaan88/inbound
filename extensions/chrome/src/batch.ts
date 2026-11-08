@@ -92,6 +92,11 @@ function updateSelection(visible: PageLink[] = visibleLinks()): void {
   browseDestinationButton.disabled = !gate.canPick;
   cancelButton.disabled = gate.sending;
   setTargetChoiceEnabled(document.getElementById("targetChoice") as HTMLElement, gate.canPick);
+  if (lateTargets && gate.canPick) {
+    const late = lateTargets;
+    lateTargets = null;
+    applyTargets(late.offered, late.target, true);
+  }
 }
 
 function render(): void {
@@ -282,18 +287,32 @@ function useTarget(offered: OfferedTarget, keepTyped = false): void {
 }
 
 let shownTargetError = "";
+// EXT.B2: a target list that arrived while a folder pick or a send was running. Switching target then would
+// put the folder being picked (a This PC path) under the server, so it waits for the gate to be free.
+let lateTargets: { offered: OfferedTarget[]; target?: TargetId } | null = null;
 
 async function loadTargets(): Promise<void> {
   try {
     const response = await chrome.runtime.sendMessage({ type: "dm.targets" }) as { ok?: boolean; targets?: OfferedTarget[]; target?: TargetId };
     const offered = response?.ok && Array.isArray(response.targets) ? response.targets : [];
     if (offered.length === 0) return;
-    const first = offered.find((item) => item.id === response.target) ?? offered[0]!;
-    renderTargetChoice(document.getElementById("targetField") as HTMLElement, document.getElementById("targetChoice") as HTMLElement,
-      offered, first.id, useTarget);
-    // Save in starts empty; anything in it now was typed or picked while the list was on its way.
-    useTarget(first, first.id === target && destinationInput.value.trim() !== "");
+    if (!gate.canPick) {
+      lateTargets = { offered, target: response.target };
+      return;
+    }
+    applyTargets(offered, response.target, false);
   } catch { /* this PC, as before a server could be paired */ }
+}
+
+/** Shows the offered targets. userActed: a pick or send ran meanwhile, so the target it used is kept if offered. */
+function applyTargets(offered: OfferedTarget[], preferred: TargetId | undefined, userActed: boolean): void {
+  const first = (userActed ? offered.find((item) => item.id === target) : undefined)
+    ?? offered.find((item) => item.id === preferred) ?? offered[0]!;
+  const choice = document.getElementById("targetChoice") as HTMLElement;
+  renderTargetChoice(document.getElementById("targetField") as HTMLElement, choice, offered, first.id, useTarget);
+  // Save in starts empty; anything in it now was typed or picked while the list was on its way.
+  useTarget(first, first.id === target && destinationInput.value.trim() !== "");
+  setTargetChoiceEnabled(choice, gate.canPick);
 }
 
 browseDestinationButton.addEventListener("click", async () => {

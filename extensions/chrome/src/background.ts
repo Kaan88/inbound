@@ -4,7 +4,9 @@ import { connectionProblem, readableError } from "./connection-problem";
 import { isUnsupportedUrl, UNSUPPORTED_SITE_MESSAGE } from "./unsupported-sites";
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
-import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
+import {
+  browserCookieHeaders, cookieContextForDownload, cookieContextForFrame, type BrowserCookieContext,
+} from "./browser-cookies";
 import {
   DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
@@ -69,14 +71,19 @@ let leftInBrowser: LeftInBrowser[] = [];
 let badgeTimer: ReturnType<typeof setTimeout> | undefined;
 let autoSendSyncQueue: Promise<void> = Promise.resolve();
 // The paired server's token is kept in storage.local, and a content script runs on every page. Content scripts use no
-// storage at all, so storage.local is closed to them (Chrome lets them read it otherwise). Set at every start, and
-// waited for before a token is written.
+// storage at all, so on Chrome and Edge storage.local is closed to them (they could read it otherwise). Set at every
+// start, and waited for before a token is written. Firefox has no setAccessLevel: there content scripts can still read
+// storage.local, token included, and dm.status says so (storageClosedToPages: false). The extension's own content
+// script never reads it; only a compromised page process could.
 const storageRestricted = restrictStorageToExtension();
+let storageClosedToPages = false;
 async function restrictStorageToExtension(): Promise<void> {
+  if (typeof chrome.storage.local.setAccessLevel !== "function") return;
   try {
-    await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
+    await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+    storageClosedToPages = true;
   } catch {
-    // A browser without it keeps its default.
+    // Refused: the browser keeps its default, which lets content scripts read it.
   }
 }
 async function hasDeleteGesture(url: string): Promise<boolean> {
@@ -378,6 +385,14 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
     return false;
   }
 
+  // Firefox (no held file name) can run without access to the site, and then no cookies can be read: a
+  // download that needs a sign-in would go to the app without one while the browser's working copy is
+  // cancelled. It stays in the browser instead. Chromium grants site access at install and is not asked.
+  if (!holdsName && !await canReadCookiesFor(item.url)) {
+    await noteLeftInBrowser(fileName, "The extension has no access to this site, so its sign-in could not be sent. Allow site access in the extension's Settings.", false);
+    return false;
+  }
+
   try {
     await chrome.downloads.pause(item.id);
   } catch {
@@ -432,7 +447,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
       totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
       startMode: settings.startMode,
       isAutoIntercept: true,
-      headers: await browserCookieHeaders(item.url, {}, item.finalUrl),
+      headers: await browserCookieHeaders(item.url, cookieContextForDownload(item), item.finalUrl),
     });
 
     if (ack?.accepted) {
@@ -511,6 +526,7 @@ async function holdForFolderChoice(item: chrome.downloads.DownloadItem, fileName
     totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
     isAutoIntercept: true,
     createdAt: Date.now(),
+    cookieContext: cookieContextForDownload(item),
     browserDownloadId: item.id,
   };
   try {
@@ -868,6 +884,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         pauseUntil,
         settings,
         siteAccess: await hasSiteAccess(),
+        storageClosedToPages: await storageRestricted.then(() => storageClosedToPages),
         leftInBrowser,
         jobs: latestJobs([...lastJobs.values()]),
       };
@@ -1210,6 +1227,20 @@ function serverStatus(): { address: string; name?: string; pairedAt?: number; co
 
 function fromPage(sender: chrome.runtime.MessageSender | undefined, page: string): boolean {
   return sender?.id === chrome.runtime.id && (sender.url ?? "").split(/[?#]/)[0] === chrome.runtime.getURL(page);
+}
+
+/** Whether the extension has host access to this address's site, which reading its cookies needs. */
+async function canReadCookiesFor(url: string): Promise<boolean> {
+  let origin: string;
+  try {
+    const parsed = new URL(url);
+    origin = `${parsed.protocol}//${parsed.hostname}/*`;
+  } catch { return true; }
+  try {
+    return chrome.permissions?.contains ? await chrome.permissions.contains({ origins: [origin] }) : true;
+  } catch {
+    return true;
+  }
 }
 
 /**

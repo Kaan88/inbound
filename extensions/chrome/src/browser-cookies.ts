@@ -26,6 +26,16 @@ export async function cookieContextForFrame(tabId?: number, frameId = 0): Promis
   return context;
 }
 
+/**
+ * The cookie store a caught download came from. Firefox puts a container tab's downloads in that
+ * container's store (DownloadItem.cookieStoreId); reading the default store instead would send another
+ * identity's cookies. Chromium's DownloadItem has no such field, so its downloads keep the default store.
+ */
+export function cookieContextForDownload(item: object): BrowserCookieContext {
+  const storeId = (item as { cookieStoreId?: unknown }).cookieStoreId;
+  return typeof storeId === "string" && storeId ? { storeId } : {};
+}
+
 async function cookiesFor(url: string, context: BrowserCookieContext): Promise<chrome.cookies.Cookie[] | null> {
   let cookies: chrome.cookies.Cookie[];
   try {

@@ -101,8 +101,12 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
   unlisted version from the owner's AMO account; that has not been done.
 - **Differences handled in code.** No `downloads.onDeterminingFilename` (see above);
-  `cookies.getPartitionKey` is optional already. Firefox may install the extension without access to sites;
+  `cookies.getPartitionKey` is optional already. A caught download's cookies come from its own cookie store
+  (`DownloadItem.cookieStoreId`, a container tab's container), on the automatic and the "ask" paths alike;
+  Chromium has no such field and reads the default store. Firefox may install the extension without access to sites;
   then Settings shows "Allow access to all sites", which asks with `permissions.request` from the click.
+  Meanwhile a download from a site without access (`permissions.contains` for its origin) is not caught: it
+  stays in the browser, unpaused, with a note, since its cookies could not be read. Chromium is not asked.
 - **Registration.** Firefox lists add-on IDs (`allowed_extensions`) where Chrome lists origins, so it has a
   manifest of its own, `native-host\com.kaank.downloadmanager.firefox.json`, under its own key
   `HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager`. Setup and
@@ -169,7 +173,10 @@ Paired browsers). On the click the page asks the browser for access to that host
 all-sites host permission, Firefox may ask. The background then calls `POST /api/pair` with the code and a
 name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
 `{address, token, id, name, pairedAt}` under `server` in `chrome.storage.local`. No page gets the token:
-`dm.status` and the other replies carry the address, name and state only. Unpair deletes it and sets
+`dm.status` and the other replies carry the address, name and state only. On Chrome and Edge the background
+closes `storage.local` to content scripts (`setAccessLevel`, `TRUSTED_CONTEXTS`); Firefox has no such call,
+so there content scripts can read `storage.local`, token included, and `dm.status.storageClosedToPages` is
+false. The extension's own content script never reads storage. Unpair deletes it and sets
 automatic downloads back to this PC, and asks the server to remove the token too: `DELETE /api/pair/self`
 with the same `Authorization: Bearer <token>` as `/api/ipc` (no body, `credentials: "omit"`,
 `redirect: "error"`, a 4-second limit; the token is forgotten here first, whatever the answer). On 204

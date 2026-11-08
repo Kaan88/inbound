@@ -817,6 +817,90 @@ function firefoxChrome(settings = catching) {
 
 const firefoxItem = (id, fileName) => ({ id, url: `https://site.test/${fileName}`, filename: fileName, referrer: '', mime: '', totalBytes: 1, fileSize: 1 });
 
+/** Cookies by store: the default container's and a Work container's sessions for the same site. */
+function containerCookies(harness) {
+  const queries = [];
+  harness.chrome.cookies.getAll = async (query) => {
+    queries.push(query);
+    return [{ name: 'session', value: query.storeId === 'firefox-container-1' ? 'work-account' : 'default-account', path: '/' }];
+  };
+  return queries;
+}
+
+test('EXT.E1: on Firefox a download from a container tab carries that container\'s cookies, caught at once or held for a folder', async () => {
+  const { harness, log } = firefoxChrome();
+  const queries = containerCookies(harness);
+  await withBackground(harness, async () => {
+    harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(30, 'work.zip'), cookieStoreId: 'firefox-container-1' });
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.headers.Cookie, 'session=work-account');
+    assert.ok(queries.every(query => query.storeId === 'firefox-container-1'));
+
+    // The default container keeps the default store.
+    harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(31, 'home.zip'), cookieStoreId: 'firefox-default' });
+    const home = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(home.payload.headers.Cookie, 'session=default-account');
+    await settle(() => log.cancelled.length === 2);
+  });
+
+  const asked = firefoxChrome({ ...catching, destinationMode: 'ask' });
+  const askedQueries = containerCookies(asked.harness);
+  await withBackground(asked.harness, async () => {
+    asked.harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(32, 'held.zip'), cookieStoreId: 'firefox-container-1' });
+    await settle(() => asked.log.windows.length);
+    const id = decodeURIComponent(asked.log.windows[0].url.split('id=')[1]);
+    const confirmed = sendRuntimeMessage(asked.harness, { type: 'dm.confirmHandoff', id, destination: '', startMode: 'now' }, ownPage('handoff.html'));
+    const request = await answerNative(asked.harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.headers.Cookie, 'session=work-account');
+    assert.ok(askedQueries.length > 0 && askedQueries.every(query => query.storeId === 'firefox-container-1'));
+    assert.equal((await confirmed).ok, true);
+  });
+});
+
+test('EXT.E1: on Firefox without access to the site a download stays in the browser, untouched', async () => {
+  const { harness, log } = firefoxChrome();
+  const asked = [];
+  harness.chrome.permissions = { async contains({ origins }) { asked.push(...origins); return origins[0] === 'https://allowed.test/*'; } };
+  await withBackground(harness, async () => {
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(40, 'locked.zip'));
+    await settle(() => log.notes.length);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(asked.includes('https://site.test/*'));
+    assert.match(log.notes[0].message, /locked\.zip: The extension has no access to this site/);
+    assert.deepEqual(log.paused, []);
+    assert.deepEqual(log.cancelled, []);
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+
+    // A site it may read is caught as before.
+    harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(41, 'open.zip'), url: 'https://allowed.test:8443/open.zip' });
+    await answerNative(harness, 'handoff.request', { accepted: true });
+    await settle(() => log.cancelled.length);
+    assert.deepEqual(log.cancelled, [41]);
+  });
+});
+
+test('Chromium is not asked about site access before a catch', async () => {
+  const { harness, log } = capturingChrome(catching);
+  harness.chrome.permissions = { async contains() { return false; } };
+  await withBackground(harness, async () => {
+    void startDownload(harness, { id: 42, url: 'https://site.test/a.zip', filename: 'a.zip' });
+    await answerNative(harness, 'handoff.request', { accepted: true });
+    await settle(() => log.cancelled.length);
+    assert.deepEqual(log.cancelled, [42]);
+  });
+});
+
+test('Chromium downloads, which have no cookieStoreId, still read the default store', async () => {
+  const { harness } = capturingChrome(catching);
+  const queries = containerCookies(harness);
+  await withBackground(harness, async () => {
+    void startDownload(harness, { id: 33, url: 'https://site.test/a.zip', filename: 'a.zip' });
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.headers.Cookie, 'session=default-account');
+    assert.ok(queries.every(query => query.storeId === undefined));
+  });
+});
+
 test('EXT.E1: on Firefox a download that will not pause is left in the browser, never sent while it still arrives', async () => {
   const { harness, log } = firefoxChrome();
   harness.chrome.downloads.pause = async () => { throw new Error('cannot pause'); };
