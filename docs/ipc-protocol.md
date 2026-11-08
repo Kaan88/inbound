@@ -104,6 +104,49 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
 - `jobs.snapshot`, `jobs.query` and `host.status` leave `stateDirectory` empty and list only leftovers inside the
   app's folders.
 
+### The web UI's own settings: `webui.*` (desktop Host, D8)
+
+Options, Web UI in the window sets the web UI up over the pipe. These commands are answered for a desktop session
+(`role` left out or `desktop`) only. A `web` session, and the Host scope of a remote session, get
+`host.actionResult` `{ok: false, message: "The web UI can only be set up in the app on this PC."}` and nothing
+changes; a Host without the web UI (the headless server) says "The web UI is not available here." The settings live
+in `<data>/webui.json` (written to a temporary file, flushed, then moved over it), never in `settings.json`, export
+or import. A damaged file counts as off.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `webui.get` | `{}` | `webui.status` |
+| `webui.set` | `{enabled?, port?, alsoReachableAs?}`; a field left out stays | `webui.status` |
+| `webui.setPassword` | `{password}` | `webui.status` |
+| `webui.recheck` | `{}` | `webui.status` |
+| `webui.openTicket` | `{}` | `webui.ticket` `{url?, error?}` |
+
+`webui.status` (and the broadcast `webui.changed`) carry `WebUiStatusDto`:
+
+- `enabled`, `port` (default 8080), `alsoReachableAs` (computer names a browser may use besides an IP address,
+  `localhost` and this PC's own name: at most 16, lower case, without `http://` or a port), `hasPassword`;
+- `state`: `off`, `starting`, `running` or `failed`, and `error` (plain words, for Options and the tray) when a
+  request was refused or the bridge could not run;
+- `firewall`: `ready` (an enabled inbound allow rule named `ruleName` for `bridgePath`, TCP, covering the port, and
+  no enabled inbound block rule for that program), `missing`, or `unknown` (the rules could not be read; a process
+  below medium integrity is refused the read);
+- `localOnly`: the bridge listens on 127.0.0.1 (and ::1) only, which it does while `firewall` isn't `ready`;
+  `addresses`: `http://<ip>:<port>/` for each of this PC's network addresses, empty while `localOnly` or not running;
+- `bridgePath` (the program the firewall rule names) and `ruleName` ("Inbound Download Manager web UI").
+
+Refusals come back as `webui.status` with `error` set and nothing changed: turning the box on without a password
+("Set a password first. Other devices sign in with it."), a port outside 1024 to 65535, a name that isn't one, a
+password the sign-in rules refuse. `webui.set` saves first and then starts, restarts (a changed port or names) or
+stops the bridge; turning it off also ends every web session. `webui.setPassword` stops the bridge, ends the web
+sessions, writes the hash to `<data>/auth.json` (unpairing every paired app and removing `sessions.json`: every
+browser signs in again), and starts the bridge again if the box is ticked. `webui.recheck` reads the firewall rules
+again and restarts the bridge on every address once they are ready. `webui.openTicket` checks that the bridge it
+started is the program listening on the port (another program on it gets an `error`), and answers
+`http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in for a browser on this PC, valid 60 s.
+
+`webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
+changes, the bridge included (started, ready, stopped, failed).
+
 ### The server's transports (D1b)
 
 `DownloadManager.Server`, the headless Host for Linux and Docker, serves the same envelopes over HTTP:
@@ -136,6 +179,40 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
 request, update itself or run programs a client names, so those commands answer as described above.
 
+### The web bridge on Windows (D8)
+
+With the web UI ticked, the desktop Host starts `DownloadManager.Server.exe --bridge` (next to the Host, or in its
+`web` folder) with no window, and gives it its options as one JSON line on standard input (`WebBridgeStartDto`: the
+Host's data folder, its hello pipe, the port, `localOnly`, the extra names, and a random 32-byte ticket key for this
+run). Nothing is on the command line. The bridge writes `ready` to standard output once it listens; closing its
+standard input stops it, so it never outlives the Host. Its exit code says why it ended: 0 stopped, 1 crashed,
+2 refused (bad options, no password), 3 the port is in use, 4 Windows doesn't allow the port; the last line of
+standard error is the reason, in plain words. The Host restarts a crashed bridge after 1, 2, 4... seconds (at most
+60), and gives up with a tray notice after 5 crashes that each ran less than 2 minutes; a refused or busy port is
+not retried.
+
+It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent` and sign-in as the server, and differs so:
+
+- No engine and no state of its own: each WebSocket and each `/api/ipc` call is one connection to the Host's hello
+  pipe (this Windows user's only, both ends checked), with `client.hello` `role: "web"` whatever the browser sent
+  (`?hello=1` keeps its `snapshot` and `events`). Envelopes pass through unchanged, one per WebSocket message and
+  one per pipe frame. The Host ending the connection (the web UI turned off, the password changed, an exit) closes
+  the socket with 1001. At most 32 browser connections hold a pipe at once. A Host that can't be reached is 503
+  `"The app on this PC isn't answering. Try again in a moment."`.
+- Sign-in is always on, from `auth.json` and `sessions.json` in the Host's data folder. There is no
+  `/api/auth/setup` and no setup code, and the bridge refuses to start without a stored password. Changing the
+  password, pairing codes and paired apps work as on the server, behind sign-in. A paired extension keeps the
+  extension's commands only; a paired desktop app (`remoteClient`) has a signed-in browser's rights.
+- `GET /api/auth/ticket?t=...` signs in a browser on this PC with the window's ticket ("Open in browser"): the
+  ticket is a nonce, an expiry and an HMAC-SHA256 with the run's key; it works once, for 60 s, from a loopback
+  address with no forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Original-For`), else 403. A good one sets the
+  session cookie and redirects to `/`; a wrong, used or expired one redirects to `/signin/` and counts as a wrong
+  sign-in from that address.
+- Uploads go to `<data>/uploads`, which the Host reads through the same `upload:<id>` reference.
+- It listens with exclusive address use, on 127.0.0.1 and ::1 while the firewall rule is missing, and on every
+  address once it is there. Its log is `<data>/logs/web-bridge-<date>.log`.
+- `GET /api/auth/status` says `hostKind: "windows"`.
+
 ### Sign-in and paired apps (D2, D9)
 
 With sign-in on (the default), every path except `/health`, `/favicon.svg`, `/theme.js`, `/signin/...` and the calls
@@ -146,7 +223,7 @@ wrong tries is 429 with `Retry-After`.
 
 | Call | Session? | Body / answer |
 | --- | --- | --- |
-| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge will say `windows`), and `version` only for a signed-in browser. `hostKind` is shown to anyone because the sign-in page and a desktop app that hasn't paired yet need it; it tells a stranger whether this is a server or a Windows PC, not which version runs there. |
+| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge says `windows`), and `version` only for a signed-in browser. `hostKind` is shown to anyone because the sign-in page and a desktop app that hasn't paired yet need it; it tells a stranger whether this is a server or a Windows PC, not which version runs there. |
 | `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
 | `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
 | `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
