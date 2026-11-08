@@ -14,7 +14,7 @@ namespace DownloadManager.Integration.Tests;
 /// The Host's protocol with no pipe under it: a real <see cref="DownloadManagerService"/> on its own state folder, and
 /// sessions that keep their frames in memory. Nothing here makes a network call.
 /// </summary>
-public sealed class HostCommandDispatcherTests : IAsyncLifetime
+public sealed partial class HostCommandDispatcherTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(AppContext.BaseDirectory, "test-work", "dispatcher-" + Guid.NewGuid().ToString("N"));
     private readonly List<string> _timeline = [];
@@ -82,13 +82,16 @@ public sealed class HostCommandDispatcherTests : IAsyncLifetime
         await plain.OpenSessionAsync(session, CancellationToken.None);
         var hello = session.Frames[0];
         Assert.Equal(MessageTypes.ServerHello, hello.Type);
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status"], hello.GetPayload<HostHelloDto>().Capabilities);
+        // The names from protocol 1 first, in their order; the ones added later only after them (D8).
+        string[] machine = ["updater", "programSettings", "folderPicker", "openUi", "shutdown", "completionActions"];
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", .. machine], hello.GetPayload<HostHelloDto>().Capabilities);
         Assert.Equal(Protocol.Version, hello.GetPayload<HostHelloDto>().ProtocolVersion);
+        Assert.Equal(HostKinds.Windows, hello.GetPayload<HostHelloDto>().HostKind);
 
         var registry = new RemoteProviderRegistry();
         await using var jobs = new RemoteJobCoordinator(registry, new JsonRemoteJobStore(_paths), service, new RemoteCoordinatorOptions { RunLoops = false });
         using var remote = new RemoteCommands(registry, jobs);
-        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "remote"], Dispatcher(service, remote: remote).Capabilities);
+        Assert.Equal(["jobs", "settings", "handoff", "tray", "status", "remote", .. machine], Dispatcher(service, remote: remote).Capabilities);
 
         // Somewhere without a tray leaves it out, so the names after it move up: clients look a name up, never a position.
         Assert.Equal(["jobs", "settings", "handoff", "status"], Dispatcher(service, new FakePlatform(new PlatformCapabilities(), _timeline)).Capabilities);

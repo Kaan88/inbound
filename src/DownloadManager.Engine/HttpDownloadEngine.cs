@@ -33,6 +33,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     private readonly IMediaCheckpointStore? _mediaCheckpoints;
     private string? _ffmpegPath;
     private HttpClient _client;
+    // Made on first use: only downloads a browser on another device added need it (DownloadJob.PublicNetworkOnly).
+    private HttpClient? _publicOnlyClient;
 
     public HttpDownloadEngine(
         EngineOptions? options = null,
@@ -62,12 +64,14 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
-    private HttpClient CreateDefaultClient()
+    private HttpClient CreateDefaultClient(bool publicOnly = false)
     {
         var sockets = CreateProxiedHandler(_options.Proxy, _options.ConnectTimeout);
         sockets.AutomaticDecompression = DecompressionMethods.None;
         sockets.PooledConnectionLifetime = TimeSpan.FromMinutes(10);
         sockets.MaxConnectionsPerServer = 64;
+        if (publicOnly && sockets.Proxy is { } proxy)
+            sockets.ConnectCallback = (context, cancellationToken) => ConnectPublicOnlyAsync(context, proxy, cancellationToken);
 
         var client = new HttpClient(sockets, disposeHandler: true);
         ConfigureClient(client);
@@ -157,6 +161,21 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// The client for a download that must stay off this PC and its local network. Its own connection pool, so a
+    /// connection another download opened to a local address is never reused for it, and each connection it opens
+    /// checks the addresses the name resolved to (<see cref="ConnectPublicOnlyAsync"/>). An engine given its own handler
+    /// (tests) has one client, and the address checks in the requests still apply.
+    /// </summary>
+    private HttpClient CurrentClient(DownloadJob job)
+    {
+        if (!job.PublicNetworkOnly || !_ownsClient) return CurrentClient();
+        lock (_clientSync)
+        {
+            return _publicOnlyClient ??= CreateDefaultClient(publicOnly: true);
+        }
+    }
+
     /// <summary>The proxy settings changed. <see cref="CreateProxiedHandler()"/> handlers made before this keep their open connections.</summary>
     public event Action? ProxyChanged;
 
@@ -191,8 +210,80 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             var previous = _client;
             _client = CreateDefaultClient();
             _retiredClients.Add(previous);
+            if (_publicOnlyClient is { } publicOnly)
+            {
+                _publicOnlyClient = null;
+                _retiredClients.Add(publicOnly);
+            }
         }
     }
+
+    /// <summary>
+    /// Opens a connection for a <see cref="DownloadJob.PublicNetworkOnly"/> download. A connection to anything but the
+    /// proxy the user set is taken to be to the site: its name is resolved here and refused when any address it gives is
+    /// local, and the connection then goes to those same addresses, so a second lookup can't change the answer. Through
+    /// the proxy, which resolves the site's name itself, the name is also resolved here first and refused the same way;
+    /// a name only the proxy knows goes ahead, and so does one that resolves differently by the time the proxy asks.
+    /// </summary>
+    private static async ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, IWebProxy proxy, CancellationToken cancellationToken)
+    {
+        var endpoint = context.DnsEndPoint;
+        var target = context.InitialRequestMessage.RequestUri;
+        var through = target is null ? null : ProxyFor(proxy, target);
+        var toProxy = through is not null && SameHost(through.IdnHost, endpoint.Host) && through.Port == endpoint.Port;
+        if (toProxy && !IPAddress.TryParse(target!.IdnHost.Trim('[', ']'), out _))
+        {
+            IPAddress[] site;
+            try
+            {
+                site = await Dns.GetHostAddressesAsync(target.IdnHost, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SocketException)
+            {
+                site = [];
+            }
+
+            if (site.Any(NetworkAddresses.IsLocal)) throw new HttpRequestException(HttpRequestError.ConnectionError, LocalNetworkRefused);
+        }
+
+        var addresses = IPAddress.TryParse(endpoint.Host.Trim('[', ']'), out var literal)
+            ? [literal]
+            : await Dns.GetHostAddressesAsync(endpoint.Host, cancellationToken).ConfigureAwait(false);
+        if (addresses.Length == 0) throw new HttpRequestException(HttpRequestError.NameResolutionError, "The name has no address.");
+        if (!toProxy && addresses.Any(NetworkAddresses.IsLocal))
+            throw new HttpRequestException(HttpRequestError.ConnectionError, LocalNetworkRefused);
+
+        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(addresses, endpoint.Port, cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    private const string LocalNetworkRefused = "Local network destinations are disabled.";
+
+    /// <summary>The proxy a request to <paramref name="target"/> goes through, or null for none. One that names the site itself is none.</summary>
+    private static Uri? ProxyFor(IWebProxy proxy, Uri target)
+    {
+        try
+        {
+            if (proxy.IsBypassed(target) || proxy.GetProxy(target) is not { } through) return null;
+            return SameHost(through.IdnHost, target.IdnHost) && through.Port == target.Port ? null : through;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException or UriFormatException)
+        {
+            return null;
+        }
+    }
+
+    private static bool SameHost(string left, string right)
+        => string.Equals(left.Trim('[', ']').TrimEnd('.'), right.Trim('[', ']').TrimEnd('.'), StringComparison.OrdinalIgnoreCase);
 
     public async Task<DownloadResult> ExecuteAsync(
         DownloadJob job,
@@ -206,7 +297,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 new JobFailure(FailureKind.InvalidContent, uriError, false, false, DateTimeOffset.UtcNow));
         }
 
-        if (!_options.AllowLocalNetwork && IsLocalTarget(uri))
+        if ((!_options.AllowLocalNetwork || job.PublicNetworkOnly) && NetworkAddresses.IsLocalTarget(uri))
         {
             return DownloadResult.Fail(DownloadState.Failed,
                 new JobFailure(FailureKind.Forbidden, "Local network destinations are disabled.", false, false, DateTimeOffset.UtcNow));
@@ -2830,7 +2921,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
         for (var redirect = 0; redirect <= _options.MaxRedirects; redirect++)
         {
-            if (!_options.AllowLocalNetwork && IsLocalTarget(currentUri))
+            if ((!_options.AllowLocalNetwork || job.PublicNetworkOnly) && NetworkAddresses.IsLocalTarget(currentUri))
             {
                 throw new DownloadEngineException(
                     new JobFailure(FailureKind.Forbidden, "Local network destinations are disabled.", false, false, DateTimeOffset.UtcNow),
@@ -4647,37 +4738,6 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         return true;
     }
 
-    private static bool IsLocalTarget(Uri uri)
-    {
-        if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-            uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (!IPAddress.TryParse(uri.Host, out var address))
-        {
-            return false;
-        }
-
-        if (IPAddress.IsLoopback(address) || address.IsIPv6LinkLocal || address.IsIPv6SiteLocal)
-        {
-            return true;
-        }
-
-        var bytes = address.GetAddressBytes();
-        return address.AddressFamily switch
-        {
-            AddressFamily.InterNetwork =>
-                bytes[0] == 10 ||
-                (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
-                (bytes[0] == 192 && bytes[1] == 168) ||
-                (bytes[0] == 169 && bytes[1] == 254),
-            AddressFamily.InterNetworkV6 => bytes[0] == 0xfd || bytes[0] == 0xfe,
-            _ => false,
-        };
-    }
-
     private static string HostOf(DownloadJob job)
         => Uri.TryCreate(job.EffectiveUrl, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
 
@@ -4913,6 +4973,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         lock (_clientSync)
         {
             _client.Dispose();
+            _publicOnlyClient?.Dispose();
             foreach (var retired in _retiredClients)
             {
                 retired.Dispose();

@@ -182,11 +182,16 @@ public sealed partial class DownloadManagerService
     /// Free and total space at each folder, measured here on the Host's side, where the files are written. Each folder
     /// has its own time limit, so one drive that doesn't answer leaves the others measured.
     /// </summary>
-    public async Task<FolderSpaceResult> GetFolderSpaceAsync(FolderSpaceRequest request, CancellationToken cancellationToken)
+    /// <param name="caller">A caller limited to some folders gets nothing measured outside them (no figures).</param>
+    public async Task<FolderSpaceResult> GetFolderSpaceAsync(FolderSpaceRequest request, CancellationToken cancellationToken, CallerScope? caller = null)
     {
         var paths = (request.Paths ?? new()).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToList();
-        var measured = await Task.WhenAll(paths.Select(path => FolderSpaceMeter.MeasureAsync(path, TimeSpan.FromSeconds(2), cancellationToken)))
+        var measured = await Task.WhenAll(paths.Select(path => caller is null
+                ? FolderSpaceMeter.MeasureAsync(path, TimeSpan.FromSeconds(2), cancellationToken)
+                : caller.Roots.Allowed(path) is { } inside
+                    ? FolderSpaceMeter.MeasureAsync(inside, TimeSpan.FromSeconds(2), cancellationToken)
+                    : Task.FromResult(new FolderSpace(null, null, false))))
             .ConfigureAwait(false);
         return new FolderSpaceResult
         {
@@ -323,10 +328,36 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    public async Task<FileMetadataResult> ReadFileMetadataAsync(FileMetadataRequest request, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Whether every file of this download is inside the caller's folders. Null when there is no such download. The
+    /// paths are read under the lock and checked outside it, because the check resolves links on disk.
+    /// </summary>
+    public bool? HeldBy(Guid id, CallerScope caller)
+    {
+        string destination, finalPath, partPath;
+        lock (_sync)
+        {
+            if (!_jobs.TryGetValue(id, out var runtime)) return null;
+            (destination, finalPath, partPath) = (runtime.Job.DestinationDirectory, runtime.Job.FinalFilePath, runtime.Job.PartFilePath);
+        }
+
+        return caller.Holds(destination, finalPath, partPath);
+    }
+
+    private JobActionResponse? RefuseOutsideCaller(Guid id, CallerScope caller)
+        => HeldBy(id, caller) switch
+        {
+            null => new JobActionResponse { Ok = false, Error = "Job not found." },
+            false => new JobActionResponse { Ok = false, Error = CallerScope.OutsideJobRefused, Job = GetJob(id) },
+            true => null,
+        };
+
+    public async Task<FileMetadataResult> ReadFileMetadataAsync(FileMetadataRequest request, CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
         if (!TryValidateUrl(request.Url, out var uri, out var error) || uri.Scheme is not ("http" or "https"))
             return new FileMetadataResult { Error = string.IsNullOrWhiteSpace(error) ? "File information is available for HTTP/HTTPS URLs." : error };
+        if (caller is not null && CallerScope.DescribeAddress(request.Url) is { } refused) return new FileMetadataResult { Error = refused };
         if (!TryCopyHeaders(request.Headers, out var headers, out error)) return new FileMetadataResult { Error = error };
         if (_engine is not IFileMetadataReader reader) return new FileMetadataResult { Error = "This engine cannot preview file information." };
         if (!await _metadataGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
@@ -336,7 +367,7 @@ public sealed partial class DownloadManagerService
         try
         {
             var metadata = await reader.ReadMetadataAsync(new DownloadJob { Url = uri.AbsoluteUri, RequestHeaders = headers,
-                UserAgent = request.UserAgent, Referrer = request.Referrer }, timeout.Token).ConfigureAwait(false);
+                UserAgent = request.UserAgent, Referrer = request.Referrer, PublicNetworkOnly = caller is not null }, timeout.Token).ConfigureAwait(false);
             return new FileMetadataResult { Ok = true, FileName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl), TotalBytes = metadata.TotalBytes,
                 ContentType = metadata.ContentType, FinalUrl = MaskIfProviderLink(metadata.FinalUrl) };
         }
@@ -347,13 +378,29 @@ public sealed partial class DownloadManagerService
         finally { _metadataGate.Release(); }
     }
 
-    public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default)
+    /// <param name="caller">A caller that isn't this machine's user (<see cref="CallerScope"/>); null for one who is.</param>
+    public async Task<AddJobResponse> AddJobAsync(AddJobRequest request, CancellationToken cancellationToken = default, CallerScope? caller = null)
     {
         if (RefuseReservedPackage(request) is { } reserved) return reserved;
+        // Before the name is asked for: that request would already reach the address.
+        if (caller is not null && RefuseForCaller(request) is { } refused) return refused;
 
         // Outside the settings gate: the probe is network-bound and must not block other adds.
-        await ResolveServerFileNameAsync(request, cancellationToken).ConfigureAwait(false);
-        return await AddWithNameSettledAsync(request, cancellationToken).ConfigureAwait(false);
+        await ResolveServerFileNameAsync(request, cancellationToken, caller).ConfigureAwait(false);
+        return await AddWithNameSettledAsync(request, cancellationToken, caller).ConfigureAwait(false);
+    }
+
+    /// <summary>The address, the folder as text and the owner name, for a caller that isn't this machine's user.</summary>
+    private static AddJobResponse? RefuseForCaller(AddJobRequest request)
+    {
+        if ((CallerScope.DescribeAddress(request.Url) ?? CallerScope.DescribeAddress(request.FinalUrl)) is { } address)
+            return new AddJobResponse { Accepted = false, Error = address, ErrorCode = "local_network" };
+        if (!string.IsNullOrWhiteSpace(request.DestinationDirectory) && PathRoots.DescribeUnsafeText(request.DestinationDirectory.Trim()) is { } text)
+            return new AddJobResponse { Accepted = false, Error = text, ErrorCode = "invalid_destination" };
+        // Its own request ids can't find a download a local client (the browser's native host, say) added.
+        if (!string.IsNullOrWhiteSpace(request.OwnerExtensionId))
+            request.OwnerExtensionId = CallerScope.OwnerPrefix + request.OwnerExtensionId.Trim();
+        return null;
     }
 
     /// <summary>
@@ -369,7 +416,7 @@ public sealed partial class DownloadManagerService
             ? new AddJobResponse { Accepted = false, Error = "That package key is reserved.", ErrorCode = "invalid_package" }
             : null;
 
-    private async Task<AddJobResponse> AddWithNameSettledAsync(AddJobRequest request, CancellationToken cancellationToken)
+    private async Task<AddJobResponse> AddWithNameSettledAsync(AddJobRequest request, CancellationToken cancellationToken, CallerScope? caller = null)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -379,7 +426,7 @@ public sealed partial class DownloadManagerService
             // In its package before anyone hears of it or it can start: what opens a window or tells of a
             // finish looks the package up then, and a small first file could otherwise finish alone.
             var result = await AddJobCoreAsync(request, cancellationToken,
-                beforeAnnounce: id => AssignPackageAfterAddAsync(id, request, cancellationToken)).ConfigureAwait(false);
+                beforeAnnounce: id => AssignPackageAfterAddAsync(id, request, cancellationToken), caller: caller).ConfigureAwait(false);
 
             // A repeat too, because a crash can land between saving the job and saving its package.
             if (result is { Accepted: true, Duplicate: true, Job: { } repeated })
@@ -399,7 +446,7 @@ public sealed partial class DownloadManagerService
     /// therefore the folder, so it has to be known before the job is created. Failures and
     /// timeouts keep the name taken from the URL; the download itself is unaffected.
     /// </summary>
-    private async Task ResolveServerFileNameAsync(AddJobRequest request, CancellationToken cancellationToken)
+    private async Task ResolveServerFileNameAsync(AddJobRequest request, CancellationToken cancellationToken, CallerScope? caller = null)
     {
         if (!string.IsNullOrWhiteSpace(request.FileName) || _engine is not IFileMetadataReader reader) return;
         if (!TryValidateUrl(request.Url, out var uri, out _) || uri.Scheme is not ("http" or "https")) return;
@@ -416,6 +463,7 @@ public sealed partial class DownloadManagerService
                 RequestHeaders = headers,
                 UserAgent = request.UserAgent,
                 Referrer = request.Referrer,
+                PublicNetworkOnly = caller is not null,
             }, timeout.Token).ConfigureAwait(false);
             var serverName = ServerNameWithoutSecret(metadata.FileName, uri.AbsoluteUri, metadata.FinalUrl);
             // The address's own last part is no answer: left unset, the transfer can still find the real name.
@@ -437,7 +485,8 @@ public sealed partial class DownloadManagerService
         AddJobRequest request,
         CancellationToken cancellationToken,
         RemoteAddContext? remote = null,
-        Func<Guid, Task>? beforeAnnounce = null)
+        Func<Guid, Task>? beforeAnnounce = null,
+        CallerScope? caller = null)
     {
         if (request.Priority is { } requestedPriority && !JobPriorities.IsValid(requestedPriority))
         {
@@ -538,13 +587,14 @@ public sealed partial class DownloadManagerService
                     Path.GetExtension(fileName).TrimStart('.'), StringComparer.OrdinalIgnoreCase))?.Id ?? FileCategories.For(fileName)
                 : FileCategories.IsBuiltIn(categoryId) ? categoryId.ToLowerInvariant() : categoryId;
         }
+        // A caller limited to the app's folders never gets the last folder: it can be anywhere.
         var destination = ResolveDestination(request.DestinationDirectory, fileName,
-            useLastFolder: !browserDownload, useCategoryFolder: !browserDownload, categoryId: categoryId);
-        if (Roots is { } roots)
+            useLastFolder: !browserDownload && caller is null, useCategoryFolder: !browserDownload, categoryId: categoryId);
+        if ((caller?.Roots ?? Roots) is { } roots)
         {
             // Checked on the resolved folder, which is also the one used: a link inside a root can't lead the file out.
             if (roots.Allowed(destination) is not { } inside)
-                return new AddJobResponse { Accepted = false, Error = PathRoots.OutsideMessage, ErrorCode = "invalid_destination" };
+                return new AddJobResponse { Accepted = false, Error = roots.OutsideTextFor(destination), ErrorCode = "invalid_destination" };
             destination = inside;
         }
 
@@ -601,6 +651,7 @@ public sealed partial class DownloadManagerService
             Source = source,
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
+            PublicNetworkOnly = caller is not null,
             RequestHeaders = headers,
             RequestedConnections = Math.Clamp(
                 Math.Min(
@@ -907,8 +958,10 @@ public sealed partial class DownloadManagerService
         bool deleteFile = true,
         CancellationToken cancellationToken = default,
         bool onlyIfUnfinished = false,
-        Guid? cancelledByPackage = null)
+        Guid? cancelledByPackage = null,
+        CallerScope? caller = null)
     {
+        if (deleteFile && caller is not null && RefuseOutsideCaller(id, caller) is { } outside) return outside;
         JobRuntime? runtime;
         lock (_sync)
         {
@@ -948,8 +1001,10 @@ public sealed partial class DownloadManagerService
     public async Task<JobActionResponse> RemoveAsync(
         Guid id,
         bool deleteFile,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
+        if (deleteFile && caller is not null && RefuseOutsideCaller(id, caller) is { } outside) return outside;
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -976,10 +1031,14 @@ public sealed partial class DownloadManagerService
     public async Task<JobActionResponse> RemoveManyAsync(
         IReadOnlyList<Guid> ids,
         bool deleteFile,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
         if (ids.Count > 1000) return new JobActionResponse { Error = "Remove at most 1000 downloads at a time." };
         var unique = ids.Distinct().ToList();
+        // All or none, before any of them is stopped. One already gone is skipped below, as it is for any caller.
+        if (deleteFile && caller is not null && unique.Where(id => HeldBy(id, caller) == false).Take(1).ToList() is [var outsideId])
+            return new JobActionResponse { Ok = false, Error = CallerScope.OutsideJobRefused, Job = GetJob(outsideId) };
         var names = new Dictionary<Guid, string>();
         lock (_sync)
         {
@@ -2345,21 +2404,33 @@ public sealed partial class DownloadManagerService
                candidateVersion > installedVersion;
     }
 
+    /// <param name="caller">
+    /// A caller limited to some folders may change only a download whose files are all inside them, and may move or
+    /// rename it only to a path inside them.
+    /// </param>
     public async Task<JobActionResponse> UpdateJobAsync(
         JobUpdateRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
+        if (caller is not null)
+        {
+            if (RefuseOutsideCaller(request.JobId, caller) is { } outside) return outside;
+            if (request.NewFilePath is { } newPath && PathRoots.DescribeUnsafeText(newPath.Trim()) is { } text)
+                return new JobActionResponse { Ok = false, Error = text, Job = GetJob(request.JobId) };
+        }
+
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try { return await UpdateJobCoreAsync(request, cancellationToken).ConfigureAwait(false); }
+            try { return await UpdateJobCoreAsync(request, cancellationToken, caller).ConfigureAwait(false); }
             finally { _persistGate.Release(); }
         }
         finally { _settingsUpdateGate.Release(); }
     }
 
-    private async Task<JobActionResponse> UpdateJobCoreAsync(JobUpdateRequest request, CancellationToken cancellationToken)
+    private async Task<JobActionResponse> UpdateJobCoreAsync(JobUpdateRequest request, CancellationToken cancellationToken, CallerScope? caller)
     {
         JobRuntime? runtime;
         DownloadJob? beforeEdit = null;
@@ -2457,10 +2528,10 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Ok = false, Error = "The new path has no folder." };
                 }
 
-                if (Roots is { } roots)
+                if ((caller?.Roots ?? Roots) is { } roots)
                 {
                     if (roots.Allowed(directory) is not { } inside)
-                        return new JobActionResponse { Ok = false, Error = PathRoots.OutsideMessage };
+                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory) };
                     directory = inside;
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }
@@ -2660,15 +2731,29 @@ public sealed partial class DownloadManagerService
     }
 
     /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify.</param>
+    /// <param name="caller">
+    /// A caller limited to some folders may point only a download inside them at a new address, never one on this PC or
+    /// its local network, and the download then stays off those for good (<see cref="DownloadJob.PublicNetworkOnly"/>).
+    /// </param>
     public async Task<JobActionResponse> RefreshUrlAsync(
         Guid id,
         string newUrl,
         bool explicitDirect = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CallerScope? caller = null)
     {
         if (!TryValidateUrl(newUrl, out var uri, out var urlError))
         {
             return new JobActionResponse { Ok = false, Error = urlError };
+        }
+
+        if (caller is not null)
+        {
+            if (CallerScope.DescribeAddress(newUrl) is { } refused) return new JobActionResponse { Ok = false, Error = refused, Job = GetJob(id) };
+            if (RefuseOutsideCaller(id, caller) is { } outside) return outside;
+            // What the user set to happen to this file would then happen to whatever the new address sends.
+            if (GetJob(id) is { CompletionOptions: var options } job && (options.OpenFile || !string.IsNullOrWhiteSpace(options.ProgramPath)))
+                return new JobActionResponse { Ok = false, Error = CallerScope.CompletionActionsKeepAddress, Job = job };
         }
 
         await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
@@ -2755,6 +2840,7 @@ public sealed partial class DownloadManagerService
 
                     runtime.Job.ResolvedUrl = null;
                     runtime.Job.FinalUrl = null;
+                    if (caller is not null) runtime.Job.PublicNetworkOnly = true;
                     runtime.Job.State = DownloadState.Queued;
                     runtime.Job.StartMode = StartMode.StartNow;
                     runtime.Job.Failure = null;
@@ -2958,7 +3044,8 @@ public sealed partial class DownloadManagerService
     /// into a <see cref="OrphanQuarantineFolderName"/> folder next to where they were found.
     /// Files that became attached to a job since the last scan are never touched.
     /// </summary>
-    public Task<CleanOrphansResponse> CleanOrphanPartFilesAsync(bool delete, CancellationToken cancellationToken)
+    /// <param name="caller">A caller limited to some folders has only the leftovers inside them cleaned.</param>
+    public Task<CleanOrphansResponse> CleanOrphanPartFilesAsync(bool delete, CancellationToken cancellationToken, CallerScope? caller = null)
     {
         ScanOrphanPartFiles();
         List<string> candidates;
@@ -2966,6 +3053,8 @@ public sealed partial class DownloadManagerService
         {
             candidates = _orphanPartFiles.ToList();
         }
+
+        if (caller is not null) candidates = candidates.Where(path => caller.Roots.Allowed(path) is not null).ToList();
 
         var response = new CleanOrphansResponse { Ok = true };
         foreach (var path in candidates)
@@ -3783,6 +3872,8 @@ public sealed partial class DownloadManagerService
 
         if (changeType == "completed")
         {
+            // Before anything opens or extracts it: a download a browser on another device added is marked as from the web.
+            if (job.PublicNetworkOnly) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
             try
             {
                 await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);

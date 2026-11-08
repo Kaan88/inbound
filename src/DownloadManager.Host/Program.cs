@@ -194,7 +194,14 @@ internal static class Program
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null };
+            // D8: a browser on another device, through the web bridge, asks for the web role and gets these rights.
+            var webSessions = new WebSessionProfile(service, controller.Capabilities, archivesStarted ? archives : null,
+                remoteStarted ? remote.Registry : null, remoteStarted ? remoteJobs : null, log.Info);
+            var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
+            {
+                Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
+                WebSessions = webSessions.Rights,
+            };
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
             void ExitApplication() => _ = Task.Run(async () =>
@@ -378,6 +385,7 @@ internal static class Program
                 log.Error($"Service shutdown: {ex.Message}");
             }
 
+            webSessions.Dispose();
             remoteCommands.Dispose();
             sleepPrevention.Dispose();
             remote.Dispose();

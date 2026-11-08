@@ -65,6 +65,13 @@ public sealed record RemoteAddRequest
     public bool ApprovedUncached { get; init; }
     /// <summary>Nobody asked for this yet, so it waits for the user's go-ahead before anything is sent or asked. See <see cref="RemoteJobRecord.HeldForApproval"/>.</summary>
     public bool HoldForApproval { get; init; }
+    /// <summary>
+    /// The folders this caller may have a .torrent file read from, when they are not the coordinator's own
+    /// (<see cref="RemoteJobCoordinator.Roots"/>): a browser on another device (D8). Null uses the coordinator's.
+    /// </summary>
+    public PathRoots? SourceRoots { get; init; }
+    /// <summary>As <see cref="SourceRoots"/>, for the destination (<see cref="RemoteJobCoordinator.DestinationRoots"/>).</summary>
+    public PathRoots? DestinationRoots { get; init; }
     public string? LinkPassword { get; init; }
     /// <summary>For the archives this brings. Never sent to the provider, and not the same thing as <see cref="LinkPassword"/>.</summary>
     public string? ArchivePassword { get; init; }
@@ -510,13 +517,15 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// which also says whether it is cached: one that isn't has no files to show until the provider has fetched it.
     /// That check is all that is sent, and when it can't be made, nothing is said about the cache.
     /// </summary>
-    public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default)
+    /// <param name="sourceRoots">Where this caller may have a .torrent file read from, when not <see cref="Roots"/>.</param>
+    public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default,
+        PathRoots? sourceRoots = null)
     {
         text = Resolve(text);
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
-            var read = await ReadTorrentFileAsync(text!.Trim(), cancellationToken).ConfigureAwait(false);
+            var read = await ReadTorrentFileAsync(text!.Trim(), sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
             return read.Bytes is null
                 ? new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = read.Error }
                 : RemoteInputClassifier.ClassifyTorrent(read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), withFiles: true);
@@ -584,11 +593,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return new RemoteAddResult { Error = "The destination has to be a full path." };
         }
 
-        if (!string.IsNullOrEmpty(request.Destination) && DestinationRoots is { } destinationRoots &&
+        if (!string.IsNullOrEmpty(request.Destination) && (request.DestinationRoots ?? DestinationRoots) is { } destinationRoots &&
             destinationRoots.Allowed(request.Destination) is null)
         {
             // Checked here, before any provider call or quota is spent, and again for each file when it is added.
-            return new RemoteAddResult { Error = PathRoots.OutsideMessage };
+            return new RemoteAddResult { Error = destinationRoots.OutsideTextFor(request.Destination) };
         }
 
         if (request.StartMode is not ("startNow" or "queue" or "later"))
@@ -812,7 +821,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 }, null, classification.Kind);
 
             case RemoteInputKind.TorrentFile:
-                var read = await ReadTorrentFileAsync(request.Input!.Trim(), cancellationToken).ConfigureAwait(false);
+                var read = await ReadTorrentFileAsync(request.Input!.Trim(), request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
                 return read.Bytes is null
                     ? (null, read.Error, classification.Kind)
                     : BuildTorrentRecord(request, read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
@@ -864,11 +873,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     private string? Resolve(string? text) =>
         text is not null && ResolveReference is { } resolve && resolve(text.Trim()) is { } path ? path : text;
 
-    private async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
+    private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, PathRoots? roots, CancellationToken cancellationToken)
     {
-        if (Roots is { } roots)
+        if (roots is not null)
         {
-            if (roots.Allowed(path) is not { } inside) return (null, "That .torrent file is outside the folders this server may use.");
+            if (roots.Allowed(path) is not { } inside) return (null, roots.OutsideFileText(".torrent file"));
             path = inside;
         }
 

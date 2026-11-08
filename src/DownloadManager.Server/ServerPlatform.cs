@@ -19,6 +19,8 @@ public sealed class ServerPlatform : IHostPlatform
         SupportsUpdater = false,
         SupportsProgramSettings = false,
         SupportsFolderBrowse = true,
+        SupportsCompletionActions = false,
+        HostKind = HostKinds.Server,
     };
 
     public PlatformCapabilities Capabilities => ServerCapabilities;

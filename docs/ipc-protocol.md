@@ -13,8 +13,9 @@ page gives the framing rules, the remote provider messages and the archive messa
 - JSON uses camelCase names and leaves out null values. Unknown fields are ignored.
 - On connect the Host sends `server.hello` and then `jobs.snapshot`. After that a client gets replies to its own requests and events meant for everyone.
 - A second pipe, `\\.\pipe\DownloadManager-<hash>-hello`, with the same ACL, is for clients that want less (PERF.7).
-  There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool }`, both
-  true when left out. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
+  There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool, "role":
+  string }`, both bools true when left out. `role` is left out (or `desktop`) by the user at this PC; `web` asks for
+  the rights of a browser on another device (below). A role the Host doesn't offer closes the connection. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
   broadcasts only if `events` is true; replies always come. Any other first frame closes the connection, and one on
   another protocol version gets `server.hello` and `server.incompatible`. The CLI asks for neither (a command that
   needs the list sends `jobs.query`), and the native host asks for events only. The main pipe is unchanged. A Host
@@ -31,13 +32,77 @@ The meaning of every message lives in `HostCommandDispatcher` (`src/DownloadMana
 transport of its own; the desktop Host's named pipe is one transport over it. The capability list is a set: look a
 name up, don't read a position. The pipe Host sends `jobs`, `settings`, `handoff`, `tray`, `status` and, with the
 provider, `remote`, in that order, and a new name is only ever appended; a Host without a tray leaves `tray` out, so
-the names after it sit one place earlier there. A Host on a machine that can't do something answers instead of
+the names after it sit one place earlier there. After those come, when the session has them, `folders`, `updater`,
+`programSettings` (it may set programs the Host runs), `folderPicker` (`host.pickFolder` opens a dialog),
+`openUi`, `shutdown` and `completionActions` (a finished download or schedule may open the file, exit or shut the
+machine down). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+`hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
 available here." A Host whose clients may not set what it runs (a network server) refuses a `settings.update` that
 changes `postDownloadCommand`, `ffmpegPath`, `updateManifestUrl`, `updatePublicKey` or
 `allowSystemCompletionActions`, and a `job.update` that sets a completion program; sending those values back
 unchanged is fine. The desktop Host can do all of these.
+
+### Web sessions on the desktop Host (D8)
+
+A session whose `client.hello` has `role: "web"` is a browser on another device, through the web bridge. It gets
+what a client of the server gets, held to the app's folders, and nothing that acts on this PC beyond its downloads.
+Every other session keeps the desktop rights above. `HostCommandDispatcher.CloseSessions("web")` ends them all.
+
+- Refused: `host.openUi`, `host.pickFolder`, `host.shutdown` and `update.*` (the replies above), program settings
+  and completion programs, a `job.update` that turns on `openFile`, a `systemAction` other than `none` or
+  `forceSystemAction` ("... can only be set in the app on this PC."), `remote.account.setKey`/`clearKey`, and
+  `remote.container.sendToJd` (handing a container to another download manager on this PC; `remote.container.preview`
+  says `canSendToJd: false` to a web session).
+- `folders.browse`/`create` work, limited to **the app's folders**: the download folder, every built-in and custom
+  category folder, the favorites and the extraction folder, worked out again whenever the settings change. The
+  same folders hold for `job.add` and a hand-off, `job.update` Move/Rename (`newFilePath`), `folders.space` (a folder
+  outside them comes back unmeasured), `host.cleanOrphans`, the archive commands' `filePath` and `folder`, and the
+  provider's `.torrent` and container paths and destinations. A refusal says "That folder is outside the app's folders."
+- One of those folders is left out when it can't be used from another device: one on a network, mapped or removable
+  drive (the text check below), and one that is, holds or is inside the user's AppData, Windows, Program Files or
+  ProgramData (a favorite such as `C:\` or the user's own folder). A path in it is refused with "That folder can't
+  be used from another device." and the reason.
+- On Windows a path is checked as text first, and nothing on disk is touched for one that fails: only a drive letter,
+  a colon and a slash, on a fixed local drive; no UNC, `\\?\`, `\\.\` or `\??\` path, no device name (`CON`, `NUL`,
+  `COM1`...), no `:` after the drive (a stream), no part ending in a dot or a space, none of `<>"|?*`. A link
+  whose target fails the same check (another computer, or a drive letter that isn't a fixed drive) is not followed.
+- A download whose files are outside the app's folders is read-only for a web session: it may pause, resume, retry
+  and remove it without its file, but `job.update`, `job.refreshUrl`, removing or cancelling with its file,
+  `archive.extract` of it (by `jobIds` or `packageId`) and `archive.setPassword` for a package with such a
+  download are refused with "This download's file is outside the app's folders, so it can't be changed from another
+  device." The same goes for a provider job saved to a folder outside them (`remote.select`, `remote.retry`,
+  `remote.startQueued`, `remote.archivePassword`).
+- An archive set whose folder or output folder is outside the app's folders is not listed in `archive.list` for a
+  web session (nor, on a server, one outside its folders), and `archive.retry`, `archive.cancel`, `archive.remove` and `archive.setPassword` by `setId` leave it
+  alone ("These archives are outside the app's folders, so they can't be changed from another device.").
+- `job.refreshUrl` is refused for a download set to open its file or run a program when it is done: those would then
+  act on whatever the new address sends.
+- `settings.update` follows an allow-list (`WebSettingsRules`): queues, schedules, connections, speed, categories'
+  names and file types. Every other field must be sent back as it is, or the save is refused with the names of
+  the changed fields and nothing is saved; what the Host keeps itself (recent folders and addresses, packages, the
+  last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
+  `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are.
+  `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
+  those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
+- What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
+  post-download command, the FFmpeg path, the update source, the proxy's address and user (its mode stays), the site
+  logins, the sound files and the recent addresses and folders. Sent back as shown, they are kept as they are; sent
+  with another value, they are refused like any field it may not change.
+- No local network: a download added, handed off or pointed at a new address by a web session never reaches
+  loopback, private, link-local, carrier-grade NAT or `.local` addresses (`errorCode: "local_network"` on `job.add`
+  and `handoff.request`), and an address's name is resolved and checked again when the connection is made. Any
+  connection that isn't to the proxy the user set is checked so. Through the proxy, the site's name is resolved on
+  this PC first and refused the same way; a name only the proxy can resolve goes ahead, as does one that resolves
+  differently by the time the proxy asks. FTP is refused. A hand-off's `extensionId` is not checked and grants
+  nothing, and request ids are kept apart from a local client's.
+- A finished download a web session added gets the mark Windows gives files from the internet (`Zone.Identifier`,
+  zone 3, with only the site's scheme and host), so SmartScreen and Office warn before it is opened. A drive without
+  streams keeps it unmarked.
+- Removing several downloads with their files skips one that is already gone, as it does for any other session.
+- `jobs.snapshot`, `jobs.query` and `host.status` leave `stateDirectory` empty and list only leftovers inside the
+  app's folders.
 
 ### The server's transports (D1b)
 
@@ -125,8 +190,8 @@ wrong tries is 429 with `Retry-After`.
 
 ### Folder browsing: `folders.*`
 
-Only a Host whose hello lists `folders` answers these; the desktop Host doesn't (it has a folder dialog) and replies
-with `error` "Folder browsing is not available here." Both requests reply with `folders.browseResult`
+Only a session whose hello lists `folders` gets these answered; the desktop Host's own sessions don't (they have a
+folder dialog) and get `error` "Folder browsing is not available here." A web session there does. Both requests reply with `folders.browseResult`
 (`FolderBrowseResult` in `FolderBrowseDtos.cs`).
 
 - `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden folders (the
@@ -148,7 +213,8 @@ with `error` "Folder browsing is not available here." Both requests reply with `
   folder settings it falls back on) answers `invalid_destination`; `job.update` Move/Rename, `settings.update` with a
   changed folder outside them, `remote.container.preview`/`sendToJd`, a `.torrent` path in `remote.add`/`classify`,
   `archive.extract` and `archive.setPassword` with a `filePath`, and `archive.settings.set` with a `folder` answer
-  `ok: false` with an error. The desktop Host has no roots.
+  `ok: false` with an error. The desktop Host has no roots for its own sessions; a web session there has the app's
+  folders (above).
 
 ## One command at a time per connection
 
