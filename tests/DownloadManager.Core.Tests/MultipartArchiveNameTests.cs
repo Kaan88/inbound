@@ -1,4 +1,5 @@
 using DownloadManager.Core;
+using DownloadManager.Tests.Shared;
 using Xunit;
 
 namespace DownloadManager.Core.Tests;
@@ -18,7 +19,7 @@ public sealed class MultipartArchiveNameTests
     [InlineData(@"C:\dl\movie.part2.rar", "movie")]
     public void Recognises_split_archive_parts(string fileName, string expected)
     {
-        Assert.True(MultipartArchiveName.TryGetBaseName(fileName, out var baseName));
+        Assert.True(MultipartArchiveName.TryGetBaseName(TestPaths.Native(fileName), out var baseName));
         Assert.Equal(expected, baseName);
     }
 
@@ -34,13 +35,26 @@ public sealed class MultipartArchiveNameTests
         Assert.False(MultipartArchiveName.TryGetBaseName(fileName, out _));
 
     [Fact]
+    [Trait("Platform", "Windows")]
     public void Parts_in_the_same_folder_share_a_key_case_insensitively()
     {
+        if (!OperatingSystem.IsWindows()) return;
         var one = MultipartArchiveName.KeyFor("Movie.part1.rar", @"C:\Downloads");
         var two = MultipartArchiveName.KeyFor("movie.PART02.rar", @"c:\downloads\");
         Assert.NotNull(one);
         Assert.Equal(one, two);
         Assert.NotEqual(one, MultipartArchiveName.KeyFor("movie.part3.rar", @"C:\Other"));
+    }
+
+    [Fact]
+    public void Off_windows_the_key_keeps_the_case_of_the_folder_and_the_name()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var one = MultipartArchiveName.KeyFor("Movie.part1.rar", "/downloads");
+        Assert.NotNull(one);
+        Assert.Equal(one, MultipartArchiveName.KeyFor("Movie.part02.rar", "/downloads/"));
+        Assert.NotEqual(one, MultipartArchiveName.KeyFor("movie.part02.rar", "/downloads"));
+        Assert.NotEqual(one, MultipartArchiveName.KeyFor("Movie.part02.rar", "/Downloads"));
     }
 
     [Fact]

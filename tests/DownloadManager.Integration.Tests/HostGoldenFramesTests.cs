@@ -20,6 +20,7 @@ namespace DownloadManager.Integration.Tests;
 /// <c>artifacts\d1a\frames-&lt;label&gt;.txt</c>, with the label from <c>GOLDEN_FRAMES_LABEL</c> (default <c>latest</c>).
 /// </para>
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed partial class HostGoldenFramesTests : IAsyncLifetime
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(400);

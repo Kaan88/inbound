@@ -134,7 +134,7 @@ public sealed class ToolPasswordTests
     {
         var channel = ToolPassword.From(password);
         Assert.Same(ToolPassword.None, channel);
-        Assert.Equal("\r\n"u8.ToArray(), channel.CopyStdinBytes());
+        Assert.Equal(OperatingSystem.IsWindows() ? "\r\n"u8.ToArray() : "\n"u8.ToArray(), channel.CopyStdinBytes());
     }
 
     [Theory]
@@ -143,7 +143,7 @@ public sealed class ToolPasswordTests
     [InlineData(" leading and trailing ")]
     public void APasswordGoesThroughStdinAsUtf8(string password)
     {
-        Assert.Equal(Encoding.UTF8.GetBytes(password + "\r\n"), ToolPassword.From(password).CopyStdinBytes());
+        Assert.Equal(Encoding.UTF8.GetBytes(password + (OperatingSystem.IsWindows() ? "\r\n" : "\n")), ToolPassword.From(password).CopyStdinBytes());
     }
 
     [Theory]
@@ -162,7 +162,7 @@ public sealed class ToolPasswordTests
     {
         var channel = ToolPassword.From("secret");
         Array.Clear(channel.CopyStdinBytes());
-        Assert.Equal("secret\r\n"u8.ToArray(), channel.CopyStdinBytes());
+        Assert.Equal(OperatingSystem.IsWindows() ? "secret\r\n"u8.ToArray() : "secret\n"u8.ToArray(), channel.CopyStdinBytes());
     }
 
     [Fact]

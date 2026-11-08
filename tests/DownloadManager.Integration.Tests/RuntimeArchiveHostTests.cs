@@ -1,3 +1,4 @@
+using DownloadManager.Persistence;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
@@ -258,6 +259,7 @@ internal sealed class ArchiveHost : IAsyncDisposable
     }
 }
 
+[Trait("Platform", "Windows")]
 [Collection("runtime-archive")]
 public sealed class RuntimeArchiveHostTests
 {
@@ -296,7 +298,7 @@ public sealed class RuntimeArchiveHostTests
         var advance = await host.RequestAsync<ArchiveActionResult>(ArchiveMessageTypes.SetPassword, new ArchiveSetPasswordRequest { FilePath = Path.Combine(host.Downloads, "advance.rar"), Password = Secret });
         Assert.True(advance.Ok, advance.Error);
         var record = await File.ReadAllTextAsync(Path.Combine(host.Data, "archive", "sets", $"{advance.Set!.Id:N}.json"));
-        Assert.Contains("dpapi:v1:", record);
+        Assert.Contains(SecretProtector.Current.Prefix, record);
 
         Assert.Contains(host.Changes, change => change.Set?.State == "extracting");
         Assert.Contains(host.Changes, change => change.Set?.State == "completed");

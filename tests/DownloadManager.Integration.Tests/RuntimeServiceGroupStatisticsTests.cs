@@ -159,7 +159,8 @@ public sealed partial class RuntimeServiceTests
         Assert.DoesNotContain(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(single.Id));
         var second = await Add("movie.part2.rar");
         var unrelated = await Add("other.part1.rar");
-        var third = await Add("Movie.part3.rar");
+        // Windows names ignore case, so a part written Movie belongs to the set there; Linux would keep it apart.
+        var third = await Add(OperatingSystem.IsWindows() ? "Movie.part3.rar" : "movie.part3.rar");
 
         var package = Assert.Single(ctx.Service.GetSnapshot().Settings.DownloadGroups, g => g.JobIds.Contains(single.Id));
         Assert.Equal("movie", package.Name);

@@ -5,6 +5,7 @@ namespace DownloadManager.Core.Tests;
 public sealed class DownloadFoldersTests
 {
     [Fact]
+    [Trait("Platform", "Windows")]
     public void FavoritesAreTrimmedNamedAndWithoutRepeats()
     {
         var result = DownloadFolders.Normalize(
@@ -20,6 +21,20 @@ public sealed class DownloadFoldersTests
         Assert.Equal(("Movies", @"D:\Media\Movies"), (result[0].Name, result[0].Path));
         Assert.Equal(("Shows", @"E:\Shows"), (result[1].Name, result[1].Path));
         Assert.Equal((@"F:\", @"F:\"), (result[2].Name, result[2].Path));
+    }
+
+    [Fact]
+    public void OffWindowsFavoritesKeepFoldersThatDifferOnlyInCapitals()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var result = DownloadFolders.Normalize(
+        [
+            new FavoriteFolder { Name = "", Path = "/downloads/Shows/" },
+            new FavoriteFolder { Name = "", Path = "/downloads/shows" },
+            new FavoriteFolder { Name = "Again", Path = "/downloads/Shows" },
+        ]);
+
+        Assert.Equal([("Shows", "/downloads/Shows/"), ("shows", "/downloads/shows")], result.Select(f => (f.Name, f.Path)));
     }
 
     [Fact]
@@ -59,6 +74,7 @@ public sealed class DownloadFoldersTests
         Assert.NotNull(space.FreeBytes);
         Assert.NotNull(space.TotalBytes);
         Assert.True(space.FreeBytes <= space.TotalBytes);
-        Assert.False(space.InsideContainer);
+        // Off Windows the test may itself run in a container (the Linux test run does), which is what the flag reports.
+        if (OperatingSystem.IsWindows()) Assert.False(space.InsideContainer);
     }
 }
