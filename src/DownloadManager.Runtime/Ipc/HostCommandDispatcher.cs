@@ -29,6 +29,7 @@ public sealed partial class HostCommandDispatcher
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _groupsGate = new();
     private int _updateWindowOpened;
+    private int _exiting;
     private List<DownloadGroupDto>? _lastGroups;
     private int _groupsBroadcastPending;
 
@@ -104,6 +105,15 @@ public sealed partial class HostCommandDispatcher
     public async Task OpenSessionAsync(IClientSession client, CancellationToken cancellationToken)
     {
         _sessions[client.Id] = client;
+        // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
+        // starting meanwhile does not take this one for a running copy and quit. Registered first and read after,
+        // and NotifyExitingAsync sets it before it reads the sessions: a session either sees it here or is told there.
+        if (Interlocked.CompareExchange(ref _exiting, 0, 0) == 1)
+        {
+            await client.SendDirectAsync(IpcMessage.Create(MessageTypes.HostExiting, new { }), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         await client.SendDirectAsync(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto
         {
             HostVersion = Protocol.HostVersion,
@@ -632,6 +642,7 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public async Task NotifyExitingAsync(TimeSpan timeout)
     {
+        Interlocked.Exchange(ref _exiting, 1);
         using var cts = new CancellationTokenSource(timeout);
         var message = IpcMessage.Create(MessageTypes.HostExiting, new { });
         await Task.WhenAll(_sessions.Values.Select(async client =>

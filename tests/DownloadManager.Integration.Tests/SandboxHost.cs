@@ -254,6 +254,23 @@ internal sealed partial class SandboxHost : IAsyncDisposable
         return process;
     }
 
+    /// <summary>
+    /// A user's exit (host.shutdown), and back at once: the next start comes while this one is still shutting down,
+    /// with its pipe and mutex still open. Returns the exiting process so a test can wait for it.
+    /// </summary>
+    public async Task<Process> ExitWithoutWaitingAsync()
+    {
+        var process = _process!;
+        await using (var connection = await ConnectAsync())
+        {
+            await connection.AskAsync<HostActionResult>(MessageTypes.HostShutdown, new { });
+        }
+
+        _process = null;
+        await CloseConnectionsAsync();
+        return process;
+    }
+
     public Task RestartAsync() => LaunchAsync();
 
     /// <summary>The Host's single-instance mutex in this profile, named as <see cref="PipeNames.MutexName"/> names it there.</summary>
