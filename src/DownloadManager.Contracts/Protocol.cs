@@ -42,6 +42,9 @@ public static class MessageTypes
     public const string SettingsGet = "settings.get";
     public const string SettingsUpdate = "settings.update";
     public const string SettingsResult = "settings.result";
+    /// <summary>Only the default download folder and the favorite folders (<see cref="DownloadFoldersResult"/>).</summary>
+    public const string SettingsDownloadFolders = "settings.downloadFolders";
+    public const string SettingsDownloadFoldersResult = "settings.downloadFoldersResult";
     public const string FolderSpace = "folders.space";
     public const string FolderSpaceResult = "folders.spaceResult";
     public const string QueueAction = "queue.action";
