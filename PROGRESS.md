@@ -13,7 +13,7 @@
 
 #### Questions for the owner (stream C)
 
-- AMO signing: upload `artifactsirefox-addon` (from `scripts\package-extension-firefox.ps1`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
+- AMO signing: upload `artifacts\firefox-addon` (from `scripts\package-extension-firefox.ps1`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
 - The privacy policy (`docs/chrome-extension-privacy.md`) changed (final-address cookies, the "left in browser" notes, folder window, popup actions); the online copy needs updating when this ships.
 - The EXT.B1 live check in your Edge with the file host's Direct Download button, when you are around.
 
