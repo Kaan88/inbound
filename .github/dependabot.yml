@@ -1,0 +1,27 @@
+# Dependabot opens pull requests for the Docker base images and the GitHub Actions; it merges nothing, and no workflow
+# here merges its pull requests either. Each one is reviewed and merged by hand.
+#
+# - docker: the FROM lines of the root Dockerfile, pinned by tag and digest (node:24-alpine, dotnet/sdk:10.0,
+#   dotnet/aspnet:10.0). A new digest of the same tag is proposed; a new major version (node 26, .NET 11) is not,
+#   since that is a decision of its own.
+# - github-actions: the actions in .github/workflows, pinned by commit with the release named beside each.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Docker"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Actions"

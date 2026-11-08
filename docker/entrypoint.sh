@@ -4,6 +4,10 @@
 # Started as root (the default), it gives the data folder to PUID:PGID when its owner differs, checks that the download
 # folders can be written, and then runs the server as PUID:PGID with no root rights left (setpriv, from the image's
 # util-linux). Started as another user (docker run --user), it changes nothing and runs the server as that user.
+#
+# PUID and PGID default to 1000. They are used only as numbers (find -user, chown, setpriv), never looked up as names,
+# so it doesn't matter whether the image already has an account with that id (the base image's 'app' is 1654) or none
+# at all: no account is created or changed, and HOME is set below because there may be no passwd entry.
 set -eu
 
 say() { printf '%s\n' "entrypoint: $*" >&2; }
@@ -12,8 +16,8 @@ if [ "$(id -u)" != "0" ]; then
     exec "$@"
 fi
 
-uid="${PUID:-1654}"
-gid="${PGID:-1654}"
+uid="${PUID:-1000}"
+gid="${PGID:-1000}"
 case "$uid$gid" in
     *[!0-9]*|"") say "PUID and PGID must be numbers (got PUID=$uid, PGID=$gid)."; exit 2 ;;
 esac
