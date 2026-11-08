@@ -16,6 +16,7 @@ if (-not $AppDir) {
 $required = @(
     "DownloadManager.Host.exe",
     "DownloadManager.NativeHost.exe",
+    "DownloadManager.Server.exe",
     "DownloadManager.Desktop.WinUI.exe"
 )
 $missing = $required | Where-Object { -not (Test-Path (Join-Path $AppDir $_)) }
@@ -30,7 +31,7 @@ if ($missing.Count -gt 0) {
     }
 }
 
-Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI -ErrorAction SilentlyContinue |
+Get-Process DownloadManager.Host, DownloadManager.Desktop.WinUI, DownloadManager.Server -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
