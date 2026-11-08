@@ -84,7 +84,9 @@ UI-agnostic and directly testable.
 
 IPC: per-user named pipe, current-user-only ACL, JSON envelopes with
 `protocolVersion`, snapshot on connect then events. Native Messaging stdout is
-protocol-only; log to stderr/file.
+protocol-only; log to stderr/file. Commands and broadcasts live in the
+transport-free `Runtime/Ipc/HostCommandDispatcher`; `HostPipeServer` is only the
+pipe transport, and machine actions go through `IHostPlatform`.
 
 Browser strategy: the extension observes eligible Chrome downloads and sends
 URL, final URL, cookies, referrer, UA and relevant headers to our native host;
