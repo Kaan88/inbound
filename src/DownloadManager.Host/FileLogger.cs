@@ -1,9 +1,10 @@
 using System.Text;
 using DownloadManager.Core.Providers;
+using DownloadManager.Runtime.Ipc;
 
 namespace DownloadManager.Host;
 
-public sealed class FileLogger
+public sealed class FileLogger : IHostLog
 {
     private readonly object _gate = new();
     private readonly string _directory;
