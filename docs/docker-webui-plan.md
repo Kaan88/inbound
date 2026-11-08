@@ -1,6 +1,68 @@
 # Plan: headless server, web UI and Docker (D1 to D4)
 
-Status: plan, 2026-11-07. Nothing here is built yet. ROADMAP D1 to D4 and PERF.1 to PERF.3 track it.
+Status: plan, 2026-11-07. D1a (the shared command dispatcher) and D1b (the server and the Linux replacements) are
+built on `stream-b`, 2026-11-08; what D1b holds is described in the next section. D2 to D4 are not started. ROADMAP D1
+to D4 and PERF.1 to PERF.3 track it.
+
+## D1b: what was built (2026-11-08)
+
+`src/DownloadManager.Server` (`net10.0`, ASP.NET Core) runs the Runtime, Engine, Persistence, Archives, Containers
+and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows project referenced.
+
+- **Endpoints:** `GET /api/ws` (WebSocket, one JSON envelope per text message, hello and snapshot then events),
+  `POST /api/ipc` (one envelope in, one reply out), `GET /health` (no check of any kind), and static files from
+  `wwwroot` (a labelled placeholder page until D2). The framing is in `docs/ipc-protocol.md`.
+- **Configuration:** `DOWNLOADMANAGER_DATA` (state, default `/data`), `DOWNLOADMANAGER_ROOTS` (the folders the web UI
+  may browse, default `/downloads`, several separated by `:` or `;`), `DOWNLOADMANAGER_URLS` or `ASPNETCORE_URLS`
+  (default `http://0.0.0.0:8080`), `DOWNLOADMANAGER_HOSTS` (host names a browser may use besides IP addresses and
+  `localhost`). On its first start the server sets the default download folder to the first root and turns off the
+  desktop-only settings (notifications, sound, clipboard watching, start at sign-in).
+- **What the server can't do:** no window, folder dialog, tray, exit on request, updater or programs named by a client
+  (`PlatformCapabilities` with only `SupportsFolderBrowse` on). Those commands answer that they are not available.
+  Instead it answers `folders.browse` and `folders.create`, limited to the roots, with every path resolved through
+  its links before the check.
+- **Origin check:** a browser request to `/api/` must come from the server's own origin and must name the server by
+  an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. That stops another web page, including one that
+  points its own name at the server (DNS rebinding), from driving it through the user's browser.
+
+**There is no sign-in yet (D2).** Anyone who can reach the port can do everything a client can: add and delete
+downloads, write files anywhere the server's user may write (a job's destination is not limited to the roots, only
+the folder browser is), change settings, enter or replace the TorBox key and site logins. The server therefore refuses
+to listen on anything but loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and logs a warning when
+it is. The default address `0.0.0.0:8080` needs that variable. Until D2, keep the port on a trusted home network.
+
+### The Linux replacements
+
+| Windows part | On Linux now | Evidence |
+| --- | --- | --- |
+| `SecretProtector` (DPAPI) | `ISecretProtector`. The server uses `AesGcmSecretProtector`: AES-256-GCM, key in `<data>/secrets.key`, 32 random bytes, created with mode 600; a looser mode is reset to 600 with a warning. Blobs are `aesgcm:v1:`. The desktop keeps DPAPI unchanged. | `SecretKeyFileTests` (Server.Tests) |
+| Bundled `7z.exe` | `7zz` (or `7z`) found by `DOWNLOADMANAGER_7ZIP`, then a `7zz` next to the program, then `PATH`. The tool status names the path used, or says how to install it. | `SevenZipToolTests`, the Archives and Integration extraction tests on Linux with the official 7-Zip 26.04 `7zz` |
+| Hard-link check after extraction (`GetFileInformationByHandle`) | `lstat` from the C library on Linux (x64 and arm64 layouts), so an extracted hard link is still refused. | `StagingWalkTests.RefusesAHardLink` on Linux |
+| Password on 7-Zip's stdin ending in CR LF | LF only on Linux: 7-Zip for Linux keeps a CR as part of the password. | `ToolPasswordTests`, the RAR4 and 7z/zip password tests on Linux |
+| Junction checks | The same checks catch folder symlinks; the tests make a symlink where Windows makes a junction. | `StagingWalkTests.RefusesAJunction`, `FinalizerTests.AJunctionInTheDestinationIsRefused` on Linux |
+| `ToolLifetime` (job object) | The tool's process tree is killed on cancel, on dispose and when the server exits normally. | `ToolProcessTests` incl. `OffWindowsATiedToolIsKilledWhenThisProcessExits` |
+| FFmpeg path | `ffmpeg` on `PATH` (no `.exe`). | `FfmpegDiscoveryTests` |
+| Completion program check | A full path; `.exe` is only required on Windows. The server refuses completion programs anyway. | `HostCommandDispatcherTests.TheDesktopAcceptsProgramSettings` on Linux |
+| Path comparisons | `PathNames`: case-insensitive on Windows, case-sensitive elsewhere. Used for extraction staging and output sets, archive set keys, package folders, renames and the folder browser. | `PathNamesTests`, `ExtractionSafetyTests` |
+| Free space and same-volume checks | `Volumes`: the drive on Windows; the longest matching mount point on Linux, so `/downloads` on its own volume is measured as itself. | `PathNamesTests`, `DownloadFoldersTests` |
+| Mark of the web, `SparseFile`, `ExtractionDurability.FlushDirectory` | Skip off Windows (checked in the code: each returns at once there). Files are still flushed with `fsync` before an archive is deleted. | code review; the extraction tests pass on Linux |
+
+### Decisions taken without the owner (listed in PROGRESS as questions)
+
+- **Case on Linux:** extraction no longer refuses `a.txt` next to `A.TXT` on Linux, because Linux keeps them apart. The
+  check stays on Windows. A name with a backslash is refused on Linux, since it would become a folder on Windows if
+  the files were ever copied there.
+- **The secret key file** is part of the data volume. A backup of `/data` carries every secret with its key; losing
+  the key file makes saved site logins, proxy passwords and the TorBox key unreadable, and they must be entered again
+  (each is read as empty, with a warning naming the key file). Secrets copied from a Windows install (DPAPI) can't be
+  read on the server, for the same reason.
+- **Not done on Linux:** a directory `fsync` after the renames (Windows flushes the folder; Linux skips it, so a power
+  cut just after an extraction could lose the renames though not the file data); a kill of the server with SIGKILL
+  leaves a running `7zz` to finish on its own (there is no job object). Both are noted for D3.
+- **Tests on Linux:** the tests that start the Windows Host, use named pipes, NTFS streams, junctions, share locks,
+  drive letters as such, Explorer or the updater carry `[Trait("Platform", "Windows")]`, and the Linux run uses
+  `--filter "Platform!=Windows"`. The Host, CLI and NativeHost references of the integration tests are Windows-only.
+
 
 ## Memory today (measured 2026-11-07, build 0.5.1)
 
@@ -52,8 +114,7 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 | Tray, sounds, clipboard, sleep prevention, shutdown actions, start at sign-in, native-host registration, updater | Not in the server. The image updates instead. |
 
 - **Paths:** state in `/data` (`DOWNLOADMANAGER_DATA` already exists), downloads under `/downloads`.
-- **Case-sensitive file systems:** the check that refuses `a.txt` next to `A.TXT` is for Windows. Decide
-  whether it stays on Linux.
+- **Case-sensitive file systems:** the check that refuses `a.txt` next to `A.TXT` stays on Windows only (D1b).
 - **Tests:** Core, Engine, Persistence, Runtime, Archives, TorBox and Containers run on Linux in a container.
   The integration tests that talk to the Host run against the Server too.
 
