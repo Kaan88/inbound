@@ -1,15 +1,17 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Dialog from '../components/Dialog.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import SegmentMap from '../components/SegmentMap.svelte';
+  import SegmentTable from '../components/SegmentTable.svelte';
   import {
     barValue, cancelPackageText, cancelTargets, detailRows, fileToShow, mergeSegments, packageActionNotice, packageFigures, pauseTargets,
-    pollsSegments, resumeTargets, sortedByName, splitPath,
+    pollsSegments, resumeTargets, segmentRows, sortedByName, splitPath, updateRates,
   } from '../lib/details';
   import { bytes, percent, stateWord, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
-  import type { Job, Segment } from '../lib/types';
+  import type { ConnectionInfo, Job, Segment } from '../lib/types';
   import PackagePassword from './PackagePassword.svelte';
 
   // The package window (D15): a summary line, the overall bar, the files sorted by name, the selected file's details,
@@ -32,9 +34,12 @@
   let busy = $state(false);
 
   let segments = $state<Segment[]>([]);
+  let connections = $state<ConnectionInfo[]>([]);
+  let segmentProblem = $state('');
   const highWater = new Map<number, number>();
+  const rates = new Map<number, number>();
   let loading = false;
-  let segmentsFor = '';
+  const segmentView = $derived(segmentRows(segments, connections, rates));
 
   async function loadSegments() {
     const current = shown;
@@ -42,23 +47,34 @@
     loading = true;
     try {
       const saved = await store.ask<Segment[]>('job.segments', { jobId: current.id });
-      const live = await store.ask<import('../lib/types').ConnectionInfo[]>('job.connections', { jobId: current.id });
-      if (shown?.id === current.id) segments = mergeSegments(Array.isArray(saved) ? saved : [], Array.isArray(live) ? live : [], current, highWater);
-    } catch {
-      // Only a display; the next second looks again.
+      const live = await store.ask<ConnectionInfo[]>('job.connections', { jobId: current.id });
+      if (shown?.id === current.id) {
+        const now = Array.isArray(live) ? live : [];
+        const merged = mergeSegments(Array.isArray(saved) ? saved : [], now, current, highWater);
+        updateRates(merged, now, rates);
+        segmentProblem = '';
+        connections = now;
+        segments = merged;
+      }
+    } catch (error) {
+      segmentProblem = `Saved segment details unavailable: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       loading = false;
     }
   }
 
+  // Starts again only when another file is picked; the download's own updates do not touch the timer.
   $effect(() => {
-    if (shownId !== segmentsFor) {
-      segmentsFor = shownId ?? '';
+    void shownId;
+    untrack(() => {
       segments = [];
+      connections = [];
+      segmentProblem = '';
       highWater.clear();
-    }
+      rates.clear();
+      void loadSegments();
+    });
     const timer = setInterval(() => void loadSegments(), 1000);
-    void loadSegments();
     return () => clearInterval(timer);
   });
 
@@ -102,18 +118,13 @@
 
     <ul class="mt-3 max-h-56 overflow-y-auto rounded border border-divider" aria-label="Files in this package">
       {#each members as job (job.id)}
-        <li class="border-b border-divider/60 last:border-b-0">
-          <button
-            class="grid w-full grid-cols-[1fr_auto] gap-x-3 gap-y-1 px-2 py-1.5 text-left text-[13px] {job.id === shownId ? 'bg-selected' : 'hover:bg-hover'}"
-            aria-pressed={job.id === shownId}
-            title="Double-click for this file's own window"
-            onclick={() => (picked = job.id)}
-            ondblclick={() => onopenfile(job.id)}
-          >
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <li class="border-b border-divider/60 last:border-b-0 {job.id === shownId ? 'bg-selected' : 'hover:bg-hover'}" title="Double-click for this file's own window" ondblclick={() => onopenfile(job.id)}>
+          <button class="grid w-full grid-cols-[1fr_auto] gap-x-3 px-2 pt-1.5 text-left text-[13px]" aria-pressed={job.id === shownId} onclick={() => (picked = job.id)}>
             <span class="truncate">{job.fileName}</span>
             <span class="tabular text-right text-[12px] text-muted"><span class="tone-{tone(job.state)}">{stateWord(job.state)}</span> · {job.totalBytes && job.totalBytes > 0 ? `${bytes(job.receivedBytes)} / ${bytes(job.totalBytes)}` : bytes(job.receivedBytes) || '0 B'}</span>
-            <span class="col-span-2"><ProgressBar value={barValue(job)} label="{job.fileName} progress" /></span>
           </button>
+          <div class="px-2 pb-1.5 pt-1"><ProgressBar value={barValue(job)} label="{job.fileName} progress" /></div>
         </li>
       {:else}
         <li class="px-3 py-4 text-center text-[13px] text-muted">No files in this package yet.</li>
@@ -137,6 +148,7 @@
           {/each}
           {#if shown.finalFilePath}<dt class="text-muted">Save to</dt><dd class="select-text break-all">{shown.finalFilePath}</dd>{/if}
         </dl>
+        <SegmentTable rows={segmentView} problem={segmentProblem} />
       {:else}
         <p class="text-[13px] text-muted">No file selected</p>
       {/if}

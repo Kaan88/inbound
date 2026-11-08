@@ -4,10 +4,11 @@
   import Dialog from '../components/Dialog.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import SegmentMap from '../components/SegmentMap.svelte';
+  import SegmentTable from '../components/SegmentTable.svelte';
   import { cantTell, routeOf } from '../lib/addlines';
   import {
     addressLabel, barValue, completedSize, detailRows, failureLabel, hasOwnAddress, heading, mergeSegments, noFileText, noticeText,
-    pollsSegments, redownloadRefusal, segmentRows, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
+    hideAddresses, pollsSegments, redownloadRefusal, segmentRows, updateRates, shownAddress, speedLimitFrom, speedLimitHelp, speedLimitText, speedLimitUnavailable, splitPath,
   } from '../lib/details';
   import { archiveShort, archiveTone, dateTime, percent, speed, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
@@ -43,7 +44,6 @@
   let question = $state<{ text: string; primary: string; secondary?: string; onprimary: () => void; onsecondary?: () => void } | null>(null);
 
   // ---- Segments (D2) ----
-  let segmentsOpen = $state(false);
   let segments = $state<Segment[]>([]);
   let connections = $state<ConnectionInfo[]>([]);
   let segmentProblem = $state('');
@@ -60,7 +60,10 @@
       const live = await store.ask<ConnectionInfo[]>('job.connections', { jobId });
       segmentProblem = '';
       connections = Array.isArray(live) ? live : [];
-      segments = mergeSegments(Array.isArray(saved) ? saved : [], connections, job ?? current, highWater);
+      const merged = mergeSegments(Array.isArray(saved) ? saved : [], connections, job ?? current, highWater);
+      // The speed smoothing moves once per sample, here, and not whenever the table is drawn.
+      updateRates(merged, connections, rates);
+      segments = merged;
     } catch (error) {
       segmentProblem = `Saved segment details unavailable: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
@@ -68,9 +71,10 @@
     }
   }
 
+  // Depends on nothing reactive: the timer is made once per dialog, whatever the download does meanwhile.
   $effect(() => {
     const timer = setInterval(() => void loadSegments(), 1000);
-    void loadSegments();
+    untrack(() => void loadSegments());
     return () => clearInterval(timer);
   });
 
@@ -98,6 +102,11 @@
     }
   });
   const canLimit = $derived(!!job?.canChangeSpeedLimit);
+  // The notice is rewritten whenever the limiter becomes available or unavailable (DownloadWindow).
+  $effect(() => {
+    void canLimit;
+    limitNotice = '';
+  });
   const limiterNotice = $derived(limitNotice || (canLimit ? speedLimitHelp : speedLimitUnavailable));
 
   async function applyLimit() {
@@ -223,6 +232,7 @@
     try {
       const result = await store.ask<{ accepted: boolean; error?: string }>('job.add', {
         url: current.url, destinationDirectory: current.destinationDirectory, fileName: current.fileName, categoryId: current.categoryId,
+        // TODO(A28): 'web' is not a DownloadSource and the Host reads it as Api; change it with the rest of the source fix.
         conflictPolicy: 'rename', rememberDestination: false, source: 'web',
       });
       if (!result.accepted) notice = result.error ?? 'The server rejected the redownload.';
@@ -258,8 +268,8 @@
 
   const rows = $derived(job ? detailRows(job) : []);
   const bar = $derived(job ? barValue(job) : 0);
-  const title = $derived(job ? (complete ? `Download complete — ${job.fileName || 'Download'}` : `${(percent(job) ?? 0).toFixed(1)}% — ${job.fileName || 'Download'}`) : 'Download removed');
-  const noticeLine = $derived(removed ? 'This download is no longer in the list.' : notice || (job ? noticeText(job) : ''));
+  const title = $derived(removed || !job ? 'Download removed' : (complete ? `Download complete — ${job.fileName || 'Download'}` : `${(percent(job) ?? 0).toFixed(1)}% — ${job.fileName || 'Download'}`));
+  const noticeLine = $derived(removed ? 'This download is no longer in the list.' : notice || (job ? hideAddresses(noticeText(job)) : ''));
   const failLabel = $derived(job ? failureLabel(job) : null);
   const ownAddress = $derived(!!job && hasOwnAddress(job));
   const folderOf = $derived(job ? splitPath(job.finalFilePath).directory : '');
@@ -268,11 +278,11 @@
 <Dialog {title} {onclose} wide>
   <div class="mb-3 text-[15px] font-semibold">{removed ? 'Download removed' : job ? heading(job) : ''}</div>
 
-  {#if job}
+  {#if job && !removed}
     <div class="mb-3 truncate text-[13px] font-semibold" title={job.fileName}>{job.fileName || 'Download'}</div>
   {/if}
 
-  {#if job && !complete}
+  {#if job && !removed && !complete}
     <div role="tablist" aria-label="Download details" class="mb-3 flex gap-1 border-b border-divider">
       {#each [['status', 'Download status'], ['speed', 'Speed limiter'], ['completion', 'Options on completion']] as [key, label] (key)}
         <button
@@ -304,7 +314,7 @@
         {/if}
         <dt class="text-muted">Queue</dt><dd>{job.queueName ?? job.queueId}</dd>
         <dt class="text-muted">Added</dt><dd>{dateTime(job.createdAt)}</dd>
-        {#if job.statusNote}<dt class="text-muted">Note</dt><dd>{job.statusNote}</dd>{/if}
+        {#if hideAddresses(job.statusNote)}<dt class="text-muted">Note</dt><dd>{hideAddresses(job.statusNote)}</dd>{/if}
         {#if failLabel && job.failure}<dt class="text-muted">{failLabel}</dt><dd class="text-error">{job.failure.message}</dd>{/if}
         {#if set}
           <dt class="text-muted">Extraction</dt>
@@ -315,35 +325,7 @@
         {/if}
       </dl>
 
-      <details class="mt-4 rounded border border-divider" bind:open={segmentsOpen}>
-        <summary class="cursor-pointer px-3 py-1.5 text-[13px] font-semibold">Segment details</summary>
-        <div class="overflow-x-auto px-3 pb-3 pt-1">
-          {#if segmentProblem}<p class="mb-2 text-[12px] text-error">{segmentProblem}</p>{/if}
-          {#if segmentView.length === 0}
-            <p class="text-[12px] text-muted">No segment information yet.</p>
-          {:else}
-            <table class="w-full min-w-[420px] text-[12px]">
-              <thead>
-                <tr class="text-left text-muted">
-                  <th class="w-8 py-1 font-semibold">N.</th><th class="font-semibold">Progress</th>
-                  <th class="w-36 text-right font-semibold">Downloaded</th><th class="w-20 text-right font-semibold">Speed</th><th class="w-32 pl-3 font-semibold">Info</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each segmentView as row (row.segment.start)}
-                  <tr class="border-t border-divider/60">
-                    <td class="py-1 text-muted">{row.number}</td>
-                    <td class="pr-3"><ProgressBar value={row.percent} label="Segment {row.number}" /></td>
-                    <td class="tabular text-right">{row.downloaded}</td>
-                    <td class="tabular text-right {row.speed === '—' ? 'text-muted' : ''}">{row.speed}</td>
-                    <td class="pl-3 {row.info === 'Waiting' ? 'text-muted' : ''}">{row.info}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
-        </div>
-      </details>
+      <SegmentTable rows={segmentView} problem={segmentProblem} />
     {:else if tab === 'speed'}
       <div class="grid gap-3">
         <div class="text-[13px]">Current transfer rate: <span class="tabular inline-block min-w-20 text-right" aria-label="Current transfer rate">{speed(job.bytesPerSecond) || '—'}</span></div>
@@ -375,7 +357,7 @@
         <ProgressBar value={bar} height={14} />
       {/if}
     </div>
-  {:else if job}
+  {:else if job && !removed}
     <div class="grid gap-2 text-[13px]">
       <div>{completedSize(job)}</div>
       {#if ownAddress}
@@ -386,7 +368,7 @@
       {/if}
       <label class="font-semibold" for="done-path">The file saved as</label>
       <input id="done-path" class="field font-mono" readonly value={job.finalFilePath} onfocus={(event) => event.currentTarget.select()} />
-      {#if job.fileRemovedAfterExtraction}<p class="hint">{noFileText(job.statusNote)}</p>{/if}
+      {#if job.fileRemovedAfterExtraction}<p class="hint">{noFileText(hideAddresses(job.statusNote))}</p>{/if}
       {#if set}
         <div><span class="text-muted">Extraction</span> <span class="tone-{archiveTone(set)} ml-2">{archiveShort(set)}</span></div>
       {/if}
@@ -400,11 +382,11 @@
   <p class="mt-3 min-h-5 text-[12.5px] {notice || (job?.failure && !removed) ? 'text-error' : 'text-muted'}" role="status">{noticeLine}</p>
 
   {#snippet footer()}
-    {#if job}
-      <button class="btn" disabled={!connected || !job.canPause || working} style:display={job.isTerminal ? 'none' : undefined} onclick={() => run('job.pause')}>Pause</button>
-      <button class="btn" disabled={!connected || !job.canResume || working} style:display={job.isTerminal && !job.canResume ? 'none' : undefined} onclick={() => run('job.resume')}>Resume</button>
+    {#if job && !removed}
+      <button class="btn" disabled={!connected || !job.canPause || working} onclick={() => run('job.pause')}>Pause</button>
+      <button class="btn" disabled={!connected || !job.canResume || working} onclick={() => run('job.resume')}>Resume</button>
       {#if job.canCancel}<button class="btn" disabled={!connected || working} onclick={() => (dialog = 'cancel')}>Cancel</button>{/if}
-      <button class="btn" disabled={!connected || working} title="Remove this download and delete its file" onclick={() => (dialog = 'delete')}>Delete…</button>
+      <button class="btn" disabled={!connected || working} title="Remove this download and delete its file" onclick={() => (dialog = 'delete')}>Delete</button>
       {#if !removed}
         <button class="btn" disabled={!connected || working} onclick={() => void redownload()}>Redownload</button>
         {#if complete && !job.fileRemovedAfterExtraction}
@@ -412,7 +394,7 @@
           <button class="btn" onclick={() => copy(job.finalFilePath, 'The path was copied.')}>Copy path</button>
           <button class="btn" onclick={() => copy(folderOf, 'The folder path was copied.')}>Copy folder path</button>
         {/if}
-        {#if !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
+        {#if !complete && !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
           <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'refresh')}>Refresh download address…</button>
         {/if}
         <button class="btn" disabled={!connected} onclick={() => (dialog = 'properties')}>Properties…</button>

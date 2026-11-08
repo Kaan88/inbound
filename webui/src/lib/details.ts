@@ -41,12 +41,48 @@ export function barValue(job: Pick<Job, 'state' | 'totalBytes' | 'progress' | 'r
   return percent(job) ?? 0;
 }
 
+/** hh:mm:ss, with "Nd hh:mm:ss" from one day (JobDetailsPanel.FormatDuration). */
+export function clock(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const days = Math.floor(total / 86400);
+  const h = String(Math.floor((total % 86400) / 3600)).padStart(2, '0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
+  return days > 0 ? `${days}d ${h}:${m}:${s}` : `${h}:${m}:${s}`;
+}
+
+/** The Host's note without any web address in it (UrlRedactor.HideAddresses). */
+export function hideAddresses(text: string | null | undefined): string {
+  return (text ?? '').replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, 'a web address').trim();
+}
+
+/** The source in the desktop's words (ToDisplaySource). */
+export function displaySource(source: string | null | undefined): string {
+  switch ((source ?? '').toLowerCase()) {
+    case 'chromecontextmenu':
+    case 'browsermenu':
+      return 'Browser menu';
+    case 'chromeauto':
+    case 'chrome':
+    case 'browser':
+      return 'Browser';
+    case 'clipboard':
+      return 'Clipboard';
+    case 'cli':
+      return 'CLI';
+    case 'batch':
+      return 'Batch';
+    default:
+      return 'App';
+  }
+}
+
 export type DetailRow = { label: string; value: string };
 
 /** Address first, then the figures in the desktop's order; always shown, with "—" for no value (D3). */
 export function detailRows(job: Job): DetailRow[] {
   const complete = job.state === 'completed';
-  const p = percent(job) ?? 0;
+  const p = job.totalBytes && job.totalBytes > 0 ? Math.max(0, Math.min(100, (job.receivedBytes * 100) / job.totalBytes)) : 0;
   const eta = timeSpanSeconds(job.estimatedRemaining);
   const rows: DetailRow[] = [];
   rows.push({ label: 'Status', value: stateWord(job.state) });
@@ -56,7 +92,7 @@ export function detailRows(job: Job): DetailRow[] {
     value: job.totalBytes && job.totalBytes > 0 ? `${bytes(job.receivedBytes)} (${(complete ? 100 : p).toFixed(2)}%)` : bytes(job.receivedBytes) || '0 B',
   });
   rows.push({ label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' });
-  rows.push({ label: 'Time left', value: complete ? 'Complete' : eta !== null && eta >= 0 && !complete ? duration(eta) || '—' : '—' });
+  rows.push({ label: 'Time left', value: complete ? 'Complete' : eta !== null && eta >= 0 ? clock(eta) : '—' });
   rows.push({ label: 'Resume capability', value: job.resumeSupported === true ? 'Yes' : job.resumeSupported === false ? 'No' : 'Unknown' });
   return rows;
 }
@@ -81,7 +117,7 @@ export function noFileText(note: string | null | undefined): string {
 /** The line under the figures: the failure when there is one, otherwise a hint about the state (D18). */
 export function noticeText(job: Pick<Job, 'state' | 'failure' | 'fileRemovedAfterExtraction' | 'statusNote'>): string {
   if (job.failure?.message) return job.failure.message;
-  if (job.state === 'completed') return job.fileRemovedAfterExtraction ? noFileText(job.statusNote) : 'The file has been saved.';
+  if (job.state === 'completed') return job.fileRemovedAfterExtraction ? noFileText(job.statusNote) : 'The file has been saved. Choose an action below.';
   if (job.state === 'paused') return 'The download is paused. Resume it or close this window.';
   return 'Closing this window will not stop the download.';
 }
@@ -109,7 +145,7 @@ export type LimitResult = { ok: true; bytesPerSecond: number } | { ok: false; er
 export function speedLimitFrom(enabled: boolean, text: string): LimitResult {
   if (!enabled) return { ok: true, bytesPerSecond: 0 };
   const cleaned = text.trim().replace(',', '.');
-  const kilobytes = /^\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : Number.NaN;
+  const kilobytes = /^(\d+(\.\d*)?|\.\d+)$/.test(cleaned) ? Number(cleaned) : Number.NaN;
   if (!Number.isFinite(kilobytes) || kilobytes <= 0 || kilobytes > Number.MAX_SAFE_INTEGER / 1024) {
     return { ok: false, error: 'Enter a positive speed in KB/s, or turn the limiter off.' };
   }
@@ -157,15 +193,26 @@ export function mergeSegments(
   return segments;
 }
 
-/** The table's rows. Speed is smoothed per segment through `rates` (0.75 old, 0.25 new), as the desktop does. */
+/** Where a segment's live connections are, matched by range start. */
+function liveFor(segment: Segment, segments: Segment[], connections: ConnectionInfo[]): ConnectionInfo[] {
+  return connections.filter((c) => (c.rangeStart !== undefined && c.rangeStart !== null ? c.rangeStart >= segment.start && c.rangeStart <= segment.end : segments.length === 1));
+}
+
+/** One sample a second: moves each segment's smoothed speed (0.75 old, 0.25 new), as the desktop does. Call from the poll only. */
+export function updateRates(segments: Segment[], connections: ConnectionInfo[], rates: Map<number, number>): void {
+  for (const segment of segments) {
+    const raw = liveFor(segment, segments, connections).reduce((sum, c) => sum + Math.max(0, c.bytesPerSecond), 0);
+    const previous = rates.get(segment.start);
+    rates.set(segment.start, previous !== undefined && raw > 0 ? previous * 0.75 + raw * 0.25 : raw);
+  }
+}
+
+/** The table's rows. Reads the smoothed speeds in `rates` and never changes them. */
 export function segmentRows(segments: Segment[], connections: ConnectionInfo[], rates: Map<number, number> = new Map()): SegmentRowView[] {
   return segments.map((segment, index) => {
     const length = Math.max(1, segment.end - segment.start + 1);
-    const live = connections.filter((c) => (c.rangeStart !== undefined && c.rangeStart !== null ? c.rangeStart >= segment.start && c.rangeStart <= segment.end : segments.length === 1));
-    const raw = live.reduce((sum, c) => sum + Math.max(0, c.bytesPerSecond), 0);
-    const previous = rates.get(segment.start);
-    const rate = previous !== undefined && raw > 0 ? previous * 0.75 + raw * 0.25 : raw;
-    rates.set(segment.start, rate);
+    const live = liveFor(segment, segments, connections);
+    const rate = rates.get(segment.start) ?? 0;
     return {
       number: index + 1,
       percent: Math.max(0, Math.min(100, (segment.completed * 100) / length)),
@@ -309,9 +356,9 @@ export function fileToShow(members: Job[], picked: string | null): string | null
   return (members.find((m) => ['connecting', 'downloading', 'verifying'].includes(m.state)) ?? members.find((m) => !m.isTerminal) ?? members[0])?.id ?? null;
 }
 
-/** Files by name, numbers in order (PackageWindow lists them sorted). */
+/** Files by name, plainly, so file10 sorts before file2 (PackageWindow, OrderBy FileName ignoring case). */
 export function sortedByName(members: Job[]): Job[] {
-  return [...members].sort((a, b) => (a.fileName || '').localeCompare(b.fileName || '', undefined, { numeric: true, sensitivity: 'base' }));
+  return [...members].sort((a, b) => (a.fileName || '').localeCompare(b.fileName || '', undefined, { sensitivity: 'base' }));
 }
 
 export interface PackageFigures {
@@ -348,7 +395,7 @@ const archiveSuffixes = ['.rar', '.7z', '.zip', '.tar', '.tar.gz', '.tgz', '.tar
 export function looksLikeArchive(name: string | null | undefined): boolean {
   if (!name) return false;
   const lower = name.toLowerCase();
-  return archiveSuffixes.some((suffix) => lower.length > suffix.length && lower.endsWith(suffix)) || /(\.[r-z]\d{2}|\.(?:7z|zip|rar|tar)\.\d{3}|\.z\d{2,3})$/i.test(name);
+  return archiveSuffixes.some((suffix) => lower.length > suffix.length && lower.endsWith(suffix)) || /(\.r\d{2}|\.(?:7z|zip|rar|tar)\.\d{3}|\.z\d{2,3})$/i.test(name);
 }
 
 /** PackageArchiveSection.Show: an archive set, a password on record, no files yet, an unnamed file or one named like an archive. */
