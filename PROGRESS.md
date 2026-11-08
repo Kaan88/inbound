@@ -351,6 +351,16 @@ Each has a default already in place; nothing waits on the answer unless it says 
 - **Connections for running downloads:** a changed count reaches running downloads only for your own HTTP downloads; TorBox, protected and FTP downloads keep the count they started with. Acceptable?
 - **Full queues:** should moving a running download into a queue that's already full also send its newest extra download back to Queued? (Now only settings saves and queue changes do.)
 - **Server program settings (D1a):** a network server refuses settings that run programs (post-download command, FFmpeg path, update feed and key, system completion actions). Allow them for a signed-in admin later, or keep them refused?
+- **Exit with downloads running (UI.B11):** exiting the app (and possibly a Windows sign-out) pauses running downloads, so "Resume unfinished downloads when Inbound starts" only helps after a crash. Resume them at the next start too?
+- **Selected rows (UI.R22):** selected rows are almost invisible in both themes (about 1.1:1). May I tint them (for example with the highlight colour) or turn on WinUI's selection bar? It changes the dark look you approved.
+- **Second dialog guard (UI.B8):** delete, messages, questions and the address dialog are guarded; about 40 other dialogs are not. Convert them all to the shared helper?
+- **Statistics and Theme (UI.R23):** give the Statistics window a Close button like the other windows? The settings' Theme value is never read (the window uses View > Dark Mode): remove it, or make it the theme source?
+- **"Closing the window ends it" by default (PERF.5):** with the window closed it saves about 120 wake-ups a second, 6 s of CPU an hour and 200 MB; opening then takes about 0.65 s with 500 downloads and 1.1 s with 5,000 (0.3 to 0.45 s for a hidden window). Recommended on; still off.
+- **CLI downloads while the window is closed:** with that option on, a CLI download gets no completion window, because only a running main window opens them. Should the Host open them instead?
+- **Speed graph history (UI.R24):** keep the last hour in the Host so it survives a closed window?
+- **Close button (TEST.4):** a scripted close is ignored the first time. Does a real click on the close button ever need two tries for you?
+- **Segment retries (UI.B15):** a segment that keeps getting bytes now retries without limit, as single-stream downloads already did. Want a cap on total retries per segment instead?
+- **Download all links:** should its Save in field show the app's default folder, as the folder window does? Today it is blank, meaning the app decides.
 
 ### Owner's remaining checks (2026-11-08)
 
