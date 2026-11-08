@@ -1160,6 +1160,8 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "plain.bin")),
             await Hashing.Sha256FileAsync(plainCompleted.FinalFilePath));
 
+        // The FTP server is shared by the class, and another test (RuntimeLiveConnectionTests) fetches slow.bin too.
+        var servedBefore = _server.Ftp.BytesServed("slow.bin");
         var slow = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{ftpBase}/slow.bin",
@@ -1181,10 +1183,11 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
             await Hashing.Sha256FileAsync(resumed.FinalFilePath));
-        Assert.True(_server.Ftp.RestCount > restBefore);
-        Assert.True(_server.Ftp.BytesServed("slow.bin") < 524_288 * 3 / 2);
+        Assert.True(_server.Ftp.RestCount > restBefore, $"REST count {_server.Ftp.RestCount}, before {restBefore}");
+        var served = _server.Ftp.BytesServed("slow.bin") - servedBefore;
+        Assert.True(served < 524_288 * 3 / 2, $"served {served}");
         // The server took REST, so a lowered limit may now requeue this job without losing its data (UI.R21).
-        Assert.True(resumed.ResumeSupported);
+        Assert.True(resumed.ResumeSupported, $"ResumeSupported false; paused at {paused.ReceivedBytes}, REST {_server.Ftp.RestCount} (before {restBefore}), served {served}");
     }
 
     [Fact]
