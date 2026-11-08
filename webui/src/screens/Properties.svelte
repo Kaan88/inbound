@@ -3,7 +3,7 @@
   import Dialog from '../components/Dialog.svelte';
   import { bytes, dateTime, stateWord } from '../lib/format';
   import {
-    addressLabel, canForce, displaySource, hideAddresses, categoryChoices, categoryOf, completionFrom, hasOwnAddress, programModeOf, shownAddress, systemActions,
+    addressLabel, canForce, displaySource, hideAddresses, categoryChoices, categoryOf, completionFrom, completionForSession, hasOwnAddress, programModeOf, shownAddress, systemActions,
     type ProgramMode,
   } from '../lib/details';
   import { store } from '../lib/store.svelte';
@@ -18,7 +18,7 @@
   const first = untrack(() => job);
   const startCategory = categoryOf(first);
   // A program path is a path on the host, and only a session that may set programs can use one; opening the file and the
-  // system actions need completionActions. A host that offers neither (a server, or a browser on the Windows app) shows a note.
+  // system actions need completionActions. With neither name the dialog shows a note instead of the controls.
   const programAllowed = $derived(store.features.programSettings);
   const actionsAllowed = $derived(store.features.completionActions);
   const completionShown = $derived(programAllowed || actionsAllowed);
@@ -62,7 +62,7 @@
         error = built.error;
         return;
       }
-      payload.completionOptions = built.options;
+      payload.completionOptions = completionForSession(built.options, programAllowed, actionsAllowed);
     }
     busy = true;
     try {

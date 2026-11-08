@@ -65,8 +65,7 @@
 
   <div class="sm:col-span-2">
     <p class="label">When the queue finishes</p>
-    <label class="flex items-center gap-2 text-[13px] opacity-60"><input type="checkbox" disabled checked={false} /> Open a file, exit, or turn off the computer</label>
-    <p class="hint pl-7">{store.texts.queueEndNote}</p>
+    <p class="hint">{store.texts.queueEndNote}</p>
   </div>
 
   <fieldset class="grid gap-2 sm:col-span-2">

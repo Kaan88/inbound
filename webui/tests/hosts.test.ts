@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { completionForSession } from '../src/lib/details';
 import { checkHost, defaultName, HostList, normalizeHostAddress, parseHosts, type KeyValue } from '../src/lib/hosts';
 import { featuresOf, hostKindOf, hostTexts } from '../src/lib/hostKind';
 
 function memory(initial: string | null = null): KeyValue & { value: string | null } {
   return { value: initial, getItem() { return this.value; }, setItem(_key, value) { this.value = value; } };
 }
+
+describe('normalizeHostAddress loopback', () => {
+  it('does not treat a name that starts with 127. as loopback', () => {
+    expect(normalizeHostAddress('http://127.evil.example')).toMatchObject({ ok: true, cleartext: true });
+    expect(normalizeHostAddress('http://127.0.0.1:8080')).toMatchObject({ ok: true, cleartext: false });
+  });
+});
 
 describe('normalizeHostAddress', () => {
   it('defaults to http and drops the path, query and fragment', () => {
@@ -100,7 +108,7 @@ describe('hostKind texts', () => {
   });
   it('keeps container wording off the Windows texts', () => {
     const text = JSON.stringify(hostTexts('windows'));
-    expect(text).not.toMatch(/docker|DOWNLOADMANAGER_|image|service manager|\/downloads\/movies|setup code/i);
+    expect(text).not.toMatch(/docker|DOWNLOADMANAGER_|image|service manager|\/downloads|setup code/i);
     expect(hostTexts('windows').setupCodeHint).toBeNull();
     expect(hostTexts('windows').signInHint).toContain('Options, Web UI');
     expect(hostTexts('windows').folderPlaceholder).toMatch(/^Type a path, such as [A-Z]:\\/);
@@ -113,8 +121,21 @@ describe('hostKind texts', () => {
 
 describe('featuresOf', () => {
   it('reads the hello names of the session', () => {
-    expect(featuresOf(['jobs', 'folders'])).toEqual({ updater: false, programSettings: false, folderPicker: false, openUi: false, shutdown: false, completionActions: false });
+    expect(featuresOf(['jobs', 'folders', 'tray'])).toEqual({ programSettings: false, completionActions: false, openUi: false });
     expect(featuresOf(['programSettings', 'completionActions']).completionActions).toBe(true);
-    expect(featuresOf(null).updater).toBe(false);
+    expect(featuresOf(null).openUi).toBe(false);
+  });
+});
+
+describe('completionForSession', () => {
+  const stored = { programPath: 'C:\\x.exe', openFile: true, systemAction: 'exit', forceSystemAction: true };
+  it('sends no program path when the session may only use completion actions', () => {
+    expect(completionForSession(stored, false, true)).toEqual({ openFile: true, systemAction: 'exit', forceSystemAction: true });
+  });
+  it('sends no actions when the session may only set programs', () => {
+    expect(completionForSession(stored, true, false)).toEqual({ programPath: stored.programPath });
+  });
+  it('sends nothing when it may set neither', () => {
+    expect(completionForSession(stored, false, false)).toEqual({});
   });
 });

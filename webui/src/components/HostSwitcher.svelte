@@ -9,6 +9,7 @@
   const hostList = new HostList();
   let hosts = $state<SavedHost[]>(hostList.all);
   let open = $state(false);
+  let toggle = $state<HTMLButtonElement>();
   type Editing = { id?: string; name: string; address: string };
   let editing = $state<Editing | null>(null);
   let removing = $state<SavedHost | null>(null);
@@ -52,17 +53,17 @@
   }
 </script>
 
-<svelte:window onclick={(event) => { if (open && !(event.target as HTMLElement).closest?.('[data-host-switcher]')) open = false; }} onkeydown={(event) => { if (event.key === 'Escape') open = false; }} />
+<svelte:window onclick={(event) => { if (open && !(event.target as HTMLElement).closest?.('[data-host-switcher]')) open = false; }} onkeydown={(event) => { if (event.key === 'Escape' && open) { open = false; toggle?.focus(); } }} />
 
 <div class="relative" data-host-switcher>
-  <button class="btn h-8 gap-1.5 px-2" aria-haspopup="menu" aria-expanded={open} title="Switch to another host" onclick={() => (open = !open)}>
+  <button bind:this={toggle} class="btn h-8 gap-1.5 px-2" aria-expanded={open} title="Switch to another host" onclick={() => (open = !open)}>
     <Icon name="monitor" size={15} class="text-icon-neutral" />
-    <span class="hidden sm:inline">This host</span>
+    <span class="hidden max-w-40 truncate sm:inline">{location.host}</span>
     <Icon name="up" size={12} class={open ? '' : 'rotate-180'} />
   </button>
   {#if open}
-    <div class="card absolute right-0 z-40 mt-1 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden py-1 shadow-lg" role="menu">
-      <div class="flex items-center gap-2 bg-selected px-3 py-1.5 text-[13px]" role="menuitem" aria-current="true">
+    <div class="card absolute right-0 z-40 mt-1 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden py-1 shadow-lg">
+      <div class="flex items-center gap-2 bg-selected px-3 py-1.5 text-[13px]" aria-current="true">
         <div class="min-w-0 flex-1">
           <div class="font-semibold">This host</div>
           <div class="truncate text-[12px] text-muted">{location.host}</div>
@@ -71,16 +72,17 @@
       </div>
       {#each hosts as host (host.id)}
         <div class="flex items-center hover:bg-hover">
-          <a class="min-w-0 flex-1 px-3 py-1.5 text-[13px]" href="{host.origin}/" role="menuitem" title="Open {host.name}'s own web UI in this tab">
+          <a class="min-w-0 flex-1 px-3 py-1.5 text-[13px]" href="{host.origin}/" title="Open {host.name}'s own web UI in this tab">
             <div class="truncate">{host.name}</div>
             <div class="truncate text-[12px] text-muted">{host.origin.replace(/^https?:\/\//, '')}</div>
           </a>
-          <button class="btn-icon shrink-0" aria-label="Edit {host.name}" onclick={() => startEdit(host)}><Icon name="settings" size={14} /></button>
+          <button class="px-2 py-1 text-[12px] text-accent underline" aria-label="Edit {host.name}" onclick={() => startEdit(host)}>Edit</button>
           <button class="btn-icon shrink-0" aria-label="Remove {host.name}" onclick={() => { open = false; removing = host; }}><Icon name="trash" size={14} /></button>
         </div>
       {/each}
       <div class="my-1 border-t border-divider"></div>
-      <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={startAdd}><Icon name="add" size={14} /> Add a host…</button>
+      <button class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-hover" onclick={startAdd}><Icon name="add" size={14} /> Add a host…</button>
+      <p class="hint px-3 pb-1">This list is kept in this browser for this web UI address. Another host's web UI keeps its own list.</p>
     </div>
   {/if}
 </div>
@@ -94,8 +96,7 @@
       </div>
       <div>
         <label class="label" for="host-address">Address</label>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input id="host-address" class="field font-mono" bind:value={editing.address} placeholder="http://192.168.1.20:8080" autocomplete="off" spellcheck="false" autofocus />
+        <input id="host-address" class="field font-mono" bind:value={editing.address} placeholder="http://192.168.1.20:8080" autocomplete="off" spellcheck="false" data-autofocus />
         <p class="hint mt-1">This opens that host's own web UI in this tab, and you sign in there. Nothing is sent to it from here.</p>
       </div>
       {#if warnClear}<p class="hint" role="note">{cleartextNote}</p>{/if}

@@ -21,7 +21,7 @@ export function normalizeHostAddress(input: string): Normalized {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, error: "The host's address starts with http:// or https://." };
   if (url.username || url.password) return { ok: false, error: 'Leave the user name and password out of the address.' };
   if (!url.hostname) return { ok: false, error: 'That address has no host name.' };
-  const loopback = url.hostname === 'localhost' || url.hostname === '[::1]' || /^127\./.test(url.hostname);
+  const loopback = url.hostname === 'localhost' || url.hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(url.hostname);
   return { ok: true, origin: url.origin, cleartext: url.protocol === 'http:' && !loopback };
 }
 

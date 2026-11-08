@@ -145,7 +145,7 @@
     <section class="min-w-0">
       <div class="mb-2 flex items-center gap-2">
         <button class="btn px-2" onclick={() => browse(listing?.parent ?? null)} disabled={busy || !listing?.path} title="Up one folder" aria-label="Up one folder"><Icon name="up" size={15} /></button>
-        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? 'The folders this server may use'}</div>
+        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? store.texts.folderListEmpty}</div>
         {#if listing?.path}
           <button class="btn px-2" onclick={toggleFavorite} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={isFavorite}>
             {isFavorite ? '★' : '☆'}

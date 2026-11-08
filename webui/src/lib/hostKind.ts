@@ -17,6 +17,9 @@ export interface HostTexts {
   queueEndNote: string;
   programPlaceholder: string;
   completionNote: string;
+  /** A full-path example for a destination box. */
+  destinationExample: string;
+  folderListEmpty: string;
   /** The sign-in page. */
   signInHint: string;
   noPasswordYet: string;
@@ -33,6 +36,8 @@ const server: HostTexts = {
   queueEndNote: 'Not available on the server: it has no desktop to open files on, and its life belongs to Docker or its service manager.',
   programPlaceholder: 'Path of an .exe on the server',
   completionNote: 'Completion programs and system actions are not available on the server.',
+  destinationExample: '/downloads or D:\\Downloads',
+  folderListEmpty: 'The folders this server may use',
   signInHint: 'Enter the password of this server.',
   noPasswordYet: 'This server has no password yet. The one you set here is needed to use it from any browser.',
   setupCodeHint: "This browser isn't on the server's own computer, so the server asks for the code it wrote in its log (docker logs).",
@@ -48,6 +53,8 @@ const windows: HostTexts = {
   queueEndNote: 'Not available from a browser: opening a file, exiting or turning off the computer can only be set in the app on that PC.',
   programPlaceholder: 'Path of an .exe on the PC',
   completionNote: 'Completion programs and system actions can only be set in the app on that PC.',
+  destinationExample: 'D:\\Downloads or C:\\Users\\Name\\Downloads',
+  folderListEmpty: 'The folders on the PC you may use',
   signInHint: 'Enter the password you set in the app on the PC, under Options, Web UI.',
   noPasswordYet: 'This PC has no web password yet. Set it in the app on the PC, under Options, Web UI.',
   setupCodeHint: null,
@@ -57,20 +64,18 @@ export function hostTexts(kind: string | null | undefined): HostTexts {
   return hostKindOf(kind) === 'windows' ? windows : server;
 }
 
-/** The hello names the Host gives this session; each is true only when the session may use it. */
+/**
+ * The hello names the Host gives this session; each is true only when the session may use it. Only names that a control
+ * here depends on are read: program settings, completion actions (open the file, system actions) and openUi (the
+ * desktop's completion window, which a browser session never gets).
+ */
 export interface Features {
-  updater: boolean;
   programSettings: boolean;
-  folderPicker: boolean;
-  openUi: boolean;
-  shutdown: boolean;
   completionActions: boolean;
+  openUi: boolean;
 }
 
 export function featuresOf(capabilities: readonly string[] | null | undefined): Features {
   const has = (name: string) => capabilities?.includes(name) ?? false;
-  return {
-    updater: has('updater'), programSettings: has('programSettings'), folderPicker: has('folderPicker'),
-    openUi: has('openUi'), shutdown: has('shutdown'), completionActions: has('completionActions'),
-  };
+  return { programSettings: has('programSettings'), completionActions: has('completionActions'), openUi: has('openUi') };
 }
