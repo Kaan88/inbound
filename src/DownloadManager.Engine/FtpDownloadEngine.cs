@@ -40,6 +40,15 @@ public sealed class FtpDownloadEngine : IDownloadEngine
                 FailureKind.InvalidContent, "Not an FTP URL.", false, false, DateTimeOffset.UtcNow));
         }
 
+        // The platform FTP client opens its data connection wherever the server's PASV answer says, which could be any
+        // address on this PC's network, so a download that must stay off it doesn't use FTP at all. The Host refuses
+        // such an address when it is added; this is the engine's own wall.
+        if (job.PublicNetworkOnly)
+        {
+            return DownloadResult.Fail(DownloadState.Failed, new JobFailure(
+                FailureKind.Forbidden, "FTP downloads added from another device are not supported.", false, false, DateTimeOffset.UtcNow));
+        }
+
         var credentials = ResolveCredentials(uri);
         long offset = File.Exists(job.PartFilePath) ? new FileInfo(job.PartFilePath).Length : 0;
         var total = await GetFileSizeAsync(uri, credentials, cancellationToken).ConfigureAwait(false);

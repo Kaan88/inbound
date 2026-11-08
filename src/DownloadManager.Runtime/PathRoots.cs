@@ -3,29 +3,91 @@ using DownloadManager.Core;
 namespace DownloadManager.Runtime;
 
 /// <summary>
-/// The folders a Host without a desktop (the server) may read from and write to on behalf of its clients
-/// (<c>DOWNLOADMANAGER_ROOTS</c>). Every path is resolved first, links and <c>..</c> included, the way the file system
-/// itself would (as <c>realpath</c> does), and the root check uses that resolved path, so a link inside a root that
-/// points outside it leads nowhere. The desktop Host has none: its client is the signed-in user, who may use any folder.
+/// The folders a client that is not this machine's user may have the Host read from and write to: the server's
+/// <c>DOWNLOADMANAGER_ROOTS</c>, or on the desktop the app's own folders for a browser on another device (D8). Every
+/// path is resolved first, links and <c>..</c> included, the way the file system itself would (as <c>realpath</c>
+/// does), and the root check uses that resolved path, so a link inside a root that points outside it leads nowhere.
+/// On Windows a path is checked as text before anything looks at it (<see cref="DescribeUnsafeText"/>): asking about a
+/// network path would already send this Windows account's credentials there.
 /// </summary>
 public sealed class PathRoots
 {
     private const int MaxLinkHops = 40;
 
-    public const string OutsideMessage = "That folder is outside the folders this server may use.";
+    private const string ServerFolders = "the folders this server may use";
 
-    public PathRoots(IEnumerable<string> roots)
+    public const string OutsideMessage = "That folder is outside " + ServerFolders + ".";
+
+    private static readonly string[] DeviceNames =
+    [
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$",
+        "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "COM\u00b9", "COM\u00b2", "COM\u00b3",
+        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT\u00b9", "LPT\u00b2", "LPT\u00b3",
+    ];
+
+    private readonly Func<string, string?> _linkTarget;
+    private readonly Func<IEnumerable<string>>? _source;
+    private readonly IReadOnlyList<string> _fixed = [];
+    private readonly Lock _cacheGate = new();
+    private (string[] Given, IReadOnlyList<string> Resolved)? _cache;
+
+    /// <param name="linkTarget">
+    /// Reads where a link points, or null when the path is no link. The file system's own by default; a test passes one
+    /// that records what was asked.
+    /// </param>
+    public PathRoots(IEnumerable<string> roots, Func<string, string?>? linkTarget = null)
     {
-        Roots = roots
-            .Where(root => !string.IsNullOrWhiteSpace(root))
-            .Select(root => Resolve(root.Trim()))
-            .OfType<string>()
-            .Distinct(PathNames.Comparer)
-            .ToList();
+        _linkTarget = linkTarget ?? ReadLinkTarget;
+        _fixed = ResolveRoots(Given(roots));
     }
 
-    /// <summary>The allowed roots, resolved. A root that doesn't exist yet stays.</summary>
-    public IReadOnlyList<string> Roots { get; }
+    private PathRoots(Func<IEnumerable<string>> source, Func<string, string?>? linkTarget, string called)
+    {
+        _linkTarget = linkTarget ?? ReadLinkTarget;
+        _source = source;
+        Called = called;
+    }
+
+    /// <summary>
+    /// Roots worked out again from <paramref name="source"/> whenever they are asked for, such as the app's folders from
+    /// the current settings. Resolved again only when the folders it gives change.
+    /// </summary>
+    /// <param name="called">What these folders are called in a refusal (<see cref="Called"/>).</param>
+    public static PathRoots Live(Func<IEnumerable<string>> source, string called, Func<string, string?>? linkTarget = null)
+        => new(source, linkTarget, called);
+
+    /// <summary>What these folders are called in a reply that refuses a path: "the folders this server may use" unless set.</summary>
+    public string Called { get; init; } = ServerFolders;
+
+    /// <summary>The words for a folder outside these roots.</summary>
+    public string OutsideText => $"That folder is outside {Called}.";
+
+    /// <summary>The words for a file outside these roots; <paramref name="kind"/> names it, such as ".torrent file".</summary>
+    public string OutsideFileText(string kind = "file") => $"That {kind} is outside {Called}.";
+
+    /// <summary>The allowed roots, resolved. A root that doesn't exist yet stays; one that fails the text check doesn't.</summary>
+    public IReadOnlyList<string> Roots
+    {
+        get
+        {
+            if (_source is null) return _fixed;
+            var given = Given(_source()).ToArray();
+            lock (_cacheGate)
+            {
+                if (_cache is { } cached && cached.Given.SequenceEqual(given, StringComparer.Ordinal)) return cached.Resolved;
+            }
+
+            var resolved = ResolveRoots(given);
+            lock (_cacheGate) _cache = (given, resolved);
+            return resolved;
+        }
+    }
+
+    private static IEnumerable<string> Given(IEnumerable<string> roots)
+        => roots.Where(root => !string.IsNullOrWhiteSpace(root)).Select(root => root.Trim()).Distinct(StringComparer.Ordinal);
+
+    private IReadOnlyList<string> ResolveRoots(IEnumerable<string> roots)
+        => roots.Select(Real).OfType<string>().Distinct(PathNames.Comparer).ToList();
 
     /// <summary>
     /// <c>DOWNLOADMANAGER_ROOTS</c>: folders separated by <c>;</c>, or also by <c>:</c> off Windows, where a drive letter
@@ -38,12 +100,17 @@ public sealed class PathRoots
         return roots.Count > 0 ? roots : [fallback];
     }
 
-    /// <summary>The resolved path when it is inside a root (or is one), otherwise null. Null for a relative path too.</summary>
+    /// <summary>
+    /// The resolved path when it is inside a root (or is one), otherwise null. Null for a relative path too, and on
+    /// Windows for any path <see cref="DescribeUnsafeText"/> refuses, before the file system is asked anything.
+    /// </summary>
     public string? Allowed(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        var real = Resolve(path.Trim());
-        return real is not null && Roots.Any(root => Inside(real, root)) ? real : null;
+        var real = Real(path.Trim());
+        if (real is null) return null;
+        var roots = Roots;
+        return roots.Any(root => Inside(real, root)) ? real : null;
     }
 
     public bool IsRoot(string real) => Roots.Any(root => PathNames.Same(root, real));
@@ -51,12 +118,74 @@ public sealed class PathRoots
     private static bool Inside(string real, string root) =>
         PathNames.Same(real, root) || real.StartsWith(Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar, PathNames.Comparison);
 
+    /// <summary>The text check, then (on Windows) <see cref="Path.GetFullPath(string)"/>, then the walk.</summary>
+    private string? Real(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (DescribeUnsafeText(path) is not null) return null;
+            try
+            {
+                path = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return null;
+            }
+
+            if (DescribeUnsafeText(path) is not null) return null;
+        }
+
+        return Resolve(path, _linkTarget);
+    }
+
+    /// <summary>
+    /// Why this Windows path can't be used by a client that isn't this machine's user, or null when it can. Text only,
+    /// apart from asking Windows what kind of drive the letter is, which goes nowhere: a path to another computer
+    /// (<c>\\server\share</c>), the <c>\\?\</c>, <c>\\.\</c> and <c>\??\</c> forms, a relative path, a device name
+    /// (<c>CON</c>, <c>NUL</c>, <c>COM1</c>...), an alternate data stream (a <c>:</c> after the drive), wildcards, and a
+    /// part that ends in a dot or a space (Windows would quietly drop those, so the folder used would not be the one
+    /// checked). Only a drive letter on a fixed drive of this PC passes, not a mapped network drive or a removable one.
+    /// Always null off Windows.
+    /// </summary>
+    public static string? DescribeUnsafeText(string? path)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        if (string.IsNullOrEmpty(path)) return "Give the full path.";
+        if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] is not ('\\' or '/'))
+            return "Give the full path, starting with a drive letter such as C:\\.";
+        if (path.Any(char.IsControl) || path.IndexOfAny(['<', '>', '"', '|', '?', '*']) >= 0)
+            return "The path has a character Windows doesn't allow there.";
+        if (path.IndexOf(':', 2) >= 0) return "The path has a colon after the drive.";
+        foreach (var part in path[3..].Split('\\', '/'))
+        {
+            if (part is "" or "." or "..") continue;
+            if (part.EndsWith('.') || part.EndsWith(' ')) return "A folder or file name in the path ends in a dot or a space.";
+            var stem = part.Split('.')[0].TrimEnd(' ');
+            if (DeviceNames.Contains(stem, StringComparer.OrdinalIgnoreCase)) return $"{stem} is a device name Windows reserves.";
+        }
+
+        try
+        {
+            if (new DriveInfo(path[..1]).DriveType != DriveType.Fixed) return "Only folders on this PC's own fixed drives can be used.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return "Only folders on this PC's own fixed drives can be used.";
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc cref="Resolve(string, Func{string, string?})"/>
+    public static string? Resolve(string path) => Resolve(path, ReadLinkTarget);
+
     /// <summary>
     /// The path as the file system reaches it: each part in turn, a link replaced by its target and walked again, and
     /// <c>..</c> taken from where the walk really is, not from the text. Parts that don't exist are kept as written.
     /// Null for a relative path or a loop of links.
     /// </summary>
-    public static string? Resolve(string path)
+    public static string? Resolve(string path, Func<string, string?> linkTarget)
     {
         try
         {
@@ -76,7 +205,7 @@ public sealed class PathRoots
                 }
 
                 var next = Path.Combine(current, part);
-                var target = new FileInfo(next).LinkTarget;
+                var target = linkTarget(next);
                 if (target is null)
                 {
                     current = next;
@@ -84,6 +213,16 @@ public sealed class PathRoots
                 }
 
                 if (++hops > MaxLinkHops) return null;
+                if (OperatingSystem.IsWindows())
+                {
+                    // A junction can report its target as \??\C:\... A link to another computer is not followed: the
+                    // next step would ask that computer about it.
+                    if (target.Length > 6 && (target.StartsWith(@"\??\", StringComparison.Ordinal) || target.StartsWith(@"\\?\", StringComparison.Ordinal)) &&
+                        char.IsAsciiLetter(target[4]) && target[5] == ':')
+                        target = target[4..];
+                    if (target.Length >= 2 && target[0] is '\\' or '/' && target[1] is '\\' or '/' or '?') return null;
+                }
+
                 if (Path.IsPathFullyQualified(target))
                 {
                     current = Path.GetPathRoot(target)!;
@@ -100,6 +239,8 @@ public sealed class PathRoots
             return null;
         }
     }
+
+    private static string? ReadLinkTarget(string path) => new FileInfo(path).LinkTarget;
 
     private static void Push(Stack<string> pending, string relative)
     {

@@ -271,6 +271,32 @@ public sealed class HostHelloDto
     public int ProtocolVersion { get; set; }
     public DateTimeOffset StartedAt { get; set; }
     public List<string> Capabilities { get; set; } = new();
+
+    /// <summary>
+    /// What kind of Host answers: <see cref="HostKinds.Windows"/> (the desktop Host) or <see cref="HostKinds.Server"/>
+    /// (<c>DownloadManager.Server</c>). Null from a Host older than this field.
+    /// </summary>
+    public string? HostKind { get; set; }
+}
+
+/// <summary>The values of <see cref="HostHelloDto.HostKind"/>.</summary>
+public static class HostKinds
+{
+    public const string Windows = "windows";
+    public const string Server = "server";
+}
+
+/// <summary>The values of <see cref="ClientHelloDto.Role"/>.</summary>
+public static class ClientRoles
+{
+    /// <summary>The user at this PC: the desktop window, the CLI, the browser's native host. The default.</summary>
+    public const string Desktop = "desktop";
+
+    /// <summary>
+    /// A browser on another device, through the web bridge (D8). It gets the rights a network client gets on the server,
+    /// limited to the app's own folders, plus the rules that matter only on a desktop.
+    /// </summary>
+    public const string Web = "web";
 }
 
 /// <summary>
@@ -284,6 +310,13 @@ public sealed class ClientHelloDto
 
     /// <summary>Send this connection the broadcasts (<c>job.event</c>, <c>host.exiting</c> and the rest).</summary>
     public bool Events { get; set; } = true;
+
+    /// <summary>
+    /// The rights this connection asks for (<see cref="ClientRoles"/>). Null or <c>desktop</c> is the user at this PC,
+    /// as before. <c>web</c> asks for fewer rights; a Host that doesn't offer that role closes the connection. A client
+    /// can only ever ask for less than it would get without the field.
+    /// </summary>
+    public string? Role { get; set; }
 }
 
 public sealed class IncompatibleDto

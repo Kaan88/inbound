@@ -40,7 +40,18 @@ public sealed record PlatformCapabilities
     public bool SupportsFolderBrowse { get; init; }
 
     /// <summary>
-    /// The desktop Host: a window, a dialog, a tray, an exit, the updater and the program settings, and no folder listing.
+    /// What a finished download or schedule may do on this machine may be set: open the file, a system action (shut
+    /// down, sleep, exit), and a schedule's when-done actions. The server runs none of these, and a browser on another
+    /// device may not set them on the desktop (they would run as this machine's user).
+    /// </summary>
+    public bool SupportsCompletionActions { get; init; }
+
+    /// <summary>The hello's <c>hostKind</c> (<see cref="HostKinds"/>). Null leaves it out.</summary>
+    public string? HostKind { get; init; }
+
+    /// <summary>
+    /// The desktop Host: a window, a dialog, a tray, an exit, the updater, the program settings and the completion
+    /// actions, and no folder listing.
     /// </summary>
     public static PlatformCapabilities Desktop { get; } = new()
     {
@@ -50,6 +61,8 @@ public sealed record PlatformCapabilities
         SupportsShutdown = true,
         SupportsUpdater = true,
         SupportsProgramSettings = true,
+        SupportsCompletionActions = true,
+        HostKind = HostKinds.Windows,
     };
 }
 
