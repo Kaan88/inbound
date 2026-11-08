@@ -97,6 +97,13 @@ internal sealed class ColumnHeaderRow
         var text = new TextBlock { Text = column.Title, TextTrimming = TextTrimming.CharacterEllipsis };
         if (Application.Current.Resources.TryGetValue("InboundHeaderTextStyle", out var style) && style is Style headerStyle) text.Style = headerStyle;
         if (column.Centered) text.HorizontalAlignment = HorizontalAlignment.Center;
+        if (column.RightAligned)
+        {
+            // UI.R6: over the right-aligned counters below it, at the same distance from the column's edge.
+            text.HorizontalAlignment = HorizontalAlignment.Right;
+            text.TextAlignment = TextAlignment.Right;
+            text.Margin = new Thickness(0, 0, ListColumn.RightPadding, 0);
+        }
         var arrow = new FontIcon { FontSize = 9, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, GripWidth, 0) };
         var content = new Grid();
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
