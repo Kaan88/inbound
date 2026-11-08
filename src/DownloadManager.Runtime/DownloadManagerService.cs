@@ -3574,11 +3574,16 @@ public sealed partial class DownloadManagerService
         {
             JobDto? dto = null;
             var quotaReached = false;
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now;
             lock (_sync)
             {
+                // Read under the lock, so reports reach the speed history in time order and none is dropped as
+                // coming from an earlier second.
+                now = DateTimeOffset.UtcNow;
                 if (job.State is DownloadState.Paused or DownloadState.Cancelled || runtime.CancelledForRemoval)
                 {
+                    // Its share of the total speed ends now, not when its wind-down finishes (UI.R24).
+                    _speedHistory.Stopped(job.Id, now);
                     return;
                 }
 

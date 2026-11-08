@@ -20,17 +20,16 @@ public sealed class SpeedHistory
     private const int HoldSeconds = 2;
 
     private readonly float[] _values = new float[Seconds];
-    private readonly Dictionary<Guid, double> _rates = new();
+
+    /// <summary>Each running download's last figure and the second it came in.</summary>
+    private readonly Dictionary<Guid, (double Rate, long Second)> _rates = new();
     private readonly long _firstSecond;
     private long _openSecond;
-    private long _lastReportSecond;
-    private double _total;
 
     public SpeedHistory(DateTimeOffset start)
     {
         _firstSecond = start.ToUnixTimeSeconds();
         _openSecond = _firstSecond;
-        _lastReportSecond = _firstSecond;
     }
 
     /// <summary>A running download's current speed. Bytes per second; anything not finite or below zero counts as 0.</summary>
@@ -39,24 +38,21 @@ public sealed class SpeedHistory
         var second = Advance(now);
         if (second < 0) return;
         var rate = double.IsFinite(bytesPerSecond) && bytesPerSecond > 0 ? bytesPerSecond : 0;
-        if (_rates.TryGetValue(jobId, out var previous) && previous == rate)
-        {
-            _lastReportSecond = second;
-            _values[Slot(second)] = (float)_total;
-            return;
-        }
-
-        _rates[jobId] = rate;
-        SetTotal(second);
+        _rates[jobId] = (rate, second);
+        _values[Slot(second)] = (float)TotalAt(second);
     }
 
-    /// <summary>The download stopped running, for whatever reason.</summary>
+    /// <summary>
+    /// The download stopped running, for whatever reason. The seconds before this one still count its last figure
+    /// as a running download's; this one no longer does.
+    /// </summary>
     public void Stopped(Guid jobId, DateTimeOffset now)
     {
-        if (!_rates.Remove(jobId)) return;
+        if (!_rates.ContainsKey(jobId)) return;
         var second = Advance(now);
+        _rates.Remove(jobId);
         if (second < 0) return;
-        SetTotal(second);
+        _values[Slot(second)] = (float)TotalAt(second);
     }
 
     /// <summary>
@@ -77,13 +73,20 @@ public sealed class SpeedHistory
         return new SpeedHistoryDto { Start = DateTimeOffset.FromUnixTimeSeconds(first), IntervalSeconds = 1, BytesPerSecond = values };
     }
 
-    private void SetTotal(long second)
+    /// <summary>
+    /// The sum of the downloads whose last figure still stands at <paramref name="second"/>: each holds for
+    /// <see cref="HoldSeconds"/> after its own report, so one that went quiet (or hung) stops counting on its own
+    /// while others keep reporting.
+    /// </summary>
+    private double TotalAt(long second)
     {
         double total = 0;
-        foreach (var rate in _rates.Values) total += rate;
-        _total = total;
-        _lastReportSecond = second;
-        _values[Slot(second)] = (float)total;
+        foreach (var (rate, at) in _rates.Values)
+        {
+            if (second - at <= HoldSeconds) total += rate;
+        }
+
+        return total;
     }
 
     /// <summary>
@@ -96,11 +99,14 @@ public sealed class SpeedHistory
         if (second < _openSecond) return -1;
         if (second == _openSecond) return second;
 
-        // Only the last hour matters; a longer gap rewrites every slot once.
+        // Only the last hour matters; a longer gap rewrites every slot once. Past the newest report's hold every
+        // second is 0, so the sums stop there.
         var from = Math.Max(_openSecond + 1, second - Seconds + 1);
+        var newest = long.MinValue;
+        foreach (var (_, at) in _rates.Values) newest = Math.Max(newest, at);
         for (var s = from; s <= second; s++)
         {
-            _values[Slot(s)] = _total > 0 && s - _lastReportSecond <= HoldSeconds ? (float)_total : 0f;
+            _values[Slot(s)] = newest != long.MinValue && s - newest <= HoldSeconds ? (float)TotalAt(s) : 0f;
         }
 
         _openSecond = second;
