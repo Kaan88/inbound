@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### 0.6.2: the last open items (2026-11-08, `dev`)
+
+- Owner, 2026-11-08: "Just finish what's left and make a final release." Done for 0.6.2: UI.B12 (a Host started beside an exiting one takes over instead of quitting), UI.R23 (1), (2), (4), (6), PERF.7 (short-lived clients skip the snapshot), TEST.4 (cause found: the first `WM_CLOSE` went to Options; scripts fixed), UI.B9 (not reproduced). UI.R23 (5) is not built, because the row says only if wanted.
+- Built in four worktrees, each reviewed by two adversarial reviewers and fixed. Merged onto `dev` by cherry-pick (the worktrees had been cut from `main`). A review of the merge found that the PERF.7 no-events probe missed the exiting broadcast; an exiting Host now answers `host.openUi` with `host.exiting`, with a test that fails without the fix.
+- Every suite passed on the merged tree (`artifacts\campaign\20261108-062\`): Core 912, Engine 162, Integration 1,294, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 47, svelte-check 0 errors. After the merge fix, the dispatcher, restart and hello-pipe tests passed 41 of 41, before the full Integration rerun.
+- Still for the owner: the UI.R4 on-screen review, the light-mode walk, AMO listing, the extension store uploads, and the server's sign-in password. PERF.4's last item (the NVIDIA driver's two threads in the window process) can't be changed by Inbound; PERF.5 ends the window process on close by default.
+
 ### 0.6.1 released; server running on the owner's mini PC (2026-11-08)
 
 - 0.6.1 is on GitHub (tag `v0.6.1`, squashed to `main`). The assets are in `artifacts\release\v0.6.1\`. Checks: signature and checksums verified, the latest feed serves 0.6.1, Setup's hash on GitHub matches, binaries are `0.6.1+f460462`, and the token scan found nothing. The Docker image workflow for `v0.6.1` passed. Extension 0.5.1 zips for the owner: `artifacts\chrome-store\` and `artifacts\firefox-addon\`.
