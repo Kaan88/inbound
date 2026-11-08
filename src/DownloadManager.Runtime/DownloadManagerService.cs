@@ -2232,6 +2232,15 @@ public sealed partial class DownloadManagerService
 
     public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>
+    /// A completion program is a full path to something the OS can start. On Windows that is an .exe; Linux programs have
+    /// no extension, so there any absolute path passes and the start itself says whether it can run. A server refuses
+    /// completion programs from clients anyway (<c>SupportsProgramSettings</c>); this keeps a saved one valid there.
+    /// </summary>
+    public static bool IsCompletionProgramPath(string program) =>
+        Path.IsPathFullyQualified(program) &&
+        (!OperatingSystem.IsWindows() || string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsNewerVersion(string candidate, string installed)
     {
         static string Clean(string value) => value.Trim().TrimStart('v', 'V');
@@ -2289,8 +2298,7 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Error = "Unknown completion system action." };
                 if (completion.SystemAction != "none" && !_settings.AllowSystemCompletionActions)
                     return new JobActionResponse { Error = "Enable system completion actions in Scheduler before choosing this action." };
-                if (completion.ProgramPath is { Length: > 0 } program &&
-                    (!Path.IsPathFullyQualified(program) || !string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase)))
+                if (completion.ProgramPath is { Length: > 0 } program && !IsCompletionProgramPath(program))
                     return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
             }
 
@@ -2353,7 +2361,8 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Ok = false, Error = "The new path has no folder." };
                 }
 
-                if (!string.Equals(target, runtime.Job.FinalFilePath, StringComparison.OrdinalIgnoreCase))
+                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move.
+                if (!PathNames.Same(target, runtime.Job.FinalFilePath))
                 {
                     if (File.Exists(target))
                     {
@@ -3882,7 +3891,7 @@ public sealed partial class DownloadManagerService
         {
             marked = _jobs.Values
                 .Where(runtime => runtime.Job.State == DownloadState.Completed && runtime.Job.FileRemovedAfterExtraction != removed &&
-                    paths.Contains(runtime.Job.FinalFilePath, StringComparer.OrdinalIgnoreCase))
+                    paths.Contains(runtime.Job.FinalFilePath, PathNames.Comparer))
                 .ToList();
             foreach (var runtime in marked)
             {

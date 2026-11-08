@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using DownloadManager.Core;
 using DownloadManager.Core.Archives;
 using Microsoft.Win32.SafeHandles;
 
@@ -66,6 +67,12 @@ public static partial class ExtractionSafety
             if (DeviceNames.Contains(stem)) return "reserved device name";
         }
 
+        // Linux keeps a backslash as part of a name, so "a\b" is one file there and a folder and a file on Windows.
+        // Which one the archive meant can't be told, and a guess could put a file where the listing didn't say. 7-Zip
+        // on Linux lists folders with "/", so an ordinary archive never meets this. Checked last, so a traversal or a
+        // device name is still named as such.
+        if (!OperatingSystem.IsWindows() && path.Contains('\\')) return "backslash in name";
+
         return null;
     }
 
@@ -111,7 +118,9 @@ public static partial class ExtractionSafety
             }
         }
 
-        RefuseNamesWindowsCannotKeepApart(probe);
+        // Linux keeps a.txt and A.TXT apart, so there the listing's own repeat check is enough. A share that folds case
+        // anyway is caught after extraction: WalkStaging then counts fewer files than were listed.
+        if (OperatingSystem.IsWindows()) RefuseNamesWindowsCannotKeepApart(probe);
     }
 
     /// <summary>
@@ -124,7 +133,7 @@ public static partial class ExtractionSafety
         var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in probe.Entries)
         {
-            var path = entry.Path.Replace('/', '\\');
+            var path = PathNames.ToNativeSeparators(entry.Path);
             if (entry.Kind == ArchiveEntryKind.Directory)
             {
                 folders.Add(path);
@@ -177,19 +186,8 @@ public static partial class ExtractionSafety
         }
     }
 
-    /// <summary>Free bytes on the volume holding a path, or null when that cannot be told, as on a network share.</summary>
-    public static long? AvailableBytes(string path)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(path));
-            return string.IsNullOrEmpty(root) ? null : new DriveInfo(root).AvailableFreeSpace;
-        }
-        catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    /// <summary>Free bytes on the volume holding a path (its own mount on Linux), or null when that cannot be told, as on a network share.</summary>
+    public static long? AvailableBytes(string path) => Volumes.AvailableBytes(path);
 
     /// <summary>
     /// Walks what was really written. Refuses reparse points, hard links, unsafe names, hidden data
@@ -201,12 +199,12 @@ public static partial class ExtractionSafety
         var zoneAllowed = DataStreams.HasZoneIdentifier(probe.FirstVolume);
         var listedFiles = probe.Entries
             .Where(entry => entry.Kind == ArchiveEntryKind.File)
-            .Select(entry => entry.Path.Replace('/', '\\'))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(entry => PathNames.ToNativeSeparators(entry.Path))
+            .ToHashSet(PathNames.Comparer);
         var listedFolders = probe.Entries
             .Where(entry => entry.Kind == ArchiveEntryKind.Directory)
-            .Select(entry => entry.Path.Replace('/', '\\'))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(entry => PathNames.ToNativeSeparators(entry.Path))
+            .ToHashSet(PathNames.Comparer);
         foreach (var file in listedFiles)
         {
             for (var parent = Path.GetDirectoryName(file); !string.IsNullOrEmpty(parent); parent = Path.GetDirectoryName(parent))
@@ -275,21 +273,22 @@ public static partial class ExtractionSafety
             }
         }
 
-        var written = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var written = files.ToHashSet(PathNames.Comparer);
         if (listedFiles.FirstOrDefault(file => !written.Contains(file)) is { } absent)
         {
             throw new ExtractionException(ExtractionFailureKind.Corrupted, $"A listed file was not extracted: {SafeForDisplay(absent)}");
         }
 
-        // The checks above fold capital letters, so one file on disk could answer for two listed names.
+        // On Windows the checks above fold capital letters, so one file on disk could answer for two listed names. On
+        // Linux a share that folds case does the same: two listed names, one file written.
         var listedCount = probe.Entries.Count(entry => entry.Kind == ArchiveEntryKind.File);
         if (files.Count < listedCount)
         {
             throw new ExtractionException(ExtractionFailureKind.Corrupted, $"The archive lists {listedCount} files, and {files.Count} came out of it.");
         }
 
-        directories.Sort(StringComparer.OrdinalIgnoreCase);
-        files.Sort(StringComparer.OrdinalIgnoreCase);
+        directories.Sort(PathNames.Comparer);
+        files.Sort(PathNames.Comparer);
         return new StagedContent(directories, files);
     }
 

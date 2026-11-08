@@ -110,7 +110,7 @@ public sealed class FfmpegMediaMuxer : IMediaMuxer
         return new MediaMuxResult(true, null);
     }
 
-    private static string? ResolveFfmpeg(string? configured)
+    internal static string? ResolveFfmpeg(string? configured)
     {
         if (!string.IsNullOrWhiteSpace(configured))
         {
@@ -123,10 +123,26 @@ public sealed class FfmpegMediaMuxer : IMediaMuxer
             return fromEnvironment;
         }
 
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        return FindOnPath(Environment.GetEnvironmentVariable("PATH"));
+    }
+
+    /// <summary>The first FFmpeg in the folders of a <c>PATH</c> value. Linux programs have no extension: an image installs /usr/bin/ffmpeg.</summary>
+    internal static string? FindOnPath(string? path)
+    {
+        var name = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        path ??= string.Empty;
         foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.Combine(directory.Trim(), "ffmpeg.exe");
+            string candidate;
+            try
+            {
+                candidate = Path.Combine(directory.Trim(), name);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
             if (File.Exists(candidate))
             {
                 return candidate;

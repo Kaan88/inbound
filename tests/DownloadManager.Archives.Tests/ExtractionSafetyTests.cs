@@ -20,6 +20,18 @@ public sealed class EntryPathTests
     [InlineData("xy_\\a.txt")]
     public void AcceptsOrdinaryNames(string path)
     {
+        // A backslash separates folders only on Windows. On Linux it would be part of one name, which is refused.
+        if (!OperatingSystem.IsWindows() && path.Contains('\\'))
+            Assert.Equal("backslash in name", ExtractionSafety.DescribeUnsafePath(path));
+        else
+            Assert.Null(ExtractionSafety.DescribeUnsafePath(path));
+    }
+
+    [Theory]
+    [InlineData("sub/deep/a.txt")]
+    [InlineData("日本語/ファイル.bin")]
+    public void ForwardSlashFoldersAreFineEverywhere(string path)
+    {
         Assert.Null(ExtractionSafety.DescribeUnsafePath(path));
     }
 

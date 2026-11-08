@@ -11,11 +11,12 @@ internal static class RarTools
 
     public const string Password = "Test-Pw_123";
 
-    public static string SevenZipPath => SevenZipTool.BundledPath;
+    /// <summary>The bundled copy on Windows; elsewhere the 7zz that <see cref="SevenZipTool.Find"/> finds (PATH or DOWNLOADMANAGER_7ZIP).</summary>
+    public static string SevenZipPath => SevenZipTool.Find() ?? SevenZipTool.BundledPath;
 
     public static string RarPath => Path.Combine(WinRarFolder, "Rar.exe");
 
-    public static string? SevenZipMissing => SevenZipTool.Find() is not null ? null : $"The bundled 7-Zip is not at {SevenZipPath}, so extraction cannot run here.";
+    public static string? SevenZipMissing => SevenZipTool.Find() is not null ? null : $"7-Zip is not here ({SevenZipTool.MissingMessage}), so extraction cannot run.";
 
     public static string? RarMissing =>
         SevenZipMissing is { } missing ? missing

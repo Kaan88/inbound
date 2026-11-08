@@ -1,4 +1,5 @@
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -55,8 +56,8 @@ public static class ExtractionFinalizer
     {
         private readonly List<Step> _steps = [];
         private readonly Stack<string> _createdDirectories = new();
-        private readonly HashSet<string> _placedThisAttempt = new(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _keep = new((keepFiles ?? []).Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _placedThisAttempt = new(PathNames.Comparer);
+        private readonly HashSet<string> _keep = new((keepFiles ?? []).Select(Path.GetFullPath), PathNames.Comparer);
         private readonly PlacementLog _log = staging.OpenPlacementLog();
 
         public void Dispose() => _log.Dispose();
@@ -65,7 +66,7 @@ public static class ExtractionFinalizer
         {
             var source = Path.Combine(staging.PayloadFolder, relativeSource);
             var target = Path.GetFullPath(Path.Combine(root, relativeTarget));
-            if (!target.StartsWith(ExtractionSafety.WithSeparator(root), StringComparison.OrdinalIgnoreCase))
+            if (!target.StartsWith(ExtractionSafety.WithSeparator(root), PathNames.Comparison))
             {
                 throw new ExtractionException(ExtractionFailureKind.UnsafePath, $"A file would land outside the destination: {ExtractionSafety.SafeForDisplay(relativeTarget)}");
             }
@@ -123,7 +124,7 @@ public static class ExtractionFinalizer
 
             // The destination itself may be a link the user chose. A link inside it would carry
             // this archive's files somewhere else.
-            for (var check = current; check.Length > root.Length && check.StartsWith(root, StringComparison.OrdinalIgnoreCase); check = Path.GetDirectoryName(check)!)
+            for (var check = current; check.Length > root.Length && check.StartsWith(root, PathNames.Comparison); check = Path.GetDirectoryName(check)!)
             {
                 if ((File.GetAttributes(check) & FileAttributes.ReparsePoint) != 0)
                 {

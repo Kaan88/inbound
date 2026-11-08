@@ -2,6 +2,7 @@ using DownloadManager.Archives;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Archives;
 using DownloadManager.Persistence;
+using DownloadManager.Core;
 
 namespace DownloadManager.Runtime.Archives;
 
@@ -151,7 +152,7 @@ public sealed partial class ArchiveCoordinator
             lock (_sync)
             {
                 takenFolders = _sets.Values
-                    .Where(other => other.Id != id && other.Destination is not null && string.Equals(other.Directory, next.Directory, StringComparison.OrdinalIgnoreCase))
+                    .Where(other => other.Id != id && other.Destination is not null && PathNames.Same(other.Directory, next.Directory))
                     .Select(other => other.Destination!)
                     .ToList();
             }
@@ -226,7 +227,7 @@ public sealed partial class ArchiveCoordinator
         {
             // An earlier attempt may have left an original in staging under the folder it used. This run's folder is another one if the destination has changed since.
             if (earlierRoot is not null && earlierDestination is not null &&
-                !string.Equals(earlierDestination, claimed.Destination, StringComparison.OrdinalIgnoreCase))
+                !PathNames.Same(earlierDestination, claimed.Destination))
             {
                 await StagingArea.RecoverAndRemoveAsync(earlierRoot, FirstVolumePath(claimed), earlierDestination).ConfigureAwait(false);
             }
@@ -303,7 +304,7 @@ public sealed partial class ArchiveCoordinator
         }
 
         var read = paths
-            .Where(path => string.Equals(Path.GetDirectoryName(path), view.Directory, StringComparison.OrdinalIgnoreCase))
+            .Where(path => PathNames.Same(Path.GetDirectoryName(path), view.Directory))
             .Select(path => Path.GetFileName(path))
             .Where(name => name.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -641,10 +642,10 @@ internal static class ArchiveDestinations
     /// <summary>A retry keeps the folder its set already has. Otherwise the first name no other set is using.</summary>
     private static string SubfolderFor(ArchiveSetRecord set, IReadOnlyCollection<string> taken)
     {
-        bool Free(string folder) => !taken.Contains(folder, StringComparer.OrdinalIgnoreCase);
+        bool Free(string folder) => !taken.Contains(folder, PathNames.Comparer);
 
         if (set.Destination is { } earlier && Free(earlier) &&
-            string.Equals(Path.GetDirectoryName(earlier), set.Directory, StringComparison.OrdinalIgnoreCase))
+            PathNames.Same(Path.GetDirectoryName(earlier), set.Directory))
         {
             return earlier;
         }
