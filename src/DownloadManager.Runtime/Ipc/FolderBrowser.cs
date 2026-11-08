@@ -139,7 +139,7 @@ public sealed class FolderBrowser
     }
 
     private FolderBrowseResult Refused(string? path) =>
-        Failed(string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ? "Give the folder's full path." : _roots.OutsideText);
+        Failed(string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) ? "Give the folder's full path." : _roots.OutsideTextFor(path));
 
     private FolderBrowseResult Failed(string error) => new() { Error = error, Roots = Roots.ToList() };
 }

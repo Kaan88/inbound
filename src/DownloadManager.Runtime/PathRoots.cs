@@ -26,24 +26,31 @@ public sealed class PathRoots
     ];
 
     private readonly Func<string, string?> _linkTarget;
+    private readonly Func<string, string?>? _refuseRoot;
     private readonly Func<IEnumerable<string>>? _source;
-    private readonly IReadOnlyList<string> _fixed = [];
+    private readonly Resolution _fixed = new([], []);
     private readonly Lock _cacheGate = new();
-    private (string[] Given, IReadOnlyList<string> Resolved)? _cache;
+    private (string[] Given, Resolution Resolved)? _cache;
+
+    /// <summary>The roots in use, and those given that can't be, each with the reason.</summary>
+    private sealed record Resolution(IReadOnlyList<string> Roots, IReadOnlyList<(string Root, string Reason)> Dropped);
 
     /// <param name="linkTarget">
     /// Reads where a link points, or null when the path is no link. The file system's own by default; a test passes one
     /// that records what was asked.
     /// </param>
-    public PathRoots(IEnumerable<string> roots, Func<string, string?>? linkTarget = null)
+    /// <param name="refuseRoot">Why a resolved root can't be one after all, or null when it can.</param>
+    public PathRoots(IEnumerable<string> roots, Func<string, string?>? linkTarget = null, Func<string, string?>? refuseRoot = null)
     {
         _linkTarget = linkTarget ?? ReadLinkTarget;
+        _refuseRoot = refuseRoot;
         _fixed = ResolveRoots(Given(roots));
     }
 
-    private PathRoots(Func<IEnumerable<string>> source, Func<string, string?>? linkTarget, string called)
+    private PathRoots(Func<IEnumerable<string>> source, Func<string, string?>? linkTarget, string called, Func<string, string?>? refuseRoot)
     {
         _linkTarget = linkTarget ?? ReadLinkTarget;
+        _refuseRoot = refuseRoot;
         _source = source;
         Called = called;
     }
@@ -53,8 +60,10 @@ public sealed class PathRoots
     /// the current settings. Resolved again only when the folders it gives change.
     /// </summary>
     /// <param name="called">What these folders are called in a refusal (<see cref="Called"/>).</param>
-    public static PathRoots Live(Func<IEnumerable<string>> source, string called, Func<string, string?>? linkTarget = null)
-        => new(source, linkTarget, called);
+    /// <param name="refuseRoot">Why a resolved root can't be one after all, or null when it can.</param>
+    public static PathRoots Live(Func<IEnumerable<string>> source, string called, Func<string, string?>? linkTarget = null,
+        Func<string, string?>? refuseRoot = null)
+        => new(source, linkTarget, called, refuseRoot);
 
     /// <summary>What these folders are called in a reply that refuses a path: "the folders this server may use" unless set.</summary>
     public string Called { get; init; } = ServerFolders;
@@ -65,29 +74,80 @@ public sealed class PathRoots
     /// <summary>The words for a file outside these roots; <paramref name="kind"/> names it, such as ".torrent file".</summary>
     public string OutsideFileText(string kind = "file") => $"That {kind} is outside {Called}.";
 
-    /// <summary>The allowed roots, resolved. A root that doesn't exist yet stays; one that fails the text check doesn't.</summary>
-    public IReadOnlyList<string> Roots
-    {
-        get
-        {
-            if (_source is null) return _fixed;
-            var given = Given(_source()).ToArray();
-            lock (_cacheGate)
-            {
-                if (_cache is { } cached && cached.Given.SequenceEqual(given, StringComparer.Ordinal)) return cached.Resolved;
-            }
+    /// <summary>
+    /// The allowed roots, resolved. A root that doesn't exist yet stays; one that fails the text check, or that the
+    /// <c>refuseRoot</c> given refuses, doesn't (<see cref="OutsideTextFor"/> says why).
+    /// </summary>
+    public IReadOnlyList<string> Roots => Current().Roots;
 
-            var resolved = ResolveRoots(given);
-            lock (_cacheGate) _cache = (given, resolved);
-            return resolved;
+    private Resolution Current()
+    {
+        if (_source is null) return _fixed;
+        var given = Given(_source()).ToArray();
+        lock (_cacheGate)
+        {
+            if (_cache is { } cached && cached.Given.SequenceEqual(given, StringComparer.Ordinal)) return cached.Resolved;
         }
+
+        var resolved = ResolveRoots(given);
+        lock (_cacheGate) _cache = (given, resolved);
+        return resolved;
     }
 
     private static IEnumerable<string> Given(IEnumerable<string> roots)
         => roots.Where(root => !string.IsNullOrWhiteSpace(root)).Select(root => root.Trim()).Distinct(StringComparer.Ordinal);
 
-    private IReadOnlyList<string> ResolveRoots(IEnumerable<string> roots)
-        => roots.Select(Real).OfType<string>().Distinct(PathNames.Comparer).ToList();
+    private Resolution ResolveRoots(IEnumerable<string> roots)
+    {
+        var resolved = new List<string>();
+        var dropped = new List<(string Root, string Reason)>();
+        foreach (var root in roots)
+        {
+            var real = Real(root);
+            var reason = real is null ? DescribeUnsafeText(root) ?? string.Empty : _refuseRoot?.Invoke(real);
+            if (reason is null)
+            {
+                if (!resolved.Contains(real!, PathNames.Comparer)) resolved.Add(real!);
+            }
+            else dropped.Add((TextOnlyFullPath(root) ?? root, reason));
+        }
+
+        return new Resolution(resolved, dropped);
+    }
+
+    /// <summary>
+    /// The words for a path that isn't inside these roots. When it is in one of the folders given that can't be used
+    /// (a network or removable drive, or one <c>refuseRoot</c> refused), they say so, since that folder is still one
+    /// of the user's own. Text only.
+    /// </summary>
+    public string OutsideTextFor(string? path)
+    {
+        var dropped = Current().Dropped;
+        if (dropped.Count == 0 || TextOnlyFullPath(path) is not { } full) return OutsideText;
+        foreach (var (root, reason) in dropped)
+        {
+            if (IsInside(full, Path.TrimEndingDirectorySeparator(root)))
+                return string.IsNullOrEmpty(reason) ? DroppedText : $"{DroppedText} {reason}";
+        }
+
+        return OutsideText;
+    }
+
+    private const string DroppedText = "That folder can't be used from another device.";
+
+    /// <summary><see cref="Path.GetFullPath(string)"/>, which works on the text alone, or null for a relative path or one it refuses.</summary>
+    private static string? TextOnlyFullPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path.Trim())) return null;
+        try
+        {
+            return Path.GetFullPath(path.Trim());
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// <c>DOWNLOADMANAGER_ROOTS</c>: folders separated by <c>;</c>, or also by <c>:</c> off Windows, where a drive letter
@@ -110,12 +170,13 @@ public sealed class PathRoots
         var real = Real(path.Trim());
         if (real is null) return null;
         var roots = Roots;
-        return roots.Any(root => Inside(real, root)) ? real : null;
+        return roots.Any(root => IsInside(real, root)) ? real : null;
     }
 
     public bool IsRoot(string real) => Roots.Any(root => PathNames.Same(root, real));
 
-    private static bool Inside(string real, string root) =>
+    /// <summary>Whether <paramref name="real"/> is <paramref name="root"/> or inside it, by text.</summary>
+    public static bool IsInside(string real, string root) =>
         PathNames.Same(real, root) || real.StartsWith(Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar, PathNames.Comparison);
 
     /// <summary>The text check, then (on Windows) <see cref="Path.GetFullPath(string)"/>, then the walk.</summary>
@@ -221,6 +282,8 @@ public sealed class PathRoots
                         char.IsAsciiLetter(target[4]) && target[5] == ':')
                         target = target[4..];
                     if (target.Length >= 2 && target[0] is '\\' or '/' && target[1] is '\\' or '/' or '?') return null;
+                    // Nor one to a mapped network drive or a removable one: the next step would look there.
+                    if (Path.IsPathFullyQualified(target) && DescribeUnsafeText(target) is not null) return null;
                 }
 
                 if (Path.IsPathFullyQualified(target))

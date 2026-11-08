@@ -70,7 +70,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         sockets.AutomaticDecompression = DecompressionMethods.None;
         sockets.PooledConnectionLifetime = TimeSpan.FromMinutes(10);
         sockets.MaxConnectionsPerServer = 64;
-        if (publicOnly) sockets.ConnectCallback = ConnectPublicOnlyAsync;
+        if (publicOnly && sockets.Proxy is { } proxy)
+            sockets.ConnectCallback = (context, cancellationToken) => ConnectPublicOnlyAsync(context, proxy, cancellationToken);
 
         var client = new HttpClient(sockets, disposeHandler: true);
         ConfigureClient(client);
@@ -218,23 +219,38 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     }
 
     /// <summary>
-    /// Opens a connection for a <see cref="DownloadJob.PublicNetworkOnly"/> download. Straight to the site, the name is
-    /// resolved here and refused when any address it gives is local; the connection then goes to those same addresses,
-    /// so a second lookup can't change the answer. Through a proxy the connection is to the proxy the user set, and the
-    /// site's name was checked as text before the request was sent.
+    /// Opens a connection for a <see cref="DownloadJob.PublicNetworkOnly"/> download. A connection to anything but the
+    /// proxy the user set is taken to be to the site: its name is resolved here and refused when any address it gives is
+    /// local, and the connection then goes to those same addresses, so a second lookup can't change the answer. Through
+    /// the proxy, which resolves the site's name itself, the name is also resolved here first and refused the same way;
+    /// a name only the proxy knows goes ahead, and so does one that resolves differently by the time the proxy asks.
     /// </summary>
-    private static async ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    private static async ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, IWebProxy proxy, CancellationToken cancellationToken)
     {
         var endpoint = context.DnsEndPoint;
         var target = context.InitialRequestMessage.RequestUri;
-        var direct = target is not null &&
-                     string.Equals(target.IdnHost.Trim('[', ']'), endpoint.Host.Trim('[', ']'), StringComparison.OrdinalIgnoreCase) &&
-                     target.Port == endpoint.Port;
+        var through = target is null ? null : ProxyFor(proxy, target);
+        var toProxy = through is not null && SameHost(through.IdnHost, endpoint.Host) && through.Port == endpoint.Port;
+        if (toProxy && !IPAddress.TryParse(target!.IdnHost.Trim('[', ']'), out _))
+        {
+            IPAddress[] site;
+            try
+            {
+                site = await Dns.GetHostAddressesAsync(target.IdnHost, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SocketException)
+            {
+                site = [];
+            }
+
+            if (site.Any(NetworkAddresses.IsLocal)) throw new HttpRequestException(HttpRequestError.ConnectionError, LocalNetworkRefused);
+        }
+
         var addresses = IPAddress.TryParse(endpoint.Host.Trim('[', ']'), out var literal)
             ? [literal]
             : await Dns.GetHostAddressesAsync(endpoint.Host, cancellationToken).ConfigureAwait(false);
         if (addresses.Length == 0) throw new HttpRequestException(HttpRequestError.NameResolutionError, "The name has no address.");
-        if (direct && addresses.Any(NetworkAddresses.IsLocal))
+        if (!toProxy && addresses.Any(NetworkAddresses.IsLocal))
             throw new HttpRequestException(HttpRequestError.ConnectionError, LocalNetworkRefused);
 
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -251,6 +267,23 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
     }
 
     private const string LocalNetworkRefused = "Local network destinations are disabled.";
+
+    /// <summary>The proxy a request to <paramref name="target"/> goes through, or null for none. One that names the site itself is none.</summary>
+    private static Uri? ProxyFor(IWebProxy proxy, Uri target)
+    {
+        try
+        {
+            if (proxy.IsBypassed(target) || proxy.GetProxy(target) is not { } through) return null;
+            return SameHost(through.IdnHost, target.IdnHost) && through.Port == target.Port ? null : through;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException or UriFormatException)
+        {
+            return null;
+        }
+    }
+
+    private static bool SameHost(string left, string right)
+        => string.Equals(left.Trim('[', ']').TrimEnd('.'), right.Trim('[', ']').TrimEnd('.'), StringComparison.OrdinalIgnoreCase);
 
     public async Task<DownloadResult> ExecuteAsync(
         DownloadJob job,

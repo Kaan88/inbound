@@ -51,7 +51,9 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                         request.Id);
 
                 case ArchiveMessageTypes.List:
-                    return IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = coordinator.List(), PackagesWithPassword = coordinator.PackagesWithPassword() }, request.Id);
+                    var sets = coordinator.List();
+                    if (roots is not null) sets = sets.Where(Inside).ToList();
+                    return IpcMessage.Create(ArchiveMessageTypes.ListResult, new ArchiveListResult { Sets = sets, PackagesWithPassword = coordinator.PackagesWithPassword() }, request.Id);
 
                 case ArchiveMessageTypes.Extract:
                     var extract = request.GetPayload<ArchiveExtractRequest>();
@@ -67,17 +69,21 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
                     var password = request.GetPayload<ArchiveSetPasswordRequest>();
                     if (Confine(password.FilePath) is var (passwordPath, passwordOk) && !passwordOk)
                         return Action(request, new ArchiveActionResult { Ok = false, Error = roots!.OutsideFileText() });
+                    if (password.SetId is { } passwordSet && RefuseOutside(passwordSet) is { } passwordRefused) return Action(request, passwordRefused);
                     password.FilePath = passwordPath;
                     return Action(request, await coordinator.SetPasswordAsync(password, cancellationToken).ConfigureAwait(false));
 
                 case ArchiveMessageTypes.Retry:
-                    return Action(request, await coordinator.RetryAsync(request.GetPayload<ArchiveActionRequest>().SetId, cancellationToken).ConfigureAwait(false));
+                    var retry = request.GetPayload<ArchiveActionRequest>().SetId;
+                    return Action(request, RefuseOutside(retry) ?? await coordinator.RetryAsync(retry, cancellationToken).ConfigureAwait(false));
 
                 case ArchiveMessageTypes.Cancel:
-                    return Action(request, await coordinator.CancelAsync(request.GetPayload<ArchiveActionRequest>().SetId, cancellationToken).ConfigureAwait(false));
+                    var cancel = request.GetPayload<ArchiveActionRequest>().SetId;
+                    return Action(request, RefuseOutside(cancel) ?? await coordinator.CancelAsync(cancel, cancellationToken).ConfigureAwait(false));
 
                 case ArchiveMessageTypes.Remove:
-                    return Action(request, await coordinator.RemoveAsync(request.GetPayload<ArchiveActionRequest>().SetId, cancellationToken).ConfigureAwait(false));
+                    var remove = request.GetPayload<ArchiveActionRequest>().SetId;
+                    return Action(request, RefuseOutside(remove) ?? await coordinator.RemoveAsync(remove, cancellationToken).ConfigureAwait(false));
 
                 default:
                     return Action(request, new ArchiveActionResult { Ok = false, Error = $"Unknown message type '{request.Type}'." });
@@ -100,6 +106,23 @@ public sealed class ArchiveIpcDispatcher(ArchiveCoordinator coordinator, PathRoo
         if (roots is null || string.IsNullOrWhiteSpace(path)) return (path, true);
         return roots.Allowed(path) is { } inside ? (inside, true) : (path, false);
     }
+
+    /// <summary>
+    /// With roots, a set whose archives or output are not all inside them is left alone: running it again could write
+    /// next to the archives, and with the user's settings overwrite or delete there. A set that isn't there is left to
+    /// the coordinator to say so.
+    /// </summary>
+    private ArchiveActionResult? RefuseOutside(Guid setId)
+        => roots is not null && coordinator.Find(setId) is { } set && !Inside(set)
+            ? new ArchiveActionResult { Ok = false, Error = OutsideSetText(roots) }
+            : null;
+
+    /// <summary>Whether the set's folder (where all its volumes are) and its output folder, once it has one, are inside the roots.</summary>
+    private bool Inside(ArchiveSetDto set)
+        => roots!.Allowed(set.Directory) is not null &&
+           (string.IsNullOrWhiteSpace(set.Destination) || roots.Allowed(set.Destination) is not null);
+
+    public static string OutsideSetText(PathRoots roots) => $"These archives are outside {roots.Called}, so they can't be changed from another device.";
 
     private static IpcMessage Action(IpcMessage request, ArchiveActionResult result) =>
         IpcMessage.Create(ArchiveMessageTypes.ActionResult, result, request.Id);

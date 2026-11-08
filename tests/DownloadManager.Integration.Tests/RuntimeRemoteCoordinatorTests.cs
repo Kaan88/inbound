@@ -417,6 +417,45 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AWebSessionsTorrentFileAndProviderJobsAreHeldToItsFolders()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var outside = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"outside-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outside);
+        try
+        {
+            // Added in the app on this PC, to a folder a browser on another device can't use (D8).
+            var (link, _, _) = rig.ScriptHoster("owner", MockTorBoxState.CachedReady);
+            var owner = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = link, Destination = outside });
+            Assert.True(owner.Job is not null, owner.Error);
+            var id = owner.Job!.Id;
+
+            var roots = new PathRoots([rig.Destination]);
+            using var web = new RemoteCommands(rig.Box.Registry, rig.Jobs, roots: roots, jobRoots: roots);
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.SelectAsync(new RemoteSelectRequest { JobId = id, All = true })).Error);
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.RetryAsync(new RemoteRetryRequest { JobId = id })).Error);
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.StartQueuedAsync(new RemoteJobIdRequest { JobId = id })).Error);
+            Assert.Equal(CallerScope.OutsideJobRefused, (await web.SetArchivePasswordAsync(new RemoteArchivePasswordRequest { JobId = id, Password = "invented" })).Error);
+            using var pipe = new RemoteCommands(rig.Box.Registry, rig.Jobs);
+            Assert.NotEqual(CallerScope.OutsideJobRefused, (await pipe.SetArchivePasswordAsync(new RemoteArchivePasswordRequest { JobId = id, Password = "invented" })).Error);
+
+            var torrent = Path.Combine(outside, "owner.torrent");
+            File.WriteAllText(torrent, "d4:infod4:name5:ownere");
+            var outsideText = roots.OutsideFileText(".torrent file");
+            var add = await web.AddAsync(new RemoteAddRequestDto { Input = torrent, Destination = rig.Destination });
+            Assert.False(add.Ok);
+            Assert.Equal(outsideText, add.Error);
+            var classify = await web.ClassifyAsync(new RemoteClassifyRequest { Text = torrent, WithFiles = true });
+            Assert.Equal(outsideText, classify.Reason);
+            Assert.Empty(rig.Mock.Submissions);
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task OnAServerAFileOutsideTheRootsIsNeverWaitedForAndItsFolderIsNeverCreated()
     {
         // Only the service knows the roots here, as for a job saved before the coordinator checked them.

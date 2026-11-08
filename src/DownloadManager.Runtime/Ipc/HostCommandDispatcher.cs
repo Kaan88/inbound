@@ -24,8 +24,11 @@ public sealed partial class HostCommandDispatcher
     private const string CompletionProgramUnavailable = "A completion program can't be set from here.";
     private const string CompletionActionsUnavailable =
         "What happens when a download is done (open the file, shut down, exit) can only be set in the app on this PC.";
+    private const string SendToOtherProgramUnavailable = "A container can only be handed to another download manager in the app on this PC.";
     private const string ProviderKeyUnavailable = "The provider's key can only be changed in the app on this PC.";
     private const string ExtractionFolderUnavailable = "The extraction folder can only be set in the app on this PC.";
+    private const string ExtractionRemovalUnavailable =
+        "Deleting archives after extraction and overwriting files can only be turned on in the app on this PC.";
     private static readonly TimeSpan GroupsBroadcastDelay = TimeSpan.FromMilliseconds(100);
 
     private readonly DownloadManagerService _service;
@@ -687,8 +690,10 @@ public sealed partial class HostCommandDispatcher
     }
 
     /// <summary>
-    /// For a web session: extracting a download's or a package's archives only where all their files are inside its
-    /// folders (a path it names is held to them by the archive commands themselves), and the extraction folder as it is.
+    /// For a web session: extracting a download's or a package's archives, or giving a package its password (which
+    /// starts its waiting sets), only where all their files are inside its folders (a path or set it names is held to
+    /// them by the archive commands themselves). The extraction folder stays as it is, and extraction can't be made to
+    /// delete archives or overwrite files: those apply to every archive the user downloads, wherever it is.
     /// </summary>
     private IpcMessage? RefuseArchiveFor(ArchiveIpcDispatcher archives, CallerScope caller, IpcMessage message)
     {
@@ -696,22 +701,38 @@ public sealed partial class HostCommandDispatcher
         {
             case ArchiveMessageTypes.Extract:
                 var extract = message.GetPayload<ArchiveExtractRequest>();
-                var jobs = (extract.JobIds ?? []).ToList();
-                if (extract.PackageId is { } packageId)
-                    jobs.AddRange(_service.GetDownloadGroups().FirstOrDefault(group => group.Id == packageId)?.JobIds ?? []);
-                return jobs.Distinct().Any(id => _service.HeldBy(id, caller) == false)
-                    ? IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Error = CallerScope.OutsideJobRefused }, message.Id)
-                    : null;
+                return HoldsAll(extract.JobIds, extract.PackageId, caller)
+                    ? null
+                    : IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Error = CallerScope.OutsideJobRefused }, message.Id);
+            case ArchiveMessageTypes.SetPassword:
+                var password = message.GetPayload<ArchiveSetPasswordRequest>();
+                return password.PackageId is not { } passwordPackage || HoldsAll(null, passwordPackage, caller)
+                    ? null
+                    : IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Error = CallerScope.OutsideJobRefused }, message.Id);
             case ArchiveMessageTypes.SettingsSet:
                 var settings = message.GetPayload<ArchiveSettingsUpdate>();
                 var current = archives.Coordinator.GetSettings();
-                if (settings.Folder is null || SameText(settings.Folder, current.Settings.Folder)) return null;
+                var error = settings.Folder is not null && !SameText(settings.Folder, current.Settings.Folder) ? ExtractionFolderUnavailable
+                    : (settings.DeleteArchives == true && !current.Settings.DeleteArchives) ||
+                      (string.Equals(settings.ConflictPolicy?.Trim(), "overwrite", StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(current.Settings.ConflictPolicy, "overwrite", StringComparison.OrdinalIgnoreCase)) ? ExtractionRemovalUnavailable
+                    : null;
+                if (error is null) return null;
                 current.Ok = false;
-                current.Error = ExtractionFolderUnavailable;
+                current.Error = error;
                 return IpcMessage.Create(ArchiveMessageTypes.SettingsResult, current, message.Id);
             default:
                 return null;
         }
+    }
+
+    /// <summary>Whether every download named, and every one of the package, is inside the caller's folders. One that is gone counts as held.</summary>
+    private bool HoldsAll(IEnumerable<Guid>? jobIds, Guid? packageId, CallerScope caller)
+    {
+        var jobs = (jobIds ?? []).ToList();
+        if (packageId is { } package)
+            jobs.AddRange(_service.GetDownloadGroups().FirstOrDefault(group => group.Id == package)?.JobIds ?? []);
+        return !jobs.Distinct().Any(id => _service.HeldBy(id, caller) == false);
     }
 
     /// <summary>What a web session is told about the Host: not where it keeps its state, nor leftovers outside its folders.</summary>
@@ -726,6 +747,7 @@ public sealed partial class HostCommandDispatcher
     private static SnapshotDto ForSession(SnapshotDto snapshot, SessionRights rights)
     {
         snapshot.Status = ForSession(snapshot.Status, rights);
+        if (rights.Scope is not null) snapshot.Settings = WebSettingsRules.ForWeb(snapshot.Settings);
         return snapshot;
     }
 
@@ -810,8 +832,11 @@ public sealed partial class HostCommandDispatcher
         }).ConfigureAwait(false);
     }
 
-    private static Task Reply<T>(IClientSession client, IpcMessage request, string type, T payload)
+    /// <summary>A web session's copy of the settings, in whichever reply carries them, leaves out what it isn't shown.</summary>
+    private Task Reply<T>(IClientSession client, IpcMessage request, string type, T payload)
     {
+        if (payload is SettingsResult { Settings: { } settings } result && RightsOf(client).Scope is not null)
+            result.Settings = WebSettingsRules.ForWeb(settings);
         client.Enqueue(IpcMessage.Create(type, payload, request.Id));
         return Task.CompletedTask;
     }

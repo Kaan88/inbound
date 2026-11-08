@@ -37,6 +37,15 @@ public sealed partial class ArchiveCoordinator
         }
     }
 
+    /// <summary>The extraction folder the user chose, or null. Unlike <see cref="GetSettings"/> it reads nothing on disk.</summary>
+    public string? ExtractionFolder
+    {
+        get
+        {
+            lock (_sync) return _settings.ChosenFolder;
+        }
+    }
+
     public ArchiveSettingsResult GetSettings()
     {
         ArchiveSettings settings;

@@ -52,30 +52,55 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
 
 - Refused: `host.openUi`, `host.pickFolder`, `host.shutdown` and `update.*` (the replies above), program settings
   and completion programs, a `job.update` that turns on `openFile`, a `systemAction` other than `none` or
-  `forceSystemAction` ("... can only be set in the app on this PC."), and `remote.account.setKey`/`clearKey`.
+  `forceSystemAction` ("... can only be set in the app on this PC."), `remote.account.setKey`/`clearKey`, and
+  `remote.container.sendToJd` (handing a container to another download manager on this PC; `remote.container.preview`
+  says `canSendToJd: false` to a web session).
 - `folders.browse`/`create` work, limited to **the app's folders**: the download folder, every built-in and custom
-  category folder, the favorites and the extraction folder, worked out from the current settings each time. The
+  category folder, the favorites and the extraction folder, worked out again whenever the settings change. The
   same folders hold for `job.add` and a hand-off, `job.update` Move/Rename (`newFilePath`), `folders.space` (a folder
   outside them comes back unmeasured), `host.cleanOrphans`, the archive commands' `filePath` and `folder`, and the
   provider's `.torrent` and container paths and destinations. A refusal says "That folder is outside the app's folders."
+- One of those folders is left out when it can't be used from another device: one on a network, mapped or removable
+  drive (the text check below), and one that is, holds or is inside the user's AppData, Windows, Program Files or
+  ProgramData (a favorite such as `C:\` or the user's own folder). A path in it is refused with "That folder can't
+  be used from another device." and the reason.
 - On Windows a path is checked as text first, and nothing on disk is touched for one that fails: only a drive letter,
   a colon and a slash, on a fixed local drive; no UNC, `\\?\`, `\\.\` or `\??\` path, no device name (`CON`, `NUL`,
-  `COM1`...), no `:` after the drive (a stream), no part ending in a dot or a space, none of `<>"|?*`.
+  `COM1`...), no `:` after the drive (a stream), no part ending in a dot or a space, none of `<>"|?*`. A link
+  whose target fails the same check (another computer, or a drive letter that isn't a fixed drive) is not followed.
 - A download whose files are outside the app's folders is read-only for a web session: it may pause, resume, retry
-  and remove it without its file, but `job.update`, `job.refreshUrl`, removing or cancelling with its file, and
-  `archive.extract` of it (by `jobIds` or `packageId`) are refused with "This download's file is outside the app's
-  folders, so it can't be changed from another device."
+  and remove it without its file, but `job.update`, `job.refreshUrl`, removing or cancelling with its file,
+  `archive.extract` of it (by `jobIds` or `packageId`) and `archive.setPassword` for a package with such a
+  download are refused with "This download's file is outside the app's folders, so it can't be changed from another
+  device." The same goes for a provider job saved to a folder outside them (`remote.select`, `remote.retry`,
+  `remote.startQueued`, `remote.archivePassword`).
+- An archive set whose folder or output folder is outside the app's folders is not listed in `archive.list` for a
+  web session (nor, on a server, one outside its folders), and `archive.retry`, `archive.cancel`, `archive.remove` and `archive.setPassword` by `setId` leave it
+  alone ("These archives are outside the app's folders, so they can't be changed from another device.").
+- `job.refreshUrl` is refused for a download set to open its file or run a program when it is done: those would then
+  act on whatever the new address sends.
 - `settings.update` follows an allow-list (`WebSettingsRules`): queues, schedules, connections, speed, categories'
   names and file types. Every other field must be sent back as it is, or the save is refused with the names of
   the changed fields and nothing is saved; what the Host keeps itself (recent folders and addresses, packages, the
   last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
   `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are.
-  `archive.settings.set` may not change `folder`.
+  `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
+  those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
+- What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
+  post-download command, the FFmpeg path, the update source, the proxy's address and user (its mode stays), the site
+  logins, the sound files and the recent addresses and folders. Sent back as shown, they are kept as they are; sent
+  with another value, they are refused like any field it may not change.
 - No local network: a download added, handed off or pointed at a new address by a web session never reaches
   loopback, private, link-local, carrier-grade NAT or `.local` addresses (`errorCode: "local_network"` on `job.add`
-  and `handoff.request`), and an address's name is resolved and checked again when the connection is made. FTP is
-  refused. A hand-off's `extensionId` is not checked and grants nothing, and request ids are kept apart from a
-  local client's.
+  and `handoff.request`), and an address's name is resolved and checked again when the connection is made. Any
+  connection that isn't to the proxy the user set is checked so. Through the proxy, the site's name is resolved on
+  this PC first and refused the same way; a name only the proxy can resolve goes ahead, as does one that resolves
+  differently by the time the proxy asks. FTP is refused. A hand-off's `extensionId` is not checked and grants
+  nothing, and request ids are kept apart from a local client's.
+- A finished download a web session added gets the mark Windows gives files from the internet (`Zone.Identifier`,
+  zone 3, with only the site's scheme and host), so SmartScreen and Office warn before it is opened. A drive without
+  streams keeps it unmarked.
+- Removing several downloads with their files skips one that is already gone, as it does for any other session.
 - `jobs.snapshot`, `jobs.query` and `host.status` leave `stateDirectory` empty and list only leftovers inside the
   app's folders.
 

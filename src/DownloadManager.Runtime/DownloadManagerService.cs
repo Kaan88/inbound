@@ -594,7 +594,7 @@ public sealed partial class DownloadManagerService
         {
             // Checked on the resolved folder, which is also the one used: a link inside a root can't lead the file out.
             if (roots.Allowed(destination) is not { } inside)
-                return new AddJobResponse { Accepted = false, Error = roots.OutsideText, ErrorCode = "invalid_destination" };
+                return new AddJobResponse { Accepted = false, Error = roots.OutsideTextFor(destination), ErrorCode = "invalid_destination" };
             destination = inside;
         }
 
@@ -1036,9 +1036,9 @@ public sealed partial class DownloadManagerService
     {
         if (ids.Count > 1000) return new JobActionResponse { Error = "Remove at most 1000 downloads at a time." };
         var unique = ids.Distinct().ToList();
-        // All or none, before any of them is stopped.
-        if (deleteFile && caller is not null && unique.Select(id => RefuseOutsideCaller(id, caller)).FirstOrDefault(refusal => refusal is not null) is { } outside)
-            return outside;
+        // All or none, before any of them is stopped. One already gone is skipped below, as it is for any caller.
+        if (deleteFile && caller is not null && unique.Where(id => HeldBy(id, caller) == false).Take(1).ToList() is [var outsideId])
+            return new JobActionResponse { Ok = false, Error = CallerScope.OutsideJobRefused, Job = GetJob(outsideId) };
         var names = new Dictionary<Guid, string>();
         lock (_sync)
         {
@@ -2531,7 +2531,7 @@ public sealed partial class DownloadManagerService
                 if ((caller?.Roots ?? Roots) is { } roots)
                 {
                     if (roots.Allowed(directory) is not { } inside)
-                        return new JobActionResponse { Ok = false, Error = roots.OutsideText };
+                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory) };
                     directory = inside;
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }
@@ -2751,6 +2751,9 @@ public sealed partial class DownloadManagerService
         {
             if (CallerScope.DescribeAddress(newUrl) is { } refused) return new JobActionResponse { Ok = false, Error = refused, Job = GetJob(id) };
             if (RefuseOutsideCaller(id, caller) is { } outside) return outside;
+            // What the user set to happen to this file would then happen to whatever the new address sends.
+            if (GetJob(id) is { CompletionOptions: var options } job && (options.OpenFile || !string.IsNullOrWhiteSpace(options.ProgramPath)))
+                return new JobActionResponse { Ok = false, Error = CallerScope.CompletionActionsKeepAddress, Job = job };
         }
 
         await WaitForEndedRunAsync(id, cancellationToken).ConfigureAwait(false);
@@ -3869,6 +3872,8 @@ public sealed partial class DownloadManagerService
 
         if (changeType == "completed")
         {
+            // Before anything opens or extracts it: a download a browser on another device added is marked as from the web.
+            if (job.PublicNetworkOnly) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
             try
             {
                 await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
