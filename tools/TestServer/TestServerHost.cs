@@ -30,6 +30,7 @@ public sealed partial class TestServerHost : IAsyncDisposable
     private int _peakRangeRequests;
     private int _activeFileRequests;
     private int _peakFileRequests;
+    private long _contentBytes;
     private long _authAuthorized;
     private long _authDenied;
     private long _expiringExpired;
@@ -188,9 +189,29 @@ public sealed partial class TestServerHost : IAsyncDisposable
         // The bytes depend on the size and seed only, so files of the same size share one copy. Keyed by
         // name as well, a long run of differently named files kept every one in memory (3 GB after
         // 3,000 one-megabyte names in the PERF.2 soak).
+        // The cache is also capped: the soak's segmented files each use their own seed, which kept 1 GB
+        // after two hours. The bytes are generated again when needed, so dropping them changes nothing.
         var key = $"{size}:{seed}";
-        return _content.GetOrAdd(key, _ => TestContent.Generate(seed, size));
+        if (_content.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var content = TestContent.Generate(seed, size);
+        if (Interlocked.Add(ref _contentBytes, content.LongLength) > ContentCacheBytes)
+        {
+            _content.Clear();
+            Interlocked.Exchange(ref _contentBytes, 0);
+            Interlocked.Exchange(ref _contentBytes, content.LongLength);
+        }
+
+        return _content.GetOrAdd(key, content);
     }
+
+    /// <summary>Most bytes of generated content kept in memory before the cache starts over.</summary>
+    public const long ContentCacheBytes = 256L * 1024 * 1024;
+
+    public long CachedContentBytes => Interlocked.Read(ref _contentBytes);
 
     public void SetVersion(string name, int version)
         => _versions[name] = version;
