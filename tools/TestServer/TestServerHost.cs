@@ -1321,7 +1321,7 @@ public sealed partial class TestServerHost : IAsyncDisposable
             // Only a response that was really cut short ends with a reset. One whose range fitted under the cut is
             // complete and ends normally: a reset straight after it can reach the client before it has read the
             // headers, and Windows then drops the unread bytes, so every small range near the end of a file
-            // failed with "An error occurred while sending the request" (PERF.2 soak, UI.B10).
+            // failed with "An error occurred while sending the request" (PERF.2 soak, UI.B15).
             if (cutAt is not null && totalToWrite < end - start + 1)
             {
                 await context.Response.Body.FlushAsync().ConfigureAwait(false);
