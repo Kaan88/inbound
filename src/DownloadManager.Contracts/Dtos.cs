@@ -288,6 +288,17 @@ public sealed class SnapshotDto
     public HostStatusDto Status { get; set; } = new();
 }
 
+/// <summary>
+/// UI.R24: total download speed, one figure per <see cref="IntervalSeconds"/> from <see cref="Start"/>, oldest first,
+/// in bytes per second. It starts no earlier than the Host did; the last figure is the second under way.
+/// </summary>
+public sealed class SpeedHistoryDto
+{
+    public DateTimeOffset Start { get; set; }
+    public int IntervalSeconds { get; set; } = 1;
+    public List<long> BytesPerSecond { get; set; } = new();
+}
+
 public sealed class FolderPickRequest
 {
     public string? InitialPath { get; set; }

@@ -74,6 +74,9 @@ public static class MessageTypes
     public const string HandoffError = "handoff.error";
     public const string StatisticsGet = "statistics.get";
     public const string StatisticsResult = "statistics.result";
+    /// <summary>UI.R24: the last hour of total download speed (<see cref="SpeedHistoryDto"/>). A Host from before it answers with an error.</summary>
+    public const string SpeedHistoryGet = "speed.history";
+    public const string SpeedHistoryResult = "speed.historyResult";
     public const string JobsQuery = "jobs.query";
     public const string JobSegments = "job.segments";
     public const string JobSegmentsResult = "job.segmentsResult";
