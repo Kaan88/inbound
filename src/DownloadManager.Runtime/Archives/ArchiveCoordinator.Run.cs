@@ -397,7 +397,9 @@ public sealed partial class ArchiveCoordinator
                 }
                 else
                 {
-                    next.VolumesToDelete = [.. read];
+                    // TB.S3: the set's recovery volumes rebuild what it holds, so they go with it. Only names RAR
+                    // gives this set's .rev files, and none another set in this folder could also claim.
+                    next.VolumesToDelete = [.. read, .. RecoveryVolumesLocked(next, read)];
                 }
             }
 
@@ -417,6 +419,36 @@ public sealed partial class ArchiveCoordinator
         }
 
         Announce(announce);
+    }
+
+    /// <summary>The <c>.rev</c> files on disk beside this set that are its own. Called under the gate.</summary>
+    private List<string> RecoveryVolumesLocked(ArchiveSetRecord set, IReadOnlyCollection<string> read)
+    {
+        string[] present;
+        try
+        {
+            present = System.IO.Directory.Exists(set.Directory)
+                ? System.IO.Directory.EnumerateFiles(set.Directory, "*.rev").Select(Path.GetFileName).OfType<string>().ToArray()
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"The recovery volumes beside a set could not be listed, so they are kept: {exception.GetType().Name}");
+            return [];
+        }
+
+        List<string> others;
+        lock (_sync)
+        {
+            others = _sets.Values
+                .Where(other => other.Id != set.Id && string.Equals(other.Directory, set.Directory, StringComparison.OrdinalIgnoreCase))
+                .Select(other => other.BaseName)
+                .ToList();
+        }
+
+        return ArchiveVolumes.RecoveryVolumes(set.BaseName, present, others)
+            .Where(name => !read.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
     }
 
     /// <summary>Runs after success is on disk, so a restart can finish it and nothing here can undo that success.</summary>

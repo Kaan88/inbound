@@ -1058,6 +1058,27 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     public Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, CancellationToken cancellationToken = default)
         => SetArchivePasswordAsync(id, password, offered: false, cancellationToken);
 
+    /// <summary>
+    /// TB.S2: offers a password to this job's own archives, with the user's consent given where it was typed. A job
+    /// that has one already, given by the user or handed over, keeps it, and so does its package on the archive side.
+    /// </summary>
+    public async Task<RemoteActionResult> OfferArchivePasswordAsync(Guid id, string password, CancellationToken cancellationToken = default)
+    {
+        RemoteJobRecord? record;
+        lock (_sync) _records.TryGetValue(id, out record);
+        if (record is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        if (record.ProtectedArchivePassword is not null || record.ArchivePasswordHandedOver)
+        {
+            return new RemoteActionResult(true, null, ToView(record));
+        }
+
+        return await SetArchivePasswordAsync(id, password, offered: true, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, bool offered, CancellationToken cancellationToken)
     {
         if (RemoteJobRules.DescribeBadArchivePassword(password) is { } bad)
@@ -1295,9 +1316,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
         if (view.ItemId is not { } itemId)
         {
-            return new RemoteActionResult(false, view.Stage == RemoteStage.Queued
-                ? $"This is waiting in your {view.ProviderName} queue, and has no item to delete yet. This app can't cancel a queued item, so do that on {view.ProviderName}'s site if you need to."
-                : $"This item isn't known to be on your {view.ProviderName} account.");
+            // TB.S1: waiting in the provider's queue, there is no item yet, only the queue's entry.
+            if (view.Stage == RemoteStage.Queued && view.State == RemoteJobState.Waiting)
+            {
+                return await ControlQueuedAsync(id, RemoteQueueAction.Remove, cancellationToken).ConfigureAwait(false);
+            }
+
+            return new RemoteActionResult(false, $"This item isn't known to be on your {view.ProviderName} account.");
         }
 
         try
@@ -1315,6 +1340,91 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
         // The item is gone now, so a client leaving can't be allowed to keep the job on the list.
         return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// TB.S1: starts, or takes out, a job's entry in the provider's queue. Only from an explicit user action, and only
+    /// for a job still waiting there with no item: its entry is found again by the job's hash in a fresh read of the
+    /// queue, so nothing else in the queue can be touched. Start has the account looked at again at once, which
+    /// finds the new item by that hash; Remove takes the job off the list too, since nothing is left to wait for.
+    /// </summary>
+    public async Task<RemoteActionResult> ControlQueuedAsync(Guid id, RemoteQueueAction action, CancellationToken cancellationToken = default)
+    {
+        RemoteJobRecord? record;
+        lock (_sync) _records.TryGetValue(id, out record);
+        if (record is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        var entry = _providers.Find(record.Provider);
+        var name = entry?.DisplayName ?? record.Provider;
+        if (record is not { State: RemoteJobState.Waiting, Stage: RemoteStage.Queued, ItemId: null })
+        {
+            return new RemoteActionResult(false, $"This item isn't waiting in your {name} queue.");
+        }
+
+        if (entry?.Queue is not { } queue || entry.Provider is not IRemoteQueueControl control)
+        {
+            return new RemoteActionResult(false, $"{name}'s queue can't be changed from this app.");
+        }
+
+        if (entry.AccountProblem() is { } problem)
+        {
+            return new RemoteActionResult(false, problem);
+        }
+
+        try
+        {
+            var queueId = await FindQueueIdAsync(queue, record, cancellationToken).ConfigureAwait(false);
+            if (queueId is null)
+            {
+                // Started or removed meanwhile, here or on the site: a look settles which.
+                await ActAsync(id, CheckedNow, string.Empty, cancellationToken).ConfigureAwait(false);
+                return new RemoteActionResult(false, $"This item is no longer in your {name} queue. It is being checked again.");
+            }
+
+            await control.ControlQueuedAsync(queueId, action, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RemoteProviderException ex)
+        {
+            return new RemoteActionResult(false, Describe(entry, ex));
+        }
+
+        if (action == RemoteQueueAction.Remove)
+        {
+            return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        _log?.Invoke($"Remote job {id:N}: started from the {name} queue at the user's request.");
+        return await ActAsync(id, CheckedNow, "This item has nothing to check.", CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>The queue's own id for this job's entry, matched by hash. Null when it isn't there, or no hash is known.</summary>
+    private async Task<string?> FindQueueIdAsync(IRemoteQueue queue, RemoteJobRecord record, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(record.PredictedHash))
+        {
+            return null;
+        }
+
+        for (var page = 0; page < _options.MostListPages; page++)
+        {
+            var read = await queue.ListQueuedAsync(record.Kind, page * _options.ListPageSize, _options.ListPageSize, fresh: true, cancellationToken).ConfigureAwait(false);
+            var hit = read.FirstOrDefault(queued => !string.IsNullOrWhiteSpace(queued.QueueId) &&
+                string.Equals(queued.Hash, record.PredictedHash, StringComparison.OrdinalIgnoreCase));
+            if (hit is not null)
+            {
+                return hit.QueueId;
+            }
+
+            if (read.Count < _options.ListPageSize)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The item's files as they are now, with their safe paths. Nothing is invented while the provider doesn't know them.</summary>
