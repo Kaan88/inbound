@@ -24,6 +24,8 @@ public sealed class ArchiveVolumesTests
         Assert.Contains(sets, set => set.Members.SequenceEqual(["Movie.part1.rar", "Movie.part2.rar"]));
         Assert.Contains(sets, set => set.Members.SequenceEqual(["movie.part1.rar"]));
         Assert.Equal(["movie.part1.rar"], ArchiveVolumes.FindSet(["Movie.part1.rar", "Movie.part2.rar", "movie.part1.rar"], "movie.part1.rar")!.Members);
+        // Without such a pair a set whose names differ in case stays one set there too (CaseDoesNotSplitASet).
+        Assert.Single(ArchiveVolumes.Group(["Film.PART1.RAR", "film.part2.rar"]));
     }
 
     [Fact]

@@ -1417,8 +1417,18 @@ public sealed class RuntimeArchiveTests(ArchiveFileServer fixture)
         var upper = await run.Archives.SetPasswordAsync(new ArchiveSetPasswordRequest { FilePath = run.PathOf("V.PART10.RAR"), Password = Secret });
 
         Assert.Equal(first.Set!.Id, other.Set!.Id);
-        Assert.Equal(first.Set.Id, upper.Set!.Id);
-        Assert.Single(run.Archives.List());
+        if (OperatingSystem.IsWindows())
+        {
+            // One file to NTFS, so one set.
+            Assert.Equal(first.Set.Id, upper.Set!.Id);
+            Assert.Single(run.Archives.List());
+            return;
+        }
+
+        // On Linux V.PART10.RAR is another file than v.part10.rar, for the same volume number, so it is another set:
+        // one set never holds two files for one volume (ArchiveVolumes.Group).
+        Assert.NotEqual(first.Set.Id, upper.Set!.Id);
+        Assert.Equal(2, run.Archives.List().Count);
     }
 
     // ----- IPC, in process. RuntimeArchiveHostTests goes through a real pipe. -----
