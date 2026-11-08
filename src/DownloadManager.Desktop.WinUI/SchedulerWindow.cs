@@ -886,7 +886,13 @@ public sealed class SchedulerWindow : Window
             if (reply.Type != MessageTypes.SettingsResult || !result.Ok) { _status.Text = result.Error ?? "The Host rejected the queue change."; return; }
             await RefreshAsync();
             UpdateQueueList(request.Action == "create" ? result.Settings.Queues.OrderByDescending(item => item.Order).FirstOrDefault()?.Id : request.Action == "delete" ? request.MoveContentsToQueueId : request.QueueId);
-            _status.Text = $"Queue {request.Action}d.";
+            _status.Text = request.Action switch
+            {
+                "create" => "Queue created.",
+                "delete" => "Queue deleted.",
+                "policy" => "Queue renamed.", // The rename is the only call that sends "policy".
+                _ => "Queue updated.",
+            };
         }
         catch (Exception ex) { _status.Text = "Could not update queue: " + ex.Message; }
     }
