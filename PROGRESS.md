@@ -1,5 +1,22 @@
 # Progress — session handoff
 
+### Campaign item 5: the extension end to end in Chrome for Testing (2026-11-08, branch `campaign-ext`)
+
+- Setup: Chrome for Testing 156.0.8078.80 with `--load-extension` (`dist`, ID `pkndd…`) and a fresh profile whose download folder is `test-downloads\cft-browser`; a test Host (`DOWNLOADMANAGER_INSTANCE=campaign-ext`, data under the worktree's `artifacts`) with its default folder in `test-downloads\ext`; TestServer on 127.0.0.1. Driven through the DevTools protocol (real mouse events for clicks, so each download has a user gesture), the browser's own right-click menu through UI Automation, and the app's folder dialog through window messages. Evidence, scripts and screenshots: `artifacts\campaign\20261108-ext\`.
+- Native-host registration without touching the owner's key: in the agent's shells, HKCU writes go to a private layer that the real hive does not see (a probe key written there was absent when read through WMI `StdRegProv`), and Chrome started from these shells reads that layer. The layer already held a stale value (`%LOCALAPPDATA%\DownloadManager\native-host\…`, a file that no longer exists), which is why agent-launched Chrome reported "native messaging host not found" before. It was saved, pointed at this worktree's manifest for the run and written back exactly. The real key, read through WMI before, during and after, stayed on the installed app's manifest the whole time.
+- Results (all passed):
+  - Fresh install: automatic sending off; Settings banner, popup "Automatic sending: off" and the OFF badge; "Check connection" reached the test Host. A direct `.mp4` stayed in the browser with its reason.
+  - On: `.flac`, `.mp4` and `.pdf` with `Content-Disposition: attachment` were caught, removed from the browser's list and completed (SHA-256 equal to the server's; the three test bodies are identical, so this shows integrity, not which file is which). `.png` (excluded), `blob:` and `data:` stayed in the browser; only the `.png` got a note, as designed.
+  - Right-click "Download with Inbound Download Manager" (the browser's own menu): the folder window opened at the default folder; Choose… opened the app's dialog; the chosen folder was used; hash matches.
+  - "Ask each time": the caught download was held paused, Download sent it to the default folder, Keep in browser let it finish in the browser.
+  - Download all links on `/download-all-page`: 4 unique links (duplicate, `mailto:`, `javascript:` and `#` left out), all 4 completed, the HLS one as `master.ts`.
+  - Popup: all downloads of the app (11, including a CLI job and a failed one); Pause, Resume, Retry and Delete with and without the file worked against the Host; Pause catching showed OFF and a note.
+  - Firefox: `npm run build:firefox` built. `web-ext lint` not run (no cached copy offline). Edge not run (no test copy; the owner's Edge is off limits).
+  - Extension: typecheck clean; `npm test` 94 of 94 after the fix (92 before).
+- Found and fixed: EXT.B2, Send could be pressed while the app's folder dialog was open (the download went to the folder shown and the choice was lost). Checked on screen after the fix.
+- Test setup notes, not product bugs: a Host built without the WinUI app shows a "frontend was not found" message box for each completed download while the completion dialog is on (turned off in the test instance's settings); `chrome.runtime.reload()` on an extension loaded with `--load-extension` unloaded it, so the browser was restarted instead; `chrome.action.openPopup()` needs a focused window, so the popup was opened as a tab.
+- Not done: Edge; a real Firefox run and AMO signing; the owner's TorBox Direct Download check (EXT.B1). The Haiku diff review named in CLAUDE.md was not available to this subagent (no agent tool).
+
 ### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
 
 - VM: VirtualBox on E:, Windows 11 Enterprise LTSC evaluation from Microsoft, a new standard user, snapshot `clean-install`. Commands go in through the desktop session's Run dialog (VirtualBox keyboard input) because starting processes through the guest additions fails in this guest; files go both ways through the guest additions.
