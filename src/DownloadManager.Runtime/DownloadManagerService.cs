@@ -100,6 +100,18 @@ public sealed partial class DownloadManagerService
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+
+    /// <summary>UI.R24. Guarded by <c>_sync</c>; written from progress reports, so it costs nothing while idle.</summary>
+    private readonly SpeedHistory _speedHistory = new(DateTimeOffset.UtcNow);
+
+    /// <summary>UI.R24: the last hour of total download speed, for a window that has just connected.</summary>
+    public SpeedHistoryDto GetSpeedHistory()
+    {
+        lock (_sync)
+        {
+            return _speedHistory.Read(DateTimeOffset.UtcNow);
+        }
+    }
     public bool TrayAvailable { get; set; }
     public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
 
@@ -3580,6 +3592,7 @@ public sealed partial class DownloadManagerService
                 // (UI.R21). A report from its wind-down still counts its bytes, but must not make it look as
                 // if it were running again.
                 var windingDown = runtime.Preempted || (runtime.PauseRequested && runtime.ResumeWhenStopped);
+                _speedHistory.Report(job.Id, windingDown ? 0 : p.BytesPerSecond, now);
                 if (!windingDown)
                 {
                     job.BytesPerSecond = p.BytesPerSecond;
@@ -3674,6 +3687,7 @@ public sealed partial class DownloadManagerService
             job.WaitingForHost = null;
             runtime.LastPhase = null;
             runtime.Preempted = false;
+            _speedHistory.Stopped(job.Id, DateTimeOffset.UtcNow);
 
             // The file is where it landed, whatever else happened while it got there.
             if (result.Success)

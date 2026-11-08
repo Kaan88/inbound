@@ -204,6 +204,10 @@ public sealed partial class HostCommandDispatcher
                     await Reply(client, message, MessageTypes.StatisticsResult, _service.GetStatistics()).ConfigureAwait(false);
                     break;
 
+                case MessageTypes.SpeedHistoryGet:
+                    await Reply(client, message, MessageTypes.SpeedHistoryResult, _service.GetSpeedHistory()).ConfigureAwait(false);
+                    break;
+
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
                     await Reply(client, message, MessageTypes.JobsSnapshot, _service.GetSnapshot())
