@@ -4,7 +4,9 @@ import { connectionProblem, readableError } from "./connection-problem";
 import { isUnsupportedUrl, UNSUPPORTED_SITE_MESSAGE } from "./unsupported-sites";
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
-import { browserCookieHeaders, cookieContextForFrame, type BrowserCookieContext } from "./browser-cookies";
+import {
+  browserCookieHeaders, cookieContextForDownload, cookieContextForFrame, type BrowserCookieContext,
+} from "./browser-cookies";
 import {
   DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
@@ -432,7 +434,7 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
       totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
       startMode: settings.startMode,
       isAutoIntercept: true,
-      headers: await browserCookieHeaders(item.url, {}, item.finalUrl),
+      headers: await browserCookieHeaders(item.url, cookieContextForDownload(item), item.finalUrl),
     });
 
     if (ack?.accepted) {
@@ -511,6 +513,7 @@ async function holdForFolderChoice(item: chrome.downloads.DownloadItem, fileName
     totalBytes: item.totalBytes > 0 ? item.totalBytes : item.fileSize > 0 ? item.fileSize : undefined,
     isAutoIntercept: true,
     createdAt: Date.now(),
+    cookieContext: cookieContextForDownload(item),
     browserDownloadId: item.id,
   };
   try {

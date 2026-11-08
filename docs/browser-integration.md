@@ -101,7 +101,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
   unlisted version from the owner's AMO account; that has not been done.
 - **Differences handled in code.** No `downloads.onDeterminingFilename` (see above);
-  `cookies.getPartitionKey` is optional already. Firefox may install the extension without access to sites;
+  `cookies.getPartitionKey` is optional already. A caught download's cookies come from its own cookie store
+  (`DownloadItem.cookieStoreId`, a container tab's container), on the automatic and the "ask" paths alike;
+  Chromium has no such field and reads the default store. Firefox may install the extension without access to sites;
   then Settings shows "Allow access to all sites", which asks with `permissions.request` from the click.
 - **Registration.** Firefox lists add-on IDs (`allowed_extensions`) where Chrome lists origins, so it has a
   manifest of its own, `native-host\com.kaank.downloadmanager.firefox.json`, under its own key
