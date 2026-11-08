@@ -20,7 +20,7 @@
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'the provider');
   const keyNotice = $derived.by(() => {
     const unreadable = store.model.accounts.find((a) => a.keyUnreadable);
-    return unreadable ? `The saved ${unreadable.providerName} API key can't be read on this server, so links here aren't going through ${unreadable.providerName}. Enter the key again in Settings to use it.` : '';
+    return unreadable ? `The saved ${unreadable.providerName} API key can't be read on this server, so links here aren't going through ${unreadable.providerName}. Enter the key again in Options to use it.` : '';
   });
 
   async function picked(event: Event) {

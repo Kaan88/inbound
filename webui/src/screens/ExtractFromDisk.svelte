@@ -39,7 +39,7 @@
       <input id="extract-name" class="field font-mono" bind:value={name} placeholder="example.part1.rar" autocomplete="off" spellcheck="false" />
     </div>
     {#if problem}<p class="text-[12.5px] text-error" role="alert">{problem}</p>{/if}
-    <p class="hint">The file is on the server. Where the files go is set on the Extraction page in Settings.</p>
+    <p class="hint">The file is on the server. Where the files go is set on the Extraction page in Options.</p>
   </form>
   {#snippet footer()}
     <button class="btn" onclick={onclose}>Cancel</button>
