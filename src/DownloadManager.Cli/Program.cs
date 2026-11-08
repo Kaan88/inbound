@@ -301,7 +301,9 @@ internal static partial class Program
                             StartMode = startOverride ?? entry.StartMode,
                             ConflictPolicy = entry.ConflictPolicy,
                             ExpectedSha256 = entry.ExpectedSha256,
-                            Source = "import",
+                            // Headless like every CLI add: the Host opens no progress or completion
+                            // window per job for "cli" (DownloadWindows), which a long list would flood.
+                            Source = "cli",
                         }).ConfigureAwait(false);
                         var result = reply.GetPayload<AddJobResponse>();
                         if (result.Accepted)
@@ -1202,7 +1204,9 @@ internal static partial class Program
                     DestinationDirectory = destination,
                     StartMode = startMode,
                     ConflictPolicy = conflict ?? "rename",
-                    Source = "batch",
+                    // Headless like every CLI add (see DownloadWindows): a batch of 1,000 must not open
+                    // 1,000 progress windows, each its own window process.
+                    Source = "cli",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
                     Priority = priority,
