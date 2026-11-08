@@ -15,8 +15,9 @@ test('EXT.E1: the Firefox manifest is the Chrome one with its own ID, an event p
   assert.deepEqual(manifest.background, { scripts: ['background.js'] });
   assert.equal('key' in manifest, false);
   assert.equal('minimum_chrome_version' in manifest, false);
-  // Same rights as in Chrome, nothing more.
-  assert.deepEqual(manifest.permissions, chromeManifest.permissions);
+  // Same rights as in Chrome, plus blocking webRequest to catch a download before Firefox's Save dialog (EXT.B5).
+  assert.deepEqual(manifest.permissions, [...chromeManifest.permissions, 'webRequest', 'webRequestBlocking']);
+  assert.equal(chromeManifest.permissions.includes('webRequestBlocking'), false);
   assert.deepEqual(manifest.host_permissions, chromeManifest.host_permissions);
   assert.equal(manifest.version, chromeManifest.version);
   // The Chrome manifest itself is untouched.

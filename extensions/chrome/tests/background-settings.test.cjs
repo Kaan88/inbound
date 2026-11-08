@@ -999,3 +999,145 @@ test('EXT.R2: popup actions use a connection of their own, so a slow delete cann
     assert.equal(harness.nativePorts[remove.portIndex].disconnected, true, 'the one-off connection is closed after its answer');
   });
 });
+
+/** Firefox with blocking webRequest: the listener and its filter, to call as Firefox would. */
+function firefoxWithResponses(settings = catching) {
+  const made = firefoxChrome(settings);
+  const registered = [];
+  made.harness.chrome.webRequest = { onHeadersReceived: { addListener(listener, filter, extra) { registered.push({ listener, filter, extra }); } } };
+  return { ...made, registered };
+}
+
+const zipResponse = (url, extra = {}) => ({
+  url, method: 'GET', statusCode: 200, type: 'main_frame', originUrl: 'https://site.test/page', cookieStoreId: 'firefox-container-1',
+  responseHeaders: [{ name: 'Content-Type', value: 'application/zip' }, { name: 'Content-Disposition', value: 'attachment; filename="big file.zip"' },
+    { name: 'Content-Length', value: '4096' }], ...extra,
+});
+
+test('EXT.B5: Firefox catches a download from its response, before the Save dialog, and cancels it only once accepted', async () => {
+  const { harness, log, registered } = firefoxWithResponses();
+  containerCookies(harness);
+  await withBackground(harness, async () => {
+    assert.equal(registered.length, 1);
+    assert.deepEqual(registered[0].filter.types, ['main_frame', 'sub_frame']);
+    assert.deepEqual(registered[0].extra, ['blocking', 'responseHeaders']);
+    const listen = registered[0].listener;
+
+    // A page is answered at once, with nothing sent anywhere.
+    assert.equal(listen({ ...zipResponse('https://site.test/'), responseHeaders: [{ name: 'Content-Type', value: 'text/html' }] }), undefined);
+
+    const answer = listen(zipResponse('https://site.test/get?id=1'));
+    assert.ok(answer instanceof Promise);
+    const request = await answerNative(harness, 'handoff.request', { accepted: true });
+    assert.equal(request.payload.url, 'https://site.test/get?id=1');
+    assert.equal(request.payload.suggestedFileName, 'big file.zip');
+    assert.equal(request.payload.totalBytes, 4096);
+    assert.equal(request.payload.referrer, 'https://site.test/page');
+    assert.equal(request.payload.headers.Cookie, 'session=work-account');
+    assert.deepEqual(await answer, { cancel: true });
+    assert.match(log.notes.at(-1).title, /^Sent to/);
+  });
+});
+
+test('EXT.B5: refused or unreachable, Firefox keeps the download, and onCreated does not send it again', async () => {
+  const { harness, log, registered } = firefoxWithResponses();
+  await withBackground(harness, async () => {
+    const answer = registered[0].listener(zipResponse('https://site.test/refused.zip'));
+    await answerNative(harness, 'handoff.request', { accepted: false, error: 'Disk full.' });
+    assert.deepEqual(await answer, {});
+    assert.match(log.notes.at(-1).message, /Disk full\. This download stays in your browser\./);
+
+    // Firefox then creates the download: left alone, said once.
+    const notes = log.notes.length;
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(50, 'refused.zip'));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(harness.nativeMessages.filter(message => message.type === 'handoff.request').length, 1);
+    assert.deepEqual(log.paused, []);
+    assert.equal(log.notes.length, notes);
+
+    // Another download of the same file later is caught as usual.
+    harness.chrome.downloads.onCreated.listeners[0](firefoxItem(51, 'refused.zip'));
+    await answerNative(harness, 'handoff.request', { accepted: true });
+    await settle(() => log.cancelled.length);
+    assert.deepEqual(log.cancelled, [51]);
+  });
+});
+
+test('EXT.B5: with catching off, a POST, or an excluded type, the response goes on and onCreated decides as before', async () => {
+  const off = firefoxWithResponses({ ...catching, autoIntercept: false });
+  await withBackground(off.harness, async () => {
+    assert.deepEqual(await off.registered[0].listener(zipResponse('https://site.test/a.zip')), {});
+    assert.equal(off.harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+  });
+
+  const { harness, registered } = firefoxWithResponses({ ...catching, excludedExtensions: ['zip'] });
+  await withBackground(harness, async () => {
+    assert.equal(registered[0].listener(zipResponse('https://site.test/a.zip', { method: 'POST' })), undefined);
+    assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/a.zip')), {});
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+  });
+});
+
+test('EXT.B5: "ask each time" opens the folder window, and Keep in browser starts the download in Firefox once', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  await withBackground(harness, async () => {
+    assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/ask.zip')), { cancel: true });
+    assert.equal(log.windows.length, 1);
+    const id = decodeURIComponent(log.windows[0].url.split('id=')[1]);
+    const shown = await sendRuntimeMessage(harness, { type: 'dm.getHandoff', id }, ownPage('handoff.html'));
+    assert.equal(shown.held, true);
+
+    await sendRuntimeMessage(harness, { type: 'dm.keepInBrowser', id }, ownPage('handoff.html'));
+    assert.deepEqual(log.downloaded, [{ url: 'https://site.test/ask.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1' }]);
+    // The download it started is Firefox's own: not caught again.
+    harness.chrome.downloads.onCreated.listeners[0]({ ...firefoxItem(60, 'ask.zip'), url: 'https://site.test/ask.zip' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(harness.nativeMessages.some(message => message.type === 'handoff.request'), false);
+    assert.equal(log.windows.length, 1);
+  });
+});
+
+test('EXT.B5: with the app unreachable the response goes on, and a restart keeps its container and is not caught again', async () => {
+  const { harness, log, registered } = firefoxWithResponses();
+  harness.chrome.runtime.connectNative = () => { throw new Error('Specified native messaging host not found.'); };
+  await withBackground(harness, async () => {
+    assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/away.zip')), {});
+    assert.match(log.notes.at(-1).message, /This download stays in your browser\./);
+  });
+
+  const asked = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  await withBackground(asked.harness, async () => {
+    assert.deepEqual(await asked.registered[0].listener(zipResponse('https://site.test/work.zip')), { cancel: true });
+    const id = decodeURIComponent(asked.log.windows[0].url.split('id=')[1]);
+    const window = openHandoffPort(asked.harness, id);
+    window.close();
+    await settle(() => asked.log.downloaded.length);
+    assert.deepEqual(asked.log.downloaded, [{ url: 'https://site.test/work.zip', filename: 'big file.zip', cookieStoreId: 'firefox-container-1' }]);
+    // Its own request, however Firefox types it, is let through untouched.
+    assert.equal(asked.registered[0].listener(zipResponse('https://site.test/work.zip')), undefined);
+  });
+});
+
+test('EXT.B5: a folder window that never connects gives the download back to Firefox', async () => {
+  const { harness, log, registered } = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  global.__inboundResponseWindowConnectMs = 20;
+  try {
+    await withBackground(harness, async () => {
+      assert.deepEqual(await registered[0].listener(zipResponse('https://site.test/lost.zip', { cookieStoreId: 'firefox-private' })), { cancel: true });
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.deepEqual(log.downloaded, [{ url: 'https://site.test/lost.zip', filename: 'big file.zip', incognito: true }]);
+    });
+  } finally { delete global.__inboundResponseWindowConnectMs; }
+
+  // One that connected in time is left to its window.
+  const kept = firefoxWithResponses({ ...catching, destinationMode: 'ask' });
+  global.__inboundResponseWindowConnectMs = 20;
+  try {
+    await withBackground(kept.harness, async () => {
+      await kept.registered[0].listener(zipResponse('https://site.test/open.zip'));
+      openHandoffPort(kept.harness, decodeURIComponent(kept.log.windows[0].url.split('id=')[1]));
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.deepEqual(kept.log.downloaded, []);
+    });
+  } finally { delete global.__inboundResponseWindowConnectMs; }
+});
