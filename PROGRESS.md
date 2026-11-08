@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### 0.6.1 released; server running on the owner's mini PC (2026-11-08)
+
+- 0.6.1 is on GitHub (tag `v0.6.1`, squashed to `main`). The assets are in `artifacts\release\v0.6.1\`. Checks: signature and checksums verified, the latest feed serves 0.6.1, Setup's hash on GitHub matches, binaries are `0.6.1+f460462`, and the token scan found nothing. The Docker image workflow for `v0.6.1` passed. Extension 0.5.1 zips for the owner: `artifacts\chrome-store\` and `artifacts\firefox-addon\`.
+- Mini PC (Ubuntu 24.04, amd64, Komodo 2): the stack `inbound` runs `ghcr.io/kaan88/inbound:0.6.1` as a Komodo "Files On Server" stack. Its download roots are the same two disks the other download manager used; the first one is the default. It runs as `1000:1000` on host port 8095. After start it was healthy, at 39 MiB, with no warnings in its log. The owner set up the Komodo stack. When checked, the sign-in password was not set yet.
+
 ### Komodo guide (2026-11-08, `dev`, after 0.6.1)
 
 - Owner asked for user instructions for Komodo: `docs/komodo.md` (ROADMAP D3c). Komodo's labels come from its UI source, because its docs site answered 404. Reviewed by three agents; the confirmed findings are fixed.
