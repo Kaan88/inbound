@@ -23,6 +23,56 @@
   - Tests: `HostCommandDispatcherTests` 19 pass. Core 818 of 818. Integration 1,111 of 1,111 (TEST.1 passed this time; it also passed 3 of 3 alone).
   - Left as they are: the flag `SupportsFolderBrowse` (PLAN.md asks for it, it is labelled, and D1b's folder listing will read it). Many older PROGRESS and ROADMAP entries already on `dev` name the other download manager directly; this branch adds none of them. Rewording them here would conflict with every other stream, so it is left for one pass on `dev` after the merge.
 
+### A1: fair host connections, limits that apply live, TEST.1 (2026-11-08, branch `stream-a`)
+
+- **UI.B7 (implemented, automated tests):** the per-host connection cap is now shared fairly. One gate per host with
+  a limit that can change while connections are out (the old `host|limit` keys let old plus new connections run
+  together). A free connection goes to the waiting job with the fewest; a job below its fair share
+  (`max(1, limit / jobs on the host)`) asks the job furthest above it to give one back. Segment workers take a
+  connection before a range; when asked, they stop at the last byte written, hand the rest of the range back and
+  save the checkpoint at once, then wait for a connection again. Nothing new goes into the checkpoint: a kill between
+  the hand-back and the save leaves the previous checkpoint, which only means fetching a few bytes again. Probes,
+  single streams and HLS/DASH fragments never give a connection back. Fragments now count under the cap, one at a
+  time per job; measured cost is under 1 µs per request, so they stay in.
+- A job that waits with no connection shows "Waiting for a connection to <host>" (host name only) in WinUI and the
+  CLI, through the runtime-only `WaitingForHost` (not saved) and `JobDto.WaitingForHost` (added field, no protocol bump).
+- **UI.R21 (implemented, automated tests; not checked on screen):** a lower simultaneous limit, overall or a
+  queue's, sends the newest excess back to Queued with its data (reverse of the start order). Left running, and
+  counted in the excess so an older job isn't stopped instead: jobs whose server can't resume or hasn't said, jobs
+  verifying or finishing, and jobs muxing. A provider job asks for one fresh link on its next run without using its
+  dead-link refresh budget. A changed default connection count reaches running segmented downloads of the user's own:
+  more connections add workers through the existing range-splitting path; fewer let the extra workers stop after
+  their current range.
+- **TEST.1 (fixed):** the cause was UI.B7 itself. The mock CDN now holds the two big files (`MockTorBox.HoldFile`,
+  `Release`, `ReleaseAll`) so only the small one can finish. 20 of 20 passes after the change, and another 20 of 20
+  after the final runtime fix (log: `artifacts\test1\runs.log`, not tracked).
+- Tests: Core 826 passed, Engine 150 passed, Integration 1,096 passed (no failures, no reruns); the six
+  `HostKillMatrixTests` passed again run on their own. New tests: `FairHostConnectionLimiterTests` (8),
+  Engine `HostFairnessTests` (4, with `ConnectionCountChangesApplyToARunningSegmentedJob`), Integration
+  `RuntimeConcurrencyLimitTests` (5).
+- Not done: the owner's scenario on a test build (3 TorBox downloads, raise to 6, lower to 2); a running job moved
+  into a full queue isn't sent back (only settings saves and queue changes trigger the check).
+- **Review fixes (same day):** seven reviewer findings checked against the code; six were real and are fixed, and one is
+  only partly fixed:
+  - A segment worker waiting for a connection now gives up once nothing is left that it could take (no free range,
+    none long enough to split). Before, a job with every byte fetched could wait for another job to free a
+    connection. New Engine test `AWorkerWithNothingLeftStopsWaitingForAConnection` fails without the fix.
+  - Connection churn on a shared host: a job below its share that gives a connection back keeps it for 250 ms
+    while nobody waiting is short of theirs. A media job's next fragment, or a worker's next range, gets it back
+    without making the other job yield, abort a response and flush its file. Anyone waiting below their share
+    still gets it at once. Three new Core tests; the main one fails with the window off.
+  - A late progress report from a requeued transfer still counts its bytes, but no longer sets the job back to
+    Downloading or Connecting, or saves that state (checked in the lowering test).
+  - While a yield is pending, a failed file write or checkpoint save is no longer taken for a yield. No test:
+    the engine has no way to make a write fail on cue.
+  - The limiter's cancel registration now lives on the waiting side, so a grant can't race its creation and leave
+    it on the job's token.
+  - Partly fixed: FTP now records whether the server took REST, so an FTP job that has resumed once can be
+    requeued. A first FTP run stays above the limit, because a server that refuses REST makes the engine start
+    over from zero. HLS/DASH detected through the engine's phase or the description now counts as resumable.
+- Tests after the fixes: Core 830 passed, Engine 151 passed, Integration 1,096 passed, no failures and no reruns.
+  TEST.1 then passed 10 of 10 runs in a row (appended to `artifacts\test1\runs.log`).
+
 ### Plan for the remaining work; owner hands over (2026-11-08)
 
 - Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.
@@ -32,7 +82,8 @@
 
 #### Questions for the owner (2026-11-08 run)
 
-- (none yet)
+- UI.R21: should a lower limit also requeue an FTP download that has never resumed? Today it keeps running, because
+  a server that refuses REST would make it start again from zero.
 
 ### Owner's remaining checks (2026-11-08)
 

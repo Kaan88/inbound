@@ -1704,7 +1704,9 @@ internal static partial class Program
 
             if (!json)
             {
-                Console.Write($"\r{job.State,-12} {FormatUtil.Bytes(job.ReceivedBytes),-12} {job.BytesPerSecond ?? 0,10:0.0} B/s   ");
+                // UI.B7: says when it waits for a connection to its host; padded so a shorter line overwrites it.
+                var waiting = job.WaitingForHost is { Length: > 0 } host ? $"  Waiting for a connection to {host}" : string.Empty;
+                Console.Write($"\r{job.State,-12} {FormatUtil.Bytes(job.ReceivedBytes),-12} {job.BytesPerSecond ?? 0,10:0.0} B/s{waiting,-60}");
             }
 
             if (job.State is "completed")

@@ -285,6 +285,7 @@ public sealed partial class MockTorBox
 
             _cdnWithCredentials = 0;
             _nextLinkDiesAfter = null;
+            ReleaseAll();
             ApiKey = DefaultApiKey;
             RateLimit = 300;
             RateWindow = TimeSpan.FromSeconds(60);
@@ -431,6 +432,55 @@ public sealed partial class MockTorBox
             }
         }
     }
+
+    /// <summary>
+    /// The CDN stops sending this file, on every link and connection, once this many of its bytes went out in
+    /// all, until <see cref="Release"/>. Connections stay open and silent, like a stalled server. A test can then
+    /// rely on a file not finishing, instead of on a throttle and a race (TEST.1).
+    /// </summary>
+    public void HoldFile(MockTorBoxFile file, long afterBytes)
+    {
+        lock (_holds) _holds[file.Id] = new FileHold(afterBytes);
+    }
+
+    /// <summary>Lets a held file go on. Releasing a file that isn't held does nothing.</summary>
+    public void Release(MockTorBoxFile file)
+    {
+        FileHold? hold;
+        lock (_holds)
+        {
+            if (!_holds.Remove(file.Id, out hold)) return;
+        }
+
+        hold.Gate.TrySetResult();
+    }
+
+    public void ReleaseAll()
+    {
+        List<FileHold> holds;
+        lock (_holds)
+        {
+            holds = _holds.Values.ToList();
+            _holds.Clear();
+        }
+
+        foreach (var hold in holds) hold.Gate.TrySetResult();
+    }
+
+    /// <summary>Bytes of a held file sent so far, across its connections.</summary>
+    public long HeldBytesSent(MockTorBoxFile file)
+    {
+        lock (_holds) return _holds.TryGetValue(file.Id, out var hold) ? Interlocked.Read(ref hold.Sent) : 0;
+    }
+
+    private sealed class FileHold(long afterBytes)
+    {
+        public long AfterBytes { get; } = afterBytes;
+        public long Sent;
+        public TaskCompletionSource Gate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private readonly Dictionary<long, FileHold> _holds = [];
 
     /// <summary>The next link issued dies, cutting off its connections, once this many bytes went through it.</summary>
     public void NextLinkDiesAfter(long bytes)
@@ -1425,8 +1475,16 @@ public sealed partial class MockTorBox
                     return;
                 }
 
+                FileHold? hold;
+                lock (_holds) _holds.TryGetValue(file.Id, out hold);
+                if (hold is not null && Interlocked.Read(ref hold.Sent) >= hold.AfterBytes)
+                {
+                    await hold.Gate.Task.WaitAsync(context.RequestAborted).ConfigureAwait(false);
+                }
+
                 var count = (int)Math.Min(32 * 1024, length - written);
                 await response.Body.WriteAsync(content.AsMemory((int)(start + written), count), context.RequestAborted).ConfigureAwait(false);
+                if (hold is not null) Interlocked.Add(ref hold.Sent, count);
                 await response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
                 written += count;
                 if (link.CountBytes(count))

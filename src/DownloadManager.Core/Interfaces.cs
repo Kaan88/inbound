@@ -39,96 +39,6 @@ public interface ISettingsStore
     Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
 
-public interface IHostConnectionLimiter
-{
-    Task<IDisposable> AcquireAsync(string host, CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Caps concurrent connections per host across every job sharing the limiter.
-/// Keys include the active limit so a settings change starts a fresh gate for
-/// new acquisitions instead of resizing a semaphore still in use.
-/// </summary>
-public sealed class HostConnectionLimiter : IHostConnectionLimiter
-{
-    private readonly object _sync = new();
-    private readonly Dictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
-    private int _limit;
-    private int _active;
-    private int _peak;
-
-    public HostConnectionLimiter(int limit)
-    {
-        _limit = Math.Max(1, limit);
-    }
-
-    public int Limit
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _limit;
-            }
-        }
-    }
-
-    public void UpdateLimit(int limit)
-    {
-        lock (_sync)
-        {
-            _limit = Math.Max(1, limit);
-        }
-    }
-
-    public async Task<IDisposable> AcquireAsync(string host, CancellationToken cancellationToken)
-    {
-        SemaphoreSlim gate;
-        lock (_sync)
-        {
-            var key = $"{host}|{_limit}";
-            if (!_gates.TryGetValue(key, out gate!))
-            {
-                gate = new SemaphoreSlim(_limit, _limit);
-                _gates[key] = gate;
-            }
-        }
-
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        lock (_sync)
-        {
-            _active++;
-            _peak = Math.Max(_peak, _active);
-        }
-
-        return new GateReleaser(gate, this);
-    }
-
-    public int Peak
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _peak;
-            }
-        }
-    }
-
-    private sealed class GateReleaser(SemaphoreSlim gate, HostConnectionLimiter owner) : IDisposable
-    {
-        public void Dispose()
-        {
-            lock (owner._sync)
-            {
-                owner._active--;
-            }
-
-            gate.Release();
-        }
-    }
-}
-
 public sealed record FileMetadata(string FileName, long? TotalBytes, string? ContentType, string FinalUrl, string? ETag = null, string? LastModified = null);
 
 public interface IFileMetadataReader
@@ -160,6 +70,27 @@ public interface IDownloadEngine
 
     /// <summary>Updates the speed cap shared by every transfer together; null or zero means none.</summary>
     void UpdateSharedSpeedLimit(long? bytesPerSecond)
+    {
+    }
+
+    /// <summary>
+    /// Raised with a job's id when it starts or stops waiting for a connection to its host while holding none.
+    /// Read <see cref="WaitingForHost"/> for the current answer; notices can arrive late.
+    /// </summary>
+    event Action<Guid>? HostWaitChanged
+    {
+        add { }
+        remove { }
+    }
+
+    /// <summary>The host name a running job waits on with no connection to it, or null.</summary>
+    string? WaitingForHost(Guid jobId) => null;
+
+    /// <summary>
+    /// The job's <see cref="DownloadJob.RequestedConnections"/> changed while it runs. A segmented transfer adds
+    /// workers for a higher count and lets workers above a lower one stop after their current range.
+    /// </summary>
+    void ConnectionsChanged(Guid jobId)
     {
     }
 }
