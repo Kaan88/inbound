@@ -29,6 +29,11 @@ public static class ThemeChoices
         null => null,
     };
 
+    /// <summary>The theme the windows use: a View > Dark Mode choice still kept (not yet saved to the Host) wins over
+    /// the Host's <paramref name="setting"/>, as FollowThemeSetting does. Options starts its Theme box from this, so
+    /// OK saves the kept choice instead of undoing it.</summary>
+    public static string InUse(bool? keptDarkMode, string? setting) => Normalize(FromDarkMode(keptDarkMode) ?? setting);
+
     /// <summary>The kept View > Dark Mode value for <paramref name="theme"/>: true for Dark, false for Light, null for
     /// System, which the menu toggle never sets.</summary>
     public static bool? ToDarkMode(string? theme) => Normalize(theme) switch
