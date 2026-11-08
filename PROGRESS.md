@@ -52,7 +52,7 @@
     - Haiku reviewed the extension, WinUI and web UI diffs. It found one more gap, fixed on `dev`: Download All read the default cookie store on Firefox.
   - The owner's ultrareview: 10 findings. Three were the same as mine: (1) is my 3, (3) is my 12, and (8) is next to my 4.
     - (2) The roots escape through provider adds, the one security finding, is fixed with two tests that fail without the fix.
-    - (4) did not reproduce. 7-Zip 26.04 on Linux lists a zip's backslashes as `/` (checked on the test VM), and a test pins it.
+    - (4) was real. My first check was wrong: its test zips held no backslash. Zips made on Windows should now extract into their folders on Linux (ROADMAP REV.2). Windows tests pass; the Linux run is still to do.
     - (5)–(10) are fixed; ROADMAP REV.2 has each one.
   - Seen once in eight Archives runs, with no message captured: `Rar5ExtractionTests.HeaderPasswordExtracts` failed, then passed alone and in seven full runs. Unexplained; watch for it.
   - Not checked in a real browser: Firefox's `cookieStoreId`, `storage.local.setAccessLevel` and `permissions.contains`, which the extension tests stand in for.

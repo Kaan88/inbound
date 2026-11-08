@@ -15,6 +15,55 @@ public sealed class SevenZipListingTests
         $"Path = {path}\r\nFolder = {(folder ? "+" : "-")}\r\nSize = {size}\r\nPacked Size = {size}\r\nAttributes = {(folder ? "D" : "A")}\r\n" +
         $"Alternate Stream = -\r\nEncrypted = {(encrypted ? "+" : "-")}\r\nSymbolic Link = \r\nHard Link = \r\nCopy Link = \r\n{extra}";
 
+    private const string Zip = "Path = a.zip\r\nType = zip\r\n";
+
+    [Fact]
+    public void AZipMadeOnWindowsListsItsBackslashesAsFoldersWhere7ZipKeepsThemInNames()
+    {
+        var listing = SevenZipListing.Parse(Listing(Zip,
+            Entry(@"dir\", 0, folder: true, extra: "Host OS = FAT\r\n"),
+            Entry(@"dir\sub\a.txt", 5, extra: "Host OS = NTFS\r\n"),
+            Entry(@"dir/mixed\b.txt", 5, extra: "Host OS = VFAT\r\n"),
+            Entry("plain/c.txt", 5, extra: "Host OS = FAT\r\n")), backslashIsAName: true);
+
+        Assert.Equal(["dir", "dir/sub/a.txt", "dir/mixed/b.txt", "plain/c.txt"], listing.Entries.Select(entry => entry.Path));
+        Assert.Equal(
+            [new ArchiveNameFix(@"dir\", "dir", true), new ArchiveNameFix(@"dir\sub\a.txt", "dir/sub/a.txt", false), new ArchiveNameFix(@"dir/mixed\b.txt", "dir/mixed/b.txt", false)],
+            listing.NameFixes);
+        Assert.False(listing.HasRepeatedNames);
+    }
+
+    [Fact]
+    public void ABackslashStaysInTheNameFromUnixFromOtherFormatsAndWhere7ZipSplitsItItself()
+    {
+        // Unix may hold a backslash in a name, so it stays one, and ExtractionSafety refuses it off Windows.
+        var unix = SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt", extra: "Host OS = Unix\r\n")), backslashIsAName: true);
+        Assert.Equal(@"dir\a.txt", Assert.Single(unix.Entries).Path);
+        Assert.Empty(unix.NameFixes);
+
+        // No host given is not a Windows host.
+        Assert.Empty(SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt")), backslashIsAName: true).NameFixes);
+
+        // A RAR's separator is the format's own; 7-Zip turns it into the system's.
+        var rar = SevenZipListing.Parse(Listing("Path = a.rar\r\nType = Rar5\r\n", Entry(@"dir\a.txt", extra: "Host OS = Windows\r\n")), backslashIsAName: true);
+        Assert.Empty(rar.NameFixes);
+
+        // Windows' 7-Zip already makes folders of it.
+        var windows = SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt", extra: "Host OS = FAT\r\n")), backslashIsAName: false);
+        Assert.Equal(@"dir\a.txt", Assert.Single(windows.Entries).Path);
+        Assert.Empty(windows.NameFixes);
+    }
+
+    [Fact]
+    public void AWindowsBackslashNameThatRepeatsAnotherNameIsARepeat()
+    {
+        var listing = SevenZipListing.Parse(Listing(Zip,
+            Entry(@"dir\a.txt", extra: "Host OS = FAT\r\n"),
+            Entry("dir/a.txt", extra: "Host OS = FAT\r\n")), backslashIsAName: true);
+
+        Assert.True(listing.HasRepeatedNames);
+    }
+
     [Fact]
     public void ReadsTheArchiveAndItsEntries()
     {
