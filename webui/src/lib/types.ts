@@ -42,6 +42,12 @@ export interface Job {
   isRemote?: boolean;
   remoteProvider?: string;
   queueRetryAt?: string;
+  /** False when the download was taken out of its queue (the Q column is then empty). Older servers leave it out: queued. */
+  isQueued?: boolean;
+  pageUrl?: string;
+  canCancel?: boolean;
+  /** Set on a file a package's Cancel stopped; Resume on the package brings all of them back only if every file has it. */
+  cancelledByPackageId?: string;
 }
 
 export interface DownloadGroup {
@@ -156,6 +162,8 @@ export interface Settings {
 }
 
 export interface HostStatus {
+  /** Part files that belong to no download, as of the last scan. */
+  orphanPartFiles?: string[];
   hostVersion: string;
   activeDownloads: number;
   queuedDownloads: number;
@@ -304,9 +312,12 @@ export interface ArchiveSet {
   phase?: string;
   percent?: number;
   destination?: string;
+  /** The archives were deleted after extracting, so extracting again could only fail. */
+  archivesDeleted?: boolean;
   note?: string;
   packageId?: string;
   jobIds: string[];
+  createdAt?: string;
   updatedAt: string;
 }
 
