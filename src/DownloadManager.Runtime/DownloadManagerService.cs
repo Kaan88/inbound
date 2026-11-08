@@ -1425,7 +1425,8 @@ public sealed partial class DownloadManagerService
             // so a running one always follows, within its provider's cap.
             foreach (var (runtime, previous) in candidates)
             {
-                if (runtime.Job.RemoteSource is null && runtime.Job.RequestedConnections != previous) continue;
+                if (runtime.Job.RemoteSource is null && runtime.Job.RequestedConnections != previous &&
+                    !SavedUnderTheOldProviderLinkCap(runtime.Job, previous)) continue;
                 if (DefaultConnectionsLocked(runtime, next.DefaultConnections) is not { } connections) continue;
                 if (connections == runtime.Job.RequestedConnections) continue;
                 runtime.Job.RequestedConnections = connections;
@@ -4146,6 +4147,17 @@ public sealed partial class DownloadManagerService
     /// and cap of its current run's link. Before a provider run has its link, null: the run then takes the new
     /// default itself. Call under <see cref="_sync"/>.
     /// </summary>
+    /// <summary>The cap on a pasted provider link's connections up to 0.5.3, before TB.L1 measured 16.</summary>
+    private const int OldProviderLinkCap = 4;
+
+    /// <summary>
+    /// A pasted provider link saved at the old cap of 4 while the default would have given it more. Up to 0.5.3 every
+    /// count of 4 or more was cut to 4, so that 4 is the cap, not a choice, and the link follows the default like any
+    /// other. A count below 4 was chosen and stays.
+    /// </summary>
+    private static bool SavedUnderTheOldProviderLinkCap(DownloadJob job, int? previous)
+        => job.ProtectedUrl is not null && job.RequestedConnections == OldProviderLinkCap && previous > OldProviderLinkCap;
+
     private int? DefaultConnectionsLocked(JobRuntime runtime, int defaultConnections)
     {
         var job = runtime.Job;
