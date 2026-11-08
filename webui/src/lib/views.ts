@@ -3,6 +3,7 @@
 
 import { percent } from './format';
 import type { Model } from './model';
+import { matchesRemoteSearch } from './remote';
 import type { ArchiveSet, DownloadGroup, Job, RemoteJob } from './types';
 
 export type ViewKey = 'all' | 'unfinished' | 'active' | 'queued' | 'failed' | 'finished' | 'remote' | 'extractions';
@@ -102,7 +103,7 @@ export function buildRows(model: Model, view: ViewKey, search: string, expanded:
   if (view === 'all' || view === 'remote') {
     for (const remote of Object.values(model.remoteJobs).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
       if (remote.state === 'localStarted') continue;
-      if (term && !(remote.name ?? '').toLocaleLowerCase().includes(term.toLocaleLowerCase())) continue;
+      if (term && !matchesRemoteSearch(remote, term)) continue;
       rows.push({ kind: 'remote', id: `remote:${remote.id}`, remote });
     }
   }

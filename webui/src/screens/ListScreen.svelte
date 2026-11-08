@@ -1,14 +1,19 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
   import { fade } from 'svelte/transition';
+  import ArchiveNoticeBar from '../components/ArchiveNoticeBar.svelte';
+  import ArchivePassword from '../components/ArchivePassword.svelte';
   import Dialog from '../components/Dialog.svelte';
   import Icon from '../components/Icon.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
+  import { archiveRowView, extractSummary, fullWithNote, packageArchiveView, planForRows, type ArchivePasswordTarget } from '../lib/archives';
+  import { actionsOf, jobRow } from '../lib/remote';
   import { archiveShort, archiveTone, bytes, duration, dateTime, percent, showsBar, speed, stateWord, statusText, timeSpanSeconds, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, Job, RemoteJob } from '../lib/types';
   import { buildRows, selectedJobIds, type Row, type SortKey, type ViewKey } from '../lib/views';
-  import ArchivePassword from './ArchivePassword.svelte';
+  import ArchiveRecord from './ArchiveRecord.svelte';
+  import ExtractFromDisk from './ExtractFromDisk.svelte';
   import JobDetails from './JobDetails.svelte';
   import RemoteActions from './RemoteActions.svelte';
 
@@ -22,7 +27,9 @@
   let deleteFile = $state(false);
   let details = $state<string | null>(null);
   let remoteOpen = $state<RemoteJob | null>(null);
-  let passwordFor = $state<ArchiveSet | null>(null);
+  let archiveOpen = $state<ArchiveSet | null>(null);
+  let passwordTarget = $state<ArchivePasswordTarget | null>(null);
+  let extractFromDisk = $state(false);
 
   const rows = $derived(buildRows(store.model, view, search, expanded, sort));
   const selectedIds = $derived(selectedJobIds(rows, selected));
@@ -36,7 +43,23 @@
     return map;
   });
   const showExtraction = $derived(archiveByJob.size > 0);
-  const needPassword = $derived(Object.values(store.model.archives).filter((set) => set.needsPassword && !set.hasPassword && set.state !== 'completed'));
+  const archivePlan = $derived(planForRows(rows, selected, (id) => archiveByJob.get(id), store.connection === 'open'));
+  const setsOfPackage = (jobIds: string[]) => [...new Set(jobIds.map((id) => archiveByJob.get(id)).filter((set): set is ArchiveSet => !!set))];
+  const canCheckRemote = $derived(Object.values(store.model.remoteJobs).some((job) => actionsOf(job).checkNow));
+
+  async function extractSelection() {
+    const plan = archivePlan;
+    if (!plan.canExtract) return;
+    const words: string[] = [];
+    if (plan.extractJobIds.length > 0) {
+      const result = await store.attempt<{ sets?: ArchiveSet[]; ignored?: { reason?: string }[] }>('archive.extract', { jobIds: plan.extractJobIds });
+      if (result) words.push(extractSummary(result));
+    }
+    for (const set of plan.extractSets) {
+      if (await store.attempt('archive.retry', { setId: set.id })) words.push(`Extraction asked for: ${set.name}.`);
+    }
+    if (words.length) store.toast(words.join(' '));
+  }
   const defaultQueue = $derived(store.model.settings?.queues.find((queue) => queue.id === (store.model.settings?.defaultQueueId ?? 0)));
 
   // A row that left the view leaves the selection.
@@ -105,7 +128,7 @@
     if (row.kind === 'job') details = row.job.id;
     else if (row.kind === 'package') toggleExpanded(row.group.id);
     else if (row.kind === 'remote') remoteOpen = row.remote;
-    else if (row.kind === 'archive' && row.set.needsPassword) passwordFor = row.set;
+    else if (row.kind === 'archive') archiveOpen = row.set;
   }
 
   async function each(type: string, jobs: Job[], done: string) {
@@ -151,6 +174,14 @@
   <span class="toolsep"></span>
   <button class="toolbtn" disabled={selectedIds.length === 0} onclick={() => { deleteFile = false; confirmDelete = { ids: selectedIds, completedOnly: false }; }}><Icon name="trash" class="text-icon-danger" /><span>Delete</span></button>
   <button class="toolbtn" disabled={completedIds.length === 0} onclick={() => { deleteFile = false; confirmDelete = { ids: completedIds, completedOnly: true }; }}><Icon name="sweep" class="text-icon-danger" /><span>Delete completed</span></button>
+  <span class="toolsep"></span>
+  <button class="toolbtn" disabled={!archivePlan.canExtract} title={archivePlan.extractText} onclick={extractSelection}><Icon name="archive" class="text-icon-media" /><span>Extract</span></button>
+  <button class="toolbtn" disabled={!archivePlan.password} onclick={() => (passwordTarget = archivePlan.password)}><Icon name="key" class="text-icon-pause" /><span>Archive password</span></button>
+  <button class="toolbtn" onclick={() => (extractFromDisk = true)}><Icon name="archive" class="text-icon-media" /><span>Extract archive…</span></button>
+  {#if view === 'remote'}
+    <span class="toolsep"></span>
+    <button class="toolbtn" disabled={!canCheckRemote} title={canCheckRemote ? 'Ask the provider about your waiting items now, without waiting for the next check' : 'Nothing is waiting on a provider, so there is nothing to check'} onclick={() => store.attempt('remote.checkNow', {}, 'Checking now…')}><Icon name="refresh" class="text-icon-info" /><span>Check now</span></button>
+  {/if}
   {#if defaultQueue}
     <span class="toolsep"></span>
     <button class="toolbtn" disabled={defaultQueue.isRunning} onclick={() => store.attempt('queue.action', { queueId: defaultQueue.id, action: 'start' }, `${defaultQueue.name} queue started.`)}><Icon name="play" class="text-icon-start" /><span>Start queue</span></button>
@@ -158,13 +189,7 @@
   {/if}
 </div>
 
-{#if needPassword.length > 0}
-  <div class="flex flex-wrap items-center gap-2 border-b border-divider bg-highlight px-3 py-1.5 text-[13px]" role="status" transition:fade={{ duration: 150 }}>
-    <Icon name="key" size={16} class="text-icon-pause" />
-    <span class="flex-1">{needPassword.length === 1 ? `${needPassword[0].name} needs a password to extract.` : `${needPassword.length} archives need a password to extract.`}</span>
-    <button class="btn py-0.5" onclick={() => (passwordFor = needPassword[0])}>Enter password</button>
-  </div>
-{/if}
+<ArchiveNoticeBar onpassword={(target) => (passwordTarget = target)} onshow={(set) => (archiveOpen = set)} />
 
 <div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} role="row">
   <span class="flex items-center justify-center"><input type="checkbox" aria-label="Select all" checked={rows.length > 0 && selected.size === rows.length} onchange={toggleAll} /></span>
@@ -199,18 +224,19 @@
 
       {#if row.kind === 'remote'}
         {@const remote = row.remote}
+        {@const r = jobRow(remote)}
         <span class="cell-name flex min-w-0 items-center gap-1.5 italic">
           <Icon name="cloud" size={16} class="shrink-0 text-icon-info" />
-          <span class="truncate" title={remote.name ?? remote.displayHost}>{remote.name ?? remote.displayHost ?? 'Waiting at the provider'}</span>
+          <span class="truncate" title={r.tooltip}>{r.name}</span>
         </span>
         <span class="cell-size"></span>
-        <span class="cell-status truncate {remote.state === 'failed' ? 'tone-failed' : remote.state === 'blocked' || remote.state === 'awaitingSelection' || remote.approvalNeeded ? 'tone-waiting' : 'tone-active'}">{remote.status}</span>
+        <span class="cell-status truncate tone-{r.tone}" title={r.tooltip}>{r.status}</span>
         {#if showExtraction}<span class="cell-extract"></span>{/if}
         <span class="cell-eta"></span>
         <span class="cell-rate"></span>
         <span class="cell-added hidden text-muted lg:block">{dateTime(remote.createdAt)}</span>
-        <span class="cell-desc truncate text-muted">
-          {remote.providerName}{remote.stage ? `: ${remote.stage}` : ''}{remote.progress > 0 && remote.progress < 1 ? ` ${Math.round(remote.progress * 100)}% (provider's)` : ''}{remote.failureMessage ? ` · ${remote.failureMessage}` : ''}
+        <span class="cell-desc truncate text-muted" title={r.tooltip}>
+          {r.detail}
           <button class="ml-1 rounded border border-divider px-1.5 py-0 text-[11px] not-italic text-text hover:bg-hover" onclick={(event) => { event.stopPropagation(); remoteOpen = remote; }}>Actions</button>
         </span>
       {:else if row.kind === 'archive'}
@@ -220,12 +246,13 @@
           <span class="truncate" title={set.firstVolume}>{set.name}</span>
         </span>
         <span class="cell-size"></span>
-        <span class="cell-status truncate tone-{archiveTone(set)}" title={set.stateText}>{archiveShort(set)}</span>
+        {@const archive = archiveRowView(set)}
+        <span class="cell-status truncate tone-{archive.tone}" title={archive.tooltip}>{archive.text || archiveShort(set)}</span>
         {#if showExtraction}<span class="cell-extract"></span>{/if}
         <span class="cell-eta"></span>
         <span class="cell-rate"></span>
         <span class="cell-added hidden text-muted lg:block">{dateTime(set.updatedAt)}</span>
-        <span class="cell-desc truncate text-muted" title={set.stateText}>{set.stateText}</span>
+        <span class="cell-desc truncate text-muted" title={archive.tooltip}>{fullWithNote(set)}</span>
       {:else if row.kind === 'package'}
         {@const summary = row.summary}
         <span class="cell-name flex min-w-0 items-center gap-1">
@@ -241,7 +268,10 @@
           <span class="block truncate tone-{tone(summary.state)}">{stateWord(summary.state)}{summary.progress !== null && summary.state !== 'completed' && summary.progress > 0 ? ` ${summary.progress.toFixed(0)}%` : ''}</span>
           {#if (tone(summary.state) === 'active' || summary.state === 'paused') && summary.progress}<span class="mt-0.5 block"><ProgressBar value={summary.progress} label="Package progress" /></span>{/if}
         </span>
-        {#if showExtraction}<span class="cell-extract"></span>{/if}
+        {#if showExtraction}
+          {@const packageView = packageArchiveView(setsOfPackage(row.group.jobIds))}
+          <span class="cell-extract truncate {packageView ? `tone-${packageView.tone}` : ''}" title={packageView?.tooltip ?? ''}>{packageView?.text ?? ''}</span>
+        {/if}
         <span class="cell-eta"></span>
         <span class="cell-rate tabular text-right">{speed(summary.bytesPerSecond)}</span>
         <span class="cell-added hidden lg:block"></span>
@@ -259,11 +289,12 @@
           {#if showsBar(job)}<span class="mt-0.5 block"><ProgressBar value={percent(job)} /></span>{/if}
         </span>
         {#if showExtraction}
-          <span class="cell-extract truncate {set ? `tone-${archiveTone(set)}` : ''}" title={set?.stateText ?? ''}>
-            {#if set}
-              {archiveShort(set)}
+          {@const archive = set ? archiveRowView(set) : null}
+          <span class="cell-extract truncate {archive ? `tone-${archive.tone}` : ''}" title={archive?.tooltip ?? ''}>
+            {#if set && archive}
+              {archive.text}
               {#if set.needsPassword && !set.hasPassword}
-                <button class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordFor = set; }}><Icon name="key" size={13} /></button>
+                <button class="ml-1 align-middle" aria-label="Enter the archive password" onclick={(event) => { event.stopPropagation(); passwordTarget = { setId: set.id, name: set.name, needed: true, wasWrong: set.failureKind === 'wrongPassword', hasPassword: set.hasPassword }; }}><Icon name="key" size={13} /></button>
               {/if}
             {/if}
           </span>
@@ -307,15 +338,23 @@
 {/if}
 
 {#if details && store.model.jobs[details]}
-  <JobDetails job={store.model.jobs[details]} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(set) => { details = null; passwordFor = set; }} />
+  <JobDetails job={store.model.jobs[details]} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(target) => { details = null; passwordTarget = target; }} />
 {/if}
 
 {#if remoteOpen}
   <RemoteActions remote={store.model.remoteJobs[remoteOpen.id] ?? remoteOpen} onclose={() => (remoteOpen = null)} />
 {/if}
 
-{#if passwordFor}
-  <ArchivePassword set={store.model.archives[passwordFor.id] ?? passwordFor} onclose={() => (passwordFor = null)} />
+{#if archiveOpen}
+  <ArchiveRecord set={store.model.archives[archiveOpen.id] ?? archiveOpen} onclose={() => (archiveOpen = null)} onpassword={(target) => { archiveOpen = null; passwordTarget = target; }} />
+{/if}
+
+{#if passwordTarget}
+  <ArchivePassword target={passwordTarget} onclose={() => (passwordTarget = null)} />
+{/if}
+
+{#if extractFromDisk}
+  <ExtractFromDisk onclose={() => (extractFromDisk = false)} />
 {/if}
 
 <style>

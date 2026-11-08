@@ -1,207 +1,367 @@
 <script lang="ts">
+  import Confirm from '../components/Confirm.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
-  import { bytes, dateTime, speed } from '../lib/format';
+  import RemoteFileTree from '../components/RemoteFileTree.svelte';
+  import { dateTime } from '../lib/format';
+  import {
+    buildFileTree, canBrowse, canDeleteFromProvider, checkable, choiceOf, choosableIds, countedItems, deleteQuestion, downloadStarted, emptyKind,
+    failureText, filterHosters, hosterDetails, hostersUp, isFullPath, itemSortLabels, itemView, jobFor, kindHeading, localFilesOf, localWords,
+    needsTheRest, providerNameOf, restoreChoice, sortItems, type FileTree, type ItemSortKey,
+  } from '../lib/remote';
   import { store } from '../lib/store.svelte';
-  import type { Hoster, RemoteAccount, RemoteItem } from '../lib/types';
+  import type { Hoster, RemoteAddResult, RemoteFile, RemoteItem } from '../lib/types';
 
-  // The provider account (key, plan), what is in it, and which file hosters it can fetch from.
-  type Tab = 'account' | 'items' | 'hosters';
-  let tab = $state<Tab>('account');
+  // My <provider>: what is in the account (one tab per kind of item the provider reports), with a file tree and
+  // Download for the chosen item, and the file hosters it can fetch from. The key lives on the provider's page in Settings.
+  let { provider: wanted = '' }: { provider?: string } = $props();
 
-  const account = $derived<RemoteAccount | undefined>(store.model.accounts[0]);
-  const kinds = $derived(account?.itemKinds?.length ? account.itemKinds : ['torrents', 'webdl', 'usenet']);
-  const kindWords: Record<string, string> = { torrents: 'Torrents', webdl: 'Web downloads', usenet: 'Usenet' };
+  const account = $derived(store.model.accounts.find((a) => a.provider === wanted) ?? store.model.accounts.find(canBrowse) ?? store.model.accounts[0]);
+  const name = $derived(account ? providerNameOf(account) : 'provider');
+  const browsable = $derived(!!account && canBrowse(account));
+  const kinds = $derived(account?.itemKinds ?? []);
 
-  let key = $state('');
-  let busy = $state(false);
+  let tab = $state('');
+  const current = $derived(tab === 'hosters' ? 'hosters' : kinds.includes(tab) ? tab : (kinds[0] ?? 'hosters'));
 
-  async function accountCall(type: string, payload: Record<string, unknown>, done: string) {
-    busy = true;
-    const result = await store.attempt<{ ok: boolean; error?: string }>(type, { provider: account?.provider, ...payload }, done);
-    busy = false;
-    return result;
+  // ---- Items, one page per kind ----
+  interface Page { items: RemoteItem[]; hasMore: boolean; offset: number; loaded: boolean; problem: string; lastCount: number; fresh: boolean }
+  const blank = (): Page => ({ items: [], hasMore: false, offset: 0, loaded: false, problem: '', lastCount: 0, fresh: false });
+  let pages = $state<Record<string, Page>>({});
+  let loads = $state(0);
+  let selectedId = $state<string | null>(null);
+  let sortKey = $state<ItemSortKey>('default');
+  let ascending = $state(true);
+  let status = $state('');
+  let statusIsProblem = $state(false);
+  let acting = $state(false);
+  let confirmDelete = $state(false);
+
+  const page = $derived(pages[current] ?? blank());
+  const jobs = $derived(Object.values(store.model.remoteJobs));
+
+  function view(item: RemoteItem) {
+    const job = jobFor(jobs, item);
+    const local = job?.state === 'localStarted' ? localWords(localFilesOf(job, store.model.groups, store.model.jobs)) : null;
+    return itemView(item, name, job, local);
   }
+  const shown = $derived(sortItems(page.items, (item) => item, view, sortKey, ascending));
+  const selected = $derived(page.items.find((item) => item.itemId === selectedId));
+  const selectedJob = $derived(selected ? jobFor(jobs, selected) : undefined);
+  const selectedView = $derived(selected ? view(selected) : undefined);
+  const activeJob = $derived(selectedJob && selectedJob.state !== 'failed' ? selectedJob : undefined);
 
-  async function saveKey() {
-    if (!key.trim()) return;
-    const result = await accountCall('remote.account.setKey', { key: key.trim() }, 'Key saved on the server.');
-    key = '';
-    if (result) await accountCall('remote.account.validate', {}, 'The provider accepted the key.');
-  }
-
-  // Items
-  let kind = $state('torrents');
-  let items = $state<RemoteItem[] | null>(null);
-  let hasMore = $state(false);
-  let offset = $state(0);
-  let itemsProblem = $state('');
-  let destination = $state('');
-
-  async function loadItems(fresh = false, from = 0) {
-    busy = true;
-    itemsProblem = '';
+  async function load(kind: string, more = false, fresh = false) {
+    if (!account || !browsable) return;
+    const base = pages[kind] ?? blank();
+    const from = more ? base.offset : 0;
+    loads++;
     try {
-      const result = await store.ask<{ items: RemoteItem[]; hasMore: boolean; offset: number }>('remote.item.get', { provider: account?.provider, kind, offset: from, limit: 50, fresh });
-      items = from === 0 ? result.items : [...(items ?? []), ...result.items];
-      hasMore = result.hasMore;
-      offset = from + result.items.length;
+      const result = await store.ask<{ items: RemoteItem[]; hasMore: boolean }>('remote.item.get', { provider: account.provider, kind, offset: from, limit: 50, fresh: fresh || base.fresh });
+      const items = from === 0 ? result.items : [...base.items, ...result.items.filter((item) => !base.items.some((known) => known.itemId === item.itemId))];
+      pages[kind] = { items, hasMore: result.hasMore, offset: from + result.items.length, loaded: true, problem: '', lastCount: result.items.length, fresh: false };
     } catch (error) {
-      itemsProblem = error instanceof Error ? error.message : String(error);
-      if (from === 0) items = [];
+      pages[kind] = { ...base, loaded: true, problem: failureText(error instanceof Error ? error.message : String(error), null, name), lastCount: 0 };
     } finally {
-      busy = false;
+      loads--;
     }
+    // A column's order means little over part of a list, so the rest is read.
+    const done = pages[kind];
+    if (kind === current && loads === 0 && needsTheRest(sortKey, done.hasMore, done.lastCount)) void load(kind, true);
   }
 
   $effect(() => {
-    if (tab === 'items' && account?.hasKey && items === null) void loadItems();
+    if (browsable && current !== 'hosters' && !(pages[current]?.loaded) && loads === 0) void load(current);
   });
 
-  async function download(item: RemoteItem) {
-    await store.attempt('remote.add', {
-      provider: item.provider, itemKind: item.kind, itemId: item.itemId,
-      destination: destination.trim() || undefined, queueId: store.model.settings?.defaultQueueId ?? 0, startMode: 'startNow',
-    }, `Downloading ${item.name ?? 'it'}.`);
+  // A saved or cleared key can be another account's: everything read with the old key goes (P6).
+  let seenEpoch = store.keyEpoch;
+  $effect(() => {
+    const epoch = store.keyEpoch;
+    if (epoch === seenEpoch) return;
+    seenEpoch = epoch;
+    pages = {};
+    selectedId = null;
+    files = {};
+    for (const kind of kinds) pages[kind] = { ...blank(), fresh: true };
+    status = '';
+  });
+  $effect(() => {
+    if (!browsable && Object.keys(pages).length) {
+      pages = {};
+      selectedId = null;
+    }
+  });
+
+  // ---- The chosen item's files ----
+  interface Files { tree: FileTree; chosen: Set<string>; problem: string; reading: boolean }
+  let files = $state<Record<string, Files>>({});
+  const filesOf = $derived(selected ? files[selected.itemId] : undefined);
+
+  async function select(item: RemoteItem) {
+    selectedId = item.itemId;
+    status = '';
+    if (files[item.itemId]?.tree.files.length || files[item.itemId]?.reading) return;
+    files[item.itemId] = { tree: buildFileTree([]), chosen: new Set(), problem: '', reading: true };
+    try {
+      const result = await store.ask<{ items: RemoteItem[] }>('remote.item.get', { provider: item.provider, kind: item.kind, itemId: item.itemId });
+      const found = result.items?.[0];
+      const tree = buildFileTree((found?.files ?? []) as RemoteFile[]);
+      const earlier = files[item.itemId]?.chosen ?? new Set<string>();
+      // The first time an item's files are shown, they all start chosen.
+      files[item.itemId] = { tree, chosen: earlier.size ? restoreChoice(tree, earlier) : new Set(choosableIds(tree)), problem: '', reading: false };
+      if (found) updateItem(found);
+    } catch (error) {
+      files[item.itemId] = { tree: buildFileTree([]), chosen: new Set(), problem: failureText(error instanceof Error ? error.message : String(error), null, name), reading: false };
+    }
   }
 
-  // Hosters
+  function updateItem(item: RemoteItem) {
+    const p = pages[item.kind];
+    if (!p) return;
+    const index = p.items.findIndex((known) => known.itemId === item.itemId);
+    if (index >= 0) p.items[index] = { ...item, files: undefined };
+  }
+
+  // ---- The destination ----
+  let freeDestination = $state(String(store.model.settings?.lastDestinationDirectory || store.model.settings?.defaultDownloadDirectory || ''));
+  let destinationHint = $state('');
+  const destination = $derived(activeJob ? (activeJob.destination ?? '') : freeDestination);
+
+  async function download(all: boolean) {
+    if (!selected || acting || !account) return;
+    const item = selected;
+    const tree = files[item.itemId]?.tree;
+    const picked = files[item.itemId]?.chosen ?? new Set<string>();
+    let choice = tree && tree.files.length ? choiceOf(tree, picked) : { all: true, fileIds: [] as string[] };
+    if (!all && tree && tree.files.length && choice.fileIds.length === 0 && !choice.all) return;
+    if (all) choice = { all: true, fileIds: [] };
+
+    acting = true;
+    status = 'Sending your choice…';
+    statusIsProblem = false;
+    try {
+      // An add past a job on the list would only return that job and ignore the choice.
+      if (activeJob) {
+        await store.ask('remote.select', choice.all ? { jobId: activeJob.id, all: true } : { jobId: activeJob.id, fileIds: choice.fileIds });
+        status = choice.all ? 'All its files will download.' : 'Your choice will download.';
+        return;
+      }
+      const folder = freeDestination.trim();
+      if (folder && !isFullPath(folder)) {
+        destinationHint = 'Enter a full folder path, such as D:\\Downloads or /srv/downloads, or leave this empty for the default folder.';
+        status = '';
+        return;
+      }
+      destinationHint = '';
+      status = 'Adding to the download list…';
+      const result = await store.ask<RemoteAddResult>('remote.add', {
+        provider: item.provider, itemKind: item.kind, itemId: item.itemId, destination: folder || undefined,
+        queueId: store.model.settings?.defaultQueueId ?? 0, startMode: 'startNow', selection: choice.all ? 'all' : 'chosen', fileIds: choice.all ? undefined : choice.fileIds,
+      });
+      if (folder) void store.saveSettings((settings) => { settings.lastDestinationDirectory = folder; }, '');
+      if (downloadStarted(result)) {
+        status = `Added '${view(item).name}' to the download list. It starts once ${name} has the files.`;
+      } else if (result.note?.trim()) {
+        status = result.note;
+        statusIsProblem = true;
+      } else {
+        status = failureText(result.job?.failureMessage, result.job?.failureKind, name);
+        statusIsProblem = true;
+      }
+    } catch (error) {
+      status = failureText(error instanceof Error ? error.message : String(error), null, name);
+      statusIsProblem = true;
+    } finally {
+      acting = false;
+    }
+  }
+
+  async function deleteFromProvider() {
+    if (!selected || !selectedJob || !canDeleteFromProvider(selectedJob)) return;
+    const item = selected;
+    const label = selectedView?.name ?? item.itemId;
+    acting = true;
+    confirmDelete = false;
+    try {
+      await store.ask('remote.deleteRemote', { jobId: selectedJob.id, confirmed: true });
+      const p = pages[item.kind];
+      if (p) p.items = p.items.filter((known) => known.itemId !== item.itemId);
+      selectedId = null;
+      status = `Deleted '${label}' from ${name}.`;
+      statusIsProblem = false;
+    } catch (error) {
+      status = failureText(error instanceof Error ? error.message : String(error), null, name);
+      statusIsProblem = true;
+    } finally {
+      acting = false;
+    }
+  }
+
+  const canCheck = $derived(!!account && checkable(jobs, account.provider));
+
+  async function checkNow() {
+    if (!account) return;
+    const one = selectedJob && selectedJob.state !== 'localStarted' ? selectedJob : undefined;
+    const result = await store.attempt('remote.checkNow', one ? { jobId: one.id } : { provider: account.provider });
+    if (result) {
+      status = `Checking ${name} now. The status above changes when it answers, unless ${name} has asked this app to wait.`;
+      statusIsProblem = false;
+    }
+  }
+
+  // ---- Hosters ----
   let hosters = $state<Hoster[] | null>(null);
   let hosterProblem = $state('');
   let fetchedAt = $state<string | undefined>(undefined);
-  let filter = $state('');
+  let hosterFilter = $state('');
+  let downOnly = $state(false);
+  let hosterBusy = $state(false);
   async function loadHosters() {
-    busy = true;
+    hosterBusy = true;
     try {
       const result = await store.ask<{ hosters: Hoster[]; problem?: string; fetchedAt?: string }>('remote.hosters', {});
       hosters = result.hosters;
       hosterProblem = result.problem ?? '';
       fetchedAt = result.fetchedAt;
     } catch (error) {
-      hosterProblem = error instanceof Error ? error.message : String(error);
-      hosters = [];
+      hosterProblem = failureText(error instanceof Error ? error.message : String(error), null, name);
+      hosters = hosters ?? [];
     } finally {
-      busy = false;
+      hosterBusy = false;
     }
   }
   $effect(() => {
-    if (tab === 'hosters' && hosters === null) void loadHosters();
+    if (current === 'hosters' && browsable && hosters === null) void loadHosters();
   });
-  const shownHosters = $derived((hosters ?? []).filter((h) => !filter.trim() || h.name.toLowerCase().includes(filter.trim().toLowerCase()) || h.domains.some((d) => d.includes(filter.trim().toLowerCase()))));
+  const shownHosters = $derived(filterHosters(hosters ?? [], hosterFilter, downOnly));
 
-  function limit(used: number | undefined, max: number | undefined, unit: (n: number) => string, word = ''): string {
-    if (!max) return '';
-    return word ? `${used ?? '?'} of ${max} ${word}` : `${used != null ? unit(used) : '?'} of ${unit(max)}`;
+  function changeSort(event: Event) {
+    sortKey = (event.currentTarget as HTMLSelectElement).value as ItemSortKey;
+    if (needsTheRest(sortKey, page.hasMore, page.lastCount) && loads === 0) void load(current, true);
   }
 
-  /** The provider's stage names ("metadataPending") as words. */
-  function words(stage: string): string {
-    return stage.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
-  }
+  const toneClass = { active: 'tone-active', done: 'tone-done', failed: 'tone-failed', waiting: 'tone-waiting', neutral: 'text-muted' } as const;
 </script>
 
 <div class="mx-auto max-w-5xl px-4 py-4">
   {#if !store.has('remote')}
     <p class="card p-4 text-[13px] text-muted">This server has no download provider.</p>
+  {:else if !account}
+    <p class="card p-4 text-[13px] text-muted">Reading the account…</p>
   {:else}
-    <h1 class="mb-3 text-[18px] font-semibold">My {account?.providerName ?? 'provider'}</h1>
-    <div class="mb-4 flex gap-1 border-b border-divider" role="tablist">
-      {#each [['account', 'Account'], ['items', 'In my account'], ['hosters', 'Hoster status']] as [key, label] (key)}
-        <button role="tab" aria-selected={tab === key} class="-mb-px border-b-2 px-3 py-2 text-[13px] {tab === key ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" onclick={() => (tab = key as Tab)}>{label}</button>
-      {/each}
-    </div>
+    <h1 class="mb-3 text-[18px] font-semibold">My {name}</h1>
 
-    {#if tab === 'account'}
-      {#if account}
-        <dl class="mb-4 grid grid-cols-[minmax(130px,auto)_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-          <dt class="text-muted">Key</dt>
-          <dd>{account.keyUnreadable ? 'Saved, but the server can no longer read it. Enter it again.' : account.hasKey ? 'Saved on the server' : 'None yet'}</dd>
-          {#if account.hasKey}
-            <dt class="text-muted">Plan</dt><dd>{account.plan ?? (account.checkedAt ? 'Unknown' : 'Not checked yet')}{account.premium ? ' (premium)' : ''}</dd>
-            {#if account.premiumUntil}<dt class="text-muted">Premium until</dt><dd>{dateTime(account.premiumUntil)}</dd>{/if}
-            {#if account.cooldownUntil && Date.parse(account.cooldownUntil) > Date.now()}<dt class="text-muted">Waiting until</dt><dd class="tone-waiting">{dateTime(account.cooldownUntil)}</dd>{/if}
-            <dt class="text-muted">Checked</dt><dd>{account.checkedAt ? dateTime(account.checkedAt) : 'Not yet'}</dd>
-          {/if}
-        </dl>
-      {/if}
-      <form class="mb-3 flex max-w-xl flex-wrap items-end gap-2" onsubmit={(event) => { event.preventDefault(); void saveKey(); }}>
-        <div class="min-w-56 flex-1">
-          <label class="label" for="provider-key">{account?.hasKey ? 'Replace the key' : 'Key'}</label>
-          <input id="provider-key" class="field font-mono" type="password" bind:value={key} autocomplete="off" spellcheck="false" />
-        </div>
-        <button class="btn-primary" type="submit" disabled={busy || !key.trim()}>Save key</button>
-      </form>
-      <p class="hint mb-4">The key is kept sealed on the server and is never sent back to a browser.</p>
-      {#if account?.hasKey}
-        <div class="flex flex-wrap gap-2">
-          <button class="btn" disabled={busy} onclick={() => accountCall('remote.account.validate', {}, 'The provider accepted the key.')}><Icon name="check" size={15} class="text-icon-start" /> Check the key</button>
-          <button class="btn" disabled={busy} onclick={() => accountCall('remote.account.get', { refresh: true }, 'Account refreshed.')}><Icon name="refresh" size={15} class="text-icon-info" /> Refresh</button>
-          <button class="btn-danger" disabled={busy} onclick={() => accountCall('remote.account.clearKey', {}, 'Key removed from the server.')}>Remove the key</button>
-        </div>
-      {/if}
-    {:else if tab === 'items'}
-      {#if !account?.hasKey}
-        <p class="text-[13px] text-muted">Save a key first.</p>
-      {:else}
+    {#if !browsable}
+      <div class="card p-4 text-[13px]">
+        <p class="mb-2">{account.keyUnreadable ? `The ${name} API key is saved, but the server can't read it.` : account.hasKey ? `${name} doesn't offer a list of what is on its account.` : `No ${name} API key is saved.`}</p>
+        {#if !account.hasKey || account.keyUnreadable}
+          <p class="mb-3 text-muted">Add the key under Settings, {name} account, to see what is in your account here.</p>
+          <a class="btn-primary inline-flex" href="#/settings" onclick={() => (store.settingsPage = `provider:${account.provider}`)}>Open {name} account</a>
+        {/if}
+      </div>
+    {:else}
+      <div class="mb-4 flex gap-1 overflow-x-auto border-b border-divider" role="tablist">
+        {#each kinds as kind (kind)}
+          <button role="tab" aria-selected={current === kind} class="-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] {current === kind ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" onclick={() => { tab = kind; selectedId = null; status = ''; }}>{kindHeading(kind)}</button>
+        {/each}
+        <button role="tab" aria-selected={current === 'hosters'} class="-mb-px shrink-0 border-b-2 px-3 py-2 text-[13px] {current === 'hosters' ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-text'}" onclick={() => { tab = 'hosters'; selectedId = null; status = ''; }}>Hosters</button>
+      </div>
+
+      {#if current !== 'hosters'}
         <div class="mb-3 flex flex-wrap items-end gap-2">
           <div>
-            <label class="label" for="item-kind">Show</label>
-            <select id="item-kind" class="field" bind:value={kind} onchange={() => loadItems()}>
-              {#each kinds as k (k)}<option value={k}>{kindWords[k] ?? k}</option>{/each}
-            </select>
+            <label class="label" for="item-sort">Sort by</label>
+            <div class="flex gap-1">
+              <select id="item-sort" class="field" value={sortKey} onchange={changeSort}>
+                {#each itemSortLabels as [key, label] (key)}<option value={key}>{label}</option>{/each}
+              </select>
+              <button class="btn" disabled={sortKey === 'default'} aria-label={ascending ? 'Ascending' : 'Descending'} title={ascending ? 'Ascending' : 'Descending'} onclick={() => (ascending = !ascending)}><Icon name={ascending ? 'chevron-up' : 'chevron-down'} size={14} /></button>
+            </div>
           </div>
-          <button class="btn" disabled={busy} onclick={() => loadItems(true)}><Icon name="refresh" size={15} class="text-icon-info" /> Refresh</button>
-          <div class="min-w-64 flex-1"><FolderField id="item-dest" label="Download to" bind:value={destination} hint="Empty uses the default download folder." /></div>
+          <button class="btn" disabled={loads > 0} onclick={() => load(current, false, true)}><Icon name="refresh" size={15} class="text-icon-info" /> Refresh</button>
+          <button class="btn" disabled={acting || !canCheck} title={canCheck ? `Ask ${name} about your waiting items now, without waiting for the next check` : `Nothing is waiting on ${name}, so there is nothing to check`} onclick={checkNow}>Check now</button>
+          <span class="hint ml-auto" aria-live="polite">{page.loaded ? countedItems(page.items.length, page.hasMore) : ''}</span>
         </div>
-        {#if itemsProblem}<p class="mb-2 text-[13px] text-error" role="alert">{itemsProblem}</p>{/if}
-        <ul class="card divide-y divide-divider">
-          {#each items ?? [] as item (item.itemId)}
-            <li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px]">
-              <Icon name="cloud" size={16} class="text-icon-info" />
-              <span class="min-w-0 flex-1">
-                <span class="block truncate font-semibold" title={item.name ?? ''}>{item.name ?? '(no name)'}</span>
-                <span class="block text-[12px] text-muted">
-                  {bytes(item.size)} · {item.fileCount} {item.fileCount === 1 ? 'file' : 'files'}
-                  {#if item.stage} · {words(item.stage)}{item.progress > 0 && item.progress < 1 ? ` ${Math.round(item.progress * 100)}%` : ''}{/if}
-                  {#if item.speedBytesPerSecond > 0} · {speed(item.speedBytesPerSecond)}{/if}
-                  {#if item.expiresAt} · until {dateTime(item.expiresAt)}{/if}
+        {#if page.problem}<p class="mb-2 text-[13px] text-error" role="alert">{page.problem}</p>{/if}
+
+        <ul class="card divide-y divide-divider" aria-label={kindHeading(current)}>
+          {#each shown as item (item.itemId)}
+            {@const v = view(item)}
+            <li>
+              <button class="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-[13px] {selectedId === item.itemId ? 'bg-selected' : 'hover:bg-hover'}" aria-pressed={selectedId === item.itemId} onclick={() => select(item)}>
+                <Icon name="cloud" size={16} class="text-icon-info" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-semibold" title={v.name}>{v.name}</span>
+                  <span class="block text-[12px] text-muted">{v.details}</span>
+                  {#if v.problem}<span class="block text-[12px] text-error">{v.problem}</span>{/if}
                 </span>
-                {#if item.error}<span class="block text-[12px] text-error">{item.error}</span>{/if}
-              </span>
-              <button class="btn" disabled={!item.cached} title={item.cached ? '' : 'The provider has not finished it yet.'} onclick={() => download(item)}><Icon name="download" size={15} class="text-icon-info" /> Download</button>
+                <span class="shrink-0 text-[12.5px] {toneClass[v.tone]}">{v.status}</span>
+              </button>
             </li>
           {:else}
-            <li class="px-3 py-6 text-center text-[13px] text-muted">{busy ? 'Loading…' : 'Nothing here.'}</li>
+            <li class="px-3 py-6 text-center text-[13px] text-muted">{loads > 0 && !page.loaded ? 'Loading…' : page.problem ? '' : emptyKind(current, name)}</li>
           {/each}
         </ul>
-        {#if hasMore}<button class="btn mt-2" disabled={busy} onclick={() => loadItems(false, offset)}>Show more</button>{/if}
+        {#if page.hasMore}<button class="btn mt-2" disabled={loads > 0} onclick={() => load(current, true)}>Load more</button>{/if}
+
+        {#if selected && selectedView}
+          <section class="card mt-4 p-3" aria-label="The chosen item">
+            <h2 class="truncate text-[14px] font-semibold" title={selectedView.name}>{selectedView.name}</h2>
+            <p class="text-[12.5px] text-muted">{selectedView.details}</p>
+            <p class="mb-2 text-[12.5px] {toneClass[selectedView.tone]}">{selectedView.status}</p>
+            {#if selectedView.problem}<p class="mb-2 text-[12.5px] text-error" role="alert">{selectedView.problem}</p>{/if}
+
+            {#if filesOf?.reading}
+              <p class="mb-2 text-[13px] text-muted">Asking {name} for the files…</p>
+            {:else if filesOf?.problem}
+              <p class="mb-2 text-[13px] text-error" role="alert">{filesOf.problem}</p>
+            {:else if filesOf && filesOf.tree.files.length > 0}
+              <RemoteFileTree tree={filesOf.tree} bind:chosen={files[selected.itemId].chosen} disabled={acting} label="Files of the selected item" />
+            {:else if filesOf}
+              <p class="mb-2 text-[13px] text-muted">{selected.stage === 'ready' ? `${name} lists no files for this.` : !selectedView.canDownload ? `This item failed on ${name}, so there are no files to download.` : `${name} doesn't list the files yet. Download all still works: it starts when ${name} has them.`}</p>
+            {/if}
+
+            <div class="mt-3 max-w-xl">
+              <FolderField id="item-dest" label="Destination folder" bind:value={freeDestination} disabled={!!activeJob} hint={activeJob ? (activeJob.state === 'localStarted' ? 'These downloads already have this folder. New files you select go there too.' : 'This item is already on the download list with this folder.') : destinationHint || 'Empty uses the default download folder.'} />
+              {#if activeJob && activeJob.destination}<p class="hint mt-1 break-all font-mono">{activeJob.destination}</p>{/if}
+            </div>
+
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button class="btn-primary" disabled={acting || !selectedView.canDownload || !filesOf || filesOf.chosen.size === 0} title="Starts once {name} has the files." onclick={() => download(false)}>Download selected</button>
+              <button class="btn" disabled={acting || !selectedView.canDownload} title="Starts once {name} has the files." onclick={() => download(true)}>Download all</button>
+              {#if canDeleteFromProvider(selectedJob)}<button class="btn-danger" disabled={acting} onclick={() => (confirmDelete = true)}>Delete from {name}…</button>{/if}
+            </div>
+            {#if status}<p class="mt-2 text-[12.5px] {statusIsProblem ? 'text-error' : 'text-muted'}" role="status">{status}</p>{/if}
+          </section>
+        {/if}
+      {:else}
+        <div class="mb-3 flex flex-wrap items-end gap-2">
+          <div class="min-w-56 flex-1"><label class="label" for="hoster-filter">Search hosts</label><input id="hoster-filter" class="field" bind:value={hosterFilter} placeholder="Name or domain" /></div>
+          <label class="flex items-center gap-2 pb-2 text-[13px]"><input type="checkbox" bind:checked={downOnly} /> Down only</label>
+          <button class="btn" disabled={hosterBusy} title="Read the list again. It is kept for an hour, so this asks the provider only when it is older." onclick={loadHosters}><Icon name="refresh" size={15} class="text-icon-info" /> Reload</button>
+        </div>
+        {#if hosterProblem}<p class="mb-2 text-[13px] text-error" role="alert">{hosterProblem}{fetchedAt ? ` Read at ${dateTime(fetchedAt)}.` : ''}</p>
+        {:else if hosters && hosters.length}<p class="hint mb-2">{hostersUp(hosters)}{fetchedAt ? ` Read at ${dateTime(fetchedAt)}.` : ''}</p>{/if}
+        <ul class="card divide-y divide-divider" aria-label="File hosts">
+          {#each shownHosters as hoster (hoster.name)}
+            <li class="flex items-start gap-3 px-3 py-2 text-[13px]">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate font-semibold">{hoster.name}</span>
+                {#if hosterDetails(hoster)}<span class="block text-[12px] text-muted">{hosterDetails(hoster)}</span>{/if}
+                {#if hoster.note}<span class="block text-[12px] text-muted">{hoster.note}</span>{/if}
+              </span>
+              <span class="shrink-0 {hoster.available ? 'tone-done' : 'tone-failed'}">{hoster.available ? 'Up' : 'Down'}</span>
+            </li>
+          {:else}
+            <li class="px-3 py-6 text-center text-[13px] text-muted">{hosterBusy ? 'Reading the host list…' : hosters && hosters.length ? 'No host matches.' : 'No hosts.'}</li>
+          {/each}
+        </ul>
       {/if}
-    {:else}
-      <div class="mb-3 flex flex-wrap items-end gap-2">
-        <div class="min-w-56 flex-1"><label class="label" for="hoster-filter">Find a site</label><input id="hoster-filter" class="field" bind:value={filter} placeholder="Name or domain" /></div>
-        <button class="btn" disabled={busy} onclick={loadHosters}><Icon name="refresh" size={15} class="text-icon-info" /> Refresh</button>
-      </div>
-      {#if hosterProblem}<p class="mb-2 text-[13px] text-error" role="alert">{hosterProblem}</p>{/if}
-      {#if fetchedAt}<p class="hint mb-2">As of {dateTime(fetchedAt)}.</p>{/if}
-      <div class="card overflow-x-auto">
-        <table class="w-full text-left text-[12.5px]">
-          <thead class="border-b border-divider text-muted">
-            <tr><th class="px-3 py-1.5 font-semibold">Site</th><th class="px-3 py-1.5 font-semibold">Status</th><th class="hidden px-3 py-1.5 font-semibold sm:table-cell">Daily use</th><th class="hidden px-3 py-1.5 font-semibold md:table-cell">Per file</th></tr>
-          </thead>
-          <tbody class="divide-y divide-divider">
-            {#each shownHosters as hoster (hoster.name)}
-              <tr>
-                <td class="px-3 py-1.5"><span class="block font-semibold">{hoster.name}</span><span class="block truncate text-[11.5px] text-muted">{hoster.domains.slice(0, 3).join(', ')}</span></td>
-                <td class="px-3 py-1.5 {hoster.available ? 'tone-done' : 'tone-failed'}">{hoster.available ? 'Working' : 'Not working'}{hoster.note ? ` · ${hoster.note}` : ''}</td>
-                <td class="tabular hidden px-3 py-1.5 sm:table-cell">{[limit(hoster.dailyLinksUsed, hoster.dailyLinkLimit, String, 'links'), limit(hoster.dailyBandwidthUsed, hoster.dailyBandwidthLimit, bytes)].filter(Boolean).join('; ') || '—'}</td>
-                <td class="tabular hidden px-3 py-1.5 md:table-cell">{hoster.perLinkSizeLimit ? bytes(hoster.perLinkSizeLimit) : '—'}</td>
-              </tr>
-            {:else}
-              <tr><td colspan="4" class="px-3 py-6 text-center text-muted">{busy ? 'Loading…' : 'No sites.'}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
     {/if}
   {/if}
 </div>
+
+{#if confirmDelete && selected}
+  <Confirm title="Delete from {name}?" message={deleteQuestion(selectedView?.name ?? '', name)} primary="Delete from {name}" danger busy={acting} onclose={() => (confirmDelete = false)} onconfirm={deleteFromProvider} />
+{/if}

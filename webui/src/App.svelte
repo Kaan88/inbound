@@ -4,6 +4,7 @@
   import { speed } from './lib/format';
   import { store, type Theme } from './lib/store.svelte';
   import { counts, views, type ViewKey } from './lib/views';
+  import { canBrowse, providerNameOf, showsWaiting } from './lib/remote';
   import AddLinks from './screens/AddLinks.svelte';
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
@@ -11,13 +12,13 @@
   import TorBoxScreen from './screens/TorBoxScreen.svelte';
 
   // The shell: header, sidebar of views, the screen picked by the address's #hash, and the toasts.
-  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider' };
+  type Screen = { kind: 'list'; view: ViewKey } | { kind: 'queues' } | { kind: 'settings' } | { kind: 'provider'; provider: string };
 
   function parse(hash: string): Screen {
     const key = hash.replace(/^#\/?/, '');
     if (key === 'queues') return { kind: 'queues' };
     if (key === 'settings') return { kind: 'settings' };
-    if (key === 'provider') return { kind: 'provider' };
+    if (key === 'provider' || key.startsWith('provider/')) return { kind: 'provider', provider: decodeURIComponent(key.slice('provider/'.length)) };
     const view = (['all', 'unfinished', 'active', 'queued', 'failed', 'finished', 'remote', 'extractions'] as ViewKey[]).find((v) => v === key);
     return { kind: 'list', view: view ?? 'all' };
   }
@@ -38,7 +39,11 @@
   });
 
   const count = $derived(counts(store.model));
-  const providerName = $derived(store.model.accounts[0]?.providerName ?? 'TorBox');
+  // The Waiting entry shows for an account with a usable key, or with jobs left from before a key was cleared; My <provider>
+  // for each account that can list its items (the desktop's rule).
+  const waitingAccounts = $derived(store.has('remote') ? store.model.accounts.filter((account) => showsWaiting(account, Object.values(store.model.remoteJobs))) : []);
+  const browseAccounts = $derived(store.has('remote') ? store.model.accounts.filter(canBrowse) : []);
+  const waitingLabel = $derived(waitingAccounts.length === 1 ? `Waiting for ${providerNameOf(waitingAccounts[0])}` : 'Waiting for providers');
   const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
   const active = $derived(Object.values(store.model.jobs).filter((job) => job.state === 'downloading').length);
   const current = $derived(screen.kind === 'list' ? screen.view : screen.kind);
@@ -101,11 +106,16 @@
       {#each views as view (view.key)}
         {@render link(`#/${view.key}`, view.key, view.key === 'all' ? 'download' : view.key === 'finished' ? 'check' : view.key === 'failed' ? 'alert' : view.key === 'active' ? 'play' : view.key === 'queued' ? 'queue' : 'pause', view.label, count[view.key])}
       {/each}
-      {#if store.has('remote')}{@render link('#/remote', 'remote', 'cloud', `Waiting at ${providerName}`, count.remote)}{/if}
+      {#if waitingAccounts.length > 0}{@render link('#/remote', 'remote', 'cloud', waitingLabel, count.remote)}{/if}
       {@render link('#/extractions', 'extractions', 'archive', 'Extractions', count.extractions)}
       <p class="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</p>
       {@render link('#/queues', 'queues', 'calendar', 'Queues and scheduler')}
-      {#if store.has('remote')}{@render link('#/provider', 'provider', 'key', `My ${providerName}`)}{/if}
+      {#each browseAccounts as account (account.provider)}
+        <a href="#/provider/{encodeURIComponent(account.provider)}" class="flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {screen.kind === 'provider' && (screen.provider === account.provider || (!screen.provider && account === browseAccounts[0])) ? 'bg-selected font-semibold' : 'hover:bg-hover'}">
+          <Icon name="key" size={16} class="shrink-0 text-icon-neutral" />
+          <span class="min-w-0 flex-1 truncate">My {providerNameOf(account)}</span>
+        </a>
+      {/each}
       {@render link('#/settings', 'settings', 'settings', 'Settings')}
     </nav>
 
@@ -117,7 +127,7 @@
       {:else if screen.kind === 'queues'}
         <QueuesScreen />
       {:else if screen.kind === 'provider'}
-        <TorBoxScreen />
+        <TorBoxScreen provider={screen.provider} />
       {:else}
         <SettingsScreen />
       {/if}

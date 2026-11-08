@@ -4,10 +4,13 @@
   import { dateTime } from '../lib/format';
   import { tickUntil } from '../lib/ticker';
   import { store } from '../lib/store.svelte';
+  import { providerNameOf } from '../lib/remote';
+  import ProviderAccount from './ProviderAccount.svelte';
   import type { ArchiveSettings, Settings, SiteLogin } from '../lib/types';
 
-  type Page = 'general' | 'folders' | 'logins' | 'proxy' | 'extraction' | 'programs' | 'signin';
-  const pages: { key: Page; label: string }[] = [
+  // A provider's account page is `provider:<id>`, one for each account the server has.
+  type Page = 'general' | 'folders' | 'logins' | 'proxy' | 'extraction' | 'programs' | 'signin' | `provider:${string}`;
+  const basePages: { key: Page; label: string }[] = [
     { key: 'general', label: 'Downloads' },
     { key: 'folders', label: 'Favorite folders' },
     { key: 'logins', label: 'Site logins' },
@@ -16,8 +19,14 @@
     { key: 'programs', label: 'Programs and updates' },
     { key: 'signin', label: 'Sign-in and browsers' },
   ];
+  const pages = $derived<{ key: Page; label: string }[]>([
+    ...basePages.slice(0, 4),
+    ...(store.has('remote') ? store.model.accounts.map((account) => ({ key: `provider:${account.provider}` as Page, label: `${providerNameOf(account)} account` })) : []),
+    ...basePages.slice(4),
+  ]);
 
-  let page = $state<Page>('general');
+  let page = $state<Page>((store.settingsPage as Page | null) ?? 'general');
+  store.settingsPage = null;
   let draft = $state<Settings | null>(null);
   let speedKb = $state<number | null>(null);
 
@@ -332,6 +341,9 @@
         <dt class="text-muted">Update signing key</dt><dd class="break-all font-mono text-[12px]">{draft.updatePublicKey ? 'set' : '(none)'}</dd>
         <dt class="text-muted">Shut down or sleep when done</dt><dd>{draft.allowSystemCompletionActions ? 'Allowed' : 'Not allowed'}</dd>
       </dl>
+    {:else if page.startsWith('provider:')}
+      {@const account = store.model.accounts.find((candidate) => `provider:${candidate.provider}` === page)}
+      {#if account}<ProviderAccount {account} />{:else}<p class="text-[13px] text-muted">This provider is not on the server any more.</p>{/if}
     {:else if page === 'signin'}
       <h1 class="mb-3 text-[18px] font-semibold">Sign-in</h1>
       {#if !store.signInRequired}
