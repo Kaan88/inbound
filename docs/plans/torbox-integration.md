@@ -38,6 +38,17 @@ Not allowed:
 
 Do not assume any supplied link works. If the CDN links have expired, get new ones through the API. The file has no Copy JDownloader Folder Link: for scenario A, build one from a real `mylist` id, which is the same URL shape.
 
+## Kept archive for live extraction checks
+
+Owner, 2026-11-08: "yes add one and airlock it". Airlock is TorBox's setting that keeps an item from being deleted after 30 days.
+
+- **Item:** web download `inbound-live-check-archive.zip` (id 2240130, tag `inbound-live-check`), added 2026-11-08, `cached: true`, `airlocked: true` in a fresh `mylist` read. TorBox still reported `expires_at` 2026-12-08 after Airlock was turned on, so whether Airlock lifts that date is not yet seen.
+- **Content:** one file, `14838-h.zip`, 1,291,466 bytes, md5 `27f461ea38147b50776e4feaabd36f74` (archive.org's published md5), SHA-256 `776a1e21fad27f26a95033cd457e804d01e34dbaba574fc5b14b07fc7e05edf2`. A plain zip, no password: 29 entries (an HTML book with its images), 1,324,037 bytes unpacked. Source: Project Gutenberg's *The Tale of Peter Rabbit* (eBook 14838, public domain in the USA), from archive.org item `thetaleofpeterra14838gut`.
+- **Why not our own zip:** TorBox has no upload of a local file. A torrent of our own zip needs a seeder TorBox can reach, which this PC isn't. GitHub release links were refused (`DOWNLOAD_SERVER_ERROR`) and sqlite.org (`UNSUPPORTED_SITE`); archive.org is a supported hoster.
+- **Use:** find it by name in `webdl/mylist`, resolve a link with `requestdl` for its one file, and download or extract it. In the live tests: `LiveAccount.KeptArchiveName`, `KeptArchiveSize`, `KeptArchiveMd5`.
+- **Kept out of cleanup:** anything whose name starts with `inbound-live-check` is never removed by a test. Live tests remove items only through `LiveAccount.RemoveUnlessKeptAsync`, which reads the item first; `KeptArchiveTests` fails if a live test calls `RemoveAsync` or a delete operation any other way. An edit of the item (`editwebdownload`) overwrites name, tags and Airlock together, so send all three.
+- **Calls spent setting it up:** 7 (two refused submissions, one accepted, one read, one edit, one read to confirm, one list by the live test).
+
 ## What is already known
 
 **Evidence labels:** [API] read from `https://api.torbox.app/openapi.json` on 2026-11-06. The docs site renders by script, so use this schema. [JD] strings read with `javap` from the installed plugins, not yet run. [Support] TorBox support articles. [Inferred] needs testing.
