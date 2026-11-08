@@ -3434,6 +3434,11 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
                     if (!HasWorkLocked(run))
                     {
+                        // Counted out under the lock that saw no work: until then the other workers' retire check
+                        // above still counted this one, so a worker that gave a range back and retired against
+                        // that stale count could leave the range with no worker at all.
+                        run.LiveWorkers--;
+                        retired = true;
                         return;
                     }
 
@@ -3482,10 +3487,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 CancellationTokenSource? idle;
                 try
                 {
-                    work = ClaimUnclaimedSegment(run) ?? TryStealSegment(run);
+                    // One lock (both helpers re-enter it) for the claim and, when nothing was left, the count.
                     lock (run.Sync)
                     {
+                        work = ClaimUnclaimedSegment(run) ?? TryStealSegment(run);
                         idle = IdleWaitersToReleaseLocked(run);
+                        if (work is null)
+                        {
+                            run.LiveWorkers--;
+                            retired = true;
+                        }
                     }
                 }
                 catch
@@ -3506,6 +3517,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
         finally
         {
+            // Every exit counts this worker out exactly once: the locked paths above set retired when they did.
             if (!retired)
             {
                 lock (run.Sync)
@@ -3513,8 +3525,16 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     run.LiveWorkers--;
                 }
             }
+
+            WorkerExitedForTests?.Invoke(run.Job.Id, retired);
         }
     }
+
+    /// <summary>
+    /// Test seam: called as each segment worker exits, with whether it was already counted out under the lock
+    /// that decided it should stop (false only for exceptions and cancellation). Null outside tests.
+    /// </summary>
+    internal static Action<Guid, bool>? WorkerExitedForTests { get; set; }
 
     private const long MinimumStealBytes = 256 * 1024;
 
