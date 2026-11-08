@@ -75,6 +75,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     favoritesField.classList.toggle("hidden", favorites.length === 0);
     // A caught download waits in the browser while this window is open; leaving it there is a choice.
     held = response.held === true;
+    if (held) holdWorker();
     keepButton.classList.toggle("hidden", !held);
     cancelButton.classList.toggle("hidden", held);
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
@@ -127,6 +128,24 @@ confirmButton.addEventListener("click", async () => {
 });
 
 cancelButton.addEventListener("click", () => window.close());
+
+/**
+ * While a caught download waits on this window, a port to the background worker stays open. Its pings
+ * keep the worker, which holds the browser's file-name callback in memory, from being stopped as idle;
+ * the port closing with this window tells the worker the window was closed without a choice.
+ */
+function holdWorker(reconnects = 0): void {
+  let port: chrome.runtime.Port;
+  try { port = chrome.runtime.connect({ name: `dm.handoff:${handoffId}` }); } catch { return; }
+  const timer = setInterval(() => {
+    try { port.postMessage({ type: "ping" }); } catch { /* reconnected below */ }
+  }, 20000);
+  port.onDisconnect.addListener(() => {
+    clearInterval(timer);
+    // The worker restarted anyway: tell the new one this window is still open. A few tries at most.
+    if (!finished && reconnects < 5) holdWorker(reconnects + 1);
+  });
+}
 
 async function keepInBrowser(): Promise<void> {
   if (finished || !held) return;

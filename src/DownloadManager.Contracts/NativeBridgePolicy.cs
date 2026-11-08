@@ -66,6 +66,64 @@ public static class NativeBridgePolicy
 
     public static bool AllowFromExtension(string? messageType) => AllowFrom(BridgeRole.BrowserExtension, messageType);
 
+    // The job actions the popup sends, one download at a time.
+    private static readonly HashSet<string> SingleJobActions = new(StringComparer.Ordinal)
+    {
+        MessageTypes.JobPause,
+        MessageTypes.JobResume,
+        MessageTypes.JobRetry,
+        MessageTypes.JobCancel,
+        MessageTypes.JobRemove,
+    };
+
+    /// <summary>
+    /// Whether this message may cross, its payload included. The type alone is not enough for job
+    /// actions: the Host's job.remove also takes a list of downloads, and job.cancel can delete the
+    /// file. The popup acts on one download and deletes a file only with Delete, so from the extension
+    /// a job action names exactly one download, carries no list, and asks to delete the file only on
+    /// job.remove. A compromised extension then cannot empty the list and its files in one request.
+    /// </summary>
+    public static bool AllowFrom(BridgeRole role, IpcMessage message)
+    {
+        if (!AllowFrom(role, message.Type)) return false;
+        if (role != BridgeRole.BrowserExtension || !SingleJobActions.Contains(message.Type)) return true;
+        if (message.Payload is not { ValueKind: JsonValueKind.Object } payload) return false;
+
+        var namesOneJob = false;
+        // The Host reads property names without regard to case, so every spelling counts here.
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (property.Name.Equals("jobIds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.ValueKind != JsonValueKind.Null &&
+                    !(property.Value.ValueKind == JsonValueKind.Array && property.Value.GetArrayLength() == 0))
+                {
+                    return false;
+                }
+            }
+            else if (property.Name.Equals("deleteFile", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.ValueKind != JsonValueKind.False &&
+                    !(property.Value.ValueKind == JsonValueKind.True && message.Type == MessageTypes.JobRemove))
+                {
+                    return false;
+                }
+            }
+            else if (property.Name.Equals("jobId", StringComparison.OrdinalIgnoreCase))
+            {
+                // Named twice is a forged request: which one the Host would read is not this check's to guess.
+                if (namesOneJob) return false;
+                namesOneJob = property.Value.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(property.Value.GetString(), out var jobId) && jobId != Guid.Empty;
+                if (!namesOneJob) return false;
+            }
+        }
+
+        return namesOneJob;
+    }
+
+    public static bool AllowFromExtension(IpcMessage message) => AllowFrom(BridgeRole.BrowserExtension, message);
+
     public static bool AllowToExtension(string? messageType) => AllowTo(BridgeRole.BrowserExtension, messageType);
 
     /// <summary>

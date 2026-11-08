@@ -87,10 +87,13 @@ export function migrateSettings(stored: Partial<Settings> | undefined | null): {
   if (untouchedList) {
     settings.interceptedExtensions = [];
     const excluded = Array.isArray(stored.excludedExtensions) ? stored.excludedExtensions : [];
-    // The old default exclude list was empty. Anything there was the user's, and stays.
-    settings.excludedExtensions = excluded.length === 0
-      ? [...DEFAULT_EXCLUDED_EXTENSIONS]
-      : [...new Set([...excluded])];
+    // The old default exclude list was empty, so anything there was the user's and stays. The new
+    // defaults are added to it either way: under the old allow-list a page or an image was never
+    // caught, and one exclude of the user's own must not start sending those to the app.
+    // Lower case, as the rules compare them.
+    settings.excludedExtensions = [...new Set([...excluded, ...DEFAULT_EXCLUDED_EXTENSIONS]
+      .map((extension) => String(extension).trim().toLowerCase())
+      .filter((extension) => extension.length > 0))];
   }
   settings.rulesVersion = RULES_VERSION;
   return { settings, changed: true };

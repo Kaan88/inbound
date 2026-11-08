@@ -102,7 +102,7 @@ internal static class Program
 
     private static async Task ForwardToHostAsync(IpcClient host, IpcMessage message, Action<string> log)
     {
-        if (NativeBridgePolicy.AllowFromExtension(message.Type))
+        if (NativeBridgePolicy.AllowFromExtension(message))
         {
             await host.SendAsync(message).ConfigureAwait(false);
             log($"Forwarded '{message.Type}' {message.Id}.");
