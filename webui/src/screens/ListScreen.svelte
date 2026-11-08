@@ -47,7 +47,20 @@
     if (changed) selected = new Set([...selected].filter((id) => present.has(id)));
   });
 
+  /** A touch screen has no double-click: there a tap opens the download, and the box on the left selects. */
+  function touchFirst(): boolean {
+    try {
+      return matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
+    } catch {
+      return false;
+    }
+  }
+
   function click(row: Row, event: MouseEvent) {
+    if (touchFirst() && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      open(row);
+      return;
+    }
     const next = new Set(selected);
     if (event.shiftKey && lastClicked) {
       const from = rows.findIndex((r) => r.id === lastClicked);
@@ -339,21 +352,30 @@
   .list-grid.with-extraction { grid-template-columns: 28px minmax(180px, 1fr) 80px 150px 120px 80px 90px; }
   .header-cell { padding: 0; background: transparent; white-space: nowrap; }
 
-  /* A phone: each download is two lines, name over status, with the figures beside the status. */
+  /* A phone: each download is two lines, name and size over status and speed. The header keeps only the box that
+     selects all and the name. */
+  @media (max-width: 767px) {
+    .list-grid { grid-template-columns: 28px 1fr; }
+    .list-grid > :nth-child(n + 3) { display: none; }
+  }
   .list-row {
     grid-template-columns: 28px 1fr auto;
-    grid-template-areas: 'check name name' 'check status rate' 'check desc desc';
+    grid-template-areas: 'check name size' 'check status rate' 'check desc desc';
     padding-top: 6px;
     padding-bottom: 6px;
     row-gap: 2px;
     cursor: default;
+    /* A double-click opens the download; it shouldn't also select the words. */
+    user-select: none;
+    -webkit-user-select: none;
   }
   .list-row .cell-check { grid-area: check; }
   .list-row .cell-name { grid-area: name; }
   .list-row .cell-status { grid-area: status; }
   .list-row .cell-rate { grid-area: rate; font-size: 11.5px; color: var(--muted); }
+  .list-row .cell-size { grid-area: size; font-size: 11.5px; color: var(--muted); text-align: right; }
   .list-row .cell-desc { grid-area: desc; font-size: 11.5px; }
-  .list-row .cell-size, .list-row .cell-eta, .list-row .cell-extract, .list-row .cell-added { display: none; }
+  .list-row .cell-eta, .list-row .cell-extract, .list-row .cell-added { display: none; }
   .list-row .cell-desc:empty { display: none; }
 
   @media (min-width: 768px) {
@@ -367,7 +389,7 @@
     .list-row.with-extraction { grid-template-columns: 28px minmax(180px, 1fr) 80px 150px 120px 80px 90px; }
     .list-row > * { grid-area: auto !important; }
     .list-row .cell-size, .list-row .cell-eta, .list-row .cell-extract { display: block; }
-    .list-row .cell-rate { font-size: inherit; color: inherit; }
+    .list-row .cell-rate, .list-row .cell-size { font-size: inherit; color: inherit; }
     .list-row .cell-desc { display: none; }
   }
 

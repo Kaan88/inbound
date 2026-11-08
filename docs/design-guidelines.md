@@ -185,3 +185,21 @@ default window width. With one remote or archive row selected, the status bar sa
    class `Microsoft.UI.Content.PopupWindowSiteBridge` or `Xaml_WindowedPopupClass`, so capture it by itself.
 6. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
    user's Downloads folder during harness runs.
+
+## 8. The web UI (D2)
+
+The browser front end (`webui/`) follows the same rules with web tools:
+
+- **Palette:** `webui/src/app.css` holds the `App.xaml` tokens as CSS variables, light by default and dark from the
+  system or from `data-theme` on `<html>`, and maps them to Tailwind names (`bg-chrome`, `text-muted`,
+  `text-icon-info`, `tone-done` and so on). Components never name a color of their own. A theme picked in the header
+  is kept per browser.
+- **Status colors and bars** are the desktop's: the state's color on the status text, a 6 px bar under it while a
+  download is active or paused with progress, a moving bar when the size is unknown.
+- **Layout:** header, sidebar of views with counts, toolbar (icon over label; icons alone below 768 px, the words kept
+  for screen readers), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
+  lines per download on a phone. The sidebar becomes a drawer below 768 px; dialogs fill the screen on a phone.
+- **Icons:** our own outline glyphs on a 24-unit grid (`Icon.svelte`), colored with the icon tokens.
+- **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
+  themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look
+  at the pictures, as with the desktop captures above.

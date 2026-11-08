@@ -45,11 +45,52 @@ unchanged is fine. The desktop Host can do all of these.
 - `GET /health` answers `{"status":"ok","version":...}` and is the only path a health check needs.
 - A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
   origin, and must name the server by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else
-  gets 403. A request without `Origin` (curl, scripts, tests) is not checked. There is no sign-in yet (D2), so the
-  server refuses to listen beyond loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set.
+  gets 403. A request without `Origin` (curl, scripts, tests) is not checked. The one exception is below: a paired
+  extension's `POST /api/ipc` and `POST /api/pair`.
+- Sign-in (D2) is on by default; see the next section.
 
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
 request, update itself or run programs a client names, so those commands answer as described above.
+
+### Sign-in and paired browsers (D2)
+
+With sign-in on (the default), every path except `/health`, `/favicon.svg`, `/theme.js`, `/signin/...` and the calls
+below needs a session cookie or, for `POST /api/ipc` only, a paired browser's token. Without one, `/api/...` answers
+401 with `{"ok":false,"error":...,"signIn":"/signin/"}`, a page `GET` is sent to `/signin/` (302), and the WebSocket
+upgrade is refused with 401. A failure always answers `{"ok":false,"error":"...","retryAfterSeconds":n?}`; a wait after
+wrong tries is 429 with `Retry-After`.
+
+| Call | Session? | Body / answer |
+| --- | --- | --- |
+| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, and `version` only for a signed-in browser |
+| `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
+| `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
+| `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
+| `POST /api/auth/password` | yes | `{current, password}`; every other session ends. 409 when the password comes from the environment. |
+| `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
+| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired browsers (`id`, `name`, `createdAt`, `lastUsedAt`), and revoking one. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. Ten wrong codes end the code. |
+| `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, path}`, a path the server's own `remote.classify` and `remote.add` accept. |
+
+- **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
+  the token hashes. `DOWNLOADMANAGER_PASSWORD` or `DOWNLOADMANAGER_PASSWORD_FILE` sets it instead (hashed at start;
+  the web UI can't change it then).
+- **Session:** a 256-bit random id in the `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`,
+  `Secure` over HTTPS); the server keeps only its SHA-256, in memory, so a restart signs everyone out. It ends after
+  24 hours without use (an open WebSocket counts as use) and 7 days after sign-in at most, and its WebSockets close
+  then. `X-Forwarded-Proto` and `X-Forwarded-For` are believed only with `DOWNLOADMANAGER_TRUST_PROXY=1`.
+- **Wrong tries** make that client address wait 1, 2, 4 ... seconds, up to 5 minutes, before the next try counts.
+- **Origin:** every state change and the WebSocket upgrade must carry the server's own origin (above).
+- **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` only, and only for what the extension
+  role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
+  `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
+  comes without settings. Only the token's SHA-256 is stored. Requests from our Chrome extension ids
+  (`chrome-extension://`, the store and the unpacked id) and from any `moz-extension://` origin (Firefox gives each
+  install a random id) pass the origin check for `POST /api/ipc` with a bearer token, which the sign-in gate then
+  checks, and for `POST /api/pair`, where the one-time code is the credential. They get CORS headers for those two
+  calls, without credentials; preflights answer 204.
+- `DOWNLOADMANAGER_AUTH=off` turns sign-in off. Then the D1b rule holds again: the server refuses to listen beyond
+  loopback unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set too.
 
 ### Folder browsing: `folders.*`
 
