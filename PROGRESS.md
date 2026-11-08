@@ -49,7 +49,7 @@
 - Waiting for the owner's ultrareview before any squash to `main`, tag, `gh release` or GHCR publish.
 - **Not done:**
   - A clean-install and upgrade run of this Setup in the Windows VM.
-  - The PERF.2 rerun on `dev`.
+  - The PERF.2 rerun on `dev`: started 2026-11-08 10:50 UTC as `soak-fixed` (`artifacts\soak\soak-fixed\` in the `dev` worktree, a test instance, stops by itself about 18:50 UTC; `bash scripts/soak.sh --stop soak-fixed` stops it earlier). Summarise with `python -I scripts/soak-summary.py artifacts/soak/soak-fixed`.
   - EXT.B3 (Firefox), which needs this build installed.
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
