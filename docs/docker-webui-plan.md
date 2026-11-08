@@ -3,7 +3,8 @@
 Status: plan, 2026-11-07. D1a (the shared command dispatcher) and D1b (the server and the Linux replacements) are
 built on `stream-b`, 2026-11-08; what D1b holds is described below. D2 (sign-in, browser pairing and the web UI) is
 built on `webui`, 2026-11-08, in the next section. D3 (the image, compose and the GHCR workflow) is built on `webui`,
-2026-11-08, in the section after it. D4 is not started. ROADMAP D1 to D4 and PERF.1 to PERF.3
+2026-11-08, in the section after it. D4 (the run on the owner's VM through the web UI) is done, 2026-11-08, in
+the section after that. ROADMAP D1 to D4 and PERF.1 to PERF.3
 track it.
 
 ## D2: what was built (2026-11-08)
@@ -125,6 +126,50 @@ Evidence, on the owner's Linux VM (x86_64, Docker 29, BuildKit 0.34), from a `gi
   hash check and the `linux-arm64` publish ran on the VM (build stages with `TARGETARCH=arm64`, output to the cache
   only); the arm64 runtime stage, which only copies files, was not built or run.
 
+
+## D4: what was run (2026-11-08)
+
+On the owner's Linux VM (x86_64, Docker 29) with `inbound-test:dev` built from `webui` `e8324ae` (only the
+TestServer changed since D3's image), started with sign-in on, `-p 18080:8080`, `PUID`/`PGID` of the VM user and
+`TZ`, its volumes in a test folder. The web UI was driven from this PC over the LAN with Playwright's headless
+Chromium; the VM's address is kept out of the repository and the screenshots.
+
+- **First open:** the setup page asked for the setup code (the browser is not on the server's machine); with the
+  code from `docker logs` and a throwaway password it signed in. Session cookie `HttpOnly`, `SameSite=Strict`.
+  Sign-out answered `/api/ipc` with 401; signing in again worked. From this PC, `/api/ipc` without a cookie 401,
+  with another `Origin` 403.
+- **TorBox, live:** the key was typed into My TorBox, Account; the server checked it (plan shown) and never sent it
+  back. In my account listed the torrents; a small cached item (3 files, 18.4 MB) was downloaded with Download, then
+  Choose files (all) through the default queue: three runs, each with a fresh link ("torbox gave a link for this
+  run"), about 4 MB/s, valid JPEGs owned by the VM user, no part file. About eight TorBox calls in all; nothing
+  added to the account.
+- **Extraction:** the TorBox item has no archive, so a 3-volume RAR5 with a password and a zip, made on this PC,
+  were served over HTTP by a labelled Node container on a test network on the VM. With "Allow downloads from
+  addresses on the local network" and "Extract archives when their downloads finish" on: the zip extracted by
+  itself, the RAR asked for its password in the list, extracted after it, and both gave files with the original
+  SHA-256.
+- **Expiring-link refresh:** a live link can't be made to expire, so a second server container was pointed at the
+  mock TorBox (`tools/TestServer --torbox`, in the same network namespace, `DOWNLOADMANAGER_TORBOX_API` on
+  loopback) with the new `--first-link-dies-after 3000000`: the first CDN link dies mid-download and answers 403
+  after that. Through its web UI: Download, choose one 8 MiB file; the server logged "the link was refused
+  (Forbidden, HTTP 403), so asking for a fresh one, 1 of 2", got a new link and finished; SHA-256 equal to the
+  mock's content.
+- **No token:** the key, the key without dashes and its first 6 characters (read into a variable, never printed)
+  were searched for: 0 hits in `docker logs` (both servers and the file server), the log files and every other file
+  in the data folder, the downloads, `docker history --no-trunc` and `docker inspect` of the image and the
+  container, and all 4,054 files of the image's own file system. The mock's key was in neither server log either.
+- **Memory** (`docker stats`, every 10 s idle, every 2 to 3 s during downloads): idle after sign-in and settings,
+  29 samples, 44.0 MiB average (42.6 to 45.5), CPU 0.016%. During the TorBox download and the extractions up to 87
+  MiB. During a 400 MB download over 8 connections at about 8 MB/s: 87 to 106 MiB, of which anonymous memory 50 to
+  56 MiB; the rest is page cache of the written file. Idle after all of it (the 400 MB file deleted through the web
+  UI with its file): 100.8 MiB (100.6 to 101.8), CPU 0.016%: 64 MiB anonymous, 33 MiB shared memory that is .NET's
+  W^X double mapping of compiled code (`/memfd:doublemapper`, 201 mappings), 4 MiB kernel; 23 MiB of inactive page
+  cache is left out by `docker stats`. The target of under 100 MB idle is met before use and reached after it.
+- **Cleanup:** the test containers, the test network and the test folder (downloads, data with the sealed key)
+  removed; the image kept; other containers untouched; disk free unchanged (8.8 GB).
+
+Not done: the extension against this server over the LAN (EXT.R1 was checked against a loopback server); arm64;
+an archive coming from TorBox itself; a live link expiring on its own.
 
 ## D1b: what was built (2026-11-08)
 
@@ -288,8 +333,8 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 - **Compose:** an example file with the two volumes and the password variable.
 - **Publishing:** an image on GHCR (`ghcr.io/kaan88/inbound`) built on each tag (owner: yes, 2026-11-08). The
   workflow is written; it runs only when the owner pushes a `v*` tag.
-- **Target:** under 100 MB of memory when idle in the container: 34 MiB fresh, 54 MiB after use (D3, above); D4
-  measures it during a download.
+- **Target:** under 100 MB of memory when idle in the container: 34 MiB fresh, 54 MiB after use (D3, above); D4:
+  44 MiB before use, up to 106 MiB during a 400 MB download, 101 MiB idle after a full session (64 MiB anonymous).
 
 ## D4 End-to-end test
 
