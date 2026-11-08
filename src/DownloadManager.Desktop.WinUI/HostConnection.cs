@@ -4,13 +4,38 @@ using DownloadManager.Contracts;
 
 namespace DownloadManager.Desktop.WinUI;
 
-public sealed class HostConnection : IAsyncDisposable
+/// <summary>
+/// The window's connection to one Host: this PC's over the named pipe, or another server's over its WebSocket
+/// (<see cref="ServerTarget"/>, design D9 section 5). Replies come back to the call that asked; events go to the handlers.
+/// <para>
+/// To a server: reconnecting waits 2 s, then twice as long each time, up to about a minute
+/// (<see cref="ReconnectBackoff"/>); a token the server refuses stops it until <see cref="Retarget"/> or
+/// <see cref="ReconnectNow"/>. While <see cref="SetEventsWanted"/> is false (the window is hidden) it asks the server
+/// for no snapshot and no events. Its <c>host.exiting</c> means "disconnected": only this PC's Host quits the app, and
+/// only this PC's update progress is shown.
+/// </para>
+/// </summary>
+public sealed partial class HostConnection : IAsyncDisposable
 {
+    private static readonly TimeSpan LocalRetryDelay = TimeSpan.FromSeconds(2);
+
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<IpcMessage>> _pending = new();
-    private IpcClient? _client;
+    private readonly ReconnectBackoff _backoff = new();
+    private readonly Lock _sync = new();
+    private IIpcConnection? _client;
     private Task? _loop;
+    private CancellationTokenSource? _session;
+    private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile ServerTarget _target;
+    private volatile bool _eventsWanted = true;
+    private volatile HostHelloDto? _hello;
+
+    public HostConnection(ServerTarget? target = null)
+    {
+        _target = target ?? ServerTarget.Local;
+    }
 
     public event Action<SnapshotDto>? SnapshotReceived;
     public event Action<UpdateProgressDto>? UpdateProgressChanged;
@@ -18,14 +43,65 @@ public sealed class HostConnection : IAsyncDisposable
     public event Action<List<DownloadGroupDto>>? GroupsChanged;
     public event Action<ArchiveChangedDto>? ArchiveChanged;
     public event Action<bool, string?>? ConnectionChanged;
-    /// <summary>The Host announced a user-requested application exit.</summary>
+    /// <summary>This PC's Host announced a user-requested application exit. Never raised for another server.</summary>
     public event Action? HostExiting;
 
     public bool IsConnected => _client is not null;
 
+    /// <summary>The Host this connection goes to.</summary>
+    public ServerTarget Target => _target;
+
+    /// <summary>Another server, not this PC: its paths and files are not this PC's.</summary>
+    public bool IsRemote => !_target.IsLocal;
+
+    /// <summary>What the connected Host said in its hello (capabilities, hostKind); null until connected.</summary>
+    public HostHelloDto? Hello => _hello;
+
+    /// <summary>The server refused the token: nothing more is tried until the user pairs again.</summary>
+    public bool PairingEnded { get; private set; }
+
     public void Start()
     {
         _loop ??= Task.Run(() => RunAsync(_cts.Token));
+    }
+
+    /// <summary>
+    /// Goes to another Host. The current connection closes, every call waiting on it fails, and the new one is tried
+    /// at once.
+    /// </summary>
+    public void Retarget(ServerTarget target)
+    {
+        lock (_sync)
+        {
+            _target = target;
+            PairingEnded = false;
+            _hello = null;
+        }
+
+        ReconnectNow();
+    }
+
+    /// <summary>Drops the current connection, or the wait before the next try, and connects again now.</summary>
+    public void ReconnectNow()
+    {
+        lock (_sync)
+        {
+            _backoff.Reset();
+            try { _session?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            _wake.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// False while the window is hidden: a server is then asked for no events (and no snapshot), so it sends nothing
+    /// while nobody looks. This PC's pipe is left as it is.
+    /// </summary>
+    public void SetEventsWanted(bool wanted)
+    {
+        if (_eventsWanted == wanted) return;
+        _eventsWanted = wanted;
+        if (IsRemote) ReconnectNow();
     }
 
     public async Task<SnapshotDto> RefreshAsync(CancellationToken cancellationToken = default)
@@ -63,17 +139,12 @@ public sealed class HostConnection : IAsyncDisposable
         // Isolate a slow server preview from this UI's normal command/event connection.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(18));
-        await using var client = await IpcClient.ConnectAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
         var request = IpcMessage.Create(MessageTypes.FileMetadata, payload);
-        await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        while (await client.ReadAsync(timeout.Token).ConfigureAwait(false) is { } reply)
-        {
-            if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
-            if (reply.ReplyTo != request.Id) continue;
-            if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This Host does not support file information previews." };
-            return reply.GetPayload<FileMetadataResult>();
-        }
-        throw new IOException("The Host disconnected while reading file information.");
+        var reply = await SendOnOwnConnectionAsync(request, timeout.Token).ConfigureAwait(false)
+            ?? throw new IOException("The Host disconnected while reading file information.");
+        if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
+        if (reply.Type != MessageTypes.FileMetadataResult) return new FileMetadataResult { Error = "This Host does not support file information previews." };
+        return reply.GetPayload<FileMetadataResult>();
     }
 
     public Task<IpcMessage> GetSegmentsAsync(Guid id, CancellationToken cancellationToken = default)
@@ -135,13 +206,11 @@ public sealed class HostConnection : IAsyncDisposable
         timeout.CancelAfter(TimeSpan.FromSeconds(60));
         try
         {
-            await using var client = await IpcClient.ConnectAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var request = IpcMessage.Create(MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = jobId, Url = url, ExplicitDirect = explicitDirect });
-            await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
-            while (await client.ReadAsync(timeout.Token).ConfigureAwait(false) is { } reply)
+            if (await SendOnOwnConnectionAsync(request, timeout.Token).ConfigureAwait(false) is { } reply)
             {
                 if (reply.V != Protocol.Version) throw new InvalidDataException("Host protocol mismatch.");
-                if (reply.ReplyTo == request.Id) return reply;
+                return reply;
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -150,6 +219,26 @@ public sealed class HostConnection : IAsyncDisposable
         }
 
         throw new IOException("The Host disconnected while changing the address.");
+    }
+
+    /// <summary>
+    /// One request on a connection of its own, so a slow answer can't hold up the main one: on this PC a pipe of its own
+    /// (as before), to a server one <c>POST /api/ipc</c>. Null when the connection closed before the reply.
+    /// </summary>
+    private async Task<IpcMessage?> SendOnOwnConnectionAsync(IpcMessage request, CancellationToken cancellationToken)
+    {
+        var target = _target;
+        if (!target.IsLocal) return await ServerConnector.SendOnceAsync(target, request, Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+
+        await using var client = await ServerConnector.ConnectAsync(target, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        while (await client.ReadAsync(cancellationToken).ConfigureAwait(false) is { } reply)
+        {
+            if (reply.V != Protocol.Version) return reply;
+            if (reply.ReplyTo == request.Id) return reply;
+        }
+
+        return null;
     }
 
     public Task<IpcMessage> CleanOrphansAsync(bool delete, CancellationToken cancellationToken = default)
@@ -244,36 +333,66 @@ public sealed class HostConnection : IAsyncDisposable
         // Exit happens before this frontend's first successful handshake.
         while (!cancellationToken.IsCancellationRequested)
         {
-            IpcClient? client = null;
+            ServerTarget target;
+            CancellationTokenSource session;
+            Task wake;
+            lock (_sync)
+            {
+                target = _target;
+                session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _session = session;
+                _wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                wake = _wake.Task;
+            }
+
+            var remote = !target.IsLocal;
+            IIpcConnection? client = null;
+            var stopTrying = false;
             try
             {
-                client = await IpcClient.ConnectAsync(TimeSpan.FromSeconds(2), cancellationToken)
+                // A server is asked only for what the window shows: nothing while it is hidden.
+                var hello = remote ? new ClientHelloDto { Snapshot = _eventsWanted, Events = _eventsWanted } : null;
+                client = await ServerConnector.ConnectAsync(target, hello, remote ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2), session.Token)
                     .ConfigureAwait(false);
 
-                var hello = await client.ReadAsync(cancellationToken).ConfigureAwait(false);
-                if (hello?.Type != MessageTypes.ServerHello)
+                var greeting = await client.ReadAsync(session.Token).ConfigureAwait(false);
+                if (greeting?.Type != MessageTypes.ServerHello)
                 {
-                    throw new InvalidDataException("The host did not send a greeting.");
+                    throw new InvalidDataException(remote ? $"{target.Name} did not answer like an Inbound server." : "The host did not send a greeting.");
                 }
 
-                if (hello.V != Protocol.Version)
+                if (greeting.V != Protocol.Version)
                 {
                     throw new InvalidDataException(
-                        $"Protocol mismatch: UI speaks {Protocol.Version}, host speaks {hello.V}.");
+                        $"Protocol mismatch: UI speaks {Protocol.Version}, host speaks {greeting.V}.");
                 }
 
-                var snapshot = await client.ReadAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    _hello = greeting.GetPayload<HostHelloDto>();
+                }
+                catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
+                {
+                    _hello = new HostHelloDto();
+                }
+
+                var snapshot = client.SnapshotFollowsHello ? await client.ReadAsync(session.Token).ConfigureAwait(false) : null;
                 _client = client;
+                if (remote) _backoff.Reset();
                 ConnectionChanged?.Invoke(true, null);
 
                 if (snapshot?.Type == MessageTypes.JobsSnapshot)
                 {
                     SnapshotReceived?.Invoke(snapshot.GetPayload<SnapshotDto>());
                 }
-
-                while (!cancellationToken.IsCancellationRequested)
+                else if (snapshot is not null)
                 {
-                    var message = await client.ReadAsync(cancellationToken).ConfigureAwait(false);
+                    Dispatch(snapshot, snapshot: false);
+                }
+
+                while (!session.IsCancellationRequested)
+                {
+                    var message = await client.ReadAsync(session.Token).ConfigureAwait(false);
                     if (message is null)
                     {
                         break;
@@ -286,28 +405,71 @@ public sealed class HostConnection : IAsyncDisposable
             {
                 break;
             }
+            catch (OperationCanceledException) when (session.IsCancellationRequested)
+            {
+                // Retargeted, shown or hidden: connect again at once, below.
+            }
+            catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
+            {
+                // Trying again can't help: the token is refused, or may not be sent. The user decides in File > Servers.
+                stopTrying = true;
+                PairingEnded = ex is RemotePairingEndedException;
+                ConnectionChanged?.Invoke(false, ex.Message);
+            }
             catch (Exception ex)
             {
-                ConnectionChanged?.Invoke(false, ex is TimeoutException && HostPipeBusyException.PipeExists() ? RemoteText.HostBusy : ex.Message);
+                ConnectionChanged?.Invoke(false, remote
+                    ? RemoteConnectionText.Failure(target, ex)
+                    : ex is TimeoutException && HostPipeBusyException.PipeExists() ? RemoteText.HostBusy : ex.Message);
             }
             finally
             {
-                if (_client == client)
+                if (client is not null && _client == client)
                 {
                     _client = null;
-                    ConnectionChanged?.Invoke(false, "The background Host has stopped. Open Download Manager again to start it.");
+                    if (!session.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+                    {
+                        ConnectionChanged?.Invoke(false, remote
+                            ? $"Disconnected from {target.Name}. Trying again shortly."
+                            : "The background Host has stopped. Open Download Manager again to start it.");
+                    }
                 }
 
                 FailPending(new IOException("The connection to the background host was lost."));
                 if (client is not null)
                 {
-                    await client.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await client.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+                    {
+                        // Closing is the point, and it is closed now.
+                    }
                 }
+
+                lock (_sync)
+                {
+                    if (_session == session) _session = null;
+                }
+            }
+
+            var askedFor = session.IsCancellationRequested;
+            session.Dispose();
+            if (askedFor)
+            {
+                if (cancellationToken.IsCancellationRequested) break;
+                continue;
             }
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                var delay = stopTrying ? Timeout.InfiniteTimeSpan : remote ? _backoff.Next() : LocalRetryDelay;
+                await wake.WaitAsync(delay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Time for the next try.
             }
             catch (OperationCanceledException)
             {
@@ -320,12 +482,14 @@ public sealed class HostConnection : IAsyncDisposable
     {
         if (message.Type == MessageTypes.HostExiting)
         {
-            HostExiting?.Invoke();
+            // Another server going away is a disconnection, which its closing socket reports; it never quits this app.
+            if (!IsRemote) HostExiting?.Invoke();
             return;
         }
         if (message.Type == MessageTypes.UpdateProgress)
         {
-            UpdateProgressChanged?.Invoke(message.GetPayload<UpdateProgressDto>());
+            // Updates are always this PC's.
+            if (!IsRemote) UpdateProgressChanged?.Invoke(message.GetPayload<UpdateProgressDto>());
             return;
         }
         if (message.ReplyTo is not null && _pending.TryGetValue(message.ReplyTo, out var completion))

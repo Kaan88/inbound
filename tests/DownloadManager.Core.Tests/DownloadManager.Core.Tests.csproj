@@ -50,6 +50,9 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerStore.cs" Link="WinUI\ServerStore.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="WinUI\DpapiSecretProtector.cs" />
   </ItemGroup>
 
   <ItemGroup>

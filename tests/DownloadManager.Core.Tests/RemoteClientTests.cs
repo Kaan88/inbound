@@ -38,6 +38,51 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task ShowingAnotherServerEndsThisHostsConnectionAndStartsTheStateOver()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady && client.State.RemoteSupported);
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        ui.Flush();
+        Assert.False(client.State.RemoteSupported);
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        // The server's socket sent no snapshot, and the client didn't wait for one: it is ready, and talks to the server.
+        Assert.All(here.Connections, pipe => Assert.True(pipe.Disposed));
+        Assert.False(client.State.RemoteSupported);
+        Assert.NotEmpty(there.Connections);
+        Assert.False(there.Connections[0].Disposed);
+    }
+
+    [Fact]
+    public async Task AHiddenWindowClosesAServersEventConnectionButNotThisHosts()
+    {
+        var here = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        await client.SetEventsWantedAsync(false);
+        Assert.False(here.Connections[0].Disposed);
+        await client.SetEventsWantedAsync(true);
+
+        var there = new FakeHost { SnapshotWithHello = false };
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await client.SetEventsWantedAsync(false);
+        Assert.True(there.Connections[0].Disposed);
+
+        await client.SetEventsWantedAsync(true);
+        await there.UntilAsync(() => there.Connections.Count == 2);
+    }
+
+    [Fact]
     public void ATimeoutAfterTheHostWasReachedIsNotReportedAsAHostThatIsDown()
     {
         Assert.Equal(RemoteText.HostTooSlow, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: true));
@@ -994,6 +1039,11 @@ public sealed class RemoteClientTests
         public bool KnowsArchives { get; set; } = true;
         public bool Refuse { get; set; }
         public bool Busy { get; set; }
+
+        /// <summary>False: as another server's socket that asked for no snapshot, the hello comes alone.</summary>
+        public bool SnapshotWithHello { get; set; } = true;
+
+        public Func<TimeSpan, CancellationToken, Task<IRemotePipe>> Connector => ConnectAsync;
         public List<FakePipe> Connections { get; } = [];
         public RemoteAccountDto Account { get; } = new() { Provider = "torbox", ProviderName = "TorBox", Capabilities = ["account"] };
         public RemoteJobDto Job { get; set; } = new() { Id = Guid.NewGuid(), Provider = "torbox", State = "waiting", Status = "Waiting for TorBox" };
@@ -1050,7 +1100,7 @@ public sealed class RemoteClientTests
             var pipe = new FakePipe(this);
             lock (_sync) Connections.Add(pipe);
             pipe.Push(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto { ProtocolVersion = Protocol.Version, Capabilities = Capabilities }));
-            pipe.Push(IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
+            if (SnapshotWithHello) pipe.Push(IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
             return Task.FromResult<IRemotePipe>(pipe);
         }
 
@@ -1107,6 +1157,8 @@ public sealed class RemoteClientTests
         private readonly Channel<IpcMessage?> _toClient = Channel.CreateUnbounded<IpcMessage?>();
 
         public bool Disposed { get; private set; }
+
+        public bool SnapshotFollowsHello => host.SnapshotWithHello;
 
         public Exception? FailNextSend { get; set; }
 

@@ -14,7 +14,7 @@ public sealed class SchedulerWindow : Window
 {
     private readonly ContentControl _editorSurface = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch,
         VerticalContentAlignment = VerticalAlignment.Stretch };
-    private readonly HostConnection _connection = new();
+    private readonly HostConnection _connection;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly ListBox _queues = new() { SelectionMode = SelectionMode.Single };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
@@ -99,9 +99,11 @@ public sealed class SchedulerWindow : Window
         finally { _capturingEditors = false; }
     }
 
-    public SchedulerWindow()
+    /// <param name="target">The Host whose queues these are: this PC, or the server the main window shows.</param>
+    public SchedulerWindow(ServerTarget? target = null)
     {
-        Title = "Scheduler — Inbound Download Manager";
+        _connection = new HostConnection(target);
+        Title = _connection.IsRemote ? $"Scheduler — {_connection.Target.Name} — Inbound Download Manager" : "Scheduler — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "scheduler");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
