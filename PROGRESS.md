@@ -1,5 +1,23 @@
 # Progress — session handoff
 
+### 0.6.1 release preparation (2026-11-08, `dev`)
+
+- Owner, 2026-11-08: "put a link to my firefox addon page to setup" (ROADMAP EXT.S3). `INSTALL.txt` names the Chrome Web Store page and the Firefox Add-ons page, and Setup's last page has two unticked boxes that open them. The README and `docs/browser-integration.md` link them too.
+- The Firefox page is not public: AMO's API answers "Authentication credentials were not provided" for the slug `inbound-download-manager` (a slug that doesn't exist gives "Not found"), so the add-on exists but is unlisted or awaiting review. The owner was told how to submit a listed version.
+- Versions: app 0.6.1, extension 0.5.1.
+- `scripts/install.ps1` writes the same two links into its `INSTALL.txt` (found by the Haiku review of the release commit, which also found a garbled evidence path here).
+- `scripts/publish.ps1` without `-SelfContained` failed since REV.3: such a publish carries no WinUI language files, so the check for the English ones always threw. The check now runs only for a self-contained publish, which Setup and the update package use.
+- Every Windows suite passed (`artifacts\campaign\20261108-061\`): Core 895, Engine 162, Integration 1,269, TorBox 323, Archives 351, Containers 187, Server 86, extension 161, web UI 44, svelte-check 0 errors.
+
+### After 0.6.0: password boxes, Firefox popup size, target switch (2026-11-08, `dev`)
+
+- TB.S4 (owner): in Add Links a hoster link's password section has an archive password box first, a tick to use it as the site password too, and a separate site password box. The two never stand in for each other unless ticked. The retry dialog and the web UI's Add Links say the same. Core and Integration tests pass; not seen on screen.
+- EXT.B4 (owner's screenshot): Firefox opened the popup small with a scroll bar. The popup's size caps in `vw`/`vh` clamped it to Firefox's first, small layout viewport. They are fixed sizes now; measured in a stand-in viewport, not yet in a real Firefox popup.
+- EXT.B5 (owner): Firefox showed its own Save dialog before the extension could catch the download, and the app then ignored the folder chosen there. The owner chose to catch it before the dialog. The Firefox build now looks at each page or frame load's response with blocking `webRequest`, and hands over one Firefox would save; the request is cancelled only once the app accepted it. In Firefox 159 with "Always ask" on, a clicked link and a typed address reached a test Host with no download begun in Firefox and the tab left on its page (`artifacts\evidence\dev-final\firefox-ext-b5\`). Not yet in the owner's Firefox.
+- EXT.R6 (owner): the popup has a This PC / Server switch once a server is paired. It sets the same default target as Settings.
+- The owner asked whether the extension got more controls: EXT.R2 (the newest 20 downloads with pause, resume, retry and delete) shipped in extension 0.5.0. In the owner's Firefox the small popup hid that list below the scroll.
+- `npm test` 151 pass, Chrome and Firefox builds made; Core 895 pass; the TB.S2 and new archive-password Integration tests pass.
+
 ### 0.6.0 released (2026-11-08, squashed to `main`, tag `v0.6.0`)
 
 - All work branches are merged into `dev`: streams A to C, the campaign, perf, webui, Edge, and the six owner-answer branches. Their worktrees and branches are removed. The evidence they held is in `artifacts\evidence\<branch>\` in the main checkout: logs, trx files and summaries, with no payloads or browser profiles. It was scanned for credentials and none were found.
@@ -72,6 +90,18 @@
   - EXT.B3, checked after the release: Firefox 159 with a test profile caught a download, and the installed native host handed it to a 0.6.0 test Host, which finished it. In the owner's first attempt the 0.5.3 Host was shut down 7.5 s after the request, which closed the bridge, and a closed bridge is reported as "unavailable". The second attempt's answer is not in the logs. Still to see: the owner's own Firefox once 0.6.0 is installed.
   - TEST.3: `scripts\register-test-native-host.ps1` registers a test build for Chrome for Testing only (the Chromium key) and refuses when another test holds the key (`artifacts\evidence\dev-final\test3-register\run.txt`).
   - D1 marked implemented, as planned for 0.6.0.
+  - Run on test builds (evidence in `artifacts\evidence\dev-final\`):
+    - UI.B7, the owner's scenario: six downloads on one host. Raising the limit from 3 to 6 got all six transferring. Lowering it to 2 sent the four newest back to Queued with their data kept.
+    - UI.R20: real Shift+Delete ticks "Delete from disk"; Delete and the toolbar don't.
+    - UI.R6: the Size, Time left and Transfer rate values share a right edge with their headers.
+    - TEST.3: a Chrome for Testing handoff went through the test registration, and Chrome's key was unchanged.
+  - TorBox live, read-only: 45 of 45 pass after updating three tests that expected the old cap of 4, and one that expected the old key form in links. TorBox now gives a torrent link the key without dashes when asked that way (TB.L3), which doesn't affect the app.
+  - TB.S1's queue read checked live; Start now and Remove couldn't be, with nothing queued. TB.S2 is blocked: no password-protected hoster link (later verified by the owner, below).
+- Owner answers and checks (2026-11-08):
+  - Done by the owner's word: EXT.S2 and EXT.E1 (the owner does the store and AMO side), D.PLAN. UI.B3 confirmed. TB.F4's open choice settled: "fine", as built.
+  - TB.S2 verified by the owner: a gofile link worked, but only with "Also try it on this link's own archives" ticked. The site password itself is the hoster link's password, not an archive's, so its archive most likely had the password.
+  - TB.L2 removed from the roadmap (owner: "TB.L2, remove", read as the row). Nothing was deleted from the TorBox account, and `KeptArchiveTests` still use the archive.
+  - D3a and D2a run with the published 0.6.0 image on the owner's Linux VM, D3b read from GitHub's run list. Default user 1000:1000, PUID 1234 honoured, PUID 0 refused with exit 2. A sign-in survives `docker restart`, and after signing out the cookie stays signed out across one. Evidence in `artifacts\evidence\dev-final\vm-d2a-d3a\`. The test containers, folders and image were removed afterwards (`cleanup-check.txt`).
 
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 

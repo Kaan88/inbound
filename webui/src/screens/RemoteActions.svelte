@@ -91,7 +91,7 @@
   {#if remote.state === 'failed' || remote.failureKind === 'linkPasswordRequired'}
     <form class="mb-3 flex flex-wrap items-end gap-2" onsubmit={(event) => { event.preventDefault(); void act('remote.retry', linkPassword ? { linkPassword } : {}, 'Trying again.'); }}>
       <div class="min-w-48 flex-1">
-        <label class="label" for="link-password">Link password (the site's, if it asks for one)</label>
+        <label class="label" for="link-password">Site password (the link's page asked for one)</label>
         <input id="link-password" class="field" type="password" bind:value={linkPassword} autocomplete="off" />
       </div>
       <button class="btn" type="submit" disabled={busy}>Retry</button>

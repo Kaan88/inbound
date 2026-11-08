@@ -23,9 +23,12 @@ Chrome version during Phase 4.
    as soon as the rules say to catch it, before the slower Delete-gesture lookup. If it will not
    pause, or has finished, it stays in the browser with a note, never sent while it still arrives.
    If the browser cannot continue a download it gave back, the popup notes that too.
-3. **`webRequest` is observational in MV3.** Blocking requires a
-   policy-installed extension, so the extension does not use it and does not
-   request the permission.
+   Firefox also asks where to save ("Always ask you where to save files") before `onCreated`, so a
+   download caught there has been through that dialog for nothing (EXT.B5). Firefox therefore looks at the
+   response first: see Firefox below.
+3. **`webRequest` is observational in Chrome's MV3.** Blocking requires a
+   policy-installed extension, so the Chrome and Edge build does not use it and does not
+   request the permission. Firefox keeps blocking `webRequest` in MV3, and its build uses it (EXT.B5).
 4. **Cookies are readable with the `cookies` permission + host permissions.**
    `chrome.cookies.getAll({url})` gives the cookie set for the target; this is
    the main way to transfer a browser session. For an automatic catch the
@@ -99,7 +102,23 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `background.scripts` instead of a service worker, and no `key` or `minimum_chrome_version`.
   `scripts\package-extension-firefox.ps1` checks it and zips it for addons.mozilla.org (AMO) into
   `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
-  unlisted version from the owner's AMO account; that has not been done.
+  unlisted version from the owner's AMO account; the owner uploaded one (2026-11-08). An unlisted add-on has no
+  public page. Setup links to `https://addons.mozilla.org/firefox/addon/inbound-download-manager/` (EXT.S3),
+  which opens only once a listed version is approved.
+- **Caught before the Save dialog (EXT.B5).** Only the Firefox manifest adds `webRequest` and
+  `webRequestBlocking`. A blocking `webRequest.onHeadersReceived` listener sees each page and frame load's
+  response. `response-download.ts` says whether Firefox would save it: a GET answered 200 or 206 that is an
+  attachment, or has a type Firefox can't show. A missing type, or one it shows (pages, text, images it draws,
+  PDF, JSON, the audio and video it plays), is answered at once with nothing. A download gets the same checks
+  as one from `onCreated` (on, paused, the rules, site access, Delete held). Its name comes from
+  `Content-Disposition` (`filename*` first; a name only, never a path), its cookies from the request's own
+  cookie store (`cookieStoreId`), and its referrer from the page that started it (`originUrl`). The request
+  is cancelled only after the app or server accepts the handoff, so Firefox never starts the download or asks
+  where to save it. A cancelled typed address leaves the tab on the page it was on. Refused or unreachable,
+  Firefox goes on as before, and the `onCreated` that follows leaves it alone for a minute, since the user was
+  already told. With "ask each time" the folder window opens and the request goes. Keep in browser, or closing
+  the window, starts the download again in Firefox (`downloads.download`), and that one is let through. A
+  form POST is never caught this way, since it can't be sent again; it still reaches `onCreated`.
 - **Differences handled in code.** No `downloads.onDeterminingFilename` (see above);
   `cookies.getPartitionKey` is optional already. A caught download's cookies come from its own cookie store
   (`DownloadItem.cookieStoreId`, a container tab's container), on the automatic and the "ask" paths alike;
@@ -113,7 +132,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `register-native-host.ps1` (install, repair, updater) write both; the key is optional like Edge's, and
   uninstall removes it only when it is this install's. The Host does not yet report or repair the Firefox
   key (only Chrome's and Edge's).
-- **Not verified:** a run in a real Firefox, signing, and Firefox's install prompt for host permissions.
+- **Checked in Firefox 159** (2026-11-08, a test profile with "Always ask" on): automatic catching (EXT.B3), and
+  catching before the Save dialog for a clicked link and a typed address (EXT.B5). **Not verified:** Firefox's
+  install prompt for host permissions.
 
 ## Which downloads are caught (EXT.B1)
 

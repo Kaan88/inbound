@@ -38,7 +38,8 @@ implemented.
 Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1).
 Edge users install the Chrome Web Store listing (same ID); Setup, repair and the Host register the native host under
 Edge's key too. In Edge the owner checked automatic catching (2026-11-08). Firefox gets its own build and gecko ID, which the app accepts
-from 0.6.0; this is not yet checked in Firefox (EXT.B3).
+from 0.6.0; checked in Firefox 159 with a test profile (EXT.B3). In Firefox, downloads are caught from
+their response headers with blocking `webRequest`, before Firefox's own Save dialog (EXT.B5).
 Extension 0.5.0 sends downloads automatically by default. Its popup lists the newest 20 downloads of the app (and
 of a paired server) and can pause, resume, retry and delete them (and the file). It can optionally pair with the user's own Inbound server. A download
 from a site the extension has no access to stays in the browser with a note (EXT.R5).

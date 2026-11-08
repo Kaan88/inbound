@@ -45,11 +45,11 @@ html:has(body.popup) {
   width: 390px;
 }
 
+/* Fixed sizes only. Firefox sizes a popup to its content and measures it in a viewport that starts tiny, so caps in
+   vw/vh clamped the content to that and the popup opened small, with a scroll bar (owner, 2026-11-08). */
 body.popup {
   width: 390px;
-  min-width: min(370px, 100vw);
-  max-width: min(400px, 100vw);
-  max-height: min(600px, 100vh);
+  max-height: 600px;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 14px;
@@ -381,6 +381,12 @@ code {
 }
 .popup .job-list { max-height: 300px; }
 
+/* The popup's This PC / Server switch, shown once a server is paired. */
+.target-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; padding: 5px 12px; background: var(--panel-2); }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; font-weight: 600; }
 /* EXT.B1: whether downloads are caught automatically, always in view. */
 .auto-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .auto-state { font-weight: 600; }

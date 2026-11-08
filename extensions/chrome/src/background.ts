@@ -4,6 +4,7 @@ import { connectionProblem, readableError } from "./connection-problem";
 import { isUnsupportedUrl, UNSUPPORTED_SITE_MESSAGE } from "./unsupported-sites";
 import { chooseDownloadFileName } from "./download-filename";
 import { removeAcceptedBrowserDownload } from "./browser-download-cleanup";
+import { responseDownload, type ResponseDownload } from "./response-download";
 import {
   browserCookieHeaders, cookieContextForDownload, cookieContextForFrame, type BrowserCookieContext,
 } from "./browser-cookies";
@@ -32,6 +33,16 @@ interface PendingHandoff {
   cookieContext?: BrowserCookieContext;
   /** Set for an automatic catch held in the browser while the user chooses a folder (destinationMode "ask"). */
   browserDownloadId?: number;
+  /**
+   * EXT.B5, Firefox: caught from its response, so the browser holds nothing. Keeping it in the browser means
+   * starting the download again there.
+   */
+  restartInBrowser?: boolean;
+}
+
+/** Whether the browser is waiting on this handoff's folder window: a held download, or one to start again. */
+function heldByWindow(pending: PendingHandoff): boolean {
+  return typeof pending.browserDownloadId === "number" || pending.restartInBrowser === true;
 }
 
 /** A download the extension saw and left in the browser, with the reason, for the popup. */
@@ -143,8 +154,33 @@ if (chrome.downloads.onDeterminingFilename) {
   });
 } else {
   chrome.downloads.onCreated.addListener((item) => {
+    // Started again by keepInBrowser for a download caught from its response (EXT.B5): the browser's own now.
+    if (restartedInBrowser.delete(item.url)) return;
     void onDownloadCreated(item).catch(() => undefined);
   });
+  // EXT.B5: Firefox asks where to save ("Always ask you where to save files") before onCreated, so a
+  // download caught there has been through that dialog for nothing. Its response is looked at first instead:
+  // a page or frame load that Firefox would save is handed over, and the request is cancelled only once the
+  // app (or server) has accepted it. Anything else, or any failure, lets Firefox carry on as before. Every
+  // other response is answered at once, without waiting for anything.
+  const webRequest = (chrome as { webRequest?: typeof chrome.webRequest }).webRequest;
+  if (webRequest?.onHeadersReceived) {
+    try {
+      webRequest.onHeadersReceived.addListener(
+        ((details: chrome.webRequest.WebResponseHeadersDetails) => {
+          // A download keepInBrowser started again is Firefox's own, however its request is typed.
+          if (restartedInBrowser.has(details.url)) return undefined;
+          const download = responseDownload(details);
+          if (!download) return undefined;
+          return onDownloadResponse(details, download).catch(() => ({}));
+        }) as unknown as (details: chrome.webRequest.WebResponseHeadersDetails) => chrome.webRequest.BlockingResponse | undefined,
+        { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame"] },
+        ["blocking", "responseHeaders"],
+      );
+    } catch {
+      // Without blocking webRequest (an older manifest), downloads are still caught from onCreated.
+    }
+  }
 }
 // The folder window of a held download keeps a port open to this worker. Its pings keep the worker
 // (and so the browser's file-name callback, which only lives in memory) alive while the window is
@@ -158,8 +194,9 @@ chrome.runtime.onConnect.addListener((port) => {
     return;
   }
   const id = port.name.slice(HANDOFF_PORT_PREFIX.length);
+  connectedHandoffs.add(id);
   port.onMessage.addListener(() => { /* a ping: receiving it is the point */ });
-  port.onDisconnect.addListener(() => { void handoffWindowClosed(id); });
+  port.onDisconnect.addListener(() => { connectedHandoffs.delete(id); void handoffWindowClosed(id); });
 });
 chrome.runtime.onInstalled.addListener((details) => {
   void installMenus();
@@ -354,6 +391,8 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
  */
 async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: () => void): Promise<boolean> {
   await ensureSettingsLoaded();
+  // EXT.B5: its response was already dealt with, and the user told.
+  if (!answer && takeSettledFromResponse(item)) return false;
   updateBadge();
   const fileName = chooseDownloadFileName(item.filename, item.url, item.finalUrl);
   // blob: and data: downloads are the page's own; nothing is said about them.
@@ -489,6 +528,152 @@ async function onDownloadCreated(item: chrome.downloads.DownloadItem, answer?: (
 }
 
 /**
+ * EXT.B5, Firefox: downloads already dealt with from their response and left to Firefox on purpose (Delete
+ * held, refused or not reachable, with the user told). When onCreated then sees one, it leaves it alone and
+ * says nothing more. Keyed by address, for a minute.
+ */
+const settledFromResponse = new Map<string, number>();
+
+/** Folder windows whose port is open, by handoff id. */
+const connectedHandoffs = new Set<string>();
+
+/** How long a folder window for a download caught from its response has to connect before it goes back to Firefox. */
+const RESPONSE_WINDOW_CONNECT_MS = 20_000;
+/** The tests' shorter wait; never set in a browser. */
+function responseWindowConnectMs(): number {
+  const override = (globalThis as { __inboundResponseWindowConnectMs?: unknown }).__inboundResponseWindowConnectMs;
+  return typeof override === "number" ? override : RESPONSE_WINDOW_CONNECT_MS;
+}
+
+function settleFromResponse(url: string): void {
+  const now = Date.now();
+  for (const [key, until] of settledFromResponse) if (until < now) settledFromResponse.delete(key);
+  settledFromResponse.set(url, now + 60_000);
+}
+
+function takeSettledFromResponse(item: chrome.downloads.DownloadItem): boolean {
+  for (const url of [item.url, item.finalUrl]) {
+    if (!url) continue;
+    const until = settledFromResponse.get(url);
+    if (until === undefined) continue;
+    settledFromResponse.delete(url);
+    if (until >= Date.now()) return true;
+  }
+  return false;
+}
+
+/**
+ * EXT.B5, Firefox: a page or frame load whose response Firefox would save. The same checks as a download
+ * caught from onCreated, in the same order. The answer cancels the request only once the app or server has
+ * accepted it (or the folder window has it); every other answer lets Firefox go on, and then onCreated sees
+ * the download as before unless this already said what became of it.
+ */
+async function onDownloadResponse(details: chrome.webRequest.WebResponseHeadersDetails,
+  download: ResponseDownload): Promise<chrome.webRequest.BlockingResponse> {
+  await ensureSettingsLoaded();
+  const proceed: chrome.webRequest.BlockingResponse = {};
+  // Off or paused: onCreated says so, as it does for every download.
+  if (!settings.enabled || !settings.autoIntercept || Date.now() < pauseUntil) return proceed;
+
+  const url = details.url;
+  const extra = details as { originUrl?: string; cookieStoreId?: string };
+  const referrer = isHttpUrl(extra.originUrl) ? extra.originUrl : undefined;
+  const fileName = download.fileName || chooseDownloadFileName(undefined, url);
+  const decision = decideCapture({ url, finalUrl: url, referrer, mime: download.mime, fileName }, settings);
+  // Not to be caught: onCreated comes to the same answer and says it there.
+  if (!decision.capture) return proceed;
+  if (!await canReadCookiesFor(url)) return proceed;
+
+  if (await hasDeleteGesture(url)) {
+    await noteLeftInBrowser(fileName, "Delete was held when the download started.", true);
+    settleFromResponse(url);
+    return proceed;
+  }
+
+  const cookieContext: BrowserCookieContext = extra.cookieStoreId ? { storeId: extra.cookieStoreId } : {};
+  if (settings.destinationMode === "ask") {
+    // Firefox has nothing to pause yet, so the request goes and the folder window holds the details. Keep in
+    // browser, or closing the window, starts the download again in Firefox (keepInBrowser).
+    return await holdResponseForFolderChoice(url, referrer, fileName, download, cookieContext) ? { cancel: true } : proceed;
+  }
+
+  const transport = transportFor(automaticTarget(settings.defaultTarget, server !== null));
+  const where = targetWords(transport);
+  try {
+    const ack = await requestHandoff(transport, {
+      requestId: crypto.randomUUID(),
+      extensionId: chrome.runtime.id,
+      url,
+      pageUrl: referrer,
+      referrer,
+      userAgent: navigator.userAgent,
+      suggestedFileName: fileName,
+      mimeType: download.mime || undefined,
+      totalBytes: download.totalBytes,
+      startMode: settings.startMode,
+      isAutoIntercept: true,
+      headers: await browserCookieHeaders(url, cookieContext, url),
+    });
+    if (ack?.accepted) {
+      notify(ack.duplicate ? `Already in ${where.name}` : `Sent to ${where.name}`, fileName);
+      return { cancel: true };
+    }
+    const refusal = ack?.error ?? ack?.message ?? `The ${where.thing} refused it.`;
+    notify(`${where.subject} did not accept the download`, `${refusal} This download stays in your browser.`);
+    setLastError(transport, refusal);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setLastError(transport, message);
+    notify(where.unavailable, `${errorFor(transport, message)} This download stays in your browser.`);
+  }
+  settleFromResponse(url);
+  return proceed;
+}
+
+/** "Ask each time" for a download caught from its response: the folder window, with nothing held in Firefox. */
+async function holdResponseForFolderChoice(url: string, referrer: string | undefined, fileName: string,
+  download: ResponseDownload, cookieContext: BrowserCookieContext): Promise<boolean> {
+  const id = crypto.randomUUID();
+  const pending: PendingHandoff = {
+    id,
+    url,
+    pageUrl: referrer,
+    referrer,
+    userAgent: navigator.userAgent,
+    suggestedFileName: fileName,
+    mimeType: download.mime || undefined,
+    totalBytes: download.totalBytes,
+    isAutoIntercept: true,
+    createdAt: Date.now(),
+    cookieContext,
+    restartInBrowser: true,
+  };
+  try {
+    pendingHandoffs.set(id, pending);
+    await chrome.storage.session.set({ [`handoff.${id}`]: pending });
+    await chrome.windows.create({
+      url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
+      type: "popup",
+      width: 560,
+      height: 680,
+    });
+    // The request is gone, so only this handoff holds the download. A window that never connects (it failed
+    // to load, or was closed before it could) would never give it back: then it starts again in Firefox.
+    const fallback = setTimeout(() => {
+      if (connectedHandoffs.has(id) || confirmingHandoffs.has(id)) return;
+      void pendingHandoff(id).then((still) => { if (still) return keepInBrowser(still); }).catch(() => undefined);
+    }, responseWindowConnectMs());
+    (fallback as { unref?: () => void }).unref?.();
+    return true;
+  } catch {
+    // No window, no choice: Firefox keeps it, as on any other failure.
+    pendingHandoffs.delete(id);
+    await chrome.storage.session.remove(`handoff.${id}`).catch(() => undefined);
+    return false;
+  }
+}
+
+/**
  * Lets a paused browser download continue. Firefox cannot continue some paused downloads (a server
  * that does not resume, for one); then the popup keeps a note so the user knows to start it again.
  */
@@ -565,6 +750,25 @@ async function forgetHandoff(id: string): Promise<void> {
 async function keepInBrowser(pending: PendingHandoff): Promise<void> {
   await forgetHandoff(pending.id);
   const downloadId = pending.browserDownloadId;
+  if (pending.restartInBrowser) {
+    // EXT.B5: Firefox never had it. It starts now, and onCreated lets this one through.
+    restartedInBrowser.add(pending.url);
+    // In the container (or private window) it came from, so its sign-in still applies.
+    const storeId = pending.cookieContext?.storeId;
+    const where = storeId === "firefox-private" ? { incognito: true } : storeId ? { cookieStoreId: storeId } : {};
+    try {
+      await chrome.downloads.download({
+        url: pending.url,
+        filename: pending.suggestedFileName || undefined,
+        ...where,
+      } as chrome.downloads.DownloadOptions);
+    } catch {
+      restartedInBrowser.delete(pending.url);
+      await noteLeftInBrowser(pending.suggestedFileName ?? "download",
+        "The browser could not start it. Download it again from the page.", false);
+    }
+    return;
+  }
   if (typeof downloadId !== "number") return;
   const answer = heldSuggestions.get(downloadId);
   heldSuggestions.delete(downloadId);
@@ -597,7 +801,7 @@ async function handoffWindowClosed(id: string): Promise<void> {
     return;
   }
   const pending = await pendingHandoff(id).catch(() => undefined);
-  if (typeof pending?.browserDownloadId === "number") await keepInBrowser(pending);
+  if (pending && heldByWindow(pending)) await keepInBrowser(pending);
 }
 
 /** The transport for a target; the server only while one is paired. */
@@ -974,7 +1178,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       return {
         ok: true,
         handoff: pending,
-        held: typeof pending.browserDownloadId === "number",
+        held: heldByWindow(pending),
         defaults: {
           destination: first.defaultFolder,
           favorites: first.favorites,
@@ -1024,7 +1228,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         confirmingHandoffs.delete(id);
         // The window closed while this was being sent. Not accepted: nobody is left to choose, so the
         // held download goes back to the browser, as when the window closes at any other time.
-        if (closedWhileConfirming.delete(id) && !ack?.accepted && typeof pending.browserDownloadId === "number") {
+        if (closedWhileConfirming.delete(id) && !ack?.accepted && heldByWindow(pending)) {
           await keepInBrowser(pending);
         }
       }
@@ -1068,6 +1272,17 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       updateBadge();
       await syncAutoSendWithTabs();
       return { ok: true, settings };
+    }
+
+    case "dm.setDefaultTarget": {
+      // The popup's This PC / Server switch (owner, 2026-11-08): changes where downloads go and nothing else.
+      if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
+      const wanted: TargetId = message.target === "server" ? "server" : "local";
+      if (wanted === "server" && !server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
+      settings = { ...settings, defaultTarget: wanted };
+      await chrome.storage.local.set({ settings });
+      updateBadge();
+      return { ok: true, automaticTarget: automaticTarget(settings.defaultTarget, server !== null) };
     }
 
     case "dm.pauseCatching": {
