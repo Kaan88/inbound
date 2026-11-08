@@ -182,8 +182,14 @@ test('EXT.R1: without a server there is one target, and nothing is asked of a se
     await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: 'D:\\Downloads', favorites: [] });
     const shown = await info;
     assert.deepEqual(shown.targets.map(t => t.id), ['local']);
-    // A page asking for the server without one paired gets this PC.
-    const confirmed = sendRuntimeMessage(harness, { type: 'dm.confirmHandoff', id, destination: '', startMode: 'now', target: 'server' }, ownPage('handoff.html'));
+    // A page asking for the server without one paired (unpaired while its window was open) is refused, not
+    // sent to this PC: its folder may be one of the server's.
+    const refused = await sendRuntimeMessage(harness, { type: 'dm.confirmHandoff', id, destination: '/downloads/music', startMode: 'now', target: 'server' }, ownPage('handoff.html'));
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /not paired/);
+    assert.equal(server.calls.length, 0);
+    // This PC still works for the same download.
+    const confirmed = sendRuntimeMessage(harness, { type: 'dm.confirmHandoff', id, destination: '', startMode: 'now', target: 'local' }, ownPage('handoff.html'));
     await answerNative(harness, 'handoff.request', { accepted: true });
     assert.equal((await confirmed).target, 'local');
     assert.equal(server.calls.length, 0);

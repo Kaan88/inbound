@@ -251,6 +251,31 @@ test('EXT.B2 folder window: Keep in browser and Escape do nothing while a send i
   }
 });
 
+test('EXT.B2 folder window: the This PC / Server choice is held while the folder dialog is open', async () => {
+  const pick = deferred();
+  const page = installPage('?id=h1', {
+    'dm.getHandoff': async () => ({ ok: true, held: false, handoff: { id: 'h1', url: 'https://example.test/a.zip' },
+      defaults: { destination: 'D:\\Default' }, target: 'local',
+      targets: [{ id: 'local', label: 'This PC', chooser: 'dialog', defaultFolder: 'D:\\Default', favorites: [] },
+        { id: 'server', label: 'Server', chooser: 'list', defaultFolder: '/downloads', favorites: [] }] }),
+    'dm.pickFolder': () => pick.promise,
+  });
+  try {
+    loadTs('handoff.ts');
+    await page.domReady();
+    const radios = page.el('targetChoice').children.flatMap(label => label.children).filter(node => node.type === 'radio');
+    assert.equal(radios.length, 2);
+    assert.ok(radios.every(radio => !radio.disabled));
+    const picking = page.el('browseDestination').click();
+    assert.ok(radios.every(radio => radio.disabled), 'no target switch while the folder dialog is open');
+    pick.resolve({ ok: true, path: 'E:\\Chosen' });
+    await picking;
+    assert.ok(radios.every(radio => !radio.disabled));
+  } finally {
+    page.restore();
+  }
+});
+
 test('EXT.B2 folder window: an expired request keeps Send off after a pick', async () => {
   const page = installPage('?id=h1', {
     'dm.getHandoff': async () => ({ ok: false, error: 'expired' }),

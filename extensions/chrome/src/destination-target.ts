@@ -21,6 +21,8 @@ export interface OfferedTarget {
 export function renderTargetChoice(field: HTMLElement, list: HTMLElement, targets: readonly OfferedTarget[],
   selected: TargetId, onChange: (target: OfferedTarget) => void): TargetId {
   list.replaceChildren();
+  const radios: HTMLInputElement[] = [];
+  targetRadios.set(list, radios);
   field.classList.toggle("hidden", targets.length < 2);
   if (targets.length < 2) return targets[0]?.id ?? "local";
   for (const target of targets) {
@@ -32,6 +34,7 @@ export function renderTargetChoice(field: HTMLElement, list: HTMLElement, target
     radio.value = target.id;
     radio.checked = target.id === selected;
     radio.addEventListener("change", () => { if (radio.checked) onChange(target); });
+    radios.push(radio);
     const text = document.createElement("span");
     text.textContent = target.label;
     label.append(radio, text);
@@ -44,6 +47,16 @@ export function renderTargetChoice(field: HTMLElement, list: HTMLElement, target
     list.append(label);
   }
   return selected;
+}
+
+const targetRadios = new WeakMap<HTMLElement, HTMLInputElement[]>();
+
+/**
+ * Holds the target choice while a folder pick or a send runs (EXT.B2): a switch then would put one target's
+ * folder in the other target's request, or show a target the request is not going to.
+ */
+export function setTargetChoiceEnabled(list: HTMLElement, enabled: boolean): void {
+  for (const radio of targetRadios.get(list) ?? []) radio.disabled = !enabled;
 }
 
 interface FolderListing {
