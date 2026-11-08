@@ -47,8 +47,17 @@
                         </FontIcon.RenderTransform>
                     </FontIcon>
                     <TextBlock Grid.Column="1" Text="Download speed" FontSize="11" VerticalAlignment="Center" />
-                    <TextBlock x:Name="Summary" Grid.Column="2" Margin="6,0,0,0" FontSize="11" VerticalAlignment="Center"
-                               Foreground="{ThemeResource InboundSecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
+                    <!-- UI.R6: each rate in a box of its own with the figures on the right, so the words after it don't move as it changes. -->
+                    <StackPanel x:Name="Summary" Grid.Column="2" Margin="6,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="SummaryCurrent" FontSize="11" MinWidth="64" TextAlignment="Right"
+                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        <TextBlock Text="   ·   Average " FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        <TextBlock x:Name="SummaryAverage" FontSize="11" MinWidth="64" TextAlignment="Right"
+                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        <TextBlock Text="   ·   Peak " FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        <TextBlock x:Name="SummaryPeak" FontSize="11" MinWidth="64" TextAlignment="Right"
+                                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
                 </Grid>
             </Button>
 

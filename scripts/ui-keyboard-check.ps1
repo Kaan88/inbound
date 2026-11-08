@@ -24,15 +24,19 @@ public static class UiKeyboardCheckNative {
   }
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   // Real key input, so the app's own Shift state check sees the key held (PostMessage would not set it).
-  public static void Delete(IntPtr top, bool shift) {
+  // Sent only while the app's window is in front: Shift+Delete in another window can delete files for good.
+  public static bool Delete(IntPtr top, bool shift) {
     SetForegroundWindow(top);
     System.Threading.Thread.Sleep(150);
+    if (GetForegroundWindow() != top) return false;
     if (shift) keybd_event(0x10, 0x2A, 0, UIntPtr.Zero);
     keybd_event(0x2E, 0x53, 1, UIntPtr.Zero);
     System.Threading.Thread.Sleep(60);
     keybd_event(0x2E, 0x53, 3, UIntPtr.Zero);
     if (shift) keybd_event(0x10, 0x2A, 2, UIntPtr.Zero);
+    return true;
   }
   public static void Enter(IntPtr hwnd) {
     PostMessage(hwnd, 0x0100, (IntPtr)13, (IntPtr)1);
@@ -163,7 +167,10 @@ if ($rows.Count -gt 0) {
     foreach ($case in @(@{ Name = 'SHIFT-DELETE'; Shift = $true; Expect = 'On' }, @{ Name = 'DELETE-KEY'; Shift = $false; Expect = 'Off' })) {
         $target.SetFocus()
         Start-Sleep -Milliseconds 200
-        [UiKeyboardCheckNative]::Delete($hwnd, $case.Shift)
+        if (-not [UiKeyboardCheckNative]::Delete($hwnd, $case.Shift)) {
+            Write-Output "$($case.Name) skipped: the app's window could not be brought to the front, so no key was sent"
+            continue
+        }
         Start-Sleep -Milliseconds 900
         $state = DeleteBox-State
         $verdict = if ($state -eq 'absent') { 'n/a (no finished row selected)' } elseif ($state -eq $case.Expect) { 'ok' } else { 'WRONG' }

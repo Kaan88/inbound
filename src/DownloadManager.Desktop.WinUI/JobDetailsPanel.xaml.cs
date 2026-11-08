@@ -306,6 +306,14 @@ public sealed partial class JobDetailsPanel : UserControl
         {
             Grid.SetColumn(element, column);
             element.VerticalAlignment = VerticalAlignment.Center;
+            // UI.R6: Downloaded and Speed are live counters in fixed columns. Right-aligned, header and rows alike,
+            // their units hold still as the digit count changes.
+            if (column is 2 or 3 && element is TextBlock counter)
+            {
+                counter.HorizontalAlignment = HorizontalAlignment.Right;
+                counter.TextAlignment = TextAlignment.Right;
+            }
+
             row.Children.Add(element);
             return element;
         }
