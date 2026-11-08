@@ -4,7 +4,9 @@ param(
     [int]$BytesPerSecond = 262144,
     [int[]]$KillAtPercent = @(20, 50, 80),
     [int[]]$Connections = @(1, 8),
-    [string]$AppDir
+    [string]$AppDir,
+    # A test instance name: with it, the matrix's Host gets its own pipe and runs beside an installed copy.
+    [string]$Instance = ("killmatrix" + (Get-Random -Minimum 1000 -Maximum 9999))
 )
 
 # Kill/restart matrix (ROADMAP P2.7 / P5.6 / X.5): for each connection count, downloads a
@@ -22,16 +24,17 @@ $serverExe = Join-Path $root "tools\TestServer\bin\Release\net10.0\TestServer.ex
 foreach ($exe in $hostExe, $cliExe, $serverExe) {
     if (-not (Test-Path $exe)) { throw "Missing $exe (build Release first)." }
 }
-if (Get-Process DownloadManager.Host -ErrorAction SilentlyContinue) {
-    throw "A Download Manager Host is already running; exit it first (tray > Exit)."
-}
+# Only this matrix's own Host counts: with DOWNLOADMANAGER_INSTANCE set, other copies (the installed app,
+# other test instances) use other pipes and are left alone.
 
 $work = Join-Path $root ("artifacts\kill-restart\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $data = Join-Path $work "data"
 $downloads = Join-Path $work "downloads"
 New-Item -ItemType Directory -Path $data, $downloads -Force | Out-Null
 $previousData = $env:DOWNLOADMANAGER_DATA
+$previousInstance = $env:DOWNLOADMANAGER_INSTANCE
 $env:DOWNLOADMANAGER_DATA = $data
+$env:DOWNLOADMANAGER_INSTANCE = $Instance
 $port = Get-Random -Minimum 20000 -Maximum 40000
 $base = "http://127.0.0.1:$port"
 $size = $SizeMiB * 1MB
@@ -159,6 +162,7 @@ finally {
     }
     finally {
         $env:DOWNLOADMANAGER_DATA = $previousData
+        $env:DOWNLOADMANAGER_INSTANCE = $previousInstance
     }
 }
 
