@@ -10,7 +10,7 @@
 #
 # Each instance gets its own copy of the binaries under OUTDIR, so the sampler finds its processes by path.
 set -u
-MODE=$1; OUTDIR=$2
+MODE=$1; OUTDIR=$2; PORT=${PERF_PORT:-5251}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$OUTDIR"; OUTDIR=$(cd "$OUTDIR" && pwd)
 ps1() { local f=$1; shift; powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$ROOT/scripts/$f")" "$@" | tr -d '\r'; }
@@ -22,21 +22,24 @@ setup() { # $1 name: copies binaries and starts a Host for a fresh instance
   cp -r "$ROOT/src/DownloadManager.Host/bin/Release/net10.0-windows" "$INST/bin/host"
   cp -r "$ROOT/src/DownloadManager.Desktop.WinUI/bin/x64/Release/net10.0-windows10.0.19041.0" "$INST/bin/host/desktop"
   cp -r "$ROOT/src/DownloadManager.Cli/bin/Release/net10.0" "$INST/bin/cli"
+  cp -r "$ROOT/tools/TestServer/bin/Release/net10.0" "$INST/bin/testserver"
   rm -f "$INST/bin/host/desktop/ui-trace.log"
   export DOWNLOADMANAGER_INSTANCE="perf-window-$name-$$"
   export DOWNLOADMANAGER_DATA=$(cygpath -w "$INST/data")
   C="$INST/bin/cli/DownloadManager.Cli.exe"; WIN_BIN=$(cygpath -w "$INST/bin"); TRACE="$INST/bin/host/desktop/ui-trace.log"
+  # Adding a download asks its server for the file's name, so the jobs point at a local TestServer that answers.
+  "$INST/bin/testserver/TestServer.exe" --port "$PORT" >/dev/null 2>&1 &
   "$INST/bin/host/DownloadManager.Host.exe" --background >/dev/null 2>&1 &
   for _ in $(seq 1 30); do sleep 1; timeout 20 "$C" host status >/dev/null 2>&1 && break; done
   timeout 20 "$C" settings set defaultdir "$(cygpath -w "$INST/downloads")" >/dev/null
 }
 
-add_jobs() { # $1 count: held for later, so nothing downloads (the address is never fetched)
+add_jobs() { # $1 count: held for later, so nothing downloads
   local done=0 n a b
   while [ "$done" -lt "$1" ]; do
     n=$(( $1 - done )); [ "$n" -gt 1000 ] && n=1000
     printf -v a '%05d' $((done + 1)); printf -v b '%05d' $((done + n))
-    timeout 300 "$C" add-batch "http://127.0.0.1:9/file/job-[$a-$b].bin?size=1048576" --start later --yes >/dev/null 2>&1
+    timeout 300 "$C" add-batch "http://127.0.0.1:$PORT/file/job-[$a-$b].bin?size=1048576" --start later --yes >/dev/null 2>&1
     done=$((done + n))
   done
 }
@@ -74,10 +77,15 @@ open_and_time() { # $1 label, $2 repeat, $3 option, $4 jobs, $5 occurrence of th
   echo "$1,$4,$3,$2,$((tw - t0)),${ts:+$((ts - t0))},${tf:+$((tf - t0))}" >> "$OUTDIR/coldopen.csv"
 }
 
-close_window() { # closes it through UI Automation; with the option on, waits for the process to end
+close_window() { # posts WM_CLOSE, as the close button does, until the window is off screen (option off) or its
+  # process has ended (option on). A posted WM_CLOSE is ignored the first time in these runs, so it is repeated.
+  local try check
+  [ "$1" = on ] && check=-Gone || check=-Hidden
   sleep 3
-  ps1 soak-hide-window.ps1 -Root "$WIN_BIN" >/dev/null
-  if [ "$1" = on ]; then ps1 perf-window-wait.ps1 -Root "$WIN_BIN" -Ready "$(cygpath -w "$INST/gone")" -Gone >/dev/null; fi
+  for try in 1 2 3 4; do
+    echo "close $1 try $try: $(ps1 soak-hide-window.ps1 -Root "$WIN_BIN" | paste -sd' ')" >> "$OUTDIR/close.log"
+    ps1 perf-window-wait.ps1 -Root "$WIN_BIN" -Ready "$(cygpath -w "$INST/closed")" $check -TimeoutSeconds 8 | grep -q timeout || break
+  done
   sleep 2
 }
 
