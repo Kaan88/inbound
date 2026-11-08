@@ -52,7 +52,7 @@
   <div>
     <label class="label" for="{uid}-date">One-time date (optional)</label>
     <input id="{uid}-date" class="field" type="date" bind:value={draft.schedule.startDate} />
-    <p class="hint mt-1">{draft.schedule.startDate ? 'Runs once, on this date.' : 'Repeat on the days above'}</p>
+    {#if !draft.schedule.startDate}<p class="hint mt-1">Repeat on the days above</p>{/if}
   </div>
 
   <div class="sm:col-span-2">
