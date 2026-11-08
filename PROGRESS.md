@@ -46,9 +46,21 @@
   - `artifacts\firefox-addon\inbound-bridge-0.5.0-firefox.zip` (unsigned, for AMO).
 - None of these packages contains a credential from the credentials file.
 - Draft notes are in `artifacts\release\v0.6.0-notes.md`.
-- Waiting for the owner's ultrareview before any squash to `main`, tag, `gh release` or GHCR publish.
+- **Reviews (2026-11-08), all fixed on `dev` (ROADMAP REV.1, REV.2):**
+  - My release review: 17 confirmed findings, each fixed in its own branch (`fix/engine`, `fix/runtime`, `fix/persist`, `fix/server`, `fix/extension`, `fix/winui`, `fix/webui`) by an agent working from `bfee07b`.
+    - I reviewed the engine, runtime, secrets and server diffs myself (concurrency, durability, security).
+    - Haiku reviewed the extension, WinUI and web UI diffs. It found one more gap, fixed on `dev`: Download All read the default cookie store on Firefox.
+  - The owner's ultrareview: 10 findings. Three were the same as mine: (1) is my 3, (3) is my 12, and (8) is next to my 4.
+    - (2) The roots escape through provider adds, the one security finding, is fixed with two tests that fail without the fix.
+    - (4) did not reproduce. 7-Zip 26.04 on Linux lists a zip's backslashes as `/` (checked on the test VM), and a test pins it.
+    - (5)–(10) are fixed; ROADMAP REV.2 has each one.
+  - Seen once in eight Archives runs, with no message captured: `Rar5ExtractionTests.HeaderPasswordExtracts` failed, then passed alone and in seven full runs. Unexplained; watch for it.
+  - Not checked in a real browser: Firefox's `cookieStoreId`, `storage.local.setAccessLevel` and `permissions.contains`, which the extension tests stand in for.
+  - Not seen on screen: the Options Theme box and the refused install dialog.
+  - New open item: EXT.R3 (Chrome and Edge with site access withdrawn by the user).
+- **The release assets above were built before these fixes and have to be rebuilt.**
 - **Not done:**
-  - A clean-install and upgrade run of this Setup in the Windows VM.
+  - The clean-install and upgrade run with the Setup rebuilt after the review fixes. The run with the earlier 0.6.0 Setup passed (TEST.2, evidence in `artifacts\campaign\20261108-final\vm-0.5.3-to-0.6.0\`): 0.5.3 to 0.6.0 kept both jobs, wrote the Chrome, Edge and Firefox keys, and turned PERF.5 on once. Uninstall kept the state and stopped only the installed Host.
   - The PERF.2 rerun on `dev`: started 2026-11-08 10:50 UTC as `soak-fixed` (`artifacts\soak\soak-fixed\` in the `dev` worktree, a test instance, stops by itself about 18:50 UTC; `bash scripts/soak.sh --stop soak-fixed` stops it earlier). Summarise with `python -I scripts/soak-summary.py artifacts/soak/soak-fixed`.
   - EXT.B3 (Firefox), which needs this build installed.
 
