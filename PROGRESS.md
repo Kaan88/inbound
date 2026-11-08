@@ -1,5 +1,19 @@
 # Progress — session handoff
 
+### `webui` merged; owner answers (2026-11-08)
+
+- `webui` (D2 web UI with sign-in and pairing, D3 Docker image and compose, the extension's server transport, D4 on the VM) merged into `dev`. The extension's folder and batch windows conflicted (the EXT.B2 gate against the This PC / Server choice) and were combined by hand. A review of that merge found real gaps, now fixed: the target radios stayed live during a folder pick or a send (a local folder could go into a server request), the server folder list could stay open during a send, and a request for a server unpaired meanwhile went to this PC with its server folder (now refused).
+- Full runs on merged `dev`:
+  - Windows, all green: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 71; extension 130; web UI 37, `svelte-check` clean. Results in `artifacts\campaign61108-merged-webui\`.
+  - Linux (the owner's VM, .NET 10 SDK container, `Platform!=Windows`): Core 862, Engine 159, Archives 274 (52 skipped, need Rar.exe), Containers 183, TorBox 323, Server 71, Integration 1,090 (7 skipped). The first Integration run failed 50 tests that need the Windows Host or registry and had no Windows tag; they are tagged now.
+- Firefox: addons.mozilla.org warned that `data_collection_permissions` needs Firefox 140 (Android 142) while the manifest said 128. The build now asks for 140.0 and `gecko_android` 142.0. Its warnings about `cookies.getPartitionKey` and `downloads.onDeterminingFilename` stay: the code checks for both and Firefox takes the other path.
+- Owner answers, 2026-11-08:
+  - UI.R22 (selected rows hard to see): leave it as is. Closed.
+  - TB.L1: keep 16 connections per TorBox file.
+  - Automatic sending on a fresh extension install: on. `DEFAULT_SETTINGS.autoIntercept` is now true; Settings still opens on install with the explanation; an update keeps the saved choice. Docs and the privacy page say so (the online copy needs the same change when this ships).
+  - Image license label: the owner has no license in mind. The image keeps no `licenses` label until one is chosen.
+  - UI.B11: the owner asked what "exiting" means. Answer given: Tasks > Exit in the window and Exit in the tray menu quit the whole app (the Host), which pauses running downloads; closing the window does not. Waiting on the decision.
+
 ### Test campaign merged into `dev` (2026-11-08)
 
 - Merged after review fixes: `campaign-recovery` (independent recovery check), `campaign-ext` (extension end to end in Chrome for Testing, EXT.B2), `campaign-ui` (dark and light walkthrough, UI.B8 dialog guard, layout and script fixes) and `perf` (UP.B2, PERF.2/3/5, UI.B13 to UI.B15, PERF.7).

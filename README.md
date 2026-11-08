@@ -16,7 +16,7 @@ Program files install to `%LOCALAPPDATA%\Programs\Inbound Download Manager`; set
 
 ## Chrome extension
 
-The extension needs the desktop app, which it reaches through a per-user native-messaging host. Automatic sending is off until you turn it on in the extension's Settings.
+The extension needs the desktop app, which it reaches through a per-user native-messaging host. Automatic sending is on from a fresh install; the extension's Settings, which open on install, can turn it off.
 
 To load it from source, build it (see below), open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `extensions\chrome\dist`. The extension ID is pinned by the manifest key.
 

@@ -379,16 +379,16 @@ test('file-name hook holds the download and answers when the browser keeps it', 
 const ruleSettings = { enabled: true, autoIntercept: true, startMode: 'now',
   interceptedExtensions: [], excludedExtensions: [], excludedHosts: [], notifications: false };
 
-test('a fresh install opens Settings and catches nothing until the user turns it on', async () => {
+test('a fresh install opens Settings, with automatic sending on', async () => {
   const harness = makeChrome(undefined, { id: 'seed' });
   let opened = 0;
   harness.chrome.runtime.openOptionsPage = async () => { opened++; };
   await withBackground(harness, async () => {
     harness.chrome.runtime.onInstalled.listeners[0]({ reason: 'install' });
     assert.equal(opened, 1);
-    await startDownload(harness, { url: 'https://file.test/a.zip' });
-    assert.deepEqual(harness.pausedDownloads, []);
-    assert.equal(harness.nativeMessages.length, 0);
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' });
+    assert.equal(status.settings.autoIntercept, true);
+    // Nothing is stored until the user saves: the default stays the default.
     assert.equal(harness.values.settings, undefined);
   });
 });
