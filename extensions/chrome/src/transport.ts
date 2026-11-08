@@ -217,7 +217,7 @@ export const SERVER_STORAGE_KEY = "server";
 export type FetchLike = (input: string, init: {
   method: string;
   headers: Record<string, string>;
-  body: string;
+  body?: string;
   signal?: AbortSignal;
   credentials?: "omit";
   cache?: "no-store";
@@ -240,15 +240,21 @@ function unreachable(address: string): string {
  * POST with the token in Authorization. Cookies are never sent (credentials "omit"), and a redirect is an
  * error rather than followed, so the token goes to the paired address only.
  */
-async function postJson(fetchImpl: FetchLike, url: string, body: unknown, timeoutMs: number,
+function postJson(fetchImpl: FetchLike, url: string, body: unknown, timeoutMs: number,
   headers: Record<string, string>): Promise<{ status: number; body: any }> {
+  return requestJson(fetchImpl, "POST", url, body, timeoutMs, headers);
+}
+
+/** One HTTP request as postJson describes it; a request without a body (DELETE) sends no Content-Type. */
+async function requestJson(fetchImpl: FetchLike, method: "POST" | "DELETE", url: string, body: unknown,
+  timeoutMs: number, headers: Record<string, string>): Promise<{ status: number; body: any }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
+      method,
+      headers: body === undefined ? { ...headers } : { "Content-Type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,
       credentials: "omit",
       cache: "no-store",
@@ -318,6 +324,21 @@ export class ServerTransport implements Transport {
       throw new Error(extractError(reply.payload));
     }
     return reply.payload;
+  }
+
+  /**
+   * Asks the server to remove this browser's pairing (DELETE /api/pair/self with the token), so the token
+   * stops working there too. True only on 204; false when the server did not answer in time, refused, or
+   * is too old to know the call. Never throws: Unpair forgets the token here whatever the answer.
+   */
+  async revokeSelf(timeoutMs = 4000): Promise<boolean> {
+    try {
+      const answer = await requestJson(this.fetchImpl, "DELETE", `${this.pairing.address}/api/pair/self`, undefined,
+        timeoutMs, { Authorization: `Bearer ${this.pairing.token}` });
+      return answer.status === 204;
+    } catch {
+      return false;
+    }
   }
 
   private failed(message: string, connected = false): Error {

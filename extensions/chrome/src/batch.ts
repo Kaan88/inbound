@@ -45,6 +45,9 @@ const successBox = document.getElementById("success") as HTMLParagraphElement;
 
 // EXT.R1: where the batch goes. The background offers the paired server beside this PC.
 let target: TargetId = "local";
+// The chosen target's default folder, shown in Save in as the folder window shows it. Sent only when changed,
+// so the app (or the server) keeps deciding the default when it is left alone.
+let defaultDestination = "";
 let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
@@ -225,7 +228,7 @@ async function sendToApp(): Promise<void> {
       type: "dm.confirmBatch",
       pageUrl,
       tabId: Number.isFinite(requestedTabId) ? requestedTabId : undefined,
-      destination: destinationInput.value.trim(),
+      destination: destinationInput.value.trim() === defaultDestination ? "" : destinationInput.value.trim(),
       startMode: startSelect.value,
       target,
       urls: [...selected].map((url) => ({ url })),
@@ -263,13 +266,22 @@ const serverFolders = new ServerFolderBrowser(document.getElementById("serverFol
   destinationInput.value = path;
 }, showError);
 
-function useTarget(offered: OfferedTarget): void {
+function useTarget(offered: OfferedTarget, keepTyped = false): void {
   target = offered.id;
   serverFolders.close();
-  // A folder typed for one target means nothing on the other.
-  destinationInput.value = "";
+  // A folder typed for one target means nothing on the other: Save in shows the new target's default.
+  // keepTyped: the list arrived late (it waits on the desktop app) and a folder was already chosen for this target.
+  defaultDestination = offered.defaultFolder ?? "";
+  if (!keepTyped) destinationInput.value = defaultDestination;
   destinationInput.placeholder = offered.id === "server" ? "Use the server's default folder" : "Use the app's default folder";
+  // The server did not answer when the window opened: say so now rather than only after Download. Only that
+  // message goes on a switch back, so a page-scan error shown meanwhile stays.
+  if (shownTargetError && errorBox.textContent === shownTargetError) showError("");
+  shownTargetError = offered.id === "server" && offered.error ? offered.error : "";
+  if (shownTargetError) showError(shownTargetError);
 }
+
+let shownTargetError = "";
 
 async function loadTargets(): Promise<void> {
   try {
@@ -279,7 +291,8 @@ async function loadTargets(): Promise<void> {
     const first = offered.find((item) => item.id === response.target) ?? offered[0]!;
     renderTargetChoice(document.getElementById("targetField") as HTMLElement, document.getElementById("targetChoice") as HTMLElement,
       offered, first.id, useTarget);
-    useTarget(first);
+    // Save in starts empty; anything in it now was typed or picked while the list was on its way.
+    useTarget(first, first.id === target && destinationInput.value.trim() !== "");
   } catch { /* this PC, as before a server could be paired */ }
 }
 

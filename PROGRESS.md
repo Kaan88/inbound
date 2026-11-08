@@ -36,6 +36,13 @@ Review of this branch (2026-11-08), each finding checked against the code:
 - **D3b, Dependabot:** `.github/dependabot.yml` for `docker` and `github-actions`, weekly, majors of the base images ignored, nothing auto-merges. The base images moved from `ARG`s into the `FROM` lines so Dependabot can read them. Not checked on GitHub.
 - Tests (Windows, Release): Server.Tests 84/84 after the review fixes (79 before), Core 869/869. No review by a cheaper model: this agent had no way to start one.
 
+### Extension: Download All default folder, Unpair self-revoke (2026-11-08, branch `owner-ext`)
+
+- **EXT.R3** (owner: "Show the default"): Download All's Save in shows the chosen target's default folder from `dm.targets` (the app's, or the server's), switches with the target, and is sent only when changed, so the app still decides when untouched. The EXT.B2 gate and held target radios are unchanged.
+- **EXT.R4** (owner: "Add self-revoke"): Unpair forgets the token, then calls `DELETE /api/pair/self` with the bearer token (4 s); on 204 Settings says the server removed it too, otherwise it keeps the advice to remove it in the web UI. The server endpoint is built on another branch; not yet run against it.
+- Review fixes: a folder typed in Save in before the late `dm.targets` answer is kept (a later target switch still shows that target's default); Unpair with nothing paired says "Not paired" rather than advising removal on a server; `revokeSelf` time-out and wrong-token 401 are tested. Open for the owner: Unpair forgets the token before calling `DELETE /api/pair/self` (the stated order was the reverse), so no download can use the token meanwhile; the end state is the same either way.
+- Evidence: extension `npx tsc --noEmit` clean, `npm test` 143/143 (new: 3 page tests in `form-gate.test.cjs`, 9 in `server-target.test.cjs`, 1 in `transport.test.cjs`; 13 in all), `npm run build` and `npm run build:firefox` succeed. Docs: `docs/browser-integration.md`, `docs/chrome-extension-privacy.md`. Not checked on screen.
+
 ### Owner answers to the open questions (2026-11-08, asked in chat)
 
 To build (each recorded in ROADMAP):
