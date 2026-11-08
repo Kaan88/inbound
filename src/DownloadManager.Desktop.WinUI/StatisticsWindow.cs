@@ -9,7 +9,7 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>Live view of durable download statistics reported by the Host.</summary>
 public sealed class StatisticsWindow : Window
 {
-    private readonly HostConnection _connection = new();
+    private readonly HostConnection _connection;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _captured = new() { Opacity = 0.72, TextWrapping = TextWrapping.Wrap };
@@ -17,9 +17,11 @@ public sealed class StatisticsWindow : Window
     private bool _closed;
     private bool _refreshing;
 
-    public StatisticsWindow()
+    /// <param name="target">The Host whose statistics these are: this PC, or the server the main window shows.</param>
+    public StatisticsWindow(ServerTarget? target = null)
     {
-        Title = "Statistics — Inbound Download Manager";
+        _connection = new HostConnection(target);
+        Title = _connection.IsRemote ? $"Statistics — {_connection.Target.Name} — Inbound Download Manager" : "Statistics — Inbound Download Manager";
         // Tall enough that the closing note is not cut off at 100%; it still scrolls on a shorter screen.
         WindowLayout.ResizeForDpi(this, 650, 720);
         WindowPlacement.Track(this, "statistics");

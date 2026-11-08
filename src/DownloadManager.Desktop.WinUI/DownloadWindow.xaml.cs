@@ -12,7 +12,7 @@ namespace DownloadManager.Desktop.WinUI;
 public sealed partial class DownloadWindow : Window
 {
     private readonly Guid _jobId;
-    private readonly HostConnection _connection = new();
+    private readonly HostConnection _connection;
     private readonly JobViewModel _iconJob = new();
     private JobDto? _job;
     private SettingsDto? _settings;
@@ -26,9 +26,12 @@ public sealed partial class DownloadWindow : Window
     private long? _displayedSpeedLimit;
     private int? _heightBeforeSegments;
 
-    public DownloadWindow(Guid jobId, bool manual = false)
+    /// <param name="target">The Host the download is on: this PC, or a saved server (<c>--server</c>).</param>
+    public DownloadWindow(Guid jobId, bool manual = false, ServerTarget? target = null)
     {
         _jobId = jobId;
+        _connection = new HostConnection(target);
+        ShownServer.Target = _connection.Target;
         _manual = manual;
         InitializeComponent();
         FileIconHeader.DataContext = _iconJob;
@@ -44,7 +47,8 @@ public sealed partial class DownloadWindow : Window
         {
             if (_closed) return;
             _settings = snapshot.Settings;
-            AppTheme.FollowSettings(snapshot.Settings);
+            // Another server's theme is its own; this window keeps this PC's.
+            if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;
             var job = snapshot.Jobs.FirstOrDefault(candidate => candidate.Id == _jobId);
             if (job is null) ShowRemoved();
@@ -216,8 +220,11 @@ public sealed partial class DownloadWindow : Window
         ShowCompletionForJob.IsEnabled = _connected && _job is not null;
         DeleteButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
         DeleteButton.IsEnabled = _connected && _job is not null;
+        // A download on another server: its file is on that machine, so this PC can't open or show it.
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility =
-            complete && _job?.FileRemovedAfterExtraction != true ? Visibility.Visible : Visibility.Collapsed;
+            complete && _job?.FileRemovedAfterExtraction != true && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
+        // The completion window's own default is this PC's choice, kept on this PC's Host; this window talks to the server.
+        if (_connection.IsRemote) DontShowAgain.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>Grows the window so every segment row is visible; restores the height when collapsed.</summary>
@@ -445,7 +452,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPath(bool folder)
     {
-        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction || !RemoteDataRules.MayUseFiles(_connection.IsRemote)) return;
         try
         {
             if (folder)
@@ -459,7 +466,7 @@ public sealed partial class DownloadWindow : Window
 
     private void OpenPathWith()
     {
-        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction) return;
+        if (_job?.State != "completed" || _job.FileRemovedAfterExtraction || !RemoteDataRules.MayUseFiles(_connection.IsRemote)) return;
         try
         {
             if (File.Exists(_job.FinalFilePath))

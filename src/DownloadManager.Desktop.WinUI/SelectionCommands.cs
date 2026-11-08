@@ -1,11 +1,13 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>Why a File menu command has nothing to act on. A null reason means the command is on. Nothing here touches the UI.</summary>
 /// <param name="OpenReason">For what needs the file itself to be there: Open, Open Folder, Move/Rename.</param>
-internal sealed record FileMenuPlan(string? FileReason, string? LocalReason, string? RemoveReason, string? OpenReason = null);
+/// <param name="ShellReason">For what this PC's shell does with the file (Open, Open With, Open Folder): also off for a
+/// download on another server, whose file is on that machine.</param>
+internal sealed record FileMenuPlan(string? FileReason, string? LocalReason, string? RemoveReason, string? OpenReason = null, string? ShellReason = null);
 
 /// <summary>Which file the progress windows talk about. Nothing here touches the UI.</summary>
 internal static class ProgressDetailRules
@@ -37,16 +39,19 @@ internal static class FileMenuRules
     /// <param name="sideRows">Selected rows with no local download behind them: remote jobs and archive records.</param>
     /// <param name="removableSideRows">Those of them that Delete can take off the list. An archive still extracting can't go.</param>
     /// <param name="fileRemoved">That file's archive was removed after extraction.</param>
-    public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false)
+    /// <param name="remote">The window shows another server (<see cref="RemoteDataRules"/>).</param>
+    public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false, bool remote = false)
     {
         var local = singleFile || package;
         var noLocalRow = local ? null : sideRows > 0 ? "no local file selected" : "select a download first";
         var fileReason = singleFile ? null : package ? "select a file, not a package" : noLocalRow;
+        var openReason = fileReason ?? (fileRemoved ? FileRemovedReason : null);
         return new FileMenuPlan(
             fileReason,
             noLocalRow,
             local || removableSideRows > 0 ? null : sideRows > 0 ? "cancel the extraction first" : "select a download first",
-            fileReason ?? (fileRemoved ? FileRemovedReason : null));
+            openReason,
+            openReason ?? (RemoteDataRules.MayUseFiles(remote) ? null : RemoteDataRules.OnAnotherServer));
     }
 
     public static string Label(string text, string? reason) => reason is null ? text : $"{text} ({reason})";

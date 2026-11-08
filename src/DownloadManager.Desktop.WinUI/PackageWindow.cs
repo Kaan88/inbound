@@ -20,7 +20,7 @@ namespace DownloadManager.Desktop.WinUI;
 internal sealed class PackageWindow : Window
 {
     private readonly Guid _packageId;
-    private readonly HostConnection _connection = new();
+    private readonly HostConnection _connection;
 
     // Archive state comes over the connection above. The Host has eight pipe instances for every client on
     // the machine, and each of these windows is a process of its own, so a second connection here adds up.
@@ -74,9 +74,12 @@ internal sealed class PackageWindow : Window
 
     private sealed record Row(ListViewItem Item, Guid JobId, TextBlock Name, TextBlock Status, ProgressBar Bar, TextBlock Size);
 
-    public PackageWindow(Guid packageId)
+    /// <param name="target">The Host the package is on: this PC, or a saved server (<c>--server</c>).</param>
+    public PackageWindow(Guid packageId, ServerTarget? target = null)
     {
         _packageId = packageId;
+        _connection = new HostConnection(target);
+        ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
         Title = "Package status — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 720, 820);
@@ -146,7 +149,8 @@ internal sealed class PackageWindow : Window
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
-            AppTheme.FollowSettings(snapshot.Settings);
+            // Another server's theme is its own; this window keeps this PC's.
+            if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
             _jobs.Clear();
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
@@ -476,7 +480,8 @@ internal sealed class PackageWindow : Window
         }.Where(part => part is not null));
 
         var allDone = members.Count > 0 && completed == members.Count;
-        _openFolder.Visibility = allDone ? Visibility.Visible : Visibility.Collapsed;
+        // Another server's folder is on that machine.
+        _openFolder.Visibility = allDone && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
         _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
         _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
         _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
@@ -549,13 +554,14 @@ internal sealed class PackageWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--job {jobId:D} --manual") { UseShellExecute = false });
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("job", jobId, _connection.Target, manual: true)) { UseShellExecute = false });
         }
         catch (Exception ex) { _notice.Text = $"Could not open progress details: {ex.Message}"; }
     }
 
     private void OpenFolder()
     {
+        if (!RemoteDataRules.MayUseFiles(_connection.IsRemote)) return;
         var folder = _members.Select(id => _jobs.TryGetValue(id, out var job) ? Path.GetDirectoryName(job.FinalFilePath) : null)
             .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
         if (folder is null) { _notice.Text = "The download folder was not found."; return; }

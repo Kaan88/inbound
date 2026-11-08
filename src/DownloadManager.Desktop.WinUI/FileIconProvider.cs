@@ -13,6 +13,8 @@ internal static class FileIconProvider
     // Invoked on the UI thread; no filesystem access or Shell calls before yielding.
     internal static async Task<WriteableBitmap?> LoadAsync(string fileName, string? completedPath, string revision)
     {
+        // A download on another server: its file is on that machine, so only its type's icon (design D9, section 5).
+        completedPath = RemoteDataRules.IconPath(ShownServer.IsRemote, completedPath);
         var key = completedPath is null ? "type:" + Path.GetExtension(fileName) : "file:" + completedPath + ":" + revision;
         Task<byte[]?> task;
         lock (Cache)
