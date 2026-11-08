@@ -417,9 +417,40 @@ export interface FolderBrowseResult {
   parent?: string;
   roots: string[];
   folders: { name: string; path: string }[];
+  /** Only with `files: 'archives'` in the request: the archive files in the folder. */
+  files?: { name: string; path: string; size: number }[];
   truncated: boolean;
   freeBytes?: number;
   totalBytes?: number;
+}
+
+/** The server's last hour of total download speed (speed.history), one figure a second, oldest first. */
+export interface SpeedHistoryResult {
+  start: string;
+  intervalSeconds: number;
+  bytesPerSecond: number[];
+}
+
+/** remote.container.preview: what a container holds, without its links. */
+export interface ContainerPreview {
+  ok?: boolean;
+  error?: string;
+  format: string;
+  notSupported?: boolean;
+  previewId?: string;
+  expiresAt?: string;
+  accountProblem?: string;
+  packages: { index: number; name?: string; comment?: string; hasArchivePassword: boolean; entryCount: number }[];
+  entries: { entryId: number; packageIndex?: number; displayHost?: string; displayName?: string; size?: number; kind: string; reason?: string; canAdd: boolean }[];
+  problems: string[];
+}
+
+/** remote.container.add: how each chosen entry went. */
+export interface ContainerAddResult {
+  ok: boolean;
+  error?: string;
+  outcomes: { entryId: number; ok: boolean; error?: string; note?: string; existing?: boolean }[];
+  jobsLeftOut?: boolean;
 }
 
 export interface FolderSpace {

@@ -403,7 +403,8 @@
           <button class="btn" onclick={() => copy(job.finalFilePath, 'The path was copied.')}>Copy path</button>
           <button class="btn" onclick={() => copy(folderOf, 'The folder path was copied.')}>Copy folder path</button>
         {/if}
-        {#if !complete && !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
+        <!-- A finished download keeps its file: only the address Redownload uses changes. -->
+        {#if !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
           <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'refresh')}>Refresh download address…</button>
         {/if}
         <button class="btn" disabled={!connected} onclick={() => (dialog = 'properties')}>Properties…</button>

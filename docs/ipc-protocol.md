@@ -35,7 +35,8 @@ provider, `remote`, in that order, and a new name is only ever appended; a Host 
 the names after it sit one place earlier there. After those come, when the session has them, `folders`, `updater`,
 `programSettings` (it may set programs the Host runs), `folderPicker` (`host.pickFolder` opens a dialog),
 `openUi`, `shutdown` and `completionActions` (a finished download or schedule may open the file, exit or shut the
-machine down). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+machine down), and `archives` (the `archive.*` messages are answered: extraction started; whether 7-Zip is there right
+now is `archive.settings.get`'s `tool`). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -79,6 +80,9 @@ Every other session keeps the desktop rights above. `HostCommandDispatcher.Close
   alone ("These archives are outside the app's folders, so they can't be changed from another device.").
 - `job.refreshUrl` is refused for a download set to open its file or run a program when it is done: those would then
   act on whatever the new address sends.
+- What a web session adds or hands off is kept with `source: "web"`, whatever source it named (an import, a
+  hand-off), so the Host opens no progress or completion window for it on this PC's screen. The rest of the add
+  follows the source it named. A local client may name `web` too.
 - `settings.update` follows an allow-list (`WebSettingsRules`): queues, schedules, connections, speed, categories'
   names and file types. Every other field must be sent back as it is, or the save is refused with the names of
   the changed fields and nothing is saved; what the Host keeps itself (recent folders and addresses, packages, the
@@ -156,6 +160,7 @@ wrong tries is 429 with `Retry-After`.
 | `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, with no `Origin` header, and gets a `remoteClient` token; with an `Origin` (a page or an extension) it is 403. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
 | `DELETE /api/pair/self` | token | the app's own Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), closes its WebSockets, and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
 | `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
+| `POST /api/upload/container?name=<file name>` | yes | the raw `.rsdf`, `.ccf` or `.dlc` file (16 MB at most), its kind from the name's extension (400 for any other); answers `{ok, upload}` as above, which `remote.container.preview` accepts as its `path`, with the file's `fileName` to name its packages. Too large is 413. |
 
 - **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
   the token hashes. `DOWNLOADMANAGER_PASSWORD` or `DOWNLOADMANAGER_PASSWORD_FILE` sets it instead (hashed at start;
@@ -220,12 +225,16 @@ Only a session whose hello lists `folders` gets these answered; the desktop Host
 folder dialog) and get `error` "Folder browsing is not available here." A web session there does. Both requests reply with `folders.browseResult`
 (`FolderBrowseResult` in `FolderBrowseDtos.cs`).
 
-- `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden folders (the
+- `folders.browse` `{ path, files? }`: the folders inside `path`, sorted by name, hidden folders (the
   Hidden or System attribute on Windows, a leading dot on Linux) and unreadable ones left out, at most 2,000 (then
   `truncated: true`, and the 2,000 are the first by name, not the first the disk returned). A hidden folder is left
   out of the list, not out of reach: its path typed in opens it. An empty or missing `path` lists the allowed roots. The
   reply carries `path` (with links resolved), `parent` (null at a root), `roots`, `folders` (`name`, `path`),
-  `freeBytes` and `totalBytes` of the mount that holds the folder.
+  `files`, `freeBytes` and `totalBytes` of the mount that holds the folder. Files are listed only with
+  `files: "archives"`, for an extraction's chooser: the files whose names extraction can start from (`.rar`, `.7z`,
+  `.zip`, `.tar`, `.gz`, `.tgz`, `.bz2`, `.tbz2`, `.tbz`, `.xz`, `.txz`, `.zst`, `.tzst`, `.001`, by name only), each
+  with `name`, `path` and `size`, under the same rules as the folders (hidden ones left out, a link only when it leads
+  inside the roots, at most 2,000). Any other `files` value is refused.
 - `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
   new folder. A name with a slash, a leading or trailing space or a trailing dot, `.`, `..`, a colon, a control
   character, more than 255 bytes, a character or device name Windows can't keep (`<>"|?*`, `CON`) or the app's own
@@ -241,6 +250,17 @@ folder dialog) and get `error` "Folder browsing is not available here." A web se
   `archive.extract` and `archive.setPassword` with a `filePath`, and `archive.settings.set` with a `folder` answer
   `ok: false` with an error. The desktop Host has no roots for its own sessions; a web session there has the app's
   folders (above).
+
+### Downloads as every client sees them
+
+- A download whose address is hidden (`addressHidden`, a direct provider link) or that is a provider's file carries
+  `pageUrl` as its site alone (`https://host[:port]/`, no user name, path or query), and its `statusNote` has any
+  address taken out, as the desktop window shows them. The Host does this, so every client (the window, the web UI,
+  the CLI) gets the same.
+- `speed.history` `{}` answers `speed.historyResult`: the total download speed of the last hour, one figure a second
+  (`start`, `intervalSeconds`, `bytesPerSecond`, oldest first, the last the second under way), the desktop's speed
+  graph's own. Every session gets it, web sessions and the server's clients too, so a graph opened later starts full.
+  A Host from before it answers with an error.
 
 ## One command at a time per connection
 
@@ -342,7 +362,9 @@ those. A frontend with a hoster link has to route it through `remote.add`. `dm a
 counts as failed. An `undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
 prints the note, because it can go on for hours and a script shouldn't stop for it.
 
-**`job.refreshUrl`** does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
+**`job.refreshUrl`** points a download at a new address. One that isn't finished goes back to the queue and starts
+(`job.event` `refreshed`). A finished one keeps its file and its state, and only the address it would be downloaded
+from again changes (`updated`); nothing is fetched. It does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
 the optional `explicitDirect`. While a usable key exists, a changed http or https address that is a
 `hosterLink` or `folderLink` gets `ok: false` with words pointing to Add Links, with or without the flag.
 So does an `unsupported` one. An `undetermined` one, or one that couldn't be classified at all, gets
@@ -439,7 +461,10 @@ by itself.
 A container is a local `.rsdf`, `.ccf` or `.dlc` file. Reading one takes two steps, because a decrypted link
 is a secret and a client never gets to see it.
 
-**`remote.container.preview`** reads the file by its full path. A path has to start with a drive. Network and
+**`remote.container.preview`** reads the file by its full path, or by the reference of one a browser uploaded
+(`upload:...`, from the server's or the web bridge's `POST /api/upload/container`; `fileName` then gives the name the
+packages are called by). A reference can only name a file in the upload folder, so it is read even though that folder
+is outside the caller's folders, while that folder's path typed in is refused like any outside one. A path has to start with a drive. Network and
 device paths are refused before anything looks at them, because even asking whether such a file exists
 sends this Windows account's credentials to the host it names. Files are limited to 16 MB and 5000 links. The
 reply has:

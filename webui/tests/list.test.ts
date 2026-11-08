@@ -500,6 +500,23 @@ describe('speed graph', () => {
     expect(history.peak()).toBe(5);
   });
 
+  it("starts from the server's own seconds without showing one twice", () => {
+    const empty = new SpeedHistory(4);
+    // The last figure is the second still under way, so it is left for this page's own sample.
+    empty.seed([1, 2, 3, 4, 9]);
+    expect(empty.samples).toEqual([1, 2, 3, 4]);
+
+    const sampled = new SpeedHistory(5);
+    sampled.add(7);
+    sampled.add(8);
+    sampled.seed([1, 2, 3, 4, 5, 6]);
+    expect(sampled.samples).toEqual([1, 2, 3, 7, 8]);
+
+    const odd = new SpeedHistory(5);
+    odd.seed([-5, Number.NaN, 3, 0]);
+    expect(odd.samples).toEqual([0, 0, 3]);
+  });
+
   it('scales the top of the graph above the peak', () => {
     expect(graphCeiling(0)).toBe(64 * 1024);
     expect(graphCeiling(100 * 1024)).toBe(128 * 1024);

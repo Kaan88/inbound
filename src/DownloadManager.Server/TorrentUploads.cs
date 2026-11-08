@@ -1,3 +1,4 @@
+using DownloadManager.Containers;
 using DownloadManager.Runtime.Remote;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -6,103 +7,78 @@ using Microsoft.AspNetCore.Http.Features;
 namespace DownloadManager.Server;
 
 /// <summary>
-/// <c>POST /api/upload/torrent</c>: a <c>.torrent</c> file from the web UI, as the request body. The server can only
-/// add a torrent file by a path it may read, so the file is kept under a random name in <c>uploads</c> in the data
-/// folder. The answer gives a reference to it (<c>upload:</c> and the random name), not its path, which would tell
-/// where the server keeps its state; <c>remote.classify</c> and <c>remote.add</c> take the reference
-/// (<see cref="RemoteJobCoordinator.ResolveReference"/>, <see cref="Resolve"/>). That folder is the one
-/// place outside the roots a torrent file may be read from (<see cref="RemoteJobCoordinator.Roots"/>); nothing else
-/// reads it. Files older than a day are removed, at start and with each upload. Signed-in users only (the sign-in gate).
+/// The web UI's file uploads, as the request body: <c>POST /api/upload/torrent</c> for a <c>.torrent</c> file and
+/// <c>POST /api/upload/container?name=...</c> for an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> container. The server can
+/// only read such a file by a path, so it is kept in <see cref="UploadFolder"/> (<c>uploads</c> in the data folder) and
+/// the answer gives a reference to it (<c>upload:</c> and a random name), not its path, which would tell where the
+/// server keeps its state. <c>remote.classify</c> and <c>remote.add</c> take a torrent's reference, and
+/// <c>remote.container.preview</c> a container's (<see cref="RemoteJobCoordinator.ResolveReference"/>, <see cref="Resolve"/>).
+/// Nothing else reads that folder. Signed-in users only (the sign-in gate): a paired app's token isn't read here.
 /// </summary>
 public sealed class TorrentUploads
 {
-    public const string FolderName = "uploads";
-    private static readonly TimeSpan KeepFor = TimeSpan.FromDays(1);
-    private const int MaxFiles = 200;
+    public const string FolderName = UploadFolder.FolderName;
+    public const string ReferencePrefix = UploadFolder.ReferencePrefix;
 
-    private TorrentUploads(string directory) => Directory = directory;
+    private readonly UploadFolder _folder;
 
-    public string Directory { get; }
+    private TorrentUploads(UploadFolder folder) => _folder = folder;
 
-    public const string ReferencePrefix = "upload:";
+    public string Directory => _folder.Directory;
 
     /// <summary>The path an upload reference stands for, or null when the text isn't one.</summary>
-    public string? Resolve(string text)
+    public string? Resolve(string text) => _folder.Resolve(text);
+
+    public static TorrentUploads Prepare(string dataFolder) => new(UploadFolder.Prepare(dataFolder));
+
+    public void Map(WebApplication web)
     {
-        if (!text.StartsWith(ReferencePrefix, StringComparison.Ordinal)) return null;
-        var name = text[ReferencePrefix.Length..];
-        return name.Length == 32 && name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')
-            ? Path.Combine(Directory, name + ".torrent")
-            : null;
+        web.MapPost("/api/upload/torrent", context =>
+            ReceiveAsync(context, UploadFolder.TorrentExtension, TorrentMetadata.MaxFileBytes, "This file is too large to be a .torrent file."));
+
+        web.MapPost("/api/upload/container", context =>
+        {
+            // The kind is the file's own extension: an .rsdf file is told apart by it. Only the name's extension is used.
+            var extension = Path.GetExtension(context.Request.Query["name"].ToString()).ToLowerInvariant();
+            if (!UploadFolder.ContainerExtensions.Contains(extension))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return context.Response.WriteAsJsonAsync(new { ok = false, error = "Only .rsdf, .ccf and .dlc files can be imported." });
+            }
+
+            return ReceiveAsync(context, extension, ContainerLimits.Default.MaxInputBytes, "This file is too large to be a container.");
+        });
     }
 
-    public static TorrentUploads Prepare(string dataFolder)
-    {
-        var uploads = new TorrentUploads(Path.Combine(dataFolder, FolderName));
-        System.IO.Directory.CreateDirectory(uploads.Directory);
-        uploads.Clean();
-        return uploads;
-    }
-
-    public void Map(WebApplication web) => web.MapPost("/api/upload/torrent", async context =>
+    private async Task ReceiveAsync(HttpContext context, string extension, long maxBytes, string tooLarge)
     {
         if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-            limit.MaxRequestBodySize = TorrentMetadata.MaxFileBytes;
-        if (context.Request.ContentLength is > TorrentMetadata.MaxFileBytes)
+            limit.MaxRequestBodySize = maxBytes;
+        if (context.Request.ContentLength > maxBytes)
         {
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await context.Response.WriteAsJsonAsync(new { ok = false, error = "This file is too large to be a .torrent file." }).ConfigureAwait(false);
+            await context.Response.WriteAsJsonAsync(new { ok = false, error = tooLarge }).ConfigureAwait(false);
             return;
         }
 
-        Clean();
-        var name = Guid.NewGuid().ToString("N");
-        var path = Path.Combine(Directory, name + ".torrent");
+        string upload;
         try
         {
-            await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                await context.Request.Body.CopyToAsync(file, context.RequestAborted).ConfigureAwait(false);
-                if (file.Length == 0) throw new InvalidDataException("empty");
-                if (file.Length > TorrentMetadata.MaxFileBytes) throw new InvalidDataException("too large");
-            }
+            upload = await _folder.SaveAsync(context.Request.Body, extension, maxBytes, context.RequestAborted).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or BadHttpRequestException or OperationCanceledException)
+        catch (InvalidDataException ex) when (ex.Message == "too large")
         {
-            TryDelete(path);
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            await context.Response.WriteAsJsonAsync(new { ok = false, error = tooLarge }).ConfigureAwait(false);
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or BadHttpRequestException or OperationCanceledException or UnauthorizedAccessException)
+        {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsJsonAsync(new { ok = false, error = "The file could not be received." }).ConfigureAwait(false);
             return;
         }
 
-        await context.Response.WriteAsJsonAsync(new { ok = true, upload = ReferencePrefix + name }).ConfigureAwait(false);
-    });
-
-    private void Clean()
-    {
-        try
-        {
-            var files = new DirectoryInfo(Directory).GetFiles("*.torrent").OrderByDescending(file => file.LastWriteTimeUtc).ToList();
-            for (var i = 0; i < files.Count; i++)
-            {
-                if (i >= MaxFiles || DateTime.UtcNow - files[i].LastWriteTimeUtc > KeepFor) TryDelete(files[i].FullName);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Cleaning up is best effort.
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // best effort
-        }
+        await context.Response.WriteAsJsonAsync(new { ok = true, upload }).ConfigureAwait(false);
     }
 }

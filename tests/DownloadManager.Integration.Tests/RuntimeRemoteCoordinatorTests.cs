@@ -456,6 +456,33 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task AWebSessionsUploadedTorrentIsReadByItsReferenceThoughTheUploadFolderIsOutsideItsFolders()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var uploads = UploadFolder.Prepare(Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"data-{Guid.NewGuid():N}"));
+        rig.Jobs.ResolveReference = uploads.Resolve;
+        try
+        {
+            var roots = new PathRoots([rig.Destination]);
+            using var web = new RemoteCommands(rig.Box.Registry, rig.Jobs, roots: roots, jobRoots: roots);
+            using var body = new MemoryStream("d4:infod6:lengthi1e4:name8:uploaded12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee"u8.ToArray());
+            var reference = await uploads.SaveAsync(body, UploadFolder.TorrentExtension, 1024, CancellationToken.None);
+
+            var classify = await web.ClassifyAsync(new RemoteClassifyRequest { Text = reference, WithFiles = true });
+            Assert.NotEqual(roots.OutsideFileText(".torrent file"), classify.Reason);
+            Assert.Equal("torrentFile", classify.Kind);
+            // Its path, typed, is outside the caller's folders like any other.
+            var typed = await web.ClassifyAsync(new RemoteClassifyRequest { Text = uploads.Resolve(reference)!, WithFiles = true });
+            Assert.Equal(roots.OutsideFileText(".torrent file"), typed.Reason);
+            Assert.Empty(rig.Mock.Submissions);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(uploads.Directory)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task OnAServerAFileOutsideTheRootsIsNeverWaitedForAndItsFolderIsNeverCreated()
     {
         // Only the service knows the roots here, as for a job saved before the coordinator checked them.

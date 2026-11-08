@@ -4,6 +4,7 @@
   import { speed } from '../lib/format';
   import { graphCeiling, SpeedHistory, speedSample } from '../lib/list';
   import { store } from '../lib/store.svelte';
+  import type { SpeedHistoryResult } from '../lib/types';
 
   // The collapsible bar under the list: the total speed of the active downloads, a sample a second. It opens upward.
   // A gap is a moment the server could not be reached; a download that went quiet counts as zero.
@@ -29,6 +30,19 @@
       // A private window: the choice lasts until the page closes.
     }
   }
+
+  // The first time the graph shows with a connection, the server's own last minutes fill it, so it doesn't start empty.
+  // A server without speed.history answers an error, and the graph then fills as before.
+  let seeded = false;
+  $effect(() => {
+    if (seeded || !open || store.connection !== 'open' || store.model.snapshots === 0) return;
+    seeded = true;
+    void store.ask<SpeedHistoryResult>('speed.history', {}).then((result) => {
+      if (result.intervalSeconds !== 1 || !Array.isArray(result.bytesPerSecond)) return;
+      history.seed(result.bytesPerSecond);
+      version++;
+    }).catch(() => undefined);
+  });
 
   // A timer runs only while the graph is open and the page is showing, so a closed graph or a hidden tab costs nothing.
   let visible = $state(typeof document === 'undefined' ? true : !document.hidden);

@@ -8,6 +8,29 @@ namespace DownloadManager.Contracts;
 public sealed class FolderBrowseRequest
 {
     public string? Path { get; set; }
+
+    /// <summary>
+    /// <see cref="FolderBrowseFiles.Archives"/> also lists the archive files in the folder (an extraction's chooser).
+    /// Null lists folders only, as before. Another value is refused.
+    /// </summary>
+    public string? Files { get; set; }
+}
+
+/// <summary>What <see cref="FolderBrowseRequest.Files"/> may ask for.</summary>
+public static class FolderBrowseFiles
+{
+    /// <summary>Files whose names extraction can start from (a RAR volume, 7z, zip, tar, compressed tar, .001).</summary>
+    public const string Archives = "archives";
+}
+
+public sealed class FolderFileDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The file's full path, as <c>archive.extract</c> takes it.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    public long Size { get; set; }
 }
 
 public sealed class FolderEntryDto
@@ -33,10 +56,15 @@ public sealed class FolderBrowseResult
     /// <summary>The allowed roots, always, so a client can offer them.</summary>
     public List<string> Roots { get; set; } = new();
 
-    /// <summary>The folders inside <see cref="Path"/> (or the roots), sorted by name. Files are never listed.</summary>
+    /// <summary>The folders inside <see cref="Path"/> (or the roots), sorted by name.</summary>
     public List<FolderEntryDto> Folders { get; set; } = new();
 
-    /// <summary>More folders were there than a listing carries; the first ones by name are given.</summary>
+    /// <summary>
+    /// The files asked for by <see cref="FolderBrowseRequest.Files"/>, sorted by name; empty otherwise, and for the roots.
+    /// </summary>
+    public List<FolderFileDto> Files { get; set; } = new();
+
+    /// <summary>More folders (or files) were there than a listing carries; the first ones by name are given.</summary>
     public bool Truncated { get; set; }
 
     /// <summary>Free and total bytes of the mount that holds <see cref="Path"/>; null when unknown or for the roots.</summary>

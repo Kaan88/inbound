@@ -1,7 +1,7 @@
 // The provider screens' rules and words, ported from the desktop window (Remote/RemoteRows.cs, RemoteText.cs,
 // RemoteFileTree.cs). Nothing here touches the DOM, so the tests run it as it is.
 
-import type { Job, RemoteAccount, RemoteFile, RemoteItem, RemoteJob } from './types';
+import type { ContainerAddResult, ContainerPreview, Job, RemoteAccount, RemoteFile, RemoteItem, RemoteJob } from './types';
 import type { Tone } from './format';
 
 // ---- Words -------------------------------------------------------------------------------------------
@@ -736,4 +736,33 @@ export function choiceOf(tree: FileTree, chosen: ReadonlySet<string>): { all: bo
   const picked = choosable.filter((id) => chosen.has(id));
   const all = choosable.length > 0 && picked.length === choosable.length;
   return { all, fileIds: all ? [] : picked };
+}
+
+// ---- Importing a container file (remote.container.preview / add) ----
+
+/** The entries a container import starts with chosen: every one that can be added. */
+export function containerChoice(preview: Pick<ContainerPreview, 'entries'>): number[] {
+  return preview.entries.filter((entry) => entry.canAdd).map((entry) => entry.entryId);
+}
+
+/** What a container's entry is called in the list: its name, else its site, else its number. */
+export function containerEntryName(entry: ContainerPreview['entries'][number]): string {
+  return entry.displayName?.trim() || entry.displayHost?.trim() || `Link ${entry.entryId + 1}`;
+}
+
+/** How the add went, in one line, and what went wrong with each entry that wasn't added. */
+export function containerAddSummary(result: ContainerAddResult, preview: Pick<ContainerPreview, 'entries'>, provider: string): { text: string; problems: string[] } {
+  const added = result.outcomes.filter((outcome) => outcome.ok && !outcome.existing).length;
+  const existing = result.outcomes.filter((outcome) => outcome.ok && outcome.existing).length;
+  const problems = result.outcomes
+    .filter((outcome) => !outcome.ok)
+    .map((outcome) => {
+      const entry = preview.entries.find((item) => item.entryId === outcome.entryId);
+      return `${entry ? containerEntryName(entry) : `Link ${outcome.entryId + 1}`}: ${outcome.error || "it couldn't be added."}`;
+    });
+  const parts: string[] = [];
+  if (added > 0) parts.push(`${added} sent to ${provider}.`);
+  if (existing > 0) parts.push(`${existing} ${existing === 1 ? 'was' : 'were'} already listed.`);
+  if (problems.length > 0) parts.push(`${problems.length} couldn't be added.`);
+  return { text: parts.join(' ') || result.error || 'Nothing was added.', problems };
 }
