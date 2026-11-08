@@ -1,5 +1,12 @@
 # Progress — session handoff
 
+### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
+
+- VM: VirtualBox on E:, Windows 11 Enterprise LTSC evaluation from Microsoft, a new standard user, snapshot `clean-install`. Commands go in through the desktop session's Run dialog (VirtualBox keyboard input) because starting processes through the guest additions fails in this guest; files go both ways through the guest additions.
+- Result: all phases pass. See ROADMAP TEST.2 for each check and `artifacts\campaign\20261108-vm-install\` for the reports.
+- Found: UP.B2 (installed-apps list keeps the old version after an in-app update).
+- WinZip: removed at the owner's request (2026-11-08, "purge winzip after you're done with it"). Spanned-zip test sets are built in code by the Archives tests instead. A 72-byte ID file in `C:\ProgramData\WinZip` needs admin to delete.
+
 ### D1a: the Host's protocol without a pipe (branch `stream-b`, 2026-11-08)
 
 - What changed: every command, the hello, the snapshot (including its fallback when it is too large for a frame) and every broadcast (download events, update progress, package changes with their 100 ms debounce, provider changes, archive changes, "Host exiting") moved out of the pipe server into `src\DownloadManager.Runtime\Ipc\HostCommandDispatcher.cs` (and `.Remote.cs`). It has no transport, so the Docker server (D1b) can put a WebSocket under the same code.
