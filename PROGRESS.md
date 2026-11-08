@@ -1,5 +1,9 @@
 # Progress — session handoff
 
+### Firefox add-on self-distributed (2026-11-08, `dev`)
+
+- Owner, 2026-11-08: keep the Firefox add-on unlisted, publish the XPI on GitHub, and have Setup install it when a box is ticked; asked whether they must hand over each XPI. No: with an AMO API key pair (Developer Hub, Manage API Keys) saved outside the repository, `scripts\sign-extension-firefox.ps1` signs each version. ROADMAP EXT.S4 has the design and what was checked. Extension 0.5.3 carries the `update_url`; the owner's current copy (0.5.1/0.5.2 from AMO) has none, so it has to be added again once from the 0.6.3 Setup or the release XPI.
+
 ### 0.6.2: the last open items (2026-11-08, `dev`)
 
 - Extension 0.5.2 (owner, 2026-11-08: the 0.5.1 upload to Firefox Add-ons went in unlisted, and a listed one needs a new version). It adds the pairing-path wording on top of 0.5.1; 161 extension tests pass. Zips for both stores are in the main checkout under artifacts, chrome-store and firefox-addon. The Firefox privacy-policy field took the policy text, not a link; addons.mozilla.org answered a first, longer paste with 406 Not Acceptable (cause not known).
