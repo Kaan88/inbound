@@ -456,6 +456,17 @@ public sealed class SettingsResult
     public string? Error { get; set; }
 }
 
+/// <summary>
+/// The folders a download can start in, for a client that may not see the settings (the browser
+/// extension): the default folder and the favorites, and nothing else.
+/// </summary>
+public sealed class DownloadFoldersResult
+{
+    public bool Ok { get; set; }
+    public string DefaultFolder { get; set; } = string.Empty;
+    public List<FavoriteFolderDto> Favorites { get; set; } = new();
+}
+
 public sealed class HostActionRequest
 {
     public string Action { get; set; } = string.Empty;

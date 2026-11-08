@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
 
@@ -217,11 +217,22 @@ public sealed class NativeBridgePolicyTests
     [InlineData("host.openUi")]
     [InlineData("host.pickFolder")]
     [InlineData("jobs.query")]
+    [InlineData("job.pause")]
+    [InlineData("job.resume")]
+    [InlineData("job.retry")]
+    [InlineData("job.cancel")]
+    [InlineData("job.remove")]
+    [InlineData("settings.downloadFolders")]
     public void ForwardsWhatTheExtensionUses(string type) => Assert.True(NativeBridgePolicy.AllowFromExtension(type));
 
     [Theory]
     [InlineData("job.add")]
-    [InlineData("job.remove")]
+    [InlineData("job.update")]
+    [InlineData("job.refreshUrl")]
+    [InlineData("job.moveToQueue")]
+    [InlineData("jobs.pauseAll")]
+    [InlineData("group.action")]
+    [InlineData("folders.space")]
     [InlineData("settings.update")]
     [InlineData("settings.get")]
     [InlineData("host.shutdown")]
@@ -241,7 +252,12 @@ public sealed class NativeBridgePolicyTests
     [InlineData("handoff.ack", true)]
     [InlineData("jobs.snapshot", true)]
     [InlineData("host.folderPicked", true)]
-    [InlineData("remotely.unrelated", true)]
+    [InlineData("job.actionResult", true)]
+    [InlineData("settings.downloadFoldersResult", true)]
+    // An allow-list: what is not named stays on the Host's side.
+    [InlineData("remotely.unrelated", false)]
+    [InlineData("settings.result", false)]
+    [InlineData("update.progress", false)]
     [InlineData("groups.changed", false)]
     public void KeepsProviderAndArchiveTrafficFromTheBrowser(string type, bool expected)
         => Assert.Equal(expected, NativeBridgePolicy.AllowToExtension(type));
