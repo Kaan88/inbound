@@ -1,5 +1,57 @@
 # Progress — session handoff
 
+### 0.6.0 ready for review, not released (2026-11-08, branch `dev`)
+
+- All work branches are merged into `dev`: streams A to C, the campaign, perf, webui, Edge, and the six owner-answer branches. Their worktrees and branches are removed. The evidence they held is in `artifacts\evidence\<branch>\` in the main checkout: logs, trx files and summaries, with no payloads or browser profiles. It was scanned for credentials and none were found.
+- Fixes found while merging:
+  - The register-native-host path in ROADMAP and PROGRESS was split by a stray CR.
+  - The golden frames now normalise this PC's browser registration (`nativeHostRegistered`, `browserIntegration`).
+  - PERF.5 is turned on once for upgraded installs (a settings marker).
+  - The FTP resume test was counting bytes that another test had fetched.
+- A four-agent semantic-merge review found nothing. It covered the files that two branches both changed: `DownloadManagerService.cs`, `HttpDownloadEngine.cs`, `MainWindow.xaml.cs` and `Dtos.cs`.
+- **Windows** (Release, `artifacts\campaign\20261108-final\`): every suite passed.
+
+  | Suite | Passed |
+  | --- | --- |
+  | Core | 888 |
+  | Engine | 161 |
+  | TorBox | 323 |
+  | Archives | 336 |
+  | Containers | 187 |
+  | Server | 84 |
+  | Integration | 1,263 (a rerun after the FTP test fix; the first run's only failure was that test) |
+  | Extension | typecheck and 143 tests |
+  | Web UI | 37 |
+
+- **Linux** (the VM, SDK 10 container, `Platform!=Windows`, in `...\linux\`): no failures.
+
+  | Suite | Passed |
+  | --- | --- |
+  | Core | 881 |
+  | Engine | 161 |
+  | Archives | 274 (52 not run on Linux) |
+  | Containers | 183 |
+  | TorBox | 323 |
+  | Server | 84 |
+  | Integration | 1,118 (7 not run) |
+
+  The VM's test image and folders are removed again. The owner's containers were not touched.
+- **Release assets:** built and checked, not uploaded. They are in `artifacts\release\v0.6.0\`:
+  - `DownloadManagerSetup-0.6.0.exe` (73.9 MB).
+  - `download-manager-0.6.0.zip` (self-contained).
+  - `manifest.json`, signed with `secrets\update-signing.pem`. openssl verifies it with `public.pem`, which matches the key in `ReleaseUpdates.cs`.
+  - `SHA256SUMS`: all four hashes match.
+- **Extension 0.5.0:**
+  - `artifacts\chrome-store\inbound-bridge-0.5.0-chrome.zip`.
+  - `artifacts\firefox-addon\inbound-bridge-0.5.0-firefox.zip` (unsigned, for AMO).
+- None of these packages contains a credential from the credentials file.
+- Draft notes are in `artifacts\release\v0.6.0-notes.md`.
+- Waiting for the owner's ultrareview before any squash to `main`, tag, `gh release` or GHCR publish.
+- **Not done:**
+  - A clean-install and upgrade run of this Setup in the Windows VM.
+  - The PERF.2 rerun on `dev`.
+  - EXT.B3 (Firefox), which needs this build installed.
+
 ### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
 
 - **PERF.5:** "Closing the window ends it" is on by default for new installs. A stored value is kept, and the settings file stores every value, so an upgraded install whose settings were saved since 0.5.3 (when the option arrived) keeps it off. Turning it on there needs a one-time settings migration: asked below.
