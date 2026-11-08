@@ -10,8 +10,8 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
   entry (`DisplayVersion`, and the major/minor DWORDs when present) under
   `HKCU\...\Uninstall\{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}_is1`, only when the key exists and its
   `InstallLocation` is the folder being updated; it never creates the key, and a failed update restores the old
-  values. `UpdateUninstallEntryTests` (6) use a fake key through the test-only `-UninstallKey` parameter; 4 fail
-  on the old script. Not yet seen on a real in-app update.
+  values. `UpdateUninstallEntryTests` (7) use a fake key through the test-only `-UninstallKey` parameter; 4 fail
+  on the old script, and the rollback test fails without the script's restore call. Not yet seen on a real in-app update.
 - **PERF.2 soak (partial, running):** `scripts/soak.sh` (Git Bash) runs a test instance with 5,040 jobs and a
   new TestServer download every 20 s in six kinds (segmented, 503 then served, cut short, slow, no ranges, 500
   forever), and writes `samples.csv` (Host, window, TestServer: private bytes, working set, handles, threads,
@@ -34,9 +34,10 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
   - The tray's once-a-second count and the settings reads built a full snapshot. In 16-minute runs with 5,000
     jobs this changed the Host from 394 to 199 MB allocated a minute, private mean from 182 to 165 MB, and max
     from 308 to 214 MB.
-  - UI.B8: the pipe took only 8 clients; now 64.
-  - UI.B9: CLI `add-batch`/`import` opened windows; they are headless now.
-  - UI.B10: segment retries now start over after progress, and the TestServer resets only responses it cuts.
+  - UI.B13: the pipe took only 8 clients; now 64.
+  - UI.B14: CLI `add-batch`/`import` opened windows. They now send sources of their own (`cliBatch`,
+    `cliImport`): no progress or completion window per job, the same list labels as before.
+  - UI.B15: segment retries now start over after progress, and the TestServer resets only responses it cuts.
   - The TestServer's content cache: from 3.2 GB to a 256 MB cap.
 - **PERF.3 (implemented):** the Host now runs with `GCConserveMemory=5`. Default GC, two runs:
   - private mean 165 and 167 MB, max 214 and 224 MB, committed 140 and 134 MB;
@@ -75,8 +76,8 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
     cost of about 0.35 to 0.65 s per open. The default is left for the owner to change.
 - **Recorded:**
   - PERF.7: every pipe connection gets the full snapshot, about 8.5 MB with 5,040 jobs.
-  - UI.R22: an idea, keeping the speed history in the Host.
-  - TEST.3: UI Automation can't close the window, and the first posted WM_CLOSE is ignored.
+  - UI.R24: an idea, keeping the speed history in the Host.
+  - TEST.4: UI Automation can't close the window, and the first posted WM_CLOSE is ignored.
   - While idle, the Host's handle count rises about 12 a minute and then falls back at once (749 to 443 in the
     first idle run; 782 to 446 in the second). The handles are released, not leaked. Their source is not found.
 - **Tests:** on the final code, with no failures and no reruns: Core 863, Engine 157, Integration 1,224,
@@ -85,7 +86,7 @@ was repeated (three runs, or two GC runs) and the repeats agreed.
   - The soak's full 8 hours.
   - A soak on the fixed build.
   - Checking UP.B2 on a real in-app update.
-  - The TEST.3 root cause.
+  - The TEST.4 root cause.
   - The review delegation in CLAUDE.md: this workflow step had no way to start a reviewer agent.
 
 ### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
