@@ -72,12 +72,20 @@ public sealed class AesGcmSecretProtector : ISecretProtector
     /// those secrets as nothing, and the stores drop a value that reads as nothing on their next save, so restoring the
     /// right key file afterwards would recover nothing. <paramref name="discardUnreadable"/> is the owner's explicit
     /// "start anyway": the secrets are then entered again. A missing key file is not created while refusing, so putting
-    /// the old one back is all it takes.
+    /// the old one back is all it takes. The key ids discarded that way are recorded next to the key file
+    /// (<see cref="DiscardedFileSuffix"/>), so the choice holds on later starts: some blobs are never rewritten (a job
+    /// keeps a URL it can't open as it is, quarantined files stay as they were), and without the record every later start
+    /// would refuse again. A key id is a hash of a key and tells nothing about it. A blob of a key not in the record still
+    /// refuses.
     /// </summary>
     public static AesGcmSecretProtector OpenForDataFolder(string keyFile, string dataFolder, bool discardUnreadable, Action<string>? warn = null)
     {
         var full = Path.GetFullPath(keyFile);
-        var sealedWith = KeyIdsIn(dataFolder, skip: full);
+        var discardedFile = full + DiscardedFileSuffix;
+        var discarded = ReadDiscarded(discardedFile);
+        var sealedWith = KeyIdsIn(dataFolder, skip: full)
+            .Where(id => !discarded.Any(known => known.SequenceEqual(id)))
+            .ToList();
         if (sealedWith.Count > 0 && !File.Exists(full) && !discardUnreadable)
         {
             throw new SecretKeyMismatchException(
@@ -87,8 +95,8 @@ public sealed class AesGcmSecretProtector : ISecretProtector
         }
 
         var protector = OpenOrCreate(full, warn);
-        var foreign = sealedWith.Where(id => !id.SequenceEqual(protector._keyId)).Count();
-        if (foreign > 0)
+        var foreign = sealedWith.Where(id => !id.SequenceEqual(protector._keyId)).ToList();
+        if (foreign.Count > 0)
         {
             if (!discardUnreadable)
             {
@@ -97,10 +105,75 @@ public sealed class AesGcmSecretProtector : ISecretProtector
                     $"that came with this data folder. To start without them (they have to be entered again), set {DiscardVariable}=1 once.");
             }
 
+            WriteDiscarded(discardedFile, discarded.Concat(foreign));
             warn?.Invoke($"Saved passwords and keys sealed with another key than {full} are discarded ({DiscardVariable}=1). Enter them again.");
         }
 
         return protector;
+    }
+
+    /// <summary>Appended to the key file's name for the record of key ids the owner chose to discard.</summary>
+    public const string DiscardedFileSuffix = ".discarded";
+
+    /// <summary>The discarded key ids, one hex id per line. A missing or unreadable record is empty; a bad line is skipped.</summary>
+    private static List<byte[]> ReadDiscarded(string path)
+    {
+        var ids = new List<byte[]>();
+        string[] lines;
+        try
+        {
+            if (!File.Exists(path)) return ids;
+            lines = File.ReadAllLines(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ids;
+        }
+
+        foreach (var line in lines)
+        {
+            byte[] id;
+            try
+            {
+                id = Convert.FromHexString(line.Trim());
+            }
+            catch (FormatException)
+            {
+                continue;
+            }
+
+            if (id.Length == KeyIdBytes && !ids.Any(known => known.SequenceEqual(id))) ids.Add(id);
+        }
+
+        return ids;
+    }
+
+    /// <summary>Writes the record to a temporary file beside it, flushed to disk, then moves it into place.</summary>
+    private static void WriteDiscarded(string path, IEnumerable<byte[]> ids)
+    {
+        var lines = ids.Select(Convert.ToHexString).Distinct(StringComparer.Ordinal).ToList();
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(Encoding.ASCII.GetBytes(string.Concat(lines.Select(line => line + "\n"))));
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A leftover temporary record holds only key ids; the next write has its own name.
+            }
+        }
     }
 
     /// <summary>The owner's explicit choice to start with secrets this key can't open, which are then lost.</summary>
