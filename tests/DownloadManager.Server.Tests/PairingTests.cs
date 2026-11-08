@@ -56,7 +56,7 @@ public sealed class PairingTests
     }
 
     [Fact]
-    public void ACodeExpiresAfterTenMinutesAndTenWrongTriesEndIt()
+    public void ACodeExpiresAfterTenMinutesAndAThousandWrongTriesEndIt()
     {
         var work = ServerHarness.NewWork();
         var time = new ManualTime(DateTimeOffset.UtcNow);
@@ -68,12 +68,14 @@ public sealed class PairingTests
         Assert.Null(pairing.Redeem(code, "late"));
 
         (code, _) = pairing.NewCode();
-        for (var i = 0; i < 9; i++) Assert.Null(pairing.Redeem("ZZZZZZZZ" == code ? "YYYYYYYY" : "ZZZZZZZZ", "guess"));
-        Assert.NotNull(pairing.Redeem(code, "after nine wrong"));
+        // A few wrong tries (anyone's, from anywhere) don't cancel the owner's code; the waits are per address.
+        Assert.Equal(1000, Pairing.MaxWrongTries);
+        for (var i = 0; i < Pairing.MaxWrongTries - 1; i++) Assert.Null(pairing.Redeem("ZZZZZZZZ" == code ? "YYYYYYYY" : "ZZZZZZZZ", "guess"));
+        Assert.NotNull(pairing.Redeem(code, "after 999 wrong"));
 
         (code, _) = pairing.NewCode();
-        for (var i = 0; i < 10; i++) Assert.Null(pairing.Redeem("ZZZZZZZZ" == code ? "YYYYYYYY" : "ZZZZZZZZ", "guess"));
-        Assert.Null(pairing.Redeem(code, "after ten wrong"));
+        for (var i = 0; i < Pairing.MaxWrongTries; i++) Assert.Null(pairing.Redeem("ZZZZZZZZ" == code ? "YYYYYYYY" : "ZZZZZZZZ", "guess"));
+        Assert.Null(pairing.Redeem(code, "after 1000 wrong"));
 
         // A new code replaces the one before.
         var (first, _) = pairing.NewCode();

@@ -8,7 +8,9 @@ namespace DownloadManager.Server;
 /// <summary>
 /// <c>POST /api/upload/torrent</c>: a <c>.torrent</c> file from the web UI, as the request body. The server can only
 /// add a torrent file by a path it may read, so the file is kept under a random name in <c>uploads</c> in the data
-/// folder, and the answer gives that path for <c>remote.classify</c> and <c>remote.add</c>. That folder is the one
+/// folder. The answer gives a reference to it (<c>upload:</c> and the random name), not its path, which would tell
+/// where the server keeps its state; <c>remote.classify</c> and <c>remote.add</c> take the reference
+/// (<see cref="RemoteJobCoordinator.ResolveReference"/>, <see cref="Resolve"/>). That folder is the one
 /// place outside the roots a torrent file may be read from (<see cref="RemoteJobCoordinator.Roots"/>); nothing else
 /// reads it. Files older than a day are removed, at start and with each upload. Signed-in users only (the sign-in gate).
 /// </summary>
@@ -21,6 +23,18 @@ public sealed class TorrentUploads
     private TorrentUploads(string directory) => Directory = directory;
 
     public string Directory { get; }
+
+    public const string ReferencePrefix = "upload:";
+
+    /// <summary>The path an upload reference stands for, or null when the text isn't one.</summary>
+    public string? Resolve(string text)
+    {
+        if (!text.StartsWith(ReferencePrefix, StringComparison.Ordinal)) return null;
+        var name = text[ReferencePrefix.Length..];
+        return name.Length == 32 && name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')
+            ? Path.Combine(Directory, name + ".torrent")
+            : null;
+    }
 
     public static TorrentUploads Prepare(string dataFolder)
     {
@@ -42,7 +56,8 @@ public sealed class TorrentUploads
         }
 
         Clean();
-        var path = Path.Combine(Directory, Guid.NewGuid().ToString("N") + ".torrent");
+        var name = Guid.NewGuid().ToString("N");
+        var path = Path.Combine(Directory, name + ".torrent");
         try
         {
             await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -60,7 +75,7 @@ public sealed class TorrentUploads
             return;
         }
 
-        await context.Response.WriteAsJsonAsync(new { ok = true, path }).ConfigureAwait(false);
+        await context.Response.WriteAsJsonAsync(new { ok = true, upload = ReferencePrefix + name }).ConfigureAwait(false);
     });
 
     private void Clean()

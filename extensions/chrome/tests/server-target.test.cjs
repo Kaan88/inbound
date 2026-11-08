@@ -190,7 +190,7 @@ test('EXT.R1: without a server there is one target, and nothing is asked of a se
   });
 });
 
-test('EXT.R1: pairing from Settings stores the token where no page can read it; unpairing sends everything back to this PC', async () => {
+test('EXT.R1: pairing from Settings stores the token in storage closed to content scripts and never hands it to a page; unpairing sends everything back to this PC', async () => {
   const { harness } = capturingChrome(catching);
   harness.chrome.permissions = { async contains() { return true; } };
   const server = fakeServer();
@@ -206,6 +206,8 @@ test('EXT.R1: pairing from Settings stores the token where no page can read it; 
     assert.equal(pairedReply.server.connected, true);
     assert.deepEqual(server.calls[0].body, { code: 'ABCDEF23', name: 'Browser' });
     assert.equal(harness.values.server.token, TOKEN);
+    // storage.local, where it is, is open to the extension's own pages and service worker only, not content scripts.
+    assert.equal(harness.chrome.storage.local.accessLevel, 'TRUSTED_CONTEXTS');
     assert.equal(JSON.stringify(pairedReply).includes(TOKEN), false);
 
     const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));

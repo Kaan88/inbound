@@ -13,9 +13,12 @@ track it.
   it). PBKDF2-SHA256 with 600,000 iterations in `<data>/auth.json`. A browser that isn't on the server's own machine
   (or reaches it through a proxy) also needs the setup code the server writes to its log at start, so whoever reaches
   a fresh server first over the network can't claim it. Sessions: 256-bit ids in an `HttpOnly`, `SameSite=Strict`
-  cookie (`Secure` over HTTPS; `X-Forwarded-Proto` believed only with `DOWNLOADMANAGER_TRUST_PROXY=1`), 24 hours idle
+  cookie (`Secure` over HTTPS; `X-Forwarded-*` believed only from the proxies `DOWNLOADMANAGER_TRUST_PROXY` lists by
+  address or network), 24 hours idle
   and 7 days at most, kept in memory as hashes; sign-out and a password change end them and close their WebSockets.
-  Wrong tries make the client address wait 1, 2, 4 ... seconds up to 5 minutes. Only `/health`, the sign-in page and
+  Wrong tries make the client address wait 1, 2, 4 ... seconds up to 5 minutes; a try counts as wrong from its start,
+  so a burst of parallel guesses gets one check, and an IPv6 client counts by its /64. A password change also unpairs
+  the extensions unless the user keeps them. Only `/health`, the sign-in page and
   its assets, `/favicon.svg` and `/theme.js` answer without a session. With sign-in on, the server may listen beyond
   loopback (the default `0.0.0.0:8080` works); `DOWNLOADMANAGER_AUTH=off` turns it off and brings back the D1b rule
   (loopback only unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1`). The status call tells the version only to a
@@ -39,7 +42,8 @@ track it.
   against a loopback test server: paired from Settings, an automatic download and an "ask each time" download landed
   on the server with matching SHA-256 (PROGRESS).
 - **Torrent upload:** `POST /api/upload/torrent` keeps the file in `<data>/uploads` (removed after a day, at most 200),
-  a folder only the provider coordinator may read besides the roots.
+  a folder only the provider coordinator may read besides the roots. The answer is a reference (`upload:<id>`), not
+  the path, so a client doesn't learn where the data folder is.
 - **Web UI** (`webui/`, Svelte 5, Vite 8, Tailwind 4, exact versions in `package-lock.json`): built to
   `webui/dist`, which the server's build copies into `wwwroot` (`webui/README.md` has the order and the commands;
   `scripts/build.ps1` builds it first). The sign-in page is its own build under `/signin/`. Screens, in the planned
@@ -153,9 +157,10 @@ and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows 
   shares) can't give this guarantee, so the data belongs on a local volume.
 - **Listening:** the loopback rule below is checked on the configured addresses before starting and again on the
   addresses Kestrel reports once it listens; a refusal stops it at once.
-- **Origin check:** a browser request to `/api/` must come from the server's own origin and must name the server by
-  an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. That stops another web page, including one that
-  points its own name at the server (DNS rebinding), from driving it through the user's browser.
+- **Origin check:** a browser request to `/api/` must come from the server's own origin, and every `/api/` request
+  must name the server by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`, `Origin` or not. That
+  stops another web page, including one that points its own name at the server (DNS rebinding), from driving it
+  through the user's browser or reading its `GET` answers.
 
 **Sign-in (D2) is on by default.** With it turned off (`DOWNLOADMANAGER_AUTH=off`), anyone who can reach the port can
 do everything a client can: add and delete downloads, write files anywhere in the roots, change settings, enter or

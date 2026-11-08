@@ -80,14 +80,15 @@ public sealed class AuthTests
         Assert.Equal(HttpStatusCode.OK, (await second.PostAsync("/api/auth/signin", new { password = AuthServer.Password })).StatusCode);
         Assert.NotEqual(client.Session, second.Session);
 
-        // X-Forwarded-Proto is believed only with DOWNLOADMANAGER_TRUST_PROXY=1.
+        // X-Forwarded-Proto is believed only from a proxy DOWNLOADMANAGER_TRUST_PROXY lists.
         using var forwarded = new AuthClient(server.Base);
         await forwarded.PostAsync("/api/auth/signin", new { password = AuthServer.Password },
             request => request.Headers.Add("X-Forwarded-Proto", "https"));
         Assert.DoesNotContain("secure", forwarded.LastSetCookie!, StringComparison.OrdinalIgnoreCase);
 
-        await using var proxied = await AuthServer.StartAsync(change: options => options with { TrustProxy = true }, work: null);
-        using var proxiedSetup = await AuthServer.SetUpAsync(proxied);
+        await using var proxied = await AuthServer.StartAsync(change: options => options with { TrustedProxies = [System.Net.IPNetwork.Parse("127.0.0.1/32")] }, work: null);
+        // Through a listed proxy the setup code is asked even from this machine.
+        using var proxiedSetup = await AuthServer.SetUpAsync(proxied, setupCode: AuthServer.SetupCode(proxied));
         using var overHttps = new AuthClient(proxied.Base) { Origin = $"https://{proxied.Base.Authority}" };
         using var signedIn = await overHttps.PostAsync("/api/auth/signin", new { password = AuthServer.Password },
             request => request.Headers.Add("X-Forwarded-Proto", "https"));
@@ -317,7 +318,8 @@ public sealed class AuthTests
         using var uploaded = await client.SendAsync(HttpMethod.Post, "/api/upload/torrent", null,
             request => request.Content = new ByteArrayContent("d4:infod4:name1:aee"u8.ToArray()));
         Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
-        var path = (await client.JsonAsync(uploaded)).GetProperty("path").GetString()!;
+        var reference = (await client.JsonAsync(uploaded)).GetProperty("upload").GetString()!;
+        var path = Path.Combine(server.Data, TorrentUploads.FolderName, reference[TorrentUploads.ReferencePrefix.Length..] + ".torrent");
         Assert.Equal(Path.Combine(server.Data, TorrentUploads.FolderName), Path.GetDirectoryName(path));
         Assert.True(File.Exists(path));
     }
