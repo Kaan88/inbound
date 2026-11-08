@@ -35,6 +35,10 @@ export class Store {
   theme = $state<Theme>(readTheme());
   toasts = $state<Toast[]>([]);
   signInRequired = $state(true);
+  /** Counts every saved or cleared provider key, so screens drop what they read with the old key. */
+  keyEpoch = $state(0);
+  /** The Settings page to open next (a provider's account page, from My provider). */
+  settingsPage = $state<string | null>(null);
   private client: ProtocolClient | null = null;
   private toastId = 0;
 

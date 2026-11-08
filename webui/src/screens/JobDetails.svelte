@@ -1,17 +1,19 @@
 <script lang="ts">
   import Dialog from '../components/Dialog.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
+  import { archiveRowView, planFor, type ArchivePasswordTarget } from '../lib/archives';
   import { archiveShort, archiveTone, bytes, dateTime, duration, percent, siteOf, speed, statusText, timeSpanSeconds, tone } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, Job } from '../lib/types';
 
-  let { job, set, onclose, onpassword }: { job: Job; set?: ArchiveSet; onclose: () => void; onpassword: (set: ArchiveSet) => void } = $props();
+  let { job, set, onclose, onpassword }: { job: Job; set?: ArchiveSet; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void } = $props();
 
   let newAddress = $state('');
   let explicitDirect = $state(false);
   let refreshing = $state(false);
 
   const p = $derived(percent(job));
+  const plan = $derived(planFor([{ jobId: job.id, fileName: job.fileName, filePath: job.finalFilePath, set }], [], null));
 
   async function refresh() {
     refreshing = true;
@@ -68,9 +70,9 @@
   {#snippet footer()}
     {#if job.canPause}<button class="btn" onclick={() => store.attempt('job.pause', { jobId: job.id })}>Pause</button>{/if}
     {#if job.canResume}<button class="btn" onclick={() => store.attempt(job.state === 'failed' ? 'job.retry' : 'job.resume', { jobId: job.id })}>{job.state === 'failed' ? 'Retry' : 'Resume'}</button>{/if}
-    {#if set?.needsPassword}<button class="btn" onclick={() => onpassword(set)}>Archive password…</button>{/if}
-    {#if set && (set.state === 'downloaded' || set.state === 'failed')}
-      <button class="btn" onclick={() => store.attempt('archive.extract', { jobIds: [job.id] }, 'Extraction asked for.')}>Extract</button>
+    {#if plan.password}<button class="btn" onclick={() => onpassword(plan.password!)}>Archive password…</button>{/if}
+    {#if plan.canExtract || (plan.extractReason !== null && set === undefined)}
+      <button class="btn" disabled={!plan.canExtract} title={plan.extractText} onclick={() => store.attempt('archive.extract', { jobIds: [job.id] }, 'Extraction asked for.')}>{plan.extractText}</button>
     {/if}
     <button class="btn" onclick={onclose}>Close</button>
   {/snippet}
