@@ -4119,7 +4119,7 @@ public sealed partial class RuntimeServiceTests
                 handler: handler,
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
             var service = new DownloadManagerService(
                 paths,
                 store,
