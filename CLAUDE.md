@@ -189,6 +189,14 @@ not as acceptance evidence.
   `...\opencode\cft\chrome-win64` copy lost its version manifest and fails to start with a side-by-side error).
   Chrome for Testing loads the extension with `--load-extension` and a fresh
   profile. Do not waste time automating Chrome stable's folder picker.
+  CfT reads `HKCU\Software\Chromium\NativeMessagingHosts` before Chrome's key, so register a test
+  build with `scripts\register-test-native-host.ps1 -NativeExe <test NativeHost.exe>` and run it with
+  `-Remove` afterwards. It refuses when the key is taken (another track's test) and never touches the
+  Chrome, Edge or Firefox keys (TEST.3).
+- Firefox without writing any key (it uses the installed app's Firefox key): start `firefox.exe --headless --no-remote --remote-debugging-port <p>
+  --profile <fresh dir>` with `DOWNLOADMANAGER_INSTANCE`/`DOWNLOADMANAGER_DATA` set, and load
+  `extensions\chrome\dist-firefox` with WebDriver BiDi `webExtension.install`. The installed native host
+  then connects to the test instance's Host (EXT.B3 check, 2026-11-08).
 - Mandatory enterprise policy is not a reliable path here; use CfT/manual.
 - An agent shell can read a stale native-host registry value while a normal terminal reads the real one,
   and Chrome launched from the agent shell then reports "Specified native messaging host not found".
