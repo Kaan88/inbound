@@ -312,8 +312,8 @@
       {:else if search}
         Nothing matches “{search}”.
       {:else}
-        <p class="mb-3">No downloads here yet.</p>
-        <button class="btn-primary" onclick={onadd}><Icon name="add" size={16} /> Add links</button>
+        <p class="mb-3">{view === 'remote' ? 'Nothing is waiting for a provider. Items show here until their files start downloading.' : 'No downloads here yet.'}</p>
+        {#if view !== 'remote'}<button class="btn-primary" onclick={onadd}><Icon name="add" size={16} /> Add links</button>{/if}
       {/if}
     </div>
   {/each}

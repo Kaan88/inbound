@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { ArchiveNoticeBoard, noticeTarget, type ArchiveNotice, type ArchivePasswordTarget } from '../lib/archives';
+  import { noticeBoard as board, noticeWatchingSince as watchingSince, noticeTarget, type ArchiveNotice, type ArchivePasswordTarget } from '../lib/archives';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet } from '../lib/types';
   import Icon from './Icon.svelte';
@@ -9,8 +9,6 @@
   // waits for the user, never takes the focus, and can be dismissed until the set has news.
   let { onpassword, onshow }: { onpassword: (target: ArchivePasswordTarget) => void; onshow: (set: ArchiveSet) => void } = $props();
 
-  const board = new ArchiveNoticeBoard();
-  const watchingSince = new Date();
   let dismissals = $state(0);
 
   const sets = $derived(Object.values(store.model.archives));

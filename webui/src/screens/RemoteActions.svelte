@@ -103,11 +103,12 @@
         <button class="btn" disabled={busy} onclick={loadFiles}>Choose files…</button>
         {#if early}<button class="btn ml-1" disabled={busy} onclick={() => choose(true)}>{downloadAllWhenReady}</button>{/if}
         {#if filesProblem}<p class="mt-1 text-[12.5px] text-error" role="alert">{filesProblem}</p>{/if}
-      {:else if filesPending || tree.files.length === 0}
-        <p class="mb-2 text-[13px] text-muted">{provider} doesn't list the files yet. {early ? 'You can download all of them when it does.' : 'Try again in a moment.'}</p>
+      {:else if tree.files.length === 0}
+        <p class="mb-2 text-[13px] text-muted">{provider} doesn't list the files yet. {early ? 'You can download all of them when it does.' : 'Try again when it does.'}</p>
         <button class="btn" disabled={busy} onclick={loadFiles}>Read the files again</button>
         {#if early}<button class="btn ml-1" disabled={busy} onclick={() => choose(true)}>{downloadAllWhenReady}</button>{/if}
       {:else}
+        {#if filesPending}<p class="mb-2 text-[13px] text-muted">{provider} is still working on this, so the list may change.</p>{/if}
         <RemoteFileTree {tree} bind:chosen disabled={busy} />
         <div class="mt-2 flex flex-wrap gap-2">
           <button class="btn-primary" disabled={busy || chosen.size === 0} onclick={() => choose(false)}>Download the chosen files</button>

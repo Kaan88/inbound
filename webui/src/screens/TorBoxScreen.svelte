@@ -5,7 +5,7 @@
   import RemoteFileTree from '../components/RemoteFileTree.svelte';
   import { dateTime } from '../lib/format';
   import {
-    buildFileTree, canBrowse, canDeleteFromProvider, checkable, choiceOf, choosableIds, countedItems, deleteQuestion, downloadStarted, emptyKind,
+    actionsOf, buildFileTree, canBrowse, canDeleteFromProvider, checkable, choiceOf, choosableIds, countedItems, deleteQuestion, downloadStarted, emptyKind,
     failureText, filterHosters, hosterDetails, hostersUp, isFullPath, itemSortLabels, itemView, jobFor, kindHeading, localFilesOf, localWords,
     needsTheRest, providerNameOf, restoreChoice, sortItems, type FileTree, type ItemSortKey,
   } from '../lib/remote';
@@ -55,12 +55,15 @@
     if (!account || !browsable) return;
     const base = pages[kind] ?? blank();
     const from = more ? base.offset : 0;
+    const epoch = store.keyEpoch;
     loads++;
     try {
       const result = await store.ask<{ items: RemoteItem[]; hasMore: boolean }>('remote.item.get', { provider: account.provider, kind, offset: from, limit: 50, fresh: fresh || base.fresh });
+      if (epoch !== store.keyEpoch) return; // read with a key that has since changed
       const items = from === 0 ? result.items : [...base.items, ...result.items.filter((item) => !base.items.some((known) => known.itemId === item.itemId))];
       pages[kind] = { items, hasMore: result.hasMore, offset: from + result.items.length, loaded: true, problem: '', lastCount: result.items.length, fresh: false };
     } catch (error) {
+      if (epoch !== store.keyEpoch) return;
       pages[kind] = { ...base, loaded: true, problem: failureText(error instanceof Error ? error.message : String(error), null, name), lastCount: 0 };
     } finally {
       loads--;
@@ -125,6 +128,13 @@
 
   // ---- The destination ----
   let freeDestination = $state(String(store.model.settings?.lastDestinationDirectory || store.model.settings?.defaultDownloadDirectory || ''));
+  let lastRemembered = $state('');
+  // Settings can arrive after this screen opens (a reload on this page): fill the box until the user types.
+  $effect(() => {
+    const remembered = String(store.model.settings?.lastDestinationDirectory || store.model.settings?.defaultDownloadDirectory || '');
+    if (remembered && (freeDestination === '' || freeDestination === lastRemembered)) freeDestination = remembered;
+    lastRemembered = remembered;
+  });
   let destinationHint = $state('');
   const destination = $derived(activeJob ? (activeJob.destination ?? '') : freeDestination);
 
@@ -202,7 +212,7 @@
 
   async function checkNow() {
     if (!account) return;
-    const one = selectedJob && selectedJob.state !== 'localStarted' ? selectedJob : undefined;
+    const one = selectedJob && actionsOf(selectedJob).checkNow ? selectedJob : undefined;
     const result = await store.attempt('remote.checkNow', one ? { jobId: one.id } : { provider: account.provider });
     if (result) {
       status = `Checking ${name} now. The status above changes when it answers, unless ${name} has asked this app to wait.`;
@@ -254,7 +264,7 @@
 
     {#if !browsable}
       <div class="card p-4 text-[13px]">
-        <p class="mb-2">{account.keyUnreadable ? `The ${name} API key is saved, but the server can't read it.` : account.hasKey ? `${name} doesn't offer a list of what is on its account.` : `No ${name} API key is saved.`}</p>
+        <p class="mb-2">{account.keyUnreadable ? `The ${name} API key is saved, but the server can't read it.` : account.hasKey ? `${name} doesn't offer a list of what is on its account.` : `No usable ${name} API key is saved. Add it in Settings.`}</p>
         {#if !account.hasKey || account.keyUnreadable}
           <p class="mb-3 text-muted">Add the key under Settings, {name} account, to see what is in your account here.</p>
           <a class="btn-primary inline-flex" href="#/settings" onclick={() => (store.settingsPage = `provider:${account.provider}`)}>Open {name} account</a>
@@ -283,7 +293,7 @@
           <button class="btn" disabled={acting || !canCheck} title={canCheck ? `Ask ${name} about your waiting items now, without waiting for the next check` : `Nothing is waiting on ${name}, so there is nothing to check`} onclick={checkNow}>Check now</button>
           <span class="hint ml-auto" aria-live="polite">{page.loaded ? countedItems(page.items.length, page.hasMore) : ''}</span>
         </div>
-        {#if page.problem}<p class="mb-2 text-[13px] text-error" role="alert">{page.problem}</p>{/if}
+        {#if page.problem}<p class="mb-2 text-[13px] text-error" role="alert">{page.problem}{page.items.length === 0 ? ` This list could not be read. Select Refresh to ask ${name} again.` : ''}</p>{/if}
 
         <ul class="card divide-y divide-divider" aria-label={kindHeading(current)}>
           {#each shown as item (item.itemId)}

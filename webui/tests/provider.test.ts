@@ -397,3 +397,16 @@ describe('archive notice', () => {
     expect(quiet.update([set({ state: 'completed', completedAt: '2026-03-01T00:00:00Z' })], since, false)).toBeNull();
   });
 });
+
+import { planFor as planForPath } from '../src/lib/archives';
+import { noticeBoard } from '../src/lib/archives';
+describe('review fixes', () => {
+  it('offers a password in advance only for a full path', () => {
+    const file = (filePath: string) => ({ jobId: 'j', fileName: 'a.rar', filePath, set: undefined });
+    expect(planForPath([file('C:/dl/a.rar')], [], null).password).not.toBeNull();
+    expect(planForPath([file('a.rar')], [], null).password ?? null).toBeNull();
+  });
+  it('keeps one notice board for the page', () => {
+    expect(noticeBoard).toBeDefined();
+  });
+});

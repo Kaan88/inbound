@@ -2,7 +2,7 @@
 // is the full version of each short label. Nothing here touches the DOM.
 
 import type { Tone } from './format';
-import { hideAddresses } from './remote';
+import { hideAddresses, isFullPath } from './remote';
 import type { ArchiveSet, Job } from './types';
 import type { Row } from './views';
 
@@ -257,7 +257,7 @@ function passwordFor(archiveFiles: ArchiveFile[], sets: ArchiveSet[], packageAlo
     return sets[0].state === 'completed' || sets[0].state === 'extracting' ? null : targetOf(sets[0]);
   }
   // A download with no record yet can still get a password in advance, by its file's path.
-  if (sets.length === 0 && archiveFiles.length === 1 && archiveFiles[0].filePath) {
+  if (sets.length === 0 && archiveFiles.length === 1 && archiveFiles[0].filePath && isFullPath(archiveFiles[0].filePath)) {
     return { filePath: archiveFiles[0].filePath, name: archiveFiles[0].fileName, needed: false, wasWrong: false, hasPassword: false };
   }
   return null;
@@ -477,3 +477,7 @@ export function planForRows(rows: Row[], selected: ReadonlySet<string>, setOfJob
   if (chosen.length === 1 && chosen[0].kind === 'package') packageAlone = { id: chosen[0].group.id, name: chosen[0].group.name };
   return planFor([...files.values()], records, packageAlone, connected);
 }
+
+/** One board for the page's lifetime, so a dismissed notice stays dismissed and a finish while away still counts. */
+export const noticeBoard = new ArchiveNoticeBoard();
+export const noticeWatchingSince = new Date();
