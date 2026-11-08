@@ -104,6 +104,31 @@ public sealed partial class DownloadSpeedGraph : UserControl
         Draw();
     }
 
+    /// <summary>
+    /// UI.R24: the Host's figures, one per <paramref name="intervalSeconds"/> from <paramref name="start"/>, replace this
+    /// window's own samples for the time they cover. Older samples stay, with a gap before the Host's start if there was
+    /// one; newer ones (taken while the request was out) stay after them.
+    /// </summary>
+    public void LoadHistory(DateTimeOffset start, int intervalSeconds, IReadOnlyList<long> bytesPerSecond)
+    {
+        if (bytesPerSecond.Count == 0 || intervalSeconds <= 0) return;
+        var end = start.AddSeconds((bytesPerSecond.Count - 1) * (double)intervalSeconds);
+        var before = _samples.Where(sample => sample.Time < start).ToList();
+        var after = _samples.Where(sample => sample.Time > end).ToList();
+        _samples.Clear();
+        foreach (var sample in before) _samples.Enqueue(sample);
+        if (before.Count > 0 && start - before[^1].Time > TimeSpan.FromSeconds(5)) _samples.Enqueue((before[^1].Time.AddSeconds(1), null));
+        for (var i = 0; i < bytesPerSecond.Count; i++)
+        {
+            var rate = bytesPerSecond[i];
+            _samples.Enqueue((start.AddSeconds(i * (double)intervalSeconds), rate >= 0 ? (double?)rate : null));
+        }
+        foreach (var sample in after) _samples.Enqueue(sample);
+        var latest = _samples.Last().Time;
+        while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < latest.AddHours(-1)) _samples.Dequeue();
+        Draw();
+    }
+
     private void ToggleButton_Click(object sender, RoutedEventArgs e)
     {
         SetExpanded(!_expanded, animate: true);
@@ -183,7 +208,13 @@ public sealed partial class DownloadSpeedGraph : UserControl
         var peak = known.Length == 0 ? 0 : known.Max();
         var average = known.Length == 0 ? 0 : known.Average();
         var latest = visible.LastOrDefault().Rate;
-        Summary.Text = $"{(latest is { } current ? RateText(current) : "—")}   ·   Average {RateText(average)}   ·   Peak {RateText(peak)}";
+        var currentText = latest is { } current ? RateText(current) : "—";
+        var averageText = RateText(average);
+        var peakText = RateText(peak);
+        if (SummaryCurrent.Text != currentText) SummaryCurrent.Text = currentText;
+        if (SummaryAverage.Text != averageText) SummaryAverage.Text = averageText;
+        if (SummaryPeak.Text != peakText) SummaryPeak.Text = peakText;
+        AutomationProperties.SetName(Summary, $"{currentText}, average {averageText}, peak {peakText}");
 
         if (!_expanded) return;
         Plot.Children.Clear();

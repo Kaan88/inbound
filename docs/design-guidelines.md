@@ -28,8 +28,10 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 - In code-behind, use `InboundTheme.Brush("InboundXxxBrush", element)`. Pass the
   window's root element. Each window sets its own `RequestedTheme`, so an
   application-level lookup can return the wrong variant.
-- New windows read `UiStateStore.Load().DarkMode`, set `RequestedTheme` on the
-  root, and use `InboundSurfaceBrush` for the background.
+- New windows call `AppTheme.Track(root)`, which sets `RequestedTheme` on the root
+  from the settings' Theme (System, Light or Dark) and changes it with the setting
+  and with Windows, and use `InboundSurfaceBrush` for the background. Do not read
+  the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
   `Content`. It sets the app icon and a title bar matching `InboundChromeBrush`,
   so a dark window never sits under a white caption.
@@ -178,10 +180,31 @@ default window width. With one remote or archive row selected, the status bar sa
 3. Drive realistic states with TestServer throttling, for example
    `/slow/name.iso?size=80000000&bps=400000`. Add a failing URL and a small
    file that completes so every status color is on screen.
-4. Capture both themes. To switch, set `"DarkMode": false|true` in
-   `artifacts\uiqa\data\ui-state.json` and restart the UI.
+4. Capture both themes. To switch, use the Theme box in Options or View > Dark
+   Mode on the test instance. Both change the test Host's Theme setting, and every
+   open window follows. Editing `artifacts\uiqa\data\ui-state.json` does not: its
+   `theme` is only a start-up hint, and a `darkMode` there is saved into the
+   Host's setting the next time the window connects.
 5. Capture a window with `PrintWindow` and flag 2 (`PW_RENDERFULLCONTENT`). It needs no focus and takes in nothing
    else on the desktop, while a copy of the screen can come out black. A menu or flyout is a window of its own, with
    class `Microsoft.UI.Content.PopupWindowSiteBridge` or `Xaml_WindowedPopupClass`, so capture it by itself.
 6. Use `--dest`, not `--dir`, with `dm add`. Destinations must be outside the
    user's Downloads folder during harness runs.
+
+## 8. The web UI (D2)
+
+The browser front end (`webui/`) follows the same rules with web tools:
+
+- **Palette:** `webui/src/app.css` holds the `App.xaml` tokens as CSS variables, light by default and dark from the
+  system or from `data-theme` on `<html>`, and maps them to Tailwind names (`bg-chrome`, `text-muted`,
+  `text-icon-info`, `tone-done` and so on). Components never name a color of their own. A theme picked in the header
+  is kept per browser.
+- **Status colors and bars** are the desktop's: the state's color on the status text, a 6 px bar under it while a
+  download is active or paused with progress, a moving bar when the size is unknown.
+- **Layout:** header, sidebar of views with counts, toolbar (icon over label; icons alone below 768 px, the words kept
+  for screen readers), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
+  lines per download on a phone. The sidebar becomes a drawer below 768 px; dialogs fill the screen on a phone.
+- **Icons:** our own outline glyphs on a 24-unit grid (`Icon.svelte`), colored with the icon tokens.
+- **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
+  themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look
+  at the pictures, as with the desktop captures above.

@@ -36,7 +36,7 @@ public static partial class MultipartArchiveName
         if (!TryGetBaseName(fileName, out var baseName)) return null;
         var folder = string.IsNullOrWhiteSpace(directory) ? string.Empty
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
-        return "multipart:" + folder.ToUpperInvariant() + "|" + baseName.ToUpperInvariant();
+        return "multipart:" + Fold(folder) + "|" + Fold(baseName);
     }
 
     /// <summary>
@@ -55,7 +55,7 @@ public static partial class MultipartArchiveName
         if (baseName.Length == 0) return null;
         var folder = string.IsNullOrWhiteSpace(directory) ? string.Empty
             : Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
-        return "multipart:" + folder.ToUpperInvariant() + "|" + baseName.ToUpperInvariant();
+        return "multipart:" + Fold(folder) + "|" + Fold(baseName);
     }
 
     private static readonly Regex[] Patterns =
@@ -81,4 +81,8 @@ public static partial class MultipartArchiveName
 
     [GeneratedRegex(@"^(?<base>.+)\.\d{3}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Numbered();
+
+    // Windows names ignore case, so parts written as Movie.part1 and movie.PART02 are one set there. Linux keeps them
+    // apart, and so does 7-Zip when it looks for the next volume, so the key keeps their case.
+    private static string Fold(string value) => OperatingSystem.IsWindows() ? value.ToUpperInvariant() : value;
 }

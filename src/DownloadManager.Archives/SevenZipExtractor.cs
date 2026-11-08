@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DownloadManager.Core.Archives;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -23,17 +24,62 @@ public sealed record SevenZipExtractorOptions
     internal Action<string>? FlushOverride { get; init; }
 }
 
-/// <summary>Where the bundled 7-Zip lives.</summary>
+/// <summary>
+/// Where 7-Zip is. On Windows it is the copy bundled in <c>tools\7-Zip</c> (<c>7z.exe</c> with its <c>7z.dll</c>). Elsewhere it
+/// is the official Linux build, <c>7zz</c>, which is one file with its formats built in: <see cref="EnvironmentVariable"/>
+/// first, then <c>tools/7-Zip/7zz</c> next to the program (where a container image puts it), then <c>7zz</c> and <c>7z</c>
+/// on <c>PATH</c>.
+/// </summary>
 public static class SevenZipTool
 {
-    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", "7z.exe");
+    /// <summary>An explicit 7-Zip program for a server, such as <c>/usr/bin/7zz</c>. Read off Windows only.</summary>
+    public const string EnvironmentVariable = "DOWNLOADMANAGER_7ZIP";
 
-    /// <summary>The program to run, or null when it or its 7z.dll is missing.</summary>
+    public static string BundledPath => Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", OperatingSystem.IsWindows() ? "7z.exe" : "7zz");
+
+    /// <summary>The program to run, or null when it is missing (on Windows, also when its 7z.dll is).</summary>
     public static string? Find(string? toolPath = null)
     {
-        var path = Path.GetFullPath(toolPath ?? BundledPath);
-        return File.Exists(path) && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "7z.dll")) ? path : null;
+        if (OperatingSystem.IsWindows())
+        {
+            var path = Path.GetFullPath(toolPath ?? BundledPath);
+            return File.Exists(path) && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "7z.dll")) ? path : null;
+        }
+
+        if (toolPath is not null)
+        {
+            var path = Path.GetFullPath(toolPath);
+            return File.Exists(path) ? path : null;
+        }
+
+        return Locate(Environment.GetEnvironmentVariable(EnvironmentVariable), Environment.GetEnvironmentVariable("PATH"));
     }
+
+    /// <summary>Off Windows: the variable's program, else the bundled 7zz, else 7zz then 7z on <paramref name="path"/>.</summary>
+    internal static string? Locate(string? configured, string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            // Named on purpose, so a wrong name is reported as missing rather than quietly replaced by another 7-Zip.
+            var full = Path.GetFullPath(configured.Trim());
+            return File.Exists(full) ? full : null;
+        }
+
+        return File.Exists(BundledPath) ? BundledPath : FindOnPath("7zz", path) ?? FindOnPath("7z", path);
+    }
+
+    /// <summary>What to tell the user when <see cref="Find"/> finds nothing. Windows has a copy to repair; a server has one to install.</summary>
+    public static string MissingMessage => OperatingSystem.IsWindows()
+        ? "The bundled 7-Zip is missing. Repair or reinstall Inbound."
+        : $"7-Zip was not found. Install 7zz, the official 7-Zip for Linux, on PATH, or set {EnvironmentVariable} to it.";
+
+    /// <summary>What to tell the user about the copy <see cref="Find"/> found.</summary>
+    public static string FoundMessage(string path) => OperatingSystem.IsWindows()
+        ? "Extraction uses the 7-Zip that comes with Inbound."
+        : $"Extraction uses 7-Zip at {path}.";
+
+    /// <summary>The first <paramref name="name"/> in a folder of the <c>PATH</c> value, or null.</summary>
+    internal static string? FindOnPath(string name, string? path) => ProgramSearch.FindOnPath(name, path);
 }
 
 /// <summary>
@@ -100,6 +146,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             progress?.Report(new ExtractionProgress(ExtractionPhase.Extracting, 100));
 
             progress?.Report(new ExtractionProgress(ExtractionPhase.Verifying));
+            ExtractionSafety.ApplyNameFixes(staging.PayloadFolder, probe.NameFixes);
             var content = ExtractionSafety.WalkStaging(staging.PayloadFolder, probe, limits);
             MarkFromZone(firstVolume, staging.PayloadFolder, content);
 
@@ -111,7 +158,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
             if (request.MakeDurable)
             {
-                var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(StringComparer.OrdinalIgnoreCase);
+                var folders = files.Select(file => Path.GetDirectoryName(file.FinalPath)!).Append(destination).Distinct(PathNames.Comparer);
                 flushed &= FlushAll(folders, FlushDirectory, cancellationToken);
             }
 
@@ -207,7 +254,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
     private string FindTool() =>
         SevenZipTool.Find(_options.ToolPath)
-        ?? throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, "The bundled 7-Zip is missing. Repair or reinstall Inbound.");
+        ?? throw new ExtractionException(ExtractionFailureKind.ToolUnavailable, SevenZipTool.MissingMessage);
 
     private static void RequireReady(ArchiveProbe probe, string firstVolume, ToolPassword secret)
     {
@@ -262,7 +309,11 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
 
         if (headersEncrypted && !hasPassword)
         {
-            var nameGaps = isRar ? RarNameSet(firstVolume)?.MissingVolumes ?? [] : [];
+            // The names are all there is to go by before a password. A spanned zip's gaps count too (A4.D), though the
+            // bundled 7-Zip has no zip it calls header-encrypted, so this is for any that ever does.
+            var nameGaps = isRar
+                ? RarNameSet(firstVolume)?.MissingVolumes ?? []
+                : SpannedZipSet(firstVolume)?.MissingVolumes ?? [];
             return new ArchiveProbe
             {
                 FirstVolume = firstVolume,
@@ -290,6 +341,7 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         var allPresent = missing.Count == 0;
 
         var volumesRead = new List<string> { firstVolume };
+        var volumeNumber = listing.VolumeNumber;
         if (listing.IsVolume && isRar && RarNameSet(firstVolume) is { } set)
         {
             foreach (var gap in set.MissingVolumes)
@@ -307,6 +359,23 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
         {
             volumesRead = SplitVolumes(firstVolume, listing.Volumes);
         }
+        else if (SpannedZipSet(firstVolume) is { } zipSet)
+        {
+            // A4.D: name.z01 ... then name.zip, which 7-Zip opened. The names add the gaps they can see; 7-Zip names a
+            // missing last part from the disk count in name.zip, and a missing middle one too.
+            foreach (var gap in zipSet.MissingVolumes)
+            {
+                if (!missing.Contains(gap, StringComparer.OrdinalIgnoreCase)) missing.Add(gap);
+            }
+
+            if (missing.Count > 0) allPresent = false;
+            var folder = Path.GetDirectoryName(firstVolume)!;
+            volumesRead = SpannedZipVolumes(zipSet, listing.Volumes).Select(member => Path.Combine(folder, member)).ToList();
+
+            // 7-Zip gives name.zip the last disk's index, but it is the volume a spanned set is opened from, so it is
+            // this set's first here; otherwise the later-volume check would refuse every spanned zip.
+            volumeNumber = 1;
+        }
 
         // A compressed stream's listing has no names, or one taken from its header: what it holds is read after unpacking.
         var stream = IsCompressedStream(listing.Type);
@@ -319,14 +388,40 @@ public sealed partial class SevenZipExtractor(SevenZipExtractorOptions? options 
             Entries = entries,
             Version = listing.Type,
             IsVolume = listing.IsVolume,
-            VolumeNumber = listing.VolumeNumber,
+            VolumeNumber = volumeNumber,
             AllVolumesPresent = allPresent,
             MissingVolumes = missing,
             ListingHasUnknownLines = !stream && listing.HasUnknownLines,
             ListingHasRepeatedNames = listing.HasRepeatedNames,
             HoldsDataStreams = listing.HoldsDataStreams,
             VolumesRead = volumesRead,
+            NameFixes = stream ? [] : listing.NameFixes,
         };
+    }
+
+    /// <summary>The spanned zip set whose name.zip this is, or null for any other archive.</summary>
+    private static ArchiveVolumeSet? SpannedZipSet(string firstVolume) =>
+        firstVolume.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && RarNameSet(firstVolume) is { Scheme: ArchiveVolumeScheme.ZipSpanned, FirstVolume: not null } set
+            ? set
+            : null;
+
+    /// <summary>
+    /// The parts read: each .zNN below the disk count 7-Zip gave, then name.zip. A higher-numbered .zNN beside the set
+    /// is not part of it and is left out, so it is never deleted with it.
+    /// </summary>
+    private static List<string> SpannedZipVolumes(ArchiveVolumeSet set, int? disks)
+    {
+        var read = new List<string>();
+        foreach (var member in set.Members)
+        {
+            if (member.Equals(set.FirstVolume, StringComparison.OrdinalIgnoreCase)) continue;
+            var dot = member.LastIndexOf(".z", StringComparison.OrdinalIgnoreCase);
+            if (disks is { } count && int.TryParse(member.AsSpan(dot + 2), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) && number >= count) continue;
+            read.Add(member);
+        }
+
+        read.Add(set.FirstVolume!);
+        return read;
     }
 
     /// <summary>name.7z.001, name.7z.002 …, as far as 7-Zip said it opened, and only files that are there.</summary>

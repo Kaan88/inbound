@@ -20,15 +20,29 @@
     <span id="statusLabel">Desktop app</span>
     <span id="statusDetail" class="muted"></span>
   </section>
+  <section id="serverCard" class="card status-card hidden">
+    <span id="serverDot" class="dot"></span>
+    <span id="serverLabel">Server</span>
+    <span id="serverDetail" class="muted"></span>
+    <button id="openServer" class="link-button" type="button">Open the web UI</button>
+  </section>
+  <section id="autoCard" class="card auto-card">
+    <span id="autoState" class="auto-state">Automatic sending: checking…</span>
+    <button id="autoTurnOn" class="link-button hidden" type="button">Turn on in Settings</button>
+  </section>
+  <section id="leftCard" class="card hidden">
+    <strong>Left in your browser</strong>
+    <ul id="leftList" class="left-list"></ul>
+  </section>
   <p id="getAppRow" class="get-app"><a id="getApp" class="hidden" href="https://github.com/Kaan88/inbound/releases/latest" target="_blank" rel="noopener">Get the desktop app</a></p>
 
   <section class="card">
     <div class="row">
-      <strong>Recent downloads</strong>
+      <strong>Downloads in Inbound</strong>
       <button id="refresh" class="link-button" type="button">Refresh</button>
     </div>
     <ul id="jobs" class="job-list">
-      <li class="empty">No recent downloads.</li>
+      <li class="empty">No downloads.</li>
     </ul>
   </section>
 

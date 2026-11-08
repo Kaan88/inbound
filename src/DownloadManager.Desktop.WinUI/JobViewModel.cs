@@ -54,7 +54,16 @@ public sealed class JobViewModel : INotifyPropertyChanged
     public string Url { get => _url; private set => Set(ref _url, value); }
     public string State { get => _state; private set => Set(ref _state, value); }
     public string StateText { get => _stateText; private set => Set(ref _stateText, value); }
-    public string SizeText { get => _sizeText; private set => Set(ref _sizeText, value); }
+    public string SizeText
+    {
+        get => _sizeText;
+        private set
+        {
+            if (Set(ref _sizeText, value)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SizeVisibility)));
+        }
+    }
+    /// <summary>Collapses an empty size, so text beside it in a row starts where the size would (Scheduler's Files tab).</summary>
+    public Visibility SizeVisibility => _sizeText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public string SpeedText { get => _speedText; private set => Set(ref _speedText, value); }
     public string EtaText { get => _etaText; private set => Set(ref _etaText, value); }
     public string DetailText { get => _detailText; private set => Set(ref _detailText, value); }
@@ -97,6 +106,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         Url = job.Url;
         State = job.State;
         StateText = job.QueueRetryAt is not null ? "Queue retry scheduled"
+            : JobNotes.WaitingText(job) is { } waiting ? waiting
             : IsProviderFile && job.State == "downloading" ? "Downloading locally"
             : ToDisplayState(job.State);
         TotalSize = job.TotalBytes is > 0 ? job.TotalBytes.Value : job.ReceivedBytes;
@@ -439,11 +449,12 @@ public sealed class JobViewModel : INotifyPropertyChanged
     private static string ToDisplaySource(string source)
         => source switch
         {
-            "chromeContextMenu" => "Chrome menu",
-            "chromeAuto" => "Chrome",
+            "chromeContextMenu" => "Browser menu",
+            "chromeAuto" => "Browser",
             "clipboard" => "Clipboard",
             "cli" => "CLI",
-            "batch" => "Batch",
+            "batch" or "cliBatch" => "Batch",
+            // An import, from the app or the CLI ("cliImport"), has always been shown as App.
             _ => "App",
         };
 

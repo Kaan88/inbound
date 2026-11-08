@@ -301,7 +301,9 @@ internal static partial class Program
                             StartMode = startOverride ?? entry.StartMode,
                             ConflictPolicy = entry.ConflictPolicy,
                             ExpectedSha256 = entry.ExpectedSha256,
-                            Source = "import",
+                            // UI.B14: headless, and no completion window per job either (DownloadWindows,
+                            // MainWindow), which a long list would flood. Shown as "App", as "import" was.
+                            Source = "cliImport",
                         }).ConfigureAwait(false);
                         var result = reply.GetPayload<AddJobResponse>();
                         if (result.Accepted)
@@ -1202,7 +1204,9 @@ internal static partial class Program
                     DestinationDirectory = destination,
                     StartMode = startMode,
                     ConflictPolicy = conflict ?? "rename",
-                    Source = "batch",
+                    // UI.B14: headless, with no completion window per job (see DownloadWindows): a batch of
+                    // 1,000 must not open 1,000 progress or completion windows, each its own window process.
+                    Source = "cliBatch",
                     Connections = connections,
                     QueueId = queueId.GetValueOrDefault(-1),
                     Priority = priority,
@@ -1704,7 +1708,9 @@ internal static partial class Program
 
             if (!json)
             {
-                Console.Write($"\r{job.State,-12} {FormatUtil.Bytes(job.ReceivedBytes),-12} {job.BytesPerSecond ?? 0,10:0.0} B/s   ");
+                // UI.B7: says when it waits for a connection to its host; padded so a shorter line overwrites it.
+                var waiting = job.WaitingForHost is { Length: > 0 } host ? $"  Waiting for a connection to {host}" : string.Empty;
+                Console.Write($"\r{job.State,-12} {FormatUtil.Bytes(job.ReceivedBytes),-12} {job.BytesPerSecond ?? 0,10:0.0} B/s{waiting,-60}");
             }
 
             if (job.State is "completed")
@@ -1736,7 +1742,6 @@ internal static partial class Program
         try
         {
             await using var client = await CliClient.ConnectAsync(startHost: !noStart).ConfigureAwait(false);
-            var snapshot = await client.SnapshotAsync().ConfigureAwait(false);
             var status = await client.StatusAsync().ConfigureAwait(false);
             Console.WriteLine("Inbound Download Manager diagnostics");
             Console.WriteLine($"  host:        {status.HostVersion} (protocol {status.ProtocolVersion})");
@@ -1744,7 +1749,7 @@ internal static partial class Program
             Console.WriteLine($"  tray:        {(status.TrayAvailable ? "yes" : "no")}");
             Console.WriteLine($"  native host: {(status.NativeHostRegistered ? "registered" : "not registered")}");
             Console.WriteLine($"  jobs:        {status.TotalJobs} total, {status.ActiveDownloads} active, {status.QueuedDownloads} queued");
-            Console.WriteLine($"  integration: {(snapshot.Settings.BrowserIntegrationEnabled ? "enabled" : "disabled")}");
+            Console.WriteLine($"  integration: {status.BrowserIntegration}");
             return 0;
         }
         catch (HostUnavailableException ex)
@@ -1912,14 +1917,15 @@ internal static partial class Program
               dm remote key clear
               dm remote classify <link>
               dm remote add <link>|- [--approve-uncached] [--dest DIR] [--queue ID]
-                          [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin]
-                          [--archive-password-stdin]
+                          [--start startNow|queue|later] [--select all|ask|ID,ID]
+                          [--link-password-stdin [--link-password-for-archives]] [--archive-password-stdin]
               dm remote add-torrent <file> [--approve-uncached] [--dest DIR] [--queue ID] [--select ...]
               dm remote list
               dm remote files <id>
               dm remote select <id> all|<file-id>...
-              dm remote retry <id> [--approve-uncached] [--link-password-stdin]
+              dm remote retry <id> [--approve-uncached] [--link-password-stdin [--link-password-for-archives]]
               dm remote check [<id>]
+              dm remote start-queued <id>
               dm remote remove <id> [--delete-from-provider --yes]
               dm remote browse torrents|webdl|usenet [--offset N] [--limit N] [--item ID]
               dm remote archive-password <id>   (from standard input; empty clears it)

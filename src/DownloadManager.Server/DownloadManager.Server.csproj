@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DownloadManager.Server</RootNamespace>
+    <!-- No Windows parts: this builds and runs on Linux (D1b). The image comes in D3. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    The web UI (D2) is built by Node in webui\ (npm ci; npm run build) into webui\dist; no Node runs here. When
+    webui\dist exists, its files are what this project serves from wwwroot, in a build as in a publish, and the
+    placeholder pages in wwwroot are left out. Without it (a build on a machine with no Node, the Linux test
+    container) the placeholder says how to build the UI. The Docker image (D3) runs the Node build first.
+  -->
+  <PropertyGroup>
+    <WebUiDist>$(MSBuildThisFileDirectory)..\..\webui\dist\</WebUiDist>
+    <WebUiBuilt Condition="Exists('$(WebUiDist)index.html') And Exists('$(WebUiDist)signin\index.html')">true</WebUiBuilt>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(WebUiBuilt)' == 'true'">
+    <Content Remove="wwwroot\**" />
+    <None Remove="wwwroot\**" />
+    <Content Include="$(WebUiDist)**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(WebUiBuilt)' != 'true'">
+    <!-- Served from next to the program (ServerApp sets the web root there), in a build as in a publish. -->
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DownloadManager.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The one place that names a concrete provider, shared with the desktop Host rather than copied. -->
+    <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
+    <ProjectReference Include="..\DownloadManager.Containers\DownloadManager.Containers.csproj" />
+    <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+  </ItemGroup>
+
+</Project>

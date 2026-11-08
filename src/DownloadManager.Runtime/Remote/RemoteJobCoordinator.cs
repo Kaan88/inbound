@@ -474,6 +474,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyAsync(string? text, CancellationToken cancellationToken = default)
     {
+        text = Resolve(text);
         var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
         return first.Kind == RemoteInputKind.OrdinaryLink
             ? RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(true, cancellationToken).ConfigureAwait(false))
@@ -486,9 +487,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         var plain = await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false);
         List<RemoteClassifierProvider>? withHosters = null;
         var answers = new List<RemoteInputClassification>(inputs.Count);
-        foreach (var input in inputs)
+        foreach (var given in inputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var input = Resolve(given);
             var first = RemoteInputClassifier.Classify(input, plain);
             if (first.Kind == RemoteInputKind.OrdinaryLink)
             {
@@ -510,6 +512,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default)
     {
+        text = Resolve(text);
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
@@ -579,6 +582,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         if (!string.IsNullOrEmpty(request.Destination) && !Path.IsPathFullyQualified(request.Destination))
         {
             return new RemoteAddResult { Error = "The destination has to be a full path." };
+        }
+
+        if (!string.IsNullOrEmpty(request.Destination) && DestinationRoots is { } destinationRoots &&
+            destinationRoots.Allowed(request.Destination) is null)
+        {
+            // Checked here, before any provider call or quota is spent, and again for each file when it is added.
+            return new RemoteAddResult { Error = PathRoots.OutsideMessage };
         }
 
         if (request.StartMode is not ("startNow" or "queue" or "later"))
@@ -750,6 +760,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
+        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
@@ -832,8 +843,35 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             }, null, classification.Kind);
     }
 
-    private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// On a server, the folders whose files a client may have it read (a .torrent file given by its path). A client
+    /// there is not the machine's user. Null on the desktop, where any file the user names may be read.
+    /// </summary>
+    public PathRoots? Roots { get; set; }
+
+    /// <summary>
+    /// On a server, the folders a client may have downloads saved in (<c>DOWNLOADMANAGER_ROOTS</c>, without the upload
+    /// folder). A destination outside them is refused before the provider is asked for anything. Null on the desktop.
+    /// </summary>
+    public PathRoots? DestinationRoots { get; set; }
+
+    /// <summary>
+    /// On a server, turns a reference to a file a client uploaded (the server's own form, such as <c>upload:…</c>) into
+    /// that file's path, or gives null for anything else. The client then never learns where the server keeps it.
+    /// </summary>
+    public Func<string, string?>? ResolveReference { get; set; }
+
+    private string? Resolve(string? text) =>
+        text is not null && ResolveReference is { } resolve && resolve(text.Trim()) is { } path ? path : text;
+
+    private async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
     {
+        if (Roots is { } roots)
+        {
+            if (roots.Allowed(path) is not { } inside) return (null, "That .torrent file is outside the folders this server may use.");
+            path = inside;
+        }
+
         try
         {
             var info = new FileInfo(path);
@@ -1057,6 +1095,27 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, CancellationToken cancellationToken = default)
         => SetArchivePasswordAsync(id, password, offered: false, cancellationToken);
+
+    /// <summary>
+    /// TB.S2: offers a password to this job's own archives, with the user's consent given where it was typed. A job
+    /// that has one already, given by the user or handed over, keeps it, and so does its package on the archive side.
+    /// </summary>
+    public async Task<RemoteActionResult> OfferArchivePasswordAsync(Guid id, string password, CancellationToken cancellationToken = default)
+    {
+        RemoteJobRecord? record;
+        lock (_sync) _records.TryGetValue(id, out record);
+        if (record is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        if (record.ProtectedArchivePassword is not null || record.ArchivePasswordHandedOver)
+        {
+            return new RemoteActionResult(true, null, ToView(record));
+        }
+
+        return await SetArchivePasswordAsync(id, password, offered: true, cancellationToken).ConfigureAwait(false);
+    }
 
     private async Task<RemoteActionResult> SetArchivePasswordAsync(Guid id, string? password, bool offered, CancellationToken cancellationToken)
     {
@@ -1295,9 +1354,13 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
         if (view.ItemId is not { } itemId)
         {
-            return new RemoteActionResult(false, view.Stage == RemoteStage.Queued
-                ? $"This is waiting in your {view.ProviderName} queue, and has no item to delete yet. This app can't cancel a queued item, so do that on {view.ProviderName}'s site if you need to."
-                : $"This item isn't known to be on your {view.ProviderName} account.");
+            // TB.S1: waiting in the provider's queue, there is no item yet, only the queue's entry.
+            if (view.Stage == RemoteStage.Queued && view.State == RemoteJobState.Waiting)
+            {
+                return await ControlQueuedAsync(id, RemoteQueueAction.Remove, cancellationToken).ConfigureAwait(false);
+            }
+
+            return new RemoteActionResult(false, $"This item isn't known to be on your {view.ProviderName} account.");
         }
 
         try
@@ -1315,6 +1378,91 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
         // The item is gone now, so a client leaving can't be allowed to keep the job on the list.
         return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// TB.S1: starts, or takes out, a job's entry in the provider's queue. Only from an explicit user action, and only
+    /// for a job still waiting there with no item: its entry is found again by the job's hash in a fresh read of the
+    /// queue, so nothing else in the queue can be touched. Start has the account looked at again at once, which
+    /// finds the new item by that hash; Remove takes the job off the list too, since nothing is left to wait for.
+    /// </summary>
+    public async Task<RemoteActionResult> ControlQueuedAsync(Guid id, RemoteQueueAction action, CancellationToken cancellationToken = default)
+    {
+        RemoteJobRecord? record;
+        lock (_sync) _records.TryGetValue(id, out record);
+        if (record is null)
+        {
+            return new RemoteActionResult(false, "That item is not on the list.");
+        }
+
+        var entry = _providers.Find(record.Provider);
+        var name = entry?.DisplayName ?? record.Provider;
+        if (record is not { State: RemoteJobState.Waiting, Stage: RemoteStage.Queued, ItemId: null })
+        {
+            return new RemoteActionResult(false, $"This item isn't waiting in your {name} queue.");
+        }
+
+        if (entry?.Queue is not { } queue || entry.Provider is not IRemoteQueueControl control)
+        {
+            return new RemoteActionResult(false, $"{name}'s queue can't be changed from this app.");
+        }
+
+        if (entry.AccountProblem() is { } problem)
+        {
+            return new RemoteActionResult(false, problem);
+        }
+
+        try
+        {
+            var queueId = await FindQueueIdAsync(queue, record, cancellationToken).ConfigureAwait(false);
+            if (queueId is null)
+            {
+                // Started or removed meanwhile, here or on the site: a look settles which.
+                await ActAsync(id, CheckedNow, string.Empty, cancellationToken).ConfigureAwait(false);
+                return new RemoteActionResult(false, $"This item is no longer in your {name} queue. It is being checked again.");
+            }
+
+            await control.ControlQueuedAsync(queueId, action, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RemoteProviderException ex)
+        {
+            return new RemoteActionResult(false, Describe(entry, ex));
+        }
+
+        if (action == RemoteQueueAction.Remove)
+        {
+            return await RemoveAsync(id, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        _log?.Invoke($"Remote job {id:N}: started from the {name} queue at the user's request.");
+        return await ActAsync(id, CheckedNow, "This item has nothing to check.", CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>The queue's own id for this job's entry, matched by hash. Null when it isn't there, or no hash is known.</summary>
+    private async Task<string?> FindQueueIdAsync(IRemoteQueue queue, RemoteJobRecord record, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(record.PredictedHash))
+        {
+            return null;
+        }
+
+        for (var page = 0; page < _options.MostListPages; page++)
+        {
+            var read = await queue.ListQueuedAsync(record.Kind, page * _options.ListPageSize, _options.ListPageSize, fresh: true, cancellationToken).ConfigureAwait(false);
+            var hit = read.FirstOrDefault(queued => !string.IsNullOrWhiteSpace(queued.QueueId) &&
+                string.Equals(queued.Hash, record.PredictedHash, StringComparison.OrdinalIgnoreCase));
+            if (hit is not null)
+            {
+                return hit.QueueId;
+            }
+
+            if (read.Count < _options.ListPageSize)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The item's files as they are now, with their safe paths. Nothing is invented while the provider doesn't know them.</summary>

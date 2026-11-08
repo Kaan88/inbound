@@ -96,6 +96,15 @@
                 <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
             </Style>
 
+            <!-- UI.R6: a live counter beside its label. A box of fixed least width with the text on its right, so the
+                 units stay put when the digit count changes. A longer value still fits: the box grows, and wraps if set. -->
+            <Style x:Key="InboundCounterValueStyle" TargetType="TextBlock">
+                <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+                <Setter Property="MinWidth" Value="210" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="TextAlignment" Value="Right" />
+            </Style>
+
             <Style x:Key="InboundToolLabelStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="10.5" />
                 <Setter Property="TextAlignment" Value="Center" />

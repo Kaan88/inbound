@@ -29,7 +29,9 @@
   enforces one instance.
 - **Tray** is a library hosted inside Host. The menu can open the UI, pause all,
   resume all, show integration status, open settings, and exit. Closing the UI
-  only closes the UI; Kill/Exit is explicit.
+  only closes the UI, never the Host; Kill/Exit is explicit. By default closing
+  the window also ends the window's process (PERF.5, "Closing the window ends
+  it"); the tray, a second launch or the Start menu entry starts it again.
 - **Desktop.WinUI** is a client. It never touches the job store or engine. It
   connects, gets a snapshot, subscribes to events, and reconnects on failure.
 - **NativeHost** is launched by Chrome per native-messaging connection. It
@@ -80,6 +82,39 @@ Queued ─▶ Connecting ─▶ Downloading ─▶ Verifying ─▶ Completed
 
 Every transition is persisted before it is published as an event. A crash
 during a transition must reconcile to a safe state, never to `Completed`.
+
+### Connection count changes on running downloads (UI.R21)
+
+A changed "connections per download" reaches running segmented HTTP
+transfers: a higher count adds workers that take an unclaimed range or split a
+running one (the same steal path an idle worker takes), a lower one lets
+workers above the count stop after their current range, or before taking one
+if they were still waiting for a host connection. Every worker still
+queues for the per-host fair limiter, and the checkpoint format is unchanged.
+
+- Ordinary and site-login downloads follow it unless their count was chosen
+  by hand.
+- Provider (TorBox) jobs always follow it when they run segmented (see the
+  single-stream exception below), clamped by the provider's per-file
+  cap (16) and the host limit of the current run's link, both kept in memory
+  for the run. A change before the run has its link is taken when the link
+  comes. A connection change never asks for or counts as a link refresh.
+- Protected (pasted provider) links follow it unless chosen by hand, clamped
+  by the same cap of 16.
+- FTP downloads are one connection by design (the FTP engine has no
+  segments), so a change while one runs is a no-op and its record is left as
+  it is.
+- A single-stream run of any kind (HTTP, provider or protected) is not split
+  while it runs: it started from no checkpoint with a count of one, it
+  resumed a one-segment checkpoint, the server refused ranges, or the file was
+  too small to split. Its record takes
+  the new count, but the transfer keeps one connection. Once a single-stream
+  run has saved bytes, its checkpoint has one segment and later runs resume it
+  single-stream whatever the count says; only a run that starts with no saved
+  bytes (or from a segmented checkpoint) uses the new count.
+- The count is reconciled when any of its inputs changes: connections per
+  download, the per-host limit, or a connection profile. A lower per-host
+  limit alone therefore also lowers a running provider job's record.
 
 ## Persistence layout
 

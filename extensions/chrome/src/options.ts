@@ -1,24 +1,18 @@
 import { connectionProblem } from "./connection-problem";
+import { DEFAULT_EXCLUDED_EXTENSIONS, DEFAULT_SETTINGS, type Settings } from "./capture-rules";
+import { normalizeServerAddress } from "./transport";
 
-interface Settings {
-  enabled: boolean;
-  autoIntercept: boolean;
-  startMode: "now" | "later";
-  interceptedExtensions: string[];
-  excludedExtensions: string[];
-  excludedHosts: string[];
-  notifications: boolean;
+interface ServerStatus {
+  address: string;
+  name?: string;
+  pairedAt?: number;
+  connected: boolean;
+  lastError: string;
 }
 
-const DEFAULT_SETTINGS: Settings = {
-  enabled: true,
-  autoIntercept: false,
-  startMode: "now",
-  interceptedExtensions: [],
-  excludedExtensions: [],
-  excludedHosts: [],
-  notifications: true,
-};
+let pairedServer: ServerStatus | null = null;
+
+const ALL_SITES = ["http://*/*", "https://*/*"];
 
 function byId<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -36,17 +30,33 @@ function fill(settings: Settings): void {
   byId<HTMLInputElement>("autoIntercept").checked = settings.autoIntercept;
   byId<HTMLInputElement>("notifications").checked = settings.notifications;
   byId<HTMLSelectElement>("startMode").value = settings.startMode;
+  byId<HTMLSelectElement>("destinationMode").value = settings.destinationMode === "ask" ? "ask" : "default";
+  byId<HTMLSelectElement>("defaultTarget").value = settings.defaultTarget === "server" && pairedServer ? "server" : "local";
   byId<HTMLTextAreaElement>("interceptedExtensions").value = settings.interceptedExtensions.join(", ");
   byId<HTMLTextAreaElement>("excludedExtensions").value = settings.excludedExtensions.join(", ");
   byId<HTMLTextAreaElement>("excludedHosts").value = settings.excludedHosts.join(", ");
+  showAutomaticState(settings);
+}
+
+/** The saved state, in words, at the top of the page: it is what the toolbar badge reflects. */
+function showAutomaticState(settings: Pick<Settings, "enabled" | "autoIntercept">): void {
+  const banner = byId<HTMLParagraphElement>("autoBanner");
+  const on = settings.enabled && settings.autoIntercept;
+  banner.dataset.on = String(on);
+  banner.textContent = on
+    ? "Automatic sending is on: downloads that match the rules below go to the desktop app."
+    : "Automatic sending is off: downloads stay in your browser unless you send them from the right-click menu. The toolbar icon shows OFF.";
 }
 
 function collect(): Settings {
   return {
+    ...DEFAULT_SETTINGS,
     enabled: byId<HTMLInputElement>("enabled").checked,
     autoIntercept: byId<HTMLInputElement>("autoIntercept").checked,
     notifications: byId<HTMLInputElement>("notifications").checked,
     startMode: byId<HTMLSelectElement>("startMode").value === "later" ? "later" : "now",
+    destinationMode: byId<HTMLSelectElement>("destinationMode").value === "ask" ? "ask" : "default",
+    defaultTarget: byId<HTMLSelectElement>("defaultTarget").value === "server" && pairedServer ? "server" : "local",
     interceptedExtensions: splitList(byId<HTMLTextAreaElement>("interceptedExtensions").value),
     excludedExtensions: splitList(byId<HTMLTextAreaElement>("excludedExtensions").value),
     excludedHosts: splitList(byId<HTMLTextAreaElement>("excludedHosts").value),
@@ -56,20 +66,63 @@ function collect(): Settings {
 // Settings opens by itself on first install, and reading the settings can take a few seconds if the
 // app has to start. A tick made before then would be overwritten, so the form waits.
 function setFormEnabled(enabled: boolean): void {
-  for (const field of document.querySelectorAll<HTMLInputElement>("input, select, textarea, #save")) {
+  for (const field of document.querySelectorAll<HTMLInputElement>("input, select, textarea, #save, #resetExcluded")) {
     field.disabled = !enabled;
+  }
+  if (enabled) byId<HTMLSelectElement>("defaultTarget").disabled = !pairedServer;
+}
+
+/** The server card: the pairing form, or the paired server with its state. */
+function showServer(status: ServerStatus | null): void {
+  pairedServer = status;
+  byId<HTMLElement>("serverUnpaired").classList.toggle("hidden", status !== null);
+  byId<HTMLElement>("serverPaired").classList.toggle("hidden", status === null);
+  const target = byId<HTMLSelectElement>("defaultTarget");
+  target.disabled = status === null;
+  if (!status) {
+    target.value = "local";
+    return;
+  }
+  const state = byId<HTMLParagraphElement>("serverState");
+  state.dataset.on = String(status.connected);
+  const where = status.address.replace(/^https?:\/\//, "");
+  state.textContent = status.connected
+    ? `Paired with the server at ${where}${status.name ? ` as "${status.name}"` : ""}. It is answering.`
+    : `Paired with the server at ${where}. ${status.lastError || "It has not answered yet."}`;
+}
+
+function showCleartextNote(): void {
+  const normalized = normalizeServerAddress(byId<HTMLInputElement>("serverAddress").value);
+  byId<HTMLElement>("serverCleartext").classList.toggle("hidden", !(normalized.ok && normalized.cleartext));
+}
+
+/**
+ * Firefox can install the extension without access to sites, and then cookies cannot be read and the
+ * page script does not run. Chrome and Edge grant it at install, so there the card shows only after the
+ * user has withdrawn it.
+ */
+async function showSiteAccess(): Promise<void> {
+  const card = byId<HTMLElement>("siteAccessCard");
+  try {
+    const granted = chrome.permissions?.contains ? await chrome.permissions.contains({ origins: ALL_SITES }) : true;
+    card.classList.toggle("hidden", granted);
+  } catch {
+    card.classList.add("hidden");
   }
 }
 
 async function load(): Promise<void> {
   setFormEnabled(false);
+  void showSiteAccess();
   try {
     const status = (await chrome.runtime.sendMessage({ type: "dm.status" })) as {
       ok?: boolean;
       settings?: Settings;
       connected?: boolean;
       lastError?: string;
+      server?: ServerStatus | null;
     };
+    showServer(status?.server ?? null);
     fill({ ...DEFAULT_SETTINGS, ...(status?.settings ?? {}) });
     setFormEnabled(true);
     byId<HTMLParagraphElement>("testResult").textContent = status?.connected
@@ -94,11 +147,28 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = (await chrome.runtime.sendMessage({
         type: "dm.saveSettings",
         settings: collect(),
-      })) as { ok?: boolean; error?: string };
+      })) as { ok?: boolean; error?: string; settings?: Settings };
       result.textContent = response?.ok ? "Saved." : (response?.error || "Save failed.");
+      if (response?.ok && response.settings) showAutomaticState(response.settings);
     } catch (error) {
       result.textContent = error instanceof Error ? error.message : String(error);
     }
+  });
+
+  byId<HTMLButtonElement>("resetExcluded").addEventListener("click", () => {
+    byId<HTMLTextAreaElement>("excludedExtensions").value = DEFAULT_EXCLUDED_EXTENSIONS.join(", ");
+  });
+
+  byId<HTMLButtonElement>("grantSiteAccess").addEventListener("click", async () => {
+    const result = byId<HTMLParagraphElement>("siteAccessResult");
+    try {
+      // Must run straight from the click: browsers only ask from a user gesture.
+      const granted = await chrome.permissions.request({ origins: ALL_SITES });
+      result.textContent = granted ? "Access allowed." : "Access was not allowed.";
+    } catch (error) {
+      result.textContent = error instanceof Error ? error.message : String(error);
+    }
+    await showSiteAccess();
   });
 
   byId<HTMLButtonElement>("test").addEventListener("click", async () => {
@@ -117,10 +187,88 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  byId<HTMLInputElement>("serverAddress").addEventListener("input", showCleartextNote);
+
+  byId<HTMLButtonElement>("pairServer").addEventListener("click", async () => {
+    const result = byId<HTMLParagraphElement>("serverResult");
+    const normalized = normalizeServerAddress(byId<HTMLInputElement>("serverAddress").value);
+    if (!normalized.ok) {
+      result.textContent = normalized.error;
+      return;
+    }
+    const button = byId<HTMLButtonElement>("pairServer");
+    button.disabled = true;
+    try {
+      // Access to the server's address only, asked straight from the click (browsers ask only from a
+      // user gesture). Chrome and Edge already have it with the access to all sites; Firefox may ask.
+      const granted = chrome.permissions?.request ? await chrome.permissions.request({ origins: [normalized.pattern] }) : true;
+      if (!granted) {
+        result.textContent = "The browser was not allowed to reach that address, so the server can't be paired.";
+        return;
+      }
+      result.textContent = "Pairing…";
+      const response = (await chrome.runtime.sendMessage({
+        type: "dm.pairServer",
+        address: normalized.origin,
+        code: byId<HTMLInputElement>("pairingCode").value,
+      })) as { ok?: boolean; error?: string; server?: ServerStatus };
+      if (!response?.ok || !response.server) {
+        result.textContent = response?.error || "Pairing failed.";
+        return;
+      }
+      byId<HTMLInputElement>("pairingCode").value = "";
+      showServer(response.server);
+      result.textContent = "Paired. Choose where automatic downloads go, then Save settings.";
+    } catch (error) {
+      result.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  byId<HTMLButtonElement>("checkServer").addEventListener("click", async () => {
+    const result = byId<HTMLParagraphElement>("serverResult");
+    result.textContent = "Checking…";
+    try {
+      const response = (await chrome.runtime.sendMessage({ type: "dm.pingServer" })) as { ok?: boolean; error?: string; server?: ServerStatus };
+      if (response?.server) showServer(response.server);
+      result.textContent = response?.ok ? "The server is answering." : (response?.error || "The server did not answer.");
+    } catch (error) {
+      result.textContent = error instanceof Error ? error.message : String(error);
+    }
+  });
+
+  byId<HTMLButtonElement>("openServer").addEventListener("click", () => {
+    if (pairedServer) void chrome.tabs.create({ url: `${pairedServer.address}/` });
+  });
+
+  byId<HTMLButtonElement>("unpairServer").addEventListener("click", async () => {
+    const result = byId<HTMLParagraphElement>("serverResult");
+    try {
+      result.textContent = "Unpairing...";
+      const response = (await chrome.runtime.sendMessage({ type: "dm.unpairServer" })) as { ok?: boolean; error?: string; revoked?: boolean; wasPaired?: boolean };
+      if (!response?.ok) {
+        result.textContent = response?.error || "Could not unpair.";
+        return;
+      }
+      showServer(null);
+      // The server removed the token itself (DELETE /api/pair/self), or it could not be reached in time.
+      result.textContent = response.wasPaired === false
+        ? "Not paired. Downloads go to this PC."
+        : response.revoked
+        ? "Unpaired. Downloads go to this PC. The server removed this browser's pairing too, so its token no longer works there."
+        : "Unpaired. Downloads go to this PC. The server could not be told, so remove this browser from its Paired browsers list too, so its token stops working there.";
+    } catch (error) {
+      result.textContent = error instanceof Error ? error.message : String(error);
+    }
+  });
+
   byId<HTMLButtonElement>("openApp").addEventListener("click", async () => {
     const result = byId<HTMLParagraphElement>("testResult");
     try {
-      const response = (await chrome.runtime.sendMessage({ type: "dm.openApp" })) as {
+      const response = (await chrome.runtime.sendMessage({
+        type: "dm.openApp",
+      })) as {
         ok?: boolean;
         error?: string;
       };

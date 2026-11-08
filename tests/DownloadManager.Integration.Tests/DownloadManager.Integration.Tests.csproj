@@ -24,6 +24,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ShellFileIconReader.cs" Link="ShellFileIconReader.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\DownloadManager.Archives.Tests\RarBuilder.cs" Link="RarBuilder.cs" />
+    <Compile Include="..\DownloadManager.Archives.Tests\SpannedZipBuilder.cs" Link="SpannedZipBuilder.cs" />
     <Compile Include="..\DownloadManager.Containers.Tests\ContainerFixtures.cs" Link="ContainerFixtures.cs" />
   </ItemGroup>
 
@@ -37,10 +38,21 @@
     <ProjectReference Include="..\..\src\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Containers\DownloadManager.Containers.csproj" />
     <ProjectReference Include="..\..\src\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
-    <!-- Run as real processes by the pipe tests, so only built here, not linked. -->
+  </ItemGroup>
+
+  <!--
+    Run as real processes by the pipe tests, so only built here, not linked. The Host is a Windows program (tray, named
+    pipe ACL), so off Windows it isn't built, and the tests that start it carry [Trait("Platform", "Windows")]: run the
+    portable set there with dotnet test filter "Platform!=Windows".
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <ProjectReference Include="..\..\src\DownloadManager.Host\DownloadManager.Host.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
     <ProjectReference Include="..\..\src\DownloadManager.Cli\DownloadManager.Cli.csproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="..\..\src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\TestPaths.cs" Link="Shared\TestPaths.cs" />
   </ItemGroup>
 
 </Project>

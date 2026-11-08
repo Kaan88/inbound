@@ -5,7 +5,10 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$ResultPath,
     [int]$HostPid = 0,
-    [switch]$NoStart
+    [switch]$NoStart,
+    # Setup's entry in Settings > Apps (Inno Setup names it after the AppId in installer\DownloadManager.iss).
+    # Tests pass a key of their own; nothing else should.
+    [string]$UninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}_is1'
 )
 
 # Replaces the installed app with the one in $PackageDir. The new files are staged beside the
@@ -25,6 +28,7 @@ $extensionBackupDir = Join-Path $InstallRoot "extension-rollback"
 $newExtensionDir = Join-Path $InstallRoot "extension-new"
 $metadataPath = Join-Path $InstallRoot "install.json"
 $metadataBackup = $null
+$rootScriptBackups = @{}
 $appSwapped = $false
 $extensionSwapped = $false
 $script:frontendsWereOpen = $false
@@ -130,6 +134,49 @@ function Move-Items([string]$from, [string]$to, [string[]]$names, [Collections.G
             }
         }
     }
+}
+
+# Setup records the version it installed in its uninstall entry, which Settings > Apps shows. An update
+# swaps the files without Setup, so the entry is brought up to date here (UP.B2). Only an entry Setup made
+# for this same folder is touched: a script install has none, and one is never created.
+$script:uninstallValuesBefore = $null
+$uninstallVersionNames = @('DisplayVersion', 'MajorVersion', 'MinorVersion', 'VersionMajor', 'VersionMinor')
+
+function Update-UninstallEntry {
+    if ([string]::IsNullOrWhiteSpace($UninstallKey) -or -not (Test-Path -LiteralPath $UninstallKey)) { return }
+    $entry = Get-ItemProperty -LiteralPath $UninstallKey
+    $location = [string]$entry.InstallLocation
+    if ([string]::IsNullOrWhiteSpace($location) -or
+        -not [string]::Equals([IO.Path]::GetFullPath($location).TrimEnd('\'), $InstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+    $before = @{}
+    foreach ($name in $uninstallVersionNames) {
+        if ($null -ne $entry.PSObject.Properties[$name]) { $before[$name] = $entry.$name }
+    }
+    $script:uninstallValuesBefore = $before
+    Set-ItemProperty -LiteralPath $UninstallKey -Name DisplayVersion -Value $Version
+    # Setup also writes the major and minor numbers as DWORDs; they follow when they are there.
+    $parsed = $null
+    if ([Version]::TryParse(($Version -split '[-+]')[0], [ref]$parsed)) {
+        foreach ($name in @('MajorVersion', 'VersionMajor')) {
+            if ($before.ContainsKey($name)) { Set-ItemProperty -LiteralPath $UninstallKey -Name $name -Value $parsed.Major -Type DWord }
+        }
+        foreach ($name in @('MinorVersion', 'VersionMinor')) {
+            if ($before.ContainsKey($name)) { Set-ItemProperty -LiteralPath $UninstallKey -Name $name -Value $parsed.Minor -Type DWord }
+        }
+    }
+}
+
+function Restore-UninstallEntry {
+    $before = $script:uninstallValuesBefore
+    if ($null -eq $before) { return }
+    foreach ($name in $before.Keys) {
+        $type = if ($name -eq 'DisplayVersion') { 'String' } else { 'DWord' }
+        Set-ItemProperty -LiteralPath $UninstallKey -Name $name -Value $before[$name] -Type $type
+    }
+    # Setup always writes DisplayVersion; if it was somehow missing, the update's own value goes again.
+    if (-not $before.ContainsKey('DisplayVersion')) { Remove-ItemProperty -LiteralPath $UninstallKey -Name DisplayVersion -ErrorAction SilentlyContinue }
 }
 
 function Get-ItemNames([string]$folder) { @(Get-ChildItem -LiteralPath $folder -Force | ForEach-Object Name) }
@@ -317,6 +364,25 @@ try {
         Swap-In $extensionDir $newExtensionDir $extensionBackupDir
     }
 
+    # Setup puts these beside app\, where swapping app\ never reaches them, and repair.ps1 would go on
+    # running the version Setup installed. A script install has no copies, so none is added. An old copy
+    # still works, so one that cannot be replaced is no reason to undo the update.
+    foreach ($name in @("register-native-host.ps1", "repair.ps1")) {
+        $packagedScript = Join-Path $PackageDir $name
+        $installedScript = Join-Path $InstallRoot $name
+        if (-not (Test-Path -LiteralPath $packagedScript) -or -not (Test-Path -LiteralPath $installedScript)) { continue }
+        try {
+            $originalScript = [IO.File]::ReadAllBytes($installedScript)
+            Copy-Item -LiteralPath $packagedScript -Destination "$installedScript.tmp" -Force
+            Move-Item -LiteralPath "$installedScript.tmp" -Destination $installedScript -Force
+            $rootScriptBackups[$installedScript] = $originalScript
+        }
+        catch {
+            Write-Warning "Could not update ${name}: $($_.Exception.Message)"
+            Remove-Item -LiteralPath "$installedScript.tmp" -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     $register = Join-Path $PackageDir "register-native-host.ps1"
     if (Test-Path $register) {
         & $register -AppDir $appDir -Force
@@ -332,6 +398,10 @@ try {
     [System.IO.File]::WriteAllText("$metadataPath.tmp", ($metadata | ConvertTo-Json -Depth 3),
         (New-Object System.Text.UTF8Encoding($false)))
     Move-Item -LiteralPath "$metadataPath.tmp" -Destination $metadataPath -Force
+
+    # The version shown in Settings > Apps. A wrong number there is no reason to undo the update.
+    try { Update-UninstallEntry }
+    catch { Write-Warning "Could not update the version in Settings > Apps: $($_.Exception.Message)" }
 
     # Keep the rollback copy through restart. The next update replaces it only after its
     # Host has exited, so a launch failure cannot discard both versions.
@@ -377,10 +447,16 @@ catch {
             $message = "$message; extension rollback error: $($_.Exception.Message)"
         }
     }
+    foreach ($installedScript in @($rootScriptBackups.Keys)) {
+        try { [IO.File]::WriteAllBytes($installedScript, $rootScriptBackups[$installedScript]) }
+        catch { $message = "$message; script rollback error: $($_.Exception.Message)" }
+    }
     if ($null -ne $metadataBackup) {
         try { [System.IO.File]::WriteAllText($metadataPath, $metadataBackup, (New-Object System.Text.UTF8Encoding($false))) }
         catch { $message = "$message; metadata rollback error: $($_.Exception.Message)" }
     }
+    try { Restore-UninstallEntry }
+    catch { Write-Warning "Could not put back the version in Settings > Apps: $($_.Exception.Message)" }
     # Recorded before the restart, because the restored Host reads it as it starts.
     try { Write-Result "failed" $message } catch { }
     $newProcesses.Clear()

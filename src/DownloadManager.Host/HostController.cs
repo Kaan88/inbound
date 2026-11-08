@@ -2,10 +2,11 @@ using System.Diagnostics;
 using System.Drawing;
 using DownloadManager.Contracts;
 using DownloadManager.Runtime;
+using DownloadManager.Runtime.Ipc;
 
 namespace DownloadManager.Host;
 
-public sealed class HostController : IHostController
+public sealed class HostController : IHostPlatform
 {
     private readonly DownloadManagerService _service;
     private readonly FileLogger _log;
@@ -17,6 +18,9 @@ public sealed class HostController : IHostController
         _service = service;
         _log = log;
     }
+
+    /// <summary>The desktop Host has a window, a folder dialog, a tray, an exit and the updater.</summary>
+    public PlatformCapabilities Capabilities => PlatformCapabilities.Desktop;
 
     public SynchronizationContext? UiContext { get; set; }
     public bool UiAvailable { get; private set; }
@@ -51,7 +55,7 @@ public sealed class HostController : IHostController
                     ShowNewFolderButton = true,
                 };
                 var startingPath = string.IsNullOrWhiteSpace(initialPath)
-                    ? _service.GetSnapshot().Settings.DefaultDownloadDirectory
+                    ? _service.GetSettings().DefaultDownloadDirectory
                     : initialPath;
                 if (Directory.Exists(startingPath)) picker.InitialDirectory = startingPath;
                 var accepted = picker.ShowDialog() == DialogResult.OK;

@@ -15,6 +15,55 @@ public sealed class SevenZipListingTests
         $"Path = {path}\r\nFolder = {(folder ? "+" : "-")}\r\nSize = {size}\r\nPacked Size = {size}\r\nAttributes = {(folder ? "D" : "A")}\r\n" +
         $"Alternate Stream = -\r\nEncrypted = {(encrypted ? "+" : "-")}\r\nSymbolic Link = \r\nHard Link = \r\nCopy Link = \r\n{extra}";
 
+    private const string Zip = "Path = a.zip\r\nType = zip\r\n";
+
+    [Fact]
+    public void AZipMadeOnWindowsListsItsBackslashesAsFoldersWhere7ZipKeepsThemInNames()
+    {
+        var listing = SevenZipListing.Parse(Listing(Zip,
+            Entry(@"dir\", 0, folder: true, extra: "Host OS = FAT\r\n"),
+            Entry(@"dir\sub\a.txt", 5, extra: "Host OS = NTFS\r\n"),
+            Entry(@"dir/mixed\b.txt", 5, extra: "Host OS = VFAT\r\n"),
+            Entry("plain/c.txt", 5, extra: "Host OS = FAT\r\n")), backslashIsAName: true);
+
+        Assert.Equal(["dir", "dir/sub/a.txt", "dir/mixed/b.txt", "plain/c.txt"], listing.Entries.Select(entry => entry.Path));
+        Assert.Equal(
+            [new ArchiveNameFix(@"dir\", "dir", true), new ArchiveNameFix(@"dir\sub\a.txt", "dir/sub/a.txt", false), new ArchiveNameFix(@"dir/mixed\b.txt", "dir/mixed/b.txt", false)],
+            listing.NameFixes);
+        Assert.False(listing.HasRepeatedNames);
+    }
+
+    [Fact]
+    public void ABackslashStaysInTheNameFromUnixFromOtherFormatsAndWhere7ZipSplitsItItself()
+    {
+        // Unix may hold a backslash in a name, so it stays one, and ExtractionSafety refuses it off Windows.
+        var unix = SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt", extra: "Host OS = Unix\r\n")), backslashIsAName: true);
+        Assert.Equal(@"dir\a.txt", Assert.Single(unix.Entries).Path);
+        Assert.Empty(unix.NameFixes);
+
+        // No host given is not a Windows host.
+        Assert.Empty(SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt")), backslashIsAName: true).NameFixes);
+
+        // A RAR's separator is the format's own; 7-Zip turns it into the system's.
+        var rar = SevenZipListing.Parse(Listing("Path = a.rar\r\nType = Rar5\r\n", Entry(@"dir\a.txt", extra: "Host OS = Windows\r\n")), backslashIsAName: true);
+        Assert.Empty(rar.NameFixes);
+
+        // Windows' 7-Zip already makes folders of it.
+        var windows = SevenZipListing.Parse(Listing(Zip, Entry(@"dir\a.txt", extra: "Host OS = FAT\r\n")), backslashIsAName: false);
+        Assert.Equal(@"dir\a.txt", Assert.Single(windows.Entries).Path);
+        Assert.Empty(windows.NameFixes);
+    }
+
+    [Fact]
+    public void AWindowsBackslashNameThatRepeatsAnotherNameIsARepeat()
+    {
+        var listing = SevenZipListing.Parse(Listing(Zip,
+            Entry(@"dir\a.txt", extra: "Host OS = FAT\r\n"),
+            Entry("dir/a.txt", extra: "Host OS = FAT\r\n")), backslashIsAName: true);
+
+        Assert.True(listing.HasRepeatedNames);
+    }
+
     [Fact]
     public void ReadsTheArchiveAndItsEntries()
     {
@@ -134,7 +183,7 @@ public sealed class ToolPasswordTests
     {
         var channel = ToolPassword.From(password);
         Assert.Same(ToolPassword.None, channel);
-        Assert.Equal("\r\n"u8.ToArray(), channel.CopyStdinBytes());
+        Assert.Equal(OperatingSystem.IsWindows() ? "\r\n"u8.ToArray() : "\n"u8.ToArray(), channel.CopyStdinBytes());
     }
 
     [Theory]
@@ -143,7 +192,7 @@ public sealed class ToolPasswordTests
     [InlineData(" leading and trailing ")]
     public void APasswordGoesThroughStdinAsUtf8(string password)
     {
-        Assert.Equal(Encoding.UTF8.GetBytes(password + "\r\n"), ToolPassword.From(password).CopyStdinBytes());
+        Assert.Equal(Encoding.UTF8.GetBytes(password + (OperatingSystem.IsWindows() ? "\r\n" : "\n")), ToolPassword.From(password).CopyStdinBytes());
     }
 
     [Theory]
@@ -162,7 +211,7 @@ public sealed class ToolPasswordTests
     {
         var channel = ToolPassword.From("secret");
         Array.Clear(channel.CopyStdinBytes());
-        Assert.Equal("secret\r\n"u8.ToArray(), channel.CopyStdinBytes());
+        Assert.Equal(OperatingSystem.IsWindows() ? "secret\r\n"u8.ToArray() : "secret\n"u8.ToArray(), channel.CopyStdinBytes());
     }
 
     [Fact]
@@ -182,19 +231,42 @@ public sealed class SevenZipToolTests : IDisposable
     [Fact]
     public void TheBundledCopyIsNextToTheProgramWithItsLibraryAndLicense()
     {
+        // The license travels with the build everywhere; the Windows program is only used on Windows.
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", "License.txt")));
+        if (!OperatingSystem.IsWindows()) return;
         var tool = SevenZipTool.Find();
         Assert.NotNull(tool);
         Assert.Equal(Path.Combine(AppContext.BaseDirectory, "tools", "7-Zip", "7z.exe"), tool);
-        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(tool)!, "License.txt")));
     }
 
     [Fact]
-    public void AProgramWithoutItsLibraryIsNotFound()
+    public void AProgramWithoutItsLibraryIsNotFoundOnWindowsAndIsTheProgramElsewhere()
     {
         var folder = Directory.CreateDirectory(Path.Combine(_space.Root, "only exe")).FullName;
-        var exe = Path.Combine(folder, "7z.exe");
+        var exe = Path.Combine(folder, OperatingSystem.IsWindows() ? "7z.exe" : "7zz");
         File.WriteAllBytes(exe, []);
-        Assert.Null(SevenZipTool.Find(exe));
+        // 7zz, the Linux build, is one file with its formats built in; 7z.exe needs its 7z.dll.
+        Assert.Equal(OperatingSystem.IsWindows() ? null : exe, SevenZipTool.Find(exe));
+    }
+
+    [Fact]
+    public void OffWindowsTheVariableThenThePathIsSearchedFor7zzBefore7z()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var first = Directory.CreateDirectory(Path.Combine(_space.Root, "first")).FullName;
+        var second = Directory.CreateDirectory(Path.Combine(_space.Root, "second")).FullName;
+        File.WriteAllBytes(Path.Combine(first, "7z"), []);
+        File.WriteAllBytes(Path.Combine(second, "7zz"), []);
+
+        var path = string.Join(Path.PathSeparator, first, second);
+
+        Assert.Equal(Path.Combine(second, "7zz"), SevenZipTool.Locate(null, path));
+        Assert.Equal(Path.Combine(first, "7z"), SevenZipTool.Locate(null, first));
+        Assert.Null(SevenZipTool.Locate(null, Path.Combine(_space.Root, "none")));
+        // A program named in the variable is used, or reported missing; it is never swapped for one on PATH.
+        Assert.Equal(Path.Combine(first, "7z"), SevenZipTool.Locate(Path.Combine(first, "7z"), path));
+        Assert.Null(SevenZipTool.Locate(Path.Combine(first, "missing"), path));
+        Assert.Contains(SevenZipTool.EnvironmentVariable, SevenZipTool.MissingMessage);
     }
 
     [Fact]
@@ -234,13 +306,18 @@ public sealed class ToolProcessTests
 {
     private static string Cmd => Path.Combine(Environment.SystemDirectory, "cmd.exe");
 
-    private static ToolInvocation CmdRun(string script) => new(Cmd, ["/d", "/c", script]);
+    /// <summary>The same small program for this system's shell: cmd on Windows, sh elsewhere.</summary>
+    private static ToolInvocation CmdRun(string windows, string unix) =>
+        OperatingSystem.IsWindows() ? new(Cmd, ["/d", "/c", windows]) : new("/bin/sh", ["-c", unix]);
+
+    private static string UnixLoop(int count, string body) => $"i=0; while [ $i -lt {count} ]; do {body}; i=$((i+1)); done";
 
     [Fact]
     public async Task BoundedOutputSurvivesAFloodOnBothPipes()
     {
         var run = await ToolProcess.RunAsync(
-            CmdRun("for /l %i in (1,1,6000) do @(echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx& echo yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1>&2)"),
+            CmdRun("for /l %i in (1,1,6000) do @(echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx& echo yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1>&2)",
+                UnixLoop(6000, "echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; echo yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1>&2")),
             CancellationToken.None);
 
         Assert.Equal(0, run.ExitCode);
@@ -251,7 +328,8 @@ public sealed class ToolProcessTests
     [Fact]
     public async Task OutputOverTheLimitStopsTheProcess()
     {
-        var invocation = CmdRun("for /l %i in (1,1,200000) do @echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") with { KeepOutputCharacters = 4096 };
+        var invocation = CmdRun("for /l %i in (1,1,200000) do @echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            UnixLoop(200000, "echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")) with { KeepOutputCharacters = 4096 };
 
         var failure = await Assert.ThrowsAsync<ExtractionException>(() => ToolProcess.RunAsync(invocation, CancellationToken.None));
 
@@ -262,7 +340,7 @@ public sealed class ToolProcessTests
     public async Task SilentProcessIsStopped()
     {
         var pid = 0;
-        var invocation = CmdRun("ping -n 60 127.0.0.1 >nul") with
+        var invocation = CmdRun("ping -n 60 127.0.0.1 >nul", "sleep 60") with
         {
             StallTimeout = TimeSpan.FromMilliseconds(400),
             Started = process => pid = process.Id,
@@ -279,7 +357,7 @@ public sealed class ToolProcessTests
     {
         using var cancellation = new CancellationTokenSource(200);
         var pid = 0;
-        var invocation = CmdRun("ping -n 60 127.0.0.1 >nul") with { Started = process => pid = process.Id };
+        var invocation = CmdRun("ping -n 60 127.0.0.1 >nul", "sleep 60") with { Started = process => pid = process.Id };
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ToolProcess.RunAsync(invocation, cancellation.Token));
 
@@ -289,7 +367,8 @@ public sealed class ToolProcessTests
     [Fact]
     public async Task AThrowingObserverDoesNotBlockThePipe()
     {
-        var invocation = CmdRun("for /l %i in (1,1,3000) do @echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") with
+        var invocation = CmdRun("for /l %i in (1,1,3000) do @echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            UnixLoop(3000, "echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")) with
         {
             OnOutput = _ => throw new InvalidOperationException("observer failed"),
             StallTimeout = TimeSpan.FromSeconds(20),
@@ -303,7 +382,7 @@ public sealed class ToolProcessTests
     [Fact]
     public async Task StdinIsClosedSoAReaderDoesNotHang()
     {
-        var run = await ToolProcess.RunAsync(CmdRun("set /p x=") with { StallTimeout = TimeSpan.FromSeconds(20) }, CancellationToken.None);
+        var run = await ToolProcess.RunAsync(CmdRun("set /p x=", "read x") with { StallTimeout = TimeSpan.FromSeconds(20) }, CancellationToken.None);
         Assert.NotNull(run);
     }
 
@@ -311,9 +390,37 @@ public sealed class ToolProcessTests
     public async Task StdinBytesAreClearedAfterTheWrite()
     {
         var bytes = Encoding.ASCII.GetBytes("hello\r\n");
-        var run = await ToolProcess.RunAsync(CmdRun("findstr .") with { StandardInput = bytes }, CancellationToken.None);
+        var run = await ToolProcess.RunAsync(CmdRun("findstr .", "cat") with { StandardInput = bytes }, CancellationToken.None);
 
         Assert.Contains("hello", run.Output);
         Assert.All(bytes, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public async Task OffWindowsATiedToolIsKilledWhenThisProcessExits()
+    {
+        // Linux has no job object: the lifetime keeps the tool so the exit handler can kill it with its children.
+        if (OperatingSystem.IsWindows()) return;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pid = 0;
+        var invocation = CmdRun("", "sleep 60") with
+        {
+            StallTimeout = TimeSpan.FromMinutes(2),
+            Started = process =>
+            {
+                pid = process.Id;
+                started.TrySetResult();
+            },
+        };
+
+        var running = ToolProcess.RunAsync(invocation, CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(ToolLifetime.TrackedCount >= 1);
+
+        ToolLifetime.KillRunning();
+
+        var run = await running.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Throws<ArgumentException>(() => System.Diagnostics.Process.GetProcessById(pid));
     }
 }

@@ -93,14 +93,34 @@ public sealed partial class DownloadManagerService
         _postDownloadHook = postDownloadHook ?? NullPostDownloadHook.Instance;
         _linkBroker = linkBroker;
         _linkSecrets = linkSecrets;
+        _engine.HostWaitChanged += OnHostWaitChanged;
     }
 
     public event EventHandler<JobChangeEventArgs>? JobChanged;
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+
+    /// <summary>UI.R24. Guarded by <c>_sync</c>; written from progress reports, so it costs nothing while idle.</summary>
+    private readonly SpeedHistory _speedHistory = new(DateTimeOffset.UtcNow);
+
+    /// <summary>UI.R24: the last hour of total download speed, for a window that has just connected.</summary>
+    public SpeedHistoryDto GetSpeedHistory()
+    {
+        lock (_sync)
+        {
+            return _speedHistory.Read(DateTimeOffset.UtcNow);
+        }
+    }
     public bool TrayAvailable { get; set; }
-    public Func<bool>? NativeHostRegistered { get; set; }
+    public Func<NativeHostRegistrationState>? NativeHostState { get; set; }
+
+    /// <summary>
+    /// Where downloads may be written, for a Host whose clients are not the machine's user (the server's
+    /// <c>DOWNLOADMANAGER_ROOTS</c>). Every add, move and folder setting is held to these, whatever the client asked for or
+    /// a setting says, so a client can't make the server write outside them. Null (the desktop Host) allows any folder.
+    /// </summary>
+    public PathRoots? Roots { get; set; }
     public string StateDirectory => _paths.Root;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -112,6 +132,7 @@ public sealed partial class DownloadManagerService
         _engine.UpdateFfmpegPath(_settings.FfmpegPath);
         _engine.UpdateHostConnectionLimit(_settings.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
+        _ftpEngine?.UpdateSharedSpeedLimit(_settings.GlobalSpeedLimitBytesPerSecond);
         _ftpEngine?.UpdateProxy(_settings.Proxy);
         _ftpEngine?.UpdateSiteLogins(BuildSiteLogins(_settings));
         _ftpEngine?.UpdateFfmpegPath(_settings.FfmpegPath);
@@ -196,6 +217,42 @@ public sealed partial class DownloadManagerService
             };
         }
     }
+
+    /// <summary>
+    /// The settings alone. <see cref="GetSnapshot"/> maps and sorts every job and reads the browser
+    /// registration from the registry, which a caller that only wants a setting should not pay for.
+    /// </summary>
+    public SettingsDto GetSettings()
+    {
+        lock (_sync)
+        {
+            return MapSettings(_settings);
+        }
+    }
+
+    /// <summary>The Host's status, without the job list (it still reads the browser registration).</summary>
+    public HostStatusDto GetStatus()
+    {
+        lock (_sync)
+        {
+            return BuildStatusLocked();
+        }
+    }
+
+    /// <summary>
+    /// The number of active downloads, as <see cref="HostStatusDto.ActiveDownloads"/> counts them. The tray asks
+    /// at most once a second while anything changes, so this neither copies the job list nor touches the registry.
+    /// </summary>
+    public int ActiveDownloadCount()
+    {
+        lock (_sync)
+        {
+            return CountActiveLocked();
+        }
+    }
+
+    private int CountActiveLocked() => _jobs.Values.Count(r => r.Job.State is DownloadState.Connecting or DownloadState.Downloading
+        or DownloadState.RetryWaiting or DownloadState.Verifying);
 
     public async Task<IReadOnlyList<SegmentDto>> GetSegmentsAsync(
         Guid id,
@@ -483,6 +540,14 @@ public sealed partial class DownloadManagerService
         }
         var destination = ResolveDestination(request.DestinationDirectory, fileName,
             useLastFolder: !browserDownload, useCategoryFolder: !browserDownload, categoryId: categoryId);
+        if (Roots is { } roots)
+        {
+            // Checked on the resolved folder, which is also the one used: a link inside a root can't lead the file out.
+            if (roots.Allowed(destination) is not { } inside)
+                return new AddJobResponse { Accepted = false, Error = PathRoots.OutsideMessage, ErrorCode = "invalid_destination" };
+            destination = inside;
+        }
+
         string finalPath;
         try
         {
@@ -669,7 +734,7 @@ public sealed partial class DownloadManagerService
             settingsChanged = true;
         }
 
-        if (source is not (DownloadSource.Import or DownloadSource.Remote) && protectedUrl is null)
+        if (source is not (DownloadSource.Import or DownloadSource.CliImport or DownloadSource.Remote) && protectedUrl is null)
         {
             lock (_sync)
             {
@@ -702,6 +767,17 @@ public sealed partial class DownloadManagerService
         return new AddJobResponse { Accepted = true, Job = Map(job) };
     }
 
+    /// <summary>
+    /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
+    /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
+    /// </summary>
+    private static void RequestStopLocked(JobRuntime runtime)
+    {
+        runtime.PauseRequested = true;
+        runtime.Preempted = false;
+        runtime.ResumeWhenStopped = false;
+    }
+
     public async Task<JobActionResponse> PauseAsync(Guid id, CancellationToken cancellationToken = default)
     {
         JobRuntime? runtime;
@@ -717,7 +793,8 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = $"Job is {runtime.Job.State}.", Job = Map(runtime.Job) };
             }
 
-            runtime.PauseRequested = true;
+            RequestStopLocked(runtime);
+
             runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Paused;
             runtime.Job.BytesPerSecond = null;
@@ -1074,7 +1151,7 @@ public sealed partial class DownloadManagerService
             paused = _jobs.Values.Where(r => r.Job.CanPause).ToList();
             foreach (var runtime in paused)
             {
-                runtime.PauseRequested = true;
+                RequestStopLocked(runtime);
                 runtime.Job.QueueRetryAt = null;
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
@@ -1190,6 +1267,11 @@ public sealed partial class DownloadManagerService
         if (string.IsNullOrWhiteSpace(settings.DefaultDownloadDirectory))
         {
             return new SettingsResult { Ok = false, Error = "Default download directory is required.", Settings = MapSettings(_settings) };
+        }
+
+        if (Roots is { } roots && DescribeFolderOutsideRoots(settings, categories, roots) is { } outside)
+        {
+            return new SettingsResult { Ok = false, Error = outside, Settings = MapSettings(_settings) };
         }
 
         string directory;
@@ -1320,29 +1402,37 @@ public sealed partial class DownloadManagerService
         await _settingsStore.SaveAsync(next, cancellationToken).ConfigureAwait(false);
         _engine.UpdateHostConnectionLimit(next.MaxConnectionsPerHost);
         _engine.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
+        // PERF.6: FTP downloads honour the cap too. The Host gives both engines one budget, so it is one cap for all.
+        _ftpEngine?.UpdateSharedSpeedLimit(next.GlobalSpeedLimitBytesPerSecond);
         List<JobRuntime> reconnected;
+        List<JobRuntime> running;
         lock (_sync)
         {
-            // What each unstarted download would have got from the old default, read before the settings change.
-            var unstarted = _settings.DefaultConnections == next.DefaultConnections
+            // What each download would have got from the old default, read before the settings change.
+            // UI.R21: running ones too, provider and protected links among them ("Apply to all", owner 2026-11-08);
+            // a segmented transfer takes the new count without stopping.
+            // Any input of DefaultConnectionsLocked counts: the default, the per-host limit and the connection profiles.
+            var candidates = !ConnectionInputsChanged(_settings, next)
                 ? []
-                : _jobs.Values.Where(IsUnstartedForConnections)
-                    .Select(runtime => (Runtime: runtime, Uri: Uri.TryCreate(runtime.Job.Url, UriKind.Absolute, out var uri) ? uri : null))
-                    .Where(item => item.Uri is not null)
-                    .Select(item => (item.Runtime, item.Uri, Old: Math.Clamp(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(item.Uri!)), 1, 32)))
+                : _jobs.Values.Where(runtime => IsUnstartedForConnections(runtime) || IsRunningForConnections(runtime))
+                    .Select(runtime => (Runtime: runtime, Old: DefaultConnectionsLocked(runtime, _settings.DefaultConnections)))
+                    .Where(item => item.Old is not null)
                     .ToList();
             _settings = next;
             reconnected = [];
             // UI.B5: a changed default reaches downloads that haven't started. One whose count was chosen by hand
-            // (not what the old default gave it) keeps it; provider downloads keep their provider's cap.
-            foreach (var (runtime, uri, previous) in unstarted)
+            // (not what the old default gave it) keeps it. A provider job's count is never chosen by hand (TB.L1),
+            // so a running one always follows, within its provider's cap.
+            foreach (var (runtime, previous) in candidates)
             {
-                if (runtime.Job.RequestedConnections != previous) continue;
-                var connections = Math.Clamp(Math.Min(next.DefaultConnections, EffectiveConnectionLimit(uri!)), 1, 32);
+                if (runtime.Job.RemoteSource is null && runtime.Job.RequestedConnections != previous &&
+                    !SavedUnderTheOldProviderLinkCap(runtime.Job, previous)) continue;
+                if (DefaultConnectionsLocked(runtime, next.DefaultConnections) is not { } connections) continue;
                 if (connections == runtime.Job.RequestedConnections) continue;
                 runtime.Job.RequestedConnections = connections;
                 reconnected.Add(runtime);
             }
+            running = reconnected.Where(IsRunningForConnections).ToList();
             var queueNames = next.Queues.ToDictionary(q => q.Id, q => q.Name);
             foreach (var runtime in _jobs.Values)
             {
@@ -1365,6 +1455,11 @@ public sealed partial class DownloadManagerService
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "updated");
         }
+        foreach (var runtime in running)
+        {
+            _engine.ConnectionsChanged(runtime.Job.Id);
+        }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, next);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(next) };
@@ -1536,7 +1631,7 @@ public sealed partial class DownloadManagerService
                         .ToList();
                     foreach (var runtime in paused)
                     {
-                        runtime.PauseRequested = true;
+                        RequestStopLocked(runtime);
                         runtime.Job.State = DownloadState.Paused;
                         runtime.Job.BytesPerSecond = null;
                         runtime.Job.EstimatedRemaining = null;
@@ -1587,6 +1682,7 @@ public sealed partial class DownloadManagerService
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
             Raise(runtime, "updated");
         }
+        await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
         SettingsChanged?.Invoke(this, _settings);
         Schedule();
         return new SettingsResult { Ok = true, Settings = MapSettings(_settings) };
@@ -2232,6 +2328,15 @@ public sealed partial class DownloadManagerService
 
     public void RequestUpdateShutdown() => UpdateShutdownRequested?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>
+    /// A completion program is a full path to something the OS can start. On Windows that is an .exe; Linux programs have
+    /// no extension, so there any absolute path passes and the start itself says whether it can run. A server refuses
+    /// completion programs from clients anyway (<c>SupportsProgramSettings</c>); this keeps a saved one valid there.
+    /// </summary>
+    public static bool IsCompletionProgramPath(string program) =>
+        Path.IsPathFullyQualified(program) &&
+        (!OperatingSystem.IsWindows() || string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsNewerVersion(string candidate, string installed)
     {
         static string Clean(string value) => value.Trim().TrimStart('v', 'V');
@@ -2289,8 +2394,7 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Error = "Unknown completion system action." };
                 if (completion.SystemAction != "none" && !_settings.AllowSystemCompletionActions)
                     return new JobActionResponse { Error = "Enable system completion actions in Scheduler before choosing this action." };
-                if (completion.ProgramPath is { Length: > 0 } program &&
-                    (!Path.IsPathFullyQualified(program) || !string.Equals(Path.GetExtension(program), ".exe", StringComparison.OrdinalIgnoreCase)))
+                if (completion.ProgramPath is { Length: > 0 } program && !IsCompletionProgramPath(program))
                     return new JobActionResponse { Error = "Choose an absolute executable path for the completion program." };
             }
 
@@ -2311,7 +2415,7 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = "Update transfer settings and Move/Rename in separate requests." };
             if (request.SpeedLimitBytesPerSecond is not null &&
                 (runtime.Job.IsTerminal || !SupportsLiveSpeedLimit(runtime.Job)))
-                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS file downloads." };
+                return new JobActionResponse { Ok = false, Error = "Live speed limits are available for unfinished HTTP/HTTPS and FTP file downloads." };
             if (request.SpeedLimitBytesPerSecond is not null)
                 runtime.Job.SpeedLimitBytesPerSecond = request.SpeedLimitBytesPerSecond;
             if (request.ShowCompletionDialog is not null)
@@ -2353,7 +2457,16 @@ public sealed partial class DownloadManagerService
                     return new JobActionResponse { Ok = false, Error = "The new path has no folder." };
                 }
 
-                if (!string.Equals(target, runtime.Job.FinalFilePath, StringComparison.OrdinalIgnoreCase))
+                if (Roots is { } roots)
+                {
+                    if (roots.Allowed(directory) is not { } inside)
+                        return new JobActionResponse { Ok = false, Error = PathRoots.OutsideMessage };
+                    directory = inside;
+                    target = Path.Combine(inside, Path.GetFileName(target));
+                }
+
+                // Only Windows sees a.txt and A.TXT as one file; on Linux changing the case is a real move.
+                if (!PathNames.Same(target, runtime.Job.FinalFilePath))
                 {
                     if (File.Exists(target))
                     {
@@ -2451,7 +2564,21 @@ public sealed partial class DownloadManagerService
         CancellationToken cancellationToken = default)
     {
         await _settingsUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var moved = await MoveToQueueCoreAsync(id, queueId, cancellationToken).ConfigureAwait(false);
+            if (!moved.Ok) return moved;
+
+            // A running download moved into a queue that is already full: the same rule as a lowered limit
+            // (owner, 2026-11-08: "Yes, same rule") sends the queue's newest extra one back to Queued.
+            await RequeueExcessAsync(cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                if (_jobs.TryGetValue(id, out var runtime)) moved.Job = Map(runtime.Job);
+            }
+
+            return moved;
+        }
         finally { _settingsUpdateGate.Release(); }
     }
 
@@ -2500,7 +2627,7 @@ public sealed partial class DownloadManagerService
 
             if (!queue.IsRunning && (runtime.Starting || runtime.Runner is { IsCompleted: false }))
             {
-                runtime.PauseRequested = true;
+                RequestStopLocked(runtime);
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
                 runtime.Job.EstimatedRemaining = null;
@@ -3237,7 +3364,7 @@ public sealed partial class DownloadManagerService
                      r.Job.IsQueued && r.Job.QueueId == queue.Id &&
                      (r.Starting || r.Runner is { IsCompleted: false })))
         {
-            active.PauseRequested = true;
+            RequestStopLocked(active);
             active.Job.State = DownloadState.Paused;
             active.Job.BytesPerSecond = null;
             active.Job.EstimatedRemaining = null;
@@ -3337,6 +3464,9 @@ public sealed partial class DownloadManagerService
             foreach (var runtime in toStart)
             {
                 runtime.Starting = true;
+                // The last run's link is no guide to this one's host or cap; a change before the new link comes is
+                // taken when it comes (UI.R21).
+                runtime.RunLink = null;
             }
         }
 
@@ -3392,36 +3522,50 @@ public sealed partial class DownloadManagerService
             }
             else
             {
-                if (runtime.PauseRequested || _shuttingDown)
+                if (runtime.Preempted && !_shuttingDown)
                 {
-                    if (runtime.ResumeWhenStopped && !_shuttingDown)
-                    {
-                        runtime.PauseRequested = false;
-                        runtime.ResumeWhenStopped = false;
-                    }
-                    else
-                    {
-                        job.State = DownloadState.Paused;
-                        job.BytesPerSecond = null;
-                        job.EstimatedRemaining = null;
-                        job.ActiveConnections = 0;
-                        job.Touch();
-                        runtime.Starting = false;
-                        return;
-                    }
+                    // A lower limit stopped it before its transfer began: back in the queue, as if never picked.
+                    // It was saved and announced as Queued by whoever stopped it; the Schedule below runs as for a cancel.
+                    runtime.Preempted = false;
+                    runtime.PauseRequested = false;
+                    runtime.ResumeWhenStopped = false;
+                    job.State = DownloadState.Queued;
+                    job.Touch();
+                    runtime.Starting = false;
                 }
+                else
+                {
+                    if (runtime.PauseRequested || _shuttingDown)
+                    {
+                        if (runtime.ResumeWhenStopped && !_shuttingDown)
+                        {
+                            runtime.PauseRequested = false;
+                            runtime.ResumeWhenStopped = false;
+                        }
+                        else
+                        {
+                            job.State = DownloadState.Paused;
+                            job.BytesPerSecond = null;
+                            job.EstimatedRemaining = null;
+                            job.ActiveConnections = 0;
+                            job.Touch();
+                            runtime.Starting = false;
+                            return;
+                        }
+                    }
 
-                runtime.Cts?.Dispose();
-                cts = new CancellationTokenSource();
-                runtime.Cts = cts;
-                job.KeepCheckpointAfterFinalize = true;
-                job.State = DownloadState.Connecting;
-                job.Failure = null;
-                job.StartedAt ??= DateTimeOffset.UtcNow;
-                job.CompletedAt = null;
-                job.FileRemovedAfterExtraction = false;
-                job.ActiveConnections = 0;
-                job.Touch();
+                    runtime.Cts?.Dispose();
+                    cts = new CancellationTokenSource();
+                    runtime.Cts = cts;
+                    job.KeepCheckpointAfterFinalize = true;
+                    job.State = DownloadState.Connecting;
+                    job.Failure = null;
+                    job.StartedAt ??= DateTimeOffset.UtcNow;
+                    job.CompletedAt = null;
+                    job.FileRemovedAfterExtraction = false;
+                    job.ActiveConnections = 0;
+                    job.Touch();
+                }
             }
         }
 
@@ -3441,11 +3585,16 @@ public sealed partial class DownloadManagerService
         {
             JobDto? dto = null;
             var quotaReached = false;
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now;
             lock (_sync)
             {
+                // Read under the lock, so reports reach the speed history in time order and none is dropped as
+                // coming from an earlier second.
+                now = DateTimeOffset.UtcNow;
                 if (job.State is DownloadState.Paused or DownloadState.Cancelled || runtime.CancelledForRemoval)
                 {
+                    // Its share of the total speed ends now, not when its wind-down finishes (UI.R24).
+                    _speedHistory.Stopped(job.Id, now);
                     return;
                 }
 
@@ -3455,12 +3604,22 @@ public sealed partial class DownloadManagerService
                     job.TotalBytes = p.TotalBytes;
                 }
 
-                job.BytesPerSecond = p.BytesPerSecond;
-                job.EstimatedRemaining = p.EstimatedRemaining;
-                job.ActiveConnections = p.ActiveConnections;
+                // A transfer a lower limit sent back to the queue is already shown, and maybe saved, as Queued
+                // (UI.R21). A report from its wind-down still counts its bytes, but must not make it look as
+                // if it were running again.
+                var windingDown = runtime.Preempted || (runtime.PauseRequested && runtime.ResumeWhenStopped);
+                _speedHistory.Report(job.Id, windingDown ? 0 : p.BytesPerSecond, now);
+                if (!windingDown)
+                {
+                    job.BytesPerSecond = p.BytesPerSecond;
+                    job.EstimatedRemaining = p.EstimatedRemaining;
+                    job.ActiveConnections = p.ActiveConnections;
+                    runtime.LastPhase = p.Phase;
+                }
+
                 // Follow the engine's phase so a job waiting between retries (or still
                 // connecting) is not shown as downloading at 0 B/s.
-                if (job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
+                if (!windingDown && job.State is DownloadState.Connecting or DownloadState.Queued or DownloadState.RetryWaiting
                     or DownloadState.Downloading)
                 {
                     job.State = p.Phase switch
@@ -3541,7 +3700,10 @@ public sealed partial class DownloadManagerService
             job.BytesPerSecond = null;
             job.EstimatedRemaining = null;
             job.ActiveConnections = 0;
-            job.ActiveConnections = 0;
+            job.WaitingForHost = null;
+            runtime.LastPhase = null;
+            runtime.Preempted = false;
+            _speedHistory.Stopped(job.Id, DateTimeOffset.UtcNow);
 
             // The file is where it landed, whatever else happened while it got there.
             if (result.Success)
@@ -3882,7 +4044,7 @@ public sealed partial class DownloadManagerService
         {
             marked = _jobs.Values
                 .Where(runtime => runtime.Job.State == DownloadState.Completed && runtime.Job.FileRemovedAfterExtraction != removed &&
-                    paths.Contains(runtime.Job.FinalFilePath, StringComparer.OrdinalIgnoreCase))
+                    paths.Contains(runtime.Job.FinalFilePath, PathNames.Comparer))
                 .ToList();
             foreach (var runtime in marked)
             {
@@ -3950,12 +4112,75 @@ public sealed partial class DownloadManagerService
         }
     }
 
-    /// <summary>Waiting, never begun, not a provider link: a new default connection count can still apply to it.</summary>
+    /// <summary>Whether a download's default count could differ between the two settings (UI.R21).</summary>
+    private static bool ConnectionInputsChanged(AppSettings before, AppSettings after) =>
+        before.DefaultConnections != after.DefaultConnections ||
+        before.MaxConnectionsPerHost != after.MaxConnectionsPerHost ||
+        !before.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections))
+            .SequenceEqual(after.ConnectionProfiles.Select(profile => (profile.Pattern, profile.MaxConnections)));
+
+    /// <summary>
+    /// Running downloads whose count a changed default may follow (UI.R21): the user's own HTTP downloads, provider
+    /// jobs and protected (pasted provider) links. Not FTP: an FTP download is one connection by design
+    /// (the FTP engine has no segments), so for a running one the change is a
+    /// no-op and its record is left as it is.
+    /// </summary>
+    private static bool IsRunningForConnections(JobRuntime runtime) =>
+        (runtime.Starting || runtime.Runner is { IsCompleted: false }) &&
+        !runtime.PauseRequested && !runtime.CancelRequested &&
+        !runtime.Job.Url.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Waiting, never begun, not a provider job: a new default connection count can still apply to it. A provider
+    /// job takes the current default afresh on each run (<see cref="ProviderConnectionsLocked"/>).
+    /// </summary>
     private static bool IsUnstartedForConnections(JobRuntime runtime) =>
         runtime.Job.State is DownloadState.Queued or DownloadState.Paused &&
         runtime.Job.ReceivedBytes == 0 &&
         !runtime.Starting && runtime.Runner is null or { IsCompleted: true } &&
-        runtime.Job.RemoteSource is null && runtime.Job.ProtectedUrl is null;
+        runtime.Job.RemoteSource is null;
+
+    /// <summary>
+    /// The count a default of <paramref name="defaultConnections"/> gives this job under the current settings, or
+    /// null when that can't be known yet. Each kind is clamped as its run clamps it: the user's own by the host's
+    /// limit, a protected link also by <see cref="ProviderLinks.MaxConnections"/>, and a provider job by the host
+    /// and cap of its current run's link. Before a provider run has its link, null: the run then takes the new
+    /// default itself. Call under <see cref="_sync"/>.
+    /// </summary>
+    /// <summary>The cap on a pasted provider link's connections up to 0.5.3, before TB.L1 measured 16.</summary>
+    private const int OldProviderLinkCap = 4;
+
+    /// <summary>
+    /// A pasted provider link saved at the old cap of 4 while the default would have given it more. Up to 0.5.3 every
+    /// count of 4 or more was cut to 4, so that 4 is the cap, not a choice, and the link follows the default like any
+    /// other. A count below 4 was chosen and stays.
+    /// </summary>
+    private static bool SavedUnderTheOldProviderLinkCap(DownloadJob job, int? previous)
+        => job.ProtectedUrl is not null && job.RequestedConnections == OldProviderLinkCap && previous > OldProviderLinkCap;
+
+    private int? DefaultConnectionsLocked(JobRuntime runtime, int defaultConnections)
+    {
+        var job = runtime.Job;
+        Uri? address;
+        var cap = int.MaxValue;
+        if (job.RemoteSource is not null)
+        {
+            if (runtime.RunLink is not { } link) return null;
+            (address, cap) = link;
+        }
+        else if (job.ProtectedUrl is not null)
+        {
+            cap = ProviderLinks.MaxConnections;
+            if (!Uri.TryCreate(job.ProtectedUrl, UriKind.Absolute, out address) &&
+                !Uri.TryCreate(job.Url, UriKind.Absolute, out address)) return null;
+        }
+        else if (!Uri.TryCreate(job.Url, UriKind.Absolute, out address))
+        {
+            return null;
+        }
+
+        return Math.Clamp(Math.Min(Math.Min(defaultConnections, EffectiveConnectionLimit(address)), cap), 1, 32);
+    }
 
         private int EffectiveConnectionLimit(Uri uri)
     {
@@ -3985,6 +4210,38 @@ public sealed partial class DownloadManagerService
             .Replace("\\?", ".") + "$";
         return System.Text.RegularExpressions.Regex.IsMatch(
             value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>
+    /// A folder setting the server's roots don't hold, in words, or null. The download folder is always checked, because
+    /// saving creates it. The others only when they change: a folder saved before the roots were narrowed is kept, so a
+    /// client sending its copy back doesn't fail on it, and an add that would use it is refused then.
+    /// </summary>
+    private string? DescribeFolderOutsideRoots(SettingsDto settings, List<CategoryDefinitionDto> categories, PathRoots roots)
+    {
+        string? Outside(string what, string? requested, string? current) =>
+            !string.IsNullOrWhiteSpace(requested) && !PathNames.Same(requested.Trim(), current?.Trim()) && roots.Allowed(requested) is null
+                ? $"{what} is outside the folders this server may use."
+                : null;
+
+        if (roots.Allowed(settings.DefaultDownloadDirectory) is null) return "The download folder is outside the folders this server may use.";
+        lock (_sync)
+        {
+            if (Outside("The last download folder", settings.LastDestinationDirectory, _settings.LastDestinationDirectory) is { } last) return last;
+            foreach (var (category, folder) in settings.CategoryFolders ?? new())
+            {
+                _settings.CategoryFolders.TryGetValue(category, out var current);
+                if (Outside($"The folder for {category}", folder, current) is { } problem) return problem;
+            }
+
+            foreach (var category in categories)
+            {
+                var current = _settings.CustomCategories.FirstOrDefault(item => item.Id == category.Id)?.DestinationDirectory;
+                if (Outside($"The folder for {category.Name}", category.DestinationDirectory, current) is { } problem) return problem;
+            }
+        }
+
+        return null;
     }
 
     private string ResolveDestination(string? requested, string fileName, bool useLastFolder = true, bool useCategoryFolder = true, string? categoryId = null)
@@ -4123,31 +4380,29 @@ public sealed partial class DownloadManagerService
 
     private HostStatusDto BuildStatusLocked()
     {
-        var active = _jobs.Values.Count(r => r.Job.State is DownloadState.Connecting or DownloadState.Downloading
-            or DownloadState.RetryWaiting or DownloadState.Verifying);
+        var active = CountActiveLocked();
         var queued = _jobs.Values.Count(r => r.Job.State == DownloadState.Queued);
+        var nativeHost = NativeHostState?.Invoke() ?? default;
         return new HostStatusDto
         {
             HostVersion = Protocol.HostVersion,
             ProtocolVersion = Protocol.Version,
             StartedAt = StartedAt,
             TrayAvailable = TrayAvailable,
-            NativeHostRegistered = NativeHostRegistered?.Invoke() ?? false,
+            NativeHostRegistered = nativeHost.IsRegistered,
             ActiveDownloads = active,
             QueuedDownloads = queued,
             TotalJobs = _jobs.Count,
             StateDirectory = _paths.Root,
-            BrowserIntegration = !_settings.BrowserIntegrationEnabled
-                ? "disabled"
-                : NativeHostRegistered?.Invoke() == true
-                    ? "connected"
-                    : "native host not registered",
+            BrowserIntegration = nativeHost.IntegrationText(_settings.BrowserIntegrationEnabled),
             OrphanPartFiles = _orphanPartFiles.Where(File.Exists).ToList(),
         };
     }
 
     private static bool SupportsLiveSpeedLimit(DownloadJob job)
         => job.RemoteSource is not null ||
+           // PERF.6: the FTP engine reads the download's own limit as it goes, like the HTTP one.
+           (Uri.TryCreate(job.Url, UriKind.Absolute, out var ftp) && ftp.Scheme == "ftp") ||
            Uri.TryCreate(job.Url, UriKind.Absolute, out var uri) &&
            uri.Scheme is "http" or "https" &&
            !uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) &&
@@ -4190,6 +4445,7 @@ public sealed partial class DownloadManagerService
             LastModified = job.LastModified,
             RequestedConnections = job.RequestedConnections,
             ActiveConnections = job.ActiveConnections,
+            WaitingForHost = WaitingHostShown(job),
             BytesPerSecond = job.BytesPerSecond,
             SpeedLimitBytesPerSecond = job.SpeedLimitBytesPerSecond,
             CanChangeSpeedLimit = !job.IsTerminal && SupportsLiveSpeedLimit(job),
@@ -4217,7 +4473,9 @@ public sealed partial class DownloadManagerService
             IsRemote = job.RemoteSource is not null,
             RemoteProvider = job.RemoteSource?.Provider,
             FileRemovedAfterExtraction = job.FileRemovedAfterExtraction,
-            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction" : null,
+            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction"
+                : WaitingHostShown(job) is { } waitingHost ? WaitingForConnectionText(waitingHost)
+                : null,
             Failure = job.Failure is null
                 ? null
                 : new FailureDto
@@ -4543,9 +4801,21 @@ public sealed partial class DownloadManagerService
         public bool AdmissionSuspended { get; set; }
         public bool PauseRequested { get; set; }
         public bool ResumeWhenStopped { get; set; }
+        /// <summary>
+        /// Stopped by a lower simultaneous-downloads limit (UI.R21), not by the user: it goes back to Queued with
+        /// its data, and a stop that lands before the transfer starts must not let it run anyway.
+        /// </summary>
+        public bool Preempted { get; set; }
+        /// <summary>The engine's last phase, so a limit change leaves a job alone while it verifies or muxes.</summary>
+        public string? LastPhase { get; set; }
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
         public bool CancelledForRemoval { get; set; }
+        /// <summary>
+        /// A provider run's link host and the provider's per-file cap, in memory only, so a changed default can
+        /// reach the running transfer within that cap (UI.R21). Null until the run has its link. Under <c>_sync</c>.
+        /// </summary>
+        public (Uri Address, int Cap)? RunLink { get; set; }
     }
 
     private sealed class InlineProgress<T>(Action<T> action) : IProgress<T>

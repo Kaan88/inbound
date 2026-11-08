@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-04)
+## Current status (2026-11-08, release 0.6.0, extension 0.5.0)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
@@ -24,8 +24,7 @@ referrer and user-agent transfer. Phase 8 (queues/scheduler) is complete,
 including completion actions, quotas, sleep prevention, and DST behavior.
 Payload bytes are written directly into a destination-local part file and renamed in place, with
 no fixed temp directory or cross-volume stitching. `PROGRESS.md` is authoritative for status. Remaining
-verification includes clean-environment install/upgrade and independent
-interruption/restart checks. Clipboard
+verification includes independent interruption/restart checks. Clipboard
 URL monitoring, batch/numbered URLs (CLI + WinUI), editable descriptions,
 duplicate Rename/Overwrite/Fail policies, category destination rules,
 last-folder memory, JSON list export/import, completion dialog/notification/
@@ -36,7 +35,13 @@ only updater (check/download/install/rollback/notifications/gating), the WinUI
 scheduler, list state views, multiselect bulk actions, delete-file choice,
 shell open/reveal, progress details, persisted layout, and recent-URL history are
 implemented.
-Edge/Firefox integration is explicitly out of scope (C3);
+Edge and Firefox integration is in scope again (owner, 2026-11-06; ROADMAP EXT.E1).
+Edge users install the Chrome Web Store listing (same ID); Setup, repair and the Host register the native host under
+Edge's key too. In Edge the owner checked automatic catching (2026-11-08). Firefox gets its own build and gecko ID, which the app accepts
+from 0.6.0; this is not yet checked in Firefox (EXT.B3).
+Extension 0.5.0 sends downloads automatically by default. Its popup lists the newest 20 downloads of the app (and
+of a paired server) and can pause, resume, retry and delete them (and the file). It can optionally pair with the user's own Inbound server. A download
+from a site the extension has no access to stays in the browser with a note (EXT.R5).
 HLS master/media assembly including AES-128 (single and rotating keys) and
 alternate-audio muxing, DASH SegmentTemplate/Timeline/SegmentList/SegmentBase
 byte ranges, DASH A/V muxing via FFmpeg, HLS/DASH fragment checkpoint recovery,
@@ -45,13 +50,13 @@ explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
 VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
 credential boundaries, and expired-URL refresh are verified.
-TorBox/account-provider work, unrar, and Linux/Docker/web UI are explicitly
-deferred (ROADMAP A1–A5/D1–D4). The installer package is built, but install
-smoke testing, sign-in behavior, and clean-environment install/upgrade acceptance
-remain unverified. Installer safety changes are under validation: Setup uses
-Windows Restart Manager rather than force-killing by process name; sign-in
-configures through synchronous config-only Host mode independently of optional
-launch; and uninstall retains state. Do not treat these changes as verified.
+TorBox and archive extraction ship in 0.5.x. The headless server, web UI and Docker image (ROADMAP D1–D4) ship in
+0.6.0 for linux/amd64 only (D1 is still in progress); see `docs\docker.md` and `docs\docker-webui-plan.md`.
+Clean install, upgrade (0.5.3 to 0.6.0), sign-in start and uninstall are verified on a fresh Windows VM (TEST.2).
+Setup uses Windows Restart Manager rather than force-killing by process name, and uninstall retains state.
+0.6.0 trims the install folder from 281 MB to about 200 MB (REV.3, partial: the VM run with the trimmed Setup is
+pending). Closing the window now ends the window process by default; the Host keeps
+running (PERF.5).
 
 Browser evidence is recorded in `PROGRESS.md`: Chrome for Testing loaded the
 extension as `pknddmneejadnnngffojnoecojhdfalc`; automatic and context-menu
@@ -84,7 +89,9 @@ UI-agnostic and directly testable.
 
 IPC: per-user named pipe, current-user-only ACL, JSON envelopes with
 `protocolVersion`, snapshot on connect then events. Native Messaging stdout is
-protocol-only; log to stderr/file.
+protocol-only; log to stderr/file. Commands and broadcasts live in the
+transport-free `Runtime/Ipc/HostCommandDispatcher`; `HostPipeServer` is only the
+pipe transport, and machine actions go through `IHostPlatform`.
 
 Browser strategy: the extension observes eligible Chrome downloads and sends
 URL, final URL, cookies, referrer, UA and relevant headers to our native host;
@@ -178,10 +185,15 @@ not as acceptance evidence.
 - The OpenCode environment has **no Goal/Todo tools**; use the markdown files.
 - **Chrome stable 156 removed `--load-extension`**. Manual “Load unpacked” works;
   for automation use Chrome for Testing 156+ (verified path:
-  `C:\Users\kaank\AppData\Local\Temp\opencode\cft\chrome-win64\chrome.exe`).
+  `%LOCALAPPDATA%\Temp\opencode\cft2\chrome-win64\chrome.exe`; the older
+  `...\opencode\cft\chrome-win64` copy lost its version manifest and fails to start with a side-by-side error).
   Chrome for Testing loads the extension with `--load-extension` and a fresh
   profile. Do not waste time automating Chrome stable's folder picker.
 - Mandatory enterprise policy is not a reliable path here; use CfT/manual.
+- An agent shell can read a stale native-host registry value while a normal terminal reads the real one,
+  and Chrome launched from the agent shell then reports "Specified native messaging host not found".
+  Run browser tests from a normal terminal. The reason the views differ is not established; to read the
+  real value from an agent shell use WMI `StdRegProv` `GetStringValue` under `HKEY_USERS\<SID>`.
 - The harness denies child-process writes to user `Downloads` and default
   LocalAppData, so Host state falls back to `artifacts\app\data` during tests.
   Use `test-downloads` for browser-test destinations.

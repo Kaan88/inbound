@@ -57,7 +57,7 @@ public sealed class ProviderLinksTests
     }
 
     [Fact]
-    public void AllowsTheProvidersConnectionLimit() => Assert.Equal(4, ProviderLinks.MaxConnections);
+    public void AllowsTheProvidersConnectionLimit() => Assert.Equal(16, ProviderLinks.MaxConnections);
 }
 
 public sealed class UrlRedactorTests
@@ -217,11 +217,22 @@ public sealed class NativeBridgePolicyTests
     [InlineData("host.openUi")]
     [InlineData("host.pickFolder")]
     [InlineData("jobs.query")]
+    [InlineData("job.pause")]
+    [InlineData("job.resume")]
+    [InlineData("job.retry")]
+    [InlineData("job.cancel")]
+    [InlineData("job.remove")]
+    [InlineData("settings.downloadFolders")]
     public void ForwardsWhatTheExtensionUses(string type) => Assert.True(NativeBridgePolicy.AllowFromExtension(type));
 
     [Theory]
     [InlineData("job.add")]
-    [InlineData("job.remove")]
+    [InlineData("job.update")]
+    [InlineData("job.refreshUrl")]
+    [InlineData("job.moveToQueue")]
+    [InlineData("jobs.pauseAll")]
+    [InlineData("group.action")]
+    [InlineData("folders.space")]
     [InlineData("settings.update")]
     [InlineData("settings.get")]
     [InlineData("host.shutdown")]
@@ -241,7 +252,12 @@ public sealed class NativeBridgePolicyTests
     [InlineData("handoff.ack", true)]
     [InlineData("jobs.snapshot", true)]
     [InlineData("host.folderPicked", true)]
-    [InlineData("remotely.unrelated", true)]
+    [InlineData("job.actionResult", true)]
+    [InlineData("settings.downloadFoldersResult", true)]
+    // An allow-list: what is not named stays on the Host's side.
+    [InlineData("remotely.unrelated", false)]
+    [InlineData("settings.result", false)]
+    [InlineData("update.progress", false)]
     [InlineData("groups.changed", false)]
     public void KeepsProviderAndArchiveTrafficFromTheBrowser(string type, bool expected)
         => Assert.Equal(expected, NativeBridgePolicy.AllowToExtension(type));
@@ -279,6 +295,47 @@ public sealed class NativeBridgePolicyTests
             Assert.False(NativeBridgePolicy.AllowToExtension(type), type);
             Assert.Null(NativeBridgePolicy.ToExtension(IpcMessage.Create(type, new { })));
         });
+    }
+
+    [Theory]
+    [InlineData("job.pause", false)]
+    [InlineData("job.resume", false)]
+    [InlineData("job.retry", false)]
+    [InlineData("job.cancel", false)]
+    [InlineData("job.remove", false)]
+    [InlineData("job.remove", true)]
+    public void AJobActionForOneDownloadCrosses(string type, bool deleteFile)
+        => Assert.True(NativeBridgePolicy.AllowFromExtension(
+            IpcMessage.Create(type, new { jobId = Guid.NewGuid().ToString(), deleteFile })));
+
+    [Theory]
+    // A list: job.remove would remove every download named, and delete their files.
+    [InlineData("job.remove", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""jobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""],""deleteFile"":true}")]
+    [InlineData("job.remove", @"{""JobIds"":[""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""]}")]
+    // Deleting the file belongs to Delete only.
+    [InlineData("job.cancel", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":true}")]
+    [InlineData("job.pause", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""DeleteFile"":true}")]
+    [InlineData("job.remove", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""deleteFile"":""yes""}")]
+    // No download, an empty one, a malformed one, or two.
+    [InlineData("job.pause", @"{}")]
+    [InlineData("job.pause", @"{""jobId"":""00000000-0000-0000-0000-000000000000""}")]
+    [InlineData("job.pause", @"{""jobId"":""not-a-job""}")]
+    [InlineData("job.pause", @"{""jobId"":""6f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f"",""JobId"":""7f1c3c2e-8a4b-4c7d-9e2f-1a2b3c4d5e6f""}")]
+    [InlineData("job.resume", @"[]")]
+    public void AJobActionBeyondOneDownloadIsRefused(string type, string payload)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(payload);
+        var message = new IpcMessage(Protocol.Version, type, "request-1", null, document.RootElement.Clone());
+        Assert.False(NativeBridgePolicy.AllowFromExtension(message));
+    }
+
+    [Fact]
+    public void AJobActionWithNoPayloadIsRefusedAndOtherTypesAreJudgedByTypeAlone()
+    {
+        Assert.False(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.JobRemove)));
+        Assert.True(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.HostPing)));
+        Assert.True(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create(MessageTypes.JobsQuery, new { })));
+        Assert.False(NativeBridgePolicy.AllowFromExtension(IpcMessage.Create("settings.update", new { })));
     }
 
     [Fact]

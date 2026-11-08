@@ -7,6 +7,7 @@ using DownloadManager.Core.Providers;
 using DownloadManager.Persistence;
 using DownloadManager.Runtime;
 using DownloadManager.Runtime.Archives;
+using DownloadManager.Runtime.Ipc;
 using DownloadManager.Runtime.Remote;
 using DownloadManager.Tray;
 
@@ -91,6 +92,8 @@ internal static class Program
                 return 0;
             }
 
+            // Measurement aid for soak runs; does nothing unless DOWNLOADMANAGER_GC_LOG is set.
+            using var gcLog = GcMemoryLog.StartFromEnvironment(log.Info);
             var jobStore = new JsonJobStore(paths, log.Info);
             var checkpoints = new JsonCheckpointStore(paths);
             var mediaCheckpoints = new JsonMediaCheckpointStore(paths);
@@ -109,7 +112,8 @@ internal static class Program
                 mediaCheckpoints: mediaCheckpoints);
             var completionExecutor = new HostCompletionActionExecutor(log.Info);
             var sleepPrevention = new WindowsSleepPrevention(log.Info);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
+            // PERF.6: one budget for the shared speed cap, so it covers HTTP and FTP downloads together.
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
             var postDownloadHook = new HostPostDownloadHook(log.Info);
             var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
             log.Secrets = remote.Registry;
@@ -165,28 +169,31 @@ internal static class Program
                 log.Warn($"Remote jobs could not start: {ex.GetType().Name}");
             }
 
-            service.NativeHostRegistered = NativeHostRegistration.IsRegistered;
+            service.NativeHostState = NativeHostRegistration.Read;
             service.TrayAvailable = true;
 
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var pipe = new HostPipeServer(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null };
-            archives.Changed += (_, change) => pipe.BroadcastArchiveChanged(change);
+            var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null };
+            var pipe = new HostPipeServer(dispatcher, log);
+            archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
             void ExitApplication() => _ = Task.Run(async () =>
             {
-                try { await pipe.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+                try { await dispatcher.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
                 finally { controller.RequestShutdown(); }
             });
             completionExecutor.ExitHost = ExitApplication;
+            dispatcher.Start();
             pipe.Start();
 
-            var currentSettings = service.GetSnapshot().Settings;
+            var currentSettings = service.GetSettings();
             using var updateMonitor = new HostUpdateMonitor(service, log.Info);
             TryApplyStartup(currentSettings.LaunchAtStartup, log);
+            TryRepairNativeHostKeys(log);
             service.SettingsChanged += (_, next) =>
             {
-                currentSettings = service.GetSnapshot().Settings;
+                currentSettings = service.GetSettings();
                 updateMonitor.ApplySettings(currentSettings);
                 TryApplyStartup(next.LaunchAtStartup, log);
                 log.Info("Settings updated.");
@@ -199,7 +206,7 @@ internal static class Program
                 ResumeAll: () => FireAndForget(service.ResumeAllAsync(), log),
                 Exit: ExitApplication,
                 IntegrationStatus: () => BrowserIntegrationText(service),
-                ActiveCount: () => service.GetSnapshot().Status.ActiveDownloads,
+                ActiveCount: () => service.ActiveDownloadCount(),
                 UpdateText: () => updateMonitor.UpdateText,
                 InstallUpdate: () => _ = updateMonitor.InstallAsync(),
                 CheckForUpdates: updateMonitor.CheckNow);
@@ -316,6 +323,8 @@ internal static class Program
             downloadWindows.Dispose();
             try
             {
+                // Broadcasts end before the sessions close, as they did when both lived in the pipe server.
+                dispatcher.Stop();
                 pipe.StopAsync().GetAwaiter().GetResult();
             }
             catch (Exception ex)
@@ -449,20 +458,18 @@ internal static class Program
         }
     }
 
+    private static void TryRepairNativeHostKeys(FileLogger log)
+    {
+        var failure = NativeHostRegistration.TryRepair();
+        if (failure is not null)
+        {
+            log.Warn($"Could not repair the browser bridge registration: {failure}");
+        }
+    }
+
     private static string BrowserIntegrationText(DownloadManagerService service)
     {
-        var settings = service.GetSnapshot().Settings;
-        if (!settings.BrowserIntegrationEnabled)
-        {
-            return "disabled";
-        }
-
-        if (!NativeHostRegistration.IsRegistered())
-        {
-            return "native host not registered";
-        }
-
-        return "connected";
+        return NativeHostRegistration.Read().IntegrationText(service.GetSettings().BrowserIntegrationEnabled);
     }
 
     private static void FireAndForget(Task task, FileLogger log)

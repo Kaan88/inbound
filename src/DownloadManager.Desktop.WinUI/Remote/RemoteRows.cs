@@ -181,6 +181,9 @@ internal static class RemoteRules
 
     /// <summary><c>remote.deleteRemote</c> takes a job, and refuses one whose item isn't known. An item with no job on the list can't be deleted from here.</summary>
     public static bool CanDeleteFromProvider(RemoteJobDto? job) => job is { ItemId.Length: > 0 };
+
+    /// <summary>TB.S1: accepted by the provider and waiting in its queue, with no item yet. Start now and removal from the queue take it.</summary>
+    public static bool IsInProviderQueue(RemoteJobDto? job) => job is { State: "waiting", Stage: "queued" } && string.IsNullOrEmpty(job.ItemId);
 }
 
 internal static partial class RemoteText
@@ -295,6 +298,8 @@ internal static partial class RemoteText
         "submissionUnknown" => $"Checking {provider}…",
         "waiting" => job.Stage switch
         {
+            // Its own words: TorBox was seen not to start a queued item by itself with slots free (TB.S1).
+            "queued" when string.IsNullOrEmpty(job.ItemId) => $"In {provider}'s queue",
             "queued" => $"Waiting for {provider}",
             "metadataPending" => $"Waiting for {provider}",
             "processing" => $"Processing on {provider}",

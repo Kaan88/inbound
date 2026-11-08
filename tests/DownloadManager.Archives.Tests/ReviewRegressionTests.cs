@@ -62,6 +62,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     // ----- Names Windows can't keep apart -----
 
     [RequiresSevenZipFact]
+    [Trait("Platform", "Windows")] // Windows names ignore case; Linux keeps both (OffWindowsNamesDifferingOnlyByCaseAreBothKept)
     public async Task EntriesDifferingOnlyByCaseAreRefusedRatherThanOneOverwritingTheOther()
     {
         var archive = Space.WriteArchive("cases.rar", RarBuilder.Rar5(("a.txt", Text), ("A.TXT", Other)));
@@ -70,10 +71,23 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     }
 
     [RequiresSevenZipFact]
+    [Trait("Platform", "Windows")] // Windows names ignore case; Linux keeps both (OffWindowsNamesDifferingOnlyByCaseAreBothKept)
     public async Task AFileAndAFolderThatCollapseToOneNameAreRefused()
     {
         var archive = Space.WriteArchive("mixed.rar", RarBuilder.Rar5(("thing", Text), ("THING/inner.txt", Other)));
         Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
+    }
+
+    [RequiresSevenZipFact]
+    public async Task OffWindowsNamesDifferingOnlyByCaseAreBothKept()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var archive = Space.WriteArchive("cases.rar", RarBuilder.Rar5(("a.txt", Text), ("A.TXT", Other)));
+
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+
+        Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
+        Assert.Equal(Other, File.ReadAllBytes(Space.Output("A.TXT")));
     }
 
     [RequiresSevenZipFact]
@@ -84,14 +98,15 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     }
 
     [RequiresSevenZipFact]
+    [Trait("Platform", "Windows")] // Windows names ignore case; Linux keeps both (OffWindowsNamesDifferingOnlyByCaseAreBothKept)
     public async Task FoldersDifferingOnlyByCaseAreOneFolderAndAreFine()
     {
         var archive = Space.WriteArchive("folders.rar", RarBuilder.Rar5(("Dir/a.txt", Text), ("DIR/b.txt", Other)));
 
         await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
-        Assert.Equal(Text, File.ReadAllBytes(Space.Output(@"Dir\a.txt")));
-        Assert.Equal(Other, File.ReadAllBytes(Space.Output(@"Dir\b.txt")));
+        Assert.Equal(Text, File.ReadAllBytes(Space.Output(Workspace.Native(@"Dir\a.txt"))));
+        Assert.Equal(Other, File.ReadAllBytes(Space.Output(Workspace.Native(@"Dir\b.txt"))));
     }
 
     [Fact]
@@ -200,6 +215,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     }
 
     [RequiresSevenZipFact]
+    [Trait("Platform", "Windows")] // held open with a Windows share lock
     public async Task AFileARollbackCouldNotRemoveIsFinishedByTheNextAttempt()
     {
         var archive = Space.WriteArchive("ro.rar", TwoReadOnlyFiles());
@@ -267,6 +283,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     // ----- A destination at the root of a drive -----
 
     [Fact]
+    [Trait("Platform", "Windows")] // drive roots
     public void APathInsideADriveRootCountsAsInside()
     {
         Assert.Equal(@"D:\", ExtractionSafety.WithSeparator(@"D:\"));
@@ -276,6 +293,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
 
     /// <summary>A real drive root, by way of a substituted drive letter that points at this test's own folder.</summary>
     [RequiresSevenZipFact]
+    [Trait("Platform", "Windows")] // drive roots
     public async Task ExtractionAndItsCrashUndoWorkAtADriveRoot()
     {
         var used = DriveInfo.GetDrives().Select(drive => char.ToUpperInvariant(drive.Name[0])).ToHashSet();
@@ -385,6 +403,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     };
 
     [Fact]
+    [Trait("Platform", "Windows")] // NTFS alternate data streams
     public void AWalkStillFindsAStreamTheListingDidNotAdmitTo()
     {
         var payload = Directory.CreateDirectory(Path.Combine(Space.Root, "payload")).FullName;
@@ -399,6 +418,7 @@ public sealed class ReviewRegressionTests : ExtractionTestBase
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // NTFS alternate data streams
     public void AZoneMarkPassesAWalkOnlyWhenTheArchiveHasOneForTheToolToHaveCopied()
     {
         var payload = Directory.CreateDirectory(Path.Combine(Space.Root, "payload")).FullName;

@@ -11,8 +11,12 @@
     <InternalsVisibleTo Include="DownloadManager.Integration.Tests" />
   </ItemGroup>
 
-  <!-- The bundled 7-Zip goes to tools\7-Zip next to every program that uses this library, and into its publish folder. -->
-  <ItemGroup>
+  <!--
+    The bundled Windows 7-Zip goes to tools\7-Zip next to every program that uses this library, and into its publish
+    folder. A Linux publish (the Docker image, D3) passes -p:BundleWindows7Zip=false: it carries the official Linux 7zz
+    instead, and the Windows files stay out of the Docker build context entirely (.dockerignore).
+  -->
+  <ItemGroup Condition="'$(BundleWindows7Zip)' != 'false'">
     <None Include="..\..\third_party\7-Zip\7z.exe;..\..\third_party\7-Zip\7z.dll;..\..\third_party\7-Zip\License.txt;..\..\third_party\7-Zip\readme.txt;..\..\third_party\7-Zip\SOURCE.md"
           Link="tools\7-Zip\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

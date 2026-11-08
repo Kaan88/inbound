@@ -53,6 +53,13 @@ public enum DownloadSource
     ClipboardMonitor,
     Import,
     Remote,
+    /// <summary>
+    /// UI.B14: CLI add-batch. Headless like <see cref="Cli"/> (no progress window per job), and unlike a single CLI
+    /// add, a running main window opens no completion window per job either: a long batch would flood windows.
+    /// </summary>
+    CliBatch,
+    /// <summary>UI.B14: CLI import of a list. Headless and without per-job completion windows, like <see cref="CliBatch"/>.</summary>
+    CliImport,
 }
 
 public enum StartMode
@@ -189,6 +196,13 @@ public sealed class DownloadJob
     /// </summary>
     [JsonIgnore]
     public bool KeepCheckpointAfterFinalize { get; set; }
+
+    /// <summary>
+    /// The host this running job waits on for a free connection while it holds none (UI.B7). Runtime only: a
+    /// restarted job waits again or doesn't, so nothing about it is worth saving.
+    /// </summary>
+    [JsonIgnore]
+    public string? WaitingForHost { get; set; }
 
     /// <summary>The user removed this job. A restart finishes that instead of bringing the job back.</summary>
     public bool RemovalPending { get; set; }
@@ -515,8 +529,9 @@ public sealed class AppSettings
     public int DefaultConnections { get; set; } = 8;
     /// <summary>New downloads go to their category's folder (Options, Categories); off, they go to the download folder.</summary>
     public bool UseCategoryFolders { get; set; } = true;
-    /// <summary>PERF.5: closing the main window ends its process instead of hiding it; the tray starts it again.</summary>
-    public bool CloseWindowCompletely { get; set; }
+    /// <summary>PERF.5: closing the main window ends its process instead of hiding it; the tray starts it again. On by default
+    /// (owner, 2026-11-08); settings saved with a value keep it, and settings that never stored one get on.</summary>
+    public bool CloseWindowCompletely { get; set; } = true;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public List<ConnectionProfile> ConnectionProfiles { get; set; } = new();
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }

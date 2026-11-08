@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DownloadManager.Core;
+using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Persistence;
@@ -621,6 +622,9 @@ public sealed class JsonSettingsStore : ISettingsStore
         _paths = paths;
     }
 
+    /// <summary>Written beside the settings by any save from a build with the PERF.5 default; see <see cref="LoadAsync"/>.</summary>
+    private string CloseWindowDefaultMarker => _paths.SettingsFile + ".perf5";
+
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
         _paths.EnsureCreated();
@@ -643,13 +647,22 @@ public sealed class JsonSettingsStore : ISettingsStore
             // Saved by a build from before provider links were recognised. Filtering them in memory
             // would leave the account key on disk until the next unrelated settings change.
             var heldProviderLink = settings.RecentUrls?.Any(ProviderLinks.IsProviderLink) == true;
+            // PERF.5 (owner, 2026-11-08): "Closing the window ends it" is on by default, and installs upgraded from a
+            // build that stored it off (0.5.3, where it arrived off) get it on once. The marker says these settings
+            // were saved by a build that knows the new default, so a later choice of off is kept.
+            var closeWindowDefaultPending = !File.Exists(CloseWindowDefaultMarker);
+            if (closeWindowDefaultPending)
+            {
+                settings.CloseWindowCompletely = true;
+            }
+
             Normalize(settings);
             if (!string.IsNullOrEmpty(settings.Proxy.PasswordProtected))
             {
                 settings.Proxy.Password = SecretProtector.UnprotectProxy(settings.Proxy.PasswordProtected);
             }
 
-            if (heldProviderLink)
+            if (heldProviderLink || closeWindowDefaultPending)
             {
                 await SaveAsync(settings, cancellationToken).ConfigureAwait(false);
             }
@@ -687,6 +700,10 @@ public sealed class JsonSettingsStore : ISettingsStore
                 : SecretProtector.ProtectProxy(settings.Proxy.Password);
             var json = JsonSerializer.Serialize(settings, PersistenceJson.Options);
             await AtomicFile.WriteAsync(_paths.SettingsFile, json, cancellationToken).ConfigureAwait(false);
+            if (!File.Exists(CloseWindowDefaultMarker))
+            {
+                await AtomicFile.WriteAsync(CloseWindowDefaultMarker, "1", cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -782,6 +799,7 @@ public sealed class JsonSettingsStore : ISettingsStore
             ? null
             : settings.SkippedUpdateVersion.Trim();
 
+        settings.Theme = ThemeChoices.Normalize(settings.Theme);
         settings.EventSoundFiles ??= new(StringComparer.OrdinalIgnoreCase);
         settings.CustomCategories ??= new();
         settings.ArchivedDownloads ??= new();

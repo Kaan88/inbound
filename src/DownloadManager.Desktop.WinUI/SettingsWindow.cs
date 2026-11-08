@@ -29,12 +29,12 @@ internal sealed class SettingsWindow : Window
     /// <summary>Validates and saves. Returns null on success, otherwise the message and the page to show.</summary>
     public Func<Task<(string? Error, int Page)>>? Save { get; set; }
 
-    public SettingsWindow(ElementTheme theme)
+    public SettingsWindow()
     {
         Title = "Options — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 860, 620);
         WindowPlacement.Track(this, "options");
-        _root.RequestedTheme = theme;
+        AppTheme.Track(_root);
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });

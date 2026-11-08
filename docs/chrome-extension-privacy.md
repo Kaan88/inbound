@@ -1,10 +1,13 @@
 # Privacy policy: Inbound Download Manager Bridge
 
-This policy covers the Inbound Download Manager Bridge extension for Chrome, and what the Inbound
-Download Manager desktop app does with the data the extension gives it.
+This policy covers the Inbound Download Manager Bridge extension for Chrome (also used in Edge, and built
+for Firefox), and what the Inbound Download Manager desktop app does with the data the extension gives it.
+Where it says Chrome, the same holds for the other browsers.
 
 **No data about you reaches the developer.** The extension has no analytics, telemetry, advertising or
-crash reporting, and the developer runs no server that receives data from it or from the desktop app.
+crash reporting, and the developer runs no server that receives data from it or from the desktop app. If you
+pair the extension with an Inbound server of your own (the Docker or Linux version), it also sends downloads
+there; that server is yours, not the developer's (see "Sending to your own server").
 GitHub, which hosts the app's updates, shows the developer only a total count of how many times each
 release file was downloaded, and that count includes update checks.
 
@@ -12,7 +15,9 @@ release file was downloaded, and that count includes update checks.
 
 It sends downloads from Chrome to the Inbound Download Manager desktop app for Windows, on the same
 computer, using Chrome's native messaging. The app must be installed separately. Without it, downloads
-stay in Chrome. The extension makes no network requests of its own: the app does the downloading.
+stay in Chrome. The toolbar popup also lists the app's newest 20 downloads and can pause, resume, retry or
+delete them (see "What the app gives the extension"). The extension makes no network requests of its own, except to an Inbound server you paired
+it with: the app or the server does the downloading.
 
 ## What it reads, and when
 
@@ -22,15 +27,18 @@ stay in Chrome. The extension makes no network requests of its own: the app does
 - the address of the page it came from, and the referrer
 - the suggested file name, file type and size
 - your browser's user agent
-- the cookies Chrome holds for the file's address. These can include the cookies that keep you signed
-  in to that site. They are used so the app can download files that need your own login.
+- the cookies Chrome holds for the file's address, and for its final address when that is on the same
+  site (the same origin). These can include the cookies that keep you signed in to that site. They are
+  used so the app can download files that need your own login. Cookies for a final address on another
+  site are not read.
 
 The extension reads cookie values only at that moment, not while you browse. A download is sent in one
 of these ways:
 
-- **Automatically**, only if you turn on "Automatically send downloads to the desktop app" in Settings.
-  It is off until you do. (A copy installed before version 0.4.0 had it on by default, and updating that
-  copy keeps it on.) Downloads that match your rules then stop in Chrome and start again in the app, and
+- **Automatically**, while "Automatically send downloads to the desktop app" is on in Settings. It is on
+  from a fresh install (versions 0.4.0 to 0.4.x started with it off; an update keeps whatever you chose),
+  and Settings opens on install with this explanation, so you can turn it off before your first download.
+  Downloads that match your rules then stop in Chrome and start again in the app, and
   they leave Chrome's download list.
 - **From the right-click menu**, when you choose "Download with Inbound Download Manager" and confirm.
   At the click, the extension notes which cookie store and top-level site the link belongs to, so it can
@@ -39,8 +47,12 @@ of these ways:
 
 **Downloads you do not send:** while automatic sending is on and not paused, the extension looks at each
 new Chrome download's address, final address, referrer, file name and type to apply your rules.
-Downloads that do not match stay in Chrome. This is not kept or sent to the app, and cookies are not read
-for them. To find out whether you held Delete, the extension first asks its script in each open tab about
+Downloads that do not match stay in Chrome, and cookies are not read for them. A download from a site the
+extension has no access to (for example after you withdrew its site access, or set it to "on click") also
+stays in Chrome, with a note, because its cookies cannot be read; nothing is sent for it. So that the toolbar popup
+can say why a download stayed in Chrome, the extension keeps the file name and the reason (for example a
+site on your exclude list, or automatic sending being off) for the last five such downloads in Chrome's
+session storage, which Chrome clears when it closes. None of this is sent to the app. To find out whether you held Delete, the extension first asks its script in each open tab about
 the download's address; the script compares it with the link you clicked and keeps nothing.
 
 **Links on a page:** when you open Download All, the extension reads the addresses of the current page's
@@ -63,13 +75,47 @@ until the app accepts it: its address, page address, referrer, user agent, file 
 to use, but no cookie values. If you cancel, it stays there until you close Chrome. Chrome's sync storage is
 not used.
 
-**What the app gives the extension:** to show recent downloads in the toolbar popup, the app sends the
-extension its download list, including downloads you did not send from Chrome: addresses, page addresses,
-file names, folders and progress. Its replies can also include the app's settings, such as recent
-addresses and any site login usernames, which the extension ignores. Passwords and cookies are not
-included. The extension keeps the list only in memory and sends it nowhere else.
+**What the app gives the extension:** to show downloads in the toolbar popup, the app sends the extension
+its download list, including downloads you did not send from Chrome: addresses, page addresses, file
+names, folders and progress. The popup shows the newest 20 and lets you pause, resume, retry or delete them in the
+app, and, only if you tick "Delete the file too", delete the file. When the folder window opens, the app
+sends the default download folder and your favorite folders. The app's other settings, passwords and
+cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
+else.
+
+**Asking for a folder:** if you choose "Ask each time" in Settings, a caught download waits, paused, in
+Chrome while its window is open. Its address, page address, referrer, user agent, file name, size and type
+are kept in Chrome's session storage until you choose Download or Keep in browser, or close the window.
 
 The extension does not run in Incognito windows. YouTube is not supported.
+
+## Sending to your own server (optional)
+
+In Settings, under Inbound server, you can pair the extension with an Inbound server you run, by typing its
+address and a one-time code from the server's web UI. Until you do, nothing below happens.
+
+- **What the extension keeps:** the server's address, the name it was paired under, and a token the server
+  gave it, in Chrome's local storage on this computer (not synced). The token lets the extension send
+  downloads and use the popup's actions on that server, and nothing else. It is not encrypted by the
+  extension; anyone who can read your browser profile can read it. In Chrome and Edge the extension's
+  scripts on web pages cannot read it; in Firefox they can (the extension's own script never does). Unpair deletes it from the extension
+  and sends the token to the server once more, only to ask it to remove this pairing, so the token stops
+  working there too. If the server can't be reached, Settings says so: then remove the browser from the
+  web UI's Paired browsers list yourself.
+- **What goes to the server:** for each download you send there (automatically, if you chose the server
+  for automatic downloads, or by choosing Server in the folder window), the same details as for the
+  desktop app, listed above, your cookies for that site included. The extension asks Chrome for access to
+  the server's address when you pair. Its requests carry the token, never Chrome's cookies for the
+  server. If the address starts with http://, the token and these details cross your network
+  unencrypted; use https:// when the network is not only yours.
+- **What the server gives the extension:** its download list for the popup (the newest 20, labelled
+  Server), its default folder and favorite folders for the folder window, and the names of its folders
+  under its download folders when you choose Choose… there.
+- **What the server keeps:** like the desktop app, a record of each download in its data folder until you
+  remove it there, the cookies encrypted with a key kept in the same data folder (anyone who can read the
+  whole data folder can read them). Its logs do not contain cookies or the token.
+- A download meant for the server that the server does not take stays in Chrome. It is never sent to the
+  desktop app instead, and the other way round.
 
 ## What the desktop app keeps
 
@@ -93,8 +139,9 @@ app does not write cookies to them.
 
 Removing the extension or uninstalling the app does not delete this data. Removing a download from the
 list deletes its record and its cookies. It does not delete the recent-addresses list, the logs, or the
-size, status and dates kept for the app's statistics. If you use Remove on a paused or failed download, a
-small progress file containing its addresses also stays behind. To erase everything, exit the app from its
+size, status and dates kept for the app's statistics. If a paused or failed download is taken off the list
+with its data kept (the command-line `remove --keep-file`), a small progress file containing its addresses
+also stays behind. To erase everything, exit the app from its
 tray icon, then delete that folder.
 
 ## Who else sees anything
@@ -116,6 +163,10 @@ tray icon, then delete that folder.
   Options. These requests contain no data about you or your downloads beyond what any web request reveals,
   such as your IP address.
 
+- **Your own Inbound server**, if you paired one, for the downloads you send there (see "Sending to your own
+  server"). Anything between this computer and the server, such as a reverse proxy, sees what the server sees
+  unless the connection uses https.
+
 Your data is not sold, not used for advertising or credit decisions, and not read by the developer. It is
 not transferred except as described above.
 
@@ -127,7 +178,8 @@ including the Limited Use requirements.
 
 In the extension's Settings you can turn automatic sending on or off, limit it to certain file types (a file
 whose name has no extension is still sent, unless it is a web page), and exclude sites. You can pause catching
-for five minutes from the toolbar popup. Removing the extension stops it reading or sending anything. Downloads
+for five minutes from the toolbar popup. You can pair or unpair your own server, and choose whether automatic
+downloads go to this computer or to it. Removing the extension stops it reading or sending anything. Downloads
 already in the app stay there, keep running, and keep their saved cookies until you remove them.
 
 ## Changes and contact

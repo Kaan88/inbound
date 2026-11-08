@@ -7,11 +7,14 @@ using Microsoft.UI.Xaml.Controls;
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>One chosen line. The password leaves its box only for the one message that carries it.</summary>
-internal sealed class AddLinksPick(AddLine line, string? linkPassword)
+internal sealed class AddLinksPick(AddLine line, string? linkPassword, bool linkPasswordForArchives = false)
 {
     public AddLine Line { get; } = line;
 
     public string? LinkPassword { get; set; } = linkPassword;
+
+    /// <summary>TB.S2: the user ticked "also try it on this link's own archives".</summary>
+    public bool LinkPasswordForArchives { get; } = linkPassword is not null && linkPasswordForArchives;
 
     public override string ToString() => "[add pick]";
 }
@@ -206,22 +209,23 @@ internal sealed class AddLinksDialog
             }
         };
 
-        ContentDialogResult answer;
+        ContentDialogResult? answer;
         try
         {
-            answer = await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is already open over this window.
-            CouldNotOpen = true;
-            ClearPasswords();
-            return null;
+            answer = await DialogGuard.ShowAsync(dialog);
         }
         finally
         {
             _session.LinesChanged -= SyncRows;
             _session.LineChanged -= OnLineChanged;
+        }
+
+        if (answer is null)
+        {
+            // Refused or failed: another dialog is already open over this window (UI.B8).
+            CouldNotOpen = true;
+            ClearPasswords();
+            return null;
         }
 
         if (answer != ContentDialogResult.Primary)
@@ -230,7 +234,7 @@ internal sealed class AddLinksDialog
             return null;
         }
 
-        var picks = _session.Chosen.Select(line => new AddLinksPick(line, TakeLinkPassword(line))).ToList();
+        var picks = _session.Chosen.Select(line => new AddLinksPick(line, TakeLinkPassword(line), LinkPasswordForArchives(line))).ToList();
         var archivePassword = _archivePanel.Visibility == Visibility.Visible ? _archivePassword.Password : string.Empty;
         ClearPasswords();
         return new AddLinksChoice
@@ -318,6 +322,9 @@ internal sealed class AddLinksDialog
         return password.Length > 0 ? password : null;
     }
 
+    private bool LinkPasswordForArchives(AddLine line)
+        => _rows.TryGetValue(line, out var row) && row.HasPassword.IsChecked == true && row.ForArchives.IsChecked == true;
+
     private void ClearPasswords()
     {
         _archivePassword.Password = string.Empty;
@@ -403,10 +410,18 @@ internal sealed class AddLinksDialog
                 MaxWidth = 360,
                 HorizontalAlignment = HorizontalAlignment.Left,
             };
+            // TB.S2: never ticked for the user. Only this link's own archives, and an archive password given wins.
+            ForArchives = new CheckBox { Content = "Also try it on this link's own archives", Visibility = Visibility.Collapsed };
             HasPassword.Click += (_, _) =>
             {
                 Password.Visibility = HasPassword.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-                if (HasPassword.IsChecked != true) Password.Password = string.Empty;
+                ForArchives.Visibility = Password.Visibility;
+                if (HasPassword.IsChecked != true)
+                {
+                    Password.Password = string.Empty;
+                    ForArchives.IsChecked = false;
+                }
+
                 changed();
             };
             _retry.Click += (_, _) => session.Retry(line);
@@ -415,6 +430,7 @@ internal sealed class AddLinksDialog
             _extras.Children.Add(_direct);
             _extras.Children.Add(HasPassword);
             _extras.Children.Add(Password);
+            _extras.Children.Add(ForArchives);
             Root = new StackPanel { Spacing = 2, Children = { Box, _extras } };
         }
 
@@ -422,6 +438,7 @@ internal sealed class AddLinksDialog
         public CheckBox Box { get; }
         public CheckBox HasPassword { get; }
         public PasswordBox Password { get; }
+        public CheckBox ForArchives { get; }
 
         public void Update()
         {
@@ -450,11 +467,14 @@ internal sealed class AddLinksDialog
             HasPassword.Visibility = view.CanTakeLinkPassword ? Visibility.Visible : Visibility.Collapsed;
             AutomationProperties.SetName(HasPassword, $"{view.Name} has a password");
             AutomationProperties.SetName(Password, $"Link password for {view.Name}");
+            AutomationProperties.SetName(ForArchives, $"Also try the link password on the archives of {view.Name}");
             if (!view.CanTakeLinkPassword)
             {
                 HasPassword.IsChecked = false;
                 Password.Password = string.Empty;
                 Password.Visibility = Visibility.Collapsed;
+                ForArchives.IsChecked = false;
+                ForArchives.Visibility = Visibility.Collapsed;
             }
 
             _extras.Visibility = view.CanRetry || view.CanChooseDirect || view.CanTakeLinkPassword ? Visibility.Visible : Visibility.Collapsed;

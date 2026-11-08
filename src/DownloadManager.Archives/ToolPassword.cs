@@ -21,7 +21,11 @@ internal sealed class ToolPassword
     /// For an archive that needs no password. 7-Zip has no switch that says so, and a closed stdin makes it stop
     /// with "Break signaled", so it gets an empty line: an encrypted archive then reports what it needs.
     /// </summary>
-    public static ToolPassword None { get; } = new("\r\n"u8.ToArray());
+    public static ToolPassword None { get; } = new(LineEnd.ToArray());
+
+    // 7-Zip for Linux reads up to the line feed and keeps a carriage return as part of the password, so each line
+    // ends the way the machine's own 7-Zip expects.
+    private static ReadOnlySpan<byte> LineEnd => OperatingSystem.IsWindows() ? "\r\n"u8 : "\n"u8;
 
     /// <summary>A copy for one run, which the runner clears after writing.</summary>
     public byte[] CopyStdinBytes() => (byte[])_stdin.Clone();
@@ -41,10 +45,9 @@ internal sealed class ToolPassword
         }
 
         var encoded = Encoding.UTF8.GetBytes(password);
-        var stdin = new byte[encoded.Length + 2];
+        var stdin = new byte[encoded.Length + LineEnd.Length];
         encoded.CopyTo(stdin, 0);
-        stdin[^2] = (byte)'\r';
-        stdin[^1] = (byte)'\n';
+        LineEnd.CopyTo(stdin.AsSpan(encoded.Length));
         CryptographicOperations.ZeroMemory(encoded);
         return new ToolPassword(stdin);
     }

@@ -1,10 +1,11 @@
-// The IDs the desktop app accepts: BrowserBridge.cs holds the same two. Only these can connect.
+// The IDs the desktop app accepts: BrowserBridge.cs holds the same three. Only these can connect.
 const STORE_EXTENSION_ID = "olhbcdbjdnfoiinllnlpandggadfabfm";
 const UNPACKED_EXTENSION_ID = "pknddmneejadnnngffojnoecojhdfalc";
+const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 
 /** True when the error means the desktop app is not on this computer at all. */
 export function isAppMissing(error: string | undefined): boolean {
-  return /not found/i.test(error ?? "");
+  return /not found|no such native application/i.test(error ?? "");
 }
 
 /** What a connection error means to someone using the extension, in place of Chrome's wording. */
@@ -17,7 +18,8 @@ export function connectionProblem(
   }
   if (/forbidden/i.test(error ?? "")) {
     // Updating the app cannot help a copy whose ID came from its own folder.
-    if (extensionId && extensionId !== STORE_EXTENSION_ID && extensionId !== UNPACKED_EXTENSION_ID) {
+    if (extensionId && extensionId !== STORE_EXTENSION_ID && extensionId !== UNPACKED_EXTENSION_ID &&
+        extensionId !== FIREFOX_EXTENSION_ID) {
       return `The desktop app does not accept this copy of the extension (ID ${extensionId}). ` +
         "A store package loaded unpacked gets a new ID from its folder. " +
         "Install from the Chrome Web Store, or load the \"extension\" folder from the app's install folder.";

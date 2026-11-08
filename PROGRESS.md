@@ -1,5 +1,772 @@
 # Progress — session handoff
 
+### 0.6.0 released (2026-11-08, squashed to `main`, tag `v0.6.0`)
+
+- All work branches are merged into `dev`: streams A to C, the campaign, perf, webui, Edge, and the six owner-answer branches. Their worktrees and branches are removed. The evidence they held is in `artifacts\evidence\<branch>\` in the main checkout: logs, trx files and summaries, with no payloads or browser profiles. It was scanned for credentials and none were found.
+- Fixes found while merging:
+  - The register-native-host path in ROADMAP and PROGRESS was split by a stray CR.
+  - The golden frames now normalise this PC's browser registration (`nativeHostRegistered`, `browserIntegration`).
+  - PERF.5 is turned on once for upgraded installs (a settings marker).
+  - The FTP resume test was counting bytes that another test had fetched.
+- A four-agent semantic-merge review found nothing. It covered the files that two branches both changed: `DownloadManagerService.cs`, `HttpDownloadEngine.cs`, `MainWindow.xaml.cs` and `Dtos.cs`.
+- **Windows** (Release, `artifacts\campaign\20261108-final\`): every suite passed.
+
+  | Suite | Passed |
+  | --- | --- |
+  | Core | 888 |
+  | Engine | 161 |
+  | TorBox | 323 |
+  | Archives | 336 |
+  | Containers | 187 |
+  | Server | 84 |
+  | Integration | 1,263 (a rerun after the FTP test fix; the first run's only failure was that test) |
+  | Extension | typecheck and 143 tests |
+  | Web UI | 37 |
+
+- **Linux** (the VM, SDK 10 container, `Platform!=Windows`, in `...\linux\`): no failures.
+
+  | Suite | Passed |
+  | --- | --- |
+  | Core | 881 |
+  | Engine | 161 |
+  | Archives | 274 (52 not run on Linux) |
+  | Containers | 183 |
+  | TorBox | 323 |
+  | Server | 84 |
+  | Integration | 1,118 (7 not run) |
+
+  The VM's test image and folders are removed again. The owner's containers were not touched.
+- **Release assets**, rebuilt from `056b424` after every fix below and uploaded to the GitHub release. They are in `artifacts\release\v0.6.0\`:
+  - `DownloadManagerSetup-0.6.0.exe`: 55,954,754 bytes, SHA-256 `20df0c69daaf2a3ad971b1d54d61fd6da303e8a4382bb053bbe1d5b8179b1adb`.
+  - `download-manager-0.6.0.zip` (self-contained): 79,240,453 bytes, SHA-256 `889c45a2b1ae8b71c0e562ced5fb19daee39b8f0614aaee505503d2b50a41e60`. Its binaries carry `0.6.0+056b424`.
+  - `manifest.json`, signed with `secrets\update-signing.pem`. openssl verifies it with `public.pem`, which matches the key in `ReleaseUpdates.cs`.
+  - `SHA256SUMS`: all four hashes match (`sha256sum -c`; the file now has LF line ends).
+  - A token scan of the tree and the packages found none of the credentials file's values.
+- **Extension 0.5.0:**
+  - `artifacts\chrome-store\inbound-bridge-0.5.0-chrome.zip`.
+  - `artifacts\firefox-addon\inbound-bridge-0.5.0-firefox.zip` (unsigned, for AMO).
+- None of these packages contains a credential from the credentials file.
+- Draft notes are in `artifacts\release\v0.6.0-notes.md`.
+- **Reviews (2026-11-08), all fixed on `dev` (ROADMAP REV.1, REV.2):**
+  - My release review: 17 confirmed findings, each fixed in its own branch (`fix/engine`, `fix/runtime`, `fix/persist`, `fix/server`, `fix/extension`, `fix/winui`, `fix/webui`) by an agent working from `bfee07b`.
+    - I reviewed the engine, runtime, secrets and server diffs myself (concurrency, durability, security).
+    - Haiku reviewed the extension, WinUI and web UI diffs. It found one more gap, fixed on `dev`: Download All read the default cookie store on Firefox.
+  - The owner's ultrareview: 10 findings. Three were the same as mine: (1) is my 3, (3) is my 12, and (8) is next to my 4.
+    - (2) The roots escape through provider adds, the one security finding, is fixed with two tests that fail without the fix.
+    - (4) was real. My first check was wrong: its test zips held no backslash. Zips made on Windows now extract into their folders on Linux (ROADMAP REV.2): Archives 351/351 on Windows, and on the Linux VM 289 passed, 52 skipped, none failed, with every new test passing.
+    - (5)–(10) are fixed; ROADMAP REV.2 has each one.
+  - Install folder trimmed (ROADMAP REV.3, owner's question): 281 MB to 201 MB, Setup 77.5 MB to 56.0 MB, by taking only the Windows App SDK parts the app uses and leaving out other languages and .NET's debugger files. Checked on a test instance and on the clean VM.
+  - Not checked in a real browser: Firefox's `cookieStoreId`, `storage.local.setAccessLevel` and `permissions.contains`, which the extension tests stand in for.
+  - Not seen on screen: the Options Theme box and the refused install dialog.
+  - EXT.R5 (Chrome and Edge with site access withdrawn by the user): fixed before release; such a download now stays in the browser with a note.
+- **After the review fixes** (`2adb35b`; later commits touch only the installer, docs and the window's trace file), every Windows suite passed: Core 895, Engine 162, TorBox 323, Archives 351, Containers 187, Server 86, Integration 1,268, and the extension's 151.
+- **Clean VM with the final build** (ROADMAP TEST.2, evidence in `artifacts\evidence\dev-final\vm-0.6.0-056b424\`):
+  - Setup took 0.5.3 to 0.6.0 and kept both jobs. Uninstall left no program folder and kept the state; a fresh install started with the kept jobs.
+  - The update helper took 0.5.3 to 0.6.0 (exit 0, result `succeeded`), and Settings > Apps showed 0.6.0 (UP.B2).
+  - The window started each time from a 199.3 MB folder (REV.3).
+  - Found and fixed on the way: the window's start-up trace was left in the install folder after uninstall. It now goes to the logs folder.
+- Owner, 2026-11-08: two ideas for later, recorded as ROADMAP D6 and D7.
+- **Not done:**
+  - The owner's parts: the Chrome Web Store and AMO uploads of extension 0.5.0.
+  - PERF.2 rerun on `dev` (`soak-fixed`): stopped after an hour (10:50 to 11:53 UTC) by the owner's choice. Both processes ran throughout; the Host rose 147.5 to 190.1 MB (+24 MB/h, like the 8-hour run), the window 302.5 to 331.9 MB. Summary in `artifacts\soak\soak-fixed\summary.txt`; payload deleted.
+  - EXT.B3 (Firefox), which needs this build installed.
+
+### Owner answers built in the WinUI app (2026-11-08, branch `owner-winui`)
+
+- **PERF.5:** "Closing the window ends it" is on by default for new installs. A stored value is kept, and the settings file stores every value, so an upgraded install whose settings were saved since 0.5.3 (when the option arrived) keeps it off. Turning it on there needs a one-time settings migration: asked below.
+- **UI.R25:** the Remove items in the right-click and File menus are now "Delete…", the same dialog as the Delete key.
+- **UI.B8:** every `ContentDialog` goes through `DialogGuard`; a second one is refused and counts as cancel. Grep finds no direct `ShowAsync` left; a test-instance repro (Delete dialog open, Delete Completed and Add URL invoked) kept the window alive.
+- **UI.R23:** Statistics has a Close button; the settings' Theme (System, Light, Dark) is the theme source for every window, with a Theme box in Options and View > Dark Mode as a toggle; the old `darkMode` moves into it once. A Windows theme change while running was not checked.
+- Tests: Core 881 passed (12 new); Integration 1,236 of 1,237 passed, the one failure the golden frames expecting the old default, now updated; after it the golden test still differs only in `nativeHostRegistered` (true on this PC since the owner registered the browsers today; TEST.3), not from this work.
+
+Review of this branch (2026-11-08), each finding checked against the code:
+- Fixed: the right-click menu's Delete… on an archive record removed the record, not the download behind it, which the old Remove deleted (`DeleteRules`; the File menu, toolbar and Delete key never acted on a record's download and still don't).
+- Fixed: the Hosters window still read the old `darkMode` and did not follow the Theme setting; it now uses `AppTheme` like every other window (a source test checks that every window does, and that only `AppTheme` reads `darkMode`).
+- Fixed: a View > Dark Mode click before the Host had saved the old value could be undone by the next snapshot and the old value sent to the Host. The click now keeps its own choice in ui-state until the Host has saved it, a save in progress picks up a later click, and an Options save drops any kept choice.
+- Fixed: a download or package window that opened before the main window moved `darkMode` never followed the setting; it now reads ui-state again on each snapshot until the value has gone.
+- Fixed: `DialogGuard` refuses a dialog without a `XamlRoot` (it could not show anyway); a source test checks all 44 dialogs set one.
+- Docs: the design guidelines described the old theme source and a capture method that no longer works; `docs/architecture.md` says closing ends the window's process by default.
+- Not a code defect: closing ending the process by default is the owner's PERF.5 decision. The tray, a second launch or the Start menu entry brings the window back; no tray check is made.
+- Question for the owner (PERF.5): an install whose settings were saved since 0.5.3 has "Closing the window ends it" stored as off and keeps it. Turn it on once for those installs with a settings migration, or keep the stored value? Answered by the owner's "On by default": on dev a settings load with no `settings.json.perf5` marker beside it turns the option on once and writes the marker; every save from this build writes it, so a later choice of off is kept (`WindowSettingsDefaultsTests.AnUpgradedInstallThatStoredOffGetsItOnOnce`).
+- Not checked: the theme and Delete changes in the running window; a Windows theme change while the app runs.
+- Tests after these fixes: WinUI build clean (one older nullable warning); Core 888 passed (7 new); Integration 1,236 of 1,237 passed, the one failure the golden frames' `nativeHostRegistered` (true on this PC, TEST.3).
+
+### Host speed history and full queues (2026-11-08, branch `owner-host`)
+
+- **UI.R24 (implemented, automated tests; the graph not checked on screen):** owner: "Keep the hour". The Host keeps the last hour of total download speed in a 3,600-slot ring buffer (`SpeedHistory`), written from progress reports with no timer; idle seconds are filled in as zeros from the times alone, so an idle Host does no work for it. A window asks for it (`speed.history`, new and additive, no protocol bump) on each connection and the speed graph merges it in, so the hour survives a closed window.
+- **Full queues (implemented, automated tests):** owner: "Yes, same rule". Moving a running download into a full queue now runs the lowered-limit check, so the queue's newest extra download goes back to Queued with its data; downloads that can't resume (and verifying, finishing or muxing ones) keep running.
+- **UI.R24 review fixes:** each download's figure now holds only for two seconds after its own report, so one that went quiet or hung (after a pause, say) stops counting while others keep reporting; a paused, cancelled or removal-pending job's late report drops its share at once; the progress callback reads the clock under the lock, so no report is dropped as coming from an earlier second; and an AES-128 HLS segment reports progress while it arrives (only bytes that are surely plaintext are counted, so the count never goes backwards), instead of only after it is decrypted. Tests: two `SpeedHistory` unit tests, an AES-128 test with a slow first segment (`aes-slow.m3u8`), a pause test through the service, and the Host test now runs a download through the pipe and checks that the history shows it. The AES and unit tests fail without the fixes. The pause test passes either way, because the runner's own stop clears the share right after the cancel; the hang case is covered by the unit test.
+- Tests (Release), rerun after the review fixes: Core 869/869, Engine 159/159; Integration 1,245 of 1,246 passed (earlier run before the fixes: 1,241 of 1,242). The one failure, `HostGoldenFramesTests.AScriptedSessionSendsTheSameFrames`, differs only in `nativeHostRegistered: true`: this PC now has the `com.kaank.downloadmanager` Chrome registration (the owner ran `register-native-host.ps1` today), which the Host's status reads. Environmental, not from this branch.
+
+### Owner answers built on the server side (`owner-server`, 2026-11-08)
+
+- **D2a, sessions survive a restart:** `<data>/sessions.json` with hashes only (never a cookie's id), atomic and mode 600, restored at start without expired ones; sign-in, sign-out and password change written at once (an expired one leaves the file at the next write or start), last-use times at most every 10 minutes and on a clean stop, and for an open WebSocket on the same beat. A password changed while the server was down drops them. `SessionPersistenceTests` (5), `SessionDurabilityTests` (5).
+- **Review fixes (2026-11-08):** a password change and a racing sign-in or save can't leave an old session under the new stamp (one lock; the sign-in is checked against the password it verified); a listening WebSocket refreshes last-seen; a failed write deletes or empties the file and a folder refusing both is logged; directory fsync after a replace off Windows (libc, best effort, **not run on Linux**); sign-in off removes the saved sessions; `AuthStore.FindToken` also swallows `UnauthorizedAccessException`; Node is named once in the Dockerfile (a `node-base` stage) so a Dependabot PR can't split the two stages (**image not rebuilt**, no Docker here); an upgrade note for the old 1654 default in `docs/docker.md`, and the entrypoint's warning names the folder's owner; doc wording on expiry and the token's scope corrected.
+- **D2b, `DELETE /api/pair/self`:** the extension's Unpair; the bearer token authenticates as on `/api/ipc` and removes only its own record, 204. CORS for our extension origins. `PairSelfTests` (3). Contract in `docs/ipc-protocol.md`.
+- **D3a, PUID/PGID 1000:** Dockerfile, entrypoint and docs; ids used only as numbers, so an existing account with that id changes nothing. **Partial: the image was not rebuilt or run** (no Docker on this PC).
+- **D3b, Dependabot:** `.github/dependabot.yml` for `docker` and `github-actions`, weekly, majors of the base images ignored, nothing auto-merges. The base images moved from `ARG`s into the `FROM` lines so Dependabot can read them. Not checked on GitHub.
+- Tests (Windows, Release): Server.Tests 84/84 after the review fixes (79 before), Core 869/869. No review by a cheaper model: this agent had no way to start one.
+
+### Extension: Download All default folder, Unpair self-revoke (2026-11-08, branch `owner-ext`)
+
+- **EXT.R3** (owner: "Show the default"): Download All's Save in shows the chosen target's default folder from `dm.targets` (the app's, or the server's), switches with the target, and is sent only when changed, so the app still decides when untouched. The EXT.B2 gate and held target radios are unchanged.
+- **EXT.R4** (owner: "Add self-revoke"): Unpair forgets the token, then calls `DELETE /api/pair/self` with the bearer token (4 s); on 204 Settings says the server removed it too, otherwise it keeps the advice to remove it in the web UI. The server endpoint is built on another branch; not yet run against it.
+- Review fixes: a folder typed in Save in before the late `dm.targets` answer is kept (a later target switch still shows that target's default); Unpair with nothing paired says "Not paired" rather than advising removal on a server; `revokeSelf` time-out and wrong-token 401 are tested. Open for the owner: Unpair forgets the token before calling `DELETE /api/pair/self` (the stated order was the reverse), so no download can use the token meanwhile; the end state is the same either way.
+- Evidence: extension `npx tsc --noEmit` clean, `npm test` 143/143 (new: 3 page tests in `form-gate.test.cjs`, 9 in `server-target.test.cjs`, 1 in `transport.test.cjs`; 13 in all), `npm run build` and `npm run build:firefox` succeed. Docs: `docs/browser-integration.md`, `docs/chrome-extension-privacy.md`. Not checked on screen.
+
+### TorBox kept archive, TB.L2 (2026-11-08, branch `owner-torbox-file`)
+
+- Added web download `inbound-live-check-archive.zip` (id 2240130) to the account and turned Airlock on ("yes add one and airlock it"). Content: a 1.29 MB public domain zip from archive.org (Project Gutenberg eBook 14838), no password. TorBox can't take a local file, GitHub and sqlite.org links were refused, so not our own zip.
+- A fresh `mylist` read: `cached: true`, `airlocked: true`, tag `inbound-live-check`, one 1,291,466-byte zip. `expires_at` still said 2026-12-08 after Airlock; whether Airlock lifts it is unverified.
+- Live tests now remove items only through `LiveAccount.RemoveUnlessKeptAsync`, which skips `inbound-live-check*` names. `KeptArchiveTests`: 9 pass without a key; with the key all 10 pass, including the live read of the item. LiveTests project without a key: 9 passed, 30 skipped.
+- API calls: 7 in all (2 refused submissions, 1 submission, 1 read, 1 edit, 1 read, 1 list from the live test). No key or link was printed, logged or committed.
+- Review fixes (2026-11-08): TB.L2 is now **partial**, not done: the keeping past 30 days is unverified until a read after 2026-12-08, and Airlock's meaning is the owner's description (TorBox's schema has only an undescribed `airlocked` field). The removal guard now scans subfolders, catches any `RemoveAsync` mention outside the helper's body (spaced calls, method groups), `RemoteQueueAction.Remove`, `controlqueued` and any "delete" string, with sample-text tests for each. The kept-name rule needs a non-letter, non-digit after the prefix. The live read compares TorBox's md5 when given, and a new live test downloads the file and checks its md5 (not yet run: no key in this session). Docs say the protection covers live test cleanup only. LiveTests project without a key: 24 passed, 31 skipped.
+
+### UI.R21 "Apply to all": connection changes reach running provider, protected and FTP downloads (2026-11-08, branch `owner-engine`)
+
+- Owner decision (2026-11-08): "Apply to all". Before, a changed connections-per-download reached only the user's own running HTTP downloads; provider and protected jobs were left out because their real host and the provider's cap are known only to the run (the job's own address is a reference or masked).
+- **Built:** a provider run now keeps its link's host and the provider's per-file cap in memory (`JobRuntime.RunLink`), so a running TorBox job takes the new count at once, clamped by the cap (16) and the host limit of that link. A change before the run has its link is taken when the link comes. A protected (pasted provider) link follows unless its count was chosen by hand, capped at 16. New workers come from the existing steal path and queue on the per-host fair limiter; no link refresh is asked for or counted. FTP is one connection by design (the FTP engine has no segments), so a change while one runs is a no-op; written up in `docs/architecture.md`.
+- **Tests (Release):** Core 869/869, Engine 161/161, TorBox 323/323. Integration 1,236/1,239 on the first full run: `RuntimeAndContractsNameNoConcreteProvider` caught a provider name in a new comment (fixed, passes); `FtpRequiresLoginAndResumesFromPartialBytes` failed once under the full run and passed 4 of 4 alone; `HostGoldenFramesTests.AScriptedSessionSendsTheSameFrames` expects `nativeHostRegistered: false` and this PC's user registry has the installed app's Chrome registration (environmental, not from this change).
+- **New tests, each run 10 times:** Engine `ARaisedCountOnAProviderLinkStaysWithinTheHostLimit` and `EveryCheckpointDuringAConnectionChangeResumesToTheRightFile` 10/10; Integration `AChangedConnectionCountReachesARunningTorBoxDownloadWithinItsCap`, `ARaisedCountOnARunningTorBoxDownloadStaysWithinThePerHostLimit`, `AChangeBeforeAProviderRunHasItsLinkIsTakenWhenTheLinkComes`, `AChangedConnectionCountReachesARunningProtectedLinkWithinTheProviderCap`, `AChangedConnectionCountLeavesARunningFtpDownloadAlone` and the three `KilledWhileAConnectionChangeReachesAProviderDownload_TheCheckpointHoldsAndTheBytesMatch` cells (real Host, MockTorBox, killed right after the change is saved, while the new workers connect, and after a checkpoint with 12 split ranges) 10/10. Results in `artifacts\owner-engine\`.
+- Not checked on screen; no live TorBox run.
+- Review fixes (main-model review, commit 6c0d5e1): the segmented run is registered before its worker count is read, so a change landing in between is in the count or wakes the run; a worker that waited for a host connection while the count went down retires before it claims a range; every input of the default count (default, per-host limit, connection profiles) reaches running downloads; a resumed provider job drops the previous run's link. A single-stream run (count 1 at start, one-segment checkpoint, ranges refused, file too small) keeps one connection; its record still takes the new count (`docs/architecture.md`).
+- Final run after the fixes (Release, `owner-engine`): Core 869/869, Engine 161/161, TorBox 323/323; Integration 1,238 of 1,241. The three failures: the golden frames (this PC's browser registration, normalised on `dev` since), and `KilledDuringExtractionAndDuringArchiveCleanup_OneCopyComesOutAndTheSiblingStays` and `FtpRequiresLoginAndResumesFromPartialBytes`, which passed 3 of 3 alone. The FTP one was a test defect, not load: the class shares one FTP server, and the new `RuntimeLiveConnectionTests` FTP case fetches `slow.bin` too, so whenever it ran first the "served under 1.5 times the file" check counted its bytes (884,736 served in 12 of 12 runs with both tests). It now measures the bytes served during its own download; 5 of 5 passed with both tests. The UI.R21 set (live connection, kill-during-change, per-host-limit-alone, change-after-resume) passed 10 of 10 repeated runs.
+
+### Owner answers to the open questions (2026-11-08, asked in chat)
+
+To build (each recorded in ROADMAP):
+- **PERF.5:** "Closing the window ends it" on by default.
+- **Remove menu items:** drop Remove from the right-click and File menus ("just delete? seems remove seems redundant"); Delete and Shift+Delete stay.
+- **UI.B8:** guard every dialog with the shared helper, not only delete.
+- **UI.R23:** the Statistics window gets a Close button. The settings' Theme value becomes the theme source (System, Light or Dark; System follows Windows); View > Dark Mode sets it.
+- **UI.R24:** the Host keeps the speed graph's last hour, so it survives a closed window.
+- **Download all links:** Save in shows the app's default folder, like the folder window.
+- **UI.R21:** a changed connection count also reaches running TorBox, protected and FTP downloads ("Apply to all").
+- **Full queues:** moving a running download into a full queue sends the queue's newest extra download back to Queued, the same rule as settings and queue changes.
+- **Web UI sessions** survive a server restart (same 24 h idle / 7 day lengths).
+- **Pairing:** an extension's token can revoke itself, so Unpair also removes it on the server.
+- **Docker:** default PUID/PGID 1000; Dependabot opens update PRs for the digest-pinned base images.
+- **TorBox:** keep one small archive in the account for live extraction checks, kept out of any test cleanup, with TorBox's Airlock turned on for it ("yes add one and airlock it"; owner: Airlock is a TorBox feature that keeps a file from being deleted after 30 days).
+
+Kept as they are: CLI downloads get no completion window while the window is closed; no cap on segment retries while bytes arrive; downloads that can't resume keep running when the simultaneous limit drops; no separate per-host default for TorBox ("don't seperate hosters, options changes for all"); media downloads count under the per-host limit; program-running settings stay refused on a network server; the setup code for a first remote setup; minimum password 8; tokens don't expire; any Firefox extension may try to pair (the code is the credential); the This PC / Server pick is per download; a failed target leaves the download in the browser; root (PUID=0) refused; FFmpeg not in the image; a lost `secrets.key` stops the server; no extraction where the hard-link check can't run. Close button: the owner never needed two clicks (TEST.4 is a script-only effect).
+Later: a live expiring-link check with a real TorBox download (only the mock so far); the arm64 image; the second 8-hour soak runs without anything waiting for it.
+
+### `webui` merged; owner answers (2026-11-08)
+
+- `webui` (D2 web UI with sign-in and pairing, D3 Docker image and compose, the extension's server transport, D4 on the VM) merged into `dev`. The extension's folder and batch windows conflicted (the EXT.B2 gate against the This PC / Server choice) and were combined by hand. A review of that merge found real gaps, now fixed: the target radios stayed live during a folder pick or a send (a local folder could go into a server request), the server folder list could stay open during a send, and a request for a server unpaired meanwhile went to this PC with its server folder (now refused).
+- Full runs on merged `dev`:
+  - Windows, all green: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 71; extension 130; web UI 37, `svelte-check` clean. Results in `artifacts\campaign\20261108-merged-webui\`.
+  - Linux (the owner's VM, .NET 10 SDK container, `Platform!=Windows`): Core 862, Engine 159, Archives 274 (52 skipped, need Rar.exe), Containers 183, TorBox 323, Server 71, Integration 1,090 (7 skipped). The first Integration run failed 50 tests that need the Windows Host or registry and had no Windows tag; they are tagged now.
+- Firefox: addons.mozilla.org warned that `data_collection_permissions` needs Firefox 140 (Android 142) while the manifest said 128. The build now asks for 140.0 and `gecko_android` 142.0. Its warnings about `cookies.getPartitionKey` and `downloads.onDeterminingFilename` stay: the code checks for both and Firefox takes the other path.
+- Owner answers, 2026-11-08:
+  - UI.R22 (selected rows hard to see): leave it as is. Closed.
+  - TB.L1: keep 16 connections per TorBox file.
+  - Automatic sending on a fresh extension install: on. `DEFAULT_SETTINGS.autoIntercept` is now true; Settings still opens on install with the explanation; an update keeps the saved choice. Docs and the privacy page say so (the online copy needs the same change when this ships).
+  - Image license label: the owner has no license in mind. The image keeps no `licenses` label until one is chosen.
+  - UI.B11: Tasks > Exit and the tray's Exit quit the whole app (the Host), which pauses running downloads; closing the window does not. Owner: "leave as is". Closed.
+  - EXT.B1 verified in the owner's Edge: the `dev` build caught a TorBox Direct Download.
+  - Firefox (EXT.E1): the owner's add-on shows "Inbound unavailable": the installed 0.5.3 writes no Firefox native-messaging key. The next release's installer writes it; until then `scripts
+  - The owner ran the script: the Firefox and Edge keys and both manifests are in place, and Firefox now starts the native host, which forwards `handoff.request` to the Host (native-host log, 12:07). Still "Inbound unavailable": 0.5.3's Host trusts only the Chrome extension IDs, so it refuses Firefox's add-on ID (EXT.B3). Firefox needs the next app release; the wrong notification text is still to explain. `scripts\register-native-host.ps1` from `dev` registers Chrome, Edge and Firefox for the installed app (run by the owner: this harness cannot write LocalAppData).
+
+### Test campaign merged into `dev` (2026-11-08)
+
+- Merged after review fixes: `campaign-recovery` (independent recovery check), `campaign-ext` (extension end to end in Chrome for Testing, EXT.B2), `campaign-ui` (dark and light walkthrough, UI.B8 dialog guard, layout and script fixes) and `perf` (UP.B2, PERF.2/3/5, UI.B13 to UI.B15, PERF.7).
+- Row numbers clashed between the tracks and were renumbered before merging: recovery's exit-pause and silent-Host rows are UI.B11 and UI.B12; perf's pipe-client, CLI-source and segment rows are UI.B13 to UI.B15, its WM_CLOSE row TEST.4 and its speed-graph idea UI.R24.
+- Review fixes, each checked against the code before changing it:
+  - recovery: the uninstall script's own-install check now needs a trailing `\` (a sibling folder such as `...Manager2` matched before); the proxy check restores the caller's instance variables.
+  - extension: Send and Browse share one state gate (a failed send during a pick could leave Send off for good, or turn it on while the app's folder dialog was open). Keep in browser and Escape now wait for a send in flight (it could keep the file in the browser and add it to the app too). The batch window redraws its rows after a send. The tests drive the real page code; the old substring test is gone.
+  - UI: the dialog check was right (an open dialog's popup child is the `ContentDialog`, shown with a trace build); the shared `ShowDialogAsync` helper now covers delete, messages, questions and the address dialog, and treats any failure to show as "not confirmed". `ui-drive.ps1` no longer presses title-bar buttons, clicks only when the test UI is at the point (checked again right before the click), and `closewin:` needs a title.
+  - perf: CLI `add-batch` and `import` send their own sources (`cliBatch`, `cliImport`), so a running main window no longer opens a completion window per job and imports stay out of recent addresses; the UP.B2 rollback test now reaches the rollback; a segment attempt that gets bytes on its last allowed try retries; `perf-window.sh` labels its rows right.
+- Full run on the merged branch, all green with no reruns: Core 869, Engine 159, Integration 1,231, TorBox 323, Archives 336, Containers 187, Server 41, extension 103. Results: `artifacts\campaign\20261108-merged-campaign\` (trx).
+- Still running: the 8-hour PERF.2 soak (old build, ends about 10:19 UTC) and the `webui` branch (D2 web UI, D3 Docker, the extension's server transport, D4).
+
+### D4: end to end on the owner's VM through the web UI, from this PC (2026-11-08, `webui`)
+
+Image `inbound-test:dev` rebuilt on the VM from `webui` `e8324ae` (`REVISION` label set; only the TestServer changed
+since the D2-fix image, so the server layers came from the cache). Run with sign-in on, `-p 18080:8080`, `PUID`/`PGID`
+of the VM user, `TZ`, volumes in a test folder, label `inbound-test`. Driven from this PC over the LAN with
+Playwright's headless Chromium (a driver script in the session scratchpad, not committed); the VM address is in no
+tracked file, screenshot or file name.
+
+- **First open:** setup code field shown (browser not on the server's machine), code from `docker logs`, throwaway
+  password set; cookie `HttpOnly`, `SameSite=Strict`. Sign-out, then `/api/ipc` 401; sign-in again worked. From this
+  PC without a cookie 401, with a foreign `Origin` 403.
+- **TorBox (live, minimal):** key read from the owner's credentials file into the page without printing it, saved in
+  My TorBox; the page showed "Saved on the server" and the plan, and the key was nowhere in the page. In my account
+  listed the torrents (one call); a small cached item already in the account (3 files, 18.4 MB) went through
+  Download, Choose files (all), the default queue: three runs, each "torbox gave a link for this run", about 4 MB/s,
+  two valid JPEGs (end marker `FFD9`) and a 20-byte README, owned by the VM user, no `.part` left. About eight
+  TorBox calls; nothing added to or deleted from the account.
+- **Extraction (stand-in):** the TorBox item has no archive. A 3-volume RAR5 with a password (WinRAR's `Rar.exe`
+  here, `-v500k -p`) and a plain zip, 1.2 MB of random data and a text file, were served over HTTP by a labelled Node
+  container (`node:24-alpine`, already on the VM) on a labelled test network. Added through Add links (the RAR as
+  package `d4-sample`). The zip extracted by itself; the RAR showed "needs a password to extract", the password went
+  in through the prompt, and it extracted. Both outputs have the originals' SHA-256 (`87a0c016…`, `d4abd5a9…`).
+- **Expiring-link refresh (mock):** a live link can't be made to expire on demand. New TestServer option
+  `--first-link-dies-after <bytes>` (commit `e8324ae`): the mock's first CDN link stops after that many bytes, cuts
+  its connections and answers 403 after. A second server container pointed at the mock (`DOWNLOADMANAGER_INSTANCE`,
+  `DOWNLOADMANAGER_TORBOX_API` on loopback; the TestServer in the same network namespace, built for Linux in an SDK
+  container) was set up through its own web UI (port 18081) with the mock key. Download, choose `sub/video.bin`
+  (8 MiB): "the link was refused (Forbidden, HTTP 403), so asking for a fresh one, 1 of 2", a new link, Completed;
+  SHA-256 `1b30edc3…` equal to the mock's generated content.
+- **No token:** the key, the key without dashes and its first 6 characters, held in shell variables and never
+  printed: 0 in `docker logs` of both servers and the file server, 0 files in the data folder (logs, settings,
+  jobs, remote state), 0 in the downloads, 0 in `docker history --no-trunc` and `docker inspect` of the image and the
+  container, 0 of the image's 4,054 files (searched inside a throwaway container with `find -xdev`; a first `grep -r /`
+  found only its own `/proc/1/cmdline`). The mock key was in neither mock-server log.
+- **Memory (`docker stats`):** idle after sign-in and settings, 29 samples every 10 s: 44.0 MiB average (42.6 to
+  45.5), CPU 0.016%. TorBox download and extractions (every 2 to 3 s): up to 87 MiB. A 400 MB download from the file
+  server (8 ranges of 50 MiB, about 8 MB/s, SHA-256 checked): 87 to 106 MiB; the cgroup's anonymous memory went
+  only from 50 to 56 MiB, the rest is page cache of the written file. Idle after the whole session, with the 400 MB
+  file deleted through the web UI with its file: 100.8 MiB (100.6 to 101.8), CPU 0.016%. Of that, 64 MiB anonymous,
+  33 MiB shared memory that is .NET's W^X double mapping of compiled code (`/memfd:doublemapper`, 201 mappings in a
+  fresh server), 4 MiB kernel. Target under 100 MB idle: met before use, reached after a full session.
+- **Cleanup:** the test containers, the test network and `~/inbound-d4` (downloads, data with the sealed key,
+  sources, mock build) removed; `inbound-test:dev` kept; class-compass and komodo untouched; 8.8 GB free, as before.
+
+Evidence: `artifacts\d4\` in the worktree (ignored): the screenshots (the account's item list among them, so keep
+it local), the four memory CSVs, both servers' logs with addresses replaced. ROADMAP D2 and D4 and
+`docs/docker-webui-plan.md` updated. Not run again: the Windows or Linux test suites (only the TestServer's
+`Program.cs` changed; it builds on Windows and in the Linux SDK container). Not delegated to a cheaper reviewer (no
+agent tool in this session).
+
+Seen, not fixed (the tested image stays as built): the delete toast says "Deleted 1 download and their files" for
+one download; "Put each kind of file in its category's folder" is on by default on the server, yet the zip and RAR
+went to `/downloads` itself (not checked whether the server has category folders at all).
+
+Questions for the owner (safer choice taken): (1) The refresh was shown with the mock, not a live link; is that
+enough, or should a later run leave a live download paused past the link's lifetime? (2) Should a small archive
+(a few MB) be kept in the TorBox account for future live extraction checks? None was added. (3) Idle after use is
+about 101 MiB by `docker stats`; `DOTNET_EnableWriteXorExecute=0` would drop the 33 MiB double mapping but turns off
+a hardening feature, so it was not tried; PERF.3 can measure it if wanted.
+
+### D2 / EXT.R1 review fixes: sign-in waits, trusted proxies, bodies, auth.json, upload references (2026-11-08, `webui`)
+
+Sixteen reviewer findings on `git diff dev...webui`, each checked against the code. Fixed (commit `a7aba23`):
+
+- **Waits a burst can't skip (high):** sign-in, setup code, password change and pairing all checked the wait, then
+  awaited the PBKDF2 check, and counted the failure only after it, so parallel guesses all passed the check. Now
+  `SignInLimiter.Begin` counts a try as wrong when it starts and `Succeeded` clears it. IPv6 clients count by
+  their /64. `AuthHardeningTests.ABurstOfParallelWrongPasswordsGetsOneCheckAndTheRestWait` (8 parallel wrong
+  sign-ins: 1 × 401, 7 × 429; 6 pairing codes: 1 × 401, 5 × 429).
+- **Proxy trust (two medium, one low):** `DOWNLOADMANAGER_TRUST_PROXY=1` believed `X-Forwarded-For` from anyone, so
+  a client reaching the port directly got a fresh address per try and could send `127.0.0.1` to skip the setup
+  code. It now takes the proxy's address or network (`172.30.0.10`, `172.30.0.0/24`); `1`, `/0` and nonsense stop
+  the start (exit 2). The setup code goes by the real peer, noted before the forwarded-headers middleware, and is
+  always asked through a listed proxy. A same-host proxy that adds no header can't be detected; docs/docker.md says
+  to list it (`127.0.0.1`) or use `DOWNLOADMANAGER_PASSWORD_FILE`. Compose example: Caddy with a fixed address.
+- **Bodies:** setup, sign-in and pairing JSON is read up to 16 KB, chunked or not (was Content-Length only, 8 MB).
+- **auth.json:** a password, token add, remove or remove-all that can't be saved is undone in memory; the endpoint
+  answers 500 and nothing changes.
+- **Password change** unpairs every extension unless `keepPairedBrowsers` (web UI checkbox "Keep the paired
+  browsers"); answers `{ok, unpaired}`.
+- **Host check without Origin:** a rebinding page's same-origin GET carried no Origin and was let through with
+  sign-in off. Every `/api/` request now needs a known host name.
+- **Pairing DoS:** 10 wrong codes from anyone ended the owner's code; now 1,000 (under 10^-9 chance of a hit).
+- **Upload path:** `/api/upload/torrent` answers `upload:<id>`; `RemoteJobCoordinator.ResolveReference` maps it.
+- **Idle wake-ups:** the sign-in and Settings countdowns run only while counting (`webui/src/lib/ticker.ts`).
+- **Extension:** `chrome.storage.local.setAccessLevel({accessLevel: "TRUSTED_CONTEXTS"})` at start, awaited before a
+  token is written (content scripts use no storage); the pairing test asserts it, and its title says what it checks.
+
+Evidence: Server.Tests 71/71 on Windows and 71/71 on Linux (the owner's VM, SDK container, `Platform!=Windows`);
+new `AuthHardeningTests` (11). Integration remote and dispatcher tests 279/279 (Windows). webui vitest 37/37 (new
+`ticker.test.ts` 3), `svelte-check` 0 errors, `npm run build`; extension npm 118/118, `tsc --noEmit` clean.
+Image `inbound-test:dev` rebuilt on the VM; in it: `TRUST_PROXY=1` exit 2 with the message; a proxy listed
+elsewhere: `X-Forwarded-For: 127.0.0.1` still needs the setup code, four tries with new forwarded addresses
+`403 429 429 429`; the bridge gateway listed: forwarded addresses believed (`403 429 403 429`, two addresses in
+the log), setup code still asked; a chunked 64 KB sign-in body 400. Containers removed; disk unchanged (8.8 GB free).
+
+Not done: the Playwright screens walk was not rerun (the upload and password screens changed only in what they
+send; the server tests cover the calls). Not delegated to a cheaper reviewer (no agent tool in this session).
+
+Questions for the owner (safer choice taken): (1) `DOWNLOADMANAGER_TRUST_PROXY=1` is refused instead of meaning
+"trust everyone"; the proxy's address is needed. (2) A password change unpairs the extensions unless kept. (3) No
+count across all addresses: it would let anyone keep the owner waiting; devices sharing one IPv6 /64 share a wait.
+(4) 1,000 wrong pairing codes end a code. (5) A same-host proxy without forwarding headers must be listed; the
+server can't tell.
+
+### EXT.R1 server target: the extension's transport, pairing and This PC / Server choice, on `webui` (2026-11-08)
+
+- **Built (extensions/chrome):** `src/transport.ts` with `NativeTransport` (the native-messaging code moved out of
+  `background.ts`, same behaviour) and `ServerTransport` (`POST <address>/api/ipc`, `Authorization: Bearer`,
+  `credentials: "omit"`, `redirect: "error"`, time limit; 401 means "pair again"); address and code normalising,
+  `pairWithServer` (`/api/pair`, then one ping before anything is stored), the target rules. Settings: an
+  "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI, Unpair; a note for plain
+  http beyond loopback) and "Automatic downloads go to: This PC / The server" (`settings.defaultTarget`, This PC by
+  default). Pair asks the browser for that host only (`permissions.request`). The folder window and Download All
+  show "Save to" only when both targets can work (the server alone when the desktop app is not installed here),
+  with each target's default folder and favorites; Choose… is the app's dialog for This PC and a folder list
+  (`folders.browse`, new `src/destination-target.ts`) for the server. The popup lists the newest 20 of each place,
+  labelled, with a server card, and sends actions to the right place. Any failure resumes the download in the
+  browser; nothing is ever sent to the other place instead. Firefox build too (`dist-firefox`). Test helpers moved
+  to `tests/harness.cjs`; the "no network requests" test now allows one `fetch`, the transport's.
+- **Evidence:** npm 118/118 (92 before + `transport.test.cjs` 13 + `server-target.test.cjs` 13; a mutation that
+  sent automatic catches to this PC failed 4 of them); `tsc --noEmit` clean; both builds. Server.Tests 60/60 (new
+  `ExtensionTransportTests` 3). `scripts/server-smoke.mjs` against a test server (`DownloadManager.Server` on
+  127.0.0.1:18480, data under `artifacts\ext-smoke`): 12/12 steps (sign in, code, pair with the code typed with a
+  dash in lower case, default folder, roots, handoff, duplicate, list without settings, delete, `job.add` refused,
+  token removed in the web UI, then 401 "pair again"). Chrome for Testing (fresh profile, `dist` loaded, downloads
+  folder in `artifacts`): paired from the real Settings page ("Paired with the server at 127.0.0.1:18480 as "Chrome
+  on Windows". It is answering."); automatic sending to the server: `browser-to-server.bin` (3 MiB) completed on
+  the server, SHA-256 05445bb3…0704e5 equal, the browser's entry removed, notification "Sent to the Inbound server";
+  repeated with the same address: a second job "browser-to-server (1).bin", completed; "ask each time": the window
+  showed no choice and the server's default folder (CfT has no native host registered, so only the server was
+  offered, as designed), Choose… listed the server's root with free space, Download sent it, `asked.bin` (1 MiB)
+  completed with SHA-256 c5c2a841…5d70 equal; the popup showed the server card and hid the desktop app's. CfT
+  reported "Specified native messaging host not found", so it never reached the installed app. Screenshots and
+  logs: `artifacts\ext-smoke\out` (not committed).
+- **Not explained:** one automatic attempt (the second CfT run, the same address as the first run, right after
+  the session was restored) left no trace: no request reached the file server, no browser entry, no note in the
+  popup. The first run had used CDP `Browser.setDownloadBehavior`, which takes downloads away from the extension,
+  and its result is discarded. Two later attempts, one with the same address, worked. Worth one more look in a
+  real Chrome.
+- **Not done:** no real Firefox or Edge run; no browser against the Docker server over the LAN (only loopback);
+  the two-target window was checked by tests, not on screen (CfT had no native host). Not delegated to a cheaper
+  reviewer (no agent tool in this session).
+- **Questions for the owner (safer choice taken):** (1) no `optional_host_permissions` entry: the required
+  `http://*/*`/`https://*/*` already cover any server, so Chrome would only warn about a duplicate; pairing still
+  asks for the one host (matters in Firefox). (2) No fallback to the other place when the chosen one fails; the
+  download stays in the browser. (3) The token is kept in `chrome.storage.local` as is (not synced, not encrypted
+  by the extension). (4) Unpair can't revoke the token on the server (a token can't revoke itself); Settings says
+  to remove it in the web UI. (5) The window's This PC / Server pick is for that download only and does not change
+  the default. (6) The popup asks the server once a second while open, like the desktop app. (7) The extension
+  version stays 0.4.0; the store listing's cookie and host-permission lines were updated, but the store's data
+  disclosure should be reviewed before a store upload, since a user's server is a new recipient.
+
+### D3 Docker image, compose and GHCR workflow, on `webui` (2026-11-08)
+
+- **Built:** `Dockerfile` (Node 24 web UI stage from the lockfile; official 7-Zip 26.04 `7zz` for x64/arm64 with a
+  checked SHA-256 from 7-zip.org, equal to GitHub's release digests; .NET 10 SDK cross-publish for `TARGETARCH` with
+  `-p:BundleWindows7Zip=false`, a new switch in the Archives csproj, so no `7z.exe`/`7z.dll` in the image; runtime
+  `aspnet:10.0` on Ubuntu 24.04; base images pinned by digest), `docker/entrypoint.sh` (`PUID`/`PGID`, chown of
+  `/data` only when needed, `setpriv` with no new privileges), `docker/healthcheck.sh` (no curl), allowlist
+  `.dockerignore`, `.gitattributes` (LF for the files read in Linux), `docker/compose.example.yml`,
+  `.github/workflows/docker.yml` (on `v*` tags only; never run), `docs/docker.md`, a README section.
+- **Evidence (owner's VM, `inbound-test:dev`, port 18080):** build passed, context 2.09 MB, decoy secrets and local
+  folders kept out of the context, nothing of ours named like a key or credential in the image or its history;
+  healthy, runs as the VM user; `/health`, setup with the log's code, sign-in, sign-out, wrong password, origin
+  refusal, roots limit, WebSocket 101 and a real 1.5 MB download (right SHA-256 and owner) checked with curl; the test
+  password in no log; restart, `docker stop` (exit 0), a `PUID` change, `PUID=0` (exit 2) and `--user` checked. Idle
+  memory over about 6 minutes: 34.4 MiB fresh, 53.9 MiB after use; workstation GC or conserve-memory save about
+  4 MiB, so none is set. Image 350 MB (base 342). FFmpeg would add 425 MB: left out, documented.
+- **Not done:** no arm64 image (no QEMU on the VM; not installed). The arm64 7-Zip check and `linux-arm64` publish
+  ran as build stages only. The workflow is not linted (no actionlint offline); its inputs were checked against each
+  action's `action.yml` at the pinned commits. Not delegated to a cheaper reviewer (no agent tool in this session).
+- **On the VM:** kept the `inbound-test:dev` image and the files in `~/inbound-d3` for D4, removed every container made; the
+  `node:24-alpine` base image pulled for the build is left there (not labelled, so not removed); build cache left.
+- **Questions for the owner (safer choice taken):** no `org.opencontainers.image.licenses` label, since the repository
+  names no license; base images pinned by digest (reproducible, but security fixes need a bump: add Dependabot or
+  Renovate?); default `PUID`/`PGID` 1654 (the image's `app` user; the compose example uses 1000); a new data folder is
+  made 700; `PUID=0` refused; FFmpeg not in the image; `latest` not moved by a pre-release tag; provenance `mode=max`
+  and an SBOM in the published image.
+
+### D2 web UI with sign-in and pairing, on `webui` (2026-11-08)
+
+- **Server sign-in** (`src/DownloadManager.Server/Auth`), on by default: one password (setup page, or
+  `DOWNLOADMANAGER_PASSWORD` / `_FILE`), PBKDF2-SHA256 600k in `<data>/auth.json`; a setup code from the server log
+  for a browser that isn't on the server's machine; `inbound_session` cookie (`HttpOnly`, `SameSite=Strict`,
+  `Secure` on HTTPS, `X-Forwarded-Proto` only with `DOWNLOADMANAGER_TRUST_PROXY=1`), 24 h idle and 7 days at most,
+  sign-out and password change close the session's WebSockets; growing waits per address; only `/health`, the
+  sign-in page, `/favicon.svg` and `/theme.js` public. `DOWNLOADMANAGER_AUTH=off` brings back the D1b loopback rule.
+- **Pairing** for the extension: an 8-character code for 10 minutes, `POST /api/pair` gives a token (hash stored),
+  listed and revocable, allowed only the extension's commands plus `folders.browse` on `POST /api/ipc`; CORS for our
+  extension ids. The extension's own server transport is not built (Stream C).
+- **Web UI** in `webui/` (Svelte 5.57.3, Vite 8.3.6, Tailwind 4.3.5, exact versions, `npm ci` works offline from the
+  lockfile), built into the server's `wwwroot` by its csproj; `scripts\build.ps1` builds it first. Every planned
+  screen: list with live progress, packages, views and bulk actions; add links incl. magnets, provider links and
+  torrent upload; extraction and its password; queues and scheduler; settings, favorites, site logins, proxy,
+  extraction, read-only program settings; sign-in, password change, pairing; My TorBox and hoster status; the
+  server folder browser wherever a folder is chosen. Both themes from the `App.xaml` tokens; phone layout at 390 px
+  (tap opens a download there).
+- **Evidence:** Server.Tests 57/57 (`AuthTests` 11, `PairingTests` 5). webui: vitest 34/34, `npm run check` 0
+  errors and 0 warnings. `npm run screens` (Playwright Chromium 158) against the server with a temp data folder and
+  roots under `artifacts\webui-run\`, the TestServer with its mock TorBox, and a local file server with a test 7z:
+  26 screens at 1360 and 390 px in dark and light (`artifacts\webui\`, looked at), no console error, page error or
+  sideways scroll, and end to end: the archive password extracted the 7z, pause and resume, delete without the
+  file left it on disk, a `.torrent` upload reached the mock provider, site login and proxy passwords saved
+  write-only, a pairing code from the page gave a token that was refused `settings.get` and answered 401 once
+  removed, sign-out. Nothing ran against the real TorBox, and nothing in a container yet.
+- **Found and fixed by the walk:** the sign-in page had no styles (Tailwind didn't scan `src/` from the sign-in
+  build's root); long paths widened the folder browser and settings on a phone; selecting a package in Finished also
+  selected its unfinished files, so Delete would have removed them (now a package row stands for its files in that
+  view, vitest); phone toolbar buttons had no accessible name; a phone had no way to open a download (no
+  double-click); a past provider wait was shown as "Waiting until".
+- **Not delegated:** the review delegation to a cheaper model was not done; this session has no agent tool. The work
+  is unreviewed.
+- **Questions for the owner (safer choice taken):** the setup code from the log for a browser elsewhere; session
+  lengths (24 h idle, 7 days); sign-in off only by `DOWNLOADMANAGER_AUTH=off`, not from the web UI; password at least
+  8 characters; at most 50 paired browsers (the oldest goes); `moz-extension://` origins let in on `/api/pair` and on
+  `/api/ipc` with a token, since Firefox ids are random; the server version hidden from browsers that aren't signed
+  in.
+- **Next:** D3 (Dockerfile and compose, the web UI built in a Node stage), the extension's server transport, D4 on the
+  test VM.
+
+### D1b merged into `dev` (2026-11-08)
+
+- `stream-b` (the headless server and its Linux replacements, with review fixes) merged. Conflicts: the spanned-zip grouping now uses the OS-aware name comparer from D1b, the service keeps stream-c's `NativeHostState` next to D1b's `Roots`, and the server no longer sets the old `NativeHostRegistered` property (unset reads as not registered).
+- Full Windows run after the merge, all green: Core 869, Engine 155, Integration 1,215, TorBox 323, Archives 336, Containers 187, Server 41. Logs: `artifacts\campaign\20261108-merged-d1b\`.
+- Next: branch `webui` (D2 web UI with sign-in and pairing, D3 Docker, the extension's server transport, D4 on the test VM).
+
+### Streams A1, A2 and C merged into `dev` (2026-11-08)
+
+- Merged after each stream's review fixes: `stream-a` (A1), `stream-a2` (A2), `stream-c` (extension). Only PROGRESS and ROADMAP conflicted, plus one stream-c command (`settings.downloadFolders`) that was added to the old pipe server; it now lives in `HostCommandDispatcher` with the other commands.
+- Full run on the merged branch, all green with no reruns: Core 863, Engine 154, Integration 1,215, TorBox 323, Archives 329, Containers 183, extension 92 (tsc clean). Logs: `artifacts\campaign\20261108-merged\` (trx per suite).
+- Running next: the UI walkthrough in dark and light, the independent recovery check, the extension end to end in Chrome for Testing, PERF.5/PERF.2/PERF.3 and the UP.B2 fix; D1b on `stream-b`.
+
+### Independent recovery check (P2.7, P5.6, X.5; branch `campaign-recovery`, 2026-11-08)
+
+- Setup: own worktree and test instances (`DOWNLOADMANAGER_INSTANCE` + `DOWNLOADMANAGER_DATA` under the worktree's `artifacts`), Release builds of this branch, `tools\TestServer` only. Evidence: `artifacts\campaign\20261108-recovery\` (index in `README.txt`). My numbers were taken before reading E94; the comparison is the last bullet. Other tracks were loading the CPU throughout.
+- **Kill/restart matrix** (`scripts\kill-restart-matrix.ps1 -Instance ...`, 24 MiB, kills at 20/50/80%), three runs, all passed:
+
+  | run | conn | bytes kept at the 20 / 50 / 80% kills | final SHA-256 |
+  | --- | --- | --- | --- |
+  | 1 (256 KiB/s per conn) | 1 | 4,128,768 / 12,320,768 / 19,202,048 | `6d905264…476423` match |
+  | 1 | 8 | 492,810 / 11,633,927 / 12,034,711 | `a240b74f…6410e6` match |
+  | 2 (128 KiB/s per conn) | 1 | 4,915,200 / 11,927,552 / 19,726,336 | match |
+  | 2 | 8 | 5,516,375 / 11,148,690 / 16,588,177 | match |
+  | 3 (256 KiB/s, checkpoint column) | 1 | checkpoint 4,128,768 / 12,320,768 / 19,202,048 | match |
+  | 3 | 8 | checkpoint 200,399 / 11,144,911 / 11,352,301 | match |
+
+  Every final file equals the independent unthrottled copy; no `.part` file and no checkpoint left (checked by hand for runs 1 and 2, by the script for run 3). Runs 1 and 2 report "kept after restart", read once the job is moving again, so it can be above the bytes at the kill (run 2, 8 conn, 20%); the script now also reads the checkpoint before the restart (`checkpointBytes`) and fails if a finished job's checkpoint is left. At 8 connections and 2 MiB/s a kill point is crossed less than 5 s after the restart, so it keeps the previous checkpoint (run 3: 80% kill kept 11.35 MB of 20.5 MB): that is the 5 s `CheckpointInterval`, as designed; at half speed (run 2) it kept 16.6 MB.
+- **A1 yield and resplit under a kill:** two 24 MiB 8-connection jobs on one host (per-host cap 8) ran 4 + 4 connections; Host killed mid-transfer once (`fair-kill`) and twice (`fair-kill2`); both files match their references, no checkpoint left.
+- **Provider cells:** `HostKillMatrixTests` 6/6 (TEST.1's cell passed), plus `HostPipeRemoteTests.ScenarioJ…` and `RuntimeArchiveHostTests.KillingTheHostMidExtraction…` 2/2. By hand against `TestServer --torbox --cdn-bps 32768`: the seeded 3-file package added by magnet, Host killed with the 8 MiB file at 3.4 MB (`torbox-kill4`): after a restart it resumed by itself, all three files match the mock's bytes, one remote job, one item on the mock account, no part or checkpoint left.
+- **Browser handoff, Chrome for Testing 156** (headless, fresh profiles, unpacked `dist` built here, loaded as `pknddmneejadnnngffojnoecojhdfalc`, driven over the DevTools protocol; automatic sending ticked and saved in the options page):
+  - Normal: a TestServer file landed in the test instance, SHA-256 match, the browser's entry removed, nothing in the browser's folder.
+  - Host frozen, request forwarded to its pipe, Host killed 1.5 s later, Host startable: the native host exited, the extension's retry started a new native host, which started a new Host and was accepted; one job, SHA-256 match, browser entry removed.
+  - Same, but no Host can be started (isolated native-host copy, `DOWNLOADMANAGER_HOST` pointing nowhere): Chrome resumed its own download 0.4 s after the retry failed and finished it, SHA-256 match, no job in the app.
+  - Registration: the installed app's Chrome key was never written. The test build was registered under `HKCU\Software\Chromium\NativeMessagingHosts` and `HKCU\Software\Google\Chrome for Testing\NativeMessagingHosts` (neither had our name) and both were removed afterwards; before and after are in `browser\registry-*.txt`. At the time the Chrome key held another track's test value, not the installed app's; it was left as found.
+- Findings: **TEST.3** (CfT reads the Chromium key first and falls back to the Chrome key; the keys are shared by every track: another track's CfT used this track's native host for about 3 minutes while the Chromium key was set, it connects to whichever Host that browser's environment names, as that track's own native host would, but it was this branch's build). **UI.B11** (an exit pauses running downloads, so the auto-resume option only covers crashes; owner decision). **UI.B12** (a Host started while a killed one is still exiting quits silently; plausible mutex cause). Script fix committed: `kill-restart-matrix.ps1` checkpoint column and leftover-checkpoint check.
+- **Comparison with E94** (read after the runs): same final hashes (`6d905264…`, `a240b74f…`) and the same pass criteria; single-stream retention is close (E94 4.98/12.39/20.05 MB, here 4.13–4.92 / 11.93–12.32 / 19.20–19.73 MB). The 8-connection 20% and 80% kills kept less here in runs 1 and 3 (0.2–0.5 MB and 11.4–12.0 MB, against E94's 4.48 and 20.66 MB); run 2 at half speed came close (5.5 / 11.1 / 16.6 MB). The difference is when a kill falls relative to the 5 s checkpoint, not a loss of written data: every kill kept progress and every file was exact. P2.7, P5.6 and X.5 are marked verified.
+- Not done: Edge and Firefox handoff; a Windows sign-out during a download (UI.B11); a real-process test for UI.B12.
+
+### Campaign item 5: the extension end to end in Chrome for Testing (2026-11-08, branch `campaign-ext`)
+
+- Setup: Chrome for Testing 156.0.8078.80 with `--load-extension` (`dist`, ID `pkndd…`) and a fresh profile whose download folder is `test-downloads\cft-browser`; a test Host (`DOWNLOADMANAGER_INSTANCE=campaign-ext`, data under the worktree's `artifacts`) with its default folder in `test-downloads\ext`; TestServer on 127.0.0.1. Driven through the DevTools protocol (real mouse events for clicks, so each download has a user gesture), the browser's own right-click menu through UI Automation, and the app's folder dialog through window messages. Evidence, scripts and screenshots: `artifacts\campaign\20261108-ext\`.
+- Native-host registration without touching the owner's key: in the agent's shells, HKCU writes go to a private layer that the real hive does not see (a probe key written there was absent when read through WMI `StdRegProv`), and Chrome started from these shells reads that layer. The layer already held a stale value (`%LOCALAPPDATA%\DownloadManager\native-host\…`, a file that no longer exists), which is why agent-launched Chrome reported "native messaging host not found" before. It was saved, pointed at this worktree's manifest for the run and written back exactly. The real key, read through WMI before, during and after, stayed on the installed app's manifest the whole time.
+- Results (all passed):
+  - Fresh install: automatic sending off; Settings banner, popup "Automatic sending: off" and the OFF badge; "Check connection" reached the test Host. A direct `.mp4` stayed in the browser with its reason.
+  - On: `.flac`, `.mp4` and `.pdf` with `Content-Disposition: attachment` were caught, removed from the browser's list and completed (SHA-256 equal to the server's; the three test bodies are identical, so this shows integrity, not which file is which). `.png` (excluded), `blob:` and `data:` stayed in the browser; only the `.png` got a note, as designed.
+  - Right-click "Download with Inbound Download Manager" (the browser's own menu): the folder window opened at the default folder; Choose… opened the app's dialog; the chosen folder was used; hash matches.
+  - "Ask each time": the caught download was held paused, Download sent it to the default folder, Keep in browser let it finish in the browser.
+  - Download all links on `/download-all-page`: 4 unique links (duplicate, `mailto:`, `javascript:` and `#` left out), all 4 completed, the HLS one as `master.ts`.
+  - Popup: all downloads of the app (11, including a CLI job and a failed one); Pause, Resume, Retry and Delete with and without the file worked against the Host; Pause catching showed OFF and a note.
+  - Firefox: `npm run build:firefox` built. `web-ext lint` not run (no cached copy offline). Edge not run (no test copy; the owner's Edge is off limits).
+  - Extension: typecheck clean; `npm test` 94 of 94 after the fix (92 before).
+- Found and fixed: EXT.B2, Send could be pressed while the app's folder dialog was open (the download went to the folder shown and the choice was lost). Checked on screen after the first fix. Review fix: that version could leave Send disabled for good after a send that failed while the dialog was open, and let Choose… be pressed during a send; both windows now use one state model (`FormGate`), covered by npm tests that run the page scripts. The review fix is not yet checked on screen.
+- Test setup notes, not product bugs: a Host built without the WinUI app shows a "frontend was not found" message box for each completed download while the completion dialog is on (turned off in the test instance's settings); `chrome.runtime.reload()` on an extension loaded with `--load-extension` unloaded it, so the browser was restarted instead; `chrome.action.openPopup()` needs a focused window, so the popup was opened as a tab.
+- Not done: Edge; a real Firefox run and AMO signing; the owner's TorBox Direct Download check (EXT.B1). The Haiku diff review named in CLAUDE.md was not available to this subagent (no agent tool).
+
+### UI walkthrough of every window, dark and light (campaign item 2, branch `campaign-ui`, 2026-11-08)
+
+- Setup: Release build published to the worktree's `artifacts\app`, a test instance (`DOWNLOADMANAGER_INSTANCE=campaign-ui`, data in `artifacts\campaign-ui`), TestServer on 127.0.0.1 only, update feed pointed at TestServer and automatic updates off. Seeded with finished, failed, queued, paused and running downloads, a three-file package and a password-protected zip (made with the bundled 7-Zip) so the extraction password prompt appears. The theme comes from `ui-state.json` `darkMode` in the instance's data folder (View > Dark Mode writes the same value). The Host's `Theme` setting ("System") is copied around but nothing reads it (UI.R23).
+- Covered, both themes: main window and every sidebar view, row and package context menus, every menu including the three limit submenus, Add URL (both pages), Add Links and its review, every Options page (including the unsigned TorBox account page), Scheduler (Schedule, Files, Limits), progress window (tabs and segment details), package window, Statistics, the update progress window (started with `update-progress`; a portable build's Check for Updates only shows a message), About, Delete and Shift+Delete, the extraction banner and password prompt, Properties, Move/Rename, Change Category, Queues. Not covered: My TorBox itself (only offered with a usable account) and native file pickers. There is no column-header menu.
+- Screenshots: `artifacts\campaign\20261108-ui\dark\` and `light\`, made with the new `scripts\ui-capture.ps1` (PrintWindow, starts nothing) and driven with the new `scripts\ui-drive.ps1` (UI Automation steps; refuses the installed app and never presses a title-bar Close). Each was looked at.
+- Light mode: no unreadable text, wrong-theme colours or clipped controls found. Contrast: `ui-accessibility-check.ps1` now reads every colour token from `App.xaml` for both themes (62 pairs: text tokens 4.5:1 on surface and chrome, glyph and progress tokens 3:1, primary text and accent-button text); all pass. It used to check a stale dark-only list.
+- Fixed: **UI.B8** (the window ended when a second dialog was requested over an open delete dialog; delete path guarded through a shared `ShowDialogAsync` that refuses a second dialog, which messages, `AskAsync` and the address dialog use too; rest recorded), Scheduler Files tab state text indented for downloads without a size, Scheduler Limits tab centred instead of left-aligned, Statistics note cut off at the default size (650 to 720 px tall).
+- Scripts: `ui-accessibility-check.ps1` and `ui-inventory.ps1` attached to the first `DownloadManager.Desktop.WinUI` process of any kind, which on this PC can be the installed app or another track's test UI (one was running); both now take `-PathPart`, refuse the installed app and find the main window by its title. `ui-keyboard-check.ps1` picked the package row (its dialog, "Delete 3 downloads?", was not recognised, so it went on pressing keys and the toolbar Delete behind it: that is how UI.B8 showed), used a stale Add dialog title, and could attach to a progress-window process; fixed. `ui-counter-alignment-check.ps1` could attach to a progress-window process; fixed.
+- Check results (test instance, dark and light; outputs in the evidence folder): accessibility U7 CHECKS PASSED in both; keyboard: Delete opens with Enter cancelling, Shift+Delete On, Delete key Off, toolbar Off, Add dialog modal, in both; counter alignment: Size, Time left and Transfer rate cells end on their header's right edge in both; inventory lists all menus, categories and the eight columns in both.
+- Recorded: UI.B9 (black client area until resized, seen only in this harness so far), UI.R22 (selected rows nearly invisible in both themes; owner decision), UI.R23 (wording and small layout points).
+- Harness notes: screenshots of a test build stay black until the window is resized by a pixel (`ui-drive.ps1 nudge`); the Alt tap used to bring a window forward can leave the menu bar's access-key tips showing.
+- UI.B8 re-check after review (fresh publish): Shift+Delete on the package row, then the toolbar Delete invoked through UI Automation while the dialog was open, also with the unconverted archive password prompt open: the window process stayed up and nothing was deleted (12 downloads, package files unchanged). A temporary trace build (not committed) showed `Popup.Child` is the `ContentDialog`, so the earlier popup check did match. Evidence: `artifacts\campaign\20261108-ui\b8\` (`notes.txt`).
+- Review fixes to `ui-drive.ps1`: `~` prefix matches could press the title-bar Minimize/Maximize/Close; `click:`/`right:` sent real mouse input without checking the test UI was in front and could click an offscreen element; `closewin:` with no title closed every secondary window. All fixed; the offscreen refusal was not exercised (no offscreen match came up).
+- Not done: high-DPI runs (only simulated by the accessibility script), the owner's look at the screenshots, the other dialogs' UI.B8 guard (about 40 `ShowAsync` calls; owner question whether to convert all).
+
+### Performance campaign: soak, GC, closing the window, UP.B2 (branch `perf`, 2026-11-08)
+
+Evidence: `artifacts\campaign\20261108-perf\` and `artifacts\soak\` in the `perf` worktree (not tracked). Other
+work ran on this PC at the same time and loaded the CPU, so timings are from a busy machine; each timing below
+was repeated (three runs, or two GC runs) and the repeats agreed.
+
+- **UP.B2 (implemented, automated tests):** the update helper writes the new version into Setup's uninstall
+  entry (`DisplayVersion`, and the major/minor DWORDs when present) under
+  `HKCU\...\Uninstall\{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}_is1`, only when the key exists and its
+  `InstallLocation` is the folder being updated; it never creates the key, and a failed update restores the old
+  values. `UpdateUninstallEntryTests` (7) use a fake key through the test-only `-UninstallKey` parameter; 4 fail
+  on the old script, and the rollback test fails without the script's restore call. Not yet seen on a real in-app update.
+- **PERF.2 soak (partial, running):** `scripts/soak.sh` (Git Bash) runs a test instance with 5,040 jobs and a
+  new TestServer download every 20 s in six kinds (segmented, 503 then served, cut short, slow, no ranges, 500
+  forever), and writes `samples.csv` (Host, window, TestServer: private bytes, working set, handles, threads,
+  CPU, every minute) and `gc.csv` (the Host's GC every minute, `DOWNLOADMANAGER_GC_LOG`).
+  - The 8-hour run is `artifacts\soak\soak-8h\` in the worktree. It started 02:17 UTC and stops by itself at
+    about 10:19 UTC. To stop it earlier, run `bash scripts/soak.sh --stop soak-8h` from the worktree. That
+    creates the `stop` file, and the driver then shuts down its own Host, window and TestServer.
+  - It runs the build of `eb4404a`, from before the fixes below, so it measures the old Host.
+  - **Full 8 hours (476 one-minute samples, `soak-8h-summary-final.txt`):** Host private MB 178.4 first, 382.0 last, mean 326.8, max 642.8, trend +22.4 MB/h; handles 490 to 498, threads 17 to 18; CPU 0.45 s a minute. Window private MB 305.3 to 317.1 (trend +0.8 MB/h), handles 1,307 to 1,331. Host GC: 410.6 MB allocated a minute, heap mean 173.6 MB, max 573.9, trend +13.2 MB/h, pause 0.03%. Both processes ran to the end. The Host trend is not yet told apart from the list growing to 5,000 jobs; a rerun on `dev` is still to do. Evidence copied to `artifacts\evidence\perf\` in the main checkout.
+  - First 142 minutes (`soak-8h-summary-at-*.txt` in the evidence folder):
+    - Host: private mean 256 MB, max 552 MB, trend -10 MB/h; handles 490 to 495; threads 17 to 18; 0.43 s CPU
+      a minute.
+    - Window, hidden after 02:59: 305 to 315 MB (+3 MB/h); 0.53 s CPU a minute with 5,000 jobs while downloads
+      stream.
+    - No CLI errors.
+    - The Host's GC heap swings between about 100 and 450 MB and comes back down. This is snapshot garbage
+      (PERF.7), not a leak.
+    - The soak's TestServer was replaced twice while running (driver.log). Its content cache was the problem,
+      now fixed.
+- **Fixed on the way:**
+  - The tray's once-a-second count and the settings reads built a full snapshot. In 16-minute runs with 5,000
+    jobs this changed the Host from 394 to 199 MB allocated a minute, private mean from 182 to 165 MB, and max
+    from 308 to 214 MB.
+  - UI.B13: the pipe took only 8 clients; now 64.
+  - UI.B14: CLI `add-batch`/`import` opened windows. They now send sources of their own (`cliBatch`,
+    `cliImport`): no progress or completion window per job, the same list labels as before.
+  - UI.B15: segment retries now start over after progress, and the TestServer resets only responses it cuts.
+  - The TestServer's content cache: from 3.2 GB to a 256 MB cap.
+- **PERF.3 (implemented):** the Host now runs with `GCConserveMemory=5`. Default GC, two runs:
+  - private mean 165 and 167 MB, max 214 and 224 MB, committed 140 and 134 MB;
+  - CPU 0.38 to 0.39 s a minute.
+
+  With `GCConserveMemory=5`, two runs:
+  - private mean 104 and 98 MB, max 132 and 130 MB, committed 86 and 85 MB;
+  - CPU 0.37 to 0.40 s a minute;
+  - gen2 collections 2.4 times as often, GC pause 0.03%.
+
+  The built Host with the setting in its runtimeconfig had a private mean of 118 MB, max 148 MB and
+  0.37 s a minute. Measured and not kept: `gcConcurrent=0` (150 MB), and server GC (129 MB, 50 threads).
+  Test: `HostGcSettingsTests`.
+- **PERF.5, "Closing the window ends it":** the option stays off by default for now. The numbers below come from
+  `scripts/perf-window.sh`, and ROADMAP PERF.5 has the details.
+  - Open time, measured to the first frame that shows the list. Each figure is the range of three runs.
+
+    | Jobs | Option on (a cold start) | Option off (showing the hidden window) |
+    | --- | --- | --- |
+    | 0 | 656–667 ms | 289–312 ms |
+    | 500 | 644–688 ms | 311–329 ms |
+    | 5,000 | 1,065–1,129 ms | 390–465 ms |
+
+  - 30 minutes idle with 500 jobs and the window closed:
+    - Option on: no window process at all. The Host used 0.01 s CPU, 0.3 context switches a second and 52 MB.
+    - Option off: the hidden window used 3.0 s CPU (6.1 s an hour), averaged 120 context switches a second
+      (max 205) and held 201 MB. The Host was the same as with the option on.
+  - What is lost with the option on:
+    - the speed graph's history;
+    - completion windows for jobs added from the CLI;
+    - selection, scroll position and open secondary windows.
+
+    Everything else lives in the Host: downloads, the tray, sounds, the browser handoff, the clipboard monitor,
+    and TorBox and remote state.
+  - Recommendation: on by default. It saves about 120 wake-ups a second, 6 s of CPU an hour and 200 MB, at a
+    cost of about 0.35 to 0.65 s per open. The default is left for the owner to change.
+- **Recorded:**
+  - PERF.7: every pipe connection gets the full snapshot, about 8.5 MB with 5,040 jobs.
+  - UI.R24: an idea, keeping the speed history in the Host.
+  - TEST.4: UI Automation can't close the window, and the first posted WM_CLOSE is ignored.
+  - While idle, the Host's handle count rises about 12 a minute and then falls back at once (749 to 443 in the
+    first idle run; 782 to 446 in the second). The handles are released, not leaked. Their source is not found.
+- **Tests:** on the final code, with no failures and no reruns: Core 863, Engine 157, Integration 1,224,
+  Archives 329, Containers 183, TorBox 323 (`tests-*run2*.txt` in the evidence folder). After the review fixes
+  (UI.B14 sources, UP.B2 rollback test, UI.B15 reset order, `perf-window.sh` label), 2026-11-08: Core 863,
+  Engine 158, Integration 1,231, no failures; Archives, Containers and TorBox not rerun. The window was not
+  started to check the labels or completion windows by eye.
+- **Not done:**
+  - The soak's full 8 hours.
+  - A soak on the fixed build.
+  - Checking UP.B2 on a real in-app update.
+  - The TEST.4 root cause.
+  - The review delegation in CLAUDE.md: this workflow step had no way to start a reviewer agent.
+
+### Clean install, upgrade and uninstall in a Windows VM (TEST.2, 2026-11-08)
+
+- VM: VirtualBox on E:, Windows 11 Enterprise LTSC evaluation from Microsoft, a new standard user, snapshot `clean-install`. Commands go in through the desktop session's Run dialog (VirtualBox keyboard input) because starting processes through the guest additions fails in this guest; files go both ways through the guest additions.
+- Result: all phases pass. See ROADMAP TEST.2 for each check and `artifacts\campaign\20261108-vm-install\` for the reports.
+- Found: UP.B2 (installed-apps list keeps the old version after an in-app update).
+- WinZip: removed at the owner's request (2026-11-08, "purge winzip after you're done with it"). Spanned-zip test sets are built in code by the Archives tests instead. A 72-byte ID file in `C:\ProgramData\WinZip` needs admin to delete.
+
+### D1b: the server for Linux and Docker (branch `stream-b`, 2026-11-08)
+
+- What it is: a new program, `src\DownloadManager.Server`, that runs the same download engine, queues, archives, containers and TorBox provider as the Windows Host, without any Windows part. Clients reach it over HTTP instead of the named pipe: a WebSocket at `/api/ws` that speaks exactly the pipe's messages (hello, snapshot, then events), `POST /api/ipc` for one request and one answer, and `/health`. The page at `/` is a labelled placeholder until the web UI (D2).
+- Folder browsing for the web UI: two new messages, `folders.browse` and `folders.create`, list and make folders only under `DOWNLOADMANAGER_ROOTS` (default `/downloads`). Every path is resolved through its links before the check, so a link that points out of a root is refused. The desktop Host doesn't offer them (it has a folder dialog).
+- Safety until sign-in exists: the server won't listen beyond this machine unless `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` is set, and then logs a warning. A browser request must come from the server's own page and name it by IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`, so another web page can't drive it, not even one that points its own name at the server. Anyone who can reach the port can still do everything; that is in `docs\docker-webui-plan.md`.
+- What replaces the Windows parts on Linux: secrets (site logins, proxy password, TorBox key) are sealed with AES-256-GCM and a key file `secrets.key` in the data folder, made readable by its owner only; a backup of the data folder must keep that file. 7-Zip is the official `7zz`, found on PATH or through `DOWNLOADMANAGER_7ZIP`. The tool and its children are killed on cancel and when the server exits. FFmpeg is found on PATH. Names that differ only in capitals are two files on Linux, so they are compared that way there; Windows is unchanged. Free space is measured on the mount that holds the folder.
+- Bugs the Linux run found and fixed: 7-Zip for Linux read a password with a trailing carriage return, so every password was wrong; the extraction check for hard links did nothing on Linux (it now asks the C library); container files and the bridge to another download manager only took drive paths.
+- Tests: new `DownloadManager.Server.Tests`, 30 pass on Windows and on Linux (protocol over the WebSocket and POST, folder browsing with links and `..`, the origin and host-name check, the loopback rule, the key file). Tests that need Windows itself (the Windows Host and its pipe, drive letters, NTFS streams, share locks, junctions, Explorer, the updater) are marked `Platform=Windows`; the rest run on both.
+- Linux run, on the owner's test VM in the .NET 10 SDK container, `--filter "Platform!=Windows"`: Core 817 of 817, Engine 147 of 147, Archives 252 passed and 52 skipped (those need WinRAR's Rar.exe to build test archives), Containers 183 of 183, TorBox 321 of 321, Server 30 of 30, Integration 1,047 passed and 7 skipped (Rar.exe). No failures.
+- Windows run: Core 824, Engine 147, Archives 314, Containers 187, TorBox 321, Server 30, Integration 1,111; all pass (the flaky TEST.1 failed once in an earlier run of this branch and passed in the final one).
+- Not done: no web UI, Docker files or sign-in (D2, D3). No manual run of the desktop app (nothing on screen changed). A directory `fsync` after extraction renames is still Windows-only. The review agent named in CLAUDE.md wasn't available to this run.
+
+#### Review fixes (D1b, 2026-11-08)
+
+Eleven findings from the review of `dev...stream-b`; ten were real and are fixed, one (the hidden-folder listing) already behaved as documented and is now explicit and tested.
+
+- The roots now hold everything a client names, not only the folder browser: a download's folder (asked for, or the default, last, category or custom-category folder it falls back on), Move/Rename of a finished download, a changed folder setting (the download folder always, since saving creates it), a container file to preview or send, a `.torrent` file given by its path, and an archive to extract, its password record and the "extract to this folder" setting. Each path is resolved through its links and the resolved one is used. This answers the earlier question about destinations outside the roots (it was "recommended yes"). The desktop Host has no roots and is unchanged.
+- `Kestrel__Endpoints__...` variables (a common compose line) could make the server listen on every address while the loopback check saw only `127.0.0.1`. Kestrel's endpoint configuration is now ignored, and the addresses it really listens on are checked again after start. The reviewer's reproduction is a test.
+- Two servers on one data folder: the server now holds `server.lock` there with no sharing for its whole life (an exclusive lock on Linux, dropped by the kernel when the process ends), and a second one stops with exit code 2.
+- A missing or different `secrets.key` no longer starts quietly: before any store opens, the data folder is searched for sealed secrets, and if they were sealed with another key (or the key file is gone) the server stops with exit code 2, naming the key file, and makes no new key. Before, the secrets read as empty and the next settings save dropped them for good. `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` is the explicit way to start without them.
+- Folder listing: hidden folders are left out explicitly (Hidden or System on Windows, a leading dot on Linux), and a listing cut at 2,000 now holds the first 2,000 by name, as the protocol says, not the first the disk returned.
+- Archives on Linux: two files whose names differ only by case are two files there, and the archive code compared some of them ignoring case, so one download could be tied to another set's cleanup. Every file-name comparison in the archive code now uses the machine's rule. Volume grouping still matches base names ignoring case (a set named `Film.PART1.RAR`, `film.part2.rar` stays one set), except in a folder that holds two names equal but for case, where bases are matched exactly. The first Linux run caught that the plain switch split such a set; the second change fixed it.
+- The Linux hard-link check after extraction could be skipped silently (no `lstat` on glibc before 2.33, or another architecture). It now also tries `__lxstat`, and when the count still can't be read it refuses the extraction with a message saying why, instead of counting one link. Windows keeps its rule.
+- New tests: 11 in Server.Tests (root confinement over the server for adds, settings, moves, containers and archives; the Kestrel variable; the address re-check; the data-folder lock; missing, other and discarded keys; JSON-escaped blobs; hidden folders; truncation), 2 in Archives.Tests (case grouping, link-count layouts and the real count on Linux). One Integration test (`OneSetKeepsOneIdWhateverOrderItsVolumesAreSeenIn`) now expects two sets on Linux for `v.part10.rar` and `V.PART10.RAR`, which are two files there; Windows is unchanged.
+- Windows: Server 41 of 41, Archives 316 of 316, Integration 1,111 of 1,111. Linux (owner's VM, .NET 10 SDK container, `--filter "Platform!=Windows"`): Server 41 of 41, Archives 254 passed and 52 skipped (Rar.exe), TorBox 321 of 321, Integration 1,047 passed and 7 skipped (Rar.exe); Core 817, Engine 147 and Containers 183 all passed on the first commit of these fixes. No live TorBox calls; the VM's test containers were removed.
+- Not tested: the `.torrent` path check (it needs a configured torrent provider, so it is covered by the code only); a data folder on a network share without working locks.
+
+#### Questions for the owner (D1b)
+
+- A `.torrent` file, container file or archive the server reads must now be inside `DOWNLOADMANAGER_ROOTS`, like downloads. D2's upload of a torrent file would go through the server instead of a path. Fine?
+- Losing `secrets.key` now stops the server (exit code 2) until the key is put back or `DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS=1` is set once. Safer than losing the secrets on the next save, but a restore without the key needs that variable. Fine?
+- When the hard-link count can't be read on Linux (an architecture other than x64 and arm64, such as 32-bit ARM), extraction is refused rather than done unchecked. A 32-bit Raspberry Pi would then not extract. Acceptable, or should that case only warn?
+- A browser may only reach the server by IP address, `localhost` or a name listed in `DOWNLOADMANAGER_HOSTS` (against DNS rebinding). Opening it as `http://nas.local:8080` needs that name listed. Fine, or should D2's sign-in replace this rule?
+- The default address is `0.0.0.0:8080` (what Docker needs), and it refuses to start there without `DOWNLOADMANAGER_ALLOW_UNAUTHENTICATED=1` until sign-in exists. Keep that, or default to loopback?
+- On Linux, extraction refuses a file name with a backslash (it would become a folder on Windows) and allows names that differ only in capitals. Keep?
+- The Linux build output still carries the Windows `7z.exe` next to the server. Drop it from the Linux publish in D3?
+
+### D1a: the Host's protocol without a pipe (branch `stream-b`, 2026-11-08)
+
+- What changed: every command, the hello, the snapshot (including its fallback when it is too large for a frame) and every broadcast (download events, update progress, package changes with their 100 ms debounce, provider changes, archive changes, "Host exiting") moved out of the pipe server into `src\DownloadManager.Runtime\Ipc\HostCommandDispatcher.cs` (and `.Remote.cs`). It has no transport, so the Docker server (D1b) can put a WebSocket under the same code.
+- New seams in Runtime: `IClientSession` and `QueuedClientSession` (a queue of 512 frames that drops the oldest when full and keeps order; direct sends refuse a frame over 8 MB), `IHostPlatform` with `PlatformCapabilities` (window, folder dialog, tray, exit, updater, folder listing; replaces the Host's `IHostController`), and `IHostLog` (the Host's `FileLogger` implements it). `HostPipeServer` now only accepts, sets the ACL, reads frames and writes the queue; the "wait for the client to go away" lookahead stays there, asking `HostCommandDispatcher.NeedsLifetime`.
+- On a machine without a window, dialog, exit or updater, those commands answer that they are not available instead of acting. The desktop Host has all of them, so nothing changes for the WinUI app, the CLI or the browser bridge. The hello's list is the same, in the same order.
+- Evidence: a scripted session against the real Host (`HostGoldenFramesTests`: 26 commands, a wrong-version client and the exit, 38 frames) was recorded on the code before the move, twice (identical), and again after it: the files in `artifacts\d1a\` are identical. New `HostCommandDispatcherTests`: 15 pass (hello with and without the provider, snapshot before any event, oversize snapshot, exit order, one package message per burst, unknown type, unavailable commands, update window opened once, wrong version, which commands get the lifetime).
+- Tests: Core 818 passed. Integration 1,106 of 1,107; the one failure was the known flaky TEST.1 (`KilledWithAPackageHalfDone`), which passed 3 of 3 alone. The pipe suites together (HostPipeRemote, HostKillMatrix, BrowserBridge, HostPipeContainer, the dispatcher and golden tests) passed 80 of 80.
+- Not done: no manual run of the desktop app (the change has no visible effect); the review agent named in CLAUDE.md wasn't available to this run.
+- Review fixes (same day):
+  - The golden test used to compare only when an environment variable named a baseline, so a normal run checked nothing. It now always compares with a committed file, `tests\DownloadManager.Integration.Tests\GoldenFrames\host-pipe-session.txt`. To rewrite that file on purpose, set `GOLDEN_FRAMES_UPDATE=1`. The script also sends `update.check`, `update.download`, `update.install` and `update.defer` now, so the updater gates and the `update.progress` broadcast are covered on the real Host. That makes 30 commands and 43 frames. The new baseline was recorded on the pre-move commit, in a temporary worktree, three times, and all three runs were byte-identical. The branch's frames match it in 3 of 3 runs. A baseline with one frame changed makes the test fail.
+  - A new test loads the built Host and checks that `HostController` claims exactly `PlatformCapabilities.Desktop`. Another checks that, with the desktop capabilities, `host.openUi`, `host.pickFolder` and the update commands reach the machine and the service.
+  - The hello's capability list is now documented as a set: clients look a name up, never a position. The desktop list and its order are unchanged. A Host without a tray leaves `tray` out (code comment, `docs\ipc-protocol.md`).
+  - New `PlatformCapabilities.SupportsProgramSettings` (on for the desktop). Without it, `settings.update` refuses changes to the post-download command, FFmpeg path, update manifest URL, update public key or the system completion actions switch. `job.update` likewise refuses to set a completion program. Sending the current values back with other changes still works. This closes the gap before D1b puts a network transport under the dispatcher. Two tests cover it, one with the setting off and one with the desktop.
+  - Tests: `HostCommandDispatcherTests` 19 pass. Core 818 of 818. Integration 1,111 of 1,111 (TEST.1 passed this time; it also passed 3 of 3 alone).
+  - Left as they are: the flag `SupportsFolderBrowse` (PLAN.md asks for it, it is labelled, and D1b's folder listing will read it). Many older PROGRESS and ROADMAP entries already on `dev` name the other download manager directly; this branch adds none of them. Rewording them here would conflict with every other stream, so it is left for one pass on `dev` after the merge.
+
+### A1: fair host connections, limits that apply live, TEST.1 (2026-11-08, branch `stream-a`)
+
+- **UI.B7 (implemented, automated tests):** the per-host connection cap is now shared fairly. One gate per host with
+  a limit that can change while connections are out (the old `host|limit` keys let old plus new connections run
+  together). A free connection goes to the waiting job with the fewest; a job below its fair share
+  (`max(1, limit / jobs on the host)`) asks the job furthest above it to give one back. Segment workers take a
+  connection before a range; when asked, they stop at the last byte written, hand the rest of the range back and
+  save the checkpoint at once, then wait for a connection again. Nothing new goes into the checkpoint: a kill between
+  the hand-back and the save leaves the previous checkpoint, which only means fetching a few bytes again. Probes,
+  single streams and HLS/DASH fragments never give a connection back. Fragments now count under the cap, one at a
+  time per job; measured cost is under 1 µs per request, so they stay in.
+- A job that waits with no connection shows "Waiting for a connection to <host>" (host name only) in WinUI and the
+  CLI, through the runtime-only `WaitingForHost` (not saved) and `JobDto.WaitingForHost` (added field, no protocol bump).
+- **UI.R21 (implemented, automated tests; not checked on screen):** a lower simultaneous limit, overall or a
+  queue's, sends the newest excess back to Queued with its data (reverse of the start order). Left running, and
+  counted in the excess so an older job isn't stopped instead: jobs whose server can't resume or hasn't said, jobs
+  verifying or finishing, and jobs muxing. A provider job asks for one fresh link on its next run without using its
+  dead-link refresh budget. A changed default connection count reaches running segmented downloads of the user's own:
+  more connections add workers through the existing range-splitting path; fewer let the extra workers stop after
+  their current range.
+- **TEST.1 (fixed):** the cause was UI.B7 itself. The mock CDN now holds the two big files (`MockTorBox.HoldFile`,
+  `Release`, `ReleaseAll`) so only the small one can finish. 20 of 20 passes after the change, and another 20 of 20
+  after the final runtime fix (log: `artifacts\test1\runs.log`, not tracked).
+- Tests: Core 826 passed, Engine 150 passed, Integration 1,096 passed (no failures, no reruns); the six
+  `HostKillMatrixTests` passed again run on their own. New tests: `FairHostConnectionLimiterTests` (8),
+  Engine `HostFairnessTests` (4, with `ConnectionCountChangesApplyToARunningSegmentedJob`), Integration
+  `RuntimeConcurrencyLimitTests` (5).
+- Not done: the owner's scenario on a test build (3 TorBox downloads, raise to 6, lower to 2); a running job moved
+  into a full queue isn't sent back (only settings saves and queue changes trigger the check).
+- **Review fixes (same day):** seven reviewer findings checked against the code; six were real and are fixed, and one is
+  only partly fixed:
+  - A segment worker waiting for a connection now gives up once nothing is left that it could take (no free range,
+    none long enough to split). Before, a job with every byte fetched could wait for another job to free a
+    connection. New Engine test `AWorkerWithNothingLeftStopsWaitingForAConnection` fails without the fix.
+  - Connection churn on a shared host: a job below its share that gives a connection back keeps it for 250 ms
+    while nobody waiting is short of theirs. A media job's next fragment, or a worker's next range, gets it back
+    without making the other job yield, abort a response and flush its file. Anyone waiting below their share
+    still gets it at once. Three new Core tests; the main one fails with the window off.
+  - A late progress report from a requeued transfer still counts its bytes, but no longer sets the job back to
+    Downloading or Connecting, or saves that state (checked in the lowering test).
+  - While a yield is pending, a failed file write or checkpoint save is no longer taken for a yield. No test:
+    the engine has no way to make a write fail on cue.
+  - The limiter's cancel registration now lives on the waiting side, so a grant can't race its creation and leave
+    it on the job's token.
+  - Partly fixed: FTP now records whether the server took REST, so an FTP job that has resumed once can be
+    requeued. A first FTP run stays above the limit, because a server that refuses REST makes the engine start
+    over from zero. HLS/DASH detected through the engine's phase or the description now counts as resumable.
+- Tests after the fixes: Core 830 passed, Engine 151 passed, Integration 1,096 passed, no failures and no reruns.
+  TEST.1 then passed 10 of 10 runs in a row (appended to `artifacts\test1\runs.log`).
+
+### Stream A2: Shift+Delete, TorBox cap and queue, FTP speed limit, counters, spanned zips (2026-11-08, branch `stream-a2`)
+
+- UI.R20: Shift+Delete asks with "Delete from disk" ticked; the Delete key and the toolbar Delete ask with it unticked (it used to start ticked). Checked with `scripts\ui-keyboard-check.ps1` on a test instance.
+- TB.L1: the live measurement (one cached 300 MB file, 1 to 16 parallel range requests, all HTTP 206, about 6.4 MB/s per connection, 92.4 MB/s at 16) is recorded. The TorBox per-file cap is now 16, and provider jobs take the smallest of the user's connections per download, the host limit and that cap on every run. The per-host limit (default 8) still caps one host overall. The plan doc's older note of "4 per file" from TorBox support and a TorBox staff reply saying there is no explicit limit disagree; both are noted in ROADMAP.
+- TB.S1 to TB.S3: My TorBox can start an item waiting in TorBox's queue or remove it from the queue (`queued/controlqueued`, sourced from TorBox's API schema); a link's hoster password can be offered to that link's own archives, opt-in; a set's `.rev` recovery volumes go with it when archive deletion is on. Mock tests only, no live calls this round.
+- PERF.6: FTP downloads now follow the per-download speed limit and the shared total cap, which covers HTTP and FTP together.
+- UI.R6: live counters (main list Size, Time left, Transfer rate and their headers; details values and segment rows; the progress window; the speed graph) are right-aligned so they no longer move when the digit count changes. Checked by UIA bounds on a test instance; not checked by the owner, at high DPI or in light mode.
+- A4.D: spanned zip sets (`name.z01` ... `name.zip`) are one set, opened from `name.zip`; a missing middle or last part is named. WinZip has no command line here, so the tests build spanned sets by hand; the bundled 7-Zip 26.04 lists and extracts them.
+- Tests: Core 819, Engine 149, Archives 321, TorBox 323, Integration 1,103, all passed.
+- Not done: the owner's on-screen checks; a live TorBox check of TB.S1/TB.S2; a spanned set made by a real zip tool.
+- Review fixes: `.rev` files now go only with RAR sets, so a 7z, zip or split set called `name` leaves a `name.rev` beside it alone (new Archives theory and an Integration test with a zip). `scripts\ui-keyboard-check.ps1` now needs `-PathPart` naming the test instance's folder, refuses the installed app, and stops if a delete dialog is still open before sending the next key. `dm remote add` and `dm remote retry` refuse `--link-password-for-archives` without `--link-password-stdin` instead of ignoring it (exit 2; covered in the CLI test), and the main usage text shows they go together. A spanned zip with locked headers and no password now names the gaps it can see from the file names, as a RAR set does. 7-Zip has no zip it calls header-encrypted, so no test reaches that path. After the fixes: Archives 329, Integration 1,104, all passed.
+
+### Stream C: the extension, local parts (2026-11-08)
+
+- Edge: merged `feature/edge-support` (277bf73, 9381038, bc728d0, b996c90, 0f60dfe) into this branch (a143c47); its registration tests use their own fake store and registry, and pass.
+- EXT.B1: the extension now catches every file type except an editable exclude list (web pages, images); a copy still on the untouched old allow-list moves over once. A download left in the browser is noted in the popup with the reason (not for `blob:`/`data:`), with a notification for the user's own rules. The badge reads OFF while automatic sending is off or paused, and popup and Settings say so. Cookies of a same-origin final address are merged in without duplicates. Not yet checked live in the owner's Edge with the file host's Direct Download button.
+- EXT.R2: the popup lists the newest 20 of all downloads with Pause, Resume/Retry and Delete (with "Delete the file too"). `NativeBridgePolicy` is a role-based allow-list both ways; the new `settings.downloadFolders` returns only the default folder and favorites; snapshots still lose their settings.
+- EXT.R1 (this PC): "When sending a download: use the app's default folder / ask each time". Ask opens `handoff.html` with the default folder, favorites and Choose…. The place for the later "this PC or the server" choice is marked in `handoff.html` and Options.
+- EXT.E1 Firefox: `npm run build:firefox` writes `dist-firefox` (gecko id `inbound-bridge@kaan88`, event page, no key); a Firefox native manifest and the HKCU Mozilla key in Setup and the scripts; `scripts\package-extension-firefox.ps1` builds the AMO zip (not signed: needs the owner's account).
+- Security: the native host skipped its caller check when no `chrome-extension://` argument was given. It now accepts only a trusted Chrome/Edge origin or the trusted gecko id and exits otherwise (tested as a real process).
+- UI.R3 confirmed by tests (browser handoffs start at the default folder, also after a Host restart; a one-off folder is not kept). UI.R4 checked in code and by new `fit-window` tests; `handoff.html` refits after the favorites load. On-screen checks are left for the owner.
+- Tests: extension `tsc --noEmit` clean, npm 85 of 85, Chrome and Firefox builds succeed; solution build clean; Core 833 of 833; Integration 1,176 of 1,176 (full suite).
+
+#### Stream C review fixes (2026-11-08)
+
+- Rules move: a copy on the old allow-list that also had its own excludes now gets the new default excludes added to them, so pages and images, never caught before, stay in the browser (the move had kept only the user's excludes).
+- "Ask each time": the folder window keeps a port open to the extension's worker. Its pings keep the worker, which holds the browser's file-name callback in memory, alive; the port closing is how a closed window is seen, replacing a listener that woke the worker for every browser window that closed. Closing the window while the download is being sent waits for the app's answer. If the worker restarts anyway, Keep in browser cancels the stuck download and starts it again in the browser once. Tested with mocks; that the pings keep a real Chrome or Edge worker awake is not yet checked in a browser.
+- Firefox (no file-name hold): the download is paused as soon as the rules say to catch it, before the slower Delete-gesture lookup. One that will not pause is left in the browser with a note instead of being sent while it still downloads; one that finished first is noted; one the browser cannot continue after a refusal is noted.
+- Popup actions (pause, resume, retry, delete) use their own native connection, so a slow delete cannot hold up an automatic handoff on the shared one.
+- Bridge: job actions from the extension are checked by payload too: exactly one download, no list, file deletion only with Delete (`job.remove`). Tested in Core and through the real native host.
+- `TrustedCaller`'s comment and the docs now say what the check is: it stops other browser extensions, not local programs, which can reach the Host's pipe anyway.
+- Uninstall: installs upgraded from 0.5.3 or earlier still have `uninsdeletekey` for Chrome's key in their uninstall log. Uninstall now notes another program's working Chrome registration first and writes it back afterwards. Checked by a source test and an Inno Setup 7 compile of Setup; not by a real upgrade and uninstall.
+- Not changed, with reasons: cookies of a cross-origin final address are still not added (the engine drops `Cookie` on a cross-origin request, `HttpDownloadEngine` `sameOrigin` check, so they would go nowhere); automatic sending still starts off on a fresh install (the 0.4.0 privacy choice; question below).
+- Tidy: CLAUDE.md's Chrome for Testing path uses `%LOCALAPPDATA%` instead of the account name; the BOM added to `ProviderLinkTests.cs` is gone.
+- Tests: extension `tsc --noEmit` clean, npm 92 of 92, Chrome and Firefox builds succeed; solution build clean (2 old nullable warnings); Core 850 of 850; Integration bridge/registration/native-host tests 106 of 106; full Integration suite 1,176 of 1,177, the one failure the known flaky TEST.1 (`HostKillMatrixTests.KilledWithAPackageHalfDone…`), which passed when run alone.
+
+#### Questions for the owner (stream C)
+
+- Automatic sending starts off on a fresh install (since 0.4.0, so cookies are sent only after the user agrees). EXT.B1 now makes this visible (OFF badge, popup, Settings, one notification) but does not turn it on. Should a fresh install catch by default?
+
+- AMO signing: upload `artifacts\firefox-addon` (from `scripts\package-extension-firefox.ps1`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
+- The privacy policy (`docs/chrome-extension-privacy.md`) changed (final-address cookies, the "left in browser" notes, folder window, popup actions); the online copy needs updating when this ships.
+- The EXT.B1 live check in your Edge with the file host's Direct Download button, when you are around.
+
+### Plan for the remaining work; owner hands over (2026-11-08)
+
+- Owner: "plan time." Decisions: UI.R1 closed ("happy with the ui"); P3.6 works; UI.R5 already a thing; TB.S1 to TB.S3 approved; all PERF items approved; testing items approved (TEST.1, independent recovery check, clean install and upgrade, light mode); small fixes UI.R6 and A4.D to do; Edge and Firefox with the extension work, Firefox signed through AMO; the extension popup sees all downloads and, when asking, can send to the local app or the Docker server; lowering the limit requeues the newest first; clean-install testing in a VirtualBox Windows trial VM on E:; WinZip is installed for spanned-zip test sets; TorBox is open in a separate Edge window for the EXT.B1 test.
+- New owner and user reports recorded: UI.B7 (limit raise leaves jobs connecting), UI.R20 (Shift+Delete), UI.R21 (limits apply live), TB.L1 (measure TorBox limits).
+- The plan is `PLAN.md` (untracked, in the worktree). Owner: "don't ask me for anything, I'll be a sleep. it's completely yours. do whatever is planned." Questions that need the owner go in the "Questions for the owner" list below instead of stopping.
+- Stale rows tidied: UP.B1 and UI.B2 released in 0.5.1, PERF.1 superseded by PERF.5, A1/A2/A1.C/A4 on main; CLAUDE.md status updated.
+
+#### Questions for the owner (2026-11-08 run)
+
+Each has a default already in place; nothing waits on the answer unless it says so.
+
+- **Firefox (EXT.E1), needs you:** upload the zip from `scripts\package-extension-firefox.ps1` (`artifacts\firefox-addon`) as an unlisted version from your addons.mozilla.org account, so release Firefox can run it.
+- **EXT.B1 live check, needs you:** computer use can only look at Edge, not click in it. The fix is in the extension build on `dev` (catch everything except an exclude list, a note when a download stays in the browser, cookies for the final address). To check the file host's Direct Download button, load `extensions\chrome\dist` in your Edge, or click the button while I watch the extension's log.
+- **Privacy policy:** `docs\chrome-extension-privacy.md` changed (final-address cookies, "left in browser" notes, the folder window, popup actions). The online copy needs updating when this ships.
+- **Automatic sending on a fresh install:** still off (the 0.4.0 privacy choice), now clearly shown as OFF in the popup. Turn it on by default?
+- **TorBox per-file cap (TB.L1):** now 16, from your measurement. Sources disagree: a note in `docs\plans\torbox-integration.md` marked as from TorBox support says at most 4 per file; a TorBox staff reply on its feature board (2024-03-10) says no explicit limit, only fair use. Keep 16 or go back to 4?
+- **TorBox host limit:** the per-host limit (8 by default) still caps the TorBox CDN host overall, so one TorBox file gets 16 only if you raise it in Options. Give TorBox CDN hosts a higher default of their own?
+- **Delete (UI.R20):** Delete now opens unticked and Shift+Delete ticked. The context menu and File menu "Remove" still just remove the row and keep the files, with no dialog. Is that what you want?
+- **Lowering the simultaneous limit (UI.R21):** downloads whose server hasn't said whether it can resume, and FTP downloads that have never resumed, keep running (stopping them could lose their data or start them over). Requeue them anyway?
+- **Media downloads:** HLS/DASH fragment requests now count under the per-host cap, one connection per media job (cost under 1 µs per request). Keep it?
+- **Connections for running downloads:** a changed count reaches running downloads only for your own HTTP downloads; TorBox, protected and FTP downloads keep the count they started with. Acceptable?
+- **Full queues:** should moving a running download into a queue that's already full also send its newest extra download back to Queued? (Now only settings saves and queue changes do.)
+- **Server program settings (D1a):** a network server refuses settings that run programs (post-download command, FFmpeg path, update feed and key, system completion actions). Allow them for a signed-in admin later, or keep them refused?
+- **Exit with downloads running (UI.B11):** exiting the app (and possibly a Windows sign-out) pauses running downloads, so "Resume unfinished downloads when Inbound starts" only helps after a crash. Resume them at the next start too?
+- **Selected rows (UI.R22):** selected rows are almost invisible in both themes (about 1.1:1). May I tint them (for example with the highlight colour) or turn on WinUI's selection bar? It changes the dark look you approved.
+- **Second dialog guard (UI.B8):** delete, messages, questions and the address dialog are guarded; about 40 other dialogs are not. Convert them all to the shared helper?
+- **Statistics and Theme (UI.R23):** give the Statistics window a Close button like the other windows? The settings' Theme value is never read (the window uses View > Dark Mode): remove it, or make it the theme source?
+- **"Closing the window ends it" by default (PERF.5):** with the window closed it saves about 120 wake-ups a second, 6 s of CPU an hour and 200 MB; opening then takes about 0.65 s with 500 downloads and 1.1 s with 5,000 (0.3 to 0.45 s for a hidden window). Recommended on; still off.
+- **CLI downloads while the window is closed:** with that option on, a CLI download gets no completion window, because only a running main window opens them. Should the Host open them instead?
+- **Speed graph history (UI.R24):** keep the last hour in the Host so it survives a closed window?
+- **Close button (TEST.4):** a scripted close is ignored the first time. Does a real click on the close button ever need two tries for you?
+- **Segment retries (UI.B15):** a segment that keeps getting bytes now retries without limit, as single-stream downloads already did. Want a cap on total retries per segment instead?
+- **Download all links:** should its Save in field show the app's default folder, as the folder window does? Today it is blank, meaning the app decides.
+
+### Owner's remaining checks (2026-11-08)
+
+- Owner: the 0.5.2 list "all work" (UI.R9 to UI.R13, TB.F15, UI.R2 verified). TB.F9 and TB.F14 "fixed already"; the add flow (TB.F10, TB.F2) "also done and fixed"; hover info (UI.R7) done; smoothing (UI.R8) removed; update window placement (UI.R14) fixed. Edge and Firefox go with the extension work (EXT.E1).
+
+### Owner's 0.5.3 check; extension requests (2026-11-08)
+
+- Owner on the 0.5.3 list: "all work as intended." Marked verified: UI.B4, UI.B5, UI.B6, UI.R15 to UI.R19, PERF.5 (option; follow-up still listed). UI.R6: "much better, they only move when digit count changes"; next step recorded. UI.R14 shows only on the next update.
+- Owner: make the extension more complete (status, pause, delete) beside the folder question: EXT.R2. Regression: the extension doesn't catch downloads reliably, for example TorBox's Direct Download button: EXT.B1; the test needs the owner's Edge signed in to TorBox. Both to work on during the web UI and Docker work, as agreed.
+
+### Release 0.5.3 (2026-11-08)
+
+- Owner: "publish the build so I can test". Main commit 79b8884, tag v0.5.3, https://github.com/Kaan88/inbound/releases/tag/v0.5.3. Contents: everything since 0.5.2 (UI.B4, UI.B5, UI.B6, UI.B3, UI.R6, UI.R14 to UI.R19, PERF.5 option).
+- Checks: manifest signature verified with the release key (same as 0.3.0 onwards), the latest feed serves 0.5.3, the downloaded Setup matches SHA256SUMS, the package has 7-Zip, the credential-token scan found nothing, and the squashed main tree equals `torbox-addflow`.
+- Not done: the owner's on-screen checks.
+
 ### Extension request for later (2026-11-08)
 
 - Owner: an extension option to ask whether to save to a default folder set in the extension, or a custom location, probably as a popup from the existing menu; to do during the web UI and Docker work. Recorded as EXT.R1.
@@ -172,24 +939,19 @@ Independent reviewers made five claims. I checked each against the code and repr
 
 **Not checked:** the race fixes are proved with the mock only; the delete of an item that exists was seen live in earlier stages, not again here. No sandbox Host ran in this stage.
 
-### Comparison with JDownloader's TorBox support, read only (2026-11-07)
+### Comparison with another download manager's TorBox support, read only (2026-11-07)
 
-JDownloader was not run this round, and its logs and settings were not read. Its side comes from the earlier bytecode reading of its two TorBox plugins, its container classes and its extraction code. Today I checked that both TorBox plugin files on disk still have the SHA-256 that reading was pinned to, so it still applies to the installed copy. Nothing in its side was seen running. This app's side says for each statement whether it was seen live in the stages above, read from code, or seen with the mock only. The installed JDownloader is a reference for suggestions, not a parity target. No code changed in this stage.
+Another download manager's TorBox support was read for its API usage; findings are folded into the plan (`docs/plans/torbox-integration.md`). It was not run. No code changed in this stage.
 
-| Point | JDownloader, read from its code | This app | Matters to the user? |
-|---|---|---|---|
-| Folder-link expansion | Needs `id` before `type` and something after `type`. Forwards the whole pasted query to `mylist` and never reads `name`. Reads only `files[]`. One package per folder, not per item. A missing item has no branch of its own: an unknown error marks the whole account unavailable for 5 minutes, and an item with no `files` can throw. A file name with no folder becomes its own folder. | **Seen live:** a link with a wrong `name` listed all 241 files under the item's real name. Chosen files landed at TorBox's paths with sizes equal and md5 equal where given. Same-named files in different folders stayed apart. An id not on the account failed in 0.7 s with words saying so. Web folder links worked. **Read from code:** the link is rebuilt from `id` and `type`, either order. One package per item. **Not run live:** usenet folder links, a removed item. | Yes, in this app's favour: one bad link doesn't block the account, and an item stays one package. Same result where both work. |
-| Hoster routing | Only links one of its own hoster plugins knows, after its own crawlers have expanded folders, so TorBox gets one link per file. Checks the hoster list (`status == false` turns a hoster off) and the per-hoster daily limits. Searches `mylist` for an item with the exact same `original_url` before creating. Keeps 65 s between creates, reserved before the POST. | **Seen live:** a hoster TorBox reports down stopped with no POST. Adds were spaced 65 s, cached ones too (waits of 41 s and 66 s). Asking again for a link already on the account returned the same id with no second item, and the app adopts it by hash. A hoster's bare address is refused. A hoster folder goes to TorBox as one item, and the file choice comes after. **Mock only:** a hoster's daily limit. | Partly. This app makes one create for a whole hoster folder where JD makes one per file, so a folder doesn't wait 65 s per file. Not seen: how TorBox treats an uncached hoster folder of which only some files are wanted. |
-| Magnets and torrents | Not sent to TorBox. No create, cache check or queue call for torrents. Only an item already on the account, through a folder link. | **Seen live:** cached magnet and `.torrent` reached file choice in 1.7 to 2.9 s; uncached ones in about 60 to 120 s after approval, one item each, sizes equal and 0 bad pieces. | Yes. JD has no reference here; this app's flow comes from the API and live runs. |
-| Cached versus uncached | Never asks TorBox whether a link is cached. Creates uncached items with no question. Ready means `download_present` and either `cached` or `download_finished`. | **Seen live:** a cache check, then approval asked for uncached, with nothing on the account until approved. Cached went on with no approval. **Owner decision recorded (TB.F2):** no approval for uncached links the user adds. Not built yet; TB.F10. | Yes, and it is the owner's call. JD's behaviour is the one the owner asked for; this app still asks today. |
-| Remote polling | One status pass per link per run, each fetching the whole web list. Wait is `eta` clamped to 15 to 60 s, else 30 s. Then the queue list, then a 1 minute grace, then "no longer exists" and a possible create again. The only state it tests is the prefix `failed`, which waits 3 hours, forever. | **Read from code:** the same 15 to 60 s clamp on `eta`. **Seen live:** stage words per state, an unknown `eta` and size no longer shown as a time, a lost create answer checked against the list before any resend, one item after a kill at create, processing and queue. TorBox did not start queued items by itself in 14 to 16 minutes; the app has no start or remove for them. | Yes. A failed item here ends with words and a user action, not an endless 3 hour wait. Both sides only wait on TorBox's queue. |
-| Errors and refusals | Reads `error` codes, not HTTP status. Treats `DOWNLOAD_SERVER_ERROR` as a 30 s wait and retry. Uses `LINK_OFFLINE` for a dead link. Rate limits are kept per endpoint with `Retry-After`. Clears the user's TorBox notifications after showing them. | **Seen live:** a dead link answers 500 `DOWNLOAD_SERVER_ERROR` with the reason in words and no item. This app now fails it once with TorBox's words (fixed in `4350e8b`). `LINK_OFFLINE` was never seen from the real service. A wrong key shows the refusal and creates nothing. An unreachable API retries by itself and submits once when back. **Read from code:** notifications are not read or cleared. **Mock only:** exhausted account limit, a real outage answer. | Yes. Read from its code, JD would keep retrying a dead link every 30 s. |
-| Direct links and expiry | Folder-link files get a new link on every attempt. A hoster download stores its link, which holds the key, in the link's properties and reuses it until opening fails. Every failure of a stored link counts as expiry, with no use of HTTP status. Up to 16 connections if the user raises it, default 1. | **Seen live:** no link is kept on disk. A stop of 360 s resumed with a new link and no restart. A forced 403 led to a new link and a resume from the same offset, md5 equal. A link always refused failed with the bytes kept. Never more than 4 connections carried data. **Not seen live:** real expiry. | Yes: no key on disk, and the 4-connection cap is kept. Real expiry is unverified on this side. |
-| Package and archive metadata | One package per folder. Reads `short_name`, `name`, `id`, `size`, `md5`, `infected`. `infected` is stored and nothing reads it. Archive sets from names (`partN.rar`, `NNN.rar`, `.rar` plus `.rNN`), with the volume flag in the header beating the name, and missing parts found from links the package knows. Deleting archives also deletes `.rev` recovery volumes. | **Seen live:** one package per item, TB.F6 folder rules on real data, two sets in one item stayed two, a held-back first, middle or last volume reads "Waiting: partN missing" and extracts once it arrives. **Read from code:** `infected` is shown in the file tree. The same three name shapes are grouped. No `.rev` handling. | Mostly in this app's favour. `.rev` files would be left behind after extraction with archive deletion on; not tried. |
-| Container import | RSDF and CCF read locally. Only `http`-style links come out of them, with no packages or passwords. DLC goes to JD's own service. DLC package names and archive passwords are applied; comment and category are dropped. | **Seen live:** RSDF and three CCF versions through the real Import JD Container dialog, made with this app's own writer, so it only shows reader and writer agree. Each link is listed with its kind and any refusal. Unticked links weren't sent. A stated password was used with no prompt. A real `.dlc` is not read, by the recorded decision, and "Open in JDownloader" is offered. Not pressed. | Yes for DLC: a user with only DLC files needs JDownloader. No container from other software was tried. |
-| Extraction and passwords | Extracts with 7-Zip-JBinding. Tries the set's passwords, the hoster link passwords, the archive's name, then a global list, and adds a password that works to that list. Writes passwords to its log in plain text. A hoster link password is sent once on create and is also tried on archives. | **Seen live:** "Password required", "Wrong password" and its dialog, then success with CRC equal. A wrong password is not in clear in the sandbox data. A stated container password used with no prompt. **Read from code:** only the set's own passwords; a hoster link password is sent on create (CLI `--link-password-stdin`) and kept apart from archives. **Not run live:** a hoster link that needs a password. | Yes. This app asks where JD would guess. That is the plan's rule, not a gap. |
+TorBox API facts the plan relies on, from the TorBox schema and this app's own runs (live unless said):
 
-**Kept different on purpose:** no guessing of archive passwords, no global list, no clearing of TorBox notifications, no stored direct links.
+- Ready means `download_present` and either `cached` or `download_finished` (read from code). Status waits use `eta` clamped to 15 to 60 s, else 30 s (read from code).
+- Web download creates are spaced 65 s per account, reserved before the POST. Asking again for a link already on the account returns the same id and no second item.
+- A dead hoster link answers 500 `DOWNLOAD_SERVER_ERROR` with the reason in words and no item. `LINK_OFFLINE` was never seen from the real service.
+- TorBox did not start queued items by itself in 14 to 16 minutes with slots free.
+- Direct links are fetched fresh for each attempt and never kept on disk. Real link expiry was not seen live.
+
+**Kept different on purpose:** no guessing of archive passwords, no global password list, no clearing of TorBox notifications, no stored direct links.
 
 **Suggestions added to ROADMAP**, for the owner to judge, nothing built: TB.S1 start or remove a queued TorBox item and give it its own words; TB.S2 offer a link's own hoster password to its own archive set; TB.S3 remove `.rev` recovery volumes with their set.
 
@@ -653,6 +1415,19 @@ Everything here is against the mock. No live call was made and no scenario is ve
 - Fix evidence: extension 56/56, typecheck, Integration 139/139. In the same browser, the uploaded zip through the new script runs as `olhbcdb…` and shows "Connected to the desktop app."; a keyless build of this source shows the new message with its ID, in Settings and in the notification on a real download.
 - Trap: Chrome for Testing saves downloads the extension leaves in Chrome to the user's real Downloads folder, and a separate instance also opens its own window and tray icon.
 - Not verified: a real store install (the listing is not public). The new message is not in the package under review. **Bump the extension version before the next store upload**, since this source differs from the uploaded 0.4.0.
+
+### Edge support (2026-11-06, branch `feature/edge-support`, not merged)
+
+- Owner decision: Edge is a required, supported browser, reversing C3. Firefox is required too and comes last, after everything else (ROADMAP FF.1, no work started). Edge users install the Chrome Web Store listing, so the same ID applies and no new ID is added. The Edge Add-ons listing (EXT.S1) stays parked because the owner cannot get into the Edge program.
+- Done in source: the native-host manifest is registered under `HKCU\Software\Microsoft\Edge\NativeMessagingHosts` as well as Chrome's, by Setup and by `register-native-host.ps1` (which install, repair and the updater all call). Edge's key is optional: a denied write gives a warning in the scripts and no error in Setup (`noerror` on that line only), and does not fail an install, repair or update; a denied Chrome key still does. `register-native-host.ps1` checks every key for a conflicting registration before writing anything, so `-Force` is needed for either and nothing is half written; a key whose manifest file is gone is not a conflict. The updater now replaces the `repair.ps1` and `register-native-host.ps1` that Setup put beside `app\`, adds none to a script install, and puts them back on rollback. The key paths are constants in `BrowserBridge`.
+- Uninstall: Setup's uninstaller and `uninstall.ps1` remove a key only when it points at this install's manifest or at a file that no longer exists. Both exceptions come from the uninstall log 0.4.0 already wrote. An install from 0.4.0 Setup that moves up through the in-app updater keeps the 0.4.0 uninstaller, which knows only Chrome's key, so uninstalling it leaves Edge's key dangling (the same after an update rolled back to 0.4.0); that key is not a conflict and the Host replaces it. A 0.4.0 install upgraded through a later Setup is expected to keep its old log entry that removes Chrome's key without the check. **Owner decision when releasing:** a first Edge version shipped through Setup avoids the dangling Edge key; one shipped only through the in-app updater leaves it on uninstall.
+- Registered state: each key is absent, usable or broken; usable means a manifest that lists the store origin and names a program that exists. Registered when either is usable. The status text (tray, status bar, CLI `status` and `doctor`, whose `integration:` line now shows this text) names a browser that cannot reach the host, such as `connected; Edge registration is broken` or `connected; not registered for Chrome`. Chrome with no Edge key stays `connected`. No protocol change: `HostStatusDto.BrowserIntegration` already carried this text.
+- Repair at Host start, both ways: when one key is usable and the other is missing or points at a file that is gone, the Host writes the working value into the other (best effort, log only on failure, skipped when `DOWNLOADMANAGER_DATA` is set, never replacing a registration whose manifest exists).
+- Wording: the app now says "browser" where Chrome was wrong for Edge (job source labels "Browser" and "Browser menu", the Settings checkbox, About text, INSTALL text) and so does the extension (notifications, popup, Settings consent text). Stored identifiers `chromeAuto` and `chromeContextMenu` are unchanged. The extension version is not bumped: the new extension wording reaches users only at the next Chrome Web Store upload.
+- Evidence run: Release build 0 warnings; Core 107, Engine 57, Integration 190 passed; extension typecheck and 50 of 50 tests. `NativeHostRegistrationTests` cover the key paths, the state logic, the status text, the repair over a fake store (Chrome only, Edge only, dangling key, foreign manifest, program gone, isolated data, write failure), and Setup's text with comments removed. `register-native-host.ps1` and `apply-update.ps1` run for real against a fake in-memory registry in a PowerShell whose `HKCU:` drive has been removed, so a call that escaped the fakes fails instead of reaching the registry: both keys written, Edge denied, Chrome denied, conflict, dangling key, root scripts replaced and restored on rollback. `uninstall.ps1` stops processes by name and removes the real shortcut, so it is never run; only its ownership function is, lifted out with the PowerShell parser. Breaking each of ten fixes in turn made at least one of these tests fail. `installer\DownloadManager.iss` compiles with ISCC 7 against placeholder content; that output was not run.
+- Earlier evidence about the store ID, with its source: the owner reports a real download handoff under the store ID worked in Edge on 0.4.0 (owner-reported; not reproduced here). The owner also confirms the Edge flyout stayed closed during it (UI.R2; the other half of that item, a normal flyout for downloads left to the browser, is still open). Measured on the installed 0.4.0 with no Edge key on the machine: Edge in a throwaway headless profile, under the store ID, got `host.ping` with `ok: true, pong`, so Edge does fall back to the Chrome key. Whether Edge reads its own key first when both exist was not measured: the check that writes the real registry was blocked by the session's permission system and needs the owner. The signed store CRX was verified (ID matches, 3 signatures valid, files the same as `dist` apart from Google's verification file and the manifest `key`/`update_url` difference), and a copy under the store ID answered `host.ping` with `ok: true, pong` through the installed 0.4.0 native host in Chrome for Testing 156 with a throwaway profile.
+- Not verified: Setup or an update writing the Edge key on a real machine; the Host repair writing a key on a real 0.4.0 install, including the Host's real registry store, which tests replace with a fake; Setup's uninstaller applying the ownership rule, which was compiled but never run; the dangling Edge key after 0.4.0 Setup, an in-app update and an uninstall from Settings > Apps, and after a rollback; a 0.4.0 install upgraded through a later Setup and then uninstalled; a real Chrome Web Store install in Edge, whether Edge shows a prompt about other stores, and its auto-update. No Setup, real registry write or browser run happened for this change. The owner's main session runs the real Edge check.
+- Traps: an agent shell can read a stale native-host registry value while a normal terminal reads the real one, and Chrome launched from the agent shell then reports "Specified native messaging host not found", so browser tests must run from a normal terminal; why the views differ is not established. The Chrome for Testing copy at `%TEMP%\opencode\cft\chrome-win64` lost its version manifest and fails to start with a side-by-side error; `%TEMP%\opencode\cft2\chrome-win64` works (CLAUDE.md corrected).
 
 ### Repository clean-up and media panel removal (2026-11-06)
 

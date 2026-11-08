@@ -32,13 +32,15 @@ public sealed class RemoteCommands : IDisposable
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
-    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null, ContainerImportService? containers = null)
+    /// <param name="roots">On a server, the folders whose files a client may have it read (container files). Null on the desktop.</param>
+    public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null,
+        ContainerImportService? containers = null, PathRoots? roots = null)
     {
         _providers = providers;
         _jobs = jobs;
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
-        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log);
+        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots);
 
         _jobs.Changed += OnJobChanged;
         _jobs.Removed += OnJobRemoved;
@@ -322,7 +324,9 @@ public sealed class RemoteCommands : IDisposable
             FilePaths = request.FilePaths?.Select(file => new RemoteChosenPath(file?.Path ?? string.Empty, file?.Size ?? 0)).ToList(),
             ApprovedUncached = request.ApproveUncached,
             LinkPassword = request.LinkPassword,
-            ArchivePassword = request.ArchivePassword,
+            ArchivePassword = OfferedLinkPassword(request) ?? request.ArchivePassword,
+            // An offer only: a password the package gets from the user meanwhile stays.
+            ArchivePasswordOffered = OfferedLinkPassword(request) is not null,
         }, cancellationToken).ConfigureAwait(false);
 
         return new RemoteAddResultDto
@@ -450,7 +454,14 @@ public sealed class RemoteCommands : IDisposable
             return ToDto(await _jobs.ApproveUncachedAsync(request.JobId, cancellationToken).ConfigureAwait(false));
         }
 
-        return ToDto(await _jobs.RetryAsync(request.JobId, request.LinkPassword, request.ApproveUncached, cancellationToken).ConfigureAwait(false));
+        var retried = await _jobs.RetryAsync(request.JobId, request.LinkPassword, request.ApproveUncached, cancellationToken).ConfigureAwait(false);
+        if (retried.Ok && request.LinkPasswordForArchives && UsableForArchives(request.LinkPassword))
+        {
+            var offered = await _jobs.OfferArchivePasswordAsync(request.JobId, request.LinkPassword!, cancellationToken).ConfigureAwait(false);
+            if (!offered.Ok) return ToDto(offered);
+        }
+
+        return ToDto(retried);
     }
 
     public async Task<RemoteActionResultDto> CheckNowAsync(RemoteCheckNowRequest request, CancellationToken cancellationToken = default)
@@ -472,8 +483,24 @@ public sealed class RemoteCommands : IDisposable
     public async Task<RemoteActionResultDto> RemoveAsync(RemoteJobIdRequest request, CancellationToken cancellationToken = default)
         => ToDto(await _jobs.RemoveAsync(request.JobId, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>TB.S1: starts the job's entry in the provider's queue. Removing it is <see cref="DeleteRemoteAsync"/>, confirmed.</summary>
+    public async Task<RemoteActionResultDto> StartQueuedAsync(RemoteJobIdRequest request, CancellationToken cancellationToken = default)
+        => ToDto(await _jobs.ControlQueuedAsync(request.JobId, RemoteQueueAction.Start, cancellationToken).ConfigureAwait(false));
+
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(RemoteDeleteRequest request, CancellationToken cancellationToken = default)
         => ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// TB.S2: the link's password, when the user agreed to have it tried on this job's own archives and gave no archive
+    /// password of their own. Null otherwise, and for one the archive side couldn't take anyway.
+    /// </summary>
+    private static string? OfferedLinkPassword(RemoteAddRequestDto request)
+        => request.LinkPasswordForArchives && string.IsNullOrEmpty(request.ArchivePassword) && UsableForArchives(request.LinkPassword)
+            ? request.LinkPassword
+            : null;
+
+    private static bool UsableForArchives(string? password)
+        => !string.IsNullOrEmpty(password) && RemoteJobRules.DescribeBadArchivePassword(password) is null;
 
     public async Task<RemoteActionResultDto> SetArchivePasswordAsync(RemoteArchivePasswordRequest request, CancellationToken cancellationToken = default)
         => ToDto(await _jobs.SetArchivePasswordAsync(request.JobId, request.Password, cancellationToken).ConfigureAwait(false));

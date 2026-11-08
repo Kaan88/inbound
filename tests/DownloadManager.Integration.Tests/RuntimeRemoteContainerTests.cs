@@ -1,3 +1,4 @@
+using DownloadManager.Tests.Shared;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -385,6 +386,8 @@ public sealed partial class RuntimeServiceTests
         var jd = PretendJd.Answering("success");
         await using var rig = await ContainerRig.CreateAsync(_server, bridge: new JDownloaderBridge(jd));
 
+        // A drive path stands for a full path here; on Linux that is the same path from /.
+        if (path.StartsWith(@"C:\", StringComparison.Ordinal)) path = TestPaths.Native(path);
         var preview = await rig.PreviewAsync(path);
         Assert.False(preview.Ok);
         Assert.Contains(expected, preview.Error);

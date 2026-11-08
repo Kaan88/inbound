@@ -1,4 +1,5 @@
 import { connectionProblem } from "./connection-problem";
+import { actionsFor, latestJobsByTarget, type JobAction, type JobSummary } from "./job-list";
 
 interface Settings {
   enabled: boolean;
@@ -7,29 +8,25 @@ interface Settings {
   notifications: boolean;
 }
 
-interface JobSummary {
-  id: string;
-  fileName: string;
-  state: string;
-  receivedBytes: number;
-  totalBytes?: number;
-  progress?: number;
-  bytesPerSecond?: number;
-  estimatedRemaining?: string | number | null;
-  failure?: { message?: string };
-}
-
 interface Status {
   ok: boolean;
   extensionVersion?: string;
   enabled?: boolean;
   autoIntercept?: boolean;
+  automaticSending?: boolean;
   connected?: boolean;
   lastError?: string;
   pauseUntil?: number;
   settings?: Settings;
+  leftInBrowser?: Array<{ fileName: string; reason: string; at: number }>;
   jobs?: JobSummary[];
+  /** The desktop app is not installed here and a server is paired: the server is the only place. */
+  localMissing?: boolean;
+  server?: { address: string; name?: string; connected: boolean; lastError: string } | null;
 }
+
+// Set from the status: with a server paired, every download is labelled with where it is.
+let serverAddress: string | null = null;
 
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const statusDot = document.getElementById("statusDot") as HTMLSpanElement;
@@ -133,18 +130,81 @@ function stateLabel(state: string): string {
 }
 
 let pauseActive = false;
+// The list is redrawn every second, so a Delete being confirmed is remembered here: job id -> "delete the file too".
+const confirmingDelete = new Map<string, boolean>();
+let shownJobs: JobSummary[] = [];
+
+const ACTION_LABELS: Record<JobAction, string> = { pause: "Pause", resume: "Resume", retry: "Retry", remove: "Delete" };
+
+async function runJobAction(job: JobSummary, action: JobAction, deleteFile = false): Promise<void> {
+  clearError();
+  try {
+    const result = (await chrome.runtime.sendMessage({
+      type: "dm.jobAction", action, jobId: job.id, deleteFile, target: job.target ?? "local",
+    })) as { ok?: boolean; error?: string };
+    if (!result?.ok) showError(result?.error || "The app did not do that.");
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error));
+  }
+  confirmingDelete.delete(job.id);
+  await pollJobs();
+}
+
+function actionRow(job: JobSummary): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "job-actions";
+  const label = job.fileName || "this download";
+  if (confirmingDelete.has(job.id)) {
+    const option = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = confirmingDelete.get(job.id) === true;
+    box.addEventListener("change", () => confirmingDelete.set(job.id, box.checked));
+    option.append(box, "Delete the file too");
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.textContent = "Delete";
+    confirm.title = job.target === "server" ? `Remove ${label} from the server` : `Remove ${label} from Inbound`;
+    confirm.addEventListener("click", () => void runJobAction(job, "remove", confirmingDelete.get(job.id) === true));
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "quiet";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { confirmingDelete.delete(job.id); renderJobs(shownJobs); });
+    row.append(option, confirm, cancel);
+    return row;
+  }
+  for (const action of actionsFor(job)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = ACTION_LABELS[action];
+    button.title = `${ACTION_LABELS[action]} ${label}`;
+    button.addEventListener("click", () => {
+      if (action === "remove") {
+        // Delete asks first, with "Delete the file too" unticked.
+        confirmingDelete.set(job.id, false);
+        renderJobs(shownJobs);
+      } else {
+        void runJobAction(job, action);
+      }
+    });
+    row.append(button);
+  }
+  return row;
+}
 
 function renderJobs(jobs: JobSummary[]): void {
+  shownJobs = latestJobsByTarget(jobs);
   jobsList.replaceChildren();
-  if (!jobs.length) {
+  if (!shownJobs.length) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = "No recent downloads.";
+    empty.textContent = "No downloads.";
     jobsList.append(empty);
     return;
   }
 
-  for (const job of jobs.slice(0, 8)) {
+  for (const job of shownJobs) {
     const item = document.createElement("li");
     const name = document.createElement("span");
     name.className = "name";
@@ -177,7 +237,16 @@ function renderJobs(jobs: JobSummary[]): void {
       meta.textContent += ` — ${job.failure.message}`;
     }
 
-    item.append(name, state, meta);
+    if (serverAddress) {
+      // EXT.R1: which place the download is in, when there are two.
+      const where = document.createElement("span");
+      where.className = "target-tag";
+      where.dataset.target = job.target ?? "local";
+      where.textContent = job.target === "server" ? "Server" : "This PC";
+      item.append(name, where, state, meta);
+    } else {
+      item.append(name, state, meta);
+    }
 
     if (typeof job.progress === "number" && job.progress > 0 && job.progress < 1) {
       const progress = document.createElement("div");
@@ -188,7 +257,49 @@ function renderJobs(jobs: JobSummary[]): void {
       item.append(progress);
     }
 
+    item.append(actionRow(job));
     jobsList.append(item);
+  }
+}
+
+function renderServer(status: Status): void {
+  const card = document.getElementById("serverCard") as HTMLElement;
+  card.classList.toggle("hidden", !status.server);
+  if (!status.server) return;
+  const dot = document.getElementById("serverDot") as HTMLSpanElement;
+  dot.className = `dot ${status.server.connected ? "ok" : "bad"}`;
+  (document.getElementById("serverLabel") as HTMLSpanElement).textContent = status.server.connected
+    ? "Connected to the server"
+    : "Server not answering";
+  (document.getElementById("serverDetail") as HTMLSpanElement).textContent = status.server.connected
+    ? status.server.address.replace(/^https?:\/\//, "")
+    : status.server.lastError || status.server.address;
+}
+
+function renderLeftInBrowser(notes: Status["leftInBrowser"]): void {
+  const card = document.getElementById("leftCard") as HTMLElement;
+  const list = document.getElementById("leftList") as HTMLUListElement;
+  // Only recent ones: an old note would explain a download nobody is wondering about any more.
+  const recent = (notes ?? []).filter((note) => Date.now() - note.at < 30 * 60 * 1000).slice(0, 3);
+  card.classList.toggle("hidden", recent.length === 0);
+  list.replaceChildren(...recent.map((note) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = note.fileName;
+    item.append(name, `: ${note.reason}`);
+    return item;
+  }));
+}
+
+async function pollJobs(): Promise<void> {
+  try {
+    const result = (await chrome.runtime.sendMessage({ type: "dm.jobs" })) as { ok?: boolean; jobs?: JobSummary[] };
+    if (Array.isArray(result?.jobs)) {
+      renderJobs(result.jobs);
+    }
+  } catch {
+    // The worker may be restarting; the manual Refresh button still works.
   }
 }
 
@@ -202,8 +313,14 @@ async function refresh(): Promise<void> {
 
     const enabled = status.settings?.enabled ?? status.enabled ?? false;
     const connected = status.connected ?? false;
+    serverAddress = status.server?.address ?? null;
+    renderServer(status);
+    // Without the desktop app here, the paired server is the only place; its card says how it is.
+    (document.getElementById("statusCard") as HTMLElement).classList.toggle("hidden", status.localMissing === true);
     statusDot.className = "dot";
-    if (!enabled) {
+    if (status.localMissing) {
+      statusText.textContent = status.server?.connected ? "Server connected" : "Server not answering";
+    } else if (!enabled) {
       statusDot.classList.add("warn");
       statusLabel.textContent = "Automatic sending is off";
       statusDetail.textContent = "Right-click a link to send it, or turn it on in Settings.";
@@ -214,7 +331,7 @@ async function refresh(): Promise<void> {
       statusDetail.textContent = !status.settings?.autoIntercept
         ? "Automatic sending is off. Right-click a link to send it, or turn it on in Settings."
         : status.pauseUntil && status.pauseUntil > Date.now()
-          ? "Catching is paused. Downloads stay in Chrome."
+          ? "Catching is paused. Downloads stay in your browser."
           : "Downloads that match your rules are sent automatically";
       statusText.textContent = "Connected";
     } else {
@@ -224,8 +341,19 @@ async function refresh(): Promise<void> {
       statusText.textContent = "Disconnected";
     }
 
-    getApp.classList.toggle("hidden", !enabled || connected);
+    getApp.classList.toggle("hidden", !enabled || connected || status.localMissing === true);
     pauseActive = !!status.pauseUntil && status.pauseUntil > Date.now();
+
+    // EXT.B1: whether downloads are caught automatically is always in view, with the way to turn it on.
+    const autoState = document.getElementById("autoState") as HTMLSpanElement;
+    const automatic = status.automaticSending ?? (enabled && !!status.settings?.autoIntercept);
+    autoState.dataset.on = String(automatic && !pauseActive);
+    autoState.textContent = !automatic
+      ? "Automatic sending: off"
+      : pauseActive ? "Automatic sending: paused" : "Automatic sending: on";
+    (document.getElementById("autoTurnOn") as HTMLButtonElement).classList.toggle("hidden", automatic);
+    renderLeftInBrowser(status.leftInBrowser);
+
     const pauseButton = document.getElementById("pauseCatching") as HTMLButtonElement;
     pauseButton.textContent = pauseActive
       ? `Resume catching (${Math.ceil((status.pauseUntil! - Date.now()) / 60000)} min left)`
@@ -235,6 +363,7 @@ async function refresh(): Promise<void> {
       : "Let the browser handle downloads for the next 5 minutes.";
 
     renderJobs(status.jobs ?? []);
+    void pollJobs();
   } catch (error) {
     statusDot.className = "dot bad";
     statusLabel.textContent = "Extension not ready";
@@ -247,19 +376,8 @@ async function refresh(): Promise<void> {
 document.addEventListener("DOMContentLoaded", () => {
   void refresh();
 
-  const liveTimer = window.setInterval(async () => {
-    try {
-      const result = (await chrome.runtime.sendMessage({ type: "dm.jobs" })) as {
-        ok?: boolean;
-        jobs?: JobSummary[];
-      };
-      if (Array.isArray(result?.jobs)) {
-        renderJobs(result.jobs);
-      }
-    } catch {
-      // The worker may be restarting; the manual Refresh button still works.
-    }
-  }, 1000);
+  // Only while the popup is open.
+  const liveTimer = window.setInterval(() => void pollJobs(), 1000);
   window.addEventListener("unload", () => window.clearInterval(liveTimer));
 
   (document.getElementById("refresh") as HTMLButtonElement).addEventListener("click", () => {
@@ -293,6 +411,14 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
     }
+  });
+
+  (document.getElementById("openServer") as HTMLButtonElement).addEventListener("click", () => {
+    if (serverAddress) void chrome.tabs.create({ url: `${serverAddress}/` });
+  });
+
+  (document.getElementById("autoTurnOn") as HTMLButtonElement).addEventListener("click", () => {
+    void chrome.runtime.openOptionsPage();
   });
 
   (document.getElementById("options") as HTMLButtonElement).addEventListener("click", () => {

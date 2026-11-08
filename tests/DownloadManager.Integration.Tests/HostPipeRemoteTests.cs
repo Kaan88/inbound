@@ -12,6 +12,7 @@ namespace DownloadManager.Integration.Tests;
 /// place of the provider. Nothing here reaches the real provider, the installed app or real state:
 /// each test has its own profile, and every value is invented.
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed class HostPipeRemoteTests : IAsyncLifetime
 {
     private const string Key = "5e2f7c1a-93bd-4a60-8c17-0fd2b6e4a913";
@@ -927,6 +928,15 @@ public sealed class HostPipeRemoteTests : IAsyncLifetime
         var odd = await host.RunCliAsync(link, "remote", "add", "-", "--item", "5");
         Assert.Equal(2, odd.ExitCode);
         Assert.Contains("--item", odd.Error);
+
+        // TB.S2: offering a link password to archives needs a link password; alone it is refused, not ignored.
+        var archivesOnly = await host.RunCliAsync(link, "remote", "add", "-", "--link-password-for-archives");
+        Assert.Equal(2, archivesOnly.ExitCode);
+        Assert.Contains("--link-password-stdin", archivesOnly.Error);
+        var retryArchivesOnly = await host.RunCliAsync(null, "remote", "retry", "1", "--link-password-for-archives");
+        Assert.Equal(2, retryArchivesOnly.ExitCode);
+        Assert.Contains("--link-password-stdin", retryArchivesOnly.Error);
+        Assert.Empty((await connection.AskAsync<SnapshotDto>(MessageTypes.JobsQuery, new { })).Jobs);
 
         // Through the provider, with nothing chosen: when it is ready it starts.
         var added = await host.RunCliAsync(link, "remote", "add", "-", "--dest", host.Destination);

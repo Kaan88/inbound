@@ -87,7 +87,7 @@ internal static partial class Program
             {
                 if (words.Count != 2)
                 {
-                    return RemoteUsage("remote add <link> [--approve-uncached] [--dest DIR] [--queue ID] [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin] [--archive-password-stdin]\n" +
+                    return RemoteUsage("remote add <link> [--approve-uncached] [--dest DIR] [--queue ID] [--start startNow|queue|later] [--select all|ask|ID,ID] [--link-password-stdin [--link-password-for-archives]] [--archive-password-stdin]\n" +
                                        "Use - for <link> to read it from standard input, which keeps it off the command line.");
                 }
 
@@ -97,6 +97,8 @@ internal static partial class Program
                 {
                     return RemoteUsage("remote add takes a link. --item, --provider, --offset and --limit aren't used by it.");
                 }
+
+                if (ArchivesFlagWithoutLinkPassword(args)) return RemoteUsage(ArchivesFlagNeedsLinkPassword);
 
                 return await RemoteAddAsync(client, args, ReadLinkArgument(words[1]), json).ConfigureAwait(false);
             }
@@ -185,7 +187,8 @@ internal static partial class Program
 
             case "retry":
             {
-                if (await RemoteJobIdAsync(client, words, "remote retry <id> [--approve-uncached] [--link-password-stdin]").ConfigureAwait(false) is not { } id)
+                if (ArchivesFlagWithoutLinkPassword(args)) return RemoteUsage(ArchivesFlagNeedsLinkPassword);
+                if (await RemoteJobIdAsync(client, words, "remote retry <id> [--approve-uncached] [--link-password-stdin [--link-password-for-archives]]").ConfigureAwait(false) is not { } id)
                 {
                     return 2;
                 }
@@ -195,6 +198,7 @@ internal static partial class Program
                     JobId = id,
                     ApproveUncached = args.Contains("--approve-uncached", StringComparer.OrdinalIgnoreCase) ? true : null,
                     LinkPassword = args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase) ? ReadSecretLine("Link password: ") : null,
+                    LinkPasswordForArchives = args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase),
                 }).ConfigureAwait(false), json);
             }
 
@@ -212,6 +216,18 @@ internal static partial class Program
                 }
 
                 return PrintRemoteAction(await AskAsync<RemoteActionResultDto>(client, MessageTypes.RemoteCheckNow, request).ConfigureAwait(false), json);
+            }
+
+            case "start-queued":
+            {
+                // TB.S1. Taking it out of the queue instead is "remote remove <id> --delete-from-provider --yes".
+                if (await RemoteJobIdAsync(client, words, "remote start-queued <id>").ConfigureAwait(false) is not { } id)
+                {
+                    return 2;
+                }
+
+                return PrintRemoteAction(await AskAsync<RemoteActionResultDto>(client, MessageTypes.RemoteStartQueued,
+                    new RemoteJobIdRequest { JobId = id }).ConfigureAwait(false), json);
             }
 
             case "remove":
@@ -411,6 +427,8 @@ internal static partial class Program
         if (args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase))
         {
             request.LinkPassword = ReadSecretLine("Link password: ");
+            // TB.S2: the user's own go-ahead to try it on this link's archives too.
+            request.LinkPasswordForArchives = args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase);
         }
 
         if (args.Contains("--archive-password-stdin", StringComparer.OrdinalIgnoreCase))
@@ -742,6 +760,14 @@ internal static partial class Program
 
         return word;
     }
+
+    private const string ArchivesFlagNeedsLinkPassword =
+        "--link-password-for-archives offers the password given with --link-password-stdin to the link's archives, so it needs --link-password-stdin too.";
+
+    /// <summary>TB.S2: the archives flag only widens a link password given here; on its own it would quietly do nothing.</summary>
+    private static bool ArchivesFlagWithoutLinkPassword(string[] args) =>
+        args.Contains("--link-password-for-archives", StringComparer.OrdinalIgnoreCase) &&
+        !args.Contains("--link-password-stdin", StringComparer.OrdinalIgnoreCase);
 
     private static int RemoteUsage(string usage)
     {

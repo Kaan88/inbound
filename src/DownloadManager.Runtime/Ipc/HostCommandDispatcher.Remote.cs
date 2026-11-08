@@ -1,10 +1,9 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
-using DownloadManager.Runtime.Remote;
 
-namespace DownloadManager.Host;
+namespace DownloadManager.Runtime.Ipc;
 
-public sealed partial class HostPipeServer
+public sealed partial class HostCommandDispatcher
 {
     /// <summary>
     /// These wait on the network, so they run under a lifetime that ends when their client goes
@@ -12,12 +11,12 @@ public sealed partial class HostPipeServer
     /// </summary>
     private static bool WaitsOnProvider(string type) => type is
         MessageTypes.RemoteAccountGet or MessageTypes.RemoteAccountValidate or MessageTypes.RemoteClassify or MessageTypes.RemoteHosters or
-        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or
+        MessageTypes.RemoteAdd or MessageTypes.RemoteItemGet or MessageTypes.RemoteFiles or MessageTypes.RemoteSelect or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteStartQueued or
         MessageTypes.RemoteContainerPreview or MessageTypes.RemoteContainerAdd or MessageTypes.RemoteContainerSendToJd or
         // Classifies a changed address before it applies it. A client that gave up has said it wasn't changed.
         MessageTypes.JobRefreshUrl;
 
-    private async Task<bool> TryDispatchRemoteAsync(ClientConnection client, IpcMessage message, CancellationToken cancellationToken)
+    private async Task<bool> TryDispatchRemoteAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
     {
         if (_remote is not { } remote || !message.Type.StartsWith("remote.", StringComparison.Ordinal))
         {
@@ -35,7 +34,8 @@ public sealed partial class HostPipeServer
             MessageTypes.RemoteItemGet => MessageTypes.RemoteItemResult,
             MessageTypes.RemoteFiles => MessageTypes.RemoteFilesResult,
             MessageTypes.RemoteSelect or MessageTypes.RemoteRetry or MessageTypes.RemoteCheckNow or
-            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteArchivePassword => MessageTypes.RemoteActionResult,
+            MessageTypes.RemoteRemove or MessageTypes.RemoteDeleteRemote or MessageTypes.RemoteArchivePassword or
+            MessageTypes.RemoteStartQueued => MessageTypes.RemoteActionResult,
             MessageTypes.RemoteContainerPreview => MessageTypes.RemoteContainerPreviewResult,
             MessageTypes.RemoteContainerAdd => MessageTypes.RemoteContainerAddResult,
             MessageTypes.RemoteContainerSendToJd => MessageTypes.RemoteContainerSendResult,
@@ -64,6 +64,7 @@ public sealed partial class HostPipeServer
                 MessageTypes.RemoteRetry => await remote.RetryAsync(message.GetPayload<RemoteRetryRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteCheckNow => await remote.CheckNowAsync(Payload<RemoteCheckNowRequest>(message), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteRemove => await remote.RemoveAsync(message.GetPayload<RemoteJobIdRequest>(), cancellationToken).ConfigureAwait(false),
+                MessageTypes.RemoteStartQueued => await remote.StartQueuedAsync(message.GetPayload<RemoteJobIdRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteArchivePassword => await remote.SetArchivePasswordAsync(message.GetPayload<RemoteArchivePasswordRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteContainerPreview => await remote.ContainerPreviewAsync(message.GetPayload<RemoteContainerPreviewRequest>(), cancellationToken).ConfigureAwait(false),
                 MessageTypes.RemoteContainerAdd => await remote.ContainerAddAsync(message.GetPayload<RemoteContainerAddRequest>(), cancellationToken).ConfigureAwait(false),
@@ -91,7 +92,7 @@ public sealed partial class HostPipeServer
         => message.Payload is null ? new T() : message.GetPayload<T>();
 
     /// <summary>A frame over the limit would end the connection, and a very large item shouldn't do that to a frontend.</summary>
-    private async Task ReplyWithinFrameAsync(ClientConnection client, IpcMessage request, string type, object reply)
+    private async Task ReplyWithinFrameAsync(IClientSession client, IpcMessage request, string type, object reply)
     {
         var message = IpcMessage.Create(type, reply, request.Id);
         if (message.Payload is { } payload && payload.GetRawText().Length >= Protocol.MaxFrameBytes - 1024)
@@ -101,15 +102,11 @@ public sealed partial class HostPipeServer
             return;
         }
 
-        await client.SendAsync(message).ConfigureAwait(false);
+        client.Enqueue(message);
     }
 
-    private void OnRemoteChanged(object? sender, RemoteChangedDto change)
-    {
-        var message = IpcMessage.Create(MessageTypes.RemoteChanged, change);
-        foreach (var client in _clients.Values)
-        {
-            client.Writer.TryWrite(message);
-        }
-    }
+    private void OnRemoteChanged(object? sender, RemoteChangedDto change) => BroadcastRemoteChanged(change);
+
+    public void BroadcastRemoteChanged(RemoteChangedDto change)
+        => Broadcast(IpcMessage.Create(MessageTypes.RemoteChanged, change));
 }

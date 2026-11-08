@@ -70,7 +70,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.True(probe.AllVolumesPresent);
         Assert.Equal("Rar5", probe.Version);
         Assert.False(probe.ListingHasUnknownLines);
-        Assert.Contains(probe.Entries, entry => entry.Path == @"sub\big.bin" && entry.Size == 600 * 1024 && !entry.IsLink);
+        Assert.Contains(probe.Entries, entry => entry.Path == Workspace.Native(@"sub\big.bin") && entry.Size == 600 * 1024 && !entry.IsLink);
         Assert.Contains(probe.Entries, entry => entry.Path == "sub" && entry.Kind == ArchiveEntryKind.Directory);
     }
 
@@ -322,7 +322,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
         Assert.True(probe.IsVolume);
         Assert.Equal(1, probe.VolumeNumber);
         Assert.True(probe.AllVolumesPresent);
-        Assert.Single(probe.Entries, entry => entry.Path == @"sub\big.bin");
+        Assert.Single(probe.Entries, entry => entry.Path == Workspace.Native(@"sub\big.bin"));
 
         await Extractor().ExtractAsync(Request(first), null, CancellationToken.None);
         Space.AssertSameAsSource();
@@ -558,7 +558,7 @@ public sealed class Rar5ExtractionTests : ExtractionTestBase
 
         Assert.Equal("old", File.ReadAllText(Space.Output("readme.txt")));
         Assert.Contains(result.Files, file => file.EntryPath == "readme.txt" && file.Outcome == ExtractedFileOutcome.Skipped);
-        Assert.True(File.Exists(Space.Output(@"sub\deep\note.txt")));
+        Assert.True(File.Exists(Space.Output(Workspace.Native(@"sub\deep\note.txt"))));
     }
 
     [RequiresRarFact]
@@ -784,7 +784,7 @@ public sealed class HandBuiltExtractionTests : ExtractionTestBase
         await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
 
         Assert.Equal(Text, File.ReadAllBytes(Space.Output("a.txt")));
-        Assert.Equal(Text, File.ReadAllBytes(Space.Output(@"sub\b.txt")));
+        Assert.Equal(Text, File.ReadAllBytes(Space.Output(Workspace.Native(@"sub\b.txt"))));
     }
 
     [RequiresSevenZipFact]

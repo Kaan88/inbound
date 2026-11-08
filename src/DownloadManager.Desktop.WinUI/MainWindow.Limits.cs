@@ -96,7 +96,7 @@ public sealed partial class MainWindow
             DefaultButton = ContentDialogButton.Primary,
             RequestedTheme = RootGrid.ActualTheme,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || double.IsNaN(box.Value) || box.Value <= 0)
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary || double.IsNaN(box.Value) || box.Value <= 0)
         {
             UpdateLimitButtons();
             return;
@@ -162,6 +162,6 @@ public sealed partial class MainWindow
             CloseButtonText = "OK",
             RequestedTheme = RootGrid.ActualTheme,
         };
-        _ = dialog.ShowAsync();
+        _ = DialogGuard.ShowAsync(dialog);
     }
 }

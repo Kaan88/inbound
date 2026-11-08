@@ -4,11 +4,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>true</Deterministic>
-    <Version>0.5.3</Version>
+    <Version>0.6.0</Version>
     <Company>Private</Company>
     <Product>Inbound Download Manager</Product>
     <Copyright>Private use</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
+    <!-- The app is English only, so the framework's translated resources are not shipped. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <AnalysisLevel>latest</AnalysisLevel>
   </PropertyGroup>
 </Project>

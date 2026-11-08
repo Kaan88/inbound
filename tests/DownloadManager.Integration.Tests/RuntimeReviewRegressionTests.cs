@@ -511,11 +511,11 @@ public sealed partial class RuntimeServiceTests
         Assert.True(response.Accepted, response.Error);
         Assert.DoesNotContain(LinkSecret, response.Job!.Url);
         Assert.DoesNotContain(LinkSecret, response.Job.PageUrl);
-        Assert.Equal(ProviderLinks.MaxConnections, response.Job.RequestedConnections);
+        Assert.Equal(Math.Min(8, ProviderLinks.MaxConnections), response.Job.RequestedConnections);
         Assert.Empty(ctx.Service.GetSnapshot().Settings.RecentUrls);
         Assert.DoesNotContain(LinkSecret, JsonSerializer.Serialize(ctx.Service.GetSnapshot()));
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
-        Assert.Contains("dpapi:v1:", await JobJsonAsync(ctx, response.Job.Id));
+        Assert.Contains(SecretProtector.Current.Prefix, await JobJsonAsync(ctx, response.Job.Id));
     }
 
     [Fact]
@@ -584,7 +584,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Null(restored.FinalUrl);
         Assert.DoesNotContain(LinkSecret, JsonSerializer.Serialize(ctx.Service.GetSnapshot()));
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
-        Assert.Contains("dpapi:v1:", await JobJsonAsync(ctx, job.Id));
+        Assert.Contains(SecretProtector.Current.Prefix, await JobJsonAsync(ctx, job.Id));
 
         Assert.True((await ctx.Service.ResumeAsync(job.Id)).Ok);
         var completed = await ctx.WaitFor(job.Id, current => current.State == "completed");

@@ -49,6 +49,11 @@ public sealed class JobDto
     public string? LastModified { get; set; }
     public int RequestedConnections { get; set; }
     public int ActiveConnections { get; set; }
+    /// <summary>
+    /// The host name (never the address) this running download is waiting on for a free connection while it
+    /// has none. Null otherwise. Added in protocol 1 without a bump: older clients ignore it.
+    /// </summary>
+    public string? WaitingForHost { get; set; }
     public double? BytesPerSecond { get; set; }
     public long? SpeedLimitBytesPerSecond { get; set; }
     public bool? ResumeSupported { get; set; }
@@ -199,8 +204,9 @@ public sealed class SettingsDto
     public int DefaultConnections { get; set; } = 8;
     /// <summary>New downloads go to their category's folder (Options, Categories); off, they go to the download folder.</summary>
     public bool UseCategoryFolders { get; set; } = true;
-    /// <summary>PERF.5: closing the main window ends its process instead of hiding it; the tray starts it again.</summary>
-    public bool CloseWindowCompletely { get; set; }
+    /// <summary>PERF.5: closing the main window ends its process instead of hiding it; the tray starts it again. On by default
+    /// (owner, 2026-11-08); settings saved with a value keep it, and settings that never stored one get on.</summary>
+    public bool CloseWindowCompletely { get; set; } = true;
     public int MaxConnectionsPerHost { get; set; } = 8;
     public List<ConnectionProfileDto> ConnectionProfiles { get; set; } = new();
     public long? GlobalSpeedLimitBytesPerSecond { get; set; }
@@ -280,6 +286,17 @@ public sealed class SnapshotDto
     public List<JobDto> Jobs { get; set; } = new();
     public SettingsDto Settings { get; set; } = new();
     public HostStatusDto Status { get; set; } = new();
+}
+
+/// <summary>
+/// UI.R24: total download speed, one figure per <see cref="IntervalSeconds"/> from <see cref="Start"/>, oldest first,
+/// in bytes per second. It starts no earlier than the Host did; the last figure is the second under way.
+/// </summary>
+public sealed class SpeedHistoryDto
+{
+    public DateTimeOffset Start { get; set; }
+    public int IntervalSeconds { get; set; } = 1;
+    public List<long> BytesPerSecond { get; set; } = new();
 }
 
 public sealed class FolderPickRequest
@@ -454,6 +471,17 @@ public sealed class SettingsResult
     public bool Ok { get; set; }
     public SettingsDto Settings { get; set; } = new();
     public string? Error { get; set; }
+}
+
+/// <summary>
+/// The folders a download can start in, for a client that may not see the settings (the browser
+/// extension): the default folder and the favorites, and nothing else.
+/// </summary>
+public sealed class DownloadFoldersResult
+{
+    public bool Ok { get; set; }
+    public string DefaultFolder { get; set; } = string.Empty;
+    public List<FavoriteFolderDto> Favorites { get; set; } = new();
 }
 
 public sealed class HostActionRequest

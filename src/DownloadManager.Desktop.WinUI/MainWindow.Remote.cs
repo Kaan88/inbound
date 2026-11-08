@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Runtime.InteropServices;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -32,6 +31,8 @@ public sealed partial class MainWindow
     private MenuFlyoutItem? _menuRemoteRetry;
     private MenuFlyoutItem? _menuRemoteCheckNow;
     private MenuFlyoutItem? _menuRemoteRemove;
+    private MenuFlyoutItem? _menuRemoteStartQueued;
+    private MenuFlyoutItem? _menuRemoteDequeue;
     private MenuFlyoutSeparator? _remoteContextSeparator;
     private string? _pendingRemoteCategory;
     private string _remoteTasksOffers = string.Empty;
@@ -355,10 +356,13 @@ public sealed partial class MainWindow
         _menuRemoteRetry = CreateContextItem("Retry", async (_, _) => await RetryRemoteAsync(SelectedRemoteJobs));
         _menuRemoteCheckNow = CreateContextItem("Check Now", async (_, _) => await CheckRemoteNowAsync(SelectedRemoteJobs));
         _menuRemoteCheckNow.KeyboardAcceleratorTextOverride = "F5";
+        // TB.S1: named for the provider when the menu opens.
+        _menuRemoteStartQueued = CreateContextItem("Start Now", async (_, _) => await StartQueuedAsync(SelectedRemoteJobs));
+        _menuRemoteDequeue = CreateContextItem("Remove from Queue…", async (_, _) => await RemoveFromProviderQueueAsync(SelectedRemoteJobs));
         _menuRemoteRemove = CreateContextItem("Remove from List…", async (_, _) => await RemoveRemoteAsync(SelectedRemoteJobs));
         _menuRemoteRemove.KeyboardAcceleratorTextOverride = "Del";
         _remoteContextSeparator = new MenuFlyoutSeparator();
-        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteRemove, _remoteContextSeparator];
+        MenuFlyoutItemBase[] items = [_menuRemoteSelectFiles, _menuRemoteDownloadAll, _menuRemoteApprove, _menuRemoteLinkPassword, _menuRemoteRetry, _menuRemoteCheckNow, _menuRemoteStartQueued, _menuRemoteDequeue, _menuRemoteRemove, _remoteContextSeparator];
         for (var i = 0; i < items.Length; i++) flyout.Items.Insert(i, items[i]);
         _remoteContextItems.AddRange(items);
     }
@@ -382,6 +386,20 @@ public sealed partial class MainWindow
         if (_menuRemoteLinkPassword is not null) _menuRemoteLinkPassword.Visibility = Show(actions is [{ EnterLinkPassword: true }]);
         if (_menuRemoteRetry is not null) _menuRemoteRetry.Visibility = Show(actions.Any(action => action.Retry));
         if (_menuRemoteCheckNow is not null) _menuRemoteCheckNow.Visibility = Show(actions.Any(action => action.CheckNow));
+        var queued = jobs.Count > 0 && jobs.All(RemoteRules.IsInProviderQueue);
+        var queueProvider = queued ? RemoteText.ProviderName(jobs[0]) : string.Empty;
+        if (_menuRemoteStartQueued is not null)
+        {
+            _menuRemoteStartQueued.Visibility = Show(queued);
+            _menuRemoteStartQueued.Text = $"Start Now on {queueProvider}";
+        }
+
+        if (_menuRemoteDequeue is not null)
+        {
+            _menuRemoteDequeue.Visibility = Show(queued);
+            _menuRemoteDequeue.Text = $"Remove from {queueProvider}'s Queue…";
+        }
+
         if (_menuRemoteRemove is not null) _menuRemoteRemove.Visibility = Show(jobs.Count > 0);
         if (_remoteContextSeparator is not null) _remoteContextSeparator.Visibility = Show(jobs.Count > 0 && FirstLocalRow is not null);
     }
@@ -393,7 +411,6 @@ public sealed partial class MainWindow
     private void HideLocalContextItemsIfRemoteOnly()
     {
         var behind = ArchiveRules.DownloadsBehind(OnlySelectedRecords, _jobsById.ContainsKey).Count;
-        if (_menuRemove is not null) _menuRemove.Text = RecordDownload is null ? "Remove" : "Remove Download";
         if (FirstLocalRow is null && (SelectedRemoteRows.Count > 0 || SelectedArchiveRows.Count > 0))
         {
             foreach (var item in _localContextItems) item.Visibility = Visibility.Collapsed;
@@ -545,7 +562,10 @@ public sealed partial class MainWindow
         var provider = RemoteText.ProviderName(job);
         var box = new PasswordBox { Header = "Link password", PasswordRevealMode = PasswordRevealMode.Hidden };
         AutomationProperties.SetName(box, "Link password");
+        // TB.S2: the user's own choice, for this item's archives only.
+        var forArchives = new CheckBox { Content = "Also try it on this item's own archives" };
         var panel = new StackPanel { Spacing = 10, Children = { new TextBlock { Text = RemoteText.LinkPasswordHint(job), TextWrapping = TextWrapping.Wrap }, box } };
+        if (!job.HasArchivePassword) panel.Children.Add(forArchives);
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -559,21 +579,14 @@ public sealed partial class MainWindow
         };
         box.PasswordChanged += (_, _) => dialog.IsPrimaryButtonEnabled = box.Password.Length > 0;
         dialog.Opened += (_, _) => box.Focus(FocusState.Programmatic);
-        ContentDialogResult answer;
-        try
-        {
-            answer = await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException)
-        {
-            return;
-        }
+        // Null when another dialog is open over this window (UI.B8); the check below treats that as cancel.
+        var answer = await DialogGuard.ShowAsync(dialog);
 
         // Out of the box before anything is sent, whatever the answer turns out to be.
         var password = box.Password;
         box.Password = string.Empty;
         if (answer != ContentDialogResult.Primary || password.Length == 0) return;
-        var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, LinkPassword = password });
+        var result = await _remote.RetryAsync(new RemoteRetryRequest { JobId = job.Id, LinkPassword = password, LinkPasswordForArchives = forArchives.IsChecked == true && !job.HasArchivePassword });
         password = string.Empty;
         if (!result.Ok) await ShowMessageAsync("Retry", RemoteText.Failure(result.Error, null, provider));
     }
@@ -603,6 +616,43 @@ public sealed partial class MainWindow
 
         if (problems.Count > 0) await ShowMessageAsync("Check Now", string.Join(Environment.NewLine, problems));
         else if (asked > 0) ShowPassingStatus(asked == 1 ? "Checking now…" : $"Checking {asked} items now…");
+    }
+
+    /// <summary>TB.S1: asks the provider to start these queued entries now. Each is found again by its own hash on the Host.</summary>
+    private async Task StartQueuedAsync(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var problems = new List<string>();
+        var started = 0;
+        foreach (var job in jobs.Where(RemoteRules.IsInProviderQueue))
+        {
+            var result = await _remote.StartQueuedAsync(job.Id);
+            if (result.Ok) started++;
+            else problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, RemoteText.ProviderName(job))}");
+        }
+
+        if (problems.Count > 0) await ShowMessageAsync("Start Now", string.Join(Environment.NewLine, problems));
+        else if (started > 0) ShowPassingStatus(started == 1 ? "Started. Checking now…" : $"Started {started} items. Checking now…");
+    }
+
+    /// <summary>TB.S1: takes these entries out of the provider's queue, and the rows off the list. Nothing else on the account is touched.</summary>
+    private async Task RemoveFromProviderQueueAsync(IReadOnlyList<RemoteJobDto> jobs)
+    {
+        var queued = jobs.Where(RemoteRules.IsInProviderQueue).ToList();
+        if (queued.Count == 0) return;
+        var provider = RemoteText.ProviderName(queued[0]);
+        var what = queued.Count == 1 ? $"'{RemoteText.JobRow(queued[0], DateTimeOffset.Now).Name}'" : $"these {queued.Count} items";
+        if (!await ConfirmAsync($"Remove from {provider}'s queue?",
+                $"Take {what} out of your {provider} queue and off this list? {provider} hasn't started them, so nothing else is deleted.",
+                "Remove from queue")) return;
+
+        var problems = new List<string>();
+        foreach (var job in queued)
+        {
+            var result = await _remote.DeleteRemoteAsync(job.Id, confirmed: true);
+            if (!result.Ok) problems.Add($"{RemoteText.JobRow(job, DateTimeOffset.Now).Name}: {RemoteText.Failure(result.Error, null, provider)}");
+        }
+
+        if (problems.Count > 0) await ShowMessageAsync("Remove from queue", string.Join(Environment.NewLine, problems));
     }
 
     private async Task RemoveRemoteAsync(IReadOnlyList<RemoteJobDto> jobs)
@@ -663,13 +713,7 @@ public sealed partial class MainWindow
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
-        try
-        {
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException)
-        {
-            return false;
-        }
+        // Refused while another dialog is open, which counts as Cancel. DialogGuard never throws.
+        return await DialogGuard.ConfirmAsync(dialog);
     }
 }

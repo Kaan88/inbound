@@ -578,7 +578,8 @@ public sealed partial class RuntimeServiceTests
         Assert.DoesNotContain(LinkSecret, added.Url);
         Assert.DoesNotContain(LinkSecret, added.PageUrl);
         Assert.Null(added.FinalUrl);
-        Assert.Equal(ProviderLinks.MaxConnections, added.RequestedConnections);
+        // The default connections and the host limit (8 each) are below the provider cap, so they decide.
+        Assert.Equal(Math.Min(8, ProviderLinks.MaxConnections), added.RequestedConnections);
         Assert.False(added.IsRemote);
 
         var completed = await ctx.WaitFor(added.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
@@ -588,7 +589,7 @@ public sealed partial class RuntimeServiceTests
 
         Assert.Empty(ctx.Service.GetSnapshot().Settings.RecentUrls);
         await AssertSecretNotOnDiskAsync(ctx, LinkSecret);
-        Assert.Contains("\"protectedUrl\": \"dpapi:v1:", await JobJsonAsync(ctx, added.Id));
+        Assert.Contains("\"protectedUrl\": \"" + SecretProtector.Current.Prefix, await JobJsonAsync(ctx, added.Id));
         Assert.DoesNotContain(LinkSecret, System.Text.Json.JsonSerializer.Serialize(ctx.Service.GetSnapshot()));
     }
 
@@ -714,7 +715,7 @@ public sealed partial class RuntimeServiceTests
         var same = await ctx.Service.RefreshUrlAsync(id, failed.Url);
         Assert.True(same.Ok, same.Error);
         await ctx.WaitFor(id, j => j.State == "failed");
-        Assert.Contains("dpapi:v1:", await JobJsonAsync(ctx, id));
+        Assert.Contains(SecretProtector.Current.Prefix, await JobJsonAsync(ctx, id));
 
         var otherMasked = await ctx.Service.RefreshUrlAsync(id, $"{PastedHost}/other.bin?token={UrlRedactor.Mask}");
         Assert.False(otherMasked.Ok);

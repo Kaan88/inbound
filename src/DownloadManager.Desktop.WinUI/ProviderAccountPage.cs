@@ -180,12 +180,15 @@ internal sealed class ProviderAccountPage
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            _result.Show(RemoteText.Failure(null), isProblem: true);
-            return false;
+            // DialogGuard never throws: a dialog it couldn't show comes back as null, which says why here.
+            var answer = await DialogGuard.ShowAsync(dialog);
+            if (answer is null)
+            {
+                _result.Show("The key wasn't cleared, because another dialog is open. Close it and try again.", isProblem: true);
+                return false;
+            }
+
+            return answer == ContentDialogResult.Primary;
         }
         finally
         {

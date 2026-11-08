@@ -112,6 +112,19 @@ if (-not (Test-Path $winuiPri -PathType Leaf)) {
 }
 Copy-Item $winuiPri (Join-Path $Output "DownloadManager.Desktop.WinUI.pri") -Force
 
+# WinUI's own strings come in about 85 languages; the app is English only. en-us is WinUI's last fallback and stays.
+$winuiStrings = @("Microsoft.ui.xaml.dll.mui", "Microsoft.UI.Xaml.Phone.dll.mui")
+Get-ChildItem -LiteralPath $Output -Directory | Where-Object { $_.Name -notin @("en-us", "tools", "Microsoft.UI.Xaml") } | ForEach-Object {
+    foreach ($name in $winuiStrings) {
+        $file = Join-Path $_.FullName $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
+    }
+    if (-not (Get-ChildItem -LiteralPath $_.FullName -Force)) { Remove-Item -LiteralPath $_.FullName -Force }
+}
+foreach ($name in $winuiStrings) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Output "en-us\$name") -PathType Leaf)) { throw "WinUI's English strings are missing: en-us\$name" }
+}
+
 Push-Location (Join-Path $root "extensions\chrome")
 try {
     if (-not (Test-Path "node_modules")) {

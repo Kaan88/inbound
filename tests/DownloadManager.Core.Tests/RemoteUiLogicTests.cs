@@ -382,6 +382,7 @@ public sealed class ArchiveFormTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // desktop code: Windows paths, Explorer or named pipes
     public void AChosenFolderIsSentWithItsDestination()
     {
         var update = ArchiveForm.Changes(Saved(), Form() with { DestinationIndex = 2, Folder = "E:\\New" }, out _);

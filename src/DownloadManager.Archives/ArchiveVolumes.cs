@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -19,6 +20,12 @@ public enum ArchiveVolumeScheme
 
     /// <summary><c>name.7z.001</c>, <c>name.zip.001</c> and the like: one archive cut into pieces, which 7-Zip joins.</summary>
     Split,
+
+    /// <summary>
+    /// A spanned zip (A4.D): <c>name.z01</c>, <c>name.z02</c> ... and <c>name.zip</c> last. The <c>.zip</c> holds the
+    /// central directory, so it is the volume 7-Zip opens, and the set's first volume here, though it is the last part.
+    /// </summary>
+    ZipSpanned,
 }
 
 /// <param name="BaseName">The name shared by the members, without the volume suffix.</param>
@@ -36,7 +43,8 @@ public sealed record ArchiveVolumeSet(
     IReadOnlyList<string> MissingVolumes);
 
 /// <summary>
-/// Groups the file names of one folder into archive sets: RAR sets, split name.7z.001 sets, and single 7z, zip and
+/// Groups the file names of one folder into archive sets: RAR sets, split name.7z.001 sets, spanned name.z01 + name.zip
+/// sets, and single 7z, zip and
 /// tar files. Reads no files.
 /// </summary>
 public static partial class ArchiveVolumes
@@ -55,24 +63,55 @@ public static partial class ArchiveVolumes
             .Select(Path.GetFileName)
             .Where(name => !string.IsNullOrEmpty(name))
             .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathNames.Comparer)
             .ToList();
+
+        // A set's names may differ in case (Film.PART1.RAR, film.part2.rar), so bases are matched ignoring it. On a file
+        // system that keeps case, two files can also differ only by it (Movie.part1.rar next to movie.part1.rar): grouping
+        // those ignoring case would make one set with two first volumes, and tie one's download to the other's cleanup.
+        // So in a folder that holds such a pair, bases are matched exactly. Windows never has one: NTFS keeps one file.
+        var grouping = names.Count == names.Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
 
         var oldStyleBases = names
             .Select(name => OldStyleVolume().Match(name))
             .Where(match => match.Success && IsLetter(match, 'r'))
             .Select(match => match.Groups["base"].Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(grouping);
 
-        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var parts = new Dictionary<string, List<(string Digits, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var splits = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        // A4.D: name.zNN beside no name.rNN is a spanned zip's part, not an old-style RAR volume past .r99.
+        var spannedZipBases = names
+            .Select(name => SpannedZipPart().Match(name))
+            .Where(match => match.Success && !oldStyleBases.Contains(match.Groups["base"].Value))
+            .Select(match => match.Groups["base"].Value)
+            .ToHashSet(grouping);
+
+        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(grouping);
+        var spannedZips = new Dictionary<string, List<(int Number, string Name)>>(grouping);
+        var parts = new Dictionary<string, List<(string Digits, string Name)>>(grouping);
+        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(grouping);
+        var splits = new Dictionary<string, List<(int Number, string Name)>>(grouping);
         var singles = new List<string>();
         var otherSingles = new List<(string Stem, string Name)>();
 
         foreach (var name in names)
         {
+            // Before the old-style branch, whose letters run to z, and before name.zip is taken for a single zip.
+            if (SpannedZipPart().Match(name) is { Success: true } zipPart && spannedZipBases.Contains(zipPart.Groups["base"].Value))
+            {
+                Add(spannedZips, zipPart.Groups["base"].Value, (int.Parse(zipPart.Groups["number"].Value, CultureInfo.InvariantCulture), name));
+                continue;
+            }
+
+            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && name.Length > ".zip".Length &&
+                spannedZipBases.Contains(name[..^".zip".Length]))
+            {
+                // The last part, numbered after every .zNN so it sorts last.
+                Add(spannedZips, name[..^".zip".Length], (int.MaxValue, name));
+                continue;
+            }
+
             if (SplitVolume().Match(name) is { Success: true } piece)
             {
                 Add(splits, piece.Groups["base"].Value, (int.Parse(piece.Groups["number"].Value, CultureInfo.InvariantCulture), name));
@@ -126,6 +165,7 @@ public static partial class ArchiveVolumes
         foreach (var (baseName, members) in parts) sets.AddRange(BuildPartSets(baseName, members));
         foreach (var (baseName, members) in threeDigit) sets.AddRange(BuildThreeDigit(baseName, members));
         foreach (var (baseName, members) in splits) sets.Add(BuildSplit(baseName, members));
+        foreach (var (baseName, members) in spannedZips) sets.Add(BuildSpannedZip(baseName, members));
         foreach (var name in singles) sets.Add(new ArchiveVolumeSet(name[..^".rar".Length], ArchiveVolumeScheme.Single, name, [name], []));
         foreach (var (stem, name) in otherSingles) sets.Add(new ArchiveVolumeSet(stem, ArchiveVolumeScheme.Single, name, [name], []));
 
@@ -133,12 +173,63 @@ public static partial class ArchiveVolumes
             .OrderBy(set => set.BaseName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(set => set.Scheme)
             .ThenBy(set => set.Members[0], StringComparer.OrdinalIgnoreCase)
+            .ThenBy(set => set.Members[0], StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// TB.S3: the RAR recovery volumes (<c>.rev</c>) among these names that belong to the set called
+    /// <paramref name="baseName"/>, such as <c>name.part01.rev</c>, <c>name.rev</c> or the older <c>name1_3_1.rev</c>. They
+    /// rebuild missing volumes and hold nothing of their own, so they go when the set's archives are deleted. Only the
+    /// name forms RAR writes are taken: <c>name2.rev</c> beside a set called <c>name</c> is not this set's, nor anything a
+    /// longer set name in <paramref name="otherBaseNames"/> could claim. Reads no files.
+    /// </summary>
+    public static IReadOnlyList<string> RecoveryVolumes(string baseName, IEnumerable<string> fileNames, IEnumerable<string>? otherBaseNames = null)
+    {
+        if (string.IsNullOrEmpty(baseName)) return [];
+        var names = fileNames
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Select(name => name!)
+            .ToList();
+        var allOthers = (otherBaseNames ?? []).ToList();
+
+        // The same rule as Group: names are matched ignoring case, unless the folder holds names that differ only by it
+        // (Movie and movie as two sets, on a file system that keeps case). Then one set's .rev files are not the other's.
+        var exact = allOthers.Any(other => string.Equals(other, baseName, StringComparison.OrdinalIgnoreCase) &&
+                                           !string.Equals(other, baseName, StringComparison.Ordinal)) ||
+                    names.Distinct(StringComparer.Ordinal).Count() != names.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var comparison = exact ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var comparer = exact ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        var others = allOthers.Where(other => !string.Equals(other, baseName, comparison)).ToList();
+        return names
+            .Where(name => IsRecoveryOf(baseName, name, comparison) && !others.Any(other => IsRecoveryOf(other, name, comparison)))
+            .Distinct(comparer)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Whether this set is one RAR wrote, the only kind that has <c>.rev</c> recovery volumes. A 7z, zip or split set
+    /// named <c>name</c> beside a <c>name.rev</c> is not that file's owner, so only RAR sets take theirs (TB.S3).
+    /// </summary>
+    public static bool HasRarRecoveryVolumes(ArchiveVolumeSet set) => set.Scheme switch
+    {
+        ArchiveVolumeScheme.PartNumbered or ArchiveVolumeScheme.OldStyle or ArchiveVolumeScheme.ThreeDigit => true,
+        ArchiveVolumeScheme.Single => set.Members.Count > 0 && set.Members[0].EndsWith(".rar", StringComparison.OrdinalIgnoreCase),
+        _ => false,
+    };
+
+    private static bool IsRecoveryOf(string baseName, string name, StringComparison comparison)
+    {
+        if (!name.EndsWith(".rev", StringComparison.OrdinalIgnoreCase) || name.Length <= baseName.Length + ".rev".Length - 1) return false;
+        var stem = name[..^".rev".Length];
+        return stem.StartsWith(baseName, comparison) && RecoverySuffix().IsMatch(stem[baseName.Length..]);
     }
 
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
     public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName, Func<string, bool>? isWholeArchive = null) =>
-        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
+        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), PathNames.Comparer));
 
     private static ArchiveVolumeSet BuildOldStyle(string baseName, List<(int Index, string Name)> members)
     {
@@ -245,6 +336,30 @@ public static partial class ArchiveVolumes
         return new ArchiveVolumeSet(baseName, ArchiveVolumeScheme.Split, first, ordered.Select(member => member.Name).ToList(), missing);
     }
 
+    /// <summary>
+    /// The .zNN parts in order, then name.zip. The names show gaps up to the highest part seen; a missing last .zNN is
+    /// known only from name.zip, which says how many disks there are, so 7-Zip names that one. Without name.zip the set
+    /// has no volume to open yet, and name.zip is its first gap.
+    /// </summary>
+    private static ArchiveVolumeSet BuildSpannedZip(string baseName, List<(int Number, string Name)> members)
+    {
+        var ordered = members.OrderBy(member => member.Number).ToList();
+        var parts = ordered.Where(member => member.Number != int.MaxValue).ToList();
+        var last = ordered.FirstOrDefault(member => member.Number == int.MaxValue).Name;
+        var width = parts.Count > 0 ? Math.Max(2, parts.Max(part => part.Name.Length - part.Name.LastIndexOf(".z", StringComparison.OrdinalIgnoreCase) - 2)) : 2;
+        var present = parts.Select(member => member.Number).ToHashSet();
+        var missing = new List<string>();
+        if (last is null) missing.Add(baseName + ".zip");
+        if (parts.Count > 0)
+        {
+            missing.AddRange(Enumerable.Range(1, parts[^1].Number)
+                .Where(number => !present.Contains(number))
+                .Select(number => string.Create(CultureInfo.InvariantCulture, $"{baseName}.z{number.ToString("D" + width, CultureInfo.InvariantCulture)}")));
+        }
+
+        return new ArchiveVolumeSet(baseName, ArchiveVolumeScheme.ZipSpanned, last, ordered.Select(member => member.Name).ToList(), missing);
+    }
+
     private static bool IsLetter(Match match, char letter) =>
         char.ToLowerInvariant(match.Groups["letter"].Value[0]) == letter;
 
@@ -265,4 +380,11 @@ public static partial class ArchiveVolumes
 
     [GeneratedRegex(@"^(?<base>.+\.(?:7z|zip|rar|tar))\.(?<number>\d{3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SplitVolume();
+
+    [GeneratedRegex(@"^(?<base>.+)\.z(?<number>\d{2,3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SpannedZipPart();
+
+    /// <summary>What follows a set's base name in a recovery volume's name: nothing, .partN, .N, .rNN, or RAR 3's N_N[_N].</summary>
+    [GeneratedRegex(@"^(?:|\.part\d{1,4}|\.\d{1,4}|\.[r-z]\d{2}|\d{1,4}(?:_\d{1,4}){1,2})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RecoverySuffix();
 }

@@ -7,6 +7,28 @@ public sealed class ArchiveVolumesTests
     private static ArchiveVolumeSet Only(params string[] names) => Assert.Single(ArchiveVolumes.Group(names));
 
     [Fact]
+    public void NamesThatDifferOnlyByCaseAreOneFileOnWindowsAndTwoSetsOnLinux()
+    {
+        var sets = ArchiveVolumes.Group(["Movie.part1.rar", "Movie.part2.rar", "movie.part1.rar"]);
+        if (OperatingSystem.IsWindows())
+        {
+            // NTFS keeps one of them, so the names are one file.
+            var set = Assert.Single(sets);
+            Assert.Equal(["Movie.part1.rar", "Movie.part2.rar"], set.Members);
+            return;
+        }
+
+        // Linux keeps both files, so the lower-case one can't be taken for a volume of the other set, or its download
+        // would be tied to that set's cleanup.
+        Assert.Equal(2, sets.Count);
+        Assert.Contains(sets, set => set.Members.SequenceEqual(["Movie.part1.rar", "Movie.part2.rar"]));
+        Assert.Contains(sets, set => set.Members.SequenceEqual(["movie.part1.rar"]));
+        Assert.Equal(["movie.part1.rar"], ArchiveVolumes.FindSet(["Movie.part1.rar", "Movie.part2.rar", "movie.part1.rar"], "movie.part1.rar")!.Members);
+        // Without such a pair a set whose names differ in case stays one set there too (CaseDoesNotSplitASet).
+        Assert.Single(ArchiveVolumes.Group(["Film.PART1.RAR", "film.part2.rar"]));
+    }
+
+    [Fact]
     public void PartNumberedSetIsInOrderWithFirstVolume()
     {
         var set = Only("example.part03.rar", "example.part01.rar", "example.part02.rar");
@@ -320,4 +342,54 @@ public sealed class ArchiveVolumesTests
     [InlineData("notes.gz")]
     [InlineData("film.mp4")]
     public void OtherNamesAreNotArchives(string name) => Assert.Empty(ArchiveVolumes.Group([name]));
+
+    [Fact]
+    public void TbS3_RecoveryVolumesAreFoundByTheNamesRarGivesThemAndAreNeverArchives()
+    {
+        string[] names =
+        [
+            "show.part01.rar", "show.part02.rar", "show.part01.rev", "show.part02.rev", "SHOW.rev", "show1_2_1.rev",
+            "show.r00.rev", "show.3.rev", "show2.rev", "showcase.rev", "show.part01.rev.txt", "other.part1.rev",
+        ];
+
+        Assert.Equal(
+            ["show.3.rev", "show.part01.rev", "show.part02.rev", "show.r00.rev", "SHOW.rev", "show1_2_1.rev"],
+            ArchiveVolumes.RecoveryVolumes("show", names));
+        Assert.Empty(ArchiveVolumes.Group(["show.part01.rev", "show.rev"]));
+    }
+
+    [Fact]
+    public void TbS3_ARecoveryVolumeAnotherSetInTheFolderCouldClaimIsLeftAlone()
+    {
+        // "a.part1" could be a whole archive's own name: its .rev is ambiguous between the two, so neither takes it.
+        string[] names = ["a.part1.rev", "a.rev", "a.part1.part1.rev"];
+        Assert.Equal(["a.rev"], ArchiveVolumes.RecoveryVolumes("a", names, otherBaseNames: ["a.part1"]));
+        Assert.Equal(["a.part1.part1.rev"], ArchiveVolumes.RecoveryVolumes("a.part1", names, otherBaseNames: ["a"]));
+        Assert.Empty(ArchiveVolumes.RecoveryVolumes(string.Empty, names));
+    }
+
+    [Fact]
+    public void TbS3_TwoSetsThatDifferOnlyByCaseKeepTheirOwnRecoveryVolumes()
+    {
+        // On a file system that keeps case, Group makes these two sets; deleting one's .rev files must not take the other's.
+        string[] revs = ["Movie.part1.rev", "Movie.part2.rev", "movie.part1.rev", "movie.part2.rev"];
+        Assert.Equal(["Movie.part1.rev", "Movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", revs, otherBaseNames: ["movie"]));
+        Assert.Equal(["movie.part1.rev", "movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("movie", revs, otherBaseNames: ["Movie"]));
+        // Even when the other set is not tracked, the case-only pair among the names is enough.
+        Assert.Equal(["Movie.part1.rev", "Movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", revs));
+        // Without such a pair, case is still ignored.
+        Assert.Equal(["MOVIE.part1.rev", "movie.part2.rev"], ArchiveVolumes.RecoveryVolumes("Movie", ["MOVIE.part1.rev", "movie.part2.rev"]));
+    }
+
+    [Theory]
+    [InlineData(new[] { "a.rar" }, true)]
+    [InlineData(new[] { "a.part1.rar", "a.part2.rar" }, true)]
+    [InlineData(new[] { "a.rar", "a.r00" }, true)]
+    [InlineData(new[] { "a.001.rar", "a.002.rar" }, true)]
+    [InlineData(new[] { "a.7z" }, false)]
+    [InlineData(new[] { "a.zip" }, false)]
+    [InlineData(new[] { "a.7z.001", "a.7z.002" }, false)]
+    [InlineData(new[] { "a.z01", "a.zip" }, false)]
+    public void TbS3_OnlyRarSetsHaveRecoveryVolumes(string[] names, bool rar) =>
+        Assert.Equal(rar, ArchiveVolumes.HasRarRecoveryVolumes(Assert.Single(ArchiveVolumes.Group(names))));
 }

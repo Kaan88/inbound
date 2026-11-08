@@ -32,7 +32,7 @@ public sealed class OtherFormatTests : ExtractionTestBase
         if (password is not null)
         {
             // Asked twice when making an archive.
-            var line = Encoding.UTF8.GetBytes(password + "\r\n");
+            var line = Encoding.UTF8.GetBytes(password + (OperatingSystem.IsWindows() ? "\r\n" : "\n"));
             await process.StandardInput.BaseStream.WriteAsync(line);
             await process.StandardInput.BaseStream.WriteAsync(line);
         }
@@ -60,6 +60,95 @@ public sealed class OtherFormatTests : ExtractionTestBase
 
         await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
         Space.AssertSameAsSource();
+    }
+
+    // ----- Zips with backslashes in their names (ultrareview 0.6.0 #4) -----
+    // Stored as bytes, because .NET's ZipArchive can't choose the host a zip names: Python's zipfile wrote them with the
+    // names set after each entry was built (its constructor turns a backslash into "/" on Windows) and the host and
+    // attributes the way Windows tools (FAT, archive bit) and Linux tools (Unix, file mode) set them. Windows' 7-Zip
+    // treats a backslash as a folder separator in a zip made on Windows and replaces it in one made on Unix; Linux's
+    // 7-Zip 26.04 keeps it in the name, whatever host the zip names.
+
+    private const string WindowsFolders = "UEsDBBQAAAAAAABgaF0AAAAAAAAAAAAAAAAEAAAAZGlyXFBLAwQUAAAAAAAAYGhdAAAAAAAAAAAAAAAACgAAAGRpclxlbXB0eVxQSwMEFAAAAAAAAGBoXYamEDYFAAAABQAAAA0AAABkaXJcc3ViXGEudHh0aGVsbG9QSwMEFAAAAAAAAGBoXSP/GekFAAAABQAAAA8AAABkaXIvbWl4ZWRcYi50eHRtaXhlZFBLAQIUABQAAAAAAABgaF0AAAAAAAAAAAAAAAAEAAAAAAAAAAAAMAAAAAAAAABkaXJcUEsBAhQAFAAAAAAAAGBoXQAAAAAAAAAAAAAAAAoAAAAAAAAAAAAwAAAAIgAAAGRpclxlbXB0eVxQSwECFAAUAAAAAAAAYGhdhqYQNgUAAAAFAAAADQAAAAAAAAAAACAAAABKAAAAZGlyXHN1YlxhLnR4dFBLAQIUABQAAAAAAABgaF0j/xnpBQAAAAUAAAAPAAAAAAAAAAAAIAAAAHoAAABkaXIvbWl4ZWRcYi50eHRQSwUGAAAAAAQABADiAAAArAAAAAAA";
+    private const string WindowsTraversal = "UEsDBBQAAAAAAABgaF1SMfuNBAAAAAQAAAALAAAALi5cZXZpbC50eHRldmlsUEsBAhQAFAAAAAAAAGBoXVIx+40EAAAABAAAAAsAAAAAAAAAAAAgAAAAAAAAAC4uXGV2aWwudHh0UEsFBgAAAAABAAEAOQAAAC0AAAAAAA==";
+    private const string WindowsTwoNamesOneFile = "UEsDBBQAAAAAAABgaF3xhmx6AwAAAAMAAAAJAAAAZGlyXGEudHh0b25lUEsDBBQAAAAAAABgaF1misoRAwAAAAMAAAAJAAAAZGlyL2EudHh0dHdvUEsBAhQAFAAAAAAAAGBoXfGGbHoDAAAAAwAAAAkAAAAAAAAAAAAgAAAAAAAAAGRpclxhLnR4dFBLAQIUABQAAAAAAABgaF1misoRAwAAAAMAAAAJAAAAAAAAAAAAIAAAACoAAABkaXIvYS50eHRQSwUGAAAAAAIAAgBuAAAAVAAAAAAA";
+    private const string UnixBackslashName = "UEsDBBQAAAAAAABgaF3oLbyRBwAAAAcAAAAJAAAAZGlyXGEudHh0bGl0ZXJhbFBLAQIUAxQAAAAAAABgaF3oLbyRBwAAAAcAAAAJAAAAAAAAAAAAAACkgQAAAABkaXJcYS50eHRQSwUGAAAAAAEAAQA3AAAALgAAAAAA";
+
+    private static readonly char Backslash = (char)92;
+
+    private async Task<string> WriteZipAsync(string name, string base64)
+    {
+        var archive = Space.Archive(name);
+        await File.WriteAllBytesAsync(archive, Convert.FromBase64String(base64));
+        return archive;
+    }
+
+    /// <summary>
+    /// Some Windows tools (PowerShell 5.1's Compress-Archive among them) write a zip's folders with backslashes. On Linux
+    /// those entries are listed by the folders they mean and put in them, including an empty folder and a name that
+    /// mixes both separators.
+    /// </summary>
+    [RequiresSevenZipFact]
+    public async Task AZipMadeOnWindowsWithBackslashesExtractsIntoItsFolders()
+    {
+        var archive = await WriteZipAsync("backslashes.zip", WindowsFolders);
+
+        var probe = await Extractor().ProbeAsync(archive, null, CancellationToken.None);
+        Assert.DoesNotContain(probe.Entries, entry => !OperatingSystem.IsWindows() && entry.Path.Contains(Backslash));
+
+        await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+        Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(Space.Destination, "dir", "sub", "a.txt")));
+        Assert.Equal("mixed", await File.ReadAllTextAsync(Path.Combine(Space.Destination, "dir", "mixed", "b.txt")));
+        Assert.True(Directory.Exists(Path.Combine(Space.Destination, "dir", "empty")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Space.Destination).Where(entry => Path.GetFileName(entry).Contains(Backslash)));
+    }
+
+    /// <summary>A backslash that becomes a folder separator is checked as one: "..\evil.txt" climbs out, so nothing is written.</summary>
+    [RequiresSevenZipFact]
+    public async Task AWindowsZipThatClimbsOutWithBackslashesIsRefused()
+    {
+        var archive = await WriteZipAsync("climb.zip", WindowsTraversal);
+
+        var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor().ExtractAsync(Request(archive), null, CancellationToken.None));
+        Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
+        // Named as a traversal, not as a backslash: the backslash was read as a separator before the check.
+        Assert.Contains("traversal", failure.Message);
+        Space.AssertDestinationUntouched();
+        Space.AssertNoStagingLeft();
+        Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(Space.Destination)!, "evil.txt")));
+    }
+
+    /// <summary>"dir\a.txt" and "dir/a.txt" are one file once the backslash separates folders, so one would overwrite the other.</summary>
+    [RequiresSevenZipFact]
+    public async Task AWindowsZipWhoseBackslashNameRepeatsAnotherIsRefused()
+    {
+        var archive = await WriteZipAsync("twice.zip", WindowsTwoNamesOneFile);
+
+        var failure = await Assert.ThrowsAsync<ExtractionException>(() => Extractor().ExtractAsync(Request(archive), null, CancellationToken.None));
+        Assert.Equal(ExtractionFailureKind.UnsafePath, failure.Kind);
+        Assert.Contains("same name twice", failure.Message);
+        Space.AssertDestinationUntouched();
+        Space.AssertNoStagingLeft();
+    }
+
+    /// <summary>
+    /// A zip made on Unix may hold a backslash as part of a name. Linux can't tell whether a folder was meant, so it refuses
+    /// the archive. Windows can't keep such a name either; its 7-Zip writes it as one file with the backslash replaced.
+    /// </summary>
+    [RequiresSevenZipFact]
+    public async Task AUnixZipWithABackslashInANameIsRefusedOffWindows()
+    {
+        var archive = await WriteZipAsync("unix.zip", UnixBackslashName);
+
+        if (OperatingSystem.IsWindows())
+        {
+            await Extractor().ExtractAsync(Request(archive), null, CancellationToken.None);
+            var written = Assert.Single(Directory.EnumerateFileSystemEntries(Space.Destination, "*", SearchOption.AllDirectories));
+            Assert.Equal("literal", await File.ReadAllTextAsync(written));
+            return;
+        }
+
+        Assert.Equal(ExtractionFailureKind.UnsafePath, await FailureOf(Request(archive)));
     }
 
     [RequiresSevenZipFact]

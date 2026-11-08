@@ -42,8 +42,16 @@ public static class MessageTypes
     public const string SettingsGet = "settings.get";
     public const string SettingsUpdate = "settings.update";
     public const string SettingsResult = "settings.result";
+    /// <summary>Only the default download folder and the favorite folders (<see cref="DownloadFoldersResult"/>).</summary>
+    public const string SettingsDownloadFolders = "settings.downloadFolders";
+    public const string SettingsDownloadFoldersResult = "settings.downloadFoldersResult";
     public const string FolderSpace = "folders.space";
     public const string FolderSpaceResult = "folders.spaceResult";
+    /// <summary>Lists folders under the server's allowed roots. Only where the hello offers <c>folders</c>.</summary>
+    public const string FoldersBrowse = "folders.browse";
+    public const string FoldersBrowseResult = "folders.browseResult";
+    /// <summary>Creates a folder under the server's allowed roots; answered with <see cref="FoldersBrowseResult"/> for the new folder.</summary>
+    public const string FoldersCreate = "folders.create";
     public const string QueueAction = "queue.action";
     public const string GroupAction = "group.action";
     public const string GroupActionResult = "group.actionResult";
@@ -66,6 +74,9 @@ public static class MessageTypes
     public const string HandoffError = "handoff.error";
     public const string StatisticsGet = "statistics.get";
     public const string StatisticsResult = "statistics.result";
+    /// <summary>UI.R24: the last hour of total download speed (<see cref="SpeedHistoryDto"/>). A Host from before it answers with an error.</summary>
+    public const string SpeedHistoryGet = "speed.history";
+    public const string SpeedHistoryResult = "speed.historyResult";
     public const string JobsQuery = "jobs.query";
     public const string JobSegments = "job.segments";
     public const string JobSegmentsResult = "job.segmentsResult";
@@ -99,6 +110,8 @@ public static class MessageTypes
     public const string RemoteCheckNow = "remote.checkNow";
     public const string RemoteRemove = "remote.remove";
     public const string RemoteDeleteRemote = "remote.deleteRemote";
+    /// <summary>Starts a job's entry waiting in the provider's queue (TB.S1). Payload <c>RemoteJobIdRequest</c>.</summary>
+    public const string RemoteStartQueued = "remote.startQueued";
     public const string RemoteActionResult = "remote.actionResult";
     public const string RemoteArchivePassword = "remote.archivePassword";
     public const string RemoteContainerPreview = "remote.container.preview";

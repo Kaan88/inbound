@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inbound sign-in</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #ffffff; --fg: #1b1f24; --muted: #666666; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #181818; --fg: #e8eaed; --muted: #a3a3a3; } }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 40rem; margin: 10vh auto; padding: 0 16px; }
+    p { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Inbound server</h1>
+    <!-- Served only when the server was built without webui/dist (see webui/README.md). -->
+    <p>The server is running, but this copy was built without its web UI. Build it with
+      <code>npm ci</code> and <code>npm run build</code> in <code>webui</code>, then build the server again.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<Project>
+  <!-- A self-contained Windows publish leaves out .NET's crash-dump and debugger files (createdump, the DAC, mscordbi,
+       DiaSymReader; about 6 MB). Stack traces in the logs keep their line numbers. Removed from the runtime pack's assets
+       rather than deleted afterwards, so no deps.json names a missing file. -->
+  <Target Name="DropDebuggerRuntimeFiles" AfterTargets="ResolveRuntimePackAssets"
+          Condition="'$(RuntimeIdentifier)' == 'win-x64' and '$(SelfContained)' == 'true'">
+    <ItemGroup>
+      <_DmDebuggerFile Include="@(RuntimePackAsset)"
+                       Condition="'%(Filename)%(Extension)' == 'createdump.exe' or '%(Filename)' == 'mscordaccore' or
+                                  $([System.String]::Copy('%(Filename)').StartsWith('mscordaccore_amd64_amd64_')) or
+                                  '%(Filename)%(Extension)' == 'mscordbi.dll' or
+                                  '%(Filename)%(Extension)' == 'Microsoft.DiaSymReader.Native.amd64.dll'" />
+      <RuntimePackAsset Remove="@(_DmDebuggerFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The copy list is made from the runtime pack before that, so the same files are taken off it too. -->
+  <Target Name="DropDebuggerRuntimeFilesFromPublish" AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(RuntimeIdentifier)' == 'win-x64' and '$(SelfContained)' == 'true'">
+    <ItemGroup>
+      <_DmDebuggerPublishFile Include="@(ResolvedFileToPublish)"
+                              Condition="'%(Filename)%(Extension)' == 'createdump.exe' or '%(Filename)' == 'mscordaccore' or
+                                         $([System.String]::Copy('%(Filename)').StartsWith('mscordaccore_amd64_amd64_')) or
+                                         '%(Filename)%(Extension)' == 'mscordbi.dll' or
+                                         '%(Filename)%(Extension)' == 'Microsoft.DiaSymReader.Native.amd64.dll'" />
+      <ResolvedFileToPublish Remove="@(_DmDebuggerPublishFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

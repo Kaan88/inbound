@@ -316,18 +316,22 @@ public sealed partial class RuntimeServiceTests
             Assert.True(collided.Ok);
             Assert.Equal(2, Directory.GetFiles(quarantine).Length);
 
-            // A locked orphan is reported as failed, not silently skipped.
-            var locked = Path.Combine(ctx.Destination, $"orphan-locked.{Guid.NewGuid():N}.part");
-            await File.WriteAllBytesAsync(locked, new byte[5]);
-            using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+            // A locked orphan is reported as failed, not silently skipped. Only Windows has a lock that stops a delete.
+            if (OperatingSystem.IsWindows())
             {
-                var failed = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
-                Assert.False(failed.Ok);
-                Assert.Contains(locked, failed.Failed, StringComparer.OrdinalIgnoreCase);
-                Assert.False(string.IsNullOrWhiteSpace(failed.Error));
+                var locked = Path.Combine(ctx.Destination, $"orphan-locked.{Guid.NewGuid():N}.part");
+                await File.WriteAllBytesAsync(locked, new byte[5]);
+                using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    var failed = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
+                    Assert.False(failed.Ok);
+                    Assert.Contains(locked, failed.Failed, StringComparer.OrdinalIgnoreCase);
+                    Assert.False(string.IsNullOrWhiteSpace(failed.Error));
+                }
+
+                File.Delete(locked);
             }
 
-            File.Delete(locked);
             await File.WriteAllBytesAsync(second, new byte[10]);
             var deleted = await ctx.Service.CleanOrphanPartFilesAsync(true, CancellationToken.None);
             Assert.True(deleted.Ok);
@@ -1078,6 +1082,63 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    public async Task Perf6_FtpDownloadsTakeALiveSpeedLimitAndTheSharedCap()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        // 128 KB at 32 KB/s is about 4 s; uncapped, loopback FTP takes milliseconds.
+        settings.GlobalSpeedLimitBytesPerSecond = 32_768;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var added = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-capped.bin",
+            Source = "cli",
+        });
+        Assert.True(added.Accepted, added.Error);
+        Assert.True(added.Job!.CanChangeSpeedLimit);
+        var completed = await ctx.WaitFor(added.Job.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        Assert.InRange(stopwatch.Elapsed.TotalSeconds, 2.5, 25);
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
+            await Hashing.Sha256FileAsync(completed.FinalFilePath));
+
+        // A running FTP transfer takes its own limit live: 128 KB at 8 KB/s needs about 16 s, so lifting the
+        // limit once bytes flow must let the rest arrive well before the old limit would have.
+        settings = ctx.Service.GetSnapshot().Settings;
+        settings.GlobalSpeedLimitBytesPerSecond = null;
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+        var own = await ctx.Service.AddJobAsync(new AddJobRequest
+        {
+            Url = $"ftp://ftpuser:ftppass@127.0.0.1:{_server.Ftp.Port}/auth.bin",
+            DestinationDirectory = ctx.Destination,
+            FileName = "ftp-own-limit.bin",
+            Source = "cli",
+            SpeedLimitBytesPerSecond = 8_192,
+        });
+        Assert.True(own.Accepted, own.Error);
+        await ctx.WaitFor(own.Job!.Id, j => j.State == "downloading" && j.ReceivedBytes > 0, TimeSpan.FromSeconds(30));
+        await Task.Delay(500);
+        var before = ctx.Service.GetJob(own.Job.Id)!;
+        Assert.Equal("downloading", before.State);
+        Assert.True(before.ReceivedBytes < 96 * 1024, $"The 8 KB/s limit let {before.ReceivedBytes} bytes through.");
+
+        var lifted = System.Diagnostics.Stopwatch.StartNew();
+        var update = await ctx.Service.UpdateJobAsync(new JobUpdateRequest { JobId = own.Job.Id, SpeedLimitBytesPerSecond = 0 });
+        Assert.True(update.Ok, update.Error);
+        Assert.Null(update.Job!.SpeedLimitBytesPerSecond); // zero is stored as unlimited
+        var ownDone = await ctx.WaitFor(own.Job.Id, j => j.State is "completed" or "failed", TimeSpan.FromSeconds(30));
+        Assert.Equal("completed", ownDone.State);
+        Assert.True(lifted.Elapsed < TimeSpan.FromSeconds(5), $"The rest took {lifted.Elapsed} after the limit was lifted.");
+        Assert.Equal(
+            await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "auth.bin")),
+            await Hashing.Sha256FileAsync(ownDone.FinalFilePath));
+    }
+
+    [Fact]
     public async Task FtpRequiresLoginAndResumesFromPartialBytes()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -1118,6 +1179,8 @@ public sealed partial class RuntimeServiceTests
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "plain.bin")),
             await Hashing.Sha256FileAsync(plainCompleted.FinalFilePath));
 
+        // The FTP server is shared by the class, and another test (RuntimeLiveConnectionTests) fetches slow.bin too.
+        var servedBefore = _server.Ftp.BytesServed("slow.bin");
         var slow = await ctx.Service.AddJobAsync(new AddJobRequest
         {
             Url = $"{ftpBase}/slow.bin",
@@ -1139,8 +1202,11 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(
             await Hashing.Sha256FileAsync(Path.Combine(_server.Ftp.Root, "slow.bin")),
             await Hashing.Sha256FileAsync(resumed.FinalFilePath));
-        Assert.True(_server.Ftp.RestCount > restBefore);
-        Assert.True(_server.Ftp.BytesServed("slow.bin") < 524_288 * 3 / 2);
+        Assert.True(_server.Ftp.RestCount > restBefore, $"REST count {_server.Ftp.RestCount}, before {restBefore}");
+        var served = _server.Ftp.BytesServed("slow.bin") - servedBefore;
+        Assert.True(served < 524_288 * 3 / 2, $"served {served}");
+        // The server took REST, so a lowered limit may now requeue this job without losing its data (UI.R21).
+        Assert.True(resumed.ResumeSupported, $"ResumeSupported false; paused at {paused.ReceivedBytes}, REST {_server.Ftp.RestCount} (before {restBefore}), served {served}");
     }
 
     [Fact]
@@ -2413,7 +2479,7 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal("127.0.0.1:3128", cleared.Address);
         var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
         Assert.DoesNotContain("clear-me-789", json);
-        Assert.DoesNotContain("dpapi:v1:", json);   // no protected blob left behind (no site logins here)
+        Assert.DoesNotContain(SecretProtector.Current.Prefix, json);   // no protected blob left behind (no site logins here)
     }
 
     [Fact]
@@ -2469,7 +2535,7 @@ public sealed partial class RuntimeServiceTests
 
             var json = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
             Assert.DoesNotContain("proxypass", json);
-            Assert.Contains("dpapi:v1:", json);
+            Assert.Contains(SecretProtector.Current.Prefix, json);
             Assert.DoesNotContain("\"password\"", json, StringComparison.OrdinalIgnoreCase);
 
             // A fresh service instance decrypts the blob and authenticates to the proxy.
@@ -2781,6 +2847,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // the installer updater is Windows-only
     public async Task UpdateHelperThatExitsAtOnceLeavesTheHostRunning()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -2818,6 +2885,7 @@ public sealed partial class RuntimeServiceTests
     }
 
     [Fact]
+    [Trait("Platform", "Windows")] // the installer updater is Windows-only
     public async Task UpdateHelperStillWaitingForTheHostIsScheduled()
     {
         await using var ctx = await ServiceContext.CreateAsync(_server);
@@ -2939,7 +3007,7 @@ public sealed partial class RuntimeServiceTests
         var json = await File.ReadAllTextAsync(jobPath);
         Assert.DoesNotContain(token, json);
         Assert.DoesNotContain("private-cookie-value", json);
-        Assert.Contains("dpapi:v1:", json);
+        Assert.Contains(SecretProtector.Current.Prefix, json);
         var store = new JsonJobStore(ctx.Paths);
         var reloaded = await store.LoadAsync(response.Job.Id);
         Assert.Equal(token, reloaded!.RequestHeaders["authorization"]);
@@ -3018,7 +3086,7 @@ public sealed partial class RuntimeServiceTests
             Assert.True(readBack.HasPassword);
             var settingsJson = await File.ReadAllTextAsync(ctx.Paths.SettingsFile);
             Assert.DoesNotContain("sitepass", settingsJson);
-            Assert.Contains("dpapi:v1:", settingsJson);
+            Assert.Contains(SecretProtector.Current.Prefix, settingsJson);
 
             var authorizedBefore = _server.SiteAuthAuthorized;
             var response = await ctx.Service.AddJobAsync(new AddJobRequest
@@ -4119,7 +4187,7 @@ public sealed partial class RuntimeServiceTests
                 handler: handler,
                 checkpoints: checkpoints,
                 mediaCheckpoints: mediaCheckpoints);
-            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine();
+            var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
             var service = new DownloadManagerService(
                 paths,
                 store,

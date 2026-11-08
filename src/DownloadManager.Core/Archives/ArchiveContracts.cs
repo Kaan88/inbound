@@ -118,8 +118,18 @@ public sealed record ArchiveProbe
     /// <summary>The volumes the tool went through, by full path, in order. Empty when it could not list them, as for encrypted headers without a password.</summary>
     public IReadOnlyList<string> VolumesRead { get; init; } = [];
 
+    /// <summary>
+    /// Off Windows: entries of a zip made on Windows whose names use a backslash between folders. 7-Zip keeps such a
+    /// name whole there and writes one file or folder called <c>dir\a.txt</c>; <see cref="Entries"/> already list it as
+    /// <c>dir/a.txt</c>, and the extractor moves what was written into those folders before checking it. Empty on Windows.
+    /// </summary>
+    public IReadOnlyList<ArchiveNameFix> NameFixes { get; init; } = [];
+
     public long TotalListedSize => Entries.Where(entry => entry.Kind == ArchiveEntryKind.File).Sum(entry => entry.Size);
 }
+
+/// <summary>A name as 7-Zip wrote it under the payload folder, and the path it stands for, both relative to that folder.</summary>
+public sealed record ArchiveNameFix(string Written, string Path, bool IsFolder);
 
 /// <remarks>
 /// A class rather than a record: a record's generated <c>ToString</c> would print the password.

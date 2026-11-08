@@ -270,7 +270,7 @@ public sealed class RemoteJobRulesTests
     public void ALoneFileGetsNoFolderWithAnExtension(string path, string expected)
     {
         var request = Build(Record(), Item(File("0", path))).Requests.Single();
-        Assert.Equal(expected, request.Source.RelativePath);
+        Assert.Equal(expected.Replace('\\', Path.DirectorySeparatorChar), request.Source.RelativePath);
         Assert.Equal(Path.GetFileName(path), request.FileName);
     }
 

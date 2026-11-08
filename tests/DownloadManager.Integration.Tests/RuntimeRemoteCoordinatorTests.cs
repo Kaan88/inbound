@@ -398,6 +398,49 @@ public sealed partial class RuntimeServiceTests
         await rig.AssertNothingLeakedAsync();
     }
 
+    [Fact]
+    public async Task OnAServerAProviderAddOutsideTheRootsIsRefusedBeforeAnyProviderCallAndCreatesNoFolder()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var roots = new PathRoots([rig.Destination]);
+        rig.Ctx.Service.Roots = roots;
+        rig.Jobs.DestinationRoots = roots;
+        var outside = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"outside-{Guid.NewGuid():N}");
+        var (link, _, _) = rig.ScriptHoster("fenced", MockTorBoxState.CachedReady);
+
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = link, Destination = outside });
+
+        Assert.Equal(PathRoots.OutsideMessage, added.Error);
+        Assert.Null(added.Job);
+        Assert.Empty(rig.Mock.Submissions);
+        Assert.False(Directory.Exists(outside), "the refused folder was created");
+    }
+
+    [Fact]
+    public async Task OnAServerAFileOutsideTheRootsIsNeverWaitedForAndItsFolderIsNeverCreated()
+    {
+        // Only the service knows the roots here, as for a job saved before the coordinator checked them.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        rig.Ctx.Service.Roots = new PathRoots([rig.Destination]);
+        var outside = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"outside-{Guid.NewGuid():N}");
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "fenced.bin", 32 * Kb, seed: 31);
+        var item = rig.Mock.AddItem(RemoteItemKind.Torrent, "fenced", [file]);
+
+        var added = await rig.Jobs.AddAsync(new RemoteAddRequest
+        {
+            Input = $"https://torbox.app/download?type=torrents&id={item.Id}",
+            Selection = RemoteSelectionMode.All,
+            Destination = outside,
+        });
+        Assert.True(added.Error is null, added.Error);
+        await rig.RunAsync();
+        await rig.AdvanceAsync(120);
+
+        Assert.Empty(rig.Children());
+        Assert.NotEqual(RemoteJobState.LocalStarted, rig.View(added.Job!.Id).State);
+        Assert.False(Directory.Exists(outside), "the refused folder was created");
+    }
+
     [Theory]
     [InlineData("torrents", RemoteItemKind.Torrent)]
     [InlineData("web_downloads", RemoteItemKind.WebDownload)]
@@ -782,6 +825,84 @@ public sealed partial class RuntimeServiceTests
         Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
         Assert.Equal(item.Id.ToString(), rig.View(job.Id).ItemId);
         await rig.AssertCompletedAsync(file, "queued", "queued.bin");
+    }
+
+    [Fact]
+    public async Task TbS1_StartNowTakesAQueuedEntryOutOfTheQueueAndTheItemIsPickedUp()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("startnow");
+        var hash = RemoteRig.Md5Of(link);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "startnow/startnow.bin", 32 * Kb, 8);
+        rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.Ready], queued: true);
+        // Another entry in the same queue, which must never be touched.
+        var other = rig.HosterLink("bystander");
+        rig.Mock.ScriptSubmission(RemoteRig.Md5Of(other), [], [MockTorBoxState.Ready], queued: true);
+        var bystander = await rig.AddAsync(new RemoteAddRequest { Input = other, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        await rig.AdvanceAsync(70);
+        Assert.Equal(RemoteStage.Queued, rig.View(job.Id).Stage);
+
+        var started = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Start);
+        Assert.True(started.Ok, started.Error);
+        var item = rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!;
+        Assert.Equal([("start", item.Id)], rig.Mock.QueueControls);
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
+        Assert.Equal(item.Id.ToString(), rig.View(job.Id).ItemId);
+        await rig.AssertCompletedAsync(file, "startnow", "startnow.bin");
+
+        // Not waiting in the queue any more: refused, and nothing is sent.
+        var again = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Start);
+        Assert.False(again.Ok);
+        Assert.Single(rig.Mock.QueueControls);
+        Assert.Equal(RemoteStage.Queued, rig.View(bystander.Id).Stage);
+    }
+
+    [Fact]
+    public async Task TbS1_RemovingAQueuedRowFromTheProviderTakesOnlyItsEntryOutOfTheQueue()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("dequeue");
+        var hash = RemoteRig.Md5Of(link);
+        rig.Mock.ScriptSubmission(hash, [], [MockTorBoxState.Ready], queued: true);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        Assert.Equal(RemoteStage.Queued, rig.View(job.Id).Stage);
+        var queuedId = rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!.Id;
+
+        Assert.False((await rig.Jobs.RemoveRemoteItemAsync(job.Id, confirmed: false)).Ok);
+        Assert.Empty(rig.Mock.QueueControls);
+
+        var removed = await rig.Jobs.RemoveRemoteItemAsync(job.Id, confirmed: true);
+        Assert.True(removed.Ok, removed.Error);
+        Assert.Equal([("delete", queuedId)], rig.Mock.QueueControls);
+        Assert.Empty(rig.Mock.Deleted);
+        Assert.Null(rig.Jobs.Find(job.Id));
+        Assert.Null(rig.Mock.FindItem(RemoteItemKind.WebDownload, hash));
+    }
+
+    [Fact]
+    public async Task TbS1_AQueuedEntryThatLeftMeanwhileIsCheckedAgainNotGuessed()
+    {
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var link = rig.HosterLink("leftqueue");
+        var hash = RemoteRig.Md5Of(link);
+        var file = MockTorBoxFile.Of(rig.Mock.NextFileId(), "leftqueue/leftqueue.bin", 16 * Kb, 9);
+        rig.Mock.ScriptSubmission(hash, [file], [MockTorBoxState.Ready], queued: true);
+        var job = await rig.AddAsync(new RemoteAddRequest { Input = link, Selection = RemoteSelectionMode.All, ApprovedUncached = true });
+        await rig.RunAsync();
+        rig.Mock.FindItem(RemoteItemKind.WebDownload, hash)!.InQueue = false;
+
+        var result = await rig.Jobs.ControlQueuedAsync(job.Id, RemoteQueueAction.Remove);
+        Assert.False(result.Ok);
+        Assert.Contains("no longer in your TorBox queue", result.Error);
+        Assert.Empty(rig.Mock.QueueControls);
+        Assert.NotNull(rig.Jobs.Find(job.Id));
+        await rig.RunAsync();
+        Assert.Equal(RemoteJobState.LocalStarted, rig.View(job.Id).State);
     }
 
     [Fact]

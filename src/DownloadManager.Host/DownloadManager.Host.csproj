@@ -14,6 +14,13 @@
     <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
   </ItemGroup>
 
+  <!-- PERF.3: the GC keeps the heap closer to what is live. 5,000 jobs and a stream of downloads, 16 minutes,
+       twice each: Host private memory mean 167 and 165 MB with the default, 98 and 104 MB with this; peak 224 and
+       214 MB against 130 and 132; CPU the same (0.38 to 0.40 s per minute). Measured 2026-11-08, PROGRESS.md. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

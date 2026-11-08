@@ -98,14 +98,8 @@ public sealed partial class MainWindow
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        try
-        {
-            return await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            return ContentDialogResult.None;
-        }
+        // Refused while another dialog is open, which counts as Cancel.
+        return await ShowDialogAsync(dialog) ?? ContentDialogResult.None;
     }
 
     private string ProviderWordForAdding()
@@ -228,14 +222,8 @@ public sealed partial class MainWindow
             _ = CheckAsync(text);
         };
 
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
-        {
-            // Another dialog is already open over this window.
-        }
+        // Shows nothing while another dialog is already open over this window.
+        await ShowDialogAsync(dialog);
 
         closing.Cancel();
         return outcome;
@@ -401,7 +389,7 @@ public sealed partial class MainWindow
         {
             var request = folder
                 ? AddRequests.ForFolderLink(pick.Line, choice.Destination, choice.QueueId, choice.StartLater)
-                : AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files);
+                : AddRequests.ForLine(pick.Line, choice.Destination, choice.QueueId, choice.StartLater, pick.LinkPassword, files, pick.LinkPasswordForArchives);
             pick.LinkPassword = null;
             if (request is null) continue;
             var name = RemoteText.AddLineWords(pick.Line, provider).Name;

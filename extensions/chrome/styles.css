@@ -380,3 +380,108 @@ code {
   .page .job-list { max-height: 22vh; }
 }
 .popup .job-list { max-height: 300px; }
+
+/* EXT.B1: whether downloads are caught automatically, always in view. */
+.auto-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.auto-state { font-weight: 600; }
+.auto-state[data-on="false"] { color: var(--warn); }
+.auto-state[data-on="true"] { color: var(--ok); }
+.left-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; }
+.left-list li { padding: 4px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.left-list li:first-child { border-top: 0; }
+.left-list .name { font-weight: 600; }
+
+/* EXT.R2: actions on each download in the popup. */
+.job-list .job-actions { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.job-list .job-actions button { padding: 3px 8px; font-size: 12px; }
+.job-list .job-actions label { font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.state-banner { margin: 8px 0 0; font-weight: 600; }
+.state-banner[data-on="false"] { color: var(--warn); }
+.state-banner[data-on="true"] { color: var(--ok); }
+
+/* EXT.R1: the server as a second place to save to. */
+.target-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.target-field legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.target-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.target-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.target-option .muted {
+  overflow-wrap: anywhere;
+}
+
+.folder-browser {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin: -4px 0 12px;
+  background: var(--panel-2);
+}
+
+.folder-browser-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.folder-browser-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.folder-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.folder-entry {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  overflow-wrap: anywhere;
+}
+
+.folder-entry:hover,
+.folder-entry:focus-visible {
+  background: var(--panel);
+}
+
+.target-tag {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  align-self: center;
+}
+
+.job-list li:has(.target-tag) { grid-template-columns: minmax(0, 1fr) auto auto; }

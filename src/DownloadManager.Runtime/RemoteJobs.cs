@@ -306,8 +306,10 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
     }
 
     /// <summary>A folder that can't be used is worth waiting for, such as a drive plugged in later. One path under a good folder isn't.</summary>
-    private static bool FolderCanBeUsed(string folder)
+    private bool FolderCanBeUsed(string folder)
     {
+        // On a server a folder outside the roots is refused, not waited for, and is never created.
+        if (Roots is { } roots && roots.Allowed(folder) is null) return false;
         try
         {
             Directory.CreateDirectory(folder);
@@ -742,7 +744,13 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
         }
 
         DownloadJob snapshot;
-        lock (_sync) snapshot = job.Clone();
+        lock (_sync)
+        {
+            snapshot = job.Clone();
+            // The last run's link is no guide to this one's host or cap.
+            runtime.RunLink = null;
+        }
+
         RemoteLinkResolution resolution;
         try
         {
@@ -794,12 +802,24 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             job.ExpectedTotalBytes = resolution.ExpectedTotalBytes ?? job.ExpectedTotalBytes;
             job.ExpectedMd5 = resolution.ExpectedMd5 ?? job.ExpectedMd5;
             job.ResolvedUrl = resolution.Url;
-            ClampConnectionsLocked(job, uri, resolution.MaxConnections ?? int.MaxValue);
+            runtime.RunLink = (uri, resolution.MaxConnections ?? int.MaxValue);
+            ProviderConnectionsLocked(job, uri, resolution.MaxConnections ?? int.MaxValue);
         }
 
         _log?.Invoke($"Job {job.Id}: {source.Provider} gave a link for this run, with {job.RequestedConnections} connections at most.");
         return null;
     }
+
+    /// <summary>
+    /// A provider job's count is never chosen by hand (its add request carries none), so each run takes the user's
+    /// current connections per download, the host's limit and the provider's cap afresh (TB.L1). A job saved under an
+    /// older, lower provider cap grows to the new one; a raised or lowered default reaches it on its next run, and a
+    /// running segmented transfer at once (UI.R21) within the same cap. The
+    /// engine resumes a checkpoint with any count, since workers never outnumber its remaining segments.
+    /// </summary>
+    private void ProviderConnectionsLocked(DownloadJob job, Uri address, int cap)
+        => job.RequestedConnections = Math.Clamp(
+            Math.Min(Math.Min(_settings.DefaultConnections, EffectiveConnectionLimit(address)), cap), 1, 32);
 
     /// <summary>Limits can drop after a job was saved, and only the run knows the real host.</summary>
     private void ClampConnectionsLocked(DownloadJob job, Uri address, int cap)

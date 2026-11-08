@@ -18,6 +18,7 @@
 
     <section class="card form-card">
       <h2>Integration</h2>
+      <p id="autoBanner" class="state-banner" data-on="false">Automatic sending: checking…</p>
       <label class="check">
         <input id="enabled" type="checkbox" />
         <span>Allow automatic sending (right-click and Download all links work either way)</span>
@@ -27,7 +28,7 @@
         <span>Automatically send downloads to the desktop app</span>
       </label>
       <p class="consent small">
-        When this is on, downloads that match your rules stop in Chrome and start again in the desktop app, and they leave Chrome's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. Nothing is sent to the developer.
+        When this is on, downloads that match your rules stop in your browser and start again in the desktop app, and they leave the browser's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you pair your own Inbound server below and send downloads there, the same details go to that server instead. Nothing is sent to the developer.
         <a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a>
       </p>
       <label class="check">
@@ -43,38 +44,96 @@
         </select>
       </label>
 
-      <p class="muted small">New downloads use the app's default folder. To use a different folder for one download, right-click its link and choose Download with Inbound Download Manager.</p>
+      <label class="field">
+        <span>When sending a download</span>
+        <select id="destinationMode">
+          <option value="default">Use the app's default folder</option>
+          <option value="ask">Ask each time</option>
+        </select>
+      </label>
+      <p class="muted small">"Ask each time" opens a small window for each caught download, starting at the app's default folder, with Choose… for another folder and Keep in browser to leave it to the browser. The folder you choose there is for that download only. With a server paired below, the window also asks whether to save on this PC or on the server. The right-click menu always asks.</p>
+
     </section>
 
     <section class="card form-card">
       <h2>File and site rules</h2>
       <label class="field">
-        <span>Catch these file types (comma-separated; empty means all). Files with no file type are also caught, unless they are web pages.</span>
+        <span>Catch only these file types (comma-separated). Leave it empty to catch every file type that is not on the list below; files with no file type are also caught, unless they are web pages.</span>
         <textarea id="interceptedExtensions" rows="4" spellcheck="false"></textarea>
       </label>
       <label class="field">
         <span>Never catch these file types</span>
         <textarea id="excludedExtensions" rows="2" spellcheck="false"></textarea>
+        <button id="resetExcluded" class="link-button" type="button">Restore the default list</button>
       </label>
       <label class="field">
         <span>Never catch downloads from these sites (one per line or comma-separated)</span>
         <textarea id="excludedHosts" rows="3" spellcheck="false"></textarea>
       </label>
       <p class="muted small">
-        To keep a single download in Chrome, hold Delete while you click its link. To keep them all for a
+        To keep a single download in your browser, hold Delete while you click its link. To keep them all for a
         while, or for buttons and links inside embedded frames where holding Delete does not work, use Pause
         catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
         it does not record what you type.
       </p>
     </section>
 
+    <section id="siteAccessCard" class="card form-card hidden">
+      <h2>Access to sites</h2>
+      <p class="muted small">This browser has not given the extension access to the sites you download from, so it cannot read a site's cookies for the app or notice Delete held on a page. Downloads that need your login may fail in the app until you allow it.</p>
+      <div class="row">
+        <button id="grantSiteAccess" type="button">Allow access to all sites</button>
+      </div>
+      <p id="siteAccessResult" class="muted small"></p>
+    </section>
+
+    <section id="serverCard" class="card form-card">
+      <h2>Inbound server</h2>
+      <p class="muted small">
+        Send downloads to your own Inbound server (the Docker or Linux version) as well as, or instead of, this PC.
+        To get a code, open the server's web UI, then Settings, Paired browsers, and choose Pair a browser. The code
+        works once, for ten minutes.
+      </p>
+      <div id="serverUnpaired">
+        <label class="field">
+          <span>Server address</span>
+          <input id="serverAddress" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="http://192.168.1.20:8080" />
+        </label>
+        <p id="serverCleartext" class="muted small hidden">This address uses http://, so the pairing token and the cookies sent with each download cross your network unencrypted. That is fine on a home network you trust; put the server behind https:// otherwise.</p>
+        <label class="field">
+          <span>Pairing code</span>
+          <input id="pairingCode" type="text" spellcheck="false" autocomplete="off" maxlength="12" placeholder="8 letters and digits" />
+        </label>
+        <div class="row">
+          <button id="pairServer" type="button">Pair</button>
+        </div>
+      </div>
+      <div id="serverPaired" class="hidden">
+        <p id="serverState" class="state-banner" data-on="false"></p>
+        <div class="row">
+          <button id="checkServer" type="button">Check connection</button>
+          <button id="openServer" type="button">Open the web UI</button>
+          <button id="unpairServer" type="button">Unpair</button>
+        </div>
+      </div>
+      <label class="field">
+        <span>Automatic downloads go to</span>
+        <select id="defaultTarget">
+          <option value="local">This PC</option>
+          <option value="server">The server</option>
+        </select>
+      </label>
+      <p class="muted small">Saved with Save settings. The server can be chosen once one is paired. If the place chosen can't take a download, it stays in your browser; it is never sent to the other place instead.</p>
+      <p id="serverResult" class="muted small" role="status"></p>
+    </section>
+
     <section class="card form-card">
       <h2>Connection</h2>
       <p class="muted small">
-        This extension needs the Inbound Download Manager desktop app for Windows, and sends download details
-        only to that app on this computer. Using the extension starts the app's background process if it is not
+        This extension needs the Inbound Download Manager desktop app for Windows, or an Inbound server paired
+        above, and sends download details only to that app on this computer or to your server. Using the extension starts the app's background process if it is not
         running. If the app is not installed or cannot be reached, or it refuses a download, the download stays
-        in Chrome. Once the app has accepted one, Chrome's copy is gone, so pause catching first for a file from a
+        in your browser. Once the app has accepted one, the browser's copy is gone, so pause catching first for a file from a
         submitted form or a link that works only once.
       </p>
       <div class="row">

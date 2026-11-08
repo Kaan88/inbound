@@ -503,7 +503,7 @@ public sealed class RemoteRowTextTests
     private static RemoteRowView Row(RemoteJobDto job) => RemoteText.JobRow(job, Now, CultureInfo.InvariantCulture);
 
     [Theory]
-    [InlineData("waiting", "queued", "Waiting for TorBox")]
+    [InlineData("waiting", "queued", "In TorBox's queue")]
     [InlineData("waiting", "processing", "Processing on TorBox")]
     [InlineData("waiting", "stalled", "Stalled on TorBox")]
     [InlineData("waiting", "ready", "Ready to download")]
@@ -513,6 +513,21 @@ public sealed class RemoteRowTextTests
     [InlineData("failed", null, "Failed on TorBox")]
     public void StagesAreWordsNamedAfterTheProvider(string state, string? stage, string words)
         => Assert.Equal(words, Row(Job(state, stage)).Status);
+
+    [Fact]
+    public void TbS1_OnlyARowWaitingInTheQueueWithNoItemOffersStartAndRemoveFromTheQueue()
+    {
+        var queued = Job("waiting", "queued");
+        Assert.True(RemoteRules.IsInProviderQueue(queued));
+        Assert.False(RemoteRules.CanDeleteFromProvider(queued));
+
+        var known = Job("waiting", "queued");
+        known.ItemId = "77";
+        Assert.False(RemoteRules.IsInProviderQueue(known));
+        Assert.Equal("Waiting for TorBox", Row(known).Status);
+        Assert.False(RemoteRules.IsInProviderQueue(Job("waiting", "processing")));
+        Assert.False(RemoteRules.IsInProviderQueue(Job("failed", "queued")));
+    }
 
     [Fact]
     public void TheProvidersNameComesFromTheHost()
