@@ -707,7 +707,7 @@ public sealed partial class DownloadManagerService
             settingsChanged = true;
         }
 
-        if (source is not (DownloadSource.Import or DownloadSource.Remote) && protectedUrl is null)
+        if (source is not (DownloadSource.Import or DownloadSource.CliImport or DownloadSource.Remote) && protectedUrl is null)
         {
             lock (_sync)
             {
