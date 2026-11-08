@@ -20,10 +20,14 @@ public sealed class AuthTests
         Assert.True(status.GetProperty("setupNeeded").GetBoolean());
         Assert.False(status.GetProperty("setupCodeNeeded").GetBoolean());
         Assert.False(status.GetProperty("signedIn").GetBoolean());
+        // A stranger isn't told which version runs here.
+        Assert.True(!status.TryGetProperty("version", out var version) || version.ValueKind == JsonValueKind.Null);
 
         // Without a session: health and the sign-in page answer, the API is refused and pages send you to sign in.
         Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/health")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/signin/")).StatusCode);
+        // The theme script the sign-in page loads is public too (absent from the placeholder page, so 404 there).
+        Assert.NotEqual(HttpStatusCode.Redirect, (await anonymous.GetAsync("/theme.js")).StatusCode);
         var page = await anonymous.GetAsync("/");
         Assert.Equal(HttpStatusCode.Redirect, page.StatusCode);
         Assert.Equal("/signin/", page.Headers.Location?.OriginalString);
@@ -40,6 +44,7 @@ public sealed class AuthTests
         using var client = await AuthServer.SetUpAsync(server);
         Assert.Equal(HttpStatusCode.OK, (await client.IpcAsync(MessageTypes.HostPing, new { })).Status);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/")).StatusCode);
+        Assert.Equal(Protocol.HostVersion, (await client.JsonAsync(await client.GetAsync("/api/auth/status"))).GetProperty("version").GetString());
         await using (var socket = await server.ConnectAsync(sessionCookie: client.Session))
             Assert.Equal(MessageTypes.ServerHello, (await socket.ReadAsync())!.Type);
 
