@@ -65,22 +65,31 @@ public sealed class ServerSecurityTests
     }
 
     [Fact]
-    public async Task ListeningBeyondLoopbackIsRefusedWithoutTheExplicitVariable()
+    public async Task WithSignInOffListeningBeyondLoopbackIsRefusedWithoutTheExplicitVariable()
     {
         foreach (var url in new[] { "http://0.0.0.0:8080", "http://*:8080", "http://+:8080", "http://[::]:8080", "http://192.168.1.5:8080", "http://nas:8080" })
         {
-            var options = new ServerOptions { DataDirectory = Path.Combine(ServerHarness.NewWork(), "data"), Urls = [url] };
+            var options = new ServerOptions { DataDirectory = Path.Combine(ServerHarness.NewWork(), "data"), Urls = [url], SignInRequired = false };
             var refused = await Assert.ThrowsAsync<ServerStartException>(() => ServerApp.StartAsync(options, logToConsole: false));
             Assert.Contains(ServerOptions.AllowUnauthenticatedVariable, refused.Message);
+            Assert.Contains(ServerOptions.AuthVariable, refused.Message);
             Assert.Null((options with { AllowUnauthenticated = true }).DescribeUnsafeBinding());
+            // With sign-in on (D2), any address may be used.
+            Assert.Null((options with { SignInRequired = true }).DescribeUnsafeBinding());
         }
 
         foreach (var url in new[] { "http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://127.0.0.2:1" })
-            Assert.Null(new ServerOptions { Urls = [url] }.DescribeUnsafeBinding());
+            Assert.Null(new ServerOptions { Urls = [url], SignInRequired = false }.DescribeUnsafeBinding());
 
-        // The default listens on every address, so it needs the variable too.
-        Assert.NotNull(ServerOptions.FromEnvironment(_ => null).DescribeUnsafeBinding());
-        Assert.Null(ServerOptions.FromEnvironment(name => name == ServerOptions.AllowUnauthenticatedVariable ? "1" : null).DescribeUnsafeBinding());
+        // The default listens on every address with sign-in on, which is allowed; turning sign-in off needs the variable.
+        Assert.Null(ServerOptions.FromEnvironment(_ => null).DescribeUnsafeBinding());
+        Assert.NotNull(ServerOptions.FromEnvironment(name => name == ServerOptions.AuthVariable ? "off" : null).DescribeUnsafeBinding());
+        Assert.Null(ServerOptions.FromEnvironment(name => name switch
+        {
+            ServerOptions.AuthVariable => "off",
+            ServerOptions.AllowUnauthenticatedVariable => "1",
+            _ => null,
+        }).DescribeUnsafeBinding());
     }
 
     [Fact]
