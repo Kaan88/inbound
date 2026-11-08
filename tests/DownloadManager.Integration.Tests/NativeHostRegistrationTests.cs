@@ -11,6 +11,7 @@ namespace DownloadManager.Integration.Tests;
 /// tests cover the pure logic, the text of Setup and the scripts, and the scripts' behaviour under a
 /// harness with a fake registry and the HKCU: drive removed. None of them touches the registry.
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed class NativeHostRegistrationTests
 {
     private const string StoreOnly =

@@ -7,6 +7,7 @@ namespace DownloadManager.Integration.Tests;
 /// 5,000 jobs at the same CPU (PROGRESS.md, 2026-11-08). The setting lives in the Host's runtimeconfig.json,
 /// which Setup's self-contained build carries too, so a project edit can't drop it unnoticed.
 /// </summary>
+[Trait("Platform", "Windows")]
 public sealed class HostGcSettingsTests
 {
     [Fact]

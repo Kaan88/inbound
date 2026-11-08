@@ -87,6 +87,7 @@ public sealed partial class RuntimeServiceTests
 }
 
 /// <summary>UI.B14 through the real CLI and Host: add-batch and import send their own sources, a single add still "cli".</summary>
+[Trait("Platform", "Windows")]
 public sealed class CliBatchSourceHostTests : IAsyncLifetime
 {
     private TestServerHost _server = null!;
