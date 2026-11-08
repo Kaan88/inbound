@@ -3556,6 +3556,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 long length;
                 long offset;
                 long requestEnd;
+                long completedBefore;
                 lock (run.Sync)
                 {
                     length = segment.End - segment.Start + 1;
@@ -3564,6 +3565,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         break;
                     }
 
+                    completedBefore = segment.Completed;
                     offset = segment.Start + segment.Completed;
                     requestEnd = segment.End;
                 }
@@ -3799,6 +3801,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         throw;
                     }
 
+                    attempt = SegmentProgressed(run, segment, completedBefore) ? 1 : attempt;
                     retryDelay = RetryPolicy.Delay(attempt, _options, ex.RetryAfter);
                 }
                 catch (Exception ex)
@@ -3817,6 +3820,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             throw new SegmentFailureException(failure, retryable);
                         }
 
+                        attempt = SegmentProgressed(run, segment, completedBefore) ? 1 : attempt;
                         retryDelay = RetryPolicy.Delay(attempt, _options);
                     }
                 }
@@ -3852,6 +3856,19 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         finally
         {
             slot?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Whether this attempt got the segment new bytes. As in the single-stream loop, a failure after progress
+    /// starts the count of attempts over: a server that cuts every response short still delivers the segment
+    /// a piece at a time, and only attempts that get nothing use the retry budget up (UI.B10).
+    /// </summary>
+    private static bool SegmentProgressed(SegmentedRun run, SegmentCheckpoint segment, long completedBefore)
+    {
+        lock (run.Sync)
+        {
+            return segment.Completed > completedBefore;
         }
     }
 
