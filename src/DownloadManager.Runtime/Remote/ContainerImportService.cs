@@ -50,6 +50,7 @@ public sealed class ContainerImportService : IDisposable
     private readonly TimeProvider _time;
     private readonly Action<string>? _log;
     private readonly Lazy<JDownloaderBridge> _bridge;
+    private readonly PathRoots? _roots;
     private readonly Lock _sync = new();
     private readonly Dictionary<Guid, HeldPreview> _held = [];
     private bool _disposed;
@@ -61,8 +62,10 @@ public sealed class ContainerImportService : IDisposable
         ContainerImportOptions? options = null,
         TimeProvider? timeProvider = null,
         Action<string>? log = null,
-        JDownloaderBridge? bridge = null)
+        JDownloaderBridge? bridge = null,
+        PathRoots? roots = null)
     {
+        _roots = roots;
         _providers = providers;
         _jobs = jobs;
         _options = options ?? new ContainerImportOptions();
@@ -83,7 +86,7 @@ public sealed class ContainerImportService : IDisposable
     /// <summary>What was read and how it would be handled. Any problem with the file comes back in words, never as an exception.</summary>
     public async Task<RemoteContainerPreviewResult> PreviewAsync(string? path, CancellationToken cancellationToken = default)
     {
-        if (RefusePath(path) is { } refused)
+        if (Confine(ref path) is { } refused)
         {
             return new RemoteContainerPreviewResult { Error = refused };
         }
@@ -304,6 +307,19 @@ public sealed class ContainerImportService : IDisposable
             : null;
     }
 
+    /// <summary>
+    /// <see cref="RefusePath"/>, and on a server also its roots: a client there is not the machine's user, so it may only
+    /// have the server read files in the folders it may use. The path becomes the resolved one, so a link can't lead out.
+    /// </summary>
+    private string? Confine(ref string? path)
+    {
+        if (RefusePath(path) is { } refused) return refused;
+        if (_roots is null) return null;
+        if (_roots.Allowed(path) is not { } inside) return "That file is outside the folders this server may use.";
+        path = inside;
+        return null;
+    }
+
     /// <returns>Why it can't be used. Before anything looks at it: asking whether a file on a network path exists already sends this Windows account's credentials there.</returns>
     private static string? RefusePath(string? path)
     {
@@ -479,7 +495,7 @@ public sealed class ContainerImportService : IDisposable
     /// <summary>Only when the user asks. It hands the file to a JDownloader running on this computer, and the links stay there.</summary>
     public async Task<JDownloaderBridgeResult> SendToJDownloaderAsync(string? path, CancellationToken cancellationToken = default)
     {
-        if (RefusePath(path) is { } refused)
+        if (Confine(ref path) is { } refused)
         {
             return new JDownloaderBridgeResult(JDownloaderBridgeStatus.InvalidInput, refused);
         }

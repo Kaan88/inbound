@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DownloadManager.Core;
 
 namespace DownloadManager.Archives;
 
@@ -55,19 +56,19 @@ public static partial class ArchiveVolumes
             .Select(Path.GetFileName)
             .Where(name => !string.IsNullOrEmpty(name))
             .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(PathNames.Comparer)
             .ToList();
 
         var oldStyleBases = names
             .Select(name => OldStyleVolume().Match(name))
             .Where(match => match.Success && IsLetter(match, 'r'))
             .Select(match => match.Groups["base"].Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(PathNames.Comparer);
 
-        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var parts = new Dictionary<string, List<(string Digits, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
-        var splits = new Dictionary<string, List<(int Number, string Name)>>(StringComparer.OrdinalIgnoreCase);
+        var oldStyle = new Dictionary<string, List<(int Index, string Name)>>(PathNames.Comparer);
+        var parts = new Dictionary<string, List<(string Digits, string Name)>>(PathNames.Comparer);
+        var threeDigit = new Dictionary<string, List<(int Number, string Name)>>(PathNames.Comparer);
+        var splits = new Dictionary<string, List<(int Number, string Name)>>(PathNames.Comparer);
         var singles = new List<string>();
         var otherSingles = new List<(string Stem, string Name)>();
 
@@ -133,12 +134,13 @@ public static partial class ArchiveVolumes
             .OrderBy(set => set.BaseName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(set => set.Scheme)
             .ThenBy(set => set.Members[0], StringComparer.OrdinalIgnoreCase)
+            .ThenBy(set => set.Members[0], StringComparer.Ordinal)
             .ToList();
     }
 
     /// <summary>The set a file belongs to, or null when the name is not part of any.</summary>
     public static ArchiveVolumeSet? FindSet(IEnumerable<string> fileNames, string fileName, Func<string, bool>? isWholeArchive = null) =>
-        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), StringComparer.OrdinalIgnoreCase));
+        Group(fileNames, isWholeArchive).FirstOrDefault(set => set.Members.Contains(Path.GetFileName(fileName), PathNames.Comparer));
 
     private static ArchiveVolumeSet BuildOldStyle(string baseName, List<(int Index, string Name)> members)
     {

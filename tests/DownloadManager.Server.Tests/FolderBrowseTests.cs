@@ -106,6 +106,31 @@ public sealed class FolderBrowseTests : IDisposable
     }
 
     [Fact]
+    public void HiddenFoldersAreLeftOutOfAListing()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "Visible"));
+        var hidden = Directory.CreateDirectory(Path.Combine(Root, OperatingSystem.IsWindows() ? "Hidden" : ".cache"));
+        if (OperatingSystem.IsWindows()) hidden.Attributes |= FileAttributes.Hidden;
+        var browser = new FolderBrowser([Root]);
+
+        Assert.Equal(["Visible"], browser.Browse(Root).Folders.Select(folder => folder.Name));
+        // Left out of the list, not out of reach: a path typed in still opens.
+        Assert.True(browser.Browse(hidden.FullName).Ok);
+    }
+
+    [Fact]
+    public void ATruncatedListingHoldsTheFirstFoldersByNameWhateverOrderTheDiskGivesThem()
+    {
+        var names = Enumerable.Range(0, FolderBrowser.MaxFolders + 25).Select(index => $"f{index:D5}").ToList();
+        foreach (var name in names.OrderBy(_ => Random.Shared.Next())) Directory.CreateDirectory(Path.Combine(Root, name));
+        var browser = new FolderBrowser([Root]);
+
+        var listing = browser.Browse(Root);
+        Assert.True(listing.Truncated);
+        Assert.Equal(names.Take(FolderBrowser.MaxFolders), listing.Folders.Select(folder => folder.Name));
+    }
+
+    [Fact]
     public void CreateMakesOneFolderInsideTheRootAndRefusesBadNames()
     {
         var browser = new FolderBrowser([Root]);

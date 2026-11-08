@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -42,12 +43,14 @@ public sealed class ServerApp : IAsyncDisposable
     private readonly RemoteCommands _remoteCommands;
     private readonly RemoteProviderSetup _remote;
     private readonly HttpDownloadEngine _engine;
+    private readonly DataFolderLock _dataLock;
     private int _stopped;
 
     private ServerApp(WebApplication web, ServerLog log, DownloadManagerService service, HostCommandDispatcher dispatcher,
         ArchiveCoordinator archives, RemoteJobCoordinator remoteJobs, RemoteCommands remoteCommands, RemoteProviderSetup remote,
-        HttpDownloadEngine engine, StoragePaths paths)
+        HttpDownloadEngine engine, StoragePaths paths, DataFolderLock dataLock)
     {
+        _dataLock = dataLock;
         _web = web;
         _log = log;
         _service = service;
@@ -77,16 +80,43 @@ public sealed class ServerApp : IAsyncDisposable
 
         var paths = new StoragePaths(Path.GetFullPath(options.DataDirectory));
         paths.EnsureCreated();
+        // Before anything reads or writes the folder: one writer, as the desktop Host's mutex gives it.
+        var dataLock = DataFolderLock.Acquire(paths.Root);
+        try
+        {
+            return await StartLockedAsync(options, paths, dataLock, logToConsole, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            dataLock.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task<ServerApp> StartLockedAsync(ServerOptions options, StoragePaths paths, DataFolderLock dataLock, bool logToConsole,
+        CancellationToken cancellationToken)
+    {
         var log = new ServerLog(paths.LogsDirectory, logToConsole);
         log.Info($"Server starting; version {Protocol.HostVersion}, state '{paths.Root}', roots {string.Join(", ", options.Roots)}.");
         if (options.AllowUnauthenticated)
             log.Warn("No sign-in: anyone who can reach this server controls it. Keep it off networks you don't trust.");
 
-        // Before any store opens: everything secret the stores read or write is sealed with this key.
+        // Before any store opens: everything secret the stores read or write is sealed with this key. A key that can't
+        // open what the folder already holds stops the start, because the stores would drop those secrets on their next save.
         var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
-        SecretProtector.Use(AesGcmSecretProtector.OpenOrCreate(keyFile, log.Warn));
+        try
+        {
+            SecretProtector.Use(AesGcmSecretProtector.OpenForDataFolder(keyFile, paths.Root, options.DiscardUnreadableSecrets, log.Warn));
+        }
+        catch (SecretKeyMismatchException ex)
+        {
+            log.Error(ex.Message);
+            throw new ServerStartException(ex.Message);
+        }
 
         await SeedFirstStartAsync(paths, options, cancellationToken).ConfigureAwait(false);
+        // Clients here are not the machine's user: what they may have the server read or write stays in these folders.
+        var roots = new PathRoots(options.Roots);
 
         var jobStore = new JsonJobStore(paths, log.Info);
         var checkpoints = new JsonCheckpointStore(paths);
@@ -114,7 +144,10 @@ public sealed class ServerApp : IAsyncDisposable
             mediaCheckpoints: mediaCheckpoints,
             ftpEngine: new DownloadManager.Engine.FtpDownloadEngine(),
             linkBroker: remote.Broker,
-            linkSecrets: remote.Registry);
+            linkSecrets: remote.Registry)
+        {
+            Roots = roots,
+        };
         foreach (var provider in remote.Registry.All)
         {
             // Addresses saved earlier may turn out to hold a key that was only just entered.
@@ -124,7 +157,8 @@ public sealed class ServerApp : IAsyncDisposable
 
         var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
         var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
-        var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
+        remoteJobs.Roots = roots;
+        var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info, roots: roots);
         service.DirectAddresses = remoteJobs;
         await service.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
@@ -156,18 +190,25 @@ public sealed class ServerApp : IAsyncDisposable
 
         var dispatcher = new HostCommandDispatcher(service, new ServerPlatform(), log, remoteStarted ? remoteCommands : null)
         {
-            Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
-            Folders = new FolderBrowser(options.Roots),
+            Archives = archivesStarted ? new ArchiveIpcDispatcher(archives, roots) : null,
+            Folders = new FolderBrowser(roots),
         };
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         service.SettingsChanged += (_, _) => log.Info("Settings updated.");
         dispatcher.Start();
 
         var web = BuildWeb(options, dispatcher, log);
-        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths);
+        var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock);
         try
         {
             await web.StartAsync(cancellationToken).ConfigureAwait(false);
+            // Kestrel's endpoint configuration is turned off in BuildWeb; this is the check that doesn't depend on that,
+            // made on what it really listens on. A refusal stops it at once.
+            if (options.DescribeUnsafeBinding(app.Addresses.Select(address => address.OriginalString)) is { } refusal)
+            {
+                log.Error(refusal);
+                throw new ServerStartException(refusal);
+            }
         }
         catch
         {
@@ -204,7 +245,15 @@ public sealed class ServerApp : IAsyncDisposable
             WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot"),
         });
         builder.WebHost.UseUrls([.. options.Urls]);
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = Protocol.MaxFrameBytes);
+        builder.WebHost.ConfigureKestrel(kestrel =>
+        {
+            kestrel.Limits.MaxRequestBodySize = Protocol.MaxFrameBytes;
+            // The builder reads a "Kestrel" section from every configuration source, unprefixed environment variables
+            // included, and Kestrel:Endpoints would replace the addresses above: Kestrel__Endpoints__X__Url=http://0.0.0.0:80
+            // (a common compose line) would open the port without the loopback rule seeing it. Only the server's own
+            // variables say where it listens.
+            kestrel.Configure(new ConfigurationBuilder().Build(), reloadOnChange: false);
+        });
         // The server's own log carries what matters; ASP.NET's request logging would repeat addresses it can't redact.
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
@@ -297,6 +346,8 @@ public sealed class ServerApp : IAsyncDisposable
     {
         await StopAsync().ConfigureAwait(false);
         await _web.DisposeAsync().ConfigureAwait(false);
+        // Last: until everything above has stopped writing, the folder is still this process's.
+        _dataLock.Dispose();
     }
 
     private async Task Step(Func<Task> step, string name)

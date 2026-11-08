@@ -7,6 +7,26 @@ public sealed class ArchiveVolumesTests
     private static ArchiveVolumeSet Only(params string[] names) => Assert.Single(ArchiveVolumes.Group(names));
 
     [Fact]
+    public void NamesThatDifferOnlyByCaseAreOneFileOnWindowsAndTwoSetsOnLinux()
+    {
+        var sets = ArchiveVolumes.Group(["Movie.part1.rar", "Movie.part2.rar", "movie.part1.rar"]);
+        if (OperatingSystem.IsWindows())
+        {
+            // NTFS keeps one of them, so the names are one file.
+            var set = Assert.Single(sets);
+            Assert.Equal(["Movie.part1.rar", "Movie.part2.rar"], set.Members);
+            return;
+        }
+
+        // Linux keeps both files, so the lower-case one can't be taken for a volume of the other set, or its download
+        // would be tied to that set's cleanup.
+        Assert.Equal(2, sets.Count);
+        Assert.Contains(sets, set => set.Members.SequenceEqual(["Movie.part1.rar", "Movie.part2.rar"]));
+        Assert.Contains(sets, set => set.Members.SequenceEqual(["movie.part1.rar"]));
+        Assert.Equal(["movie.part1.rar"], ArchiveVolumes.FindSet(["Movie.part1.rar", "Movie.part2.rar", "movie.part1.rar"], "movie.part1.rar")!.Members);
+    }
+
+    [Fact]
     public void PartNumberedSetIsInOrderWithFirstVolume()
     {
         var set = Only("example.part03.rar", "example.part01.rar", "example.part02.rar");

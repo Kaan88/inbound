@@ -65,6 +65,100 @@ public sealed class AesGcmSecretProtector : ISecretProtector
         return new AesGcmSecretProtector(key, full, warn);
     }
 
+    /// <summary>
+    /// <see cref="OpenOrCreate"/> for a data folder that may already hold sealed secrets. Before any store opens, the folder
+    /// is searched for blobs, and when one was sealed with another key than the key file's (or the key file is gone, and
+    /// a new one would be made), this refuses with <see cref="SecretKeyMismatchException"/>. Starting anyway would read
+    /// those secrets as nothing, and the stores drop a value that reads as nothing on their next save, so restoring the
+    /// right key file afterwards would recover nothing. <paramref name="discardUnreadable"/> is the owner's explicit
+    /// "start anyway": the secrets are then entered again. A missing key file is not created while refusing, so putting
+    /// the old one back is all it takes.
+    /// </summary>
+    public static AesGcmSecretProtector OpenForDataFolder(string keyFile, string dataFolder, bool discardUnreadable, Action<string>? warn = null)
+    {
+        var full = Path.GetFullPath(keyFile);
+        var sealedWith = KeyIdsIn(dataFolder, skip: full);
+        if (sealedWith.Count > 0 && !File.Exists(full) && !discardUnreadable)
+        {
+            throw new SecretKeyMismatchException(
+                $"The secret key file {full} is missing, but {dataFolder} holds saved passwords and keys sealed with it. " +
+                $"Restore the key file from the backup it came with. To start without them (they have to be entered again), " +
+                $"set {DiscardVariable}=1 once.");
+        }
+
+        var protector = OpenOrCreate(full, warn);
+        var foreign = sealedWith.Where(id => !id.SequenceEqual(protector._keyId)).Count();
+        if (foreign > 0)
+        {
+            if (!discardUnreadable)
+            {
+                throw new SecretKeyMismatchException(
+                    $"{dataFolder} holds saved passwords and keys sealed with another key than {full}. Restore the key file " +
+                    $"that came with this data folder. To start without them (they have to be entered again), set {DiscardVariable}=1 once.");
+            }
+
+            warn?.Invoke($"Saved passwords and keys sealed with another key than {full} are discarded ({DiscardVariable}=1). Enter them again.");
+        }
+
+        return protector;
+    }
+
+    /// <summary>The owner's explicit choice to start with secrets this key can't open, which are then lost.</summary>
+    public const string DiscardVariable = "DOWNLOADMANAGER_DISCARD_UNREADABLE_SECRETS";
+
+    /// <summary>
+    /// The key ids of every <see cref="BlobPrefix"/> blob in the data folder's files, logs left out (they never carry
+    /// one). Each distinct id once. A file that can't be read is skipped: the stores report it themselves.
+    /// </summary>
+    internal static List<byte[]> KeyIdsIn(string dataFolder, string? skip = null)
+    {
+        var ids = new List<byte[]>();
+        if (!Directory.Exists(dataFolder)) return ids;
+        var logs = Path.Combine(Path.GetFullPath(dataFolder), "logs") + Path.DirectorySeparatorChar;
+        // System.Text.Json writes + as \u002B by default (and a / may come as \/), so those spellings are read as well.
+        var blob = new System.Text.RegularExpressions.Regex(System.Text.RegularExpressions.Regex.Escape(BlobPrefix) +
+            @"((?:[A-Za-z0-9+/=]|\\u002[BbFf]|\\/)+)");
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 };
+        foreach (var file in Directory.EnumerateFiles(dataFolder, "*", options))
+        {
+            var path = Path.GetFullPath(file);
+            if (path.StartsWith(logs, StringComparison.Ordinal) || string.Equals(path, skip, StringComparison.Ordinal)) continue;
+            string text;
+            try
+            {
+                if (new FileInfo(path).Length > 64L * 1024 * 1024) continue;
+                text = File.ReadAllText(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (!text.Contains(BlobPrefix, StringComparison.Ordinal)) continue;
+            foreach (System.Text.RegularExpressions.Match match in blob.Matches(text))
+            {
+                byte[] bytes;
+                try
+                {
+                    bytes = Convert.FromBase64String(match.Groups[1].Value
+                        .Replace(@"\u002B", "+", StringComparison.OrdinalIgnoreCase)
+                        .Replace(@"\u002F", "/", StringComparison.OrdinalIgnoreCase)
+                        .Replace(@"\/", "/", StringComparison.Ordinal));
+                }
+                catch (FormatException)
+                {
+                    continue;
+                }
+
+                if (bytes.Length < KeyIdBytes + NonceBytes + TagBytes) continue;
+                var id = bytes[..KeyIdBytes];
+                if (!ids.Any(known => known.SequenceEqual(id))) ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
     public string Protect(string plaintext, ReadOnlySpan<byte> purpose)
     {
         var plain = Encoding.UTF8.GetBytes(plaintext);
@@ -199,3 +293,6 @@ public sealed class AesGcmSecretProtector : ISecretProtector
         }
     }
 }
+
+/// <summary>The data folder's saved secrets were sealed with another key than the key file's. The message says what to do.</summary>
+public sealed class SecretKeyMismatchException(string message) : Exception(message);

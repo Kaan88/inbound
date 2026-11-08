@@ -238,6 +238,26 @@ public sealed class StagingWalkTests : IDisposable
     }
 
     [Fact]
+    public void TheLinkCountIsReadOnlyFromALayoutThatIsKnownAndNeverGuessedAsOne()
+    {
+        var stat = new byte[256];
+        BitConverter.GetBytes(3UL).CopyTo(stat, 16);
+        Assert.Equal(3u, ExtractionSafety.LinkCountIn(stat, Architecture.X64));
+        BitConverter.GetBytes(2u).CopyTo(stat, 20);
+        Assert.Equal(2u, ExtractionSafety.LinkCountIn(stat, Architecture.Arm64));
+        // Another layout isn't read as one link, which would turn the check off; the walk then refuses.
+        Assert.Null(ExtractionSafety.LinkCountIn(stat, Architecture.Arm));
+        Assert.Null(ExtractionSafety.LinkCountIn(stat, Architecture.RiscV64));
+
+        if (!OperatingSystem.IsLinux()) return;
+        var single = _space.WriteSource("single.txt", "a");
+        Assert.Equal(1u, ExtractionSafety.UnixHardLinkCount(single));
+        MakeHardLink(Path.Combine(_space.Root, "second.txt"), single);
+        Assert.Equal(2u, ExtractionSafety.UnixHardLinkCount(single));
+        Assert.Null(ExtractionSafety.UnixHardLinkCount(Path.Combine(_space.Root, "not-there.txt")));
+    }
+
+    [Fact]
     public void RefusesAJunction()
     {
         _space.WriteSource("a.txt", "a");
