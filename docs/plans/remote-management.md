@@ -1,7 +1,7 @@
 # Web UI in the Windows app (D8) and remote management (D9): design
 
-Status: draft for the owner, revised 2026-11-09 after three reviews (security, the code, simplicity). Nothing here is
-built.
+Status: agreed with the owner 2026-11-09 (decisions below), after three reviews (security, the code,
+simplicity). Being built.
 
 Owner, 2026-11-08: "put webui to installer too. have it be possible to enable webui from desktop app. like how
 qbittorrent does." and "since host is separate, like transmission, have desktop or webui be able to connect to each
@@ -22,8 +22,8 @@ other easily. maybe I want to manage my homeserver from my desktop ui or vice ve
 2. **The web UI** is the Docker server's. Served from Windows it shows Windows paths, its folder browser starts at
    the app's folders, and texts that today name Docker follow a new `hostKind` (`windows` or `server`) in the hello
    and the sign-in status. Its Settings gains "Other servers": saved addresses shown as links.
-3. **Servers in the desktop window**: a Servers list (File → Servers, and a switcher in the status bar). See
-   "Open question 1" for the two ways to show a server.
+3. **Servers in the desktop window**: a Servers list (File → Servers, and a switcher in the status bar); the
+   window itself shows the chosen server (section 5).
 
 ## Architecture
 
@@ -61,7 +61,7 @@ browser, provider and container commands with roots) and routes web-role session
 (`DownloadManagerService`, `RemoteJobCoordinator`) take the caller's roots per call instead of one global value.
 
 - **Roots (where a browser may read or write files)**: the app's folders, worked out live: the download folder,
-  every category folder, the favorites and the extraction folder (see open question 2). Because the browser cannot
+  every category folder, the favorites and the extraction folder. Because the browser cannot
   change those settings (below), it cannot widen its own roots.
 - **Jobs outside the roots** are shown but read-only: no delete-file, move, rename, refresh-URL, extract or
   completion edits.
@@ -108,7 +108,7 @@ allow rule. So the bridge never listens beyond this PC until the rule check pass
 ### 4. Pairing and HTTPS
 
 - The extension keeps its pairing code. It can now pair with a Windows PC exactly as with the Docker server.
-- A desktop window adding a server (only needed for the native client, open question 1) types the address and the
+- A desktop window adding a server  types the address and the
   server's password once; the server returns a token with a new `RemoteClient` role (same sign-in waits and
   lock-out as the page). The password is not kept; the token is kept for this Windows user only (DPAPI). Tokens get
   a role field (none means extension, so older files keep working), work on `/api/ws` for that role only, close
@@ -118,7 +118,7 @@ allow rule. So the bridge never listens beyond this PC until the rule check pass
   address until the user confirms it for that server. A self-made certificate that the window pins at pairing
   (as Syncthing does) is a later step.
 
-### 5. If the desktop window manages other servers natively (open question 1, option B)
+### 5. The desktop window managing other servers
 
 - `IpcClient` becomes an interface with the pipe and a WebSocket implementation; every connection is built from a
   `ServerTarget`. The WebSocket accepts an optional `client.hello` (snapshot and events opt-out, as the pipe does);
@@ -148,15 +148,10 @@ Downloads are saved without the "came from the internet" mark (Zone.Identifier) 
 handed off from the browser loses SmartScreen's and Office's warnings. Only extracted files get it today. Recorded
 as its own item.
 
-## Open questions for the owner
+## Owner decisions (2026-11-09)
 
-1. How should the desktop window show another server?
-   - A. **Its web UI in an app window** (WebView2, already shipped with the window): small, safe, ready with D8.
-   - B. **The native window**, switching between "This PC" and saved servers: the full desktop UI for every server,
-     but about as much work as D8 again (section 5).
-   - Recommended: A first, B later if A is not enough.
-2. Where may a browser save and browse on this PC: the app's folders (download, category, favorites, extraction;
-   recommended), or anywhere?
+1. The desktop window manages other servers **natively** (section 5): it switches between "This PC" and saved servers. The app-window (WebView2) variant is not built.
+2. A browser may save and browse only in **the app's folders** (download, category, favorites, extraction), worked out live; it cannot change them.
 
 ## Order of work
 
@@ -164,6 +159,6 @@ as its own item.
 2. Bridge mode in `DownloadManager.Server`, started and stopped by the Host; `webui.*` pipe commands; idle measured.
 3. Options → Web UI page; web UI texts by `hostKind` and "Other servers"; publish and Setup ship the bridge and
    the web UI; the firewall button.
-4. Token roles and password pairing (both server kinds), then the desktop Servers list per question 1.
+4. Token roles and password pairing (both server kinds), then the native Servers list and switcher (section 5).
 5. End to end: a browser on another device → this PC; the window → the Docker server on the owner's server; the
    window → a test instance on this PC on another port. Reviews; ROADMAP evidence.
