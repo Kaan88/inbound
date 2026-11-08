@@ -1,5 +1,10 @@
 # Progress — session handoff
 
+### Komodo guide (2026-11-08, `dev`, after 0.6.1)
+
+- Owner asked for user instructions for Komodo: `docs/komodo.md` (ROADMAP D3c). Komodo's labels come from its UI source, because its docs site answered 404. Reviewed by three agents; the confirmed findings are fixed.
+- Found on the way: the pairing path "Settings, Paired browsers" named a heading, not a tab. The tab is "Sign-in and browsers". Fixed in the extension's options page and pairing error, and in the server's wrong-code message; these ship with the next release. Extension 161 and Server 86 tests pass.
+
 ### 0.6.1 release preparation (2026-11-08, `dev`)
 
 - Owner, 2026-11-08: "put a link to my firefox addon page to setup" (ROADMAP EXT.S3). `INSTALL.txt` names the Chrome Web Store page and the Firefox Add-ons page, and Setup's last page has two unticked boxes that open them. The README and `docs/browser-integration.md` link them too.

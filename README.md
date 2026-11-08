@@ -40,7 +40,7 @@ docker run -d --name inbound --init -p 8080:8080 \
 Sign-in is on by default; the first visit sets the password, with a setup code from `docker logs`. Settings, compose,
 backup (the data folder holds the key to the saved secrets) and a reverse proxy for HTTPS are in
 [docs/docker.md](docs/docker.md); `docker/compose.example.yml` is a starting point. The image is published only when
-a version tag is pushed. 0.6.0 publishes it for linux/amd64 only.
+a version tag is pushed, for linux/amd64 only. With Komodo, follow [docs/komodo.md](docs/komodo.md).
 
 ## Build
 
@@ -103,5 +103,6 @@ docs/                              architecture and operation docs
 - `CLAUDE.md` — agent onboarding
 - `docs/architecture.md` — process boundaries and IPC
 - `docs/docker.md` — running the server in Docker
+- `docs/komodo.md` — setting the server up as a Komodo Stack
 - `docs/browser-integration.md` — handoff constraints and protocol
 - `docs/chrome-extension-privacy.md` — extension privacy policy

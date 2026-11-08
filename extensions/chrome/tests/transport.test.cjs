@@ -170,7 +170,7 @@ test('pairing turns the code into a token, checks it with one ping, and keeps no
 });
 
 test('pairing failures: the server\'s reason, a server that is not ours, a bad code before any request', async () => {
-  const wrong = mockFetch({ status: 401, body: { ok: false, error: 'That code is wrong, used or expired. Show a new one in the web UI (Settings, Paired browsers).' } });
+  const wrong = mockFetch({ status: 401, body: { ok: false, error: 'That code is wrong, used or expired. Show a new one in the web UI (Settings, Sign-in and browsers).' } });
   await assert.rejects(pairWithServer('nas:8080', 'ABCDEF23', 'x', wrong.fetch), /code is wrong, used or expired/);
   assert.equal(wrong.calls.length, 1);
   await assert.rejects(pairWithServer('nas:8080', 'ABCDEF23', 'x', mockFetch({ status: 404, body: 'Not found' }).fetch), /not an Inbound server/);

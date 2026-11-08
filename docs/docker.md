@@ -47,6 +47,8 @@ docker compose up -d
 The password file is read by the server's user (`PUID`), so it must be readable by that user. A trailing newline is
 ignored.
 
+With Komodo, `komodo.md` walks through the same set-up as a Stack, step by step.
+
 ## Settings
 
 | Variable | Default | What it does |

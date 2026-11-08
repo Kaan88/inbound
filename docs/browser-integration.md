@@ -189,7 +189,7 @@ envelope on a connection of its own):
 
 **Pairing** (Settings, Inbound server): the user types the address (a missing scheme means http; a path is
 dropped; a user name or password in it is refused) and the 8-character code from the web UI (Settings,
-Paired browsers). On the click the page asks the browser for access to that host only
+Sign-in and browsers). On the click the page asks the browser for access to that host only
 (`permissions.request`, origin pattern without the port); Chrome and Edge already have it through the
 all-sites host permission, Firefox may ask. The background then calls `POST /api/pair` with the code and a
 name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
