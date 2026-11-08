@@ -185,7 +185,10 @@ public sealed partial class TestServerHost : IAsyncDisposable
 
     public byte[] ContentFor(string name, int size, int seed = 1)
     {
-        var key = $"{name}:{size}:{seed}";
+        // The bytes depend on the size and seed only, so files of the same size share one copy. Keyed by
+        // name as well, a long run of differently named files kept every one in memory (3 GB after
+        // 3,000 one-megabyte names in the PERF.2 soak).
+        var key = $"{size}:{seed}";
         return _content.GetOrAdd(key, _ => TestContent.Generate(seed, size));
     }
 
