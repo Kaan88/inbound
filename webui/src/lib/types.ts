@@ -32,6 +32,8 @@ export interface Job {
   estimatedRemaining?: string;
   source?: string;
   queueId: number;
+  /** False when the download was taken out of its queue; older servers leave it out (then it is true). */
+  isQueued?: boolean;
   queueName?: string;
   priority?: number;
   description?: string;
