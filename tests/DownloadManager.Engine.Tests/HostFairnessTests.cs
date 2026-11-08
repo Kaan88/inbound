@@ -346,12 +346,73 @@ public sealed class HostFairnessTests(TestServerFixture fixture, ITestOutputHelp
         for (var i = 0; i < snapshots.Count; i++)
         {
             var (checkpoint, part) = snapshots[i];
-            var resumed = ProviderJob($"live-kill-{i}.bin", size, 871, 0, 3);
-            resumed.Id = Guid.NewGuid();
+            // The same file name and link path as the killed run, so the server's ETag matches the checkpoint's
+            // and the run resumes; another name changes the ETag, and every resume would start over from byte 0,
+            // passing whatever the snapshot held. Unthrottled, and each in its own folder.
+            var folder = Path.Combine(Destination, $"resume-{i}");
+            Directory.CreateDirectory(folder);
+            var final = Path.Combine(folder, "live-kill.bin");
+            var resumed = new DownloadJob
+            {
+                Url = job.Url,
+                ResolvedUrl = $"{_server.BaseAddress}/file/live-kill.bin?size={size}&seed=871&bps=0",
+                FileName = "live-kill.bin",
+                DestinationDirectory = folder,
+                FinalFilePath = final,
+                PartFilePath = final + $".{Guid.NewGuid():N}.part",
+                RequestedConnections = 3,
+            };
             File.Move(part, resumed.PartFilePath);
             checkpoint.JobId = resumed.Id;
-            await AssertFileAsync(await resumer.ExecuteAsync(resumed, checkpoint, null, CancellationToken.None).WaitAsync(Patience), 871, size);
+            var saved = checkpoint.Segments.Sum(segment => segment.Completed);
+            Assert.True(saved > 0, $"snapshot {i} holds no bytes, so its resume proves nothing");
+            var least = long.MaxValue;
+            var result = await resumer.ExecuteAsync(resumed, checkpoint,
+                new SyncProgress(p => InterlockedMin(ref least, p.ReceivedBytes)), CancellationToken.None).WaitAsync(Patience);
+            await AssertFileAsync(result, 871, size);
+            Assert.True(Interlocked.Read(ref least) >= saved,
+                $"snapshot {i} resumed from {Interlocked.Read(ref least)} bytes, below the {saved} its checkpoint holds: it started over");
         }
+    }
+
+    private static void InterlockedMin(ref long target, long value)
+    {
+        long current;
+        while (value < (current = Interlocked.Read(ref target)) && Interlocked.CompareExchange(ref target, value, current) != current)
+        {
+        }
+    }
+
+    /// <summary>
+    /// UI.R21: a segment worker leaves the live count under the same lock that decided it had nothing to do.
+    /// Before the fix the no-work exits left it to the finally, under a second lock, and in between another
+    /// worker that had just given a range back could retire against the stale count, leaving that range with
+    /// no worker and the run ending short.
+    /// </summary>
+    [Fact]
+    public async Task EveryWorkerThatRunsOutOfWorkLeavesTheLiveCountUnderTheSameLock()
+    {
+        const int size = 4 * Megabyte;
+        var engine = Engine(hostLimit: 8);
+        var job = Job("live-count.bin", size, 881, 0, 4);
+        var exits = new ConcurrentQueue<bool>();
+        void Record(Guid id, bool countedOut)
+        {
+            if (id == job.Id) exits.Enqueue(countedOut);
+        }
+
+        HttpDownloadEngine.WorkerExitedForTests += Record;
+        try
+        {
+            await AssertFileAsync(await engine.ExecuteAsync(job, null, null, CancellationToken.None).WaitAsync(Patience), 881, size);
+        }
+        finally
+        {
+            HttpDownloadEngine.WorkerExitedForTests -= Record;
+        }
+
+        Assert.NotEmpty(exits);
+        Assert.All(exits, Assert.True);
     }
 
     private async Task<DownloadCheckpoint?> ReadCheckpointAsync(Guid id)
