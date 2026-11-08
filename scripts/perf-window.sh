@@ -60,7 +60,8 @@ print(int(datetime.datetime.fromisoformat(stamp).timestamp() * 1000))
 EOF
 }
 
-open_and_time() { # $1 label, $2 repeat, $3 option, $4 jobs, $5 occurrence of the trace line to wait for (cold only)
+open_and_time() { # $1 label, $2 repeat, $3 option (CSV only), $4 jobs,
+  # $5 occurrence of the trace line to wait for: set for a cold start, whatever the option; empty when only shown
   local ready="$INST/ready.$2" t0 tw tf ts
   rm -f "$ready"
   ps1 perf-window-wait.ps1 -Root "$WIN_BIN" -Ready "$(cygpath -w "$ready")" > "$INST/seen.$2" &
@@ -70,7 +71,7 @@ open_and_time() { # $1 label, $2 repeat, $3 option, $4 jobs, $5 occurrence of th
   timeout 20 "$C" host open >/dev/null
   wait $waiter; tw=$(tail -1 "$INST/seen.$2")
   ts=""; tf=""
-  if [ "$3" = on ]; then
+  if [ -n "${5:-}" ]; then
     for _ in $(seq 1 600); do tf=$(trace_ms "First frame with the list" "$5"); [ -n "$tf" ] && break; sleep 0.1; done
     ts=$(trace_ms "First snapshot applied" "$5")
   fi
@@ -99,8 +100,8 @@ case "$MODE" in
       for r in $(seq 1 "$REPEATS"); do open_and_time cold "$r" on "$jobs" "$r"; close_window on; done
       # Option off: the first open is a cold start too; after closing, the process stays and only shows again.
       timeout 20 "$C" settings set closewindowcompletely false >/dev/null
-      open_and_time first-start-off 0 on "$jobs" $((REPEATS + 1)); close_window off
-      for r in $(seq 1 "$REPEATS"); do open_and_time show-hidden "$r" off "$jobs" 0; close_window off; done
+      open_and_time first-start-off 0 off "$jobs" $((REPEATS + 1)); close_window off
+      for r in $(seq 1 "$REPEATS"); do open_and_time show-hidden "$r" off "$jobs" ""; close_window off; done
       teardown
     done
     ;;
