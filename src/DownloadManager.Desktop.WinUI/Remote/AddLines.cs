@@ -52,7 +52,7 @@ internal static partial class LinkExtractor
         if (string.IsNullOrWhiteSpace(text)) return [];
         return HttpPattern().Matches(text)
             .Select(match => match.Value.TrimEnd(TrailingPunctuation))
-            .Where(IsWebLink)
+            .Where(IsDownloadableLink)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -73,7 +73,7 @@ internal static partial class LinkExtractor
         {
             var path = match.Groups["path"];
             var input = path.Success ? path.Value : match.Groups["link"].Value.TrimEnd(TrailingPunctuation);
-            if (path.Success || IsMagnet(input) || IsWebLink(input)) found.Add(input);
+            if (path.Success || IsMagnet(input) || IsDownloadableLink(input)) found.Add(input);
         }
 
         return found.Distinct(StringComparer.Ordinal).ToList();
@@ -83,8 +83,16 @@ internal static partial class LinkExtractor
 
     public static bool IsTorrentPath(string input) => input.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && !IsMagnet(input) && !input.Contains("://", StringComparison.Ordinal);
 
-    public static bool IsWebLink(string input)
+    /// <summary>An http, https or ftp address, which the desktop downloads itself (the Host accepts the same three).</summary>
+    public static bool IsDownloadableLink(string input)
         => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "ftp";
+
+    /// <summary>
+    /// An http or https address. Only these can be a provider's, and only these can be the "direct" choice for a
+    /// link that can't be told apart, so ftp never reaches either path.
+    /// </summary>
+    public static bool IsWebLink(string input)
+        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }
 
 /// <summary>

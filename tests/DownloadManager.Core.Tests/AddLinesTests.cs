@@ -44,6 +44,15 @@ public sealed class AddLinesTests
     }
 
     [Fact]
+    public void FtpIsDownloadableButNeverAProviderOrDirectChoice()
+    {
+        Assert.True(LinkExtractor.IsDownloadableLink("ftp://a.example/x.zip"));
+        Assert.False(LinkExtractor.IsWebLink("ftp://a.example/x.zip"));
+        Assert.True(LinkExtractor.IsWebLink("https://a.example/x.zip"));
+        Assert.False(LinkExtractor.IsDownloadableLink("gopher://a.example/x"));
+    }
+
+    [Fact]
     public void WithAProviderMagnetsAndWholeLineTorrentPathsAreFoundInOrder()
     {
         var text = $"first https://a.example/x.zip.\r\n{MagnetLink}\r\n  C:\\t\\a.torrent  \r\nnot this C:\\t\\b.torrent one\n\\\\server\\c.torrent\nhttps://torbox.app/download?id=1&type=torrents";

@@ -1876,7 +1876,7 @@ public sealed partial class MainWindow : Window
         if (await ProviderAddAppliesAsync())
         {
             ShowPassingStatus($"Checking {entries.Count} addresses…");
-            answers = await ImportRouting.ClassifyAllAsync(entries.Select(entry => entry.Url).Where(LinkExtractor.IsWebLink), () => _remote.OpenClassifier());
+            answers = await ImportRouting.ClassifyAllAsync(entries.Select(entry => entry.Url).Where(LinkExtractor.IsDownloadableLink), () => _remote.OpenClassifier());
         }
 
         var accepted = 0;
