@@ -767,6 +767,17 @@ public sealed partial class DownloadManagerService
         return new AddJobResponse { Accepted = true, Job = Map(job) };
     }
 
+    /// <summary>
+    /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
+    /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
+    /// </summary>
+    private static void RequestStopLocked(JobRuntime runtime)
+    {
+        runtime.PauseRequested = true;
+        runtime.Preempted = false;
+        runtime.ResumeWhenStopped = false;
+    }
+
     public async Task<JobActionResponse> PauseAsync(Guid id, CancellationToken cancellationToken = default)
     {
         JobRuntime? runtime;
@@ -782,13 +793,7 @@ public sealed partial class DownloadManagerService
                 return new JobActionResponse { Ok = false, Error = $"Job is {runtime.Job.State}.", Job = Map(runtime.Job) };
             }
 
-            runtime.PauseRequested = true;
-            if (runtime.Preempted)
-            {
-                // The user's pause wins over the limit's requeue that is still winding down.
-                runtime.Preempted = false;
-                runtime.ResumeWhenStopped = false;
-            }
+            RequestStopLocked(runtime);
 
             runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Paused;
@@ -1146,7 +1151,7 @@ public sealed partial class DownloadManagerService
             paused = _jobs.Values.Where(r => r.Job.CanPause).ToList();
             foreach (var runtime in paused)
             {
-                runtime.PauseRequested = true;
+                RequestStopLocked(runtime);
                 runtime.Job.QueueRetryAt = null;
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
@@ -1625,7 +1630,7 @@ public sealed partial class DownloadManagerService
                         .ToList();
                     foreach (var runtime in paused)
                     {
-                        runtime.PauseRequested = true;
+                        RequestStopLocked(runtime);
                         runtime.Job.State = DownloadState.Paused;
                         runtime.Job.BytesPerSecond = null;
                         runtime.Job.EstimatedRemaining = null;
@@ -2621,7 +2626,7 @@ public sealed partial class DownloadManagerService
 
             if (!queue.IsRunning && (runtime.Starting || runtime.Runner is { IsCompleted: false }))
             {
-                runtime.PauseRequested = true;
+                RequestStopLocked(runtime);
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
                 runtime.Job.EstimatedRemaining = null;
@@ -3358,7 +3363,7 @@ public sealed partial class DownloadManagerService
                      r.Job.IsQueued && r.Job.QueueId == queue.Id &&
                      (r.Starting || r.Runner is { IsCompleted: false })))
         {
-            active.PauseRequested = true;
+            RequestStopLocked(active);
             active.Job.State = DownloadState.Paused;
             active.Job.BytesPerSecond = null;
             active.Job.EstimatedRemaining = null;
