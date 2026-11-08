@@ -226,6 +226,7 @@ test('EXT.R1: pairing from Settings stores the token in storage closed to conten
     const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
     assert.equal(status.server.address, ADDRESS);
     assert.equal(JSON.stringify(status).includes(TOKEN), false, 'the status never carries the token');
+    assert.equal(status.storageClosedToPages, true);
 
     await sendRuntimeMessage(harness, { type: 'dm.saveSettings', settings: { ...catching, defaultTarget: 'server' } }, ownPage('options.html'));
     assert.equal(harness.values.settings.defaultTarget, 'server');
@@ -233,6 +234,28 @@ test('EXT.R1: pairing from Settings stores the token in storage closed to conten
     assert.equal(unpaired.ok, true);
     assert.equal(harness.values.server, null);
     assert.equal(harness.values.settings.defaultTarget, 'local');
+  });
+});
+
+test('EXT.E1: a browser without storage.local.setAccessLevel (Firefox) is not reported as closing storage to pages, and pairing still persists', async () => {
+  const { harness } = capturingChrome(catching);
+  harness.chrome.permissions = { async contains() { return true; } };
+  delete harness.chrome.storage.local.setAccessLevel;
+  const server = fakeServer();
+  await withServer(harness, server, async () => {
+    const pairedReply = await sendRuntimeMessage(harness, { type: 'dm.pairServer', address: ADDRESS, code: 'ABCDEF23' }, ownPage('options.html'));
+    assert.equal(pairedReply.ok, true);
+    assert.equal(harness.values.server.token, TOKEN);
+    const status = await sendRuntimeMessage(harness, { type: 'dm.status' }, ownPage('popup.html'));
+    assert.equal(status.storageClosedToPages, false);
+    assert.equal(JSON.stringify(status).includes(TOKEN), false);
+  });
+  // A browser that refuses the call is not reported as closed either.
+  const refusing = capturingChrome(catching);
+  refusing.harness.chrome.storage.local.setAccessLevel = async () => { throw new Error('unsupported'); };
+  await withBackground(refusing.harness, async () => {
+    const status = await sendRuntimeMessage(refusing.harness, { type: 'dm.status' }, ownPage('popup.html'));
+    assert.equal(status.storageClosedToPages, false);
   });
 });
 

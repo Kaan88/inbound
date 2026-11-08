@@ -171,7 +171,10 @@ Paired browsers). On the click the page asks the browser for access to that host
 all-sites host permission, Firefox may ask. The background then calls `POST /api/pair` with the code and a
 name such as "Chrome on Windows", checks the token with one `host.ping`, and only then stores
 `{address, token, id, name, pairedAt}` under `server` in `chrome.storage.local`. No page gets the token:
-`dm.status` and the other replies carry the address, name and state only. Unpair deletes it and sets
+`dm.status` and the other replies carry the address, name and state only. On Chrome and Edge the background
+closes `storage.local` to content scripts (`setAccessLevel`, `TRUSTED_CONTEXTS`); Firefox has no such call,
+so there content scripts can read `storage.local`, token included, and `dm.status.storageClosedToPages` is
+false. The extension's own content script never reads storage. Unpair deletes it and sets
 automatic downloads back to this PC, and asks the server to remove the token too: `DELETE /api/pair/self`
 with the same `Authorization: Bearer <token>` as `/api/ipc` (no body, `credentials: "omit"`,
 `redirect: "error"`, a 4-second limit; the token is forgotten here first, whatever the answer). On 204
