@@ -42,12 +42,13 @@ try {
         }
     }
 
-    # The bridge can briefly outlive the Host and would keep its files locked.
+    # The browser bridge and the web UI bridge can briefly outlive the Host and would keep their files locked.
     Stop-Installed 'DownloadManager.NativeHost.exe'
+    Stop-Installed 'DownloadManager.Server.exe'
     Stop-Installed 'DownloadManager.Desktop.WinUI.exe'
     Start-Sleep -Milliseconds 300
 
-    $left = @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe', 'DownloadManager.NativeHost.exe' |
+    $left = @('DownloadManager.Host.exe', 'DownloadManager.Desktop.WinUI.exe', 'DownloadManager.NativeHost.exe', 'DownloadManager.Server.exe' |
         Where-Object { @(Get-Installed $_).Count -gt 0 })
     if ($left.Count -gt 0) {
         [Console]::Error.WriteLine("Still running: $($left -join ', ')")
