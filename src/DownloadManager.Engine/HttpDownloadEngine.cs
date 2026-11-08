@@ -3350,6 +3350,15 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
         }
     }
 
+    /// <summary>
+    /// Called under <see cref="SegmentedRun.Sync"/> after the run's work shrank (a claim, a split, written bytes).
+    /// When a worker is waiting for a connection and nothing is left that it could take, returns the source to
+    /// cancel so that wait ends: otherwise the connection may go to another job first, and this job, with every
+    /// byte fetched, would wait for one it no longer needs.
+    /// </summary>
+    private static CancellationTokenSource? IdleWaitersToReleaseLocked(SegmentedRun run)
+        => run.PendingAcquires > 0 && !HasWorkLocked(run) ? run.SwapNoWorkLocked() : null;
+
     /// <summary>A range nobody is on, or one long enough that splitting it is worth a connection.</summary>
     private static bool HasWorkLocked(SegmentedRun run)
     {
@@ -3399,6 +3408,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                CancellationToken noWork;
                 lock (run.Sync)
                 {
                     // The connection count went down: the workers above it stop between ranges.
@@ -3413,14 +3423,40 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     {
                         return;
                     }
+
+                    run.PendingAcquires++;
+                    noWork = run.NoWorkToken;
                 }
 
-                var slot = await _hostLimiter.AcquireAsync(run.Host, run.Job.Id, yieldable: true, cancellationToken)
-                    .ConfigureAwait(false);
+                HostSlot slot;
+                try
+                {
+                    using var acquireToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, noWork);
+                    slot = await _hostLimiter.AcquireAsync(run.Host, run.Job.Id, yieldable: true, acquireToken.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (noWork.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    // The other workers took or finished everything meanwhile: look again, which normally ends here.
+                    continue;
+                }
+                finally
+                {
+                    lock (run.Sync)
+                    {
+                        run.PendingAcquires--;
+                    }
+                }
+
                 SegmentCheckpoint? work;
+                CancellationTokenSource? idle;
                 try
                 {
                     work = ClaimUnclaimedSegment(run) ?? TryStealSegment(run);
+                    lock (run.Sync)
+                    {
+                        idle = IdleWaitersToReleaseLocked(run);
+                    }
                 }
                 catch
                 {
@@ -3428,6 +3464,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     throw;
                 }
 
+                idle?.Cancel();
                 if (work is null)
                 {
                     slot.Dispose();
@@ -3540,6 +3577,9 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                     .ConfigureAwait(false);
                 Interlocked.Increment(ref run.ActiveConnections);
                 var yielded = false;
+                // Set while this worker writes to its own file or checkpoint: a failure there is a real one even
+                // with a yield pending, since a yield never cancels those (they keep the job's token).
+                var localWork = false;
                 TimeSpan? retryDelay = null;
                 try
                 {
@@ -3692,6 +3732,7 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                         // Bytes read but not yet written are simply fetched again after a yield here.
                         await run.RateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
                         await SharedRateLimiter.WaitAsync(allowed, token).ConfigureAwait(false);
+                        localWork = true;
                         await RandomAccess.WriteAsync(
                                 run.File.SafeFileHandle,
                                 buffer.AsMemory(0, allowed),
@@ -3700,15 +3741,21 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                             .ConfigureAwait(false);
                         writeOffset += allowed;
 
+                        CancellationTokenSource? idle;
                         lock (run.Sync)
                         {
                             segment.Completed += allowed;
                             run.AggregateBytes += allowed;
+                            // This range just got too short to split: a worker waiting to split it can stop.
+                            idle = IdleWaitersToReleaseLocked(run);
                         }
+
+                        idle?.Cancel();
 
                         run.Reporter.Report(force: false, "Downloading");
                         await MaybeSaveSegmentedCheckpointAsync(run, cancellationToken)
                             .ConfigureAwait(false);
+                        localWork = false;
 
                         if (truncated)
                         {
@@ -3759,7 +3806,8 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
                 catch (Exception ex)
                 {
                     // A yield that cut a request short can surface as another failure; it is still only a yield.
-                    if (!cancellationToken.IsCancellationRequested && slot.YieldRequested)
+                    // A failed write or checkpoint save is not one of those, so it is never taken for a yield.
+                    if (!localWork && !cancellationToken.IsCancellationRequested && slot.YieldRequested)
                     {
                         yielded = true;
                     }
@@ -4131,6 +4179,24 @@ public sealed partial class HttpDownloadEngine : IDownloadEngine, IFileMetadataR
 
         private readonly List<Task> _workers = new();
         private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private CancellationTokenSource _noWork = new();
+
+        /// <summary>Workers waiting for a connection while holding no range. Read and written under <see cref="Sync"/>.</summary>
+        public int PendingAcquires { get; set; }
+
+        /// <summary>Cancelled once nothing is left that a waiting worker could take. Read under <see cref="Sync"/>.</summary>
+        public CancellationToken NoWorkToken => _noWork.Token;
+
+        /// <summary>
+        /// Swaps in a fresh token and returns the old source for the caller to cancel after letting go of
+        /// <see cref="Sync"/>: cancelling runs the limiter's abandon, which must not run under this lock.
+        /// </summary>
+        public CancellationTokenSource SwapNoWorkLocked()
+        {
+            var stale = _noWork;
+            _noWork = new CancellationTokenSource();
+            return stale;
+        }
 
         /// <summary>Workers started and not yet retired or finished. Read and written under <see cref="Sync"/>.</summary>
         public int LiveWorkers { get; set; }
