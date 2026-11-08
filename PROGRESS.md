@@ -1,5 +1,50 @@
 # Progress — session handoff
 
+### D2 / EXT.R1 review fixes: sign-in waits, trusted proxies, bodies, auth.json, upload references (2026-11-08, `webui`)
+
+Sixteen reviewer findings on `git diff dev...webui`, each checked against the code. Fixed (commit `a7aba23`):
+
+- **Waits a burst can't skip (high):** sign-in, setup code, password change and pairing all checked the wait, then
+  awaited the PBKDF2 check, and counted the failure only after it, so parallel guesses all passed the check. Now
+  `SignInLimiter.Begin` counts a try as wrong when it starts and `Succeeded` clears it. IPv6 clients count by
+  their /64. `AuthHardeningTests.ABurstOfParallelWrongPasswordsGetsOneCheckAndTheRestWait` (8 parallel wrong
+  sign-ins: 1 × 401, 7 × 429; 6 pairing codes: 1 × 401, 5 × 429).
+- **Proxy trust (two medium, one low):** `DOWNLOADMANAGER_TRUST_PROXY=1` believed `X-Forwarded-For` from anyone, so
+  a client reaching the port directly got a fresh address per try and could send `127.0.0.1` to skip the setup
+  code. It now takes the proxy's address or network (`172.30.0.10`, `172.30.0.0/24`); `1`, `/0` and nonsense stop
+  the start (exit 2). The setup code goes by the real peer, noted before the forwarded-headers middleware, and is
+  always asked through a listed proxy. A same-host proxy that adds no header can't be detected; docs/docker.md says
+  to list it (`127.0.0.1`) or use `DOWNLOADMANAGER_PASSWORD_FILE`. Compose example: Caddy with a fixed address.
+- **Bodies:** setup, sign-in and pairing JSON is read up to 16 KB, chunked or not (was Content-Length only, 8 MB).
+- **auth.json:** a password, token add, remove or remove-all that can't be saved is undone in memory; the endpoint
+  answers 500 and nothing changes.
+- **Password change** unpairs every extension unless `keepPairedBrowsers` (web UI checkbox "Keep the paired
+  browsers"); answers `{ok, unpaired}`.
+- **Host check without Origin:** a rebinding page's same-origin GET carried no Origin and was let through with
+  sign-in off. Every `/api/` request now needs a known host name.
+- **Pairing DoS:** 10 wrong codes from anyone ended the owner's code; now 1,000 (under 10^-9 chance of a hit).
+- **Upload path:** `/api/upload/torrent` answers `upload:<id>`; `RemoteJobCoordinator.ResolveReference` maps it.
+- **Idle wake-ups:** the sign-in and Settings countdowns run only while counting (`webui/src/lib/ticker.ts`).
+- **Extension:** `chrome.storage.local.setAccessLevel({accessLevel: "TRUSTED_CONTEXTS"})` at start, awaited before a
+  token is written (content scripts use no storage); the pairing test asserts it, and its title says what it checks.
+
+Evidence: Server.Tests 71/71 on Windows and 71/71 on Linux (the owner's VM, SDK container, `Platform!=Windows`);
+new `AuthHardeningTests` (11). Integration remote and dispatcher tests 279/279 (Windows). webui vitest 37/37 (new
+`ticker.test.ts` 3), `svelte-check` 0 errors, `npm run build`; extension npm 118/118, `tsc --noEmit` clean.
+Image `inbound-test:dev` rebuilt on the VM; in it: `TRUST_PROXY=1` exit 2 with the message; a proxy listed
+elsewhere: `X-Forwarded-For: 127.0.0.1` still needs the setup code, four tries with new forwarded addresses
+`403 429 429 429`; the bridge gateway listed: forwarded addresses believed (`403 429 403 429`, two addresses in
+the log), setup code still asked; a chunked 64 KB sign-in body 400. Containers removed; disk unchanged (8.8 GB free).
+
+Not done: the Playwright screens walk was not rerun (the upload and password screens changed only in what they
+send; the server tests cover the calls). Not delegated to a cheaper reviewer (no agent tool in this session).
+
+Questions for the owner (safer choice taken): (1) `DOWNLOADMANAGER_TRUST_PROXY=1` is refused instead of meaning
+"trust everyone"; the proxy's address is needed. (2) A password change unpairs the extensions unless kept. (3) No
+count across all addresses: it would let anyone keep the owner waiting; devices sharing one IPv6 /64 share a wait.
+(4) 1,000 wrong pairing codes end a code. (5) A same-host proxy without forwarding headers must be listed; the
+server can't tell.
+
 ### EXT.R1 server target: the extension's transport, pairing and This PC / Server choice, on `webui` (2026-11-08)
 
 - **Built (extensions/chrome):** `src/transport.ts` with `NativeTransport` (the native-messaging code moved out of
