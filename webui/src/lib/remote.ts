@@ -766,3 +766,43 @@ export function containerAddSummary(result: ContainerAddResult, preview: Pick<Co
   if (problems.length > 0) parts.push(`${problems.length} couldn't be added.`);
   return { text: parts.join(' ') || result.error || 'Nothing was added.', problems };
 }
+
+// ---- My <provider>: a row's quick actions (right-click, long press, the row's ... button) ----
+
+export type ItemAction = 'open' | 'downloadAll' | 'checkNow' | 'copyName' | 'refresh' | 'deleteFromProvider';
+
+export interface ItemMenuEntry {
+  action?: ItemAction;
+  label?: string;
+  hint?: string;
+  disabled?: boolean;
+  hidden?: boolean;
+  separator?: boolean;
+}
+
+/**
+ * What a row's menu offers: the desktop window's My <provider> buttons for that row (Download selected / all, Check now,
+ * Delete from <provider>, Refresh), plus copying the name. The provider's items carry no link, so there is nothing to copy
+ * but the name. Delete needs a job that knows the item (remote.deleteRemote takes a job), as the desktop's button does.
+ */
+export function itemMenu(view: Pick<RemoteItemView, 'canDownload'>, job: RemoteJob | undefined, provider: string, busy: { acting: boolean; loading: boolean }): ItemMenuEntry[] {
+  const active = !!job && job.state !== 'failed';
+  return [
+    { action: 'open', label: 'Choose files and download…' },
+    { action: 'downloadAll', label: active ? 'Download all its files' : 'Download all', disabled: busy.acting || !view.canDownload },
+    { separator: true },
+    { action: 'checkNow', label: 'Check now', hidden: !job || !actionsOf(job).checkNow, disabled: busy.acting },
+    { action: 'copyName', label: 'Copy name' },
+    { action: 'refresh', label: 'Refresh list', disabled: busy.loading },
+    { separator: true },
+    { action: 'deleteFromProvider', label: `Delete from ${provider}…`, hidden: !canDeleteFromProvider(job), disabled: busy.acting },
+  ];
+}
+
+/** What a Download selected or Download all press sends, or null when nothing is chosen. All chosen is all, as on the desktop. */
+export function downloadChoice(tree: FileTree | undefined, chosen: Set<string>, all: boolean): { all: boolean; fileIds: string[] } | null {
+  if (all || !tree || tree.files.length === 0) return { all: true, fileIds: [] };
+  const choice = choiceOf(tree, chosen);
+  if (!choice.all && choice.fileIds.length === 0) return null;
+  return choice;
+}

@@ -18,13 +18,35 @@
     const previous = document.activeElement as HTMLElement | null;
     const first = panel?.querySelector<HTMLElement>('[data-autofocus]') ?? panel?.querySelector<HTMLElement>('input, select, textarea, button:not([data-close])');
     first?.focus();
+    // A first control that is still disabled (a reply not in yet) can't take the focus: the panel does, so Escape works.
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
     return () => previous?.focus?.();
   });
+
+  function focusable(): HTMLElement[] {
+    // Only this dialog's own controls: one opened from inside it (the folder browser) keeps its own.
+    return [...(panel?.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [])]
+      .filter((element) => !(element as HTMLButtonElement).disabled && element.tabIndex >= 0 && element.getClientRects().length > 0 && element.closest('[role="dialog"]') === panel);
+  }
 
   function keydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.stopPropagation();
       onclose();
+    } else if (event.key === 'Tab' && panel && (event.target as Element | null)?.closest?.('[role="dialog"]') === panel) {
+      // Tab stays inside the dialog, as it does in the desktop's dialogs.
+      const list = focusable();
+      if (list.length === 0) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      const at = document.activeElement;
+      if (event.shiftKey && (at === first || !panel.contains(at))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (at === last || !panel.contains(at))) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   }
 </script>

@@ -50,7 +50,7 @@ DOWNLOADMANAGER_TORBOX_API=http://127.0.0.1:18731/torbox/v1/api/ \
 `npm run screens` (`scripts/screens.mjs`, Playwright's Chromium) walks every screen against such a server and saves
 screenshots at 1360 and 390 pixels wide, dark and light, into `artifacts\webui\`: the list (row menu, toolbar More menu,
 delete and cancel-package dialogs, package and download details), the Add menu and every add dialog, Extractions, Queues,
-every Options page, My TorBox and Statistics. It sets the test server's password on a first run, seeds downloads through
+every Options page, My TorBox (its tabs, an item's dialog and a row's menu) and Statistics. It sets the test server's password on a first run, seeds downloads through
 the Add URL and Add links dialogs, then does a few things end to end: enters an archive password and checks the
 extraction, stops and resumes, deletes without the file, uploads a `.torrent` file and chooses its files, saves a site
 login and a proxy password in one Options draft (Apply), checks that Cancel and Back ask before dropping a draft, pairs a
@@ -67,6 +67,7 @@ console error, page error, sideways scroll or overlapping toolbar buttons. `INBO
 | `INBOUND_MOCK_KEY` | the mock TorBox key the TestServer prints (invented) |
 | `INBOUND_FILES` | a plain web server with `holiday-photos.7z` (a test archive, password `screens`) and `documents.zip` |
 | `INBOUND_TORRENT` | a small `.torrent` file to upload |
+| `INBOUND_VARIANTS` | a regex of the variants to walk, such as `dark`; the first one left runs the end-to-end checks |
 
 ## Rules the code keeps
 
