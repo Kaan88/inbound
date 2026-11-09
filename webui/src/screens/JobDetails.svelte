@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from '../lib/clipboard';
   import { untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Dialog from '../components/Dialog.svelte';
@@ -268,12 +269,8 @@
   }
 
   async function copy(text: string, done: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      store.toast(done);
-    } catch {
-      notice = 'The browser did not allow copying. Select the text and copy it by hand.';
-    }
+    if (await copyText(text)) store.toast(done);
+    else notice = 'The browser did not allow copying. Select the text and copy it by hand.';
   }
 
   const rows = $derived(job ? detailRows(job) : []);

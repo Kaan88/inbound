@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from '../lib/clipboard';
   import { tick } from 'svelte';
   import Confirm from '../components/Confirm.svelte';
   import ContextMenu, { type MenuItem } from '../components/ContextMenu.svelte';
@@ -142,6 +143,11 @@
       files[item.itemId] = { tree: buildFileTree([]), chosen: new Set(), problem: failureText(error instanceof Error ? error.message : String(error), null, name), reading: false };
     }
   }
+
+  // An item that left the list (deleted, another key) takes its dialog with it; the list's status line shows again.
+  $effect(() => {
+    if (dialogOpen && !selected) dialogOpen = false;
+  });
 
   function updateItem(item: RemoteItem) {
     const p = pages[item.kind];
@@ -315,12 +321,8 @@
   }
 
   async function copyName(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      store.toast('Name copied.');
-    } catch {
-      store.toast('The browser would not copy it. Open the item and select its name instead.', 'error');
-    }
+    if (await copyText(text)) store.toast('Name copied.');
+    else store.toast('The browser would not copy it. Open the item and select its name instead.', 'error');
   }
 
   function contextmenu(item: RemoteItem, event: MouseEvent) {
@@ -344,14 +346,16 @@
 
   function pointerdown(item: RemoteItem, event: PointerEvent) {
     if (event.pointerType !== 'touch') return;
+    // A new touch starts fresh: the click that ended an earlier long press may never have come.
+    suppressClick = false;
     cancelLongPress();
     longPress = {
       x: event.clientX,
       y: event.clientY,
       timer: setTimeout(() => {
         longPress = null;
+        // The click that ends this press is swallowed, however long the finger stays down.
         suppressClick = true;
-        setTimeout(() => (suppressClick = false), 500);
         openMenu(item, event.clientX, event.clientY);
       }, 550),
     };
@@ -367,7 +371,7 @@
   }
 
   function rowClick(item: RemoteItem) {
-    if (suppressClick) return; // the end of a long press
+    if (suppressClick) { suppressClick = false; return; } // the end of a long press
     open(item);
   }
 

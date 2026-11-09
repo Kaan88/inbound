@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from '../lib/clipboard';
   import { flip } from 'svelte/animate';
   import ArchiveNoticeBar from '../components/ArchiveNoticeBar.svelte';
   import ArchivePassword from '../components/ArchivePassword.svelte';
@@ -222,7 +223,7 @@
   }
 
   function click(row: Row, event: MouseEvent) {
-    if (suppressClick) return;
+    if (suppressClick) { suppressClick = false; return; }
     const ctrl = event.ctrlKey || event.metaKey;
     cursor = row.id;
     if (touchFirst() && !event.shiftKey && !ctrl) {
@@ -658,13 +659,10 @@
   }
 
   async function copy(text: string, done: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      store.toast(done);
-    } catch {
-      store.toast('The browser would not copy it. Select the text in the download\'s details instead.', 'error');
-    }
+    if (await copyText(text)) store.toast(done);
+    else store.toast("The browser would not copy it. Select the text in the download's details instead.", 'error');
   }
+
 
   function openMenu(row: Row, x: number, y: number) {
     if (!selected.has(row.id)) {
@@ -690,14 +688,16 @@
 
   function pointerdown(row: Row, event: PointerEvent) {
     if (event.pointerType !== 'touch') return;
+    // A new touch starts fresh: the click that ended an earlier long press may never have come.
+    suppressClick = false;
     cancelLongPress();
     longPress = {
       x: event.clientX,
       y: event.clientY,
       timer: setTimeout(() => {
         longPress = null;
+        // The click that ends this press is swallowed, however long the finger stays down.
         suppressClick = true;
-        setTimeout(() => (suppressClick = false), 500);
         openMenu(row, event.clientX, event.clientY);
       }, 550),
     };
