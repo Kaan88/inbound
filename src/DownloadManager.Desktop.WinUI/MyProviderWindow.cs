@@ -374,8 +374,10 @@ internal sealed class MyProviderWindow : Window
 
         void ApplyColors()
         {
-            _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
-            _listFrame.BorderBrush = InboundTheme.Brush("InboundDividerBrush", _root);
+            _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
+            // The list keeps an opaque surface for reading; the window around it is frosted.
+            _listFrame.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
+            _listFrame.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
             _empty.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
             _detailLine.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
         }

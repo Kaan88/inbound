@@ -10,8 +10,10 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 | Token | Use | Dark | Light |
 |---|---|---|---|
-| `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar | `#202020` | `#F3F3F3` |
-| `InboundSurfaceBrush` | window/page background, download list, dialog bodies | `#181818` | `#FFFFFF` |
+| `InboundWindowBrush` | every window's root: transparent, so the Mica backdrop shows; solid where Mica isn't available | Transparent (fallback `#202020`) | Transparent (fallback `#F3F3F3`) |
+| `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar: a faint layer over Mica | `#08FFFFFF` | `#80FFFFFF` |
+| `InboundSurfaceBrush` | the download list and other lists, opaque for reading; popups drawn over a plot | `#181818` | `#FFFFFF` |
+| `InboundCardBrush` / `InboundCardStrokeBrush` | cards, tiles and framed lists on the frosted window, with a 1px edge, radius 8 | `#0DFFFFFF` / `#14FFFFFF` | `#B3FFFFFF` / `#13000000` |
 | `InboundDividerBrush` | 1px borders and grid lines | `#343434` | `#DADADA` |
 | `InboundSecondaryTextBrush` | secondary columns, hints, axis labels | `#A3A3A3` | `#666666` |
 | `InboundProgressFillBrush` | progress fill, segment map and the speed-graph line (blue, not green, so it does not read as "completed") | `#4AA3F0` | `#1F6FC5` |
@@ -33,8 +35,16 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
   and with Windows, and use `InboundSurfaceBrush` for the background. Do not read
   the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
-  `Content`. It sets the app icon and a title bar matching `InboundChromeBrush`,
-  so a dark window never sits under a white caption.
+  `Content`. It sets the app icon, a Mica backdrop (`MicaBackdrop`, Windows 11) behind a transparent root
+  (`InboundWindowBrush`; a root with no background gets it), and a title bar in the solid color under Mica
+  (`#202020` / `#F3F3F3`), so the caption meets the frosted body. Where Mica isn't supported (Windows 10),
+  `App` makes `InboundWindowBrush` that same solid color before any window opens, so nothing is see-through.
+- The look is frosted: the window is Mica, chrome is a faint translucent layer, and cards and tiles are
+  translucent white (dark) or white (light) with a thin translucent edge. Only what is read closely stays
+  opaque: the download list and other lists (`InboundSurfaceBrush`). Buttons and text boxes keep the WinUI
+  defaults, which are already the matching translucent Fluent fills. No gradients drawn by the app, and
+  no Acrylic. Text keeps 4.5:1 or better: the secondary and status colors are checked on the opaque surface,
+  and Mica is at least as dark (dark) or as light (light) as the fallback color.
 
 ## 2. Status colors
 

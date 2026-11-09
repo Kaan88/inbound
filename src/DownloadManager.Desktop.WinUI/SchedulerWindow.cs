@@ -196,7 +196,7 @@ public sealed class SchedulerWindow : Window
         WindowLayout.ApplyChrome(this, root);
         void ApplyBackground()
         {
-            var brush = InboundTheme.Brush("InboundSurfaceBrush", root);
+            var brush = InboundTheme.Brush("InboundWindowBrush", root);
             root.Background = brush;
             windowFrame.Background = brush;
         }
