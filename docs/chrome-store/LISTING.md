@@ -59,12 +59,14 @@ Sends browser downloads to the Inbound Download Manager desktop app for Windows,
 2. `images\screenshot-2-ask.png`: "Choose where each download goes" (Ask where to save in the popup, light)
 3. `images\screenshot-3-batch.png`: "Download all links on a page" (Add links, dark)
 4. `images\screenshot-4-options.png`: "Your rules, your folders" (Options > General, light)
-5. `images\screenshot-5-app.png`: the desktop window (a capture of the real app)
+5. `images\screenshot-5-app.png`: "Everything in the desktop app" (the desktop window with the same four downloads, dark)
 
 Images 1 to 4 and the promo tile are made by `extensions\chrome\scripts\store-screens.mjs` (`npm run screens` in
 `extensions\chrome`, from Bash or a normal terminal) from the real extension pages and invented data
-(`extensions\chrome\tests\fixtures\screens-data.json`); two runs give byte-identical files. Image 5 is not made by the
-script: it is a capture of the desktop window on a test instance (`scripts\ui-capture.ps1`).
+(`extensions\chrome\tests\fixtures\screens-data.json`); two runs give byte-identical files. Image 5 frames, in the same
+style, a capture of the desktop window: a test instance in dark mode with the fixtures' four downloads from a local file
+server (invented names and sizes; the .rar icons are this PC's own file-type icons), taken with `scripts\ui-capture.ps1`
+with the window's status bar cropped off, then `SCREENS_APP_CAPTURE=<that PNG> SCREENS_ONLY=screenshot-5 npm run screens`.
 
 **Small promo tile:** `images\promo-small-440x280.png`. The marquee image is optional and not included.
 

@@ -1,6 +1,7 @@
 // Lays out one store image (store-frame.html): a caption and the extension page in an iframe, scaled for the popup.
 // Query: kind=shot|promo, caption, sub, page (an extension page with its own query), w, h ("auto": the page's own
-// height), scale, top (promo: the crop's offset), clip (promo: the crop's height). Sets window.frameReady when drawn.
+// height), scale, top (promo: the crop's offset), clip (promo: the crop's height), image (in place of page: a capture shown
+// at 1:1, screenshot 5's desktop window), compact (narrower caption margins for a wide surface). Sets window.frameReady.
 (() => {
   const query = new URLSearchParams(location.search);
   const kind = query.get("kind") ?? "shot";
@@ -8,8 +9,10 @@
   const scale = Number(query.get("scale") ?? "1");
   const fixedHeight = query.get("h") === "auto" ? 0 : Number(query.get("h") ?? "0");
 
-  const iframe = document.createElement("iframe");
-  iframe.src = `/${query.get("page") ?? "popup.html"}`;
+  const image = query.get("image");
+  const iframe = document.createElement(image ? "img" : "iframe");
+  iframe.src = image ? `/${image}` : `/${query.get("page") ?? "popup.html"}`;
+  if (image) iframe.alt = "";
   iframe.width = String(width);
   iframe.title = "Extension page";
   iframe.style.width = `${width}px`;
@@ -36,6 +39,7 @@
     document.body.append(head, surface);
   } else {
     document.documentElement.style.setProperty("--caption-width", query.get("captionWidth") ? `${query.get("captionWidth")}px` : "430px");
+    if (query.get("compact") === "1") document.body.classList.add("compact");
     const caption = document.createElement("div");
     caption.className = "caption";
     const icon = document.createElement("img");
@@ -57,8 +61,8 @@
 
   /** Sizes the iframe and its frame; store-screens.mjs calls it once the page inside is ready. */
   window.fitFrame = () => {
-    const inner = iframe.contentDocument;
-    const contentHeight = fixedHeight || Math.ceil(inner.documentElement.getBoundingClientRect().height);
+    const contentHeight = fixedHeight || (image ? iframe.naturalHeight
+      : Math.ceil(iframe.contentDocument.documentElement.getBoundingClientRect().height));
     iframe.style.height = `${contentHeight}px`;
     iframe.height = String(contentHeight);
     if (kind === "promo") {
