@@ -28,6 +28,10 @@ other easily. maybe I want to manage my homeserver from my desktop ui or vice ve
 3. **Servers in the desktop window**: a Servers list (File → Servers), and a switcher at the right end of the
    toolbar, in the status bar and under Tasks → Show Downloads Of (Ctrl+Shift+O opens it; Ctrl+0 shows This PC,
    Ctrl+1 to Ctrl+9 the saved servers). The window itself shows the chosen server (section 5), and its title names it.
+   While a server is shown, a bar above the list names it and has Back to This PC (UI.B18). When the server can't be
+   reached the bar says why, with Try again (or Pair again when the pairing was refused), the list says so instead of
+   "No downloads", and rows from before a lost connection are dimmed as out of date. Options for an unreachable
+   server still opens with this PC's own pages, and the windows and dialogs that act on a server name it.
 
 ## Architecture
 
