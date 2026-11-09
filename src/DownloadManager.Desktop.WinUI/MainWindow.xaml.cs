@@ -152,6 +152,19 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             () => ApplySort("size", ascending: false)));
+        // UI.R26: Ctrl+Shift+O opens the server switcher; Ctrl+0 shows this PC and Ctrl+1 to Ctrl+9 the saved servers.
+        RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+            Windows.System.VirtualKey.O,
+            Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
+            () => ToolbarServerMenu.ShowAt(ToolbarServerSwitcher)));
+        for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
+        {
+            var chosen = number;
+            RootGrid.KeyboardAccelerators.Add(CreateAccelerator(
+                Windows.System.VirtualKey.Number0 + number,
+                Windows.System.VirtualKeyModifiers.Control,
+                () => SwitchToNumber(chosen)));
+        }
 
         _sortKey = ListColumnSets.IsDownloadSort(_uiState.SortKey) ? _uiState.SortKey : "added";
         _sortAscending = _uiState.SortAscending;
@@ -2216,6 +2229,19 @@ public sealed partial class MainWindow : Window
                 label.Visibility = large ? Visibility.Visible : Visibility.Collapsed;
             }
         }
+
+        // The server switcher keeps its name with small buttons too, beside the icon: which server is shown is what
+        // it is there to say (UI.R26).
+        ToolbarServerSwitcher.Height = large ? 58 : 32;
+        ToolbarServerSwitcher.Padding = large ? new Thickness(10, 2, 10, 2) : new Thickness(6, 2, 6, 2);
+        if (ToolbarServerSwitcher.Content is StackPanel server)
+        {
+            server.Orientation = large ? Orientation.Vertical : Orientation.Horizontal;
+            server.Spacing = large ? 0 : 6;
+            ToolbarServerIcon.FontSize = large ? 25 : 16;
+            ToolbarServerLabel.Margin = large ? new Thickness(0, 3, 0, 0) : new Thickness(0);
+            ToolbarServerLabel.VerticalAlignment = VerticalAlignment.Center;
+        }
     }
 
     /// <summary>View > Dark Mode: a quick way to set the Theme setting to Dark or Light (UI.R23). The choice is kept in
@@ -3602,7 +3628,7 @@ public sealed partial class MainWindow : Window
             !string.Equals(job.State, "cancelled", StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task ShowSettingsDialogAsync()
+    private async Task ShowSettingsDialogAsync(bool showWebUi = false)
     {
         if (_settingsWindow is not null)
         {
@@ -3939,6 +3965,8 @@ public sealed partial class MainWindow : Window
 
             var webUi = new WebUiOptionsPage(_remote) { PageIndex = nextPage + (extraction is null ? 0 : 1) };
             window.AddPage("Web UI", "\uE12B", webUi.Controls);
+            _settingsWebUiPage = webUi.PageIndex;
+            window.Closed += (_, _) => _settingsWebUiPage = null;
 
             window.Closed += (_, _) =>
             {
@@ -4090,6 +4118,7 @@ public sealed partial class MainWindow : Window
                 return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
             };
 
+            if (showWebUi) window.ShowPage(webUi.PageIndex);
             window.Activate();
             await window.WaitClosedAsync();
         }

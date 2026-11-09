@@ -70,7 +70,9 @@ public sealed partial class MainWindow
 
     private void InitializeServers()
     {
-        ServerSwitcherMenu.Opening += (_, _) => FillServerMenu();
+        ServerSwitcherMenu.Opening += (_, _) => FillServerMenu(ServerSwitcherMenu.Items);
+        ToolbarServerMenu.Opening += (_, _) => FillServerMenu(ToolbarServerMenu.Items);
+        UpdateServerSwitchers();
         AppWindow.Changed += (sender, args) =>
         {
             if (!args.DidVisibilityChange) return;
@@ -86,28 +88,86 @@ public sealed partial class MainWindow
         }
     }
 
-    private void FillServerMenu()
+    private IReadOnlyList<ServerChoice> ServerChoices() => ServerSwitch.Choices(_servers.Load(), _connection.Target.Id);
+
+    /// <summary>The switchers' menus (toolbar, status bar, Tasks > Show Downloads Of): This PC, the saved servers, Servers….</summary>
+    private void FillServerMenu(IList<MenuFlyoutItemBase> items)
     {
-        ServerSwitcherMenu.Items.Clear();
-        var shown = _connection.Target;
-        ServerSwitcherMenu.Items.Add(ServerItem("This PC", shown.IsLocal, () => _ = ShowServerAsync(ServerTarget.Local)));
-        foreach (var server in _servers.Load())
+        items.Clear();
+        foreach (var choice in ServerChoices())
         {
-            var id = server.Id;
-            ServerSwitcherMenu.Items.Add(ServerItem(server.Name, shown.Id == id, () => _ = ShowSavedServerAsync(id)));
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = choice.Name,
+                IsChecked = choice.IsCurrent,
+                KeyboardAcceleratorTextOverride = choice.ShortcutText ?? string.Empty,
+            };
+            var id = choice.Id;
+            item.Click += (_, _) =>
+            {
+                // A ToggleMenuFlyoutItem unticks itself when the shown one is chosen again; it stays the shown one.
+                item.IsChecked = true;
+                _ = id is null ? ShowServerAsync(ServerTarget.Local) : ShowSavedServerAsync(id);
+            };
+            items.Add(item);
         }
 
-        ServerSwitcherMenu.Items.Add(new MenuFlyoutSeparator());
+        items.Add(new MenuFlyoutSeparator());
+        var add = new MenuFlyoutItem { Text = "Add a Server…" };
+        add.Click += (_, _) => _ = AddServerFromMenuAsync();
+        items.Add(add);
         var manage = new MenuFlyoutItem { Text = "Servers…" };
         manage.Click += (_, _) => _ = ShowServersDialogAsync();
-        ServerSwitcherMenu.Items.Add(manage);
+        items.Add(manage);
+    }
 
-        static MenuFlyoutItem ServerItem(string text, bool current, Action choose)
+    private async Task AddServerFromMenuAsync()
+    {
+        try
         {
-            var item = new ToggleMenuFlyoutItem { Text = text, IsChecked = current };
-            item.Click += (_, _) => choose();
-            return item;
+            await PairServerAsync(null);
         }
+        finally
+        {
+            UpdateServerSwitchers();
+        }
+    }
+
+    /// <summary>Ctrl+0 shows this PC; Ctrl+1 to Ctrl+9 the saved servers in their order.</summary>
+    private void SwitchToNumber(int number)
+    {
+        if (ServerSwitch.ForNumber(ServerChoices(), number) is not { } choice)
+        {
+            ShowPassingStatus($"There is no server {number}. Add one in File > Servers.");
+            return;
+        }
+
+        if (choice.IsCurrent)
+        {
+            ShowPassingStatus($"{choice.Name} is already shown.");
+            return;
+        }
+
+        _ = choice.Id is null ? ShowServerAsync(ServerTarget.Local) : ShowSavedServerAsync(choice.Id);
+    }
+
+    /// <summary>
+    /// Says everywhere which Host the window shows (UI.R26): the toolbar switcher's name and icon, the status-bar
+    /// switcher, the window title, and the Tasks menu's list. Called on every switch and whenever the list changes.
+    /// </summary>
+    private void UpdateServerSwitchers()
+    {
+        var target = _connection.Target;
+        var help = ServerSwitch.SwitcherHelp(target);
+        ToolbarServerLabel.Text = target.Name;
+        ToolbarServerIcon.Glyph = target.IsLocal ? "" : "";
+        ToolTipService.SetToolTip(ToolbarServerSwitcher, help);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ToolbarServerSwitcher, help);
+        ServerSwitcher.Content = target.Name;
+        ToolTipService.SetToolTip(ServerSwitcher, help);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ServerSwitcher, help);
+        Title = ServerSwitch.TitleFor(target);
+        FillServerMenu(TasksServersItem.Items);
     }
 
     private async Task ShowSavedServerAsync(string id)
@@ -158,8 +218,7 @@ public sealed partial class MainWindow
         _settings = target.IsLocal ? _localSettings : null;
         _graphConnected = _connection.IsConnected;
         _graphSnapshotReady = false;
-        ServerSwitcher.Content = target.Name;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(ServerSwitcher, $"Showing {target.Name}");
+        UpdateServerSwitchers();
         ConnectionText.Text = target.IsLocal ? "Connecting…" : $"Connecting to {target.Name}…";
         RebuildVisible();
         UpdateStatusText();
@@ -219,6 +278,18 @@ public sealed partial class MainWindow
 
     private async Task ShowServersDialogAsync()
     {
+        try
+        {
+            await ShowServersDialogLoopAsync();
+        }
+        finally
+        {
+            UpdateServerSwitchers();
+        }
+    }
+
+    private async Task ShowServersDialogLoopAsync()
+    {
         while (true)
         {
             var servers = _servers.Load();
@@ -245,7 +316,7 @@ public sealed partial class MainWindow
             var panel = new StackPanel { Spacing = 10, MinWidth = 460 };
             panel.Children.Add(new TextBlock
             {
-                Text = "Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the button at the left of the status bar.",
+                Text = "Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the switcher at the right of the toolbar or the left of the status bar, Tasks > Show Downloads Of, or Ctrl+0 to Ctrl+9.",
                 TextWrapping = TextWrapping.Wrap,
             });
             panel.Children.Add(servers.Count == 0 ? new TextBlock { Text = "No servers yet.", Opacity = 0.72 } : list);
@@ -368,8 +439,8 @@ public sealed partial class MainWindow
         if (_servers.Target(existing.Id) is { } updated)
         {
             ShownServer.Target = updated;
-            ServerSwitcher.Content = updated.Name;
             _connection.Retarget(updated);
+            UpdateServerSwitchers();
             await _remote.RetargetAsync(updated);
         }
     }
@@ -455,12 +526,34 @@ public sealed partial class MainWindow
 
     private Task OpenOptionsAsync() => _connection.IsRemote ? ShowServerOptionsAsync() : ShowSettingsDialogAsync();
 
+    // The Web UI page's place in the Options window that is open, if it has one, for Web UI on This PC… to go to.
+    private int? _settingsWebUiPage;
+
+    private void MenuWebUi_Click(object sender, RoutedEventArgs e) => _ = OpenWebUiOptionsAsync();
+
+    /// <summary>
+    /// Web UI on This PC… (UI.R27): Options on its Web UI page, whichever server the window shows. While a server is
+    /// shown that page talks to this PC's Host directly, so turning the web UI on never needs a switch back.
+    /// </summary>
+    private async Task OpenWebUiOptionsAsync()
+    {
+        if (_settingsWindow is not null)
+        {
+            if (_settingsWebUiPage is { } page) _settingsWindow.ShowPage(page);
+            _settingsWindow.Activate();
+            return;
+        }
+
+        if (_connection.IsRemote) await ShowServerOptionsAsync(showWebUi: true);
+        else await ShowSettingsDialogAsync(showWebUi: true);
+    }
+
     /// <summary>
     /// Options while a server is shown (design D9, section 5): this PC's own choices (theme, start at sign-in, clipboard,
     /// browser, updates, what a finished download does here) are read from and saved to this PC's Host; the server's
     /// pages show only what its hello allows, and a save there never changes those choices on the server.
     /// </summary>
-    private async Task ShowServerOptionsAsync()
+    private async Task ShowServerOptionsAsync(bool showWebUi = false)
     {
         if (_settingsWindow is not null)
         {
@@ -491,7 +584,11 @@ public sealed partial class MainWindow
         var theirs = remote.Settings;
         var window = new SettingsWindow { Title = $"Options — {serverName} — Inbound Download Manager" };
         _settingsWindow = window;
-        window.Closed += (_, _) => _settingsWindow = null;
+        window.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+            _settingsWebUiPage = null;
+        };
 
         // This PC.
         string[] themeValues = [ThemeChoices.System, ThemeChoices.Light, ThemeChoices.Dark];
@@ -590,12 +687,24 @@ public sealed partial class MainWindow
         {
             extraction = new ExtractionOptionsPage(_remote, window);
             window.AddPage("Extraction", "", extraction.Controls);
+            nextPage++;
         }
+
+        // UI.R27: this PC's web UI, through a client of this PC's Host of its own (the window's follows the server, and
+        // a server never takes webui.* from a paired app). It lets other devices reach this PC, not the server.
+        var localClient = new RemoteClient(action => DispatcherQueue.TryEnqueue(() => action()));
+        var webUi = new WebUiOptionsPage(localClient) { PageIndex = nextPage };
+        window.AddPage("Web UI on this PC", "",
+            [SettingsWindow.Hint($"This PC's own web UI: a browser on another device can control this PC's downloads through it. It doesn't change {serverName}; {serverName}'s web UI is set on {serverName}."),
+             .. webUi.Controls]);
+        _settingsWebUiPage = webUi.PageIndex;
 
         window.Closed += (_, _) =>
         {
             foreach (var (page, _) in accountPages) page.Close();
             extraction?.Close();
+            webUi.Close();
+            _ = localClient.DisposeAsync().AsTask();
         };
 
         static int? WholeNumber(NumberBox box) => double.IsNaN(box.Value) ? null : (int)Math.Round(box.Value);
@@ -607,6 +716,7 @@ public sealed partial class MainWindow
             }
 
             if (extraction?.Validate() is { } extractionProblem) return (extractionProblem, extractionPageIndex);
+            if (webUi.Validate() is { } webUiProblem) return (webUiProblem, webUi.PageIndex);
             if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168) return ("Update interval must be 1-168 hours.", ThisPcPage);
             var sounds = new Dictionary<string, string>(mine.EventSoundFiles, StringComparer.OrdinalIgnoreCase);
             if (!soundEditor.TryApplyTo(sounds, out var soundError)) return (soundError ?? "Invalid sound choice.", SoundsPage);
@@ -674,9 +784,15 @@ public sealed partial class MainWindow
                 return ($"{serverName}'s options were saved, but this PC's weren't: {thisPcProblem}", ThisPcPage);
 
             var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
+            var webUiSaveProblem = await webUi.SaveAsync();
+            // Neither problem is dropped: both are said, and the window shows the page of the first.
+            if (webUiSaveProblem is not null && extractionSaveProblem is not null)
+                return ($"{extractionSaveProblem} {webUiSaveProblem}", extractionPageIndex);
+            if (webUiSaveProblem is not null) return (webUiSaveProblem, webUi.PageIndex);
             return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
         };
 
+        if (showWebUi) window.ShowPage(webUi.PageIndex);
         window.Activate();
         await window.WaitClosedAsync();
     }

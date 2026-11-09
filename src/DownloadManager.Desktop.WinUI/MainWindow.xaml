@@ -52,6 +52,10 @@
                 <MenuFlyoutItem Text="Export Download List…" AccessKey="E" Click="MenuExport_Click" />
                 <MenuFlyoutItem Text="Import Download List…" AccessKey="I" Click="MenuImport_Click" />
                 <MenuFlyoutSeparator />
+                <!-- UI.R26: filled from the saved servers each time it opens, like the switchers. -->
+                <MenuFlyoutSubItem x:Name="TasksServersItem" Text="Show Downloads Of" AccessKey="S" />
+                <MenuFlyoutItem Text="Web UI on This PC…" AccessKey="W" Click="MenuWebUi_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Exit" AccessKey="X" Click="MenuExit_Click" />
             </MenuBarItem>
 
@@ -68,6 +72,7 @@
                 <MenuFlyoutItem x:Name="FileDeleteItem" Text="Delete…" AccessKey="E" KeyboardAcceleratorTextOverride="Delete" Click="MenuDelete_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Servers…" AccessKey="V" Click="MenuServers_Click" />
+                <MenuFlyoutItem Text="Web UI on This PC…" AccessKey="W" Click="MenuWebUi_Click" />
             </MenuBarItem>
 
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
@@ -138,6 +143,11 @@
                 <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
                 <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
             </Border.Resources>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
             <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel x:Name="ToolbarPanel" Orientation="Horizontal" Padding="8,4" Spacing="0">
@@ -229,6 +239,23 @@
                     </Button>
                 </StackPanel>
             </ScrollViewer>
+                <!-- UI.R26: which Host the window shows, at the right end of the toolbar so it stays in view however
+                     narrow the window is. One click lists This PC and the saved servers; Ctrl+Shift+O opens it. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Padding="0,4,8,4">
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <DropDownButton x:Name="ToolbarServerSwitcher" Style="{StaticResource InboundToolButtonStyle}"
+                                    AutomationProperties.Name="Show downloads of" AutomationProperties.AcceleratorKey="Ctrl+Shift+O"
+                                    ToolTipService.ToolTip="Showing the downloads of this PC. Select to show another server's.">
+                        <StackPanel>
+                            <FontIcon x:Name="ToolbarServerIcon" Glyph="&#xE7F4;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                            <TextBlock x:Name="ToolbarServerLabel" Text="This PC" MaxWidth="160" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                        <DropDownButton.Flyout>
+                            <MenuFlyout x:Name="ToolbarServerMenu" Placement="BottomEdgeAlignedRight" />
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- What extraction wants the user to know. It sits above the list and waits; nothing opens by itself. -->
