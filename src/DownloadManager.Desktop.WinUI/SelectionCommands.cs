@@ -64,7 +64,8 @@ internal static class FileMenuRules
             shellReason ?? (finished ? null : NotFinishedReason));
     }
 
-    public static string Label(string text, string? reason) => reason is null ? text : $"{text} ({reason})";
+    /// <summary>The item's text with the reason it is off; with nothing selected the greyed item says nothing more (owner, 2026-11-09).</summary>
+    public static string Label(string text, string? reason) => reason is null or "select a download first" ? text : $"{text} ({reason})";
 
     /// <summary>Grouping takes two rows or more with files behind them. A package row alone holds several files, and is one already.</summary>
     /// <param name="files">The files the selection stands for, a package's included.</param>
