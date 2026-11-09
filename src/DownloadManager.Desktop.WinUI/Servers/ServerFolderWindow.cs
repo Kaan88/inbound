@@ -30,7 +30,7 @@ internal sealed class ServerFolderWindow : Window
     private readonly Button _choose = new() { Content = "Choose this folder" };
     private FolderBrowseResult? _shown;
     private int _version;
-    private bool _messageIsError;
+    private ServerFolderListing.Message? _said;
 
     // Whole paths wrap rather than being cut off, so two roots that differ only at the end can be told apart, and each
     // row's tooltip has the whole path too.
@@ -91,7 +91,7 @@ internal sealed class ServerFolderWindow : Window
             _space.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", root);
             _empty.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", root);
             // Red only for a problem; the notice about a long folder is information (review of UI.B16).
-            _message.Foreground = InboundTheme.Brush(_messageIsError ? "InboundErrorTextBrush" : "InboundSecondaryTextBrush", root);
+            _message.Foreground = InboundTheme.Brush(_said?.Brush ?? ServerFolderListing.NoticeBrush, root);
         }
 
         _applyColors = ApplyColors;
@@ -120,7 +120,7 @@ internal sealed class ServerFolderWindow : Window
             var chosen = _path.Text.Trim();
             if (chosen.Length == 0)
             {
-                Say("Open a folder first.", error: true);
+                Say(ServerFolderListing.NothingChosen);
                 return;
             }
 
@@ -154,7 +154,7 @@ internal sealed class ServerFolderWindow : Window
     {
         if (_shown?.Path is not { } parent)
         {
-            Say("Open one of the folders first; a new folder is made inside it.", error: false);
+            Say(ServerFolderListing.NewFolderNeedsAFolder);
             return;
         }
 
@@ -197,7 +197,7 @@ internal sealed class ServerFolderWindow : Window
         if (result is null) return;
         if (!result.Ok)
         {
-            Say(result.Error ?? "That folder can't be opened.", error: true);
+            Say(ServerFolderListing.Refusal(result));
             return;
         }
 
@@ -212,14 +212,14 @@ internal sealed class ServerFolderWindow : Window
         _space.Text = result.FreeBytes is { } free
             ? result.TotalBytes is { } total ? $"{FolderChooser.Size(free)} free of {FolderChooser.Size(total)}" : $"{FolderChooser.Size(free)} free"
             : string.Empty;
-        if (view.Notice is { } notice) Say(notice, error: false);
+        if (view.Message is { } notice) Say(notice);
     }
 
-    /// <summary>A line under the list: in error red only when <paramref name="error"/>.</summary>
-    private void Say(string text, bool error)
+    /// <summary>A line under the list, in the colour <see cref="ServerFolderListing.Message.Brush"/> gives it.</summary>
+    private void Say(ServerFolderListing.Message message)
     {
-        _messageIsError = error;
-        _message.Text = text;
+        _said = message;
+        _message.Text = message.Text;
         _message.Visibility = Visibility.Visible;
         _applyColors();
     }

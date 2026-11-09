@@ -279,11 +279,36 @@ internal static class ServerFolderListing
 
     public const string NoRoots = "This server has no folders this app may save to.";
 
+    public const string CantOpen = "That folder can't be opened.";
+
+    /// <summary>The theme token for a problem under the list.</summary>
+    public const string ErrorBrush = "InboundErrorTextBrush";
+
+    /// <summary>The theme token for information under the list (review of UI.B16: a notice is never red).</summary>
+    public const string NoticeBrush = "InboundSecondaryTextBrush";
+
+    /// <summary>A line under the list, and whether it reports a problem.</summary>
+    public sealed record Message(string Text, bool IsError)
+    {
+        /// <summary>Red only for a problem; anything else in secondary text.</summary>
+        public string Brush => IsError ? ErrorBrush : NoticeBrush;
+    }
+
+    /// <summary>'Choose this folder' with nothing opened or typed: a problem.</summary>
+    public static readonly Message NothingChosen = new("Open a folder first.", IsError: true);
+
+    /// <summary>'New folder' at the list of roots: a hint, not a problem.</summary>
+    public static readonly Message NewFolderNeedsAFolder = new("Open one of the folders first; a new folder is made inside it.", IsError: false);
+
     /// <param name="Rows">Each row's text, and its whole path for the tooltip and for opening it. The contract's own
     /// public type, which the list's binding can read.</param>
-    /// <param name="Notice">Information for the line under the list, never an error; null for none.</param>
+    /// <param name="Message">The line under the list: the server's refusal (red) or the long-list notice (grey); null for none.</param>
     /// <param name="Empty">Shown in place of the list when it has no rows; null when it has some.</param>
-    public sealed record View(IReadOnlyList<FolderEntryDto> Rows, string? Notice, string? Empty, bool CanGoUp, bool CanCreate);
+    public sealed record View(IReadOnlyList<FolderEntryDto> Rows, Message? Message, string? Empty, bool CanGoUp, bool CanCreate);
+
+    /// <summary>A refused <c>folders.browse</c> or <c>folders.create</c>: the list stays as it was, and this says why, in red.</summary>
+    public static Message Refusal(FolderBrowseResult result)
+        => new(string.IsNullOrWhiteSpace(result.Error) ? CantOpen : result.Error, IsError: true);
 
     /// <summary>The roots are listed with their whole paths, a folder's contents by name.</summary>
     public static View For(FolderBrowseResult result)
@@ -292,7 +317,8 @@ internal static class ServerFolderListing
             ? result.Roots.Select(root => new FolderEntryDto { Name = root, Path = root }).ToList()
             : result.Folders;
         string? empty = rows.Count > 0 ? null : result.Path is null ? NoRoots : EmptyFolder;
-        return new View(rows, result.Truncated ? TruncatedNotice : null, empty, result.Path is not null, result.Path is not null);
+        var notice = result.Truncated ? new Message(TruncatedNotice, IsError: false) : null;
+        return new View(rows, notice, empty, result.Path is not null, result.Path is not null);
     }
 
     /// <summary>'Choose this folder' needs a folder: one opened, or one typed.</summary>
@@ -306,10 +332,11 @@ internal static class ServerFolderListing
 internal static class MoveRefusal
 {
     /// <summary>
-    /// The server's refusal of a folder outside its roots ("That folder is outside the folders this server may use."),
-    /// the one where listing them helps.
+    /// The server's refusal of a folder outside its roots, the one where listing them helps: told by its
+    /// <see cref="JobActionErrorCodes.OutsideRoots"/> code, never by its wording. A server older than the code gets
+    /// its reason shown without the list.
     /// </summary>
-    public static bool IsOutsideRoots(string? error) => error?.Contains(" is outside ", StringComparison.OrdinalIgnoreCase) == true;
+    public static bool IsOutsideRoots(JobActionResponse? result) => result is { Ok: false, ErrorCode: JobActionErrorCodes.OutsideRoots };
 
     public static string Text(string? error, IReadOnlyList<string>? roots, string serverName)
     {
