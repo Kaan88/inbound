@@ -880,7 +880,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// <summary>
     /// Turns a reference to a file a browser uploaded (<see cref="UploadFolder"/>, <c>upload:…</c>) into that file's path,
     /// or gives null for anything else. The client then never learns where the Host keeps it. Set where uploads are
-    /// stored: the Docker server (the Windows web bridge once it stores them). The hello's <c>uploads</c> follows it.
+    /// stored: the Docker server, and the Windows Host where its web bridge is installed. The hello's <c>uploads</c> follows it.
     /// </summary>
     public Func<string, string?>? ResolveReference { get; set; }
 

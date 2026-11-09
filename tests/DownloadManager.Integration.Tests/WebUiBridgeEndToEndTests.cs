@@ -62,6 +62,98 @@ public sealed class WebUiBridgeEndToEndTests
         }
     }
 
+    private static StringContent Envelope(string type, object payload) =>
+        new(JsonSerializer.Serialize(IpcMessage.Create(type, payload), IpcJson.Options));
+
+    private static async Task<IpcMessage> IpcAsync(HttpClient http, string type, object payload, string? bearer = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/ipc") { Content = Envelope(type, payload) };
+        if (bearer is not null) request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearer);
+        using var response = await http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return JsonSerializer.Deserialize<IpcMessage>(await response.Content.ReadAsStringAsync(), IpcJson.Options)!;
+    }
+
+    private static async Task<(HttpStatusCode Status, string? Reference)> UploadAsync(HttpClient http, string path, byte[] body, string? fileName = null, string? bearer = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new ByteArrayContent(body) };
+        if (fileName is not null) request.Headers.Add("X-File-Name", Uri.EscapeDataString(fileName));
+        if (bearer is not null) request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearer);
+        using var response = await http.SendAsync(request);
+        if (response.StatusCode != HttpStatusCode.OK) return (response.StatusCode, null);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return (response.StatusCode, json.RootElement.GetProperty("upload").GetString());
+    }
+
+    [Fact]
+    public async Task UploadsThroughTheBridgeLandInTheHostsUploadFolderAndTheHostReadsThemByReference()
+    {
+        // Gap a between the bridge and the Host streams: the bridge serves both uploads into <Host data>\uploads, the
+        // Host resolves upload:<id> for the torrent and the container commands, and its hello says "uploads". A paired
+        // desktop app's token uploads too (gap b).
+        await using var host = await SandboxHost.StartAsync(NoApi);
+        await using var pipe = await host.ConnectAsync();
+        var port = FreePort();
+        Assert.True((await pipe.AskAsync<WebUiStatusDto>(WebUiMessageTypes.SetPassword, new WebUiPasswordRequest { Password = "upload test password" })).HasPassword);
+        Assert.Equal(WebUiStates.Running,
+            (await pipe.AskAsync<WebUiStatusDto>(WebUiMessageTypes.Set, new WebUiSetRequest { Enabled = true, Port = port }, TimeSpan.FromSeconds(60))).State);
+        var ticket = await pipe.AskAsync<WebUiTicketDto>(WebUiMessageTypes.OpenTicket, new { });
+        var cookies = new CookieContainer();
+        using var http = new HttpClient(new HttpClientHandler { CookieContainer = cookies, AllowAutoRedirect = false }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+        using (var signedIn = await http.GetAsync(ticket.Url)) Assert.Equal(HttpStatusCode.Redirect, signedIn.StatusCode);
+
+        using (var socket = new ClientWebSocket())
+        {
+            socket.Options.Cookies = cookies;
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/api/ws"), CancellationToken.None);
+            var hello = (await ReadAsync(socket))!.GetPayload<HostHelloDto>();
+            Assert.Contains("remote", hello.Capabilities);
+            Assert.Contains("uploads", hello.Capabilities);
+        }
+
+        var uploads = Path.Combine(host.DataDirectory, "uploads");
+        var torrent = "d4:infod6:lengthi4e4:name5:a.bin12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee"u8.ToArray();
+        var (torrentStatus, torrentReference) = await UploadAsync(http, "/api/upload/torrent", torrent);
+        Assert.Equal(HttpStatusCode.OK, torrentStatus);
+        Assert.True(File.Exists(Path.Combine(uploads, torrentReference!["upload:".Length..] + ".torrent")));
+        // The test Host has no provider key, so a .torrent file can't be used yet; but it is read as that file. A reference
+        // with no file behind it is told apart.
+        const string Gone = "The uploaded file is no longer there. Upload it again.";
+        var classified = (await IpcAsync(http, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = torrentReference })).GetPayload<RemoteClassifyResult>();
+        Assert.NotEqual(Gone, classified.Reason);
+        Assert.Equal(Gone, (await IpcAsync(http, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = "upload:" + new string('0', 32) }))
+            .GetPayload<RemoteClassifyResult>().Reason);
+
+        var (containerStatus, containerReference) = await UploadAsync(http, "/api/upload/container", "not really a container"u8.ToArray(), "links.rsdf");
+        Assert.Equal(HttpStatusCode.OK, containerStatus);
+        Assert.True(File.Exists(Path.Combine(uploads, containerReference!["upload:".Length..] + ".rsdf")));
+        var preview = (await IpcAsync(http, MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = containerReference, FileName = "links.rsdf" }))
+            .GetPayload<RemoteContainerPreviewResult>();
+        Assert.Equal("rsdf", preview.Format);
+        Assert.DoesNotContain("outside", preview.Error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Gone, preview.Error);
+        // A reference whose file is gone says so; one never made too.
+        var gone = (await IpcAsync(http, MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = "upload:" + new string('0', 32) }))
+            .GetPayload<RemoteContainerPreviewResult>();
+        Assert.Equal(Gone, gone.Error);
+
+        // A desktop app paired with the password uploads with its token, and nothing else of its sign-in is needed.
+        using var anonymous = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false }) { BaseAddress = http.BaseAddress };
+        using var pairing = await anonymous.PostAsync("/api/pair", new StringContent(
+            JsonSerializer.Serialize(new { password = "upload test password", name = "Desk PC", role = "remoteClient" }), System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, pairing.StatusCode);
+        string token;
+        using (var paired = JsonDocument.Parse(await pairing.Content.ReadAsStringAsync())) token = paired.RootElement.GetProperty("token").GetString()!;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await UploadAsync(anonymous, "/api/upload/torrent", torrent)).Status);
+        var (byToken, tokenReference) = await UploadAsync(anonymous, "/api/upload/torrent", torrent, bearer: token);
+        Assert.Equal(HttpStatusCode.OK, byToken);
+        Assert.NotEqual(Gone, (await IpcAsync(anonymous, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = tokenReference }, token))
+            .GetPayload<RemoteClassifyResult>().Reason);
+        Assert.Equal(HttpStatusCode.OK, (await UploadAsync(anonymous, "/api/upload/container", "x"u8.ToArray(), "links.ccf", token)).Status);
+
+        await pipe.AskAsync<WebUiStatusDto>(WebUiMessageTypes.Set, new WebUiSetRequest { Enabled = false }, TimeSpan.FromSeconds(60));
+    }
+
     [Fact]
     public async Task TheWindowTurnsTheWebUiOnSignsABrowserInWithATicketAndOffAgain()
     {

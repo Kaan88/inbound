@@ -159,9 +159,12 @@ internal static class Program
             var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
             var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
-            // D8: a .torrent file a browser uploaded through the web bridge, by its reference.
-            var uploads = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName));
-            remoteJobs.ResolveReference = uploads.Resolve;
+            // D8: a .torrent or container file a browser (or another PC's window) uploaded through the web bridge, by its
+            // reference. The bridge keeps them in <data>\uploads; without the bridge program nothing can upload, so the
+            // hello then has no "uploads" and the web UI and the window keep their upload items hidden.
+            var bridgeLauncher = new WebBridgeLauncher(log.Warn);
+            if (File.Exists(bridgeLauncher.BridgePath))
+                remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
             service.DirectAddresses = remoteJobs;
             service.InitializeAsync().GetAwaiter().GetResult();
 
@@ -203,7 +206,7 @@ internal static class Program
                 remoteStarted ? remote.Registry : null, remoteStarted ? remoteJobs : null, log.Info);
             // D8: the web UI. With its box cleared this starts nothing: no process, no timer, nothing listening.
             var webUi = new WebUiSupervisor(new WebUiConfigStore(paths.Root),
-                new WebUiPlatform(new WebBridgeLauncher(log.Warn), new WindowsFirewallRules(log.Warn), new TcpListenerOwner(),
+                new WebUiPlatform(bridgeLauncher, new WindowsFirewallRules(log.Warn), new TcpListenerOwner(),
                     new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
                 paths.Root, PipeNames.HostHelloPipe(), log);
             var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
