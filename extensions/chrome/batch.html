@@ -42,9 +42,10 @@
       <label class="field">
         <span>Destination folder (optional)</span>
         <div class="destination-picker">
-          <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
-          <button id="browseDestination" type="button">Browse…</button>
+          <input id="destination" type="text" spellcheck="false" placeholder="Use the default folder" />
+          <button id="browseDestination" type="button" disabled>Browse…</button>
         </div>
+        <span id="freeSpace" class="muted small free-space"></span>
       </label>
       <div id="serverFolders" class="hidden"></div>
       <label class="field">

@@ -129,7 +129,9 @@ test('EXT.R1: "ask each time" offers this PC and the server, each with its own d
     const listing = sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/downloads' }, ownPage('handoff.html'));
     assert.equal((await listing).ok, true);
     assert.deepEqual(server.of('folders.browse').at(-1).body.payload, { path: '/downloads' });
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('popup.html'))).ok, false);
+    // EXT.R7: the popup's ask form lists them too; Settings, or any other page, may not.
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('options.html'))).ok, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('popup.html'))).ok, true);
 
     const confirmed = await sendRuntimeMessage(harness,
       { type: 'dm.confirmHandoff', id, destination: '/downloads/music', startMode: 'now', target: 'server' }, ownPage('handoff.html'));
