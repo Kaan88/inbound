@@ -180,7 +180,10 @@ public sealed partial class MainWindow
         try
         {
             ApplyConnection(true, null);
-            ApplySnapshot(await _local.RefreshAsync());
+            var snapshot = await _local.RefreshAsync();
+            // Another switch while this PC's list was read: that one fills the window.
+            if (switchNumber != _switches || _connection != _local) return;
+            ApplySnapshot(snapshot);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
         {

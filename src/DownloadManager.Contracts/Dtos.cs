@@ -431,6 +431,15 @@ public sealed class JobActionResponse
     public bool Ok { get; set; }
     public JobDto? Job { get; set; }
     public string? Error { get; set; }
+    /// <summary>A <see cref="JobActionErrorCodes"/> value when a client acts on the kind of refusal; null otherwise.</summary>
+    public string? ErrorCode { get; set; }
+}
+
+/// <summary>What kind of refusal a <see cref="JobActionResponse"/> is, for a client that acts on it rather than on its words.</summary>
+public static class JobActionErrorCodes
+{
+    /// <summary>The folder is outside the folders the caller may use (a server's roots, or the app's for another device).</summary>
+    public const string OutsideRoots = "outside_roots";
 }
 
 public sealed class CleanOrphansRequest

@@ -1,4 +1,5 @@
 using DownloadManager.Contracts;
+using DownloadManager.Runtime;
 using TestServer;
 
 namespace DownloadManager.Server.Tests;
@@ -93,6 +94,9 @@ public sealed class ServerRootConfinementTests
             JobId = added.Job!.Id, NewFilePath = Path.Combine(outside, "move-me.bin"),
         });
         Assert.False(refused.Ok);
+        // The desktop lists the server's folders on this code (U-WR-12), not on the words.
+        Assert.Equal(JobActionErrorCodes.OutsideRoots, refused.ErrorCode);
+        Assert.Equal(PathRoots.OutsideMessage, refused.Error);
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
 
         var moved = await client.AskAsync<JobActionResponse>(MessageTypes.JobUpdate, new JobUpdateRequest

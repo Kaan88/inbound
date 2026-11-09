@@ -1369,7 +1369,7 @@ public sealed partial class MainWindow : Window
             if (result.Ok) return (null, true);
             var error = result.Error ?? "The host rejected the move.";
             // Another server's own folders, so one can be typed or chosen without leaving the dialog.
-            if (remote && MoveRefusal.IsOutsideRoots(error)) return (MoveRefusal.Text(error, await ServerRootsAsync(), _connection.Target.Name), false);
+            if (remote && MoveRefusal.IsOutsideRoots(result)) return (MoveRefusal.Text(error, await ServerRootsAsync(), _connection.Target.Name), false);
             return (error, false);
         }
         catch (Exception ex)
@@ -4570,7 +4570,10 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var snapshot = await _connection.RefreshAsync();
+            var connection = _connection;
+            var snapshot = await connection.RefreshAsync();
+            // A reply from the Host shown before a switch would put its settings and path style on the new one.
+            if (connection != _connection) return;
             ApplySnapshot(snapshot);
         }
         catch (Exception ex)
