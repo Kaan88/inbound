@@ -5,8 +5,8 @@
 // Getting back (U-WU-1): a jump to another host carries this host's address and the names and addresses of the list
 // in the link's #fragment, which the browser never sends to a server. Nothing else goes: no password, token or cookie,
 // and the server sends no Referer. The other host's page takes the fragment off the address at once, offers "Back to"
-// this host for that tab, and offers the hosts it did not know yet; they are kept only when the user adds them, since
-// anyone could make such a link.
+// that host for that tab once it is in this browser's list, and offers the hosts it did not know yet, that one first;
+// they are kept only when the user adds them, since anyone could make such a link and the Back link carries this list.
 
 export interface SavedHost {
   id: string;
@@ -174,24 +174,29 @@ export function readHandoff(hash: string): Handoff | null {
 }
 
 export interface Arrival {
-  /** Where "Back to" goes, and what to call it. */
+  /**
+   * Where "Back to" goes, and what to call it: only a host saved in this browser's list. Anyone can craft the fragment,
+   * and the Back link carries this list, so a host the list doesn't have is first offered with Add (U-WU-1).
+   */
   back: { name: string; origin: string } | null;
+  /** The host the link says it came from, saved or not, for the wording. */
+  from: { name: string; origin: string } | null;
   /** What the other host calls this one, if it named it. */
   selfName: string;
-  /** Hosts the other host knows and this browser's list for this address doesn't. */
+  /** Hosts the other host knows and this browser's list for this address doesn't (the one it came from first). */
   offered: { name: string; origin: string }[];
 }
 
 /** What a page makes of a handoff, given its own address and its saved list. */
 export function arrival(handoff: Handoff | null, here: string, saved: readonly SavedHost[]): Arrival {
-  if (!handoff || handoff.from === here) return { back: null, selfName: '', offered: [] };
+  if (!handoff || handoff.from === here) return { back: null, from: null, selfName: '', offered: [] };
   const known = new Set(saved.map((host) => host.origin));
   const savedName = saved.find((host) => host.origin === handoff.from)?.name;
-  const back = { name: savedName ?? defaultName(handoff.from), origin: handoff.from };
+  const from = { name: savedName ?? defaultName(handoff.from), origin: handoff.from };
   const selfName = handoff.hosts.find((host) => host.origin === here)?.name ?? '';
-  const offered = [back, ...handoff.hosts].filter((host, index, all) =>
+  const offered = [from, ...handoff.hosts].filter((host, index, all) =>
     host.origin !== here && !known.has(host.origin) && all.findIndex((other) => other.origin === host.origin) === index);
-  return { back, selfName: selfName === defaultName(here) ? '' : selfName, offered };
+  return { back: savedName === undefined ? null : from, from, selfName: selfName === defaultName(here) ? '' : selfName, offered };
 }
 
 const arrivalKey = 'inbound.hostHandoff';

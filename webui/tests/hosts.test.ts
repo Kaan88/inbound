@@ -155,12 +155,25 @@ describe('passing the list along (U-WU-1)', () => {
     expect(link).not.toMatch(/token|password|cookie/i);
   });
 
-  it('host B offers the way back to A and the hosts it lacks, and learns its own name', () => {
+  it('host B offers A and the hosts it lacks to add, and learns its own name; Back waits until A is added', () => {
     const handoff = readHandoff(new URL(handoffUrl(b, a, listOnA)).hash);
     const seen = arrival(handoff, b, []);
-    expect(seen.back).toEqual({ name: '127.0.0.1:18851', origin: a });
+    // Anyone can craft the fragment, so an origin B has not saved is never a one-click Back (it would carry B's list).
+    expect(seen.back).toBeNull();
+    expect(seen.from).toEqual({ name: '127.0.0.1:18851', origin: a });
     expect(seen.selfName).toBe('Second box');
     expect(seen.offered.map((host) => host.origin)).toEqual([a, c]);
+    const added = arrival(handoff, b, [{ id: 'x', name: '127.0.0.1:18851', origin: a }]);
+    expect(added.back).toEqual({ name: '127.0.0.1:18851', origin: a });
+    expect(added.offered.map((host) => host.origin)).toEqual([c]);
+  });
+
+  it('a crafted link from an unknown origin gets no Back', () => {
+    const crafted = readHandoff(`#${handoffParam}=${encodeURIComponent(JSON.stringify({ v: 1, f: 'https://evil.example', h: [] }))}`);
+    expect(crafted?.from).toBe('https://evil.example');
+    const seen = arrival(crafted, b, [{ id: 'y', name: 'Attic', origin: c }]);
+    expect(seen.back).toBeNull();
+    expect(seen.offered).toEqual([{ name: 'evil.example', origin: 'https://evil.example' }]);
   });
 
   it('uses the name B already has for A, and offers nothing B knows', () => {
@@ -180,6 +193,7 @@ describe('passing the list along (U-WU-1)', () => {
 
   it('a page with no handoff, or one from itself, offers nothing', () => {
     expect(arrival(null, b, []).back).toBeNull();
+    expect(arrival(null, b, []).from).toBeNull();
     expect(arrival({ from: b, hosts: [] }, b, []).back).toBeNull();
   });
 
