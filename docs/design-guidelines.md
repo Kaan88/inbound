@@ -212,3 +212,22 @@ The browser front end (`webui/`) follows the same rules with web tools:
 - **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
   themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look
   at the pictures, as with the desktop captures above.
+
+## 9. The browser extension (EXT.R8)
+
+- **One look.** The extension's build copies the web UI's `webui/src/tokens.css` (the palette, equal to `App.xaml`),
+  `webui/src/ui-kit.css` (buttons, fields, notices, the 6 px bar, menus, dialogs, the segmented control) and
+  `webui/public/theme.js`. Its own `extensions/chrome/extension.css` holds layout only and names no colour.
+  `tests/tokens-parity.test.cjs` keeps the tokens equal to `App.xaml` and checks the contrast pairs.
+- **Shared code.** Words and numbers come from `webui/src/lib/format.ts` (time left as the desktop writes it, `1m 45s`),
+  glyphs from `webui/src/lib/icons.ts`, with file-kind glyphs grouped as the desktop list's.
+- **Popup anatomy** (380 wide, up to 600 tall, fixed px only): a 40 px header of icon buttons, notices only when there
+  is something to say, one list that alone scrolls with 56 px rows (name and size, status line, a reserved bar slot) and
+  at most two buttons each, group rows This PC / `<server> (server)` when a server is paired, and a 24 px status bar with
+  Send to, the counts and the connection. Rows are keyed and updated in place. Delete is a dialog over the list.
+- **Save forms.** The right-click window, the popup's ask view and Add links share `src/ui/save-form.ts`: Send to,
+  Destination folder with the target's favorites and Browse…, the server's folder panel. Start download and Download
+  later send this download only; Options > Default start picks the primary one.
+- **Options** is the desktop's Options window: pages on the left, OK / Cancel / Apply, only changed settings saved.
+- **Store images** are made by `extensions/chrome/scripts/store-screens.mjs` from the real pages (see
+  `docs/chrome-store/LISTING.md`), never by hand.
