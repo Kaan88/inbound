@@ -202,6 +202,27 @@ public sealed class WindowLocalFindingsTests
         Assert.Contains("then closes this window", source);
     }
 
+    [Theory]
+    [InlineData("failed", false, 0.0, "Failed — unreachable-file.bin")]
+    [InlineData("paused", false, 42.0, "Paused — unreachable-file.bin")]
+    [InlineData("downloading", false, 42.5, "42.5% — unreachable-file.bin")]
+    [InlineData("downloading", false, null, "Downloading — unreachable-file.bin")]
+    [InlineData("completed", true, 100.0, "Download complete — unreachable-file.bin")]
+    public void U_WL_16_the_progress_title_says_the_state_unless_it_is_moving(string state, bool complete, double? percent, string title)
+    {
+        var words = state switch { "failed" => "Failed", "paused" => "Paused", _ => "Downloading" };
+        Assert.Equal(title, ShellWords.ProgressTitle(state, complete, percent, "unreachable-file.bin", words));
+    }
+
+    [Fact]
+    public void U_WL_15_one_verb_and_one_time_format_across_windows()
+    {
+        Assert.Contains("Content=\"Stop\"", File.ReadAllText(WinUiFile("DownloadWindow.xaml")));
+        Assert.Contains("Content = \"Stop all\"", File.ReadAllText(WinUiFile("PackageWindow.cs")));
+        Assert.Contains("DurationText.TimeLeft(duration)", File.ReadAllText(WinUiFile("JobDetailsPanel.xaml.cs")));
+        Assert.DoesNotContain("Automatic (from file type)", File.ReadAllText(WinUiFile("MainWindow.xaml.cs")));
+    }
+
     internal static string WinUiFile(string name) => Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", name);
 
     internal static string RepoRoot()
