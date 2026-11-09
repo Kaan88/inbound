@@ -2457,7 +2457,10 @@ public sealed partial class MainWindow : Window
     private void SetToolbarScale(bool large)
     {
         _toolbarLarge = large;
-        foreach (var button in ToolbarPanel.Children.OfType<Button>())
+        // Some buttons sit in a panel of their own (My TorBox, shown only with an account), one level down.
+        var buttons = ToolbarPanel.Children.OfType<Button>()
+            .Concat(ToolbarPanel.Children.OfType<Panel>().SelectMany(panel => panel.Children.OfType<Button>()));
+        foreach (var button in buttons)
         {
             button.Width = large ? double.NaN : 34;
             button.MinWidth = large ? 72 : 34;
