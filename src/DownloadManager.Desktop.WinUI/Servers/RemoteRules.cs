@@ -9,14 +9,51 @@ namespace DownloadManager.Desktop.WinUI;
 internal static class ShownServer
 {
     private static volatile ServerTarget _target = ServerTarget.Local;
+    private static volatile string? _hostKind;
+    private static volatile string? _defaultFolder;
 
+    /// <summary>Showing another Host forgets what the one before said about its paths.</summary>
     public static ServerTarget Target
     {
         get => _target;
-        set => _target = value ?? ServerTarget.Local;
+        set
+        {
+            _target = value ?? ServerTarget.Local;
+            _hostKind = null;
+            _defaultFolder = null;
+        }
     }
 
     public static bool IsRemote => !_target.IsLocal;
+
+    /// <summary>
+    /// What the shown server said that tells its paths apart: its <c>hostKind</c> (saved when it was paired, then from
+    /// its hello) and its default download folder (from its settings). A null or empty value keeps what was known.
+    /// </summary>
+    public static void Describe(string? hostKind, string? defaultFolder)
+    {
+        if (!string.IsNullOrWhiteSpace(hostKind)) _hostKind = hostKind;
+        if (!string.IsNullOrWhiteSpace(defaultFolder)) _defaultFolder = defaultFolder;
+    }
+
+    /// <summary>How a full folder path is written on the Host the window shows: this PC's rules for this PC.</summary>
+    public static PathStyle PathStyle => IsRemote ? ServerPaths.StyleFor(_hostKind, _defaultFolder) : PathStyle.ThisPc;
+}
+
+/// <summary>How the Host a folder is on writes a full path (<see cref="ServerPaths.IsFull(string, PathStyle)"/>).</summary>
+internal enum PathStyle
+{
+    /// <summary>This PC's Host: Windows' own rules, as <see cref="Path.IsPathFullyQualified(string)"/> has them.</summary>
+    ThisPc,
+
+    /// <summary>A server whose folders are <c>/srv/downloads</c>.</summary>
+    Linux,
+
+    /// <summary>A server whose folders are <c>D:\Downloads</c>.</summary>
+    Windows,
+
+    /// <summary>A server that hasn't said which: either kind is taken.</summary>
+    Either,
 }
 
 /// <summary>
@@ -56,15 +93,17 @@ internal static class RemoteDataRules
     /// Windows account's credentials there. A full path on the server (<c>/opt/x</c> or <c>C:\x.exe</c>), not a network
     /// or device path; the server checks the rest. Null when it can be sent.
     /// </summary>
-    public static string? ServerProgramPathProblem(string? path)
+    /// <param name="style">The server's path style (<see cref="ShownServer.PathStyle"/>): a Windows server's program is
+    /// not <c>/opt/x</c>, and the example is in the server's own style.</param>
+    public static string? ServerProgramPathProblem(string? path, PathStyle style = PathStyle.Either)
     {
         var text = path?.Trim() ?? string.Empty;
         if (text.Length == 0) return "Type the full path of the program on the server.";
         if (text.StartsWith(@"\\", StringComparison.Ordinal) || text.StartsWith("//", StringComparison.Ordinal))
             return "Use a program on the server itself, not on a network share.";
-        var unixFull = text.StartsWith('/');
-        var windowsFull = text.Length >= 3 && char.IsAsciiLetter(text[0]) && text[1] == ':' && text[2] is '\\' or '/';
-        return unixFull || windowsFull ? null : "Type the full path of the program on the server, such as /opt/tools/done.sh.";
+        var server = style == PathStyle.ThisPc ? PathStyle.Either : style;
+        var example = server == PathStyle.Windows ? @"C:\Tools\done.cmd" : "/opt/tools/done.sh";
+        return ServerPaths.IsFull(text, server) ? null : $"Type the full path of the program on the server, such as {example}.";
     }
 
     /// <summary>A folder is chosen with this PC's folder dialog, or with the server's folder browser.</summary>
@@ -159,6 +198,67 @@ internal static class ServerPaths
         if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return false;
         return path.StartsWith('/') || (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/');
     }
+
+    /// <summary>
+    /// A server's path style. Its own default folder settles it; without one, the desktop Host's bridge
+    /// (<c>hostKind: windows</c>) is Windows and the headless server (<c>server</c>), which ships for Linux only, is
+    /// Linux. A server that said neither takes both.
+    /// </summary>
+    public static PathStyle StyleFor(string? hostKind, string? defaultFolder)
+    {
+        var folder = defaultFolder?.Trim() ?? string.Empty;
+        if (IsLinuxFull(folder)) return PathStyle.Linux;
+        if (IsWindowsFull(folder)) return PathStyle.Windows;
+        return hostKind switch
+        {
+            HostKinds.Windows => PathStyle.Windows,
+            HostKinds.Server => PathStyle.Linux,
+            _ => PathStyle.Either,
+        };
+    }
+
+    /// <summary>
+    /// A full folder path for a Host of <paramref name="style"/>. This PC keeps Windows' rules; a server's network path
+    /// is never one (<see cref="IsFull(string)"/>).
+    /// </summary>
+    public static bool IsFull(string path, PathStyle style)
+    {
+        var text = path.Trim();
+        switch (style)
+        {
+            case PathStyle.ThisPc:
+                try
+                {
+                    return Path.IsPathFullyQualified(text);
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+            case PathStyle.Linux:
+                return IsLinuxFull(text);
+            case PathStyle.Windows:
+                return IsWindowsFull(text);
+            default:
+                return IsFull(text);
+        }
+    }
+
+    /// <summary>A folder to name as an example, in the Host's own style.</summary>
+    public static string Example(PathStyle style) => style switch
+    {
+        PathStyle.Linux => "/downloads",
+        PathStyle.Either => @"/downloads or D:\Downloads",
+        _ => @"D:\Downloads",
+    };
+
+    /// <summary>"a full folder path, such as …", with "on the server" for another server.</summary>
+    public static string FullFolderWords(PathStyle style) =>
+        style == PathStyle.ThisPc ? $"a full folder path, such as {Example(style)}" : $"a full folder path on the server, such as {Example(style)}";
+
+    private static bool IsLinuxFull(string path) => path.StartsWith('/') && !path.StartsWith("//", StringComparison.Ordinal);
+
+    private static bool IsWindowsFull(string path) => path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/';
 
     public static string Join(string folder, string name)
     {

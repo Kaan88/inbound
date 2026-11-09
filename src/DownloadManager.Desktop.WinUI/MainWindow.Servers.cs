@@ -135,6 +135,8 @@ public sealed partial class MainWindow
         _statisticsWindow?.Close();
 
         ShownServer.Target = target;
+        // What it said when it was paired, until its own hello and settings say more.
+        if (!target.IsLocal) ShownServer.Describe(_servers.Find(target.Id!)?.HostKind, null);
         if (target.IsLocal)
         {
             _connection = _local;
@@ -368,6 +370,7 @@ public sealed partial class MainWindow
         if (_servers.Target(existing.Id) is { } updated)
         {
             ShownServer.Target = updated;
+            ShownServer.Describe(_servers.Find(existing.Id)?.HostKind ?? _connection.Hello?.HostKind, _settings?.DefaultDownloadDirectory);
             ServerSwitcher.Content = updated.Name;
             _connection.Retarget(updated);
             await _remote.RetargetAsync(updated);

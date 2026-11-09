@@ -879,9 +879,10 @@ internal sealed class MyProviderWindow : Window
         }
 
         var destination = _destination.Text.Trim();
-        if (destination.Length > 0 && !Path.IsPathFullyQualified(destination))
+        // The folder is on the Host the window shows, so that Host's path rules decide (a Linux server's /downloads).
+        if (destination.Length > 0 && !ServerPaths.IsFull(destination, ShownServer.PathStyle))
         {
-            _destinationHint.Show("Enter a full folder path, such as D:\\Downloads, or leave this empty for the default folder.", isProblem: true);
+            _destinationHint.Show($"Enter {ServerPaths.FullFolderWords(ShownServer.PathStyle)}, or leave this empty for the default folder.", isProblem: true);
             _destination.Focus(FocusState.Programmatic);
             return;
         }
