@@ -40,7 +40,9 @@
                     <SolidColorBrush x:Key="InboundWindowFallbackBrush" Color="#202020" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="InboundWindowBrush" Color="Transparent" />
+                    <!-- UI.B21: light Mica takes the wallpaper's hue strongly (a teal cast beside the white lists), so light
+                         windows lay an 85% veil of Mica's own neutral grey over it: still frosted, but neutral like dark. -->
+                    <SolidColorBrush x:Key="InboundWindowBrush" Color="#D9F3F3F3" />
                     <SolidColorBrush x:Key="InboundChromeBrush" Color="#80FFFFFF" />
                     <SolidColorBrush x:Key="InboundSurfaceBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="InboundDividerBrush" Color="#DADADA" />

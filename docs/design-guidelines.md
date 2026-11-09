@@ -10,7 +10,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 | Token | Use | Dark | Light |
 |---|---|---|---|
-| `InboundWindowBrush` | every window's root: transparent, so the Mica backdrop shows; solid where Mica isn't available | Transparent (fallback `#202020`) | Transparent (fallback `#F3F3F3`) |
+| `InboundWindowBrush` | every window's root: lets the Mica backdrop show; solid where Mica isn't available. Light lays an 85% neutral veil over Mica, which otherwise takes a strong wallpaper tint (UI.B21) | Transparent (fallback `#202020`) | `#D9F3F3F3` (fallback `#F3F3F3`) |
 | `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar: a faint layer over Mica | `#08FFFFFF` | `#80FFFFFF` |
 | `InboundSurfaceBrush` | the download list and other lists, opaque for reading; popups drawn over a plot | `#181818` | `#FFFFFF` |
 | `InboundCardBrush` / `InboundCardStrokeBrush` | cards, tiles and framed lists on the frosted window, with a 1px edge, radius 8 | `#0DFFFFFF` / `#14FFFFFF` | `#B3FFFFFF` / `#13000000` |
@@ -36,7 +36,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
   the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
   `Content`. It sets the app icon, a Mica backdrop (`MicaBackdrop`, Windows 11) behind a transparent root
-  (`InboundWindowBrush`; a root with no background gets it), and a title bar in the solid color under Mica
+  (`InboundWindowBrush`, transparent in dark and a mostly opaque neutral veil in light; a root with no background gets it), and a title bar in the solid color under Mica
   (`#202020` / `#F3F3F3`), so the caption meets the frosted body. Where Mica isn't supported (Windows 10),
   `App` makes `InboundWindowBrush` that same solid color before any window opens, so nothing is see-through.
 - The look is frosted: the window is Mica, chrome is a faint translucent layer, and cards and tiles are
