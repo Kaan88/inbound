@@ -53,7 +53,18 @@ Sends browser downloads to the Inbound Download Manager desktop app for Windows,
 
 **Icon:** comes from the zip.
 
-**Screenshots:** `images\screenshot-1-popup.png` to `screenshot-5-app.png`, all 1280 x 800.
+**Screenshots:** all 1280 x 800, 24-bit RGB PNG without alpha, in this order:
+
+1. `images\screenshot-1-popup.png`: "Your downloads, one click away" (the popup with This PC and a server, dark)
+2. `images\screenshot-2-ask.png`: "Choose where each download goes" (Ask where to save in the popup, light)
+3. `images\screenshot-3-batch.png`: "Download all links on a page" (Add links, dark)
+4. `images\screenshot-4-options.png`: "Your rules, your folders" (Options > General, light)
+5. `images\screenshot-5-app.png`: the desktop window (a capture of the real app)
+
+Images 1 to 4 and the promo tile are made by `extensions\chrome\scripts\store-screens.mjs` (`npm run screens` in
+`extensions\chrome`, from Bash or a normal terminal) from the real extension pages and invented data
+(`extensions\chrome\tests\fixtures\screens-data.json`); two runs give byte-identical files. Image 5 is not made by the
+script: it is a capture of the desktop window on a test instance (`scripts\ui-capture.ps1`).
 
 **Small promo tile:** `images\promo-small-440x280.png`. The marquee image is optional and not included.
 
