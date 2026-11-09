@@ -16,7 +16,7 @@ internal sealed class ServerFolderWindow : Window
     private readonly TextBox _path = new() { Header = "Folder", PlaceholderText = "Choose one of the server's folders below" };
     private readonly ListView _folders = new() { SelectionMode = ListViewSelectionMode.Single, MinHeight = 240 };
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Visibility = Visibility.Collapsed };
-    private readonly TextBlock _space = new() { FontSize = 12, Opacity = 0.72 };
+    private readonly TextBlock _space = new() { FontSize = 12 };
     private readonly Button _up = new() { Content = "Up one level" };
     private readonly Button _newFolder = new() { Content = "New folder…" };
     private readonly Button _choose = new() { Content = "Choose this folder" };
@@ -45,8 +45,9 @@ internal sealed class ServerFolderWindow : Window
         Grid.SetRow(top, 1);
         root.Children.Add(top);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_folders, "Folders");
-        Grid.SetRow(_folders, 2);
-        root.Children.Add(_folders);
+        var listFrame = new Border { Child = _folders, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4) };
+        Grid.SetRow(listFrame, 2);
+        root.Children.Add(listFrame);
         var status = new StackPanel { Spacing = 4 };
         status.Children.Add(_space);
         status.Children.Add(_message);
@@ -61,6 +62,20 @@ internal sealed class ServerFolderWindow : Window
         root.Children.Add(footer);
         Content = root;
         WindowLayout.ApplyChrome(this, root);
+
+        // The window's own surface and the shared tokens (UI.B16): without a background a window is drawn black
+        // behind its controls, whatever the theme.
+        void ApplyColors()
+        {
+            root.Background = InboundTheme.Brush("InboundSurfaceBrush", root);
+            listFrame.BorderBrush = InboundTheme.Brush("InboundDividerBrush", root);
+            _space.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", root);
+            _message.Foreground = InboundTheme.Brush("InboundErrorTextBrush", root);
+        }
+
+        ApplyColors();
+        root.Loaded += (_, _) => ApplyColors();
+        root.ActualThemeChanged += (_, _) => ApplyColors();
         WindowLayout.CenterOnMainWindow(this);
 
         _folders.DisplayMemberPath = nameof(FolderEntryDto.Name);
@@ -118,6 +133,7 @@ internal sealed class ServerFolderWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = ((FrameworkElement)Content).ActualTheme,
             Title = "New folder",
             Content = name,
             PrimaryButtonText = "Create",
