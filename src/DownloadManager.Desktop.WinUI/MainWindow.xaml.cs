@@ -2657,7 +2657,10 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, 8, 0, 0),
         });
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Padding = InboundTheme.DialogScrollPadding };
+        // A grid, not a horizontal stack: a stack gives the text unlimited width, so it would never wrap.
+        var row = new Grid { ColumnSpacing = 16, Padding = InboundTheme.DialogScrollPadding, MaxWidth = 520 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         try
         {
             var icon = Path.Combine(AppContext.BaseDirectory, "app.png");
@@ -2673,6 +2676,7 @@ public sealed partial class MainWindow : Window
             // Without the picture the About text still shows.
         }
 
+        Grid.SetColumn(text, 1);
         row.Children.Add(text);
         var dialog = new ContentDialog
         {
