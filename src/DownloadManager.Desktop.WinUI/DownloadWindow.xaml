@@ -3,112 +3,343 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:DownloadManager.Desktop.WinUI">
-    <Grid x:Name="Root" Padding="18" RowSpacing="10"
+    <!-- UI.R29 direction B: a header, Overview / Connections / Options tabs, and the actions at the bottom right. -->
+    <Grid x:Name="Root" Padding="20,16,20,16" RowSpacing="12"
           Background="{ThemeResource InboundSurfaceBrush}">
+        <Grid.Resources>
+            <Style x:Key="TileStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource InboundCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource InboundCardStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="12,8" />
+            </Style>
+            <Style x:Key="CardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource InboundCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource InboundCardStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="14,12" />
+            </Style>
+            <Style x:Key="TileLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource InboundSecondaryTextBrush}" />
+            </Style>
+            <Style x:Key="TileValueStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="18" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
+            </Style>
+            <Style x:Key="KeyStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource InboundSecondaryTextBrush}" />
+            </Style>
+        </Grid.Resources>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel x:Name="Header" Spacing="4">
-            <TextBlock x:Name="Heading" Text="Connecting…" FontSize="21" FontWeight="SemiBold" />
-            <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="24" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+        <!-- Header: the file's icon on a tile, its name and where it comes from, and the state. -->
+        <Grid x:Name="Header" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="40" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Border Width="40" Height="40" CornerRadius="8" Background="{ThemeResource InboundCardBrush}"
+                    BorderBrush="{ThemeResource InboundCardStrokeBrush}" BorderThickness="1">
                 <Grid x:Name="FileIconHeader">
                     <Image Source="{Binding FileIcon}" Visibility="{Binding FileIconVisibility}" Width="24" Height="24" />
                     <FontIcon Glyph="{Binding FileGlyph}" Visibility="{Binding FileGlyphVisibility}" FontSize="20" />
                 </Grid>
-                <TextBlock x:Name="FileNameText" Grid.Column="1" FontSize="14" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-            </Grid>
-        </StackPanel>
-
-        <TabView x:Name="DetailsTabs" Grid.Row="1" IsAddTabButtonVisible="False"
-                 CanReorderTabs="False" TabWidthMode="Equal">
-            <TabViewItem Header="Download status" IsClosable="False">
-                <ScrollViewer x:Name="StatusScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Spacing="8" Padding="4,8,10,10">
-                        <TextBlock x:Name="UrlHeader" Text="URL" FontWeight="SemiBold" />
-                        <TextBlock x:Name="UrlText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                   FontSize="12" />
-                        <local:JobDetailsPanel x:Name="Details" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabViewItem>
-
-            <TabViewItem Header="Speed limiter" IsClosable="False">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Spacing="12" Padding="4,12,10,10">
-                        <!-- UI.R6: the rate holds a right edge of its own, so its units stay put as digits come and go. -->
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Current transfer rate:" />
-                            <TextBlock x:Name="CurrentRateText" Text="—" MinWidth="80" TextAlignment="Right"
-                                       AutomationProperties.Name="Current transfer rate" />
-                        </StackPanel>
-                        <CheckBox x:Name="UseSpeedLimit" Content="Use speed limiter" />
-                        <TextBox x:Name="SpeedLimitInput" Header="Maximum download speed (KB/s)"
-                                 PlaceholderText="Enter a positive number" IsEnabled="False" />
-                        <TextBlock x:Name="SpeedLimitNotice"
-                                   Text="Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
-                                   TextWrapping="Wrap" FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <Button x:Name="ApplySpeedLimitButton" Content="Apply speed limit"
-                                HorizontalAlignment="Left" Click="ApplySpeedLimit_Click" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabViewItem>
-
-            <TabViewItem Header="Options on completion" IsClosable="False">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Spacing="10" Padding="4,12,10,10">
-                        <TextBlock Text="Save to" FontWeight="SemiBold" />
-                        <TextBlock x:Name="CompletionPath" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                        <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
-                                  Click="ShowCompletionForJob_Click" />
-                        <TextBlock Text="The global completion preference can be changed from the completion window."
-                                   TextWrapping="Wrap" FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabViewItem>
-        </TabView>
-
-        <ScrollViewer x:Name="CompletionSummary" Grid.Row="1" Visibility="Collapsed"
-                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Spacing="6">
-                <TextBlock x:Name="CompletedSize" />
-                <TextBlock x:Name="CompletedUrlHeader" Text="Address" FontWeight="SemiBold" Margin="0,6,0,0" />
-                <TextBox x:Name="CompletedUrl" IsReadOnly="True" />
-                <TextBlock Text="The file saved as" FontWeight="SemiBold" />
-                <TextBox x:Name="CompletedPath" IsReadOnly="True" />
+            </Border>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                <TextBlock x:Name="FileNameText" Text="Connecting…" FontSize="15" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" />
+                <TextBlock x:Name="SubText" FontSize="12" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
             </StackPanel>
-        </ScrollViewer>
+            <Border x:Name="StateChip" Grid.Column="2" VerticalAlignment="Center" CornerRadius="10" Padding="10,2,10,3"
+                    BorderThickness="1" Background="{ThemeResource InboundCardBrush}">
+                <TextBlock x:Name="Heading" Text="Connecting…" FontSize="12" FontWeight="SemiBold" />
+            </Border>
+        </Grid>
 
-        <TextBlock x:Name="Notice" Grid.Row="2" TextWrapping="Wrap"
-                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-        <local:SegmentMapBar x:Name="SegmentMap" Grid.Row="3" Visibility="Collapsed" ToolTipService.ToolTip="Start positions and download progress by connection" />
-        <ProgressBar x:Name="OverallFooter" Grid.Row="3" Maximum="100" IsIndeterminate="True" Style="{StaticResource InboundProgressBarStyle}" Height="14" MinHeight="14" CornerRadius="2" />
+        <SelectorBar x:Name="Tabs" Grid.Row="1" Margin="-12,0,-12,0" SelectionChanged="Tabs_SelectionChanged">
+            <SelectorBarItem x:Name="OverviewTab" Text="Overview" IsSelected="True" />
+            <SelectorBarItem x:Name="ConnectionsTab" Text="Connections" />
+            <SelectorBarItem x:Name="OptionsTab" Text="Options" />
+        </SelectorBar>
 
-        <ScrollViewer Grid.Row="4" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-        <StackPanel x:Name="ActionRow" Orientation="Horizontal" Spacing="8"
-                    HorizontalAlignment="Right" VerticalAlignment="Center">
-            <Button x:Name="PauseButton" Content="Pause" Click="Pause_Click" />
-            <Button x:Name="ResumeButton" Content="Resume" Click="Resume_Click" />
-            <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" ToolTipService.ToolTip="Remove this download and delete its file" />
-            <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" />
-            <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Visibility="Collapsed" />
-            <Button x:Name="FolderButton" Content="Open folder" Click="Folder_Click" Visibility="Collapsed" />
-            <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" />
-        </StackPanel>
-        </ScrollViewer>
-        <CheckBox x:Name="DontShowAgain" Grid.Row="5" Content="Don't show this dialog again" Visibility="Collapsed"
-                  Click="DontShowAgain_Click" />
+        <Grid Grid.Row="2">
+            <!-- Overview: ring and tiles, the last minute's speed, a thin map of the file, and where it comes from and goes. -->
+            <ScrollViewer x:Name="OverviewPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="12" Padding="0,0,12,4">
+                    <InfoBar x:Name="FailureBar" Severity="Error" IsClosable="False" IsOpen="False" />
+                    <Grid ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="124" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="124" Height="124" VerticalAlignment="Center">
+                            <ProgressRing x:Name="Ring" Width="124" Height="124" IsIndeterminate="False" Maximum="100"
+                                          Background="{ThemeResource InboundProgressTrackBrush}"
+                                          Foreground="{ThemeResource InboundProgressFillBrush}"
+                                          AutomationProperties.Name="Download progress" />
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <FontIcon x:Name="RingGlyph" FontSize="32" Visibility="Collapsed" HorizontalAlignment="Center" />
+                                <TextBlock x:Name="RingValue" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                           Typography.NumeralAlignment="Tabular" />
+                                <TextBlock x:Name="RingCaption" FontSize="11" HorizontalAlignment="Center" Margin="0,3,0,0"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Grid.Column="1" ColumnSpacing="8" RowSpacing="8" VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Style="{StaticResource TileStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="Tile1Label" Style="{StaticResource TileLabelStyle}" />
+                                    <TextBlock Style="{StaticResource TileValueStyle}"><Run x:Name="Tile1Value" /><Run x:Name="Tile1Unit" FontSize="12" FontWeight="Normal" Foreground="{ThemeResource InboundSecondaryTextBrush}" /></TextBlock>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource TileStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="Tile2Label" Style="{StaticResource TileLabelStyle}" />
+                                    <TextBlock Style="{StaticResource TileValueStyle}"><Run x:Name="Tile2Value" /><Run x:Name="Tile2Unit" FontSize="12" FontWeight="Normal" Foreground="{ThemeResource InboundSecondaryTextBrush}" /></TextBlock>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="1" Style="{StaticResource TileStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="Tile3Label" Style="{StaticResource TileLabelStyle}" />
+                                    <TextBlock Style="{StaticResource TileValueStyle}"><Run x:Name="Tile3Value" /><Run x:Name="Tile3Unit" FontSize="12" FontWeight="Normal" Foreground="{ThemeResource InboundSecondaryTextBrush}" /></TextBlock>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource TileStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="Tile4Label" Style="{StaticResource TileLabelStyle}" />
+                                    <TextBlock Style="{StaticResource TileValueStyle}"><Run x:Name="Tile4Value" /><Run x:Name="Tile4Unit" FontSize="12" FontWeight="Normal" Foreground="{ThemeResource InboundSecondaryTextBrush}" /></TextBlock>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <Border x:Name="SpeedPanel" Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Speed" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="1" Text="last 60 s" FontSize="12" VerticalAlignment="Bottom"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                <TextBlock x:Name="PeakText" Grid.Column="2" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            </Grid>
+                            <local:SpeedChart x:Name="Chart" AutomationProperties.Name="Speed over the last 60 seconds" />
+                        </StackPanel>
+                    </Border>
+
+                    <local:SegmentMapBar x:Name="OverviewMap" Height="6" CornerRadius="3" Visibility="Collapsed"
+                                         ToolTipService.ToolTip="Where in the file the downloaded parts are" />
+
+                    <Grid x:Name="Facts" ColumnSpacing="12" RowSpacing="4" Padding="2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="UrlHeader" Text="Address" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="UrlText" Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   IsTextSelectionEnabled="True" FontFamily="Consolas" />
+                        <TextBlock x:Name="SavedHeader" Grid.Row="1" Text="Save to" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="SavedText" Grid.Row="1" Grid.Column="1" FontSize="12" TextWrapping="Wrap"
+                                   IsTextSelectionEnabled="True" />
+                        <TextBlock x:Name="ResumeHeader" Grid.Row="2" Text="Resume" Style="{StaticResource KeyStyle}" />
+                        <TextBlock x:Name="ResumeText" Grid.Row="2" Grid.Column="1" FontSize="12" />
+                    </Grid>
+
+                    <!-- Finished: what to do with the file, Open first. -->
+                    <StackPanel x:Name="CompletedActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                        <Button x:Name="OpenButton" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" Padding="16,7" MinWidth="110">
+                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8A7;" FontSize="14" /><TextBlock Text="Open" /></StackPanel>
+                        </Button>
+                        <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7">
+                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE838;" FontSize="14" /><TextBlock Text="Show in folder" /></StackPanel>
+                        </Button>
+                        <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Padding="16,7" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Connections: one row per part of the file, with where it is and what it is doing. -->
+            <Grid x:Name="ConnectionsPage" RowSpacing="12" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid x:Name="ConnectionsSummary" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ConnectionsPercent" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <ProgressBar x:Name="ConnectionsBar" Grid.Column="1" Maximum="100" VerticalAlignment="Center" Style="{StaticResource InboundProgressBarStyle}" />
+                    <TextBlock x:Name="ConnectionsLine" Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                </Grid>
+                <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="12,8">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Padding="0,0,12,0" Spacing="6">
+                            <local:JobDetailsPanel x:Name="Details" />
+                            <TextBlock x:Name="ConnectionsNote" FontSize="12" TextWrapping="Wrap" Visibility="Collapsed"
+                                       Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+                <Grid Grid.Row="2">
+                    <local:SegmentMapBar x:Name="SegmentMap" Visibility="Collapsed" ToolTipService.ToolTip="Start positions and download progress by connection" />
+                    <ProgressBar x:Name="OverallFooter" Maximum="100" IsIndeterminate="True" Style="{StaticResource InboundProgressBarStyle}" Height="14" MinHeight="14" CornerRadius="2" />
+                </Grid>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Width="8" Height="8" Fill="{ThemeResource InboundProgressFillBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Downloaded" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Width="8" Height="8" Fill="{ThemeResource InboundProgressTrackBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Not yet downloaded" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+            <!-- Options: this download's speed limit, what happens when it finishes, and where it goes. -->
+            <Grid x:Name="OptionsPage" RowSpacing="12" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="OptionsPercent" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <ProgressBar x:Name="OptionsBar" Grid.Column="1" Maximum="100" VerticalAlignment="Center" Style="{StaticResource InboundProgressBarStyle}" />
+                    <TextBlock x:Name="OptionsLine" Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                </Grid>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="10" Padding="0,0,12,4">
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Speed limit" FontSize="13" FontWeight="SemiBold" />
+                                <!-- UI.R6: the rate holds a right edge of its own, so its units stay put as digits come and go. -->
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="Current transfer rate:" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                    <TextBlock x:Name="CurrentRateText" Text="—" MinWidth="80" FontSize="12" TextAlignment="Right"
+                                               AutomationProperties.Name="Current transfer rate" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <CheckBox x:Name="UseSpeedLimit" Content="Limit this download to" VerticalAlignment="Center" />
+                                    <TextBox x:Name="SpeedLimitInput" Width="120" PlaceholderText="KB/s" IsEnabled="False" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Maximum download speed in KB/s" />
+                                    <TextBlock Text="KB/s" VerticalAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                    <Button x:Name="ApplySpeedLimitButton" Content="Apply" Click="ApplySpeedLimit_Click" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock x:Name="SpeedLimitNotice"
+                                           Text="Applies to ordinary HTTP/HTTPS and FTP file downloads. HLS and DASH transfers do not support this control."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="When it finishes" FontSize="13" FontWeight="SemiBold" />
+                                <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
+                                          Click="ShowCompletionForJob_Click" />
+                                <TextBlock Text="The global completion preference can be changed from the completion window."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Save to" FontSize="13" FontWeight="SemiBold" />
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,2,0,0"
+                                              Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+                                    <TextBlock x:Name="CompletionPath" Grid.Column="1" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <TextBlock x:Name="Notice" Grid.Row="3" TextWrapping="Wrap" FontSize="12"
+                   Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+
+        <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox x:Name="DontShowAgain" Content="Don't show this window again" Visibility="Collapsed"
+                      Click="DontShowAgain_Click" VerticalAlignment="Center" />
+            <StackPanel x:Name="ActionRow" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="PauseButton" Click="Pause_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE769;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
+                        <TextBlock Text="Pause" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ResumeButton" Click="Resume_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon x:Name="ResumeGlyph" Glyph="&#xE768;" FontSize="14" />
+                        <TextBlock x:Name="ResumeLabel" Text="Resume" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
+                <Button x:Name="MoreButton" AutomationProperties.Name="More actions" ToolTipService.ToolTip="More actions" Padding="10,7">
+                    <FontIcon Glyph="&#xE712;" FontSize="14" />
+                    <Button.Flyout>
+                        <MenuFlyout Placement="TopEdgeAlignedRight">
+                            <MenuFlyoutItem x:Name="DeleteItem" Text="Delete download and file…" Click="Delete_Click">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource InboundIconDangerBrush}" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+                <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="80" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

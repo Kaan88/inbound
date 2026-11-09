@@ -84,12 +84,23 @@ default window width. With one remote or archive row selected, the status bar sa
   `InboundTheme.Styled(new ProgressBar { ... })`.
 - In the list, the bar sits under the status text inside the 140px Status
   column. Show it only while a job is active or paused with progress above 0.
-- The progress dialog has one main bar, `SegmentMapBar` (14px, radius 2). It
+- The progress window (UI.R29, direction B) has a header (the file's icon on a tile, its name, where it
+  comes from, a state chip in the status color) and a `SelectorBar`: Overview, Connections (n), Options.
+  Overview puts a determinate 124px `ProgressRing` (blue running, amber paused, red failed, green with a check
+  when done) beside four tiles, then a card with the last 60 s of the job's own speed (`SpeedChart`), a thin
+  6px segment map and the address, folder and resume facts. A failure opens an `InfoBar` with the reason
+  first. Connections and Options start with a one-line summary (percent, bar, speed and time left).
+  Completed hides the tabs and makes Open the primary button. Tiles and cards use `InboundCardBrush` with an
+  `InboundCardStrokeBrush` edge, radius 8.
+- The speed chart samples the job updates the window already receives, one sample per second, and draws only
+  while it can be seen. It never asks the Host for anything and has no timer.
+- The Connections tab keeps `SegmentMapBar` (14px, radius 2). It
   draws every segment's completed bytes at its real offset, with a divider at
   each segment start. The plain indeterminate bar appears only
-  while the size is unknown. Don't add a second overall bar.
-- The segment table has the columns N. | Progress (6px bar) | Downloaded |
-  Speed | Info. Its values come from the live stream position
+  while the size is unknown.
+- The segment table has the columns N. | Range | Progress (6px bar) | Downloaded |
+  Speed | State. State is only what the Host reports: Receiving, Done, Paused or Waiting; per-connection
+  retries aren't reported, so the download's own retry count shows on the Overview instead. Its values come from the live stream position
   (`RangeStart - Start + ReceivedBytes`), merged with the saved checkpoint and
   kept at a high-water mark, so numbers never move backwards between
   refreshes. Per-segment speeds are smoothed (EMA 0.25) because raw per-stream rates sawtooth.

@@ -14,6 +14,7 @@ public sealed partial class JobDetailsPanel : UserControl
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private HostConnection? _connection;
     private SegmentMapBar? _map;
+    private readonly List<SegmentMapBar> _extraMaps = [];
     private ProgressBar? _movingBar;
     private FrameworkElement _root;
     private JobDto? _job;
@@ -29,7 +30,7 @@ public sealed partial class JobDetailsPanel : UserControl
     private readonly Dictionary<long, double> _segmentRate = [];
     private readonly List<SegmentRow> _segmentRows = [];
 
-    private sealed record SegmentRow(TextBlock Number, ProgressBar Bar, TextBlock Downloaded, TextBlock Speed, TextBlock Info);
+    private sealed record SegmentRow(TextBlock Number, TextBlock Range, ProgressBar Bar, TextBlock Downloaded, TextBlock Speed, TextBlock Info);
 
     public JobDetailsPanel()
     {
@@ -55,6 +56,23 @@ public sealed partial class JobDetailsPanel : UserControl
     {
         set => SavePathLabel.Visibility = SavePathValue.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    /// <summary>
+    /// The table alone, always open, without the figures above it: a window that shows the figures its own way
+    /// (the progress window's Overview tab) and gives the table a tab of its own.
+    /// </summary>
+    internal void UseTableOnly()
+    {
+        if (Segments.Parent is Panel holder) holder.Children.Remove(Segments);
+        Figures.Visibility = Visibility.Collapsed;
+        SegmentDetails.Visibility = Visibility.Collapsed;
+        Body.Children.Add(Segments);
+    }
+
+    /// <summary>Another segment map in the window that shows the same as the main one.</summary>
+    internal void AddMap(SegmentMapBar map) => _extraMaps.Add(map);
+
+    private IEnumerable<SegmentMapBar> Maps => _map is null ? _extraMaps : _extraMaps.Prepend(_map);
 
     /// <summary>Starts reading segments over the window's connection.</summary>
     /// <param name="map">The window's segment map, which may sit anywhere in it.</param>
@@ -92,7 +110,7 @@ public sealed partial class JobDetailsPanel : UserControl
         }
 
         // One main bar: the segment map when the size is known, the indeterminate bar only for unknown sizes.
-        if (_map is { } map)
+        foreach (var map in Maps)
         {
             map.Visibility = job.TotalBytes is > 0 || complete ? Visibility.Visible : Visibility.Collapsed;
             if (complete) map.SetFraction(1);
@@ -142,7 +160,7 @@ public sealed partial class JobDetailsPanel : UserControl
             bar.Value = 0;
         }
 
-        if (_map is { } map)
+        foreach (var map in Maps)
         {
             map.SetFraction(0);
             map.Visibility = Visibility.Collapsed;
@@ -203,12 +221,12 @@ public sealed partial class JobDetailsPanel : UserControl
 
             if (segments.Count > 0)
             {
-                _map?.SetSegments(segments, total);
+                foreach (var map in Maps) map.SetSegments(segments, total);
                 _haveSegmentMap = true;
             }
             else
             {
-                _map?.SetFraction(0);
+                foreach (var map in Maps) map.SetFraction(0);
             }
 
             RenderSegmentTable(segments, connections);
@@ -248,6 +266,7 @@ public sealed partial class JobDetailsPanel : UserControl
 
         // Rows are updated in place. Recreating the ProgressBars on every refresh made each bar
         // first draw against a default width and then snap to the real one, so the bars jumped.
+        var paused = _job?.State == "paused";
         if (_segmentRows.Count != segments.Count || Segments.Children.Count != segments.Count + 2)
         {
             BuildSegmentRows(segments.Count, secondary);
@@ -267,10 +286,15 @@ public sealed partial class JobDetailsPanel : UserControl
             var value = Math.Clamp(segment.Completed * 100.0 / length, 0, 100);
             if (Math.Abs(row.Bar.Value - value) > 0.001) row.Bar.Value = value;
             row.Downloaded.Text = $"{Bytes(segment.Completed)} / {Bytes(length)}";
+            row.Range.Text = $"{Bytes(segment.Start)} – {Bytes(segment.End + 1)}";
+            ToolTipService.SetToolTip(row.Range, $"Bytes {segment.Start:N0} to {segment.End:N0}");
             row.Speed.Text = rate > 0 ? $"{Bytes((long)rate)}/s" : "—";
             Tone(row.Speed, rate <= 0);
-            row.Info.Text = segment.IsComplete ? "Complete" : live.Count > 0 ? "Receiving data…" : "Waiting";
-            Tone(row.Info, live.Count == 0);
+            // Only what the Host reports: a connection on the range, the range done, or neither.
+            // It doesn't say which connection is retrying; the download's own retries show in the window.
+            row.Info.Text = segment.IsComplete ? "Done" : live.Count > 0 ? "Receiving" : paused ? "Paused" : "Waiting";
+            row.Info.Foreground = InboundTheme.Brush(segment.IsComplete ? "InboundStatusDoneBrush"
+                : live.Count > 0 ? "InboundStatusActiveBrush" : paused ? "InboundStatusWaitingBrush" : "InboundSecondaryTextBrush", _root);
         }
     }
 
@@ -294,7 +318,7 @@ public sealed partial class JobDetailsPanel : UserControl
         static Grid NewRow()
         {
             var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var width in new[] { 28d, -1d, 170d, 90d, 120d })
+            foreach (var width in new[] { 24d, 132d, -1d, 150d, 80d, 74d })
             {
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = width < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(width) });
             }
@@ -308,7 +332,7 @@ public sealed partial class JobDetailsPanel : UserControl
             element.VerticalAlignment = VerticalAlignment.Center;
             // UI.R6: Downloaded and Speed are live counters in fixed columns. Right-aligned, header and rows alike,
             // their units hold still as the digit count changes.
-            if (column is 2 or 3 && element is TextBlock counter)
+            if (column is 3 or 4 && element is TextBlock counter)
             {
                 counter.HorizontalAlignment = HorizontalAlignment.Right;
                 counter.TextAlignment = TextAlignment.Right;
@@ -320,10 +344,11 @@ public sealed partial class JobDetailsPanel : UserControl
 
         var head = NewRow();
         Cell(head, 0, SegmentText("N.", secondary, header: true));
-        Cell(head, 1, SegmentText("Progress", secondary, header: true));
-        Cell(head, 2, SegmentText("Downloaded", secondary, header: true));
-        Cell(head, 3, SegmentText("Speed", secondary, header: true));
-        Cell(head, 4, SegmentText("Info", secondary, header: true));
+        Cell(head, 1, SegmentText("Range", secondary, header: true));
+        Cell(head, 2, SegmentText("Progress", secondary, header: true));
+        Cell(head, 3, SegmentText("Downloaded", secondary, header: true));
+        Cell(head, 4, SegmentText("Speed", secondary, header: true));
+        Cell(head, 5, SegmentText("State", secondary, header: true));
         Segments.Children.Add(head);
         Segments.Children.Add(new Border { Height = 1, Background = InboundTheme.Brush("InboundDividerBrush", _root) });
         for (var index = 0; index < count; index++)
@@ -331,10 +356,11 @@ public sealed partial class JobDetailsPanel : UserControl
             var row = NewRow();
             _segmentRows.Add(new SegmentRow(
                 Cell(row, 0, SegmentText((index + 1).ToString(CultureInfo.CurrentCulture), secondary, muted: true)),
-                Cell(row, 1, InboundTheme.Styled(new ProgressBar { Maximum = 100 })),
-                Cell(row, 2, SegmentText(string.Empty, secondary)),
-                Cell(row, 3, SegmentText("—", secondary, muted: true)),
-                Cell(row, 4, SegmentText(string.Empty, secondary, muted: true))));
+                Cell(row, 1, SegmentText(string.Empty, secondary, muted: true)),
+                Cell(row, 2, InboundTheme.Styled(new ProgressBar { Maximum = 100 })),
+                Cell(row, 3, SegmentText(string.Empty, secondary)),
+                Cell(row, 4, SegmentText("—", secondary, muted: true)),
+                Cell(row, 5, SegmentText(string.Empty, secondary, muted: true))));
             Segments.Children.Add(row);
         }
     }

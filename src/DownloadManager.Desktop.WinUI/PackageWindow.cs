@@ -45,8 +45,18 @@ internal sealed class PackageWindow : Window
     private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
     private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _summary = new() { Opacity = 0.8 };
-    private readonly ProgressBar _overall = InboundTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 100 });
-    private readonly TextBlock _detail = new() { Opacity = 0.8 };
+    // UI.R29 direction B: the package's ring and four tiles, then Files and Extraction tabs.
+    private readonly ProgressRing _ring = new() { Width = 124, Height = 124, IsIndeterminate = false, Maximum = 100 };
+    private readonly TextBlock _ringValue = new() { FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly FontIcon _ringGlyph = new() { Glyph = "\uE73E", FontSize = 32, Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly TextBlock _ringCaption = new() { FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
+    private readonly List<(TextBlock Label, TextBlock Value)> _tiles = [];
+    private readonly SelectorBar _tabs = new() { Margin = new Thickness(-12, 0, -12, 0) };
+    private readonly SelectorBarItem _filesTab = new() { Text = "Files", IsSelected = true };
+    private readonly SelectorBarItem _extractionTab = new() { Text = "Extraction", Visibility = Visibility.Collapsed };
+    private FrameworkElement? _listFrame;
+    private FrameworkElement? _fileDetailsView;
+    private bool _archivesApply;
     private readonly ListView _list = new()
     {
         SelectionMode = ListViewSelectionMode.Single,
@@ -82,7 +92,7 @@ internal sealed class PackageWindow : Window
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
         Title = "Package status — Inbound Download Manager";
-        WindowLayout.ResizeForDpi(this, 720, 820);
+        WindowLayout.ResizeForDpi(this, 720, 860);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -94,9 +104,13 @@ internal sealed class PackageWindow : Window
         header.Children.Add(_title);
         header.Children.Add(_summary);
         _root.Children.Add(header);
-        Add(_overall, 1);
-        Add(_detail, 2);
-        var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(4), Child = _list };
+        Add(BuildOverview(), 1);
+        _tabs.Items.Add(_filesTab);
+        _tabs.Items.Add(_extractionTab);
+        _tabs.SelectionChanged += (_, _) => ShowTab();
+        Add(_tabs, 2);
+        var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(4), Child = _list };
+        _listFrame = listFrame;
         AutomationProperties.SetName(_list, "Files in this package");
         if (Application.Current.Resources.TryGetValue("InboundListRowStyle", out var rowStyle) && rowStyle is Style style) _list.ItemContainerStyle = style;
         _list.SelectionChanged += (_, _) => OnFileSelected();
@@ -107,7 +121,7 @@ internal sealed class PackageWindow : Window
             OpenFileWindow(file);
         };
         Add(listFrame, 3);
-        Add(BuildFileDetails(), 4);
+        Add(_fileDetailsView = BuildFileDetails(), 4);
         BuildArchivePanel();
         Add(_archivePanel, 5);
         var footer = new Grid { ColumnSpacing = 8 };
@@ -125,7 +139,21 @@ internal sealed class PackageWindow : Window
         void ApplyColors()
         {
             _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
-            listFrame.BorderBrush = InboundTheme.Brush("InboundDividerBrush", _root);
+            listFrame.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
+            listFrame.Background = InboundTheme.Brush("InboundCardBrush", _root);
+            _ring.Background = InboundTheme.Brush("InboundProgressTrackBrush", _root);
+            _ringCaption.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
+            _ringGlyph.Foreground = InboundTheme.Brush("InboundStatusDoneBrush", _root);
+            foreach (var tile in _tiles)
+            {
+                tile.Label.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
+                if (tile.Label.Parent is FrameworkElement { Parent: Border card })
+                {
+                    card.Background = InboundTheme.Brush("InboundCardBrush", _root);
+                    card.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
+                }
+            }
+            Render();
         }
         _root.Loaded += (_, _) => ApplyColors();
         _root.ActualThemeChanged += (_, _) => ApplyColors();
@@ -213,6 +241,60 @@ internal sealed class PackageWindow : Window
         var accelerator = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         accelerator.Invoked += (_, args) => { args.Handled = true; Close(); };
         return accelerator;
+    }
+
+    /// <summary>The ring with the package's percentage beside four tiles: downloaded, speed, time left, files.</summary>
+    private FrameworkElement BuildOverview()
+    {
+        var row = new Grid { ColumnSpacing = 20 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(124) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var ring = new Grid { Width = 124, Height = 124, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(_ring, "Package progress");
+        ring.Children.Add(_ring);
+        var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        label.Children.Add(_ringGlyph);
+        label.Children.Add(_ringValue);
+        label.Children.Add(_ringCaption);
+        ring.Children.Add(label);
+        row.Children.Add(ring);
+        var tiles = new Grid { ColumnSpacing = 8, RowSpacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        tiles.ColumnDefinitions.Add(new ColumnDefinition());
+        tiles.ColumnDefinitions.Add(new ColumnDefinition());
+        tiles.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        tiles.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (var index = 0; index < 4; index++)
+        {
+            var name = new TextBlock { FontSize = 12 };
+            var value = new TextBlock { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+            var stack = new StackPanel();
+            stack.Children.Add(name);
+            stack.Children.Add(value);
+            var card = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(12, 8, 12, 8), Child = stack };
+            Grid.SetRow(card, index / 2);
+            Grid.SetColumn(card, index % 2);
+            tiles.Children.Add(card);
+            _tiles.Add((name, value));
+        }
+        Grid.SetColumn(tiles, 1);
+        row.Children.Add(tiles);
+        return row;
+    }
+
+    private void ShowTab()
+    {
+        var extraction = _tabs.SelectedItem == _extractionTab && _archivesApply;
+        if (_listFrame is { } list) list.Visibility = extraction ? Visibility.Collapsed : Visibility.Visible;
+        if (_fileDetailsView is { } details) details.Visibility = extraction ? Visibility.Collapsed : Visibility.Visible;
+        _archivePanel.Visibility = extraction ? Visibility.Visible : Visibility.Collapsed;
+        // The archive section takes the list's room when its tab is open.
+        Grid.SetRow(_archivePanel, extraction ? 3 : 5);
+    }
+
+    private void SetTile(int index, string label, string value)
+    {
+        _tiles[index].Label.Text = label;
+        _tiles[index].Value.Text = value;
     }
 
     /// <summary>The same segment map and figures as a file's own window, for the selected file.</summary>
@@ -358,7 +440,10 @@ internal sealed class PackageWindow : Window
         var names = _members.Select(id => _jobs.TryGetValue(id, out var job) ? job.FileName : null).ToList();
         // A password on record shows the section even with no archive left, so it can still be cleared.
         var hasArchives = PackageArchiveSection.Show(names, sets.Count, _passwordSavedHere || _passwordOnRecord || sets.Any(set => set.HasPassword));
-        _archivePanel.Visibility = _archives.ArchivesSupported && _groupKnown && (hasArchives || _passwordActedHere) ? Visibility.Visible : Visibility.Collapsed;
+        _archivesApply = _archives.ArchivesSupported && _groupKnown && (hasArchives || _passwordActedHere);
+        _extractionTab.Visibility = _archivesApply ? Visibility.Visible : Visibility.Collapsed;
+        if (!_archivesApply && _tabs.SelectedItem == _extractionTab) _tabs.SelectedItem = _filesTab;
+        ShowTab();
 
         // The Host says whether a password is held only through a set, and a new package may have none yet.
         _clearPassword.IsEnabled = _passwordSavedHere || _passwordOnRecord || sets.Count == 0 || sets.Any(set => set.HasPassword);
@@ -469,17 +554,24 @@ internal sealed class PackageWindow : Window
         var speed = members.Sum(job => job.State is "downloading" ? job.BytesPerSecond ?? 0 : 0);
         var allKnown = members.Count > 0 && members.All(job => job.TotalBytes is > 0);
         _summary.Text = members.Count == 0 ? string.Empty : $"{completed} of {members.Count} files complete";
-        _overall.Value = members.Count > 0 && completed == members.Count ? 100 : allKnown ? Percent(received, total) : 0;
-        _overall.IsIndeterminate = !allKnown && completed < members.Count && speed > 0;
-        var remaining = allKnown && speed > 0 ? TimeSpan.FromSeconds((total - received) / speed) : (TimeSpan?)null;
-        _detail.Text = members.Count == 0 ? string.Empty : string.Join("   ·   ", new[]
-        {
-            allKnown ? $"{Bytes(received)} of {Bytes(total)}" : Bytes(received),
-            speed > 0 ? $"{Bytes((long)speed)}/s" : null,
-            remaining is { } left ? $"{FormatDuration(left)} left" : null,
-        }.Where(part => part is not null));
-
         var allDone = members.Count > 0 && completed == members.Count;
+        var anyFailed = members.Any(job => job.State == "failed");
+        var percent = allDone ? 100 : allKnown ? Percent(received, total) : 0;
+        _ring.Value = percent;
+        _ring.IsIndeterminate = !allKnown && !allDone && speed > 0;
+        _ring.Foreground = InboundTheme.Brush(allDone ? "InboundStatusDoneBrush" : anyFailed ? "InboundStatusFailedBrush" : "InboundProgressFillBrush", _root);
+        _ringGlyph.Visibility = allDone ? Visibility.Visible : Visibility.Collapsed;
+        _ringValue.Visibility = allDone ? Visibility.Collapsed : Visibility.Visible;
+        _ringValue.Text = allKnown || members.Count == 0 ? $"{percent:0}%" : Bytes(received);
+        _ringCaption.Text = members.Count == 0 ? string.Empty : allDone ? "complete" : $"{completed} of {members.Count} files";
+        AutomationProperties.SetName(_ring, allDone ? "Package complete" : $"Package {percent:0} percent downloaded");
+        var remaining = allKnown && speed > 0 ? TimeSpan.FromSeconds((total - received) / speed) : (TimeSpan?)null;
+        SetTile(0, "Downloaded", allKnown ? $"{Bytes(received)} / {Bytes(total)}" : members.Count == 0 ? "—" : Bytes(received));
+        SetTile(1, "Speed", speed > 0 ? $"{Bytes((long)speed)}/s" : "—");
+        SetTile(2, "Time left", remaining is { } left ? ProgressOverviewText.Duration(left) : "—");
+        SetTile(3, "Files", members.Count == 0 ? "—" : $"{completed} of {members.Count} done");
+        _filesTab.Text = members.Count > 0 ? $"Files ({members.Count})" : "Files";
+
         // Another server's folder is on that machine.
         _openFolder.Visibility = allDone && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
         _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
@@ -588,11 +680,4 @@ internal sealed class PackageWindow : Window
     private static string Bytes(long bytes) => bytes >= 1024L * 1024 * 1024
         ? $"{bytes / (1024.0 * 1024 * 1024):N2} GB" : bytes >= 1024L * 1024
         ? $"{bytes / (1024.0 * 1024):N1} MB" : bytes >= 1024 ? $"{bytes / 1024.0:N0} KB" : $"{bytes:N0} B";
-
-    private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration.TotalDays >= 1) return $"{(int)duration.TotalDays}d {duration.Hours}h";
-        if (duration.TotalHours >= 1) return $"{(int)duration.TotalHours}h {duration.Minutes:D2}m";
-        return duration.TotalMinutes >= 1 ? $"{(int)duration.TotalMinutes}m {duration.Seconds:D2}s" : $"{duration.Seconds}s";
-    }
 }
