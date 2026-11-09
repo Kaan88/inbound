@@ -315,14 +315,19 @@ public static class PipeOwner
 
 public sealed class IpcClient : IIpcConnection
 {
-    private readonly NamedPipeClientStream _pipe;
+    private readonly Stream _pipe;
 
-    private IpcClient(NamedPipeClientStream pipe)
+    private IpcClient(Stream pipe)
     {
         _pipe = pipe;
     }
 
-    public bool IsConnected => _pipe.IsConnected;
+    public bool IsConnected => _pipe switch
+    {
+        PipeStream pipe => pipe.IsConnected,
+        System.Net.Sockets.NetworkStream socket => socket.Socket.Connected,
+        _ => false,
+    };
 
     /// <summary>
     /// Whether <c>jobs.snapshot</c> follows <c>server.hello</c> on this connection. True on the main pipe, and on the hello
@@ -365,8 +370,12 @@ public sealed class IpcClient : IIpcConnection
         }
     }
 
-    private static async Task<NamedPipeClientStream> OpenAsync(string name, TimeSpan? timeout, CancellationToken cancellationToken)
+    /// <summary>A named pipe on Windows; on Linux, the Host's Unix socket of that name (<see cref="UnixSockets"/>).</summary>
+    private static async Task<Stream> OpenAsync(string name, TimeSpan? timeout, CancellationToken cancellationToken)
     {
+        if (OperatingSystem.IsLinux())
+            return await UnixSockets.ConnectAsync(name, timeout ?? TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+
         var pipe = new NamedPipeClientStream(
             ".",
             name,

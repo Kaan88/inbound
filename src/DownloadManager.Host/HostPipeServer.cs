@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.IO.Pipes;
+﻿using System.IO.Pipes;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 using DownloadManager.Runtime.Ipc;
@@ -16,7 +15,7 @@ public sealed class HostPipeServer
 {
     private readonly HostCommandDispatcher _dispatcher;
     private readonly FileLogger _log;
-    private readonly ConcurrentDictionary<Guid, PipeClientSession> _clients = new();
+    private readonly IpcConnectionHandler _connections;
     private readonly CancellationTokenSource _cts = new();
     private Task? _acceptLoop;
     private Task? _helloAcceptLoop;
@@ -25,6 +24,7 @@ public sealed class HostPipeServer
     {
         _dispatcher = dispatcher;
         _log = log;
+        _connections = new IpcConnectionHandler(dispatcher, log);
     }
 
     /// <summary>
@@ -43,10 +43,7 @@ public sealed class HostPipeServer
     public async Task StopAsync()
     {
         _cts.Cancel();
-        foreach (var client in _clients.Values)
-        {
-            client.Complete();
-        }
+        _connections.CompleteAll();
 
         foreach (var loop in new[] { _acceptLoop, _helloAcceptLoop })
         {
@@ -71,8 +68,7 @@ public sealed class HostPipeServer
             {
                 pipe = CreatePipe(pipeName);
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                var client = new PipeClientSession(pipe, _log);
-                _ = HandleClientAsync(client, clientSpeaksFirst, cancellationToken);
+                _ = _connections.HandleAsync(pipe, clientSpeaksFirst, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -107,7 +103,7 @@ public sealed class HostPipeServer
     internal const int MaxClients = 64;
 
     /// <summary>How long the hello pipe waits for a client's <c>client.hello</c> before closing the connection.</summary>
-    internal static readonly TimeSpan ClientHelloTimeout = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan ClientHelloTimeout = IpcConnectionHandler.ClientHelloTimeout;
 
     private static NamedPipeServerStream CreatePipe(string pipeName)
     {
@@ -133,167 +129,6 @@ public sealed class HostPipeServer
         {
             pipe.Dispose();
             throw;
-        }
-    }
-
-    /// <param name="clientSpeaksFirst">
-    /// The hello pipe (PERF.7): the client's first frame is <c>client.hello</c>, read before the Host sends anything, and
-    /// says whether this connection gets the snapshot and the events. On the main pipe everyone gets both, as always.
-    /// </param>
-    private async Task HandleClientAsync(PipeClientSession client, bool clientSpeaksFirst, CancellationToken serverToken)
-    {
-        _clients[client.Id] = client;
-        Task? writerTask = null;
-        try
-        {
-            ClientHelloDto? options = null;
-            IpcMessage? incompatible = null;
-            if (clientSpeaksFirst)
-            {
-                IpcMessage? first;
-                using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(serverToken))
-                {
-                    // A client that connects and never says hello would hold a pipe instance until it went away.
-                    deadline.CancelAfter(ClientHelloTimeout);
-                    try
-                    {
-                        first = await IpcFraming.ReadAsync(client.Stream, deadline.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (!serverToken.IsCancellationRequested)
-                    {
-                        _log.Warn($"A client on the hello pipe sent no {MessageTypes.ClientHello} within {ClientHelloTimeout.TotalSeconds:0} s; closed.");
-                        return;
-                    }
-                }
-
-                if (first is null)
-                {
-                    return;
-                }
-
-                if (first.V != Protocol.Version)
-                {
-                    // Answered after the hello, which carries this Host's version, and then closed; nothing else is sent.
-                    incompatible = first;
-                    options = new ClientHelloDto { Snapshot = false, Events = false };
-                }
-                else if (first.Type != MessageTypes.ClientHello)
-                {
-                    var type = first.Type ?? "(no type)";
-                    _log.Warn($"A client on the hello pipe sent '{(type.Length > 64 ? type[..64] : type)}' first instead of {MessageTypes.ClientHello}; closed.");
-                    return;
-                }
-                else
-                {
-                    options = first.Payload is null ? new ClientHelloDto() : first.GetPayload<ClientHelloDto>();
-                    if (!_dispatcher.OffersRole(options.Role))
-                    {
-                        var role = options.Role ?? string.Empty;
-                        _log.Warn($"A client on the hello pipe asked for the role '{(role.Length > 32 ? role[..32] : role)}', which this Host doesn't offer; closed.");
-                        return;
-                    }
-                }
-            }
-
-            await _dispatcher.OpenSessionAsync(client, options, serverToken).ConfigureAwait(false);
-            // Close() (HostCommandDispatcher.CloseSessions) ends the reads as well as the writes.
-            using var session = CancellationTokenSource.CreateLinkedTokenSource(serverToken, client.Closing);
-            serverToken = session.Token;
-            writerTask = client.RunWriterAsync(serverToken);
-            if (incompatible is not null && _dispatcher.RejectIfIncompatible(client, incompatible))
-            {
-                return;
-            }
-
-            Task<IpcMessage?>? pendingRead = null;
-            while (!serverToken.IsCancellationRequested)
-            {
-                var message = await (pendingRead ?? IpcFraming.ReadAsync(client.Stream, serverToken)).ConfigureAwait(false);
-                pendingRead = null;
-                if (message is null)
-                {
-                    break;
-                }
-
-                if (_dispatcher.RejectIfIncompatible(client, message))
-                {
-                    break;
-                }
-
-                if (HostCommandDispatcher.NeedsLifetime(message.Type))
-                {
-                    // The next frame is read meanwhile: an EOF there means the client gone, which ends the operation.
-                    pendingRead = IpcFraming.ReadAsync(client.Stream, serverToken);
-                    await IpcOperationLifetime.RunAsync(token => _dispatcher.DispatchAsync(client, message, token), pendingRead, serverToken).ConfigureAwait(false);
-                }
-                else await _dispatcher.DispatchAsync(client, message, serverToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // shutting down
-        }
-        catch (IOException ex)
-        {
-            _log.Info($"IPC client disconnected: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"IPC client failed: {UrlRedactor.RedactText(ex.ToString())}");
-        }
-        finally
-        {
-            _dispatcher.CloseSession(client);
-            _clients.TryRemove(client.Id, out _);
-            client.Complete();
-            try
-            {
-                if (writerTask is not null) await writerTask.ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // writer termination is best effort
-            }
-
-            await client.DisposeAsync().ConfigureAwait(false);
-        }
-    }
-
-    private sealed class PipeClientSession(NamedPipeServerStream pipe, IHostLog log) : QueuedClientSession(log)
-    {
-        private readonly CancellationTokenSource _closing = new();
-
-        public Stream Stream => pipe;
-
-        /// <summary>
-        /// Cancelled by <see cref="Close"/>: the Host ends this connection at once, the writer too, so a client that has
-        /// stopped reading can't hold it open. What was still queued is not sent.
-        /// </summary>
-        public CancellationToken Closing => _closing.Token;
-
-        public override void Close()
-        {
-            base.Close();
-            try { _closing.Cancel(); }
-            catch (ObjectDisposedException) { /* already gone */ }
-        }
-
-        protected override Task WriteFrameAsync(IpcMessage message, CancellationToken cancellationToken)
-            => IpcFraming.WriteAsync(pipe, message, cancellationToken);
-
-        public override async ValueTask DisposeAsync()
-        {
-            try
-            {
-                await pipe.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (IOException)
-            {
-                // best effort
-            }
-
-            _closing.Dispose();
-            await base.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Linux desktop Host (D7 stage 1): the Windows Host's role on a Linux desktop. The same engine and IPC as the
+    Windows Host, over Unix sockets instead of named pipes, without WinForms. The window comes from the Uno build.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DownloadManager.Host</RootNamespace>
+    <AssemblyName>inbound-host</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- PERF.3, as on Windows: the GC keeps the heap closer to what is live. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared with the Windows Host rather than copied: neither uses anything of Windows. -->
+    <Compile Include="..\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
+    <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Contracts\DownloadManager.Contracts.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Persistence\DownloadManager.Persistence.csproj" />
+    <ProjectReference Include="..\DownloadManager.Runtime\DownloadManager.Runtime.csproj" />
+    <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
+    <ProjectReference Include="..\DownloadManager.Containers\DownloadManager.Containers.csproj" />
+    <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+  </ItemGroup>
+
+</Project>

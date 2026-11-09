@@ -1,4 +1,12 @@
-# Progress — session handoff
+﻿# Progress — session handoff
+
+### D7 stage 1, step 1: the Linux desktop Host (2026-11-09, branch `linux-host`)
+- Owner: "start in plan order", on their CachyOS KDE Wayland machine. Repo cloned to the Linux home folder (the Windows checkout untouched); .NET 10 SDK 10.0.403 in `~/.dotnet`.
+- `IpcConnectionHandler` (Runtime): the per-connection loop moved out of `HostPipeServer`, which now uses it; Windows Host still compiles (checked on Linux with `EnableWindowsTargeting`, not run).
+- Unix-socket transport: `UnixSockets` (Contracts) and `UnixSocketIpcServer` (Runtime). Both pipe names as sockets in `$XDG_RUNTIME_DIR/inbound` (0700, sockets 0600), owner of the folder checked (statx), peer user checked with `SO_PEERCRED` on both ends. `IpcClient` uses it on Linux, so the CLI, NativeHost and the window need no change.
+- `DownloadManager.Host.Linux` (`inbound-host`): the Windows Host's composition without WinForms; host kind `linux`; single instance by a flock on `host.lock` (a second start asks the running Host to open the window); folder dialog via kdialog/zenity; secrets sealed with the data folder's key file as on the server; SIGTERM/SIGINT stop it cleanly.
+- Tested on Linux with a sandbox data folder: CLI add/list over the socket, a second start, a 48 MB local download (byte-identical), clean stop with sockets removed. Core.Tests and Server.Tests: 28 and 1 failures on Linux, the same ones with and without this change (Windows path and shell tests).
+- Not yet: tray (SNI), notifications, sign-in start, sleep prevention, libsecret, completion actions, native-messaging manifests, the Uno window on Linux.
 
 ### Web UI in the Windows app, and remote management (2026-11-08, requested)
 
