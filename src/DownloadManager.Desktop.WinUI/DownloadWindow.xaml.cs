@@ -41,8 +41,8 @@ public sealed partial class DownloadWindow : Window
         AppTheme.Track(Root);
         WindowLayout.ResizeForDpi(this, 640, 640);
         WindowPlacement.Track(this, "progress", restoreSize: false);
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
         Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
         // U-WL-17: Enter opens the finished file, the window's default action.

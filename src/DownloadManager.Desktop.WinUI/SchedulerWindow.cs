@@ -114,8 +114,8 @@ public sealed class SchedulerWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_files, "Downloads in this queue");
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "scheduler");
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
 
         var root = new Grid { Margin = new Thickness(14), ColumnSpacing = 14, RowSpacing = 10 };
         AppTheme.Track(root);

@@ -95,6 +95,7 @@ public sealed partial class MainWindow : Window
         StatusBrushes.UseTheme(RootGrid.ActualTheme);
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
+        MenuBarHover.Attach(MainMenuBar);
         UiTrace.Write("MainWindow collections initialized");
 
         try
@@ -108,10 +109,10 @@ public sealed partial class MainWindow : Window
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
             else AppWindow.Resize(new SizeInt32 { Width = width, Height = height });
             WindowPlacement.Track(this, "main");
-            var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
+            var icon = WindowLayout.AppIconPath;
             if (File.Exists(icon))
             {
-                AppWindow.SetIcon(icon);
+                AppWindow.SetIcon(WindowLayout.IconArgument(icon));
             }
 
             ApplyTitleBarTheme(DarkModeMenuItem.IsChecked);

@@ -42,6 +42,7 @@
     <Compile Include="$(WinUiDir)**\*.cs" Exclude="$(WinUiDir)bin\**;$(WinUiDir)obj\**" Link="WinUI\%(RecursiveDir)%(Filename)%(Extension)" />
     <Page Include="$(WinUiDir)**\*.xaml" Exclude="$(WinUiDir)bin\**;$(WinUiDir)obj\**;$(WinUiDir)App.xaml" Link="WinUI\%(RecursiveDir)%(Filename)%(Extension)" />
     <ApplicationDefinition Include="$(WinUiDir)App.xaml" Link="WinUI\App.xaml" />
+    <Content Include="..\..\assets\app.png" Link="app.png" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\DownloadManager.Core\Providers\ProviderLinks.cs" Link="Providers\ProviderLinks.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\UrlRedactor.cs" Link="Providers\UrlRedactor.cs" />
     <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />

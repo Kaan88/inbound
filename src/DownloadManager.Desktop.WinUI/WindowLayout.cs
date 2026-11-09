@@ -7,6 +7,12 @@ namespace DownloadManager.Desktop.WinUI;
 
 internal static class WindowLayout
 {
+    /// <summary>The window icon: the .ico on Windows; on Linux the window manager takes it from the window itself, from a PNG.</summary>
+    public static string AppIconPath => Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "app.ico" : "app.png");
+
+    /// <summary>What SetIcon takes: Uno looks the file up in the app's own folder by name.</summary>
+    public static string IconArgument(string path) => OperatingSystem.IsWindows() ? path : Path.GetFileName(path);
+
     public static void ResizeForDpi(Window window, int width, int height) => window.AppWindow.Resize(ScaledToFit(window, width, height));
 
     /// <summary>How small the user can drag the window, and how small a remembered size can come back. Set it before restoring one.</summary>
@@ -66,8 +72,8 @@ internal static class WindowLayout
 
     public static void ApplyChrome(Window window, FrameworkElement root)
     {
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) window.AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) window.AppWindow.SetIcon(WindowLayout.IconArgument(icon));
         UseBackdrop(window);
         if (root is Microsoft.UI.Xaml.Controls.Panel { Background: null } panel)
         {

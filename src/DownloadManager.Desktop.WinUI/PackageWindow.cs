@@ -102,8 +102,8 @@ internal sealed class PackageWindow : Window
         // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
         WindowLayout.ResizeForDpi(this, 720, 680);
         WindowPlacement.Track(this, "package");
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
 
         // The chosen file's details are the longer of the two, and the list scrolls well in less room.
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star), GridLength.Auto, GridLength.Auto })

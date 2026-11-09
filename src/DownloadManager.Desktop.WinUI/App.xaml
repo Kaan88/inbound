@@ -70,6 +70,11 @@
                     <AcrylicBrush x:Key="InboundDrawerBrush" TintColor="#F3F3F3" TintOpacity="0.7" TintLuminosityOpacity="0.85" FallbackColor="#F3F3F3" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+            <!-- Selected rows: WinUI 3's own subtle fills (with its accent pill), set by name because Uno falls back to the
+                 older accent-blue fill. -->
+            <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
+            <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
+            <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
 
             <!-- Inbound blue replaces the user's Windows accent so checkboxes, primary buttons and selections match the palette. -->
             <Color x:Key="SystemAccentColor">#1F6FC5</Color>
