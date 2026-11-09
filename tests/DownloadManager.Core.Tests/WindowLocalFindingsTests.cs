@@ -253,7 +253,7 @@ public sealed class WindowLocalFindingsTests
         var progress = File.ReadAllText(WinUiFile("DownloadWindow.xaml"));
         Assert.Contains("AutomationProperties.Name=\"Stop\"", progress);
         Assert.Contains("<TextBlock Text=\"Stop\" />", progress);
-        Assert.Contains("Content = \"Stop all\"", File.ReadAllText(WinUiFile("PackageWindow.cs")));
+        Assert.Contains("\"Stop all\", \"InboundIconPauseBrush\"", File.ReadAllText(WinUiFile("PackageWindow.cs")));
         Assert.Contains("DurationText.TimeLeft(duration)", File.ReadAllText(WinUiFile("JobDetailsPanel.xaml.cs")));
         Assert.DoesNotContain("Automatic (from file type)", File.ReadAllText(WinUiFile("MainWindow.xaml.cs")));
     }

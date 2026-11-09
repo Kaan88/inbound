@@ -3,28 +3,19 @@ namespace DownloadManager.Desktop.WinUI;
 /// <summary>Words and figures for the progress window's ring and tiles.</summary>
 internal static class ProgressOverviewText
 {
-    /// <summary>A byte count as its number and its unit, so a tile can show the unit smaller.</summary>
-    public static (string Number, string Unit) Split(long bytes) => bytes >= 1024L * 1024 * 1024
-        ? ($"{bytes / (1024.0 * 1024 * 1024):N2}", "GB") : bytes >= 1024L * 1024
-        ? ($"{bytes / (1024.0 * 1024):N2}", "MB") : bytes >= 1024 ? ($"{bytes / 1024.0:N1}", "KB") : ($"{bytes:N0}", "B");
+    /// <summary>A byte count as its number and its unit, so a tile can show the unit smaller (UI.R31: <see cref="UiFormat"/>).</summary>
+    public static (string Number, string Unit) Split(long bytes) => UiFormat.Split(bytes);
 
-    /// <summary>Received of total in the total's unit: "2.60", "/ 4.20 GB".</summary>
-    public static (string Number, string Unit) Of(long received, long total)
-    {
-        var (totalNumber, unit) = Split(total);
-        var scale = unit switch { "GB" => 1024.0 * 1024 * 1024, "MB" => 1024.0 * 1024, "KB" => 1024.0, _ => 1 };
-        var number = unit == "B" ? $"{received:N0}" : (received / scale).ToString(unit == "KB" ? "N1" : "N2");
-        return (number, $"/ {totalNumber} {unit}");
-    }
+    /// <summary>Received of total in the total's unit: "2.6", "/ 4.2 GB".</summary>
+    public static (string Number, string Unit) Of(long received, long total) => UiFormat.Of(received, total);
 
-    /// <summary>"4 min 23 s", "1 h 05 min", "12 s".</summary>
+    /// <summary>UI.R31: a duration in the list's words: "4m 23s", "1h 5m", "12s", "under 1s".</summary>
     public static string Duration(TimeSpan? duration)
     {
         if (duration is not { } value || value < TimeSpan.Zero) return "—";
-        if (value.TotalDays >= 1) return $"{(int)value.TotalDays} d {value.Hours} h";
-        if (value.TotalHours >= 1) return $"{(int)value.TotalHours} h {value.Minutes:D2} min";
-        if (value.TotalMinutes >= 1) return $"{value.Minutes} min {value.Seconds} s";
-        return $"{Math.Max(0, (int)Math.Round(value.TotalSeconds))} s";
+        if (value.TotalDays >= 1) return $"{(int)value.TotalDays}d {value.Hours}h";
+        if (value < TimeSpan.FromSeconds(1)) return "under 1s";
+        return DurationText.TimeLeft(value);
     }
 
     /// <summary>How long a finished download took, when the Host recorded both ends.</summary>

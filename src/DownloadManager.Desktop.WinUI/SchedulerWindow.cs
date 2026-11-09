@@ -17,11 +17,15 @@ public sealed class SchedulerWindow : Window
     private readonly HostConnection _connection;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly ListBox _queues = new() { SelectionMode = SelectionMode.Single };
-    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _status = InboundUi.Secondary();
     private readonly Button _start = new() { Content = "Start Now" };
     private readonly Button _stop = new() { Content = "Stop", IsEnabled = false };
-    private readonly Button _apply = new() { Content = "Apply" };
-    private readonly Button _close = new() { Content = "Close" };
+    // UI.R31: Apply is the footer's accent button, as the primary action is in Progress Details.
+    private readonly Button _apply = new() { Content = "Apply", MinWidth = 92, Style = InboundUi.Style("AccentButtonStyle") };
+    private readonly Button _close = new() { Content = "Close", MinWidth = 92 };
+    // UI.R31: with no schedule for the queue, an empty state and a New schedule button instead of a disabled form.
+    private readonly StackPanel _scheduleBody = new() { Spacing = 9 };
+    private readonly StackPanel _scheduleEmpty = new() { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 48, 0, 0) };
 
     private readonly ComboBox _schedulePicker = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _scheduleTarget = new() { Header = "Queue", HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -125,14 +129,14 @@ public sealed class SchedulerWindow : Window
         queuePanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         queuePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         queuePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        queuePanel.Children.Add(new TextBlock
-        {
-            Text = "Queues", FontSize = 19, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
+        queuePanel.Children.Add(InboundUi.PageTitle("Queues"));
         _queues.DisplayMemberPath = nameof(QueueDto.Name);
+        // UI.R31: the queue list is a framed card with the sidebar's rounded selection.
+        if (InboundUi.Style("InboundCategoryItemStyle") is { } queueItemStyle) _queues.ItemContainerStyle = queueItemStyle;
         _queues.SelectionChanged += (_, _) => OnQueueSelectionChanged();
-        Grid.SetRow(_queues, 1);
-        queuePanel.Children.Add(_queues);
+        var queueCard = InboundUi.ListCard(_queues);
+        Grid.SetRow(queueCard, 1);
+        queuePanel.Children.Add(queueCard);
         var queueCrud = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var createQueue = new Button { Content = "New…" };
         var renameQueue = new Button { Content = "Rename…" };
@@ -180,6 +184,7 @@ public sealed class SchedulerWindow : Window
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _status.Text = "Loading queues…";
+        _status.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(_status, 0);
         bottom.Children.Add(_status);
         _apply.Click += async (_, _) => await ApplyAsync();
@@ -231,8 +236,17 @@ public sealed class SchedulerWindow : Window
 
     private UIElement BuildScheduleTab()
     {
-        var panel = new StackPanel { Spacing = 9, Padding = new Thickness(10) };
-        panel.Children.Add(new TextBlock { Text = "Schedules", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
+        var outer = new StackPanel { Spacing = 9, Padding = new Thickness(10) };
+        outer.Children.Add(InboundUi.SectionTitle("Schedules"));
+        var emptyNew = InboundUi.IconButton("\uE710", "New schedule", accent: true);
+        emptyNew.HorizontalAlignment = HorizontalAlignment.Center;
+        emptyNew.Click += (_, _) => BeginNewSchedule();
+        _scheduleEmpty.Children.Add(InboundUi.EmptyState("\uE787", "No schedules yet for this queue."));
+        _scheduleEmpty.Children.Add(emptyNew);
+        _scheduleEmpty.Visibility = Visibility.Collapsed;
+        outer.Children.Add(_scheduleEmpty);
+        outer.Children.Add(_scheduleBody);
+        var panel = _scheduleBody;
         panel.Children.Add(_schedulePicker);
         var scheduleActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         _newSchedule.Click += (_, _) => BeginNewSchedule();
@@ -284,14 +298,14 @@ public sealed class SchedulerWindow : Window
         _shutdownWhenDone.Unchecked += (_, _) => UpdateShutdownControls();
         UpdateShutdownControls();
         _scheduleHint.Text = "Edits are preserved when you switch schedules. Apply saves them; Close discards unsaved changes.";
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        return new ScrollViewer { Content = outer, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
 
     private UIElement BuildFilesTab()
     {
         var panel = new StackPanel { Spacing = 9, Padding = new Thickness(10) };
-        panel.Children.Add(new TextBlock { Text = "Downloads in this queue", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
-        panel.Children.Add(new TextBlock { Text = "All downloads in this queue, also finished and failed ones. Set the order of waiting downloads with the same priority, or move a download to another queue. Running downloads go on. Apply saves the changes.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(InboundUi.SectionTitle("Downloads in this queue"));
+        panel.Children.Add(InboundUi.Secondary("All downloads in this queue, also finished and failed ones. Set the order of waiting downloads with the same priority, or move a download to another queue. Running downloads go on. Apply saves the changes."));
         _files.ItemTemplate = (DataTemplate)XamlReader.Load("""
             <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
               <Grid ColumnSpacing="10" Padding="4">
@@ -305,15 +319,17 @@ public sealed class SchedulerWindow : Window
                 <StackPanel Grid.Column="1" Spacing="2">
                   <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding SizeText}" Visibility="{Binding SizeVisibility}" FontSize="12" Opacity="0.75"/>
-                    <TextBlock Text="{Binding StateText}" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding SizeText}" Visibility="{Binding SizeVisibility}" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}"/>
+                    <TextBlock Text="{Binding StateText}" FontSize="12" Foreground="{Binding StatusBrush}" TextTrimming="CharacterEllipsis"/>
                   </StackPanel>
                 </StackPanel>
               </Grid>
             </DataTemplate>
             """);
         _files.SelectionChanged += (_, _) => UpdateFileButtons();
-        panel.Children.Add(_files);
+        // UI.R31: a framed card of bounded height, so Move up and Move down stay in view with many files.
+        _files.MaxHeight = 320;
+        panel.Children.Add(InboundUi.ListCard(_files));
         var ordering = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         _moveUp.Click += (_, _) => MoveFile(-1);
         _moveDown.Click += (_, _) => MoveFile(1);
@@ -339,12 +355,15 @@ public sealed class SchedulerWindow : Window
     {
         // Left-aligned like the other tabs; MaxWidth alone centred it in a wide window.
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(10), MaxWidth = 680, HorizontalAlignment = HorizontalAlignment.Left };
-        panel.Children.Add(new TextBlock { Text = "Queue limits", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 17 });
+        panel.Children.Add(InboundUi.SectionTitle("Queue limits"));
         panel.Children.Add(_maxConcurrent);
         panel.Children.Add(_quotaEnabled);
+        // Guideline §6: what depends on the box sits 28px in under it.
+        _quotaMb.Margin = new Thickness(28, 0, 0, 0);
+        _quotaHours.Margin = new Thickness(28, 0, 0, 0);
         panel.Children.Add(_quotaMb);
         panel.Children.Add(_quotaHours);
-        panel.Children.Add(new TextBlock { Text = "Apply changes the limits only. How much of the quota is used, and when it starts again, stay as they are.", TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
+        panel.Children.Add(InboundUi.Secondary("Apply changes the limits only. How much of the quota is used, and when it starts again, stay as they are."));
         _quotaEnabled.Checked += (_, _) => UpdateQuotaControls();
         _quotaEnabled.Unchecked += (_, _) => UpdateQuotaControls();
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -642,6 +661,9 @@ public sealed class SchedulerWindow : Window
             _shutdownMode, _forceShutdown }) control.IsEnabled = _scheduleEditorEnabled;
         if (_runOptions?.Content is Control options) options.IsEnabled = _scheduleEditorEnabled;
         if (_scheduleEditorEnabled) UpdateShutdownControls();
+        var none = !_scheduleEditorEnabled && _schedulePicker.Items.Count == 0;
+        _scheduleEmpty.Visibility = none ? Visibility.Visible : Visibility.Collapsed;
+        _scheduleBody.Visibility = none ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ClearScheduleForm()
