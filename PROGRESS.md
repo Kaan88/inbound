@@ -1,5 +1,11 @@
 ﻿# Progress — session handoff
 
+### 0.6.5 owner requests UI.R33, UI.B22, UI.R34 (2026-11-10, `linux-host`)
+- UI.R33: My TorBox's "Added N files" notice closes itself after 3 s (`MainWindow.ProviderViews.cs`).
+- UI.B22: `DownloadSpeedGraph.Slide` resumes from the time since the newest sample instead of restarting at 0 on every redraw (size, theme, shown again). Probable cause of the stepping in Progress Details; not reproduced on screen.
+- UI.R34: `PackageWindow` gains Progress Details' speed card for the package (collapsed by default).
+- Uno build (Linux) and WinUI build (Windows VM over SSH) 0 errors. Not run in the app; no tests touched (UI-only).
+
 ### D7 stage 2: the window on Linux and the AppImage layout (2026-11-09, `linux-host`, partial)
 - The WinUI window builds through Uno for Linux and runs on KDE Wayland (XWayland) against `inbound-host`; the owner saw it working. Single instance over a user-only Unix socket (`ActivationSignal`); the Win32 window calls are skipped on Linux; file icons are generic there for now.
 - `scripts/package-appimage.sh` builds a self-contained AppDir (Host, CLI, native host, web server; the window in `desktop/`). `AppRun` handles `--native-host`, `--cli` and `--host`; started with no argument it starts the Host, then the window. Checked from the AppDir with no .NET installed and a sandbox data folder: Host and window started, `--cli list` listed the downloads, `--native-host` answered `jobs.query` with `jobs.snapshot`.

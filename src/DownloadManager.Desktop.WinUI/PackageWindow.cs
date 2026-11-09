@@ -51,6 +51,11 @@ internal sealed class PackageWindow : Window
     private readonly FontIcon _ringGlyph = new() { Glyph = "\uE73E", FontSize = 32, Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _ringCaption = new() { FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
     private readonly List<InfoTile> _tiles = [];
+    // UI.R34: Progress Details' speed card, for the whole package, sampled once a second by the same rule (UI.B20).
+    // It starts closed to its figures bar so the window still fits a 768-pixel screen; its toggle opens the plot.
+    private readonly DownloadSpeedGraph _chart = new() { Heading = "Speed", PeriodSeconds = 60, IsExpanded = false };
+    private Border? _chartCard;
+    private readonly DispatcherTimer _chartTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     // With no Extraction tab, one tab would look odd: the files get a section heading instead.
     private readonly TextBlock _filesHeading = InboundUi.SectionTitle("Files");
     private readonly Grid _tabRow = new();
@@ -113,7 +118,14 @@ internal sealed class PackageWindow : Window
         _delete.Margin = new Thickness(0, 0, 16, 0);
         ToolTipService.SetToolTip(_delete, "Remove this package's files from the list and delete them");
         _root.Children.Add(_header.Element);
-        Add(BuildOverview(), 1);
+        var overview = new StackPanel { Spacing = 12 };
+        overview.Children.Add(BuildOverview());
+        _chartCard = InboundUi.Card(_chart, new Thickness(0));
+        _chartCard.Visibility = Visibility.Collapsed;
+        overview.Children.Add(_chartCard);
+        Add(overview, 1);
+        _chartTimer.Tick += (_, _) => SampleChart();
+        AppWindow.Changed += (_, change) => { if (change.DidPresenterChange || change.DidVisibilityChange) UpdateChartSeen(); };
         _tabs.Items.Add(_filesTab);
         _tabs.Items.Add(_extractionTab);
         _tabs.SelectionChanged += (_, _) => ShowTab();
@@ -213,6 +225,7 @@ internal sealed class PackageWindow : Window
         Closed += async (_, _) =>
         {
             _closed = true;
+            _chartTimer.Stop();
             _fileDetails.Stop();
             _archivePassword.Password = string.Empty;
             await _connection.DisposeAsync();
@@ -278,6 +291,19 @@ internal sealed class PackageWindow : Window
         row.Children.Add(tiles);
         return row;
     }
+
+    /// <summary>The package's figure for the graph: every file's rate by the main window's rule, added up.</summary>
+    private void SampleChart()
+    {
+        if (_closed) return;
+        var now = DateTimeOffset.UtcNow;
+        var rates = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id])
+            .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now));
+        _chart.AddSample(now, SpeedSample.Total(_hostConnected, rates.ToList()));
+    }
+
+    private void UpdateChartSeen() => _chart.IsSeen = !_closed && AppWindow.IsVisible && _chartCard is { Visibility: Visibility.Visible }
+        && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
 
     private void ShowTab()
     {
@@ -567,6 +593,12 @@ internal sealed class PackageWindow : Window
         var anyFailed = members.Any(job => job.State == "failed");
         if (_groupKnown) SetHeaderChip(members, allDone, anyFailed, speed);
         var percent = allDone ? 100 : allKnown ? Percent(received, total) : 0;
+        // The speed card shows while anything in the package can still move, as in Progress Details.
+        var moving = members.Any(job => job.State is not ("completed" or "failed" or "cancelled"));
+        _chartCard!.Visibility = moving ? Visibility.Visible : Visibility.Collapsed;
+        if (moving && !_chartTimer.IsEnabled) { SampleChart(); _chartTimer.Start(); }
+        else if (!moving) _chartTimer.Stop();
+        UpdateChartSeen();
         _ring.Value = percent;
         _ring.IsIndeterminate = !allKnown && !allDone && speed > 0;
         _ring.Foreground = InboundTheme.Brush(allDone ? "InboundStatusDoneBrush" : anyFailed ? "InboundStatusFailedBrush" : "InboundProgressFillBrush", _root);

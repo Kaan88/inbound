@@ -31,6 +31,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private Storyboard? _transition;
     private Storyboard? _slide;
     private double _pixelsPerSecond;
+    /// <summary>When the newest sample came in (<see cref="Environment.TickCount64"/>), so a redraw between samples resumes the slide where it is.</summary>
+    private long _sampledAt = Environment.TickCount64;
 
     // Where the last drawing put things, for the hover layer.
     private double _left, _upper, _chartWidth, _chartHeight, _top;
@@ -129,6 +131,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
             else if (time - previous > TimeSpan.FromSeconds(5)) _samples.Enqueue((previous.AddSeconds(1), null));
         }
         _samples.Enqueue((time, value));
+        _sampledAt = Environment.TickCount64;
         while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < time.AddHours(-1)) _samples.Dequeue();
         Draw();
     }
@@ -153,6 +156,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
             _samples.Enqueue((start.AddSeconds(i * (double)intervalSeconds), rate >= 0 ? (double?)rate : null));
         }
         foreach (var sample in after) _samples.Enqueue(sample);
+        if (after.Count == 0) _sampledAt = Environment.TickCount64;
         var latest = _samples.Last().Time;
         while (_samples.Count > 3601 || _samples.TryPeek(out var first) && first.Time < latest.AddHours(-1)) _samples.Dequeue();
         Draw();
@@ -331,11 +335,20 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (!_seen || !_expanded || pixelsPerSecond <= 0 || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
         // Two seconds at most: a sample that is late leaves the line where it got to, not sliding away.
         const double longest = SlideSeconds;
+        // UI.B22: a redraw that is not a new sample (the plot resized as the window's text changed, the theme, the
+        // period) starts from where the slide had got to by now, not from 0. Restarting at 0 jumped the line back to
+        // the right each time, so it moved in steps with blank stretches instead of sliding in from the right.
+        var elapsed = Math.Clamp((Environment.TickCount64 - _sampledAt) / 1000d, 0, longest);
+        if (longest - elapsed < 0.05)
+        {
+            SlideTransform.X = -pixelsPerSecond * longest;
+            return;
+        }
         var animation = new DoubleAnimation
         {
-            From = 0,
+            From = -pixelsPerSecond * elapsed,
             To = -pixelsPerSecond * longest,
-            Duration = new Duration(TimeSpan.FromSeconds(longest)),
+            Duration = new Duration(TimeSpan.FromSeconds(longest - elapsed)),
             FillBehavior = FillBehavior.HoldEnd,
         };
         Storyboard.SetTarget(animation, SlideTransform);
