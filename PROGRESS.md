@@ -1,5 +1,12 @@
 ﻿# Progress — session handoff
 
+### D7 stage 1, step 2: notifications, sleep prevention, sign-in start, completion actions (2026-11-09, `linux-host`)
+- D-Bus through `Tmds.DBus.Protocol` 0.95.2 (no native parts). `LinuxDesktop.cs` in `DownloadManager.Host.Linux`.
+- Notifications: `org.freedesktop.Notifications`, on the same settings as the Windows tray balloons (download and remote notices).
+- Sleep prevention: a logind `sleep` inhibitor in `block` mode, held while downloads run. Checked live: `systemd-inhibit --list` showed it during an 8 MB throttled download and not after; the completion notice was sent without error.
+- Sign-in start: an XDG autostart entry (`~/.config/autostart/inbound-host.desktop`) following the setting, pointing at the AppImage when run from one; skipped for a sandbox data folder, as on Windows. Not yet checked live.
+- Completion actions: open with `xdg-open`; exit; power off, restart (systemctl) or sign out (loginctl) after a 30 s notice. The post-download command reuses the Windows Host's hook. Not yet checked live (the power actions are not run in tests).
+
 ### D7 stage 1, step 1: the Linux desktop Host (2026-11-09, branch `linux-host`)
 - Owner: "start in plan order", on their CachyOS KDE Wayland machine. Repo cloned to the Linux home folder (the Windows checkout untouched); .NET 10 SDK 10.0.403 in `~/.dotnet`.
 - `IpcConnectionHandler` (Runtime): the per-connection loop moved out of `HostPipeServer`, which now uses it; Windows Host still compiles (checked on Linux with `EnableWindowsTargeting`, not run).

@@ -23,6 +23,7 @@
     <!-- Shared with the Windows Host rather than copied: neither uses anything of Windows. -->
     <Compile Include="..\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
+    <Compile Include="..\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +35,10 @@
     <ProjectReference Include="..\DownloadManager.Archives\DownloadManager.Archives.csproj" />
     <ProjectReference Include="..\DownloadManager.Containers\DownloadManager.Containers.csproj" />
     <ProjectReference Include="..\DownloadManager.Providers.TorBox\DownloadManager.Providers.TorBox.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2" />
   </ItemGroup>
 
 </Project>

@@ -95,9 +95,14 @@ internal static class Program
         var ftpEngine = new DownloadManager.Engine.FtpDownloadEngine(engine.SpeedBudget);
         var remote = RemoteProviderSetup.Create(paths, engine, log.Info);
         log.Secrets = remote.Registry;
-        // [TODO D7] Completion actions, sleep prevention (logind Inhibit) and the post-download command.
+        using var notifications = new DesktopNotifications(log.Warn);
+        var completionExecutor = new LinuxCompletionActionExecutor(log.Info) { Notice = notifications.Notify };
+        using var sleepPrevention = new LogindSleepPrevention(log.Info);
         var service = new DownloadManagerService(
             paths, jobStore, checkpoints, settingsStore, engine, log.Info,
+            completionActions: completionExecutor,
+            sleepPrevention: sleepPrevention,
+            postDownloadHook: new HostPostDownloadHook(log.Info),
             mediaCheckpoints: mediaCheckpoints,
             ftpEngine: ftpEngine,
             linkBroker: remote.Broker,
@@ -148,16 +153,45 @@ internal static class Program
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
         };
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
-        service.SettingsChanged += (_, _) => log.Info("Settings updated.");
+        completionExecutor.ExitHost = () => _ = Task.Run(async () =>
+        {
+            try { await dispatcher.NotifyExitingAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+            finally { platform.RequestShutdown(); }
+        });
+        service.SettingsChanged += (_, next) =>
+        {
+            TryApplyStartup(next.LaunchAtStartup, log);
+            log.Info("Settings updated.");
+        };
         await using var sockets = new UnixSocketIpcServer(dispatcher, log);
         dispatcher.Start();
         sockets.Start();
 
         var currentSettings = service.GetSettings();
         service.SettingsChanged += (_, _) => currentSettings = service.GetSettings();
-        // [TODO D7] Desktop notifications (org.freedesktop.Notifications); until then the kind is logged.
-        using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null,
-            notice => log.Info($"Download notice: {notice.Kind}"), log.Warn);
+        TryApplyStartup(currentSettings.LaunchAtStartup, log);
+        // As the Windows Host's tray balloons: the same notices on the same settings.
+        using var downloadNotices = new DownloadNotices(service, archivesStarted ? archives : null, notice =>
+        {
+            var current = currentSettings;
+            // The kind only: a notice's title and message carry file names.
+            log.Info($"Download notice: {notice.Kind}");
+            var show = notice.Kind switch
+            {
+                DownloadNoticeKind.Completed or DownloadNoticeKind.PackageExtractionCompleted => current.NotifyOnCompletion,
+                DownloadNoticeKind.Failed or DownloadNoticeKind.Extraction => true,
+                _ => false,
+            };
+            if (show) notifications.Notify(notice.Title, notice.Message);
+        }, log.Warn);
+        // [TODO D7] Whether the window is in front, so a notice it already shows isn't repeated.
+        using var remoteNotices = remoteStarted
+            ? RemoteNotices.Listen(remoteJobs, TimeProvider.System, () => currentSettings.NotifyOnCompletion, () => false, notice =>
+            {
+                log.Info($"Remote notice: {notice.Title}: {notice.Message}");
+                notifications.Notify(notice.Title, notice.Message);
+            }, log.Warn)
+            : null;
         using var downloadWindows = new DownloadWindows(service, () => currentSettings.ShowCompletionDialog, window =>
         {
             _ = Task.Run(() =>
@@ -200,6 +234,7 @@ internal static class Program
 
         // Shutting down stops what is running, which isn't news about any package.
         downloadNotices.Dispose();
+        remoteNotices?.Dispose();
         downloadWindows.Dispose();
         await Step(async () =>
         {
@@ -245,6 +280,20 @@ internal static class Program
         {
             Console.Error.WriteLine($"Another Inbound Host has the data folder but doesn't answer: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>A sandbox data folder (tests, a second profile) must not change the real sign-in start.</summary>
+    private static void TryApplyStartup(bool enabled, FileLogger log)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA"))) return;
+        try
+        {
+            AutostartEntry.Apply(enabled);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log.Warn($"Could not update sign-in startup: {ex.Message}");
         }
     }
 
