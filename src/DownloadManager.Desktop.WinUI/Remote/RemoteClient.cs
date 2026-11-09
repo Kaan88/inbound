@@ -483,7 +483,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     public async Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
     {
         var (sent, _, error) = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
-        if (sent is null) return new RemoteContainerSendResult { Status = "failed", Message = error };
+        if (sent is null) return new RemoteContainerSendResult { Status = "failed", Message = error ?? string.Empty };
         return await SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = sent }, MessageTypes.RemoteContainerSendResult,
             failure => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(failure) }, cancellationToken, SendToJdTimeout).ConfigureAwait(false);
     }

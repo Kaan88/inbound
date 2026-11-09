@@ -147,7 +147,7 @@ public sealed class WebUiBridgeEndToEndTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await UploadAsync(anonymous, "/api/upload/torrent", torrent)).Status);
         var (byToken, tokenReference) = await UploadAsync(anonymous, "/api/upload/torrent", torrent, bearer: token);
         Assert.Equal(HttpStatusCode.OK, byToken);
-        Assert.NotEqual(Gone, (await IpcAsync(anonymous, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = tokenReference }, token))
+        Assert.NotEqual(Gone, (await IpcAsync(anonymous, MessageTypes.RemoteClassify, new RemoteClassifyRequest { Text = tokenReference! }, token))
             .GetPayload<RemoteClassifyResult>().Reason);
         Assert.Equal(HttpStatusCode.OK, (await UploadAsync(anonymous, "/api/upload/container", "x"u8.ToArray(), "links.ccf", token)).Status);
 
