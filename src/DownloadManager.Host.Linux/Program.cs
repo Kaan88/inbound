@@ -210,6 +210,17 @@ internal static class Program
             platform.RequestShutdown();
         }
 
+        // Optional: without a tray the Host runs as before, and the window and the CLI reach it as always.
+        await using var tray = await StatusNotifierTray.TryStartAsync(new LinuxTrayActions(
+            Open: () => platform.OpenUi(),
+            OpenSettings: () => platform.OpenUi("settings"),
+            PauseAll: () => Observe(service.PauseAllAsync(), log, "Pause all"),
+            ResumeAll: () => Observe(service.ResumeAllAsync(), log, "Resume all"),
+            Exit: () => completionExecutor.ExitHost?.Invoke(),
+            ActiveCount: () => service.ActiveDownloadCount()), log.Info).ConfigureAwait(false);
+        service.TrayAvailable = platform.TrayAvailable = tray is not null;
+        if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
+
         log.Info("Host ready.");
         if (open) platform.OpenUi();
 

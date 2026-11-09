@@ -8,7 +8,7 @@ namespace DownloadManager.Host;
 /// <summary>
 /// The Linux desktop: a window to open (the Uno build, found next to the Host), a folder dialog, an exit, and the program
 /// settings, for the user who could start those programs anyway (the socket admits only them). No updater: updates come
-/// with a new AppImage. The tray comes in a later step of D7 stage 1.
+/// with a new AppImage. A tray when the desktop has one (<see cref="TrayAvailable"/>).
 /// </summary>
 public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger log) : IHostPlatform
 {
@@ -30,7 +30,12 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
     private readonly CancellationTokenSource _exit = new();
     private int _folderPickerOpen;
 
-    public PlatformCapabilities Capabilities => LinuxCapabilities;
+    /// <summary>Set once the tray icon has registered; the hello lists <c>tray</c> only then.</summary>
+    public bool TrayAvailable { get; set; }
+
+    public PlatformCapabilities Capabilities => TrayAvailable ? WithTray : LinuxCapabilities;
+
+    private static readonly PlatformCapabilities WithTray = LinuxCapabilities with { SupportsTray = true };
 
     /// <summary>Cancelled when a client or a signal asks the Host to exit.</summary>
     public CancellationToken ExitRequested => _exit.Token;
