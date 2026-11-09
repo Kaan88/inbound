@@ -176,8 +176,12 @@ public sealed partial class DownloadWindow : Window
         var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
             : complete ? "The file has been saved. Choose an action below."
             : job.State == "paused" ? "The download is paused. Resume it or close this window."
+            : job.State == "failed" && job.CanResume ? "Resume tries the download again."
             : "Closing this window will not stop the download.";
-        if (_connected) Notice.Text = job.Failure?.Message ?? completionText;
+        var failure = JobNotes.FailureMessage(job);
+        FailureText.Text = failure ?? string.Empty;
+        FailureText.Visibility = failure is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_connected) Notice.Text = failure is null ? job.Failure?.Message ?? completionText : completionText;
 
         _updatingControls = true;
         try

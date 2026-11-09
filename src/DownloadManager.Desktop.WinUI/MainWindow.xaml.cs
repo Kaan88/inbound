@@ -489,8 +489,7 @@ public sealed partial class MainWindow : Window
         SyncFileMenu(sideRows, removableSideRows);
         StopAllButton.IsEnabled = connected && _jobsById.Values.Any(j => j.CanPause);
         DeleteCompletedButton.IsEnabled = connected && _jobsById.Values.Any(j => j.State == "completed");
-        StartQueueButton.IsEnabled = connected && _settings is not null;
-        StopQueueButton.IsEnabled = connected && _settings is not null;
+        SyncQueueCommands();
         SyncArchiveMenus();
     }
 
@@ -499,8 +498,9 @@ public sealed partial class MainWindow : Window
     /// <summary>A command with nothing to act on is dimmed and says why in its own words, like Extract.</summary>
     private void SyncFileMenu(int sideRows, int removableSideRows)
     {
-        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
-        Apply(FileOpenItem, "Open", plan.ShellReason);
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true, _connection.IsRemote,
+            SelectedJob?.State == "completed");
+        Apply(FileOpenItem, "Open", plan.LaunchReason);
         Apply(FileOpenFolderItem, "Open Folder", plan.ShellReason);
         Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
@@ -1051,9 +1051,10 @@ public sealed partial class MainWindow : Window
 
         // The same words as the File menu: a package row has no one file for these to act on.
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
-        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
-        SayIfNoFile(_menuOpen, "Open", plan.ShellReason);
-        SayIfNoFile(_menuOpenWith, "Open With…", plan.ShellReason);
+        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true, _connection.IsRemote,
+            CommandJob?.State == "completed");
+        SayIfNoFile(_menuOpen, "Open", plan.LaunchReason);
+        SayIfNoFile(_menuOpenWith, "Open With…", plan.LaunchReason);
         SayIfNoFile(_menuOpenFolder, "Open Folder", plan.ShellReason);
         SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
         if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
@@ -1440,25 +1441,52 @@ public sealed partial class MainWindow : Window
 
         StartQueueMenu.Items.Clear();
         StopQueueMenu.Items.Clear();
+        _queueMenuItems.Clear();
         foreach (var queue in _settings.Queues.OrderBy(queue => queue.Order))
         {
-            var start = new MenuFlyoutItem
-            {
-                Text = $"Start {queue.Name} download queue",
-                IsEnabled = !queue.IsRunning,
-            };
+            var start = new MenuFlyoutItem { Text = $"Start {queue.Name} download queue" };
             start.Click += async (_, _) => await QueueActionFromMenuAsync(queue.Id, "start");
             StartQueueMenu.Items.Add(start);
 
-            var stop = new MenuFlyoutItem
-            {
-                Text = $"Stop {queue.Name} download queue",
-                IsEnabled = queue.IsRunning,
-            };
+            var stop = new MenuFlyoutItem { Text = $"Stop {queue.Name} download queue" };
             stop.Click += async (_, _) => await QueueActionFromMenuAsync(queue.Id, "stop");
             StopQueueMenu.Items.Add(stop);
+            _queueMenuItems[queue.Id] = (start, stop);
         }
+
+        SyncQueueCommands();
     }
+
+    private readonly Dictionary<int, (MenuFlyoutItem Start, MenuFlyoutItem Stop)> _queueMenuItems = new();
+
+    /// <summary>
+    /// U-WL-1: the menu, the toolbar and the Queues dialog offer Start for a stopped queue and for a running one whose
+    /// "later" or queue-paused downloads wait for it, and Stop for a running one, from the same rule.
+    /// </summary>
+    private void SyncQueueCommands()
+    {
+        if (_settings is null) return;
+        var jobs = _jobsById.Values.Select(row => row.Dto).OfType<JobDto>().ToList();
+        foreach (var queue in _settings.Queues)
+        {
+            if (!_queueMenuItems.TryGetValue(queue.Id, out var items)) continue;
+            items.Start.IsEnabled = QueueCommands.CanStart(queue, jobs);
+            items.Stop.IsEnabled = QueueCommands.CanStop(queue);
+        }
+
+        var connected = _connection?.IsConnected ?? false;
+        var targetId = SelectedJob?.QueueId ?? SelectedPackage?.SharedQueueId ?? _settings.DefaultQueueId;
+        var target = _settings.Queues.FirstOrDefault(queue => queue.Id == targetId);
+        StartQueueButton.IsEnabled = connected && target is not null && QueueCommands.CanStart(target, jobs);
+        StopQueueButton.IsEnabled = connected && target is not null && QueueCommands.CanStop(target);
+        var startTip = target is null ? "Start the selected queue" : $"Start the {target.Name} queue ({QueueCommands.State(target, jobs)})";
+        if (startTip != _startQueueToolTip) ToolTipService.SetToolTip(StartQueueButton, _startQueueToolTip = startTip);
+        var stopTip = target is null ? "Stop the selected queue and pause its downloads" : $"Stop the {target.Name} queue and pause its downloads";
+        if (stopTip != _stopQueueToolTip) ToolTipService.SetToolTip(StopQueueButton, _stopQueueToolTip = stopTip);
+    }
+
+    private string _startQueueToolTip = string.Empty;
+    private string _stopQueueToolTip = string.Empty;
 
     private async Task QueueActionFromMenuAsync(int queueId, string action)
     {
@@ -3241,7 +3269,7 @@ public sealed partial class MainWindow : Window
             var info = new StackPanel { Spacing = 2 };
             info.Children.Add(new TextBlock
             {
-                Text = $"{queue.Name} — {(queue.IsRunning ? "running" : "stopped")}",
+                Text = $"{queue.Name} — {QueueCommands.State(queue, snapshot.Jobs)}",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             info.Children.Add(new TextBlock
@@ -3275,7 +3303,7 @@ public sealed partial class MainWindow : Window
             };
             primaryActions.Children.Add(files);
 
-            var start = new Button { Content = "Start", IsEnabled = !queue.IsRunning };
+            var start = new Button { Content = "Start", IsEnabled = QueueCommands.CanStart(queue, snapshot.Jobs) };
             start.Click += (_, _) =>
             {
                 action = "start";
