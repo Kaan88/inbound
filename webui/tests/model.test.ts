@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cantTell, kindWord, linesOf, routeOf, showsAddress, type AddLine } from '../src/lib/addlines';
-import { bytes, duration, percent, statusText, timeSpanSeconds } from '../src/lib/format';
+import { bytes, duration, percent, stateWord, statusText, timeSpanSeconds, tone } from '../src/lib/format';
+import { fileKindIcon, iconPaths } from '../src/lib/icons';
 import { apply, emptyModel, hasCapability } from '../src/lib/model';
 import type { Envelope } from '../src/lib/protocol';
 import type { ClassifyResult, Job } from '../src/lib/types';
@@ -171,7 +172,13 @@ describe('format', () => {
     expect(timeSpanSeconds('1.02:00:00')).toBe(93600);
     expect(timeSpanSeconds('00:00:01.5000000')).toBe(1.5);
     expect(timeSpanSeconds('soon')).toBeNull();
-    expect(duration(3725)).toBe('1 h 02 min');
+    // The desktop list's words (DurationText.TimeLeft), the same in the web UI and the extension (EXT.R8 Q2).
+    expect(duration(3725)).toBe('1h 2m');
+    expect(duration(105)).toBe('1m 45s');
+    expect(duration(45.9)).toBe('45s');
+    expect(duration(0.4)).toBe('1s');
+    expect(duration(0)).toBe('');
+    expect(duration(100000)).toBe('27h 46m');
   });
 
   it('takes progress as a fraction', () => {
@@ -179,5 +186,22 @@ describe('format', () => {
     expect(percent({ totalBytes: 200, receivedBytes: 50 })).toBe(25);
     expect(percent({ receivedBytes: 50 })).toBeNull();
     expect(statusText(job('a', 'downloading', { progress: 0.5 }))).toBe('Downloading 50%');
+  });
+});
+
+describe('words and glyphs shared with the browser extension (EXT.R8)', () => {
+  it('names every state the extension shows', () => {
+    expect(stateWord('muxing')).toBe('Merging');
+    expect(stateWord('scheduled')).toBe('Scheduled');
+    expect(stateWord('retryWaiting')).toBe('Retrying');
+    expect(tone('retryWaiting')).toBe('waiting');
+  });
+
+  it("groups file kinds as the desktop list's glyphs do", () => {
+    expect(fileKindIcon('linux-desktop-24.04-amd64.iso')).toBe('disc');
+    expect(fileKindIcon('project-assets.part2.rar')).toBe('archive-file');
+    expect(fileKindIcon('installer-2.4.1.EXE')).toBe('program');
+    expect(fileKindIcon('notes')).toBe('file');
+    for (const name of ['disc', 'archive-file', 'program', 'document', 'music', 'video', 'image', 'file']) expect(iconPaths[name]).toBeTruthy();
   });
 });

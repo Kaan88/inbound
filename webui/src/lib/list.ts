@@ -3,7 +3,7 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
-import { bytes, dateTime, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { bytes, dateTime, duration, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
@@ -45,15 +45,9 @@ export function statusWords(job: Job): string {
   return stateWord(job.state);
 }
 
-/** The Time left column: "1h 5m", "3m 20s", "45s"; blank when there is no estimate. */
+/** The Time left column: "1h 5m", "3m 20s", "45s"; blank when there is no estimate (format.duration, the desktop's words). */
 export function timeLeft(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return '';
-  const total = Math.floor(seconds);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-  if (hours >= 1) return `${hours}h ${minutes}m`;
-  return minutes >= 1 ? `${minutes}m ${rest}s` : `${Math.max(1, rest)}s`;
+  return duration(seconds);
 }
 
 
