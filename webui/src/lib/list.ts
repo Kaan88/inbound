@@ -770,6 +770,21 @@ export function speedSample(jobs: readonly Job[], connected: boolean, ready: boo
   return sum;
 }
 
+/**
+ * The total the status bar and the speed graph's label show (U-WU-14): the rates the rows show, added up, so the three
+ * places never disagree. Null while the server can't be reached.
+ */
+export function liveSpeed(jobs: readonly Job[], connected: boolean, ready: boolean): number | null {
+  if (!connected || !ready) return null;
+  let sum = 0;
+  for (const job of jobs) {
+    if (!activeStates.includes(job.state)) continue;
+    const r = job.bytesPerSecond ?? 0;
+    if (Number.isFinite(r) && r > 0) sum += r;
+  }
+  return sum;
+}
+
 /** The scale the graph's top line is drawn at: 64 KB/s doubled until it clears the peak. */
 export function graphCeiling(peak: number): number {
   let ceiling = 64 * 1024;
