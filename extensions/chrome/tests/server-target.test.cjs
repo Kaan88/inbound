@@ -85,7 +85,7 @@ test('EXT.R1: this PC stays the default for automatic sending after pairing', as
 });
 
 for (const [name, handler, reason] of [
-  ['no answer', new TypeError('Failed to fetch'), /not answering/],
+  ['no answer', new TypeError('Failed to fetch'), /Could not connect to the Inbound server .*\(the browser said: Failed to fetch\)/],
   ['a revoked pairing', { status: 401, body: { ok: false, error: 'Pair it again.' } }, /Pair it again/],
   ['a refusal', { accepted: false, error: 'That folder is outside the server\'s download folders.' }, /outside the server/],
 ]) {
@@ -304,7 +304,7 @@ test('EXT.R1: the popup keeps one place\'s downloads when the other does not ans
     assert.equal(listed.ok, true);
     assert.deepEqual(listed.jobs.map(j => j.fileName), ['here.zip']);
     assert.equal(listed.groups[1].ok, false);
-    assert.match(listed.groups[1].error, /not answering/);
+    assert.match(listed.groups[1].error, /Could not connect to the Inbound server/);
   });
 });
 

@@ -153,6 +153,12 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   `register-native-host.ps1` (install, repair, updater) write both; the key is optional like Edge's, and
   uninstall removes it only when it is this install's. The Host does not yet report or repair the Firefox
   key (only Chrome's and Edge's).
+- **No upgrade to https (EXT.B6).** Firefox's default CSP for MV3 extension pages adds
+  `upgrade-insecure-requests`, so the background's fetch to a server at `http://<LAN address>` went to `https://`
+  instead and failed with a bare network error (loopback addresses are exempt, and Chromium's default has no
+  upgrade, so Edge paired with the same server and code). The Firefox manifest sets
+  `content_security_policy.extension_pages` to `script-src 'self'`: the same default without the upgrade.
+  Reproduced and checked in headless Firefox 159 against a test server on a LAN address of this PC (2026-11-09).
 - **Checked in Firefox 159** (2026-11-08, a test profile with "Always ask" on): automatic catching (EXT.B3), and
   catching before the Save dialog for a clicked link and a typed address (EXT.B5). **Not verified:** Firefox's
   install prompt for host permissions.
@@ -252,7 +258,9 @@ envelope on a connection of its own):
   `Authorization: Bearer <token>`, `credentials: "omit"` (never the browser's cookies for the server),
   `redirect: "error"` (the token goes to the paired address only) and a time limit. A 401 means the pairing
   was removed (`ServerUnpairedError`, "Pair it again"); a 403 refusal of the paired role comes back as its
-  envelope; no answer is said in the server's own words, never as the desktop app missing.
+  envelope; no answer is said in the server's own words, never as the desktop app missing: "Could not connect
+  to the Inbound server at <address> (the browser said: <fetch error>)", plus a word on the certificate for an
+  https:// address. A time-out says so instead.
 
 **Pairing** (Settings, Inbound server): the user types the address (a missing scheme means http; a path is
 dropped; a user name or password in it is refused) and the 8-character code from the web UI (Settings,

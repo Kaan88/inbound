@@ -14,7 +14,7 @@ loaded._compile(esbuild.buildSync({
 }).outputFiles[0].text, source);
 const {
   NativeTransport, ServerTransport, ServerUnpairedError, normalizeServerAddress, normalizePairingCode, pairingName,
-  pairWithServer, readPairing, availableTargets, automaticTarget, initialTarget, isNativeHostMissing,
+  pairWithServer, unreachable, readPairing, availableTargets, automaticTarget, initialTarget, isNativeHostMissing,
 } = loaded.exports;
 
 const connectionProblem = (() => {
@@ -89,7 +89,8 @@ test('ServerTransport: a revoked pairing (401) says to pair again', async () => 
 test('ServerTransport: no answer, a time-out and a non-envelope answer fail in the server\'s own words', async () => {
   const down = new ServerTransport(PAIRING, mockFetch(new TypeError('Failed to fetch')).fetch);
   const error = await down.send('host.ping', {}).catch(e => e);
-  assert.match(error.message, /The Inbound server at http:\/\/192\.168\.1\.20:8080 is not answering/);
+  assert.match(error.message,
+    /^Could not connect to the Inbound server at http:\/\/192\.168\.1\.20:8080 \(the browser said: Failed to fetch\)\. Check that it is running/);
   // Never explained as the desktop app missing or stopped.
   assert.equal(connectionProblem.readableError(error.message), error.message);
   assert.equal(down.connected, false);
@@ -187,6 +188,33 @@ test('pairing failures: the server\'s reason, a server that is not ours, a bad c
   // A token the ping refuses is never handed back to be stored.
   const revoked = mockFetch({ status: 200, body: { ok: true, token: TOKEN, id: 'p1' } }, { status: 401, body: { ok: false, error: 'Pair it again.' } });
   await assert.rejects(pairWithServer('nas:8080', 'ABCDEF23', 'x', revoked.fetch), /Pair it again/);
+});
+
+test('EXT.B6: a pairing that gets no HTTP answer says the connection failed, in the browser\'s words', async () => {
+  // Firefox's words for a failed fetch (refused, no route, TLS, or blocked by the browser).
+  const firefox = mockFetch(new TypeError('NetworkError when attempting to fetch resource.'));
+  const error = await pairWithServer('http://192.168.1.20:8095', 'ABCDEF23', 'Firefox on Windows', firefox.fetch).catch(e => e);
+  assert.equal(error.message,
+    'Could not connect to the Inbound server at http://192.168.1.20:8095 (the browser said: NetworkError when attempting to fetch resource). ' +
+    'Check that it is running and that this address is right.');
+  assert.doesNotMatch(error.message, /not answering/);
+  assert.equal(connectionProblem.readableError(error.message), error.message);
+
+  // https: the certificate is a likely cause, and a tab shows whether the browser trusts it.
+  const tls = await pairWithServer('https://nas.lan:8443', 'ABCDEF23', 'x', mockFetch(new TypeError('Failed to fetch')).fetch).catch(e => e);
+  assert.match(tls.message, /^Could not connect to the Inbound server at https:\/\/nas\.lan:8443 \(the browser said: Failed to fetch\)\./);
+  assert.match(tls.message, /must also trust the server's certificate/);
+
+  // A time-out is told apart from a failed connection.
+  const slow = (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+  await assert.rejects(pairWithServer('nas:8080', 'ABCDEF23', 'x', slow, 30), /took too long to answer/);
+});
+
+test('unreachable: no error text, or a long one, still reads as one sentence', () => {
+  assert.equal(unreachable('http://nas:8080'),
+    'Could not connect to the Inbound server at http://nas:8080. Check that it is running and that this address is right.');
+  assert.doesNotMatch(unreachable('http://nas:8080', new Error('x'.repeat(500))), /x{201}/);
+  assert.doesNotMatch(unreachable('http://nas:8080', 'Failed.  '), /Failed\.\)/);
 });
 
 test('a stored pairing is used only when it is whole and its address is an origin', () => {
