@@ -22,6 +22,9 @@ export const FIREFOX_EXTENSION_ID = "inbound-bridge@kaan88";
 // writes it, and a release squash puts it on main, so it lists only XPIs already published.
 export const FIREFOX_UPDATE_URL = "https://raw.githubusercontent.com/Kaan88/inbound/main/extensions/firefox-updates.json";
 
+// The Firefox extension pages' CSP (see firefoxManifest): no upgrade-insecure-requests.
+export const FIREFOX_EXTENSION_PAGES_CSP = "script-src 'self'";
+
 const staticFiles = [
   "popup.html",
   "options.html",
@@ -43,6 +46,11 @@ export function firefoxManifest(chromeManifest) {
   // EXT.B5: Firefox asks where to save before downloads.onCreated, so there downloads are caught from their
   // response headers (blocking webRequest, which Firefox keeps in MV3). Chrome has onDeterminingFilename.
   manifest.permissions = [...new Set([...(manifest.permissions ?? []), "webRequest", "webRequestBlocking"])];
+  // EXT.B6: Firefox's default CSP for MV3 extension pages adds upgrade-insecure-requests, which turns the
+  // background's fetch to a paired server at http://<LAN address> into https:// (loopback is exempt), so pairing
+  // failed with a bare network error while Chrome and Edge, whose default has no upgrade, paired. This is that
+  // default without the upgrade; scripts stay limited to the extension's own files.
+  manifest.content_security_policy = { extension_pages: FIREFOX_EXTENSION_PAGES_CSP };
   manifest.browser_specific_settings = {
     gecko: {
       id: FIREFOX_EXTENSION_ID,
