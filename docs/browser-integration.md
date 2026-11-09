@@ -84,9 +84,14 @@ Edge is a supported browser (owner decision 2026-11-06). It runs the same extens
 - **Registered state.** Each key is absent, usable or broken. Usable means it points at a manifest that lists
   the store origin and names a program that exists. The bridge is registered when either key is usable, and
   the status (tray, status bar, CLI `status` and `doctor`) names a browser that cannot reach the host:
-  `connected; not registered for Chrome`, `connected; Chrome registration is broken`,
-  `connected; Edge registration is broken`. Chrome with no Edge key stays plain `connected`, because Edge may
-  not be installed and an install from 0.4.0 has no Edge key until the Host adds it.
+  `on; not registered for Chrome`, `on; Chrome registration is broken`,
+  `on; Edge registration is broken`. Chrome with no Edge key stays plain `on`, because Edge may
+  not be installed and an install from 0.4.0 has no Edge key until the Host adds it. The word is `on`, not
+  `connected`: a registration means a browser can reach the app, not that one is running (U-WL-9). When a key is
+  broken or missing, the window's status bar offers Repair, which runs the `register-native-host.ps1` that Setup
+  put beside `app\` for this install's `app` folder, without `-Force`, so another program's registration is never
+  replaced. A test or portable instance (`DOWNLOADMANAGER_DATA` or `DOWNLOADMANAGER_INSTANCE` set) and a build that
+  isn't installed are told why instead, and nothing is written.
 - **Repair at Host start.** Once per start, best effort, when one key is usable and the other is missing or
   points at a file that is gone, the Host writes the working key's value into the other one. It logs a failure
   rather than showing one, skips isolated-data runs, and never replaces a registration whose manifest exists,

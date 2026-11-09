@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
     private bool _pendingSettingsOpen;
     private string _category = "all";
     private string _search = string.Empty;
+
+    /// <summary>U-WL-7: how small the window can be dragged, the same as the smallest remembered size it starts at. The toolbar scrolls sideways below its full width.</summary>
+    private const int MinimumWindowWidth = 900;
+    private const int MinimumWindowHeight = 560;
     private readonly PassingLine _passing;
     private string _sortKey = "added";
     private bool _sortAscending;
@@ -94,8 +98,10 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var width = Math.Clamp(_uiState.WindowWidth, 900, 8000);
-            var height = Math.Clamp(_uiState.WindowHeight, 560, 8000);
+            // U-WL-7: set before the remembered size comes back, as SetMinimumSize asks.
+            WindowLayout.SetMinimumSize(this, MinimumWindowWidth, MinimumWindowHeight);
+            var width = Math.Clamp(_uiState.WindowWidth, MinimumWindowWidth, 8000);
+            var height = Math.Clamp(_uiState.WindowHeight, MinimumWindowHeight, 8000);
 
             // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
@@ -489,7 +495,7 @@ public sealed partial class MainWindow : Window
         AddButton.IsEnabled = connected;
         PauseButton.IsEnabled = connected && rows.Any(row => row.CanPause);
         ResumeButton.IsEnabled = connected && rows.Any(row => row.CanResume);
-        CancelPackageButton.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
+        CancelPackageGroup.Visibility = rows.Any(row => row.IsPackage) ? Visibility.Visible : Visibility.Collapsed;
         CancelPackageButton.IsEnabled = connected && rows.Any(row => row.CanCancelPackage);
         var sideRows = rows.Count(row => row.IsSideRow);
         var removableSideRows = FirstLocalRow is null && sideRows > 0 ? SelectedRemoteJobs.Count + CurrentArchivePlan().Remove.Count : 0;
@@ -564,8 +570,11 @@ public sealed partial class MainWindow : Window
             ConnectionText.Text = _connection.IsRemote
                 ? $"Connected to {_connection.Target.Name}" + (host is null ? string.Empty : $" · {host}")
                 : "Host connected" + (host is null ? string.Empty : $" · {host}")
-                    + (_status?.BrowserIntegration is { Length: > 0 } integration ? $" · browser {integration}" : string.Empty);
+                    + (ShellWords.BrowserIntegration(_status?.BrowserIntegration) is { } integration ? $" · {integration}" : string.Empty);
         }
+        var repair = !_connection.IsRemote && _graphConnected && ShellWords.IntegrationNeedsRepair(_status?.BrowserIntegration);
+        RepairBrowserButton.Visibility = repair ? Visibility.Visible : Visibility.Collapsed;
+        if (ShellWords.FindCount(_search, _visibleJobs.Count(row => row.PackageId is null)) is { } shown) StatusText.Text += $" · {shown}";
         var selected = SelectedJobs.Count;
         if (selected > 1)
         {
@@ -702,7 +711,23 @@ public sealed partial class MainWindow : Window
 
         UpdateEmptyText();
         EmptyText.Visibility = _visibleJobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFindBar();
         UpdateButtons();
+    }
+
+    /// <summary>U-WL-8: a filtered list says so, with how many rows it shows, until the filter is cleared.</summary>
+    private void UpdateFindBar()
+    {
+        var words = ShellWords.FindFilter(_search, _visibleJobs.Count(row => row.PackageId is null));
+        FindBar.Visibility = words is null ? Visibility.Collapsed : Visibility.Visible;
+        if (words is not null && FindBarText.Text != words) FindBarText.Text = words;
+    }
+
+    private void FindBarClear_Click(object sender, RoutedEventArgs e)
+    {
+        _search = string.Empty;
+        RebuildVisible();
+        UpdateStatusText();
     }
 
     private ScrollViewer? _jobsScroller;
@@ -2177,11 +2202,13 @@ public sealed partial class MainWindow : Window
         {
             _search = box.Text.Trim();
             RebuildVisible();
+            UpdateStatusText();
         }
         else if (result == ContentDialogResult.Secondary)
         {
             _search = string.Empty;
             RebuildVisible();
+            UpdateStatusText();
         }
     }
 
@@ -2457,8 +2484,11 @@ public sealed partial class MainWindow : Window
     {
         await ShowMessageAsync("Inbound Download Manager",
             $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
-            "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
-            "and a Manifest V3 browser bridge.");
+            // U-WL-26: what it does for the person, not how it is built.
+            "Downloads files for you, in parts at once where the server allows, and picks up where it left off after a " +
+            "lost connection or a restart. Downloads keep going in the background while this window is closed, and the " +
+            "browser extension hands the browser's downloads to it.\n\n" +
+            "If something goes wrong, Help > Open Diagnostics Folder has the logs.");
     }
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -3724,7 +3754,7 @@ public sealed partial class MainWindow : Window
             var sound = new CheckBox { Content = "Play a sound", IsChecked = settings.PlayCompletionSound };
             var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = settings.ShowCompletionDialog };
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
-            var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = settings.CloseWindowCompletely };
+            var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
             // UI.R23: the source of every window's theme. View > Dark Mode sets it too, so the box follows that.

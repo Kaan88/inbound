@@ -180,14 +180,6 @@
                             <TextBlock Text="Stop All" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
-                            Visibility="Collapsed"
-                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
-                        <StackPanel>
-                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
-                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
-                        </StackPanel>
-                    </Button>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                     <Button x:Name="DeleteButton" AutomationProperties.Name="Delete" Style="{StaticResource InboundToolButtonStyle}" Click="DeleteButton_Click"
                             ToolTipService.ToolTip="Delete the selected download and its partial data">
@@ -237,6 +229,17 @@
                             <TextBlock Text="Stop Queue" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
+                    <!-- U-WL-6: last, so that showing it for a package moves no other button. -->
+                    <StackPanel x:Name="CancelPackageGroup" Orientation="Horizontal" Visibility="Collapsed">
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <Button x:Name="CancelPackageButton" AutomationProperties.Name="Cancel Package" Style="{StaticResource InboundToolButtonStyle}" Click="MenuCancelPackage_Click"
+                            ToolTipService.ToolTip="Cancel the unfinished files in the selected package (partial data is kept)">
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE711;" FontSize="25" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                            <TextBlock Text="Cancel Package" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
                 <!-- UI.R26: which Host the window shows, at the right end of the toolbar so it stays in view however
@@ -279,6 +282,26 @@
                 <Button x:Name="ServerBannerBack" Grid.Column="3" FontSize="12" Padding="10,2" Content="Back to This PC"
                         AutomationProperties.Name="Back to This PC" AutomationProperties.AcceleratorKey="Ctrl+0"
                         ToolTipService.ToolTip="Show the downloads of this PC (Ctrl+0)" Click="ServerBannerBack_Click" />
+            </Grid>
+        </Border>
+
+        <!-- U-WL-8: while Find filters the list, what it shows and the way back to everything. -->
+        <Border x:Name="FindBar" Visibility="Collapsed" Padding="10,4"
+                Background="{ThemeResource InboundHighlightBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE71C;" FontSize="14" VerticalAlignment="Center" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                <TextBlock x:Name="FindBarText" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Find filter" AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Column="2" Content="Change…" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Change what Find looks for" Click="MenuFind_Click" />
+                <Button Grid.Column="3" Content="Show all" FontSize="12" Padding="10,2"
+                        AutomationProperties.Name="Clear the Find filter and show all downloads" Click="FindBarClear_Click" />
             </Grid>
         </Border>
 
@@ -558,6 +581,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <!-- Which Host the window shows: This PC or a saved server (design D9, section 5). -->
                 <DropDownButton x:Name="ServerSwitcher" Content="This PC" FontSize="11" Padding="6,0" MinHeight="0" Height="21"
@@ -574,6 +598,11 @@
                            AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
                 <TextBlock x:Name="ConnectionText" Grid.Column="2" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
+                <!-- U-WL-9: a browser registration that is broken or missing can be put right from here. -->
+                <Button x:Name="RepairBrowserButton" Grid.Column="3" Content="Repair…" FontSize="11" Padding="8,0" MinHeight="0" Height="19"
+                        VerticalAlignment="Center" Visibility="Collapsed" Click="RepairBrowser_Click"
+                        AutomationProperties.Name="Repair browser integration"
+                        ToolTipService.ToolTip="Register Inbound with your browsers again, so the extension can reach it" />
             </Grid>
         </Border>
     </Grid>
