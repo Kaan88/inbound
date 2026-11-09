@@ -210,7 +210,8 @@ export function planFileMenu(singleFile: boolean, packageRow: boolean, sideRows:
 }
 
 export function menuLabel(text: string, reason: string | null): string {
-  return reason === null ? text : `${text} (${reason})`;
+  // With nothing selected the greyed item says nothing more (owner, 2026-11-09).
+  return reason === null || reason === 'select a download first' ? text : `${text} (${reason})`;
 }
 
 export interface FileCommand { label: string; enabled: boolean; hidden: boolean }

@@ -402,7 +402,7 @@ describe('file menu rules', () => {
     expect(planFileMenu(false, false, 2, 1).removeReason).toBeNull();
     expect(planFileMenu(false, false, 0, 0).fileReason).toBe('select a download first');
     expect(planFileMenu(true, false, 0, 0, true).openReason).toBe('archive removed after extraction');
-    expect(menuLabel('Properties', 'select a download first')).toBe('Properties (select a download first)');
+    expect(menuLabel('Properties', 'select a download first')).toBe('Properties');
     expect(menuLabel('Properties', null)).toBe('Properties');
   });
 });

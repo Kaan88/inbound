@@ -29,7 +29,7 @@ function block(selector) {
 }
 
 const MAP = {
-  '--chrome': 'InboundChromeBrush', '--surface': 'InboundSurfaceBrush', '--divider': 'InboundDividerBrush',
+  '--chrome': 'InboundWindowFallbackBrush', // the desktop's chrome is now see-through over Mica (UI.R30); its solid colour is the fallback '--surface': 'InboundSurfaceBrush', '--divider': 'InboundDividerBrush',
   '--muted': 'InboundSecondaryTextBrush', '--progress': 'InboundProgressFillBrush', '--track': 'InboundProgressTrackBrush',
   '--error': 'InboundErrorTextBrush', '--highlight': 'InboundHighlightBrush',
   '--icon-start': 'InboundIconStartBrush', '--icon-pause': 'InboundIconPauseBrush', '--icon-danger': 'InboundIconDangerBrush',
