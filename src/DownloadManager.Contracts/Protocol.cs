@@ -264,7 +264,7 @@ public static class PipeNames
     public static string MutexName() => $"Local\\DownloadManager.Host.{CurrentUserKey()}";
 }
 
-public sealed class IpcClient : IAsyncDisposable
+public sealed class IpcClient : IIpcConnection
 {
     private readonly NamedPipeClientStream _pipe;
 

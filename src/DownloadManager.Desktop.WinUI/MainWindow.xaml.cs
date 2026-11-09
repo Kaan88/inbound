@@ -14,7 +14,7 @@ public sealed partial class MainWindow : Window
 {
     private ObservableCollection<JobViewModel> _visibleJobs = new();
     private readonly Dictionary<Guid, JobViewModel> _jobsById = new();
-    private readonly HostConnection _connection;
+    private HostConnection _connection;
     private readonly RemoteClient _remote;
     private MenuFlyoutSubItem? _addToQueueMenu;
     private List<DownloadGroupDto> _groups = new();
@@ -45,6 +45,10 @@ public sealed partial class MainWindow : Window
         _uiState = UiStateStore.Load();
         InitializeComponent();
         UiTrace.Write("MainWindow InitializeComponent complete");
+        // This PC's Host, always: its settings drive the theme and the window's own choices, and its updates are the
+        // ones shown. The list shows _connection, which is this one unless another server is chosen (MainWindow.Servers).
+        _local = new HostConnection();
+        _connection = _local;
 
         // Its one timer is kept with it for the window's life. See PassingLine for why that matters.
         _passing = new PassingLine(tick => new DispatcherOneShot(DispatcherQueue, PassingLine.Time, tick));
@@ -113,18 +117,8 @@ public sealed partial class MainWindow : Window
         UiTrace.Write("MainWindow chrome initialized");
         AppWindow.Closing += OnWindowClosing;
 
-        _connection = new HostConnection();
-        _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() => ApplySnapshot(snapshot));
-        _connection.JobChanged += (job, type) => DispatcherQueue.TryEnqueue(() => ApplyJobEvent(job, type));
-        _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() => { _groups = groups; RebuildVisible(); });
-        _connection.ConnectionChanged += (connected, error) =>
-            DispatcherQueue.TryEnqueue(() => ApplyConnection(connected, error));
-        _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() =>
-        {
-            UiTrace.Write("Host announced application exit");
-            Application.Current.Exit();
-        });
-        _connection.Start();
+        WireConnection(_local);
+        _local.Start();
         UiTrace.Write("MainWindow connection started");
 
         InitializeListHeader();
@@ -134,6 +128,7 @@ public sealed partial class MainWindow : Window
         InitializeRemoteUi();
         InitializeArchiveUi();
         _remote.Start();
+        InitializeServers();
 
         // Otherwise WinUI floats a shortcut's name over the window whenever the pointer rests on the root.
         RootGrid.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
@@ -226,20 +221,20 @@ public sealed partial class MainWindow : Window
         if (_settings is not null)
         {
             _pendingSettingsOpen = false;
-            _ = ShowSettingsDialogAsync();
+            _ = OpenOptionsAsync();
         }
     }
 
     private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        UiTrace.Write($"MainWindow closing completely={_settings?.CloseWindowCompletely == true}");
+        UiTrace.Write($"MainWindow closing completely={LocalSettings?.CloseWindowCompletely == true}");
         // Closing the window hides it, and by default (PERF.5) also ends this process. Downloads and the browser
         // bridge stay alive in the background host; Exit is an explicit tray/menu action.
         SaveUiState(sender);
         args.Cancel = true;
         // PERF.5 option: end the window's process, so the GPU driver's threads and the window's memory go with it.
         // The Host keeps downloading; the tray, a second launch or a download window starts it again.
-        if (_settings?.CloseWindowCompletely == true)
+        if (LocalSettings?.CloseWindowCompletely == true)
         {
             sender.Hide();
             Application.Current.Exit();
@@ -278,7 +273,12 @@ public sealed partial class MainWindow : Window
         if (!_graphSnapshotReady) _ = LoadSpeedHistoryAsync();
         _graphSnapshotReady = true;
         _settings = snapshot.Settings;
-        FollowThemeSetting(snapshot.Settings);
+        if (!_connection.IsRemote)
+        {
+            _localSettings = snapshot.Settings;
+            _localStatus = snapshot.Status;
+            FollowThemeSetting(snapshot.Settings);
+        }
         UpdateLimitButtons();
         _groups = snapshot.Settings.DownloadGroups;
         RefreshCustomCategories();
@@ -292,6 +292,7 @@ public sealed partial class MainWindow : Window
             var vm = new JobViewModel();
             vm.Update(job);
             _jobsById[vm.Id] = vm;
+            if (_connection.IsRemote) _remoteCompletions.Saw(job.Id, job.State);
         }
 
         RebuildVisible(selectedId);
@@ -301,7 +302,7 @@ public sealed partial class MainWindow : Window
         if (_pendingSettingsOpen)
         {
             _pendingSettingsOpen = false;
-            _ = ShowSettingsDialogAsync();
+            _ = OpenOptionsAsync();
         }
     }
 
@@ -326,6 +327,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyJobEvent(JobDto job, string changeType)
     {
+        if (_connection.IsRemote && changeType != "completed") _remoteCompletions.Saw(job.Id, job.State);
         if (changeType == "removed")
         {
             if (_jobsById.Remove(job.Id, out var removed))
@@ -396,21 +398,33 @@ public sealed partial class MainWindow : Window
 
         // Preserve notifications for headless jobs when the main UI is already open. Only a single CLI add: a CLI
         // batch or import ("cliBatch", "cliImport") opens no completion window per job (UI.B14).
-        if (changeType == "completed" && job.Source == "cli" && (job.ShowCompletionDialog ?? _settings?.ShowCompletionDialog) == true)
+        // Another server's completions are shown from these events, while this window is open (design D9, section 5):
+        // whether to is this PC's setting alone, and only for a download seen unfinished here, a few a minute at most
+        // (RemoteCompletionGate). This PC's Host opens its own.
+        if (changeType == "completed" && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
+                (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true))
         {
             // A package opens one window, when its last file is done, as the Host does for the other sources.
-            if (PackageOf(job.Id) is not { } package) OpenDownloadWindow(job.Id);
-            else if (PackageMembers(package).All(member => member.State == "completed")) OpenPackageWindow(package.Id);
+            var package = PackageOf(job.Id);
+            var due = package is null || PackageMembers(package).All(member => member.State == "completed");
+            if (due && (!_connection.IsRemote || _remoteCompletions.MayOpen(job.Id, DateTimeOffset.UtcNow)))
+            {
+                if (package is null) OpenDownloadWindow(job.Id);
+                else OpenPackageWindow(package.Id);
+            }
         }
+
+        if (changeType == "completed") NoteRemoteCompletion(job);
     }
 
     private void ApplyConnection(bool connected, string? error)
     {
         _graphConnected = connected;
         _graphSnapshotReady = false;
-        ConnectionText.Text = connected
-            ? "Host connected"
-            : $"Host unavailable{(error is null ? string.Empty : $": {error}")}";
+        var target = _connection.Target;
+        ConnectionText.Text = target.IsLocal
+            ? connected ? "Host connected" : $"Host unavailable{(error is null ? string.Empty : $": {error}")}"
+            : connected ? $"Connected to {target.Name}" : error ?? $"Disconnected from {target.Name}";
         if (connected) UpdateStatusText();
 
         // The rows stay on the list while the Host is away, so it isn't empty.
@@ -485,9 +499,9 @@ public sealed partial class MainWindow : Window
     /// <summary>A command with nothing to act on is dimmed and says why in its own words, like Extract.</summary>
     private void SyncFileMenu(int sideRows, int removableSideRows)
     {
-        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true);
-        Apply(FileOpenItem, "Open", plan.OpenReason);
-        Apply(FileOpenFolderItem, "Open Folder", plan.OpenReason);
+        var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
+        Apply(FileOpenItem, "Open", plan.ShellReason);
+        Apply(FileOpenFolderItem, "Open Folder", plan.ShellReason);
         Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
@@ -534,8 +548,10 @@ public sealed partial class MainWindow : Window
                           (retrying > 0 ? $" · {retrying} retrying" : string.Empty);
         if (_graphConnected)
         {
-            ConnectionText.Text = "Host connected" + (host is null ? string.Empty : $" · {host}")
-                + (_status?.BrowserIntegration is { Length: > 0 } integration ? $" · browser {integration}" : string.Empty);
+            ConnectionText.Text = _connection.IsRemote
+                ? $"Connected to {_connection.Target.Name}" + (host is null ? string.Empty : $" · {host}")
+                : "Host connected" + (host is null ? string.Empty : $" · {host}")
+                    + (_status?.BrowserIntegration is { Length: > 0 } integration ? $" · browser {integration}" : string.Empty);
         }
         var selected = SelectedJobs.Count;
         if (selected > 1)
@@ -1035,10 +1051,10 @@ public sealed partial class MainWindow : Window
 
         // The same words as the File menu: a package row has no one file for these to act on.
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
-        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true);
-        SayIfNoFile(_menuOpen, "Open", plan.OpenReason);
-        SayIfNoFile(_menuOpenWith, "Open With…", plan.OpenReason);
-        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.OpenReason);
+        var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
+        SayIfNoFile(_menuOpen, "Open", plan.ShellReason);
+        SayIfNoFile(_menuOpenWith, "Open With…", plan.ShellReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.ShellReason);
         SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
         if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
         SayIfNoFile(_menuRedownload, "Redownload", plan.FileReason);
@@ -1201,6 +1217,7 @@ public sealed partial class MainWindow : Window
 
     private async void MenuOpenWith_Click(object sender, RoutedEventArgs e)
     {
+        if (SayIfOnAnotherServer()) return;
         if (CommandJob is { FileRemovedAfterExtraction: true } removed)
         {
             ShowPassingStatus(JobNotes.NoFile(removed.StatusNote));
@@ -1243,14 +1260,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var nameBox = new TextBox { Header = "File name", Text = Path.GetFileName(job.FinalFilePath) };
-        var folderBox = new TextBox { Text = Path.GetDirectoryName(job.FinalFilePath) ?? string.Empty };
+        // Another server's path is split and joined with its own separator: a Linux server's paths use '/'.
+        var remote = _connection.IsRemote;
+        var nameBox = new TextBox { Header = "File name", Text = remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath) };
+        var folderBox = new TextBox { Text = (remote ? ServerPaths.Folder(job.FinalFilePath) : Path.GetDirectoryName(job.FinalFilePath)) ?? string.Empty };
         var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
         browse.Click += async (_, _) =>
         {
             try
             {
-                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder) folderBox.Text = folder;
+                // For another server this is its folder browser, starting at the download's folder.
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), start: remote ? folderBox.Text : null) is { } folder) folderBox.Text = folder;
             }
             catch (Exception)
             {
@@ -1290,9 +1310,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var target = Path.Combine(folderBox.Text.Trim(), nameBox.Text.Trim());
+        var newName = nameBox.Text.Trim();
+        if (remote && newName.IndexOfAny(['/', '\\']) >= 0)
+        {
+            await ShowMessageAsync("Move/Rename", "Type the file name without a folder; choose the folder above it.");
+            return;
+        }
+
+        var target = remote ? ServerPaths.Join(folderBox.Text.Trim(), newName) : Path.Combine(folderBox.Text.Trim(), newName);
         if (string.Equals(target, job.FinalFilePath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(Path.GetFileName(target), Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
+            string.Equals(remote ? ServerPaths.FileName(target) : Path.GetFileName(target),
+                remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
         {
             return;
         }
@@ -1538,7 +1566,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--package {packageId:D}") { UseShellExecute = false });
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("package", packageId, _connection.Target)) { UseShellExecute = false });
         }
         catch (Exception ex) { _ = ShowMessageAsync("Could not open progress", ex.Message); }
     }
@@ -1547,7 +1575,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--job {jobId:D} --manual")
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, WindowInstance.Arguments("job", jobId, _connection.Target, manual: true))
             {
                 UseShellExecute = false,
             });
@@ -1566,7 +1594,7 @@ public sealed partial class MainWindow : Window
     {
         if (_statisticsWindow is null)
         {
-            _statisticsWindow = new StatisticsWindow();
+            _statisticsWindow = new StatisticsWindow(_connection.Target);
             _statisticsWindow.Closed += (_, _) => _statisticsWindow = null;
         }
         _statisticsWindow.ShowWindow();
@@ -1715,7 +1743,13 @@ public sealed partial class MainWindow : Window
         categoryBox.SelectedItem = categoryBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
             item.Tag as string == (job.CategoryIsAutomatic ? "" : job.CategoryId)) ?? categoryBox.Items[0];
         var originalCategorySelection = categoryBox.SelectedItem;
-        var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions);
+        // Another server's download: its program is a path there, never looked for on this PC, and only what its hello
+        // allows can be changed.
+        var capabilities = _connection.Hello?.Capabilities ?? [];
+        var remoteScope = _connection.IsRemote
+            ? new RemoteCompletionScope(_connection.Target.Name, capabilities.Contains("programSettings"), capabilities.Contains("completionActions"))
+            : null;
+        var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions, remoteScope);
         var canEditCompletion = job.State != "completed";
         if (completionEditor.Content is Control completionControl) completionControl.IsEnabled = canEditCompletion;
         JobCompletionOptionsDto? completionOptions = null;
@@ -1957,7 +1991,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await _connection.ShutdownAsync();
+            await _local.ShutdownAsync();
         }
         catch (Exception)
         {
@@ -1975,7 +2009,7 @@ public sealed partial class MainWindow : Window
 
     // A record's row in the context menu acts on the download behind it, as the other file commands there do.
     private async void MenuContextDelete_Click(object sender, RoutedEventArgs e) => await ConfirmDeleteAsync(deleteFromDisk: false, fromContextMenu: true);
-    private void MenuOptions_Click(object sender, RoutedEventArgs e) => _ = ShowSettingsDialogAsync();
+    private void MenuOptions_Click(object sender, RoutedEventArgs e) => _ = OpenOptionsAsync();
 
     private async void MenuPauseAll_Click(object sender, RoutedEventArgs e)
     {
@@ -2241,18 +2275,19 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var latest = await _connection.RefreshAsync();
+            // The theme is this PC's, whichever server the window shows.
+            var latest = await _local.RefreshAsync();
             if (latest.Settings.Theme == theme)
             {
-                _settings = latest.Settings;
+                KeepLocalSettings(latest.Settings);
                 return true;
             }
 
             var updated = CloneSettings(latest.Settings);
             updated.Theme = theme;
-            var result = (await _connection.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
+            var result = (await _local.UpdateSettingsAsync(updated)).GetPayload<SettingsResult>();
             if (!result.Ok) return false;
-            _settings = result.Settings;
+            KeepLocalSettings(result.Settings);
             return true;
         }
         catch (Exception ex)
@@ -2268,7 +2303,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var check = (await _connection.CheckForUpdatesAsync())
+            var check = (await _local.CheckForUpdatesAsync())
                 .GetPayload<UpdateCheckResult>();
             if (check.Status == "notInstalled")
             {
@@ -2317,11 +2352,11 @@ public sealed partial class MainWindow : Window
             if (updateChoice is null) return;
             if (updateChoice != ContentDialogResult.Primary)
             {
-                await _connection.DeferUpdateAsync(check.AvailableVersion!);
+                await _local.DeferUpdateAsync(check.AvailableVersion!);
                 return;
             }
 
-            var download = (await _connection.DownloadUpdateAsync())
+            var download = (await _local.DownloadUpdateAsync())
                 .GetPayload<UpdateDownloadResult>();
             if (!download.Ok)
             {
@@ -2350,11 +2385,11 @@ public sealed partial class MainWindow : Window
             if (installChoice is null) return;
             if (installChoice != ContentDialogResult.Primary)
             {
-                await _connection.DeferUpdateAsync(check.AvailableVersion!);
+                await _local.DeferUpdateAsync(check.AvailableVersion!);
                 return;
             }
 
-            var install = (await _connection.InstallUpdateAsync())
+            var install = (await _local.InstallUpdateAsync())
                 .GetPayload<UpdateInstallResult>();
             if (!install.Ok && install.Status == "busy")
             {
@@ -2377,7 +2412,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
 
-                install = (await _connection.InstallUpdateAsync(force: true))
+                install = (await _local.InstallUpdateAsync(force: true))
                     .GetPayload<UpdateInstallResult>();
             }
 
@@ -2402,7 +2437,8 @@ public sealed partial class MainWindow : Window
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
     {
-        var directory = _status?.StateDirectory;
+        // This PC's own folder, whichever server the window shows.
+        var directory = _connection.IsRemote ? _localStatus?.StateDirectory : _status?.StateDirectory;
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
             _ = ShowMessageAsync("Diagnostics", "The host state directory is not available yet.");
@@ -3549,7 +3585,7 @@ public sealed partial class MainWindow : Window
     {
         if (_schedulerWindow is null)
         {
-            _schedulerWindow = new SchedulerWindow();
+            _schedulerWindow = new SchedulerWindow(_connection.Target);
             _schedulerWindow.Closed += (_, _) => _schedulerWindow = null;
         }
         _schedulerWindow.ShowWindow();
@@ -4517,6 +4553,7 @@ public sealed partial class MainWindow : Window
 
     private async Task OpenJobAsync(JobViewModel job)
     {
+        if (SayIfOnAnotherServer()) return;
         if (job.FileRemovedAfterExtraction)
         {
             ShowPassingStatus(JobNotes.NoFile(job.StatusNote));
@@ -4542,6 +4579,7 @@ public sealed partial class MainWindow : Window
 
     private void OpenContainingFolder(JobViewModel job)
     {
+        if (SayIfOnAnotherServer()) return;
         if (job.FileRemovedAfterExtraction)
         {
             ShowPassingStatus(JobNotes.NoFile(job.StatusNote));

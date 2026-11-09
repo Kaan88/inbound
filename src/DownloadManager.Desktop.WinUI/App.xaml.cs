@@ -21,6 +21,9 @@ public partial class App : Application
     private readonly Guid? _packageId;
     private PackageWindow? _packageWindow;
 
+    /// <summary><c>--server</c>: the saved server a progress or package window is for (design D9, section 5).</summary>
+    private readonly string? _serverId;
+
     public App()
     {
         UiTrace.Write("App ctor begin");
@@ -50,8 +53,9 @@ public partial class App : Application
         var packageIndex = Array.FindIndex(commandLine, arg => arg == "--package");
         if (packageIndex >= 0 && packageIndex + 1 < commandLine.Length &&
             Guid.TryParse(commandLine[packageIndex + 1], out var packageId)) _packageId = packageId;
-        var name = $"Local\\DownloadManager.UI.Show.{PipeNames.CurrentUserKey()}" +
-            (_updateMode ? ".Update" : _jobId is { } id ? $".Job.{id:D}" : _packageId is { } pid ? $".Package.{pid:D}" : string.Empty);
+        _serverId = WindowInstance.ServerId(commandLine);
+        // The same download's window for another server is another window, so the server's id is in its name.
+        var name = WindowInstance.EventName(PipeNames.CurrentUserKey(), _updateMode, _jobId, _packageId, _serverId);
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name, out var createdNew);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
         _secondaryInstance = !createdNew;
@@ -114,9 +118,22 @@ public partial class App : Application
             return;
         }
 
+        ServerTarget? server = null;
+        if (_serverId is not null && (_jobId is not null || _packageId is not null))
+        {
+            // The token is read from the window's own store; it never travels on the command line.
+            server = ServerStore.ForThisUser().Target(_serverId);
+            if (server is null)
+            {
+                UiTrace.Write("A progress window was asked for a server that isn't saved or can't be opened here");
+                Exit();
+                return;
+            }
+        }
+
         if (_packageId is { } package)
         {
-            _packageWindow = new PackageWindow(package);
+            _packageWindow = new PackageWindow(package, server);
             _packageWindow.Closed += (_, _) => Exit();
             _packageWindow.Activate();
             _ = Task.Run(() =>
@@ -132,7 +149,7 @@ public partial class App : Application
 
         if (_jobId is { } id)
         {
-            _downloadWindow = new DownloadWindow(id, commandLine.Contains("--manual"));
+            _downloadWindow = new DownloadWindow(id, commandLine.Contains("--manual"), server);
             _downloadWindow.Closed += (_, _) => Exit();
             _downloadWindow.Activate();
             _ = Task.Run(() =>

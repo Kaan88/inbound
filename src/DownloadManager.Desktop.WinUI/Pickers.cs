@@ -28,9 +28,14 @@ internal static class Pickers
         return one is null || string.IsNullOrWhiteSpace(one.Path) ? [] : [one.Path];
     }
 
-    /// <summary>The chosen folder's path, null when cancelled.</summary>
-    public static async Task<string?> PickFolderAsync(IntPtr window, bool startInDownloads = true)
+    /// <summary>
+    /// The chosen folder's path, null when cancelled. While the window shows another server, its folders are offered
+    /// (<see cref="ServerFolderWindow"/>), never this PC's: a download is saved on the server.
+    /// </summary>
+    public static async Task<string?> PickFolderAsync(IntPtr window, bool startInDownloads = true, string? start = null)
     {
+        if (RemoteDataRules.UsesServerFolderBrowser(ShownServer.IsRemote)) return await ServerFolderWindow.PickAsync(ShownServer.Target, start);
+
         var picker = new FolderPicker(Win32Interop.GetWindowIdFromWindow(window)) { ViewMode = PickerViewMode.List };
         if (startInDownloads) picker.SuggestedStartLocation = PickerLocationId.Downloads;
         var folder = await picker.PickSingleFolderAsync();
