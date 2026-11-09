@@ -282,9 +282,15 @@ public sealed class ContainerImportService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Why an ordinary link in a container has no way in (U-WR-8). Nothing from a container is ever requested directly
+    /// (see the class), and its links are secrets that a client never sees, so it can't be offered as a normal download.
+    /// </summary>
+    public const string NotDirect = "A container's links only go to a provider; this app never downloads them directly.";
+
     private static string OrdinaryReason(RemoteProviderEntry? taker)
     {
-        const string normal = "It can be added as a normal download.";
+        const string normal = NotDirect;
         if (taker is null)
         {
             return $"This app has no provider that could fetch this. {normal}";

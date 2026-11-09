@@ -376,6 +376,12 @@ public sealed class FileMetadataResult
     public string? ContentType { get; set; }
     public string? FinalUrl { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>
+    /// The Host would refuse to add this address for this caller (<see cref="Error"/> says why), so a dialog can stop
+    /// before Start rather than after it (U-WR-2). False when only the preview failed.
+    /// </summary>
+    public bool AddRefused { get; set; }
 }
 
 public sealed class AddJobRequest

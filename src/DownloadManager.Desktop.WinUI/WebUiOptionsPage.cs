@@ -19,15 +19,16 @@ internal sealed class WebUiOptionsPage
     private readonly CheckBox _enable = new() { Content = "Let other devices on my network control this PC's downloads" };
     private readonly StatusLine _state = new("Web UI state");
     private readonly NumberBox _port = SettingsWindow.Number("Port", WebUiForm.DefaultPort, WebUiForm.MinPort, WebUiForm.MaxPort);
-    private readonly TextBox _names = new() { Header = "Also reachable as", PlaceholderText = "nas, nas.example.com", MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+    // U-WR-15: fixed widths; sized to their headers they were narrower than what is typed in them.
+    private readonly TextBox _names = new() { Header = "Also reachable as", PlaceholderText = "nas, nas.example.com", Width = 420, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBlock _addresses = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Visibility = Visibility.Collapsed };
     private readonly TextBlock _addressesHint = SettingsWindow.Hint("Type one of these in the browser on the other device.");
     private readonly TextBlock _localOnlyHint = SettingsWindow.Hint("Other devices can't reach the web UI until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.");
     private readonly Button _openInBrowser = new() { Content = "Open in browser", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _openResult = new("Open in browser result");
     private readonly StatusLine _passwordState = new("Web UI password status");
-    private readonly PasswordBox _newPassword = new() { Header = "New password", PasswordRevealMode = PasswordRevealMode.Hidden, MaxWidth = 320, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly PasswordBox _repeatPassword = new() { Header = "Type it again", PasswordRevealMode = PasswordRevealMode.Hidden, MaxWidth = 320, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly PasswordBox _newPassword = new() { Header = "New password", PasswordRevealMode = PasswordRevealMode.Hidden, Width = 320, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly PasswordBox _repeatPassword = new() { Header = "Type it again", PasswordRevealMode = PasswordRevealMode.Hidden, Width = 320, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly Button _setPassword = new() { Content = "Set password", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _passwordResult = new("Web UI password result");
     private readonly StatusLine _firewallState = new("Windows Firewall status");

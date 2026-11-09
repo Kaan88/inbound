@@ -84,9 +84,9 @@
             <StackPanel Spacing="6">
                 <TextBlock x:Name="CompletedSize" />
                 <TextBlock x:Name="CompletedUrlHeader" Text="Address" FontWeight="SemiBold" Margin="0,6,0,0" />
-                <TextBox x:Name="CompletedUrl" IsReadOnly="True" />
+                <TextBox x:Name="CompletedUrl" IsReadOnly="True" AutomationProperties.Name="Address" />
                 <TextBlock Text="The file saved as" FontWeight="SemiBold" />
-                <TextBox x:Name="CompletedPath" IsReadOnly="True" />
+                <TextBox x:Name="CompletedPath" IsReadOnly="True" AutomationProperties.Name="The file saved as" />
             </StackPanel>
         </ScrollViewer>
 
@@ -98,11 +98,13 @@
         <ScrollViewer Grid.Row="4" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <StackPanel x:Name="ActionRow" Orientation="Horizontal" Spacing="8"
                     HorizontalAlignment="Right" VerticalAlignment="Center">
+            <!-- U-WL-17: Delete first and set apart, so it is never next to the default Open. -->
+            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" Margin="0,0,16,0" ToolTipService.ToolTip="Remove this download and delete its file" />
             <Button x:Name="PauseButton" Content="Pause" Click="Pause_Click" />
             <Button x:Name="ResumeButton" Content="Resume" Click="Resume_Click" />
             <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" ToolTipService.ToolTip="Remove this download and delete its file" />
-            <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" />
+            <Button x:Name="OpenButton" Content="Open" Click="Open_Click" Visibility="Collapsed" Style="{StaticResource AccentButtonStyle}"
+                    AutomationProperties.AcceleratorKey="Enter" />
             <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Visibility="Collapsed" />
             <Button x:Name="FolderButton" Content="Open folder" Click="Folder_Click" Visibility="Collapsed" />
             <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" />
