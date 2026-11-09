@@ -101,7 +101,8 @@ a:not([class]):hover,
   font-size: 12px;
 }
 .notice > .notice-text { flex: 1; min-width: 0; }
-.notice.notice-error { color: var(--error); }
+/* --error on the notice's blue is 4.27:1 in dark; the failed status colour is 4.91:1 (light 5.30:1). */
+.notice.notice-error { color: var(--status-failed); }
 
 /* The 6 px bar of the desktop list, with a reserved slot when there is nothing to show. */
 .progress { display: block; height: 6px; overflow: hidden; border-radius: 3px; background-color: var(--track); }

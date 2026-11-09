@@ -173,6 +173,8 @@ function showServer(status: ServerStatus | null): void {
   byId<HTMLElement>("serverPaired").classList.toggle("hidden", status === null);
   const target = byId<HTMLSelectElement>("defaultTarget");
   target.disabled = status === null;
+  // The "once one is paired" sentence only while none is.
+  byId<HTMLElement>("targetPairHint").classList.toggle("hidden", status !== null);
   if (!status) {
     target.value = "local";
     return;

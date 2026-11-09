@@ -4,6 +4,7 @@
 import { bytes as formatBytes } from "../../../webui/src/lib/format";
 import type { TargetId } from "./transport";
 import { icon } from "./ui/icon";
+import { fitPathText } from "./ui/path-field";
 
 /** One target as the background offers it (dm.getHandoff, dm.targets). */
 export interface OfferedTarget {
@@ -165,8 +166,7 @@ export class ServerFolderBrowser {
     // U-EX-12: a folder list arrived, so an error about an earlier one (or a folder typed before) is stale.
     this.onListed();
     const atRoots = !listing.path;
-    this.pathText.textContent = atRoots ? "Folders you can save to" : listing.path!;
-    this.pathText.title = this.pathText.textContent;
+    fitPathText(this.pathText, atRoots ? "Folders you can save to" : listing.path!);
     this.freeText.textContent = typeof listing.freeBytes === "number" ? `${formatBytes(listing.freeBytes)} free` : "";
     this.upButton.disabled = atRoots;
     this.useButton.disabled = atRoots;

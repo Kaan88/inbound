@@ -83,11 +83,14 @@ export function confirmDialog(options: ConfirmOptions, host: HTMLElement = docum
   backdrop.append(dialog);
   host.append(backdrop);
   openCount++;
+  // A short popup (one download is about 120 px) would leave the question no room: the page grows while it is open.
+  host.classList.add("dialog-open");
 
   return new Promise((resolve) => {
     const finish = (answer: ConfirmAnswer | null) => {
       openCount--;
       backdrop.remove();
+      if (!host.querySelector(":scope > .dialog-backdrop")) host.classList.remove("dialog-open");
       document.removeEventListener("keydown", onKey, true);
       try { returnTo?.focus(); } catch { /* gone with a redraw */ }
       resolve(answer);

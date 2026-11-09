@@ -18,6 +18,8 @@ interface Settings {
   startMode: "now" | "later";
   notifications: boolean;
   theme?: ThemeChoice;
+  /** "ask": a caught download asks where to save, in this popup or a folder window. */
+  destinationMode?: string;
 }
 
 interface ServerInfo { address: string; name?: string; connected: boolean; lastError: string }
@@ -151,9 +153,14 @@ function renderNotices(): void {
     if (status.server && !status.server.connected) {
       // U-EX-4: where caught downloads go is not answering, so they stay in the browser: said where it is seen.
       const goesThere = automatic && pauseLeft === 0 && status.automaticTarget === "server";
+      // With "ask where to save" a caught download is asked about, and the form then starts on This PC (U-EX-11).
+      const asks = status.settings?.destinationMode === "ask" && !status.localMissing;
+      const after = !goesThere ? "" : asks
+        ? " When a download is caught you'll be asked, with This PC chosen."
+        : " Caught downloads stay in the browser.";
       bars.push(notice({
         glyph: "cloud", tint: "tint-danger",
-        text: `${serverName(status.server)} isn't answering.${goesThere ? " Caught downloads stay in the browser." : ""}`,
+        text: `${serverName(status.server)} isn't answering.${after}`,
         action: { label: "Open web UI", run: () => openServer() },
       }));
     }
@@ -258,7 +265,27 @@ function unavailableView(): HTMLElement[] | null {
     { label: "Try again", run: () => void refresh() });
 }
 
+/**
+ * The row that had the focus can go (deleted, or gone from the app): the focus moves to the row now in its place, or
+ * the one before, or the header's first button, rather than to the page.
+ */
+function keepListFocus(render: () => void): void {
+  const list = byId<HTMLUListElement>("jobs");
+  const active = document.activeElement as HTMLElement | null;
+  const row = active?.closest?.(".job") as HTMLElement | null;
+  const at = row && list.contains(row) ? Array.from(list.querySelectorAll(".job")).indexOf(row) : -1;
+  render();
+  if (at < 0 || active!.isConnected) return;
+  const rows = Array.from(list.querySelectorAll<HTMLElement>(".job:not(.skeleton)"));
+  const next = rows[Math.min(at, rows.length - 1)] ?? byId<HTMLButtonElement>("downloadAll");
+  try { next.focus(); } catch { /* not shown */ }
+}
+
 function renderList(): void {
+  keepListFocus(drawList);
+}
+
+function drawList(): void {
   const list = byId<HTMLUListElement>("jobs");
   const empty = byId("emptyState");
   const unavailable = unavailableView();

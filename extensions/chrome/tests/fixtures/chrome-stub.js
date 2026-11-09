@@ -22,9 +22,13 @@
   const jobs = scenario.empty ? [] : data.jobs
     .filter((job) => scenario.paired || job.target !== "server")
     .map((job) => scenario.paired ? job : { ...job, target: undefined });
-  const targets = scenario.paired
+  const offered = scenario.paired
     ? data.targets.map((target) => target.id === "server" && scenario.serverDown ? { ...target, error: "No answer from home-server:8080." } : target)
     : [data.targets[0]];
+  // A folder too long for the field: its end, the folder's name, shows (ui/path-field.ts).
+  const targets = scenario.longFolder
+    ? offered.map((target) => target.id === "local" ? { ...target, defaultFolder: "D:\\Downloads\\Projects\\2026\\Client work\\Renders\\Final cut" } : target)
+    : offered;
 
   function status() {
     return {

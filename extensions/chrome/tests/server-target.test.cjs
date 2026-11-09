@@ -410,3 +410,27 @@ test('Download All: with a server paired each target brings its own default fold
     assert.equal(server.of('handoff.request')[0].body.payload.destinationDirectory, undefined);
   });
 });
+
+test('U-EX-4: the badge shows "!" only after a request to the server failed, and clears when one is answered', async () => {
+  const { harness, log } = paired({ ...catching, defaultTarget: 'server' });
+  const handlers = {};
+  const server = fakeServer(handlers);
+  await withServer(harness, server, async () => {
+    // A worker that just started has asked the server nothing: that is not "down".
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.notEqual(log.badge.at(-1), '!', 'no "!" before any request');
+    assert.equal(log.badge.includes('!'), false);
+    // A request fails (the popup's list, not a status check): the badge says so at once.
+    handlers['jobs.query'] = new TypeError('Failed to fetch');
+    const failed = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+    await answerNative(harness, 'jobs.query', { jobs: [] });
+    await failed;
+    assert.equal(log.badge.at(-1), '!');
+    // The next request is answered: the "!" goes, again without a status check.
+    handlers['jobs.query'] = { jobs: [] };
+    const answered = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+    await answerNative(harness, 'jobs.query', { jobs: [] });
+    await answered;
+    assert.equal(log.badge.at(-1), '');
+  });
+});

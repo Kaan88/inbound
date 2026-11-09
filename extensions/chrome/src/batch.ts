@@ -104,7 +104,8 @@ function showSuccess(message: string): void {
 }
 
 function typeOf(link: PageLink): string {
-  return link.extension ? link.extension.toUpperCase() : link.kind;
+  // Upper case like the file types ("RAR", "ISO"), so "LINK" reads as one of them.
+  return (link.extension || link.kind).toUpperCase();
 }
 
 function visibleLinks(): PageLink[] {
@@ -124,20 +125,29 @@ function visibleLinks(): PageLink[] {
   return shown;
 }
 
+/**
+ * What Start adds: the ticked links the filter shows. A ticked link the filter hides stays ticked for when the filter is
+ * cleared, but is not added, and the footer says how many are left out.
+ */
+function chosenLinks(visible: PageLink[] = visibleLinks()): PageLink[] {
+  return visible.filter((link) => selected.has(link.url));
+}
+
 function updateSelection(visible: PageLink[] = visibleLinks()): void {
-  const shownSelected = visible.filter((link) => selected.has(link.url)).length;
-  selectAll.checked = visible.length > 0 && shownSelected === visible.length;
-  selectAll.indeterminate = shownSelected > 0 && shownSelected < visible.length;
+  const chosen = chosenLinks(visible).length;
+  selectAll.checked = visible.length > 0 && chosen === visible.length;
+  selectAll.indeterminate = chosen > 0 && chosen < visible.length;
   if (scanned) countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
-  selectionLabel.textContent = `${selected.size} selected`;
-  const off = !targetsLoaded || !gate.canSend || selected.size === 0;
+  const hidden = selected.size - chosen;
+  selectionLabel.textContent = hidden > 0 ? `${chosen} selected (${hidden} more hidden by the filter, not added)` : `${chosen} selected`;
+  const off = !targetsLoaded || !gate.canSend || chosen === 0;
   confirmButton.disabled = off;
   laterButton.disabled = off;
   browseDestinationButton.disabled = !targetsLoaded || !gate.canPick;
   cancelButton.disabled = gate.sending;
   form.setTargetChoiceEnabled(gate.canPick);
   // The package name only means something for two or more (one Download All batch becomes one package).
-  packageField.classList.toggle("hidden", selected.size < 2);
+  packageField.classList.toggle("hidden", chosen < 2);
 }
 
 function render(): void {
@@ -292,7 +302,7 @@ selectAll.addEventListener("change", () => {
 });
 
 async function start(startMode: "now" | "later"): Promise<void> {
-  if (!targetsLoaded || selected.size === 0 || !gate.canSend) {
+  if (!targetsLoaded || chosenLinks().length === 0 || !gate.canSend) {
     return;
   }
 
@@ -307,7 +317,8 @@ laterButton.addEventListener("click", () => start("later"));
 async function sendToApp(startMode: "now" | "later"): Promise<void> {
   showError("");
   showSuccess("");
-  selectionLabel.textContent = `Adding ${selected.size} download${selected.size === 1 ? "" : "s"}…`;
+  const chosen = chosenLinks().map((link) => link.url);
+  selectionLabel.textContent = `Adding ${chosen.length} download${chosen.length === 1 ? "" : "s"}…`;
 
   try {
     const response = (await chrome.runtime.sendMessage({
@@ -317,8 +328,8 @@ async function sendToApp(startMode: "now" | "later"): Promise<void> {
       destination: form.destinationToSend(),
       startMode,
       target: form.target,
-      packageName: selected.size >= 2 ? packageInput.value.trim() : undefined,
-      urls: [...selected].map((url) => ({ url })),
+      packageName: chosen.length >= 2 ? packageInput.value.trim() : undefined,
+      urls: chosen.map((url) => ({ url })),
     })) as BatchResponse;
 
     if (!response?.ok) {
@@ -338,7 +349,7 @@ async function sendToApp(startMode: "now" | "later"): Promise<void> {
     }
 
     if (accepted > 0 && failed === 0) {
-      selected.clear();
+      for (const url of chosen) selected.delete(url);
       render();
       setTimeout(() => window.close(), 1400);
     }
