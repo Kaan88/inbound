@@ -47,7 +47,7 @@ internal static class ArchiveForm
     /// What changed, or null when nothing did. Only changes are sent: a setting nobody touched stays
     /// as it is on the Host, and turning auto-extract on starts counting from when it really went on.
     /// </summary>
-    public static ArchiveSettingsUpdate? Changes(ArchiveSettingsDto saved, ArchiveFormValues form, out string? error)
+    public static ArchiveSettingsUpdate? Changes(ArchiveSettingsDto saved, ArchiveFormValues form, out string? error, PathStyle pathStyle = PathStyle.ThisPc)
     {
         error = null;
         var folder = form.Folder.Trim();
@@ -63,9 +63,10 @@ internal static class ArchiveForm
                 return null;
             }
 
-            if (!Path.IsPathFullyQualified(folder))
+            // The folder is on the Host whose settings these are: a Linux server's is /downloads/extracted.
+            if (!ServerPaths.IsFull(folder, pathStyle))
             {
-                error = "The extraction folder must be a full path.";
+                error = $"The extraction folder must be {ServerPaths.FullFolderWords(pathStyle)}.";
                 return null;
             }
         }

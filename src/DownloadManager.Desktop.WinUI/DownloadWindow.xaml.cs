@@ -47,6 +47,7 @@ public sealed partial class DownloadWindow : Window
         {
             if (_closed) return;
             _settings = snapshot.Settings;
+            if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
             // Another server's theme is its own; this window keeps this PC's.
             if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;

@@ -135,6 +135,8 @@ public sealed partial class MainWindow
         _statisticsWindow?.Close();
 
         ShownServer.Target = target;
+        // What it said when it was paired, until its own hello and settings say more.
+        if (!target.IsLocal) ShownServer.Describe(_servers.Find(target.Id!)?.HostKind, null);
         if (target.IsLocal)
         {
             _connection = _local;
@@ -178,7 +180,10 @@ public sealed partial class MainWindow
         try
         {
             ApplyConnection(true, null);
-            ApplySnapshot(await _local.RefreshAsync());
+            var snapshot = await _local.RefreshAsync();
+            // Another switch while this PC's list was read: that one fills the window.
+            if (switchNumber != _switches || _connection != _local) return;
+            ApplySnapshot(snapshot);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
         {
@@ -368,6 +373,7 @@ public sealed partial class MainWindow
         if (_servers.Target(existing.Id) is { } updated)
         {
             ShownServer.Target = updated;
+            ShownServer.Describe(_servers.Find(existing.Id)?.HostKind ?? _connection.Hello?.HostKind, _settings?.DefaultDownloadDirectory);
             ServerSwitcher.Content = updated.Name;
             _connection.Retarget(updated);
             await _remote.RetargetAsync(updated);
