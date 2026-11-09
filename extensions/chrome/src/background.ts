@@ -1463,8 +1463,10 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // The native port opens lazily; probe once so the popup does not report
       // a working host as disconnected just because nothing used it yet. A paired server is asked
       // each time, at the same time: it has no connection to keep open.
-      await Promise.all([
-        native.connected ? undefined : sendNative("host.ping", {}, 3000, 0).catch(() => undefined),
+      // The bridge can stay open while the app behind it has stopped, so an open port alone is not "connected": the app
+      // has to answer the ping.
+      const [hostAnswered] = await Promise.all([
+        sendNative("host.ping", {}, 3000, 0).then((reply) => reply?.ok !== false, () => false),
         server?.send("host.ping", {}, 3000).catch(() => undefined),
       ]);
       updateBadge();
@@ -1474,7 +1476,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         enabled: settings.enabled,
         autoIntercept: settings.autoIntercept,
         automaticSending: automaticSendingActive(),
-        connected: native.connected,
+        connected: native.connected && hostAnswered,
         lastError: native.lastError,
         localMissing: localMissing(),
         server: serverStatus(),
