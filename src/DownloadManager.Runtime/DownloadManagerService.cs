@@ -825,14 +825,18 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>
-    /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
-    /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
+    /// Whether a queue start tries this failed download again: the queue would have retried it by itself. A retry that
+    /// is already waiting was counted when it was set, so it runs even when that used the last one.
     /// </summary>
     private static bool QueueRetriesFailedLocked(DownloadJob job, DownloadQueue queue)
         => job.State == DownloadState.Failed && !job.IsTerminal && job.QueueProcessing &&
            job.Failure?.Kind != FailureKind.VerificationFailed &&
-           (queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit);
+           (job.QueueRetryAt is not null || queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit);
 
+    /// <summary>
+    /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
+    /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
+    /// </summary>
     private static void RequestStopLocked(JobRuntime runtime)
     {
         runtime.PauseRequested = true;
@@ -1686,8 +1690,10 @@ public sealed partial class DownloadManagerService
                         runtime.CancelRequested = false;
                         runtime.CancelledForRemoval = false;
                         runtime.Job.QueueProcessing = true;
-                        // A retry counts against the queue's limit, as one the queue makes itself; anything else starts a fresh run.
-                        runtime.Job.QueueRetryCount = retry ? runtime.Job.QueueRetryCount + 1 : 0;
+                        // A retry counts against the queue's limit, as one the queue makes itself; a retry that was already
+                        // waiting was counted when it was set. Anything else starts a fresh run.
+                        runtime.Job.QueueRetryCount = !retry ? 0
+                            : runtime.Job.QueueRetryAt is null ? runtime.Job.QueueRetryCount + 1 : runtime.Job.QueueRetryCount;
                         runtime.Job.QueueRetryAt = null;
                         runtime.Job.State = DownloadState.Queued;
                         runtime.Job.StartMode = StartMode.StartNow;

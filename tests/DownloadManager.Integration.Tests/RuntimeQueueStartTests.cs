@@ -162,4 +162,42 @@ public sealed partial class RuntimeServiceTests
         Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" })).Ok);
         await ctx.WaitFor(main.Id, j => j.State == "failed" && j.UpdatedAt > mainStopped.UpdatedAt && j.QueueRetryCount >= 1);
     }
+    [Fact]
+    public async Task StartingTheQueueRunsAWaitingRetryWithoutCountingItTwice()
+    {
+        await using var ctx = await ServiceContext.CreateAsync(_server, autoResume: false);
+        var settings = ctx.Service.GetSnapshot().Settings;
+        settings.Queues.Add(new QueueDto { Id = 3, Name = "Two retries", IsRunning = true, MaxConcurrentDownloads = 1, Order = 3, RetryLimit = 2 });
+        settings.Queues.Add(new QueueDto { Id = 4, Name = "Last retry", IsRunning = true, MaxConcurrentDownloads = 1, Order = 4, RetryLimit = 1 });
+        Assert.True((await ctx.Service.UpdateSettingsAsync(settings)).Ok);
+
+        async Task<JobDto> AddFlakyAsync(int queueId)
+        {
+            var name = $"queue-waiting-{queueId}-{Guid.NewGuid():N}.bin";
+            var response = await ctx.Service.AddJobAsync(new AddJobRequest
+            {
+                Url = $"{_server.BaseAddress}/flaky/{name}?failures=100&size=16384",
+                DestinationDirectory = ctx.Destination, FileName = name, Source = "cli", QueueId = queueId, StartMode = "queue",
+            });
+            Assert.True(response.Accepted, response.Error);
+            return response.Job!;
+        }
+
+        // Two retries: the first failure sets one (counted); a Start runs that one now, and the second is still left.
+        var two = await AddFlakyAsync(3);
+        var pending = await ctx.WaitFor(two.Id, j => j.State == "failed" && j.QueueRetryAt is not null);
+        Assert.Equal(1, pending.QueueRetryCount);
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 3, Action = "start" })).Ok);
+        var again = await ctx.WaitFor(two.Id, j => j.State == "failed" && j.UpdatedAt > pending.UpdatedAt && j.QueueRetryAt is not null);
+        Assert.Equal(2, again.QueueRetryCount);
+
+        // One retry, already waiting: a Start runs it now, and after that failure none is left.
+        var one = await AddFlakyAsync(4);
+        var last = await ctx.WaitFor(one.Id, j => j.State == "failed" && j.QueueRetryAt is not null);
+        Assert.Equal(1, last.QueueRetryCount);
+        Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 4, Action = "start" })).Ok);
+        var spent = await ctx.WaitFor(one.Id, j => j.State == "failed" && j.UpdatedAt > last.UpdatedAt && j.QueueRetryAt is null,
+            TimeSpan.FromSeconds(20));
+        Assert.Equal(1, spent.QueueRetryCount);
+    }
 }
