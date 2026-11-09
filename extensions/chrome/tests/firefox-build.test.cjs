@@ -43,6 +43,25 @@ test('EXT.B6: Firefox extension pages do not upgrade http:// to https://, so a s
   assert.equal('content_security_policy' in chromeManifest, false);
 });
 
+test('EXT.B6: the built Firefox manifest carries that CSP, and the Chrome build has none', () => {
+  const { execFileSync } = require('node:child_process');
+  // Inside the package (ignored): the build's esbuild child may not be allowed to write to the temp folder.
+  const out = fs.mkdtempSync(path.join(root, 'test-build-'));
+  try {
+    const build = path.join(root, 'scripts', 'build.mjs');
+    execFileSync(process.execPath, [build, '--target', 'firefox', '--outdir', path.join(out, 'firefox')], { cwd: root, stdio: 'pipe' });
+    execFileSync(process.execPath, [build, '--target', 'chrome', '--outdir', path.join(out, 'chrome')], { cwd: root, stdio: 'pipe' });
+    const firefox = JSON.parse(fs.readFileSync(path.join(out, 'firefox', 'manifest.json'), 'utf8'));
+    assert.deepEqual(firefox.content_security_policy, { extension_pages: "script-src 'self'" });
+    assert.equal(firefox.browser_specific_settings.gecko.id, 'inbound-bridge@kaan88');
+    const chrome = JSON.parse(fs.readFileSync(path.join(out, 'chrome', 'manifest.json'), 'utf8'));
+    assert.equal('content_security_policy' in chrome, false);
+    assert.ok(fs.existsSync(path.join(out, 'firefox', 'background.js')));
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('the desktop app trusts the same Firefox ID', () => {
   const bridge = fs.readFileSync(path.join(root, '..', '..', 'src', 'DownloadManager.Contracts', 'BrowserBridge.cs'), 'utf8');
   assert.match(bridge, /FirefoxExtensionId = "inbound-bridge@kaan88"/);

@@ -10,8 +10,12 @@ const target = targetIndex >= 0 ? process.argv[targetIndex + 1] : "chrome";
 if (target !== "chrome" && target !== "firefox") {
   throw new Error(`Unknown --target ${target}. Use chrome or firefox.`);
 }
-// Chrome and Edge share dist; Firefox gets its own folder, since its manifest differs.
-const dist = path.join(root, target === "firefox" ? "dist-firefox" : "dist");
+// Chrome and Edge share dist; Firefox gets its own folder, since its manifest differs. --outdir builds
+// elsewhere (the tests check a real build without touching dist).
+const outdirIndex = process.argv.indexOf("--outdir");
+const dist = outdirIndex >= 0
+  ? path.resolve(process.argv[outdirIndex + 1])
+  : path.join(root, target === "firefox" ? "dist-firefox" : "dist");
 
 // Firefox's add-on ID. The desktop app and the Firefox native-messaging manifest name the same one
 // (BrowserBridge.FirefoxExtensionId).
