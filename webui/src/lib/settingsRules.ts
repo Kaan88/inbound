@@ -54,6 +54,8 @@ export interface ProxyForm {
   password: string;
   forget: boolean;
   hasPassword: boolean;
+  /** A manual proxy whose address the server did not send (a web session sees only the mode); the host keeps its own. */
+  addressHidden?: boolean;
 }
 
 export interface OptionsForm {
@@ -245,6 +247,7 @@ export function formFrom(settings: Settings): OptionsForm {
     proxy: {
       mode: settings.proxy?.mode ?? 'none', type: split.type, host: split.host, username: settings.proxy?.username ?? '',
       password: '', forget: false, hasPassword: !!settings.proxy?.hasPassword,
+      addressHidden: settings.proxy?.mode === 'manual' && !settings.proxy?.address,
     },
     logins: (settings.siteLogins ?? []).map((l) => ({
       id: l.id, site: l.site, username: l.username, password: '', hasPassword: l.hasPassword, isNew: false, removed: false,
@@ -269,7 +272,11 @@ const whole = (value: number | null | undefined) => (value === null || value ===
  * Every problem in the draft, in the desktop's order (U-WU-12: the page showed only the first and marked nothing). Each
  * names its page and its box.
  */
-export function validateAll(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null): Problem[] {
+export function validateAll(
+  form: OptionsForm,
+  archive?: { saved: ArchiveSettings; values: ArchiveValues } | null,
+  context: { pcOnly?: boolean } = {},
+): Problem[] {
   const problems: Problem[] = [];
   if (archive) {
     const { error } = archiveChanges(archive.saved, archive.values);
@@ -294,7 +301,9 @@ export function validateAll(form: OptionsForm, archive?: { saved: ArchiveSetting
   const limit = whole(form.speedKb);
   const speedUntouched = limit === form.speedKbAtOpen;
   if (!speedUntouched && limit !== null && (limit < 1 || limit > maxSpeedKb)) problems.push({ message: `Speed limit must be between 1 and ${maxSpeedKb} KB/s.`, page: 'connection', field: 'set-speed' });
-  if (form.proxy.mode === 'manual' && composeProxyAddress(form.proxy.type, form.proxy.host) === null)
+  // Not where only the PC may change the proxy, nor while the hidden address is left empty: the host keeps its own.
+  const proxyKept = context.pcOnly || (form.proxy.addressHidden && form.proxy.host.trim() === '');
+  if (!proxyKept && form.proxy.mode === 'manual' && composeProxyAddress(form.proxy.type, form.proxy.host) === null)
     problems.push({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy', field: 'proxy-address' });
   const profiles = parseProfiles(form.profiles);
   if (profiles.error) problems.push({ message: profiles.error, page: 'connection', field: 'set-profiles' });
@@ -302,8 +311,8 @@ export function validateAll(form: OptionsForm, archive?: { saved: ArchiveSetting
 }
 
 /** What the desktop checks before it saves, in its order; the first problem and the page it is on. */
-export function validateForm(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null): Problem | null {
-  return validateAll(form, archive)[0] ?? null;
+export function validateForm(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null, context: { pcOnly?: boolean } = {}): Problem | null {
+  return validateAll(form, archive, context)[0] ?? null;
 }
 
 /** The footer's words for the problems: one says itself; several are counted and each names its page. */
