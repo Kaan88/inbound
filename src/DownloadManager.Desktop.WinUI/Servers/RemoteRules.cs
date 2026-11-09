@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 
 namespace DownloadManager.Desktop.WinUI;
 
@@ -301,6 +301,7 @@ internal static class ServerPaths
         {
             HostKinds.Windows => PathStyle.Windows,
             HostKinds.Server => PathStyle.Linux,
+            HostKinds.Linux => PathStyle.Linux,
             _ => PathStyle.Either,
         };
     }

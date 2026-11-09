@@ -1,4 +1,4 @@
-namespace DownloadManager.Contracts;
+﻿namespace DownloadManager.Contracts;
 
 public sealed class FailureDto
 {
@@ -288,6 +288,9 @@ public static class HostKinds
 {
     public const string Windows = "windows";
     public const string Server = "server";
+
+    /// <summary>The Linux desktop Host (<c>DownloadManager.Host.Linux</c>): a desktop, with Linux paths.</summary>
+    public const string Linux = "linux";
 }
 
 /// <summary>The values of <see cref="ClientHelloDto.Role"/>.</summary>
