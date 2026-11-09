@@ -17,6 +17,7 @@
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
   import { listState } from '../lib/listState.svelte';
+  import { LongPress } from '../lib/longpress';
   import { orderedQueues, queueStartedText } from '../lib/queues';
   import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
@@ -88,9 +89,8 @@
   let extractFromDisk = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; label: string } | null>(null);
   let grid: HTMLDivElement | undefined = $state();
-  let suppressClick = false;
   let menuOpenedAt = 0;
-  let longPress: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+  const longPress = new LongPress();
 
   /** One dialog at a time that asks a yes or no: the Delete questions, Cancel Package, taking provider rows off the list. */
   interface Confirm {
@@ -234,7 +234,7 @@
   }
 
   function click(row: Row, event: MouseEvent) {
-    if (suppressClick) { suppressClick = false; return; }
+    if (longPress.takeClick()) return;
     const ctrl = event.ctrlKey || event.metaKey;
     cursor = row.id;
     if (touchFirst() && !event.shiftKey && !ctrl) {
@@ -794,29 +794,8 @@
   }
 
   function pointerdown(row: Row, event: PointerEvent) {
-    if (event.pointerType !== 'touch') return;
-    // A new touch starts fresh: the click that ended an earlier long press may never have come.
-    suppressClick = false;
-    cancelLongPress();
-    longPress = {
-      x: event.clientX,
-      y: event.clientY,
-      timer: setTimeout(() => {
-        longPress = null;
-        // The click that ends this press is swallowed, however long the finger stays down.
-        suppressClick = true;
-        openMenu(row, event.clientX, event.clientY);
-      }, 550),
-    };
-  }
-
-  function pointermove(event: PointerEvent) {
-    if (longPress && Math.hypot(event.clientX - longPress.x, event.clientY - longPress.y) > 8) cancelLongPress();
-  }
-
-  function cancelLongPress() {
-    if (longPress) clearTimeout(longPress.timer);
-    longPress = null;
+    // Every press, mouse included, ends the swallow of an earlier long press whose click never came.
+    longPress.down(event.pointerType, event.clientX, event.clientY, () => openMenu(row, event.clientX, event.clientY));
   }
 
   function toolbarMenu(event: MouseEvent, label: string, items: MenuItem[]) {
@@ -946,7 +925,8 @@
   const ariaSort = (key: SortKey) => (sort.key === key ? (sort.ascending ? 'ascending' : 'descending') : 'none') as 'ascending' | 'descending' | 'none';
 </script>
 
-<svelte:window onkeydown={windowKey} />
+<!-- The finger may lift on the menu the long press opened, not on the row: the swallow still runs out. -->
+<svelte:window onkeydown={windowKey} onpointerup={() => longPress.up()} onpointercancel={() => longPress.cancelled()} />
 
 <!-- Toolbar: Add URL | Resume, Stop, Stop All, [Cancel Package] | Delete, Delete Completed | Extract | [Check now] | Options, Scheduler | Start Queue, Stop Queue | More.
      What doesn't fit the width goes into More, least needed first (U-WU-2, U-WU-9); the bar never scrolls sideways. -->
@@ -1033,9 +1013,7 @@
       ondblclick={() => open(row)}
       oncontextmenu={(event) => contextmenu(row, event)}
       onpointerdown={(event) => pointerdown(row, event)}
-      onpointermove={pointermove}
-      onpointerup={cancelLongPress}
-      onpointercancel={cancelLongPress}
+      onpointermove={(event) => longPress.move(event.clientX, event.clientY)}
     >
       <!-- The whole cell is the box's target, so a finger can tick it (U-WU-8). -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
