@@ -10,6 +10,7 @@
 //   INBOUND_MOCK_KEY       the mock TorBox key the TestServer prints (an invented one), optional
 //   INBOUND_TEST_PASSWORD  the throwaway password to set or sign in with
 //   INBOUND_OUT            where screenshots go (default ../artifacts/webui)
+//   INBOUND_VARIANTS       a regex of the variants to walk (desktop-dark, desktop-light, phone-dark, phone-light), optional
 
 import { chromium } from '@playwright/test';
 import { mkdirSync, readdirSync } from 'node:fs';
@@ -25,12 +26,14 @@ const out = resolve(process.env.INBOUND_OUT ?? resolve(import.meta.dirname, '../
 if (!password) throw new Error('Set INBOUND_TEST_PASSWORD to a throwaway password for the test server.');
 mkdirSync(out, { recursive: true });
 
-const variants = [
+const allVariants = [
   { name: 'desktop-dark', viewport: { width: 1360, height: 820 }, colorScheme: 'dark' },
   { name: 'desktop-light', viewport: { width: 1360, height: 820 }, colorScheme: 'light' },
   { name: 'phone-dark', viewport: { width: 390, height: 844 }, colorScheme: 'dark', isMobile: true, hasTouch: true },
   { name: 'phone-light', viewport: { width: 390, height: 844 }, colorScheme: 'light', isMobile: true, hasTouch: true },
 ];
+// INBOUND_VARIANTS=regex keeps only the matching variants (dark, say); the first one left runs the end-to-end checks.
+const variants = process.env.INBOUND_VARIANTS ? allVariants.filter((v) => new RegExp(process.env.INBOUND_VARIANTS).test(v.name)) : allVariants;
 
 // INBOUND_ONLY=regex walks only the screens (or, with a name starting "e2e:", the end-to-end checks) whose name matches,
 // to try one fix quickly; the screens' state then must come from an earlier run.
@@ -485,6 +488,28 @@ for (const index of [0, 1, 2, 3]) {
     await p.waitForTimeout(1500);
   });
 }
+// D2d: a row opens a dialog (files, destination, Download), and its menu has the quick actions.
+/** A My TorBox row whose files the provider lists ("3 files"), or the first row. */
+async function itemRow(p) {
+  await p.locator('.item-row').first().waitFor();
+  const listed = p.locator('.item-row', { hasText: / \d+ files? / }).first();
+  return (await listed.count()) ? listed : p.locator('.item-row').first();
+}
+await capture(`${at++}-my-torbox-item-dialog`, signedIn, async (p) => {
+  await app(p, '#/provider');
+  const row = (await itemRow(p)).locator('> button').first();
+  await row.click();
+  await dialog(p).waitFor();
+  await dialog(p).getByRole('button', { name: 'Download selected' }).waitFor();
+  await p.waitForTimeout(800); // the file tree
+});
+await capture(`${at++}-my-torbox-row-menu`, signedIn, async (p, v) => {
+  await app(p, '#/provider');
+  const row = await itemRow(p);
+  if (phone(v)) await row.getByRole('button', { name: /^Actions for / }).click();
+  else await row.locator('> button').first().click({ button: 'right' });
+  await p.getByRole('menu').waitFor();
+});
 await capture(`${at++}-statistics`, signedIn, (p) => app(p, '#/statistics'), { fullPage: true });
 await capture(`${at++}-menu-open`, signedIn, async (p, v) => {
   await app(p, '#/all');
@@ -566,6 +591,43 @@ if (torrent && mockKey) {
     if (await dialog(page).count() && await close.count()) await close.click();
     await app(page, '#/remote');
     expect(/torrent-(?!5b1e7c3d)\w+[\s\S]*Waiting for TorBox/.test(await page.locator('main').innerText()), 'the uploaded torrent is not waiting at the provider');
+  });
+}
+
+// D2d: My TorBox's item dialog by keyboard (Enter opens, Tab stays inside, Escape closes, the row has the focus again),
+// the row menu by Shift+F10, and Download selected from the dialog, which closes it and says so under the list.
+if (mockKey) {
+  await step('e2e: My TorBox item dialog and row menu by keyboard, then Download selected', async () => {
+    await app(page, '#/provider');
+    const row = (await itemRow(page)).locator('> button').first();
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await dialog(page).waitFor();
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'the dialog did not take the focus');
+    for (let i = 0; i < 12; i++) await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'Tab left the dialog');
+    await page.keyboard.press('Escape');
+    await dialog(page).waitFor({ state: 'detached' });
+    expect(await row.evaluate((el) => el === document.activeElement), 'the focus did not come back to the row');
+
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menu').waitFor();
+    expect(await page.getByRole('menuitem', { name: /Copy name/ }).count() === 1, 'the row menu has no Copy name');
+    await page.keyboard.press('Escape');
+    await page.getByRole('menu').waitFor({ state: 'detached' });
+    expect(await row.evaluate((el) => el === document.activeElement), 'the focus did not come back to the row after the menu');
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menuitem', { name: /Choose files and download/ }).click();
+    await dialog(page).waitFor();
+    const selected = dialog(page).getByRole('button', { name: 'Download selected' });
+    await page.waitForFunction(() => {
+      const button = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Download selected');
+      return button && !button.disabled;
+    }, null, { timeout: 10000 });
+    await selected.click();
+    await dialog(page).waitFor({ state: 'detached', timeout: 10000 });
+    expect(/Added '.+' to the download list|will download/.test(await page.locator('main').innerText()), 'Download selected did not say it was added');
+    await page.screenshot({ path: resolve(out, 'e2e-my-torbox-added.desktop-dark.png') });
   });
 }
 
