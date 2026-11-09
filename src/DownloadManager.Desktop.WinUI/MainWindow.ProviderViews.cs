@@ -120,8 +120,25 @@ public sealed partial class MainWindow
 
     private void ShowProviderFull(string provider)
     {
+        // From the drawer, a new panel takes up the drawer's place (tab, item, scroll, folder). The same panel moved out
+        // of the SplitView's pane was left with almost no controls in UI Automation, so a screen reader found nothing.
+        if (_providerPanel is { Mode: ProviderPanelMode.Drawer } drawer && BrowsableAccount(provider) is { } account &&
+            RemoteRules.SameProvider(drawer.Provider, account.Provider))
+        {
+            var state = drawer.Capture();
+            if (ProviderSplit.IsPaneOpen)
+            {
+                _closingDrawer = true;
+                ProviderSplit.IsPaneOpen = false;
+            }
+
+            drawer.Close();
+            Detach(drawer.Element);
+            _providerPanel = null;
+            if (EnsureProviderPanel(provider) is { } fresh) fresh.Restore(state);
+        }
+
         if (EnsureProviderPanel(provider) is not { } panel) return;
-        // The place is taken while the list is still laid out as it was.
         panel.SetMode(ProviderPanelMode.Full);
         if (ProviderSplit.IsPaneOpen)
         {
@@ -129,8 +146,7 @@ public sealed partial class MainWindow
             ProviderSplit.IsPaneOpen = false;
         }
 
-        Detach(panel.Element);
-        ProviderFullHost.Children.Add(panel.Element);
+        AttachFull(panel);
         if (!_providerFull) _scrollTrackBeforeFull = JobsScrollTrack.Visibility;
         _providerFull = true;
         ProviderFullHost.Visibility = Visibility.Visible;
@@ -140,6 +156,13 @@ public sealed partial class MainWindow
         SelectSidebarQuietly(RemoteBrowseTag + panel.Provider);
         UpdateProviderButton();
         panel.SetShown(AppWindow.IsVisible);
+    }
+
+    private void AttachFull(ProviderPanel panel)
+    {
+        if (ReferenceEquals(panel.Element.Parent, ProviderFullHost)) return;
+        Detach(panel.Element);
+        ProviderFullHost.Children.Add(panel.Element);
     }
 
     /// <summary>Back to the list as it was. The panel keeps its place for the next time.</summary>
@@ -219,6 +242,7 @@ public sealed partial class MainWindow
     {
         if (!_closingDrawer) _drawerDismissedAt = DateTime.UtcNow;
         _closingDrawer = false;
+
         if (_providerPanel is { } panel && !_providerFull) panel.SetShown(false);
         UpdateProviderButton();
     }
