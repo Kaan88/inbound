@@ -183,6 +183,11 @@ internal sealed class PipeBackend(string helloPipe, ServerLog log) : IEnvelopeBa
             {
                 // Closed under the request: the Host stopped, or it closed the web sessions.
             }
+            catch (InvalidDataException ex)
+            {
+                // A frame the bridge can't read: not this app's Host, or a broken connection.
+                log.Warn($"The app's pipe sent something that isn't a frame: {ex.Message}");
+            }
 
             throw new BackendUnavailableException(HostAway);
         }

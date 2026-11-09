@@ -32,6 +32,37 @@ public sealed class BridgeApp : IAsyncDisposable
 
     public ServerAuth Auth { get; }
 
+    /// <summary>How a refused name is added (<see cref="OriginCheck"/>): on Windows it is set in the app, not in a variable.</summary>
+    public const string AddNameText = "add the name under Web UI in the app's Options on that PC";
+
+    /// <summary>
+    /// This PC's own names (its DNS host name and its NetBIOS name, lower case), which a phone on the network may use
+    /// as well as an address: the bridge accepts them besides the names set in Options.
+    /// </summary>
+    internal static List<string> OwnNames()
+    {
+        var names = new List<string>();
+        try
+        {
+            names.Add(System.Net.Dns.GetHostName());
+        }
+        catch (SocketException)
+        {
+            // No host name: the NetBIOS name below still counts.
+        }
+
+        try
+        {
+            names.Add(Environment.MachineName);
+        }
+        catch (InvalidOperationException)
+        {
+            // Not readable.
+        }
+
+        return names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim().ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>Where Kestrel really listens.</summary>
     public IReadOnlyList<Uri> Addresses =>
         _web.Services.GetService(typeof(IServer)) is IServer server && server.Features.Get<IServerAddressesFeature>() is { } feature
@@ -59,7 +90,8 @@ public sealed class BridgeApp : IAsyncDisposable
         }
 
         if (key.Length < 32) throw new ServerStartException("The web bridge was given no ticket key it can use.");
-        var hosts = (start.Hosts ?? []).Where(host => !string.IsNullOrWhiteSpace(host)).Select(host => host.Trim()).ToList();
+        var hosts = (start.Hosts ?? []).Where(host => !string.IsNullOrWhiteSpace(host)).Select(host => host.Trim())
+            .Concat(OwnNames()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var port = start.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         List<string> urls = start.LocalOnly ? [$"http://127.0.0.1:{port}"] : [$"http://0.0.0.0:{port}"];
         // IPv6 too where the PC has it; with port 0 each family would get a different port, so tests keep to one.
@@ -74,6 +106,7 @@ public sealed class BridgeApp : IAsyncDisposable
             HostKind = HostKinds.Windows,
             Bridge = true,
             TicketKey = key,
+            SessionCookieName = $"{ServerAuth.CookieName}_{port}",
         };
     }
 
@@ -135,6 +168,9 @@ public sealed class BridgeApp : IAsyncDisposable
 
     public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => _web.WaitForShutdownAsync(cancellationToken);
 
+    /// <summary>Tests: the web front ends as it would by itself (not through <see cref="StopAsync"/> or standard input).</summary>
+    internal void EndByItself() => _web.Lifetime.StopApplication();
+
     public async Task StopAsync()
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
@@ -169,9 +205,11 @@ public sealed class BridgeApp : IAsyncDisposable
 
     /// <summary>
     /// The process: options from the first line of standard input, <see cref="WebBridgeExit.ReadyLine"/> on standard
-    /// output once it listens, the reason on standard error when it can't. It stops when standard input closes.
+    /// output once it listens, the reason on standard error when it can't. It stops when standard input closes. The
+    /// three streams are UTF-8 both ends (<see cref="Utf8"/>; the data folder's path holds the Windows user's name).
     /// </summary>
-    public static async Task<int> RunAsync(TextReader input, TextWriter output, TextWriter error)
+    /// <param name="started">Tests: called once the bridge listens.</param>
+    public static async Task<int> RunAsync(TextReader input, TextWriter output, TextWriter error, Func<BridgeApp, Task>? started = null)
     {
         WebBridgeStartDto? start;
         try
@@ -223,10 +261,31 @@ public sealed class BridgeApp : IAsyncDisposable
                     // Nothing else is sent; a line is ignored.
                 }
             });
-            await Task.WhenAny(stdinClosed, app.WaitForShutdownAsync()).ConfigureAwait(false);
+            if (started is not null) await started(app).ConfigureAwait(false);
+            var first = await Task.WhenAny(stdinClosed, app.WaitForShutdownAsync()).ConfigureAwait(false);
+            if (first != stdinClosed)
+            {
+                // Nobody asked: the web front ended by itself. The Host restarts it as a crash, and says why.
+                app._log.Error("The web front stopped by itself.");
+                await error.WriteLineAsync("The web UI stopped by itself. Details are in the web bridge's log.").ConfigureAwait(false);
+                await error.FlushAsync().ConfigureAwait(false);
+                return WebBridgeExit.Crashed;
+            }
         }
 
         return WebBridgeExit.Stopped;
+    }
+
+    /// <summary>UTF-8 without a byte order mark: what the Host writes and reads on the bridge's three streams.</summary>
+    public static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>The process's own streams in UTF-8, whatever the console's code page (a hidden console has the OEM one).</summary>
+    public static Task<int> RunOnConsoleAsync()
+    {
+        var input = new StreamReader(Console.OpenStandardInput(), Utf8, detectEncodingFromByteOrderMarks: false);
+        var output = new StreamWriter(Console.OpenStandardOutput(), Utf8) { AutoFlush = true };
+        var error = new StreamWriter(Console.OpenStandardError(), Utf8) { AutoFlush = true };
+        return RunAsync(input, output, error);
     }
 }
 

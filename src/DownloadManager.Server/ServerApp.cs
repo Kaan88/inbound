@@ -343,12 +343,17 @@ public static class OriginCheck
 {
     public const string HostsVariable = "DOWNLOADMANAGER_HOSTS";
 
+    /// <summary>Where a refused name is added, said in the refusal: this server's environment variable.</summary>
+    public const string HostsSetting = "add the name to " + HostsVariable;
+
     /// <param name="hasValidToken">Whether the request carries a paired app's valid token on a token path (<see cref="ServerAuth.HasValidToken"/>).</param>
-    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames, Func<HttpContext, bool> hasValidToken) => async (context, next) =>
+    /// <param name="addName">How the refusal says to add a name (<see cref="HostsSetting"/>; the web bridge names the app's Options).</param>
+    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames, Func<HttpContext, bool> hasValidToken,
+        string addName = HostsSetting) => async (context, next) =>
     {
         if (context.Request.Path.StartsWithSegments("/api") && !ExtensionCors.Admits(context.Request) &&
             !CarriesOwnCredential(context, hasValidToken) &&
-            Refusal(context.Request, allowedNames) is { } refusal)
+            Refusal(context.Request, allowedNames, addName) is { } refusal)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync(refusal).ConfigureAwait(false);
@@ -374,7 +379,7 @@ public static class OriginCheck
         (value ?? string.Empty).Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
     /// <summary>Why the request is refused, or null.</summary>
-    public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames)
+    public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames, string addName = HostsSetting)
     {
         var origin = request.Headers.Origin.ToString();
         var hasOrigin = !string.IsNullOrEmpty(origin);
@@ -394,6 +399,6 @@ public static class OriginCheck
             string.Equals(name, "localhost", StringComparison.OrdinalIgnoreCase) ||
             allowedNames.Contains(name, StringComparer.OrdinalIgnoreCase))
             return null;
-        return $"This server isn't known by the name {name}. Use its IP address, or add the name to {HostsVariable}.";
+        return $"This server isn't known by the name {name}. Use its IP address, or {addName}.";
     }
 }

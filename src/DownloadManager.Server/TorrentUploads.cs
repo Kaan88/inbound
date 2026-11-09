@@ -1,4 +1,5 @@
 using DownloadManager.Runtime.Remote;
+using DownloadManager.Runtime.WebUi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -16,7 +17,7 @@ namespace DownloadManager.Server;
 /// </summary>
 public sealed class TorrentUploads
 {
-    public const string FolderName = "uploads";
+    public const string FolderName = UploadReferences.FolderName;
     private static readonly TimeSpan KeepFor = TimeSpan.FromDays(1);
     private const int MaxFiles = 200;
 
@@ -24,17 +25,10 @@ public sealed class TorrentUploads
 
     public string Directory { get; }
 
-    public const string ReferencePrefix = "upload:";
+    public const string ReferencePrefix = UploadReferences.Prefix;
 
-    /// <summary>The path an upload reference stands for, or null when the text isn't one.</summary>
-    public string? Resolve(string text)
-    {
-        if (!text.StartsWith(ReferencePrefix, StringComparison.Ordinal)) return null;
-        var name = text[ReferencePrefix.Length..];
-        return name.Length == 32 && name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')
-            ? Path.Combine(Directory, name + ".torrent")
-            : null;
-    }
+    /// <summary>The path an upload reference stands for, or null when the text isn't one (<see cref="UploadReferences"/>).</summary>
+    public string? Resolve(string text) => UploadReferences.Resolve(Directory, text);
 
     public static TorrentUploads Prepare(string dataFolder)
     {
@@ -56,8 +50,8 @@ public sealed class TorrentUploads
         }
 
         Clean();
-        var name = Guid.NewGuid().ToString("N");
-        var path = Path.Combine(Directory, name + ".torrent");
+        var (name, reference) = UploadReferences.NewName();
+        var path = UploadReferences.FileFor(Directory, name);
         try
         {
             await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -75,7 +69,7 @@ public sealed class TorrentUploads
             return;
         }
 
-        await context.Response.WriteAsJsonAsync(new { ok = true, upload = ReferencePrefix + name }).ConfigureAwait(false);
+        await context.Response.WriteAsJsonAsync(new { ok = true, upload = reference }).ConfigureAwait(false);
     });
 
     private void Clean()

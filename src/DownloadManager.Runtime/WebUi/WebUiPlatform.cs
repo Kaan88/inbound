@@ -37,10 +37,23 @@ public interface IFirewallRules
     string Check(string program, int port, string ruleName);
 }
 
-/// <summary>Whether a process listens on a TCP port on 127.0.0.1 (or every IPv4 address).</summary>
+/// <summary>Who listens on a TCP port on 127.0.0.1 (or every IPv4 address).</summary>
 public interface IListenerCheck
 {
-    bool IsListening(int processId, int port);
+    ListenerOwner Owner(int processId, int port);
+}
+
+/// <summary>What <see cref="IListenerCheck.Owner"/> found.</summary>
+public enum ListenerOwner
+{
+    /// <summary>Nothing listens there.</summary>
+    None,
+
+    /// <summary>Only the process asked about.</summary>
+    Ours,
+
+    /// <summary>Another process, alone or besides it.</summary>
+    Other,
 }
 
 /// <summary>The web UI's sign-in password, kept where the bridge reads it (<c>auth.json</c>).</summary>
@@ -51,11 +64,21 @@ public interface IWebUiPasswords
     /// <summary>Why this password can't be used (the server's sign-in rules), or null.</summary>
     string? Problem(string? password);
 
+    /// <summary>Whether this is the password in force already (then setting it again changes nothing).</summary>
+    Task<bool> IsCurrentAsync(string password, CancellationToken cancellationToken);
+
     /// <summary>
-    /// Saves it (only while the bridge is stopped: the bridge keeps the file in memory). The browsers signed in and the
-    /// apps paired with the old one sign in or pair again.
+    /// Saves it (only while the bridge is stopped: the bridge keeps the file in memory). The browsers signed in with the
+    /// old one sign in again; the paired desktop apps pair again, and the paired browser extensions too unless
+    /// <paramref name="keepPairedBrowsers"/> (as on the web UI's own password change).
     /// </summary>
-    Task SetAsync(string password, CancellationToken cancellationToken);
+    Task SetAsync(string password, bool keepPairedBrowsers, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Ends every browser's sign-in (removes the saved sessions; only while the bridge is stopped). Paired apps stay
+    /// paired: their tokens were made with the password, which is still the one in force.
+    /// </summary>
+    void EndSignIns();
 }
 
 /// <summary>This PC's addresses another device on the network could use.</summary>

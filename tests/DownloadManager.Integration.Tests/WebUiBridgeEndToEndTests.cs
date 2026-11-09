@@ -151,8 +151,14 @@ public sealed class WebUiBridgeEndToEndTests
 
         Assert.Empty(TcpListenerOwner.ListenersOn(port, [IPAddress.Loopback, IPAddress.Any]));
 
-        // Ticked again and the Host restarted: it starts the bridge by itself, and stops it when it exits.
-        await pipe.AskAsync<WebUiStatusDto>(WebUiMessageTypes.Set, new WebUiSetRequest { Enabled = true }, TimeSpan.FromSeconds(60));
+        // Ticked again: the browser signed in before must sign in again (turning it off ended every sign-in).
+        Assert.Equal(WebUiStates.Running,
+            (await pipe.AskAsync<WebUiStatusDto>(WebUiMessageTypes.Set, new WebUiSetRequest { Enabled = true }, TimeSpan.FromSeconds(60))).State);
+        Assert.NotEmpty(cookies.GetCookies(http.BaseAddress!));
+        using (var stale = await http.PostAsync("/api/ipc", new StringContent(JsonSerializer.Serialize(IpcMessage.Create(MessageTypes.HostPing, new { }), IpcJson.Options))))
+            Assert.Equal(HttpStatusCode.Unauthorized, stale.StatusCode);
+
+        // And the Host restarted: it starts the bridge by itself, and stops it when it exits.
         await pipe.DisposeAsync();
         await host.StopAsync();
         Assert.Empty(TcpListenerOwner.ListenersOn(port, [IPAddress.Loopback, IPAddress.Any]));

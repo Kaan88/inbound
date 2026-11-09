@@ -34,10 +34,10 @@ public sealed class WebUiSupervisorTests : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
-    private WebUiSupervisor Supervisor(TimeSpan? firstRestart = null, TimeSpan? startTimeout = null)
+    private WebUiSupervisor Supervisor(TimeSpan? firstRestart = null, TimeSpan? startTimeout = null, TimeProvider? time = null)
     {
         var supervisor = new WebUiSupervisor(new WebUiConfigStore(_data),
-            new WebUiPlatform(_launcher, _firewall, _listener, _passwords, new FakeNetwork()), _data, "test-hello-pipe", new TestLog())
+            new WebUiPlatform(_launcher, _firewall, _listener, _passwords, new FakeNetwork()), _data, "test-hello-pipe", new TestLog(), time)
         {
             FirstRestartDelay = firstRestart ?? TimeSpan.FromMilliseconds(50),
             StartTimeout = startTimeout ?? TimeSpan.FromSeconds(10),
@@ -146,6 +146,7 @@ public sealed class WebUiSupervisorTests : IDisposable
         await using var supervisor = Supervisor();
         await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
         Assert.True(_launcher.Starts[0].LocalOnly);
+        var closedBefore = _closed;
 
         // Nothing changed: no restart.
         await supervisor.RecheckAsync();
@@ -164,6 +165,46 @@ public sealed class WebUiSupervisorTests : IDisposable
         _firewall.State = WebUiFirewallStates.Missing;
         Assert.True((await supervisor.RecheckAsync()).LocalOnly);
         Assert.True(_launcher.Starts[2].LocalOnly);
+        // Only the addresses changed: the web sessions end with the old bridge's pipes, the sign-ins stay.
+        Assert.Equal(closedBefore, _closed);
+        Assert.DoesNotContain("end-sign-ins", _timeline);
+    }
+
+    [Fact]
+    public async Task ARecheckStartsNothingThatIsntRunning()
+    {
+        // Failed for a port in use: a recheck can't fix that, so it doesn't try again or raise the notice again.
+        _passwords.Has = true;
+        _launcher.Behave = process => process.Exit(WebBridgeExit.PortInUse, "Port 8080 is in use by another program. Choose another port.");
+        await using var supervisor = Supervisor();
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
+        _firewall.State = WebUiFirewallStates.Ready;
+        var status = await supervisor.RecheckAsync();
+        Assert.Equal(WebUiStates.Failed, status.State);
+        Assert.Equal(WebUiFirewallStates.Ready, status.Firewall);
+        await supervisor.RecheckAsync();
+        Assert.Single(_launcher.Starts);
+        Assert.Single(_notices);
+
+        // Off: nothing starts either.
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = false });
+        await supervisor.RecheckAsync();
+        Assert.Single(_launcher.Starts);
+    }
+
+    [Fact]
+    public async Task ARecheckWhileWaitingToRestartLeavesTheRuleToTheRestart()
+    {
+        _passwords.Has = true;
+        await using var supervisor = Supervisor(firstRestart: TimeSpan.FromMilliseconds(400));
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
+        _launcher.Processes[0].Exit(WebBridgeExit.Crashed, null);
+        await UntilAsync(() => supervisor.GetAsync().GetAwaiter().GetResult().State == WebUiStates.Starting, "waiting to restart");
+        _firewall.State = WebUiFirewallStates.Ready;
+        await supervisor.RecheckAsync();
+        Assert.Single(_launcher.Starts);
+        await UntilAsync(() => _launcher.Starts.Count == 2, "the restart");
+        Assert.False(_launcher.Starts[1].LocalOnly);
     }
 
     [Fact]
@@ -183,12 +224,20 @@ public sealed class WebUiSupervisorTests : IDisposable
         Assert.Equal(3, _launcher.Starts.Count);
 
         var closedBefore = _closed;
+        lock (_timeline) _timeline.Clear();
         var off = await supervisor.SetAsync(new WebUiSetRequest { Enabled = false });
         Assert.Equal(WebUiStates.Off, off.State);
         Assert.All(_launcher.Processes, process => Assert.True(process.Stopped));
         Assert.True(_closed > closedBefore);
         Assert.False(new WebUiConfigStore(_data).Load(out _).Enabled);
         Assert.Equal(3, _launcher.Starts.Count);
+        // Every browser signs in again next time, once the bridge is gone (it can't write them back).
+        Assert.Equal(["stop", "close-web", "end-sign-ins"], _timeline);
+
+        // Cleared again: nothing more to end.
+        lock (_timeline) _timeline.Clear();
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = false });
+        Assert.DoesNotContain("end-sign-ins", _timeline);
     }
 
     [Fact]
@@ -209,6 +258,65 @@ public sealed class WebUiSupervisorTests : IDisposable
         // Ticking the box again (or another port) tries again.
         _launcher.Behave = null;
         Assert.Equal(WebUiStates.Running, (await supervisor.SetAsync(new WebUiSetRequest { Enabled = true })).State);
+    }
+
+    [Fact]
+    public async Task APortWindowsKeepsFailsWithItsMessageAndATrayNoticeAndIsNotRetried()
+    {
+        _passwords.Has = true;
+        _launcher.Behave = process => process.Exit(WebBridgeExit.PortForbidden, "Windows doesn't allow listening on port 8080. Choose another port.");
+        await using var supervisor = Supervisor();
+        var status = await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
+        Assert.Equal(WebUiStates.Failed, status.State);
+        Assert.Equal("Windows doesn't allow listening on port 8080. Choose another port.", status.Error);
+        Assert.Equal(["Web UI: Windows doesn't allow listening on port 8080. Choose another port."], _notices);
+        await Task.Delay(300);
+        Assert.Single(_launcher.Starts);
+
+        // Without a message from the bridge, the Host says it.
+        _launcher.Behave = process => process.Exit(WebBridgeExit.PortForbidden, null);
+        Assert.Equal("Windows doesn't allow listening on port 18085. Choose another port.",
+            (await supervisor.SetAsync(new WebUiSetRequest { Port = 18085 })).Error);
+    }
+
+    [Fact]
+    public async Task ARunOfTwoMinutesStartsTheCrashCountAgain()
+    {
+        _passwords.Has = true;
+        var time = new OffsetTime();
+        await using var supervisor = Supervisor(time: time);
+        await supervisor.SetAsync(new WebUiSetRequest { Enabled = true });
+
+        // Each bridge says ready, then ends by itself: restarted each time, up to the limit.
+        for (var i = 0; i < WebUiSupervisor.MaxRestarts; i++)
+        {
+            _launcher.Processes[i].Exit(WebBridgeExit.Crashed, null);
+            var next = i + 2;
+            await UntilAsync(() => _launcher.Starts.Count == next, $"restart {next - 1}");
+            await UntilAsync(() => supervisor.GetAsync().GetAwaiter().GetResult().State == WebUiStates.Running, "running again");
+        }
+
+        // The last one ran for more than two minutes before it ended: that is no run of crashes, so it starts again.
+        time.Offset += TimeSpan.FromMinutes(3);
+        _launcher.Processes[WebUiSupervisor.MaxRestarts].Exit(WebBridgeExit.Crashed, null);
+        await UntilAsync(() => _launcher.Starts.Count == WebUiSupervisor.MaxRestarts + 2, "a restart after a long run");
+        await UntilAsync(() => supervisor.GetAsync().GetAwaiter().GetResult().State == WebUiStates.Running, "running after a long run");
+        Assert.Empty(_notices);
+
+        // Without the long run, the next end after the limit gives up.
+        for (var i = 0; i < WebUiSupervisor.MaxRestarts; i++)
+        {
+            var count = _launcher.Starts.Count;
+            _launcher.Processes[count - 1].Exit(WebBridgeExit.Crashed, null);
+            if (i < WebUiSupervisor.MaxRestarts - 1)
+            {
+                await UntilAsync(() => _launcher.Starts.Count == count + 1, "a restart");
+                await UntilAsync(() => supervisor.GetAsync().GetAwaiter().GetResult().State == WebUiStates.Running, "running");
+            }
+        }
+
+        await UntilAsync(() => supervisor.GetAsync().GetAwaiter().GetResult().State == WebUiStates.Failed, "failed");
+        Assert.Single(_notices);
     }
 
     [Fact]
@@ -277,6 +385,19 @@ public sealed class WebUiSupervisorTests : IDisposable
         Assert.Null(status.Error);
         Assert.Equal(WebUiStates.Running, status.State);
         Assert.Equal(["stop", "close-web", "password", "start"], _timeline);
+        Assert.False(_passwords.KeptBrowsers);
+
+        // The password in force set again changes nothing: no restart, nobody signed out or unpaired.
+        lock (_timeline) _timeline.Clear();
+        var same = await supervisor.SetPasswordAsync("a long enough password");
+        Assert.Null(same.Error);
+        Assert.Equal(WebUiStates.Running, same.State);
+        Assert.Empty(_timeline);
+
+        // Keeping the paired browsers is passed on.
+        await supervisor.HandleAsync(IpcMessage.Create(WebUiMessageTypes.SetPassword,
+            new WebUiPasswordRequest { Password = "a third long password", KeepPairedBrowsers = true }), CancellationToken.None);
+        Assert.True(_passwords.KeptBrowsers);
 
         // With the box cleared it is only saved.
         await supervisor.SetAsync(new WebUiSetRequest { Enabled = false });
@@ -293,13 +414,19 @@ public sealed class WebUiSupervisorTests : IDisposable
         Assert.Equal("The web UI isn't running.", (await supervisor.OpenTicketAsync()).Error);
 
         await supervisor.SetAsync(new WebUiSetRequest { Enabled = true, Port = 18082 });
-        _listener.Answer = false;
+        _listener.Answer = ListenerOwner.Other;
         var refused = await supervisor.OpenTicketAsync();
         Assert.Null(refused.Url);
         Assert.Contains("Another program answers on port", refused.Error);
         Assert.Equal((_launcher.Processes[0].ProcessId, 18082), _listener.LastAsked);
 
-        _listener.Answer = true;
+        // Nothing there (the bridge ended between two checks) is said as that, not as another program.
+        _listener.Answer = ListenerOwner.None;
+        var nobody = await supervisor.OpenTicketAsync();
+        Assert.Null(nobody.Url);
+        Assert.Equal($"The web UI isn't answering on port {18082} right now. Try again in a moment.", nobody.Error);
+
+        _listener.Answer = ListenerOwner.Ours;
         var ticket = await supervisor.OpenTicketAsync();
         Assert.Null(ticket.Error);
         Assert.StartsWith("http://127.0.0.1:18082/api/auth/ticket?t=", ticket.Url);
@@ -428,10 +555,10 @@ public sealed class WebUiSupervisorTests : IDisposable
 
     internal sealed class FakeListener : IListenerCheck
     {
-        public bool Answer { get; set; } = true;
+        public ListenerOwner Answer { get; set; } = ListenerOwner.Ours;
         public (int, int)? LastAsked { get; private set; }
 
-        public bool IsListening(int processId, int port)
+        public ListenerOwner Owner(int processId, int port)
         {
             LastAsked = (processId, port);
             return Answer;
@@ -440,18 +567,38 @@ public sealed class WebUiSupervisorTests : IDisposable
 
     internal sealed class FakePasswords(List<string> timeline) : IWebUiPasswords
     {
+        private string? _current;
+
         public bool Has { get; set; }
+        public bool KeptBrowsers { get; private set; }
 
         public bool HasPassword() => Has;
 
         public string? Problem(string? password) => password is null || password.Length < 8 ? "The password needs at least 8 characters." : null;
 
-        public Task SetAsync(string password, CancellationToken cancellationToken)
+        public Task<bool> IsCurrentAsync(string password, CancellationToken cancellationToken) => Task.FromResult(Has && password == _current);
+
+        public Task SetAsync(string password, bool keepPairedBrowsers, CancellationToken cancellationToken)
         {
             lock (timeline) timeline.Add("password");
             Has = true;
+            _current = password;
+            KeptBrowsers = keepPairedBrowsers;
             return Task.CompletedTask;
         }
+
+        public void EndSignIns()
+        {
+            lock (timeline) timeline.Add("end-sign-ins");
+        }
+    }
+
+    /// <summary>The system's clock and timers, with the time moved on by <see cref="Offset"/>.</summary>
+    internal sealed class OffsetTime : TimeProvider
+    {
+        public TimeSpan Offset { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Offset;
     }
 
     internal sealed class FakeNetwork : INetworkAddresses

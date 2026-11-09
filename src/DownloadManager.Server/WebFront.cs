@@ -111,7 +111,8 @@ internal static class WebFront
         web.Use(SecurityHeaders.Middleware);
         web.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         web.Use(ExtensionCors.Middleware);
-        web.Use(OriginCheck.Middleware(options.AllowedHostNames, auth.HasValidToken));
+        web.Use(OriginCheck.Middleware(options.AllowedHostNames, auth.HasValidToken,
+            options.Bridge ? DownloadManager.Server.Bridge.BridgeApp.AddNameText : OriginCheck.HostsSetting));
         web.Use(auth.Middleware);
 
         var stopping = web.Lifetime.ApplicationStopping;
@@ -224,6 +225,12 @@ internal static class WebFront
             catch (BackendUnavailableException ex)
             {
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await context.Response.WriteAsJsonAsync(new { ok = false, error = ex.Message }, stopping).ConfigureAwait(false);
+                return;
+            }
+            catch (TimeoutException ex)
+            {
+                context.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
                 await context.Response.WriteAsJsonAsync(new { ok = false, error = ex.Message }, stopping).ConfigureAwait(false);
                 return;
             }

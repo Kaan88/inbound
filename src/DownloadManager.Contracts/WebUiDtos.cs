@@ -120,6 +120,13 @@ public sealed class WebUiSetRequest
 public sealed class WebUiPasswordRequest
 {
     public string Password { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional: leave the paired browser extensions paired (they are unpaired otherwise), as on the web UI's own
+    /// password change. Paired desktop apps are always unpaired, and every browser signs in again. Setting the password
+    /// that is in force already changes nothing at all.
+    /// </summary>
+    public bool KeepPairedBrowsers { get; set; }
 }
 
 /// <summary>

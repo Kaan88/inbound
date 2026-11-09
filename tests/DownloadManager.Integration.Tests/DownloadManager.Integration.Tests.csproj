@@ -61,10 +61,6 @@
     <Compile Include="..\..\src\DownloadManager.Host\WebUiPasswordFile.cs" Link="WebUi\WebUiPasswordFile.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\LocalNetworkAddresses.cs" Link="WebUi\LocalNetworkAddresses.cs" />
     <Compile Include="..\..\src\DownloadManager.Host\HostUploads.cs" Link="WebUi\HostUploads.cs" />
-    <Compile Include="..\..\src\DownloadManager.Server\Auth\AuthStore.cs" Link="WebUi\AuthStore.cs" />
-    <Compile Include="..\..\src\DownloadManager.Server\Auth\PasswordHash.cs" Link="WebUi\PasswordHash.cs" />
-    <Compile Include="..\..\src\DownloadManager.Server\Auth\AtomicFile.cs" Link="WebUi\AtomicFile.cs" />
-    <Compile Include="..\..\src\DownloadManager.Server\ServerStartException.cs" Link="WebUi\ServerStartException.cs" />
   </ItemGroup>
 
   <ItemGroup>

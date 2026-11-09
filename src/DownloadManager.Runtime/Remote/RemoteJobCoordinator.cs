@@ -522,13 +522,14 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         PathRoots? sourceRoots = null)
     {
         var resolved = Resolve(text);
-        // A reference to an upload is the coordinator's own file, not a path the caller chose: its roots don't apply.
-        if (!ReferenceEquals(resolved, text)) sourceRoots = null;
+        // A reference to an upload is the coordinator's own file, not a path the caller chose: no roots apply to it,
+        // neither the caller's nor Roots.
+        var upload = !ReferenceEquals(resolved, text);
         text = resolved;
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
-            var read = await ReadTorrentFileAsync(text!.Trim(), sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
+            var read = await ReadTorrentFileAsync(text!.Trim(), upload ? null : sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
             return read.Bytes is null
                 ? new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = read.Error }
                 : RemoteInputClassifier.ClassifyTorrent(read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), withFiles: true);
@@ -772,8 +773,14 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
-        // An upload's reference names the coordinator's own file, so the caller's source roots don't apply to it.
-        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved, SourceRoots = null };
+        // An upload's reference names the coordinator's own file, so no roots apply to it, neither the caller's nor Roots.
+        var upload = false;
+        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input))
+        {
+            request = request with { Input = resolved, SourceRoots = null };
+            upload = true;
+        }
+
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
@@ -825,7 +832,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 }, null, classification.Kind);
 
             case RemoteInputKind.TorrentFile:
-                var read = await ReadTorrentFileAsync(request.Input!.Trim(), request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
+                var read = await ReadTorrentFileAsync(request.Input!.Trim(), upload ? null : request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
                 return read.Bytes is null
                     ? (null, read.Error, classification.Kind)
                     : BuildTorrentRecord(request, read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
