@@ -342,8 +342,14 @@ public sealed class RemoteArchivePasswordRequest
 
 public sealed class RemoteContainerPreviewRequest
 {
-    /// <summary>The full path of a local .rsdf, .ccf or .dlc file on a drive of this computer.</summary>
+    /// <summary>
+    /// The full path of a local .rsdf, .ccf or .dlc file on a drive of this computer, or the reference
+    /// (<c>upload:…</c>) of one a browser uploaded to the server or the web bridge.
+    /// </summary>
     public string Path { get; set; } = string.Empty;
+
+    /// <summary>For an uploaded file, the name it had, which names its packages. Ignored for a path.</summary>
+    public string? FileName { get; set; }
 
     public override string ToString() => "[container preview]";
 }

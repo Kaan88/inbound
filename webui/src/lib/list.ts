@@ -720,6 +720,17 @@ export class SpeedHistory {
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
+  /**
+   * The server's own figures (speed.history, one a second, the last the second under way), put before what this page
+   * sampled since it opened. As many of the server's newest are left out as were sampled here, so no second shows twice.
+   */
+  seed(serverSamples: readonly number[]): void {
+    const finished = serverSamples.slice(0, -1);
+    const older = finished.slice(0, Math.max(0, finished.length - this.samples.length));
+    this.samples = [...older.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0)), ...this.samples];
+    if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
+  }
+
   peak(): number {
     let peak = 0;
     for (const sample of this.samples) if (sample !== null && sample > peak) peak = sample;

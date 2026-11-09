@@ -14,6 +14,7 @@
   import { noticeBoard, noticeWatchingSince } from './lib/archives';
   import AddLinks from './screens/AddLinks.svelte';
   import AddUrl from './screens/AddUrl.svelte';
+  import ImportContainer from './screens/ImportContainer.svelte';
   import ImportList from './screens/ImportList.svelte';
   import ListScreen from './screens/ListScreen.svelte';
   import QueuesScreen from './screens/QueuesScreen.svelte';
@@ -37,12 +38,12 @@
   let screen = $state<Screen>(parse(location.hash));
   let drawer = $state(false);
   // Which add dialog is open: Add URL, the many-inputs dialog (optionally with lines already answered), or the list import.
-  type Adding = { kind: 'url' } | { kind: 'many'; mode: 'links' | 'magnet' | 'torrent' | 'imported'; seed?: { input: string; result: ClassifyResult }[] } | { kind: 'list' };
+  type Adding = { kind: 'url' } | { kind: 'many'; mode: 'links' | 'magnet' | 'torrent' | 'imported'; seed?: { input: string; result: ClassifyResult }[] } | { kind: 'list' } | { kind: 'container' };
   let adding = $state<Adding | null>(null);
 
   function openAdd(kind: AddKind) {
     drawer = false;
-    adding = kind === 'url' ? { kind: 'url' } : kind === 'list' ? { kind: 'list' } : { kind: 'many', mode: kind };
+    adding = kind === 'url' ? { kind: 'url' } : kind === 'list' ? { kind: 'list' } : kind === 'container' ? { kind: 'container' } : { kind: 'many', mode: kind };
   }
 
   // Download the list as a file; the browser's own Save dialog says where it goes.
@@ -148,7 +149,7 @@
   <div class="relative flex min-h-0 flex-1">
     {#if drawer}<button class="fixed inset-0 z-20 bg-black/30 md:hidden" aria-label="Close the menu" onclick={() => (drawer = false)}></button>{/if}
     <nav aria-label="Views" class="z-30 w-60 shrink-0 overflow-y-auto border-r border-divider bg-chrome p-2 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-xl max-md:transition-transform {drawer ? '' : 'max-md:-translate-x-full'}">
-      <AddMenu onpick={openAdd} onexport={exportList} canTorrent={store.has('remote')} />
+      <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} />
       <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>
       {@render link(viewHash('all'), 'all', 'download', 'All Downloads', count.all)}
       {#each categories as category (category.key)}
@@ -206,6 +207,8 @@
   <AddLinks mode={adding.mode} seed={adding.seed} onclose={() => (adding = null)} />
 {:else if adding?.kind === 'list'}
   <ImportList onclose={() => (adding = null)} onreview={(seed) => (adding = { kind: 'many', mode: 'imported', seed })} />
+{:else if adding?.kind === 'container'}
+  <ImportContainer onclose={() => (adding = null)} />
 {/if}
 
 <div class="pointer-events-none fixed bottom-10 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2" aria-live="polite">

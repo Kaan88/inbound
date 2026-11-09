@@ -24,8 +24,8 @@
   const settings = $derived(store.model.settings);
   const account = $derived(store.model.accounts[0]);
   const providerName = $derived(account?.providerName ?? 'the provider');
-  // Nothing says "no" yet: the archive commands exist wherever this page is served from.
-  const archivesSupported = true;
+  // The server answers the archive commands (its hello names "archives"); without them there is no password to give.
+  const archivesSupported = $derived(store.has('archives'));
   const queues = $derived([...(settings?.queues ?? [])].sort((a, b) => a.order - b.order));
 
   let remoteOn = $state(store.has('remote'));
@@ -67,7 +67,8 @@
   const title = $derived(mode === 'links' && seed.length === 1 ? 'Add link' : mode === 'magnet' ? 'Add magnet' : mode === 'torrent' ? 'Import torrent file' : mode === 'imported' ? 'Import download list' : 'Add links');
   const single = $derived(mode === 'links' && seed.length > 0);
   const showPaste = $derived((mode === 'links' && !single) || mode === 'magnet');
-  const showUpload = $derived(remoteOn && (mode === 'torrent' || (mode === 'links' && !single)));
+  // .torrent files are uploaded first, so only where the server takes uploads (the hello's "uploads").
+  const showUpload = $derived(remoteOn && store.has('uploads') && (mode === 'torrent' || (mode === 'links' && !single)));
 
   function pwOf(input: string): Passwords {
     return passwords[input] ?? { has: false, archive: '', site: '', same: false };
