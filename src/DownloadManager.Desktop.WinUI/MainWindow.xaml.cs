@@ -232,7 +232,7 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         Activate();
-        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (OperatingSystem.IsWindows()) SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
         SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
     }
 

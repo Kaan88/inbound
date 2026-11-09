@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml.Media.Imaging;
+﻿using Microsoft.UI.Xaml.Media.Imaging;
 using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -47,6 +47,8 @@ internal static class FileIconProvider
 
     private static async Task<byte[]?> ReadAsync(string fileName, string? completedPath)
     {
+        // The shell's file icons are Windows-only; elsewhere the list shows its generic icon. [TODO D7] the icon theme's MIME icons.
+        if (!OperatingSystem.IsWindows()) return null;
         await Workers.WaitAsync().ConfigureAwait(false);
         try
         {
