@@ -716,29 +716,31 @@ export const speedGraphWindow = 600;
 /** The speed history: one sample a second, with gaps (null) while the server is not reachable. Keeps the Host's full hour. */
 export class SpeedHistory {
   samples: (number | null)[] = [];
+  /** The Unix second the newest sample was taken in. */
+  private newestSecond = 0;
   constructor(readonly limit = 3600) {}
 
-  add(rate: number | null): void {
+  add(rate: number | null, second = Math.floor(Date.now() / 1000)): void {
     this.samples.push(rate === null ? null : Math.max(0, rate));
+    this.newestSecond = second;
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
   /**
    * Takes the server's own figures (speed.history, one a second, the last the second under way) in place of what this page
-   * sampled, which may hold gaps from a hidden tab or a lost connection. The newest second this page sampled stays at the
-   * end for the second under way, so no second shows twice.
+   * sampled, which may hold gaps from a hidden tab or a lost connection. `start` is the time of the first figure. The
+   * newest second this page sampled stays at the end for the second under way, but only when it is that second or later,
+   * so no second shows twice; otherwise, or when this page has a gap there, the server's own last figure ends the line.
    */
-  replace(serverSamples: readonly number[]): void {
-    let newest: number | null = null;
-    for (let i = this.samples.length - 1; i >= 0; i--) {
-      const sample = this.samples[i];
-      if (sample !== null) {
-        newest = sample;
-        break;
-      }
-    }
-    const finished = serverSamples.slice(0, -1).map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0));
-    this.samples = newest === null ? finished : [...finished, newest];
+  replace(serverSamples: readonly number[], start?: string): void {
+    const clean = serverSamples.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0));
+    if (clean.length === 0) return;
+    const finished = clean.slice(0, -1);
+    const tail = this.samples[this.samples.length - 1] ?? null;
+    const first = start === undefined ? Number.NaN : Date.parse(start) / 1000;
+    const underWay = Math.floor(first) + clean.length - 1;
+    const keepLocal = tail !== null && Number.isFinite(underWay) && this.newestSecond >= underWay;
+    this.samples = [...finished, keepLocal ? tail : clean[clean.length - 1]];
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
