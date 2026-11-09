@@ -31,7 +31,7 @@ public sealed class UploadFolder
     public const int MaxFiles = 200;
 
     /// <summary>What a caller says for a reference whose file has gone (cleaned up after a day, or never there).</summary>
-    public const string GoneText = "The uploaded file is no longer there. Upload it again.";
+    public const string GoneText = DownloadManager.Contracts.UploadReferenceText.Gone;
 
     public UploadFolder(string directory) => Directory = directory;
 
