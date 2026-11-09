@@ -517,7 +517,7 @@ public sealed partial class MainWindow : Window
     {
         var plan = FileMenuRules.Plan(SelectedJob is not null, SelectedPackage is not null, sideRows, removableSideRows, SelectedJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
         Apply(FileOpenItem, "Open", plan.ShellReason);
-        Apply(FileOpenFolderItem, "Open Folder", plan.ShellReason);
+        Apply(FileOpenFolderItem, "Open Folder", OpenFolderReason(plan));
         Apply(FileMoveRenameItem, "Move/Rename…", plan.OpenReason);
         Apply(FileProgressItem, "Progress Details…", plan.LocalReason);
         var rows = JobsList.SelectedItems.OfType<JobViewModel>().ToList();
@@ -1092,7 +1092,7 @@ public sealed partial class MainWindow : Window
         var plan = FileMenuRules.Plan(CommandJob is not null, SelectedPackage is not null, rows.Count(row => row.IsSideRow), 0, CommandJob?.FileRemovedAfterExtraction == true, _connection.IsRemote);
         SayIfNoFile(_menuOpen, "Open", plan.ShellReason);
         SayIfNoFile(_menuOpenWith, "Open With…", plan.ShellReason);
-        SayIfNoFile(_menuOpenFolder, "Open Folder", plan.ShellReason);
+        SayIfNoFile(_menuOpenFolder, "Open Folder", OpenFolderReason(plan));
         SayIfNoFile(_menuMoveRename, "Move/Rename…", plan.OpenReason);
         if (_menuMoveRename is not null) _menuMoveRename.IsEnabled = SelectedJob?.State == "completed" && plan.OpenReason is null;
         SayIfNoFile(_menuRedownload, "Redownload", plan.FileReason);
@@ -1103,7 +1103,8 @@ public sealed partial class MainWindow : Window
         if (_menuUnqueue is not null) _menuUnqueue.IsEnabled = selection.Any(job => !string.IsNullOrEmpty(job.QueueText));
         static Visibility Show(bool on) => on ? Visibility.Visible : Visibility.Collapsed;
         if (_menuGroup is not null) _menuGroup.Visibility = Show(FileMenuRules.CanGroup(selection.Count, rows.Count(row => !row.IsSideRow)));
-        if (_menuUngroup is not null) _menuUngroup.Visibility = Show(selection.Any(job => job.PackageId is not null));
+        // U-WL-14: a package row isn't in a package; only its files can be taken out of it.
+        if (_menuUngroup is not null) _menuUngroup.Visibility = Show(rows.Any(row => !row.IsPackage && row.PackageId is not null));
         if (_menuRenamePackage is not null) _menuRenamePackage.Visibility = Show(SelectedPackage is not null || SelectedJob?.PackageId is not null);
         // A provider's file has no address of its own to edit or send again.
         var providerFile = selection.Any(job => job.IsProviderFile);
@@ -1167,6 +1168,33 @@ public sealed partial class MainWindow : Window
         {
             OpenContainingFolder(job);
         }
+        else if (SelectedPackage is { } package && PackageFolder(package) is { } folder && !SayIfOnAnotherServer())
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                _ = ShowMessageAsync("Could not open folder", ex.Message);
+            }
+        }
+    }
+
+    /// <summary>U-WL-14: a package's folder is the one all of its files are in, below which each may have its own.</summary>
+    private static string? PackageFolder(JobViewModel package)
+    {
+        var folder = ShellWords.CommonFolder(package.Children.Select(child =>
+            !string.IsNullOrWhiteSpace(child.FinalFilePath) ? Path.GetDirectoryName(child.FinalFilePath) : child.Destination));
+        return folder is not null && Directory.Exists(folder) ? folder : null;
+    }
+
+    /// <summary>Open Folder works for a package too, on the folder its files share.</summary>
+    private string? OpenFolderReason(FileMenuPlan plan)
+    {
+        if (SelectedJob is not null || SelectedPackage is not { } package) return plan.ShellReason;
+        if (!RemoteDataRules.MayUseFiles(_connection.IsRemote)) return RemoteDataRules.OnAnotherServer;
+        return PackageFolder(package) is null ? "its folder isn't there" : null;
     }
 
     private async void MenuAddToQueue_Click(object sender, RoutedEventArgs e)
@@ -2212,6 +2240,38 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>The secondary text color for an editable box's placeholder, in its own theme and when the theme changes.</summary>
+    private static void DimPlaceholder(ComboBox box)
+    {
+        void Apply()
+        {
+            var brush = InboundTheme.Brush("InboundSecondaryTextBrush", box);
+            box.PlaceholderForeground = brush;
+            foreach (var key in new[] { "TextControlPlaceholderForeground", "TextControlPlaceholderForegroundPointerOver", "TextControlPlaceholderForegroundFocused" })
+                box.Resources[key] = brush;
+        }
+
+        box.Loaded += (_, _) => Apply();
+        box.ActualThemeChanged += (_, _) => Apply();
+    }
+
+    /// <summary>Turns every control inside a panel on or off, however deep the panels go.</summary>
+    private static void SetControlsEnabled(UIElement element, bool enabled)
+    {
+        switch (element)
+        {
+            case Control control:
+                control.IsEnabled = enabled;
+                break;
+            case Panel panel:
+                foreach (var child in panel.Children) SetControlsEnabled(child, enabled);
+                break;
+            case Border { Child: { } child }:
+                SetControlsEnabled(child, enabled);
+                break;
+        }
+    }
+
     private void MenuHideCategories_Click(object sender, RoutedEventArgs e)
     {
         _hideCategories = HideCategoriesMenuItem.IsChecked;
@@ -2527,6 +2587,8 @@ public sealed partial class MainWindow : Window
             IsEditable = true,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        // U-WL-21: an editable box draws its placeholder in the text color, so it read as a typed address.
+        DimPlaceholder(urlBox);
         foreach (var recent in _settings.RecentUrls.Take(20))
         {
             urlBox.Items.Add(recent);
@@ -2595,6 +2657,12 @@ public sealed partial class MainWindow : Window
             url = checkedAddress.Input;
             addressResult = checkedAddress.Result;
             addressNote = checkedAddress.Result?.Note;
+            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
+            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
+            {
+                await ShowProviderAddAsync(AddFocus.Links, numbered);
+                return;
+            }
         }
         else
         {
@@ -2609,6 +2677,12 @@ public sealed partial class MainWindow : Window
             };
             if (await DialogGuard.ShowAsync(addressDialog) != ContentDialogResult.Primary) return;
             url = urlBox.Text.Trim();
+            // U-WL-12: a numbered address is several downloads, which Add Links lists one by one.
+            if (LinkExtractor.ExpandNumbered(url) is { Count: > 1 } numbered)
+            {
+                await ShowAddLinksAsync(numbered);
+                return;
+            }
         }
 
         // A direct link holds an account key. The Host keeps the key out of everything it saves, and so does this.
@@ -3039,7 +3113,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void MenuAddBatch_Click(object sender, RoutedEventArgs e)
+    private async void MenuAddBatch_Click(object sender, RoutedEventArgs e) => await ShowAddLinksAsync(null);
+
+    /// <param name="links">Links to start from, in place of what the clipboard holds: Add URL's numbered address, expanded.</param>
+    private async Task ShowAddLinksAsync(IReadOnlyList<string>? links)
     {
         if (_settings is null)
         {
@@ -3048,7 +3125,7 @@ public sealed partial class MainWindow : Window
 
         if (await ProviderAddAppliesAsync())
         {
-            await ShowProviderAddAsync(AddFocus.Links);
+            await ShowProviderAddAsync(AddFocus.Links, links);
             return;
         }
 
@@ -3061,7 +3138,8 @@ public sealed partial class MainWindow : Window
             Height = 160,
         };
         ScrollViewer.SetVerticalScrollBarVisibility(pasteBox, ScrollBarVisibility.Auto);
-        try
+        if (links is { Count: > 0 }) pasteBox.Text = string.Join(Environment.NewLine, links);
+        else try
         {
             var clip = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
             if (clip.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
@@ -3110,6 +3188,7 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 10 };
         AddUnreadableKeyNotice(panel);
         panel.Children.Add(pasteBox);
+        panel.Children.Add(SettingsWindow.Hint(LinkExtractor.NumberedHint));
         var batchDestinationRow = new Grid { ColumnSpacing = 8 };
         batchDestinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         batchDestinationRow.Children.Add(destinationBox);
@@ -3150,9 +3229,11 @@ public sealed partial class MainWindow : Window
             var uri = new Uri(link);
             var name = Uri.UnescapeDataString(uri.Segments.LastOrDefault()?.Trim('/') ?? string.Empty);
             var listed = FindExistingJob(link) is not null;
+            var noPath = LinkExtractor.HasNoPath(link);
             var box = new CheckBox
             {
-                IsChecked = !(listed && skipDuplicates.IsChecked == true),
+                // U-WL-23: an address that names no file may have been cut short, so it waits to be ticked.
+                IsChecked = !(listed && skipDuplicates.IsChecked == true) && !noPath,
                 Content = new StackPanel
                 {
                     Children =
@@ -3160,7 +3241,8 @@ public sealed partial class MainWindow : Window
                         new TextBlock { Text = name.Length > 0 ? name : uri.Host, TextTrimming = TextTrimming.CharacterEllipsis },
                         new TextBlock
                         {
-                            Text = uri.Host + (listed ? " · already in the list" : string.Empty),
+                            Text = uri.Host + (listed ? " · already in the list" : string.Empty) + (noPath ? $" · {LinkExtractor.NoPathWords}" : string.Empty),
+                            TextWrapping = TextWrapping.Wrap,
                             FontSize = 12,
                             Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", RootGrid),
                         },
@@ -3993,8 +4075,8 @@ public sealed partial class MainWindow : Window
             saveTo.AddRange(categoryRows);
             void ShowCategoryFoldersEnabled()
             {
-                foreach (var row in categoryRows.OfType<Control>()) row.IsEnabled = useCategoryFolders.IsChecked == true;
-                foreach (var row in categoryRows.OfType<Panel>()) foreach (var control in row.Children.OfType<Control>()) control.IsEnabled = useCategoryFolders.IsChecked == true;
+                // U-WL-19: every control in a row, Browse and the favourites button inside the folder field included.
+                foreach (var row in categoryRows) SetControlsEnabled(row, useCategoryFolders.IsChecked == true);
                 foreach (var box in categoryBoxes.Values) box.IsEnabled = useCategoryFolders.IsChecked == true;
             }
             useCategoryFolders.Checked += (_, _) => ShowCategoryFoldersEnabled();

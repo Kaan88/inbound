@@ -51,7 +51,8 @@ internal static partial class LinkExtractor
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
         return HttpPattern().Matches(text)
-            .Select(match => match.Value.TrimEnd(TrailingPunctuation))
+            .Select(match => TrimLink(match.Value))
+            .SelectMany(ExpandNumbered)
             .Where(IsDownloadableLink)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -72,12 +73,83 @@ internal static partial class LinkExtractor
         foreach (Match match in InputPattern().Matches(lines))
         {
             var path = match.Groups["path"];
-            var input = path.Success ? path.Value : match.Groups["link"].Value.TrimEnd(TrailingPunctuation);
-            if (path.Success || IsMagnet(input) || IsDownloadableLink(input)) found.Add(input);
+            var input = path.Success ? path.Value : TrimLink(match.Groups["link"].Value);
+            if (path.Success || IsMagnet(input)) found.Add(input);
+            else found.AddRange(ExpandNumbered(input).Where(IsDownloadableLink));
         }
 
         return found.Distinct(StringComparer.Ordinal).ToList();
     }
+
+    /// <summary>
+    /// Takes the punctuation a sentence puts after a link off its end, but not the bracket that closes a numbered
+    /// part such as <c>file[1-3]</c>.
+    /// </summary>
+    private static string TrimLink(string link)
+    {
+        var end = link.Length;
+        while (end > 0 && Array.IndexOf(TrailingPunctuation, link[end - 1]) >= 0)
+        {
+            if (link[end - 1] == ']' && link.AsSpan(0, end - 1).Count('[') > link.AsSpan(0, end - 1).Count(']')) break;
+            end--;
+        }
+
+        return link[..end];
+    }
+
+    /// <summary>
+    /// U-WL-12: a numbered address, such as <c>https://example.com/part[1-3].bin</c>, is the addresses it stands for,
+    /// as the CLI's add-batch makes them (<see cref="BatchUrlExpander"/>): number ranges keep leading zeros, letter
+    /// ranges, comma lists, and several groups multiply, up to its limit. Only brackets after the host count, and only
+    /// those holding a range or a list, so an IPv6 host or another bracket stays as typed. A pattern that can't be
+    /// expanded stays one address, as typed.
+    /// </summary>
+    /// <summary>
+    /// U-WL-23: an address with nothing after its host names no file, and text such as "ftp://bad host" gives one
+    /// when a space cut it short. It is listed unticked, so it is added only when the user says so.
+    /// </summary>
+    public static bool HasNoPath(string input)
+        => Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.AbsolutePath is "" or "/" && uri.Query.Length == 0;
+
+    public const string NoPathWords = "The address has nothing after the host, so it may have been cut short. Tick it to add it anyway.";
+
+    public const string NumberedHint = "A numbered address such as https://example.com/part[1-3].rar stands for each of its numbers, and [a-c] or [x,y] work too.";
+
+    public static IReadOnlyList<string> ExpandNumbered(string link)
+    {
+        var scheme = link.IndexOf("://", StringComparison.Ordinal);
+        var path = scheme < 0 ? -1 : link.IndexOf('/', scheme + 3);
+        if (path < 0) return [link];
+        var rest = link[path..];
+        var groups = NumberedGroup().Matches(rest);
+        if (groups.Count == 0) return [link];
+
+        // Brackets that aren't a range or a list are kept from the expander, which would refuse them.
+        const char Open = (char)0xE000, Close = (char)0xE001;
+        var guarded = new System.Text.StringBuilder(rest.Length);
+        var index = 0;
+        foreach (Match group in groups)
+        {
+            guarded.Append(rest.AsSpan(index, group.Index - index).ToString().Replace('[', Open).Replace(']', Close));
+            guarded.Append(group.Value);
+            index = group.Index + group.Length;
+        }
+
+        guarded.Append(rest[index..].Replace('[', Open).Replace(']', Close));
+        try
+        {
+            return BatchUrlExpander.Expand(guarded.ToString())
+                .Select(expanded => link[..path] + expanded.Replace(Open, '[').Replace(Close, ']'))
+                .ToList();
+        }
+        catch (FormatException)
+        {
+            return [link];
+        }
+    }
+
+    [GeneratedRegex(@"\[[^\[\]]*[-,][^\[\]]*\]", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberedGroup();
 
     public static bool IsMagnet(string input) => input.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
 
@@ -362,7 +434,7 @@ internal sealed class AddLineSession : IDisposable
             {
                 AddRoute.Checking or AddRoute.FolderLink => true,
                 AddRoute.Provider => !line.HosterLooksUnusable,
-                AddRoute.Direct => !(line.IsListed && _skipListed),
+                AddRoute.Direct => !(line.IsListed && _skipListed) && !LinkExtractor.HasNoPath(line.Input),
                 _ => false,
             };
         }
@@ -587,6 +659,9 @@ internal static partial class RemoteText
                     break;
                 case "ordinaryLink":
                     word = "Ordinary link";
+                    // U-WL-23: where it comes from, so two files of one name can be told apart, and a link cut short says so.
+                    if (Uri.TryCreate(line.Input, UriKind.Absolute, out var from)) details.Add($"From {from.IdnHost}.");
+                    if (LinkExtractor.HasNoPath(line.Input)) details.Add(LinkExtractor.NoPathWords);
                     if (line.IsListed) details.Add("Already in the list");
                     AddNote(details, result.Note);
                     break;
@@ -673,6 +748,13 @@ internal static partial class RemoteText
         var them = toReview == 1 ? "it" : "them";
         return $"{added} {entries} added, because another dialog was open. Add {them} with Add Links.";
     }
+
+    /// <summary>U-WL-22: the Tasks menu item for .rsdf, .ccf and .dlc files, and what it needs when there is no provider key.</summary>
+    public static string ContainerImportItem(string? provider)
+        => provider is null ? "Import Link Container… (needs a provider key in Options)" : "Import Link Container…";
+
+    public static string ContainerImportHelp(string provider)
+        => $"Opens an .rsdf, .ccf or .dlc file, such as JDownloader saves, and sends its links to {provider} like pasted ones";
 
     public static string ProviderOffer(string provider)
         => $"{provider} handles this site, so this link can go through your account. It can also download directly from the site instead.";

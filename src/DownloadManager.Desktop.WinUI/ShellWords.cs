@@ -43,6 +43,53 @@ internal static class ShellWords
         return new BrowserRepairPlan(null, script, appDirectory);
     }
 
+    /// <summary>U-WL-18: a status line's name with its words, said once when the words already start with the name.</summary>
+    public static string SpokenStatus(string name, string text)
+    {
+        if (text.Length == 0) return name;
+        return text.StartsWith(name, StringComparison.OrdinalIgnoreCase) ? text : $"{name}: {text}";
+    }
+
+    /// <summary>
+    /// The folder that holds every one of a package's files, or null when they have none in common or none is known.
+    /// U-WL-14: what Open Folder opens for a package row.
+    /// </summary>
+    public static string? CommonFolder(IEnumerable<string?> folders)
+    {
+        string[]? common = null;
+        foreach (var folder in folders)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) continue;
+            var parts = Path.TrimEndingDirectorySeparator(folder).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (common is null) { common = parts; continue; }
+            var same = 0;
+            while (same < common.Length && same < parts.Length && string.Equals(common[same], parts[same], StringComparison.OrdinalIgnoreCase)) same++;
+            common = common[..same];
+        }
+
+        if (common is null || common.Length == 0) return null;
+        var joined = string.Join(Path.DirectorySeparatorChar, common);
+        return joined.EndsWith(':') ? joined + Path.DirectorySeparatorChar : joined;
+    }
+
+    /// <summary>
+    /// U-WL-24: how a package's files are named in its window. A name two files share gets the folder it is in
+    /// below the folder they all share, such as <c>subideo.bin</c>, so the two can be told apart.
+    /// </summary>
+    public static IReadOnlyList<string> PackageFileNames(IReadOnlyList<(string? Folder, string Name)> files)
+    {
+        var shared = files.GroupBy(file => file.Name, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1).Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (shared.Count == 0) return files.Select(file => file.Name).ToList();
+        var root = CommonFolder(files.Select(file => file.Folder));
+        return files.Select(file =>
+        {
+            if (!shared.Contains(file.Name) || string.IsNullOrWhiteSpace(file.Folder) || root is null) return file.Name;
+            var relative = Path.GetRelativePath(root, file.Folder);
+            return relative == "." ? file.Name : Path.Combine(relative, file.Name);
+        }).ToList();
+    }
+
     private static string Rows(int count) => count == 1 ? "1 download" : $"{count} downloads";
 }
 

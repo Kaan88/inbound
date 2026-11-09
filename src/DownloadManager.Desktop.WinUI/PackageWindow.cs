@@ -82,7 +82,8 @@ internal sealed class PackageWindow : Window
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
         Title = ServerNames.ForWindow("Package status — Inbound Download Manager", _connection.Target);
-        WindowLayout.ResizeForDpi(this, 720, 820);
+        // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
+        WindowLayout.ResizeForDpi(this, 720, 680);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -439,9 +440,11 @@ internal sealed class PackageWindow : Window
             _list.Items.Remove(_rows[stale].Item);
             _rows.Remove(stale);
         }
+        var names = ShellWords.PackageFileNames(members.Select(job => ((string?)FolderOf(job), job.FileName)).ToList());
         for (var index = 0; index < members.Count; index++)
         {
             var job = members[index];
+            var name = names[index];
             if (!_rows.TryGetValue(job.Id, out var row)) _rows[job.Id] = row = CreateRow(job.Id);
             var at = _list.Items.IndexOf(row.Item);
             if (at != index)
@@ -449,8 +452,8 @@ internal sealed class PackageWindow : Window
                 if (at >= 0) _list.Items.RemoveAt(at);
                 _list.Items.Insert(Math.Min(index, _list.Items.Count), row.Item);
             }
-            row.Name.Text = job.FileName;
-            AutomationProperties.SetName(row.Item, $"{job.FileName}, {StateText(job)}");
+            row.Name.Text = name;
+            AutomationProperties.SetName(row.Item, $"{name}, {StateText(job)}");
             row.Status.Text = StateText(job);
             row.Bar.IsIndeterminate = job.TotalBytes is not > 0 && job.State is "connecting" or "downloading";
             row.Bar.Value = job.State == "completed" ? 100 : Percent(job.ReceivedBytes, job.TotalBytes);
@@ -549,6 +552,9 @@ internal sealed class PackageWindow : Window
         };
         if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
     }
+
+    private static string? FolderOf(JobDto job)
+        => !string.IsNullOrWhiteSpace(job.FinalFilePath) ? Path.GetDirectoryName(job.FinalFilePath) : job.DestinationDirectory;
 
     private void OpenFileWindow(Guid jobId)
     {

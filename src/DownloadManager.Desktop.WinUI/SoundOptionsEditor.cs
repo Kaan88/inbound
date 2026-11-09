@@ -95,6 +95,8 @@ public sealed class SoundOptionsEditor
     private Row CreateRow(string key, string label, string? current)
     {
         var mode = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        // U-WL-18: the row's label sits beside it, which a screen reader doesn't connect to the box.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(mode, $"Sound for {label}");
         mode.Items.Add(new ComboBoxItem { Content = "System sound" });
         mode.Items.Add(new ComboBoxItem { Content = "Disabled" });
         mode.Items.Add(new ComboBoxItem { Content = "WAV file" });
@@ -102,6 +104,8 @@ public sealed class SoundOptionsEditor
         var path = new TextBox { PlaceholderText = "Select a WAV file", MinWidth = 0 };
         var pickerError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         var browse = new Button { Content = "Browse…" };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(path, $"WAV file for {label}");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(browse, $"Browse for the WAV file for {label}");
         var row = new Row(key, label, mode, path, browse);
 
         if (current == string.Empty || current is null && key != "completed")

@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using DownloadManager.Contracts;
 using DownloadManager.Desktop.WinUI;
 
 namespace DownloadManager.Core.Tests;
@@ -80,6 +81,99 @@ public sealed class WindowLocalFindingsTests
         var plan = ShellWords.RepairPlan(@"C:\src\artifacts\app\", null, null, _ => false);
         Assert.Null(plan.Script);
         Assert.Contains("Setup", plan.Refusal);
+    }
+
+    [Fact]
+    public void U_WL_10_before_the_firewall_step_the_page_shows_the_addresses_that_will_work()
+    {
+        var running = new WebUiStatusDto { State = WebUiStates.Running, LocalOnly = true, Port = 8080, AlsoReachableAs = ["nas", "NAS-PC"] };
+        Assert.Equal(["http://nas-pc:8080/", "http://nas:8080/"], WebUiForm.AddressesOnceAllowed(running, "NAS-PC"));
+        Assert.Empty(WebUiForm.AddressesOnceAllowed(new WebUiStatusDto { State = WebUiStates.Running, LocalOnly = false, Port = 8080 }, "PC"));
+        Assert.Empty(WebUiForm.AddressesOnceAllowed(new WebUiStatusDto { State = WebUiStates.Off, LocalOnly = true, Port = 8080 }, "PC"));
+    }
+
+    [Fact]
+    public void U_WL_10_the_password_comes_before_the_box_that_needs_it()
+    {
+        var source = File.ReadAllText(WinUiFile("WebUiOptionsPage.cs"));
+        var controls = source[source.IndexOf("Controls =", StringComparison.Ordinal)..];
+        Assert.True(controls.IndexOf("_newPassword,", StringComparison.Ordinal) < controls.IndexOf("_enable,", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("http://h/part[1-3].bin?size=1", new[] { "http://h/part1.bin?size=1", "http://h/part2.bin?size=1", "http://h/part3.bin?size=1" })]
+    [InlineData("http://h/f[08-10].rar", new[] { "http://h/f08.rar", "http://h/f09.rar", "http://h/f10.rar" })]
+    [InlineData("http://h/[a,b]/x[1-2]", new[] { "http://h/a/x1", "http://h/a/x2", "http://h/b/x1", "http://h/b/x2" })]
+    [InlineData("http://h/[draft]/x[1-2]", new[] { "http://h/[draft]/x1", "http://h/[draft]/x2" })]
+    [InlineData("http://[::1]:8080/file.bin", new[] { "http://[::1]:8080/file.bin" })]
+    [InlineData("http://h/file[1-x].bin", new[] { "http://h/file[1-x].bin" })]
+    [InlineData("http://h/plain.bin", new[] { "http://h/plain.bin" })]
+    public void U_WL_12_a_numbered_address_stands_for_each_of_its_numbers(string link, string[] expected)
+        => Assert.Equal(expected, LinkExtractor.ExpandNumbered(link));
+
+    [Fact]
+    public void U_WL_12_pasted_text_expands_numbered_links_in_both_add_dialogs()
+    {
+        const string text = "see http://127.0.0.1:47315/file/part[1-3].bin?size=100000 and http://h/end[1-2].";
+        Assert.Equal(
+            ["http://127.0.0.1:47315/file/part1.bin?size=100000", "http://127.0.0.1:47315/file/part2.bin?size=100000", "http://127.0.0.1:47315/file/part3.bin?size=100000", "http://h/end1", "http://h/end2"],
+            LinkExtractor.HttpLinks(text));
+        Assert.Equal(5, LinkExtractor.Inputs(text).Count);
+    }
+
+    [Theory]
+    [InlineData("ftp://bad", true)]
+    [InlineData("https://example.com/", true)]
+    [InlineData("https://example.com/?id=4", false)]
+    [InlineData("https://example.com/file.zip", false)]
+    public void U_WL_23_an_address_that_names_no_file_waits_to_be_ticked(string link, bool noPath)
+        => Assert.Equal(noPath, LinkExtractor.HasNoPath(link));
+
+    [Fact]
+    public void U_WL_23_an_ordinary_line_says_its_host_and_one_cut_short_says_so()
+    {
+        var good = new AddLine("https://files.example.com/a.zip") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink" } };
+        Assert.Contains("From files.example.com.", RemoteText.AddLineWords(good, "TorBox").Detail);
+        var cut = new AddLine("ftp://bad") { Result = new RemoteClassifyResult { Ok = true, Kind = "ordinaryLink" } };
+        Assert.Contains(LinkExtractor.NoPathWords, RemoteText.AddLineWords(cut, "TorBox").Detail);
+    }
+
+    [Fact]
+    public void U_WL_14_a_package_folder_is_the_one_its_files_share()
+    {
+        Assert.Equal(@"D:\dl\Sample", ShellWords.CommonFolder([@"D:\dl\Sample\other", @"D:\dl\Sample\sub", @"D:\dl\Sample"]));
+        Assert.Equal(@"D:\dl\Sample", ShellWords.CommonFolder([@"D:\dl\Sample\", null, ""]));
+        Assert.Equal(@"D:\", ShellWords.CommonFolder([@"D:\a", @"D:\b"]));
+        Assert.Null(ShellWords.CommonFolder([@"D:\a", @"E:\b"]));
+        Assert.Null(ShellWords.CommonFolder([]));
+    }
+
+    [Fact]
+    public void U_WL_24_files_of_one_name_show_the_folder_they_are_in()
+    {
+        var names = ShellWords.PackageFileNames([(@"D:\dl\S\other", "video.bin"), (@"D:\dl\S\sub", "video.bin"), (@"D:\dl\S", "readme.txt")]);
+        Assert.Equal([@"other\video.bin", @"sub\video.bin", "readme.txt"], names);
+        Assert.Equal(["a.bin", "b.bin"], ShellWords.PackageFileNames([(@"D:\x", "a.bin"), (@"D:\y", "b.bin")]));
+    }
+
+    [Fact]
+    public void U_WL_24_the_package_window_fits_a_768_pixel_screen()
+        => Assert.Contains("WindowLayout.ResizeForDpi(this, 720, 680)", File.ReadAllText(WinUiFile("PackageWindow.cs")));
+
+    [Theory]
+    [InlineData("Network type", "Network type: Ethernet is Private.", "Network type: Ethernet is Private.")]
+    [InlineData("Web UI state", "Off.", "Web UI state: Off.")]
+    [InlineData("Web UI state", "", "Web UI state")]
+    public void U_WL_18_a_status_line_says_its_name_once(string name, string text, string spoken)
+        => Assert.Equal(spoken, ShellWords.SpokenStatus(name, text));
+
+    [Fact]
+    public void U_WL_22_the_container_import_says_what_it_takes_and_what_it_needs()
+    {
+        Assert.Equal("Import Link Container…", RemoteText.ContainerImportItem("TorBox"));
+        Assert.Contains("needs a provider key", RemoteText.ContainerImportItem(null));
+        Assert.Contains(".rsdf, .ccf or .dlc", RemoteText.ContainerImportHelp("TorBox"));
+        Assert.DoesNotContain("JD Container", File.ReadAllText(WinUiFile("MainWindow.Remote.cs")));
     }
 
     internal static string WinUiFile(string name) => Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", name);

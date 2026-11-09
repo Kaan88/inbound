@@ -120,6 +120,25 @@ internal static partial class WebUiForm
         return all;
     }
 
+    /// <summary>
+    /// U-WL-10: while it runs for this PC only, what another device will type once Windows Firewall allows it: this
+    /// PC's name and the names it is also reachable as, with the port. The Host sends its network addresses only once
+    /// they work, so the name is what can be shown before.
+    /// </summary>
+    public static List<string> AddressesOnceAllowed(WebUiStatusDto status, string? machineName)
+    {
+        if (status is not { State: WebUiStates.Running, LocalOnly: true }) return [];
+        var all = new List<string>();
+        foreach (var name in new[] { machineName }.Concat(status.AlsoReachableAs))
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            var address = $"http://{name.Trim().ToLowerInvariant()}:{status.Port}/";
+            if (!all.Contains(address, StringComparer.OrdinalIgnoreCase)) all.Add(address);
+        }
+
+        return all;
+    }
+
     /// <summary>The address a browser on this PC uses, while it runs: the bridge always listens on this PC's loopback.</summary>
     public static string? ThisPcAddress(WebUiStatusDto status)
         => status.State == WebUiStates.Running && status.Port is >= WebUiForm.MinPort and <= WebUiForm.MaxPort ? $"http://127.0.0.1:{status.Port}/" : null;

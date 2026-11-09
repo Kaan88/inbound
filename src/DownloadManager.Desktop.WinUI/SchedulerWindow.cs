@@ -104,6 +104,10 @@ public sealed class SchedulerWindow : Window
     {
         _connection = new HostConnection(target);
         Title = _connection.IsRemote ? $"Scheduler — {_connection.Target.Name} — Inbound Download Manager" : "Scheduler — Inbound Download Manager";
+        // U-WL-18: lists and pickers without a header of their own are named for screen readers.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_queues, "Queues");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_schedulePicker, "Schedule");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_files, "Downloads in this queue");
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "scheduler");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");

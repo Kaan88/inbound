@@ -274,8 +274,11 @@ internal sealed record ArchivePlan(
 {
     public bool CanExtract => ExtractReason is null;
 
-    /// <summary>Retry Extraction or Extract Again already says it, for the same sets. Two lines for one command read as a fault.</summary>
-    public bool ShowExtract => !ExtractRepeatsRetry;
+    /// <summary>
+    /// Retry Extraction or Extract Again already says it, for the same sets. Two lines for one command read as a fault.
+    /// U-WL-14: nor is it shown, dimmed, for a selection that holds no archive at all; Extract Archive… is beside it.
+    /// </summary>
+    public bool ShowExtract => !ExtractRepeatsRetry && ExtractReason != ArchiveRules.NoArchiveReason;
 
     public string ExtractText => ExtractReason is null ? "Extract" : $"Extract ({ExtractReason})";
 }
@@ -283,6 +286,8 @@ internal sealed record ArchivePlan(
 /// <summary>Which archive commands the Host would take for a selection. Nothing here touches the UI.</summary>
 internal static partial class ArchiveRules
 {
+    public const string NoArchiveReason = "no archive selected";
+
     /// <summary>The Host decides for real; this is only for what the menus offer, and it matches the Host's test of a name.</summary>
     public static bool LooksLikeArchive(string? fileName)
         => !string.IsNullOrEmpty(fileName) &&
@@ -308,7 +313,7 @@ internal static partial class ArchiveRules
 
         var reason = !connected ? "the background Host isn't connected"
             : files.Count == 0 && sets.Count == 0 ? "select an archive download first"
-            : archiveFiles.Count == 0 && sets.Count == 0 ? "no archive selected"
+            : archiveFiles.Count == 0 && sets.Count == 0 ? NoArchiveReason
             : jobIds.Count > 0 || ownSets.Count > 0 ? null
             : WhyNotAgain(sets);
 
@@ -325,7 +330,7 @@ internal static partial class ArchiveRules
             reason,
             reason is null ? jobIds : [],
             reason is null ? ownSets : [],
-            PasswordFor(archiveFiles, sets, packageAlone),
+            PasswordFor(archiveFiles, sets, files.Count == 0 || archiveFiles.Count > 0 || sets.Count > 0 ? packageAlone : null),
             retry,
             sets.Where(set => set.State is "waiting" or "extracting").ToList(),
             sets.Where(set => set.State != "extracting").ToList(),
