@@ -1,5 +1,10 @@
 ﻿# Progress — session handoff
 
+### D7.U: the AppImage updates itself (2026-11-10, `linux-host`)
+- `InstalledBuild.AppImage`, `DownloadManagerService.ManifestUrlFor`/`ReplaceAppImage`, `AppImageRestarter`, `UpdateInstallJournal.RecordSucceeded`; the Linux Host gets `HostUpdateMonitor` and `SupportsUpdater` when run from an AppImage. `UpdateSigner` takes a manifest name; `scripts/prepare-appimage-release.sh`.
+- Verified end to end on Linux with packed 0.6.5 and 0.6.6 AppImages over a loopback feed (see ROADMAP D7.U). Core.Tests 1,282 pass on Windows; new AppImage tests pass on Linux and Windows; solution builds with 0 errors on Windows.
+- Next release: run `scripts/prepare-appimage-release.sh` and upload `manifest-linux-x64.json` with the AppImage, or AppImage users see no update.
+
 ### 0.6.5 owner requests UI.R33, UI.B22, UI.R34 (2026-11-10, `linux-host`)
 - UI.R33: My TorBox's "Added N files" notice closes itself after 3 s (`MainWindow.ProviderViews.cs`).
 - UI.B22: `DownloadSpeedGraph.Slide` resumes from the time since the newest sample instead of restarting at 0 on every redraw (size, theme, shown again). Probable cause of the stepping in Progress Details; not reproduced on screen.

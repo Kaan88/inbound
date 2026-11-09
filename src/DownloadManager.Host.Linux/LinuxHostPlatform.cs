@@ -7,8 +7,8 @@ namespace DownloadManager.Host;
 
 /// <summary>
 /// The Linux desktop: a window to open (the Uno build, found next to the Host), a folder dialog, an exit, and the program
-/// settings, for the user who could start those programs anyway (the socket admits only them). No updater: updates come
-/// with a new AppImage. A tray when the desktop has one (<see cref="TrayAvailable"/>).
+/// settings, for the user who could start those programs anyway (the socket admits only them). The updater only when
+/// running from an AppImage, which replaces itself; a build run any other way is updated by whoever installed it. A tray when the desktop has one (<see cref="TrayAvailable"/>).
 /// </summary>
 public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger log) : IHostPlatform
 {
@@ -18,7 +18,7 @@ public sealed class LinuxHostPlatform(DownloadManagerService service, FileLogger
         SupportsFolderPicker = true,
         SupportsTray = false,
         SupportsShutdown = true,
-        SupportsUpdater = false,
+        SupportsUpdater = DownloadManager.Core.InstalledBuild.AppImage() is not null,
         SupportsProgramSettings = true,
         SupportsCompletionActions = true,
         HostKind = HostKinds.Linux,

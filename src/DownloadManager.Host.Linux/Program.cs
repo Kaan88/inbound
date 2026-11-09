@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Persistence;
@@ -182,7 +182,15 @@ internal static class Program
         sockets.Start();
 
         var currentSettings = service.GetSettings();
-        service.SettingsChanged += (_, _) => currentSettings = service.GetSettings();
+        // An AppImage updates itself (it replaces its own file and a restarter starts the new one); otherwise the monitor
+        // finds no installed build and stays idle.
+        using var updateMonitor = new HostUpdateMonitor(service, log.Info);
+        service.UpdateShutdownRequested += (_, _) => platform.RequestShutdown();
+        service.SettingsChanged += (_, _) =>
+        {
+            currentSettings = service.GetSettings();
+            updateMonitor.ApplySettings(currentSettings);
+        };
         TryApplyStartup(currentSettings.LaunchAtStartup, log);
         try
         {
@@ -246,6 +254,8 @@ internal static class Program
         if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
 
         webUi.Notice = notifications.Notify;
+        updateMonitor.Attach(notifications.Notify);
+        updateMonitor.Start();
         // Off the start path: the bridge takes a moment, and the socket it talks to is open already.
         _ = Task.Run(async () =>
         {
