@@ -27,6 +27,7 @@
 
 ### 0.6.5 release (2026-11-09)
 
+- **Released 2026-11-09** (tag `v0.6.5`, squashed to `main` as 96fbde0 without the local-only docs; binaries `0.6.5+96fbde0`). Checks: the live feed serves 0.6.5 and its signature verifies with the same key; Setup, the zip and the XPI on GitHub match SHA256SUMS; `extensions/firefox-updates.json` on `main` points at the XPI on v0.6.5; a scan of the package, release files, XPI and every tracked file found no secret; the Docker image workflow for the tag succeeded.
 - Owner, 2026-11-09: "make a new release." App 0.6.5 with UI.B20, UI.B21, UI.R31 and UI.R32 (My TorBox in the main window, the drawer option), and the fix for a crash when changing the theme. Only the desktop app changed since 0.6.4; the extension stays 0.6.0 and `extensions/firefox-updates.json` now points at the same signed XPI on v0.6.5. Tests at release: WinUI build and Core.Tests (1,276) per change, as the owner asked for speed; the other suites last ran on `integ` before 0.6.4.
 
 ### 0.6.4 release (2026-11-09)
