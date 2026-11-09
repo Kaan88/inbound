@@ -552,6 +552,12 @@ public sealed partial class ArchiveCoordinator
     private static string? DescribeBadPassword(string? password) =>
         password is not null && password.AsSpan().IndexOfAny('\r', '\n', '\0') >= 0 ? "An archive password cannot contain a line break." : null;
 
+    /// <summary>
+    /// Whether an extraction could run now: the extractor it was given, or a 7-Zip found where <see cref="ToolStatus"/>
+    /// looks (a few file checks, nothing started). The hello's <c>archives</c> name follows it.
+    /// </summary>
+    public bool CanExtract => _options.ExtractorFactory is not null || SevenZipTool.Find(_options.SevenZipPath) is not null;
+
     private ArchiveToolStatusDto ToolStatus()
     {
         var found = SevenZipTool.Find(_options.SevenZipPath);

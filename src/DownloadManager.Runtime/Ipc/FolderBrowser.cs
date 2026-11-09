@@ -92,7 +92,7 @@ public sealed class FolderBrowser
                     if (!ArchiveNames.IsChooserName(file.Name)) continue;
                     // As for folders: a link is listed only when what it leads to is inside the roots.
                     if (file.LinkTarget is not null && Allowed(file.FullName) is null) continue;
-                    found.Add(new FolderFileDto { Name = file.Name, Path = file.FullName, Size = file.Length });
+                    found.Add(new FolderFileDto { Name = file.Name, Path = file.FullName, Size = SizeOf(file) });
                     if (found.Count > MaxFolders)
                     {
                         truncated = true;
@@ -152,6 +152,20 @@ public sealed class FolderBrowser
         StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0
             ? order
             : StringComparer.Ordinal.Compare(left.Name, right.Name));
+
+    /// <summary>A file's size; for a link, its target's (a link's own is 0 on Windows), or 0 when that can't be read.</summary>
+    private static long SizeOf(FileInfo file)
+    {
+        if (file.LinkTarget is null) return file.Length;
+        try
+        {
+            return file.ResolveLinkTarget(returnFinalTarget: true) is FileInfo { Exists: true } target ? target.Length : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
 
     private static readonly Comparer<FolderFileDto> FileByName = Comparer<FolderFileDto>.Create((left, right) =>
         StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name) is var order and not 0

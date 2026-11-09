@@ -32,10 +32,11 @@ public sealed partial class HostCommandDispatcherTests
     }
 
     [Fact]
-    public async Task TheHelloNamesArchivesLastOnlyWhereTheArchiveCommandsAreAnswered()
+    public async Task TheHelloNamesArchivesOnlyWhereTheArchiveCommandsAreAnsweredAndAnExtractorIsThere()
     {
         var service = await ServiceAsync();
-        await using var archives = new ArchiveCoordinator(service, new JsonArchiveStore(_paths));
+        await using var archives = new ArchiveCoordinator(service, new JsonArchiveStore(_paths),
+            options: new ArchiveCoordinatorOptions { ExtractorFactory = _ => new FakeExtractor() });
         await archives.InitializeAsync();
         var web = await WebAsync(archives: archives, service: service);
 
@@ -51,22 +52,51 @@ public sealed partial class HostCommandDispatcherTests
         // Without extraction neither has it.
         var without = await WebAsync(service: service);
         Assert.DoesNotContain("archives", without.Session.Frames[0].GetPayload<HostHelloDto>().Capabilities);
+
+        // Extraction started but no 7-Zip there: the commands are answered, the archive boxes aren't offered.
+        await using var noTool = new ArchiveCoordinator(service, new JsonArchiveStore(new StoragePaths(Path.Combine(_root, "no-tool"))),
+            options: new ArchiveCoordinatorOptions { SevenZipPath = Path.Combine(_root, "missing", "7z.exe") });
+        await noTool.InitializeAsync();
+        Assert.False(noTool.CanExtract);
+        var toolless = new HostCommandDispatcher(service, new FakePlatform(PlatformCapabilities.Desktop, _timeline), new ListLog())
+        {
+            Archives = new ArchiveIpcDispatcher(noTool),
+        };
+        Assert.DoesNotContain("archives", toolless.Capabilities);
     }
 
     [Fact]
-    public async Task WhatAWebSessionAddsIsKeptAsAWebAddAndOpensNoWindowOnThisPc()
+    public async Task TheHelloNamesUploadsOnlyWhereUploadedFilesAreReadByTheirReference()
+    {
+        var service = await ServiceAsync();
+        var registry = new RemoteProviderRegistry();
+        await using var jobs = new RemoteJobCoordinator(registry, new JsonRemoteJobStore(_paths), service, new RemoteCoordinatorOptions { RunLoops = false });
+        var without = await WebAsync(providers: registry, remoteJobs: jobs, service: service);
+        var names = without.Session.Frames[0].GetPayload<HostHelloDto>().Capabilities;
+        Assert.Contains("remote", names);
+        Assert.DoesNotContain("uploads", names);
+
+        jobs.ResolveReference = UploadFolder.Prepare(_paths.Root).Resolve;
+        var with = await WebAsync(providers: registry, remoteJobs: jobs, service: service);
+        Assert.Equal("uploads", with.Session.Frames[0].GetPayload<HostHelloDto>().Capabilities[^1]);
+    }
+
+    [Fact]
+    public async Task WhatAWebSessionAddsIsMarkedAsFromAnotherDeviceAndOpensNoWindowOnThisPc()
     {
         var web = await WebAsync();
 
-        foreach (var source in new[] { null, "api", "import", "chromeAuto", "web" })
+        foreach (var (source, kept) in new (string?, string)[] { (null, "cli"), ("api", "api"), ("import", "import"), ("chromeAuto", "chromeAuto"), ("web", "api") })
         {
             var request = Later("https://203.0.113.10/" + (source ?? "none") + ".bin", Inside, (source ?? "none") + ".bin");
-            request.Source = source;
+            request.Source = source!; // null on the wire: no source named
             var added = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobAdd, request)).GetPayload<AddJobResponse>();
             Assert.True(added.Accepted, added.Error);
-            Assert.Equal("web", added.Job!.Source);
+            // Its source stays the one it named; the mark beside it keeps the windows away.
+            Assert.Equal(kept, added.Job!.Source);
+            Assert.True(added.Job.AddedFromAnotherDevice);
             Assert.False(DownloadWindows.OpensWindows(added.Job));
-            Assert.Equal(DownloadSource.Web, (await StoredAsync(added.Job.Id)).Source);
+            Assert.True((await StoredAsync(added.Job.Id)).AddedFromAnotherDevice);
         }
 
         // A hand-off through the bridge too.
@@ -79,17 +109,58 @@ public sealed partial class HostCommandDispatcherTests
             IsAutoIntercept = true,
         })).GetPayload<HandoffAck>();
         Assert.True(handoff.Accepted, handoff.Error);
-        Assert.Equal("web", handoff.Job!.Source);
+        Assert.Equal("chromeAuto", handoff.Job!.Source);
+        Assert.True(handoff.Job.AddedFromAnotherDevice);
+        Assert.False(DownloadWindows.OpensWindows(handoff.Job));
 
-        // The user at this PC: what they say, and windows as before. A client there calling itself "web" is taken at its word.
+        // The user at this PC: windows as before. A client there naming "web" gets an app add, not the mark.
         var localRequest = Later("https://203.0.113.10/local.bin", Inside, "local.bin");
         localRequest.Source = "api";
         var local = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobAdd, localRequest)).GetPayload<AddJobResponse>();
         Assert.Equal("api", local.Job!.Source);
+        Assert.False(local.Job.AddedFromAnotherDevice);
         Assert.True(DownloadWindows.OpensWindows(local.Job));
         var named = Later("https://203.0.113.10/named.bin", Inside, "named.bin");
         named.Source = "web";
-        Assert.Equal("web", (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobAdd, named)).GetPayload<AddJobResponse>().Job!.Source);
+        var namedJob = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobAdd, named)).GetPayload<AddJobResponse>().Job!;
+        Assert.Equal("api", namedJob.Source);
+        Assert.False(namedJob.AddedFromAnotherDevice);
+        Assert.True(DownloadWindows.OpensWindows(namedJob));
+    }
+
+    [Fact]
+    public async Task AJobAddedFromAnotherDeviceIsSavedSoAnOlderBuildStillLoadsIt()
+    {
+        var web = await WebAsync();
+        var request = Later("https://203.0.113.10/kept.bin", Inside, "kept.bin");
+        request.Source = "web";
+        var added = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobAdd, request)).GetPayload<AddJobResponse>();
+        Assert.True(added.Accepted, added.Error);
+
+        // The file names a source every build reads, and the mark as a property of its own.
+        var file = Path.Combine(_paths.JobsDirectory, $"{added.Job!.Id:N}.json");
+        var json = File.ReadAllText(file);
+        using (var saved = System.Text.Json.JsonDocument.Parse(json))
+        {
+            Assert.Equal("api", saved.RootElement.GetProperty("source").GetString());
+            Assert.True(saved.RootElement.GetProperty("addedFromAnotherDevice").GetBoolean());
+        }
+
+        // As an older build reads it: a property it doesn't know is skipped, and the job loads...
+        var older = new StoragePaths(Path.Combine(_root, "older-build"));
+        var olderStore = new JsonJobStore(older);
+        await olderStore.InitializeAsync();
+        File.WriteAllText(Path.Combine(older.JobsDirectory, $"{added.Job.Id:N}.json"),
+            json.Replace("\"addedFromAnotherDevice\"", "\"aPropertyFromALaterBuild\"", StringComparison.Ordinal));
+        Assert.Equal([added.Job.Id], (await olderStore.LoadAllAsync()).Select(job => job.Id));
+        // ...while a source it doesn't know sets the job aside, which is why the mark isn't a source.
+        var unknown = Guid.NewGuid();
+        var withUnknownSource = json.Replace(added.Job.Id.ToString(), unknown.ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("\"source\": \"api\"", "\"source\": \"aSourceFromALaterBuild\"", StringComparison.Ordinal);
+        Assert.Contains("aSourceFromALaterBuild", withUnknownSource);
+        File.WriteAllText(Path.Combine(older.JobsDirectory, $"{unknown:N}.json"), withUnknownSource);
+        Assert.DoesNotContain(unknown, (await olderStore.LoadAllAsync()).Select(job => job.Id));
+        Assert.Single(Directory.GetFiles(older.CorruptDirectory));
     }
 
     private DownloadJob FinishedJob(string folder, string name, JobCompletionOptions? options = null)
@@ -157,12 +228,54 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Equal(opens.Url, web.Service.GetJob(opens.Id)!.Url);
     }
 
+    /// <summary>Answers for the provider's rules without asking anyone, and counts what it was asked.</summary>
+    private sealed class RecordingAddressPolicy(string refused) : IDirectAddressPolicy
+    {
+        public List<string> Asked { get; } = [];
+
+        public Task<string?> WhyNotDirectAsync(string address, bool explicitDirect, CancellationToken cancellationToken = default)
+        {
+            lock (Asked) Asked.Add(address);
+            return Task.FromResult(address == refused ? "A provider handles this site." : null);
+        }
+    }
+
+    [Fact]
+    public async Task AFinishedDownloadsNewAddressIsCheckedAsAnyOtherSoAProviderLinkCantBecomeItsAddress()
+    {
+        var finished = FinishedJob(Inside, "checked.bin");
+        var web = await WebAsync(async store => await store.SaveAsync(finished));
+        var policy = new RecordingAddressPolicy("https://hoster.example/file/abc");
+        web.Service.DirectAddresses = policy;
+
+        var refused = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobRefreshUrl,
+            new JobRefreshUrlRequest { JobId = finished.Id, Url = "https://hoster.example/file/abc" })).GetPayload<JobActionResponse>();
+        Assert.False(refused.Ok);
+        Assert.Equal("A provider handles this site.", refused.Error);
+        Assert.Equal(finished.Url, web.Service.GetJob(finished.Id)!.Url);
+        Assert.Equal("completed", web.Service.GetJob(finished.Id)!.State);
+
+        var allowed = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobRefreshUrl,
+            new JobRefreshUrlRequest { JobId = finished.Id, Url = "https://203.0.113.40/checked.bin" })).GetPayload<JobActionResponse>();
+        Assert.True(allowed.Ok, allowed.Error);
+        Assert.Equal("completed", allowed.Job!.State);
+        Assert.Equal("https://203.0.113.40/checked.bin", allowed.Job.Url);
+        lock (policy.Asked) Assert.Equal(["https://hoster.example/file/abc", "https://203.0.113.40/checked.bin"], policy.Asked);
+
+        // The address it already has isn't asked about again.
+        var same = (await AskAsync(web.Dispatcher, web.Pipe, MessageTypes.JobRefreshUrl,
+            new JobRefreshUrlRequest { JobId = finished.Id, Url = "https://203.0.113.40/checked.bin" })).GetPayload<JobActionResponse>();
+        Assert.True(same.Ok, same.Error);
+        lock (policy.Asked) Assert.Equal(2, policy.Asked.Count);
+    }
+
     [Fact]
     public async Task TheFolderBrowserListsArchiveFilesOnlyWhenAskedAndOnlyInsideTheFolders()
     {
         var web = await WebAsync();
         Directory.CreateDirectory(Path.Combine(Inside, "sub"));
-        foreach (var name in new[] { "b.part1.rar", "a.zip", "c.tar.gz", "d.7z.001", "notes.txt", "movie.mkv" })
+        foreach (var name in new[] { "b.part1.rar", "a.zip", "c.tar.gz", "d.7z.001", "notes.txt", "movie.mkv",
+                     "backup.sql.gz", "movie.mkv.001", "d.7z.002", "e.r00", ".zip" })
             File.WriteAllText(Path.Combine(Inside, name), "x");
         File.WriteAllText(Path.Combine(Outside, "outside.rar"), "x");
 
@@ -217,10 +330,14 @@ public sealed partial class HostCommandDispatcherTests
         var typed = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.RemoteContainerPreview,
             new RemoteContainerPreviewRequest { Path = uploads.Resolve(reference)! })).GetPayload<RemoteContainerPreviewResult>();
         Assert.Equal("That file is outside the app's folders.", typed.Error);
-        // A reference that names no upload, or a torrent's, reads nothing.
+        // A reference that names no upload (or no longer does) says so; a torrent's reads nothing.
         var unknown = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.RemoteContainerPreview,
             new RemoteContainerPreviewRequest { Path = "upload:" + new string('0', 32) })).GetPayload<RemoteContainerPreviewResult>();
-        Assert.Equal("Only .rsdf, .ccf and .dlc files can be imported.", unknown.Error);
+        Assert.Equal(UploadFolder.GoneText, unknown.Error);
+        File.Delete(uploads.Resolve(reference)!);
+        var gone = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.RemoteContainerPreview,
+            new RemoteContainerPreviewRequest { Path = reference })).GetPayload<RemoteContainerPreviewResult>();
+        Assert.Equal(UploadFolder.GoneText, gone.Error);
         using var torrentBody = new MemoryStream("d4:infod4:name1:aee"u8.ToArray());
         var torrent = await uploads.SaveAsync(torrentBody, UploadFolder.TorrentExtension, 1024, CancellationToken.None);
         var notContainer = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.RemoteContainerPreview,
@@ -235,9 +352,11 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Null(uploads.Resolve("C:\\file.torrent"));
         Assert.Null(uploads.Resolve("upload:../../x"));
         Assert.Null(uploads.Resolve("upload:" + new string('A', 32)));
+        // Well formed, but nothing there.
+        Assert.Null(uploads.Resolve("upload:" + new string('0', 32)));
 
         using (var big = new MemoryStream(new byte[2048]))
-            await Assert.ThrowsAsync<InvalidDataException>(() => uploads.SaveAsync(big, ".ccf", 1024, CancellationToken.None));
+            await Assert.ThrowsAsync<UploadTooLargeException>(() => uploads.SaveAsync(big, ".ccf", 1024, CancellationToken.None));
         using (var empty = new MemoryStream())
             await Assert.ThrowsAsync<InvalidDataException>(() => uploads.SaveAsync(empty, ".ccf", 1024, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() => uploads.SaveAsync(new MemoryStream([1]), ".exe", 1024, CancellationToken.None));
@@ -256,25 +375,47 @@ public sealed partial class HostCommandDispatcherTests
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-2));
         uploads.Clean();
         Assert.False(File.Exists(path));
+
+        // Each kind has its own cap: a burst of containers leaves the torrent an open dialog still names.
+        using var torrentBody = new MemoryStream([1]);
+        var torrent = uploads.Resolve(await uploads.SaveAsync(torrentBody, UploadFolder.TorrentExtension, 1024, CancellationToken.None))!;
+        File.SetLastWriteTimeUtc(torrent, DateTime.UtcNow.AddHours(-1));
+        for (var i = 0; i <= UploadFolder.MaxFiles; i++)
+        {
+            using var container = new MemoryStream([1]);
+            await uploads.SaveAsync(container, ".dlc", 1024, CancellationToken.None);
+        }
+
+        uploads.Clean();
+        Assert.True(File.Exists(torrent));
+        Assert.Equal(UploadFolder.MaxFiles, Directory.GetFiles(uploads.Directory, "*.dlc").Length);
+
+        // A folder removed since it was prepared is made again rather than failing the upload.
+        Directory.Delete(uploads.Directory, recursive: true);
+        using var again = new MemoryStream([1]);
+        Assert.NotNull(uploads.Resolve(await uploads.SaveAsync(again, ".rsdf", 1024, CancellationToken.None)));
     }
 
     [Fact]
-    public void TheHostRedactsAHiddenDownloadsPageAndNoteForEveryClient()
+    public void TheHostRedactsAHiddenDownloadsPageAndFinalAddressForEveryClient()
     {
         var hidden = new DownloadJob
         {
             Url = "https://hoster.example/download/***",
             ProtectedUrl = "protected",
+            FinalUrl = "https://cdn.hoster.example/abcdef/a.bin?token=1",
             PageUrl = "https://user:secret@hoster.example:8443/folder/abcdef?key=1",
             FileName = "a.bin",
             DestinationDirectory = Inside,
             FinalFilePath = Path.Combine(Inside, "a.bin"),
             State = DownloadState.Downloading,
+            // The Host sets a host name here, never an address; this one only shows that the note's safeguard holds.
             WaitingForHost = "https://hoster.example/download/abcdef",
         };
         var shown = DownloadManagerService.Map(hidden);
         Assert.True(shown.AddressHidden);
         Assert.Equal("https://hoster.example:8443/", shown.PageUrl);
+        Assert.Null(shown.FinalUrl);
         Assert.DoesNotContain("abcdef", shown.StatusNote);
         Assert.StartsWith("Waiting for a connection to ", shown.StatusNote);
 
@@ -288,8 +429,9 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Equal("https://hoster.example/", DownloadManagerService.Map(provider).PageUrl);
 
         // The user's own link shows as it is.
-        var plain = new DownloadJob { Url = "https://example.com/c.bin", PageUrl = "https://example.com/page?id=7", FileName = "c.bin" };
+        var plain = new DownloadJob { Url = "https://example.com/c.bin", FinalUrl = "https://cdn.example.com/c.bin", PageUrl = "https://example.com/page?id=7", FileName = "c.bin" };
         Assert.Equal("https://example.com/page?id=7", DownloadManagerService.Map(plain).PageUrl);
+        Assert.Equal("https://cdn.example.com/c.bin", DownloadManagerService.Map(plain).FinalUrl);
         Assert.Null(DownloadManagerService.Map(new DownloadJob { Url = "x", ProtectedUrl = "p", PageUrl = "not an address" }).PageUrl);
     }
 }

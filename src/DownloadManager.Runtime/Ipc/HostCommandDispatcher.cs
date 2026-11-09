@@ -103,8 +103,11 @@ public sealed partial class HostCommandDispatcher
         if (platform.SupportsOpenUi) capabilities.Add("openUi");
         if (platform.SupportsShutdown) capabilities.Add("shutdown");
         if (platform.SupportsCompletionActions) capabilities.Add("completionActions");
-        // archive.* is answered (extraction started). Whether 7-Zip is there now is archive.settings.get's tool.
-        if (rights.Archives is not null) capabilities.Add("archives");
+        // archive.* is answered (extraction started) and an extractor is there (7-Zip found), as of the hello. A 7-Zip
+        // installed later shows on the next connection, or at once in archive.settings.get's tool.
+        if (rights.Archives is { } archives && archives.Coordinator.CanExtract) capabilities.Add("archives");
+        // A .torrent file or a container can be uploaded (POST /api/upload/...) and then named by its reference.
+        if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
         return capabilities;
     }
 

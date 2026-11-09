@@ -4,12 +4,14 @@ namespace DownloadManager.Runtime.Remote;
 
 /// <summary>
 /// Files a browser sent the Host (a <c>.torrent</c> file, or an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> container), kept
-/// under a random name in <c>uploads</c> in the data folder. Only the server's web endpoints write here (the Docker
-/// server, and the Windows app's web bridge into the Host's own data folder). A client gets a reference
+/// under a random name in <c>uploads</c> in the data folder. Only a server's web endpoints write here: the Docker server
+/// today (<c>TorrentUploads</c>); the Windows app's web bridge does not store uploads yet, so the desktop Host sets no
+/// <see cref="RemoteJobCoordinator.ResolveReference"/> and its hello has no <c>uploads</c>. A client gets a reference
 /// (<c>upload:</c> and the random name), never the path, which would tell where the state is kept; the provider and
 /// container commands take it (<see cref="RemoteJobCoordinator.ResolveReference"/>). A reference names a file here by
 /// construction, so it is read wherever the caller's own folders are: it can't name anything else. Files older than a
-/// day go, at start and with each upload, and at most <see cref="MaxFiles"/> are kept.
+/// day go, at start and with each upload, and at most <see cref="MaxFiles"/> of each kind (torrents, containers) are
+/// kept, so a burst of one kind can't take away the other's that an open dialog still names.
 /// </summary>
 public sealed class UploadFolder
 {
@@ -27,6 +29,9 @@ public sealed class UploadFolder
     private static readonly TimeSpan KeepFor = TimeSpan.FromDays(1);
     public const int MaxFiles = 200;
 
+    /// <summary>What a caller says for a reference whose file has gone (cleaned up after a day, or never there).</summary>
+    public const string GoneText = "The uploaded file is no longer there. Upload it again.";
+
     public UploadFolder(string directory) => Directory = directory;
 
     public string Directory { get; }
@@ -41,21 +46,32 @@ public sealed class UploadFolder
     }
 
     /// <summary>
-    /// The path a reference stands for, or null when the text isn't one. The file that is there, whichever kind it is;
-    /// for a reference whose file is gone, the <c>.torrent</c> path, which then says it doesn't exist.
+    /// Whether the text is a reference as this folder writes them (<c>upload:</c> and 32 lowercase hex digits), whether
+    /// or not its file is still here. Anything else is not a reference at all, and is read as the text it is.
+    /// </summary>
+    public static bool IsReference(string? text) => NameOf(text?.Trim()) is not null;
+
+    private static string? NameOf(string? text)
+    {
+        if (text is null || !text.StartsWith(ReferencePrefix, StringComparison.Ordinal)) return null;
+        var name = text[ReferencePrefix.Length..];
+        return name.Length == 32 && name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') ? name : null;
+    }
+
+    /// <summary>
+    /// The path of the file a reference stands for, whichever kind it is. Null when the text isn't a reference, or when
+    /// its file is gone (<see cref="IsReference"/> tells those apart, for <see cref="GoneText"/>).
     /// </summary>
     public string? Resolve(string text)
     {
-        if (!text.StartsWith(ReferencePrefix, StringComparison.Ordinal)) return null;
-        var name = text[ReferencePrefix.Length..];
-        if (name.Length != 32 || !name.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')) return null;
+        if (NameOf(text) is not { } name) return null;
         foreach (var extension in Extensions)
         {
             var path = Path.Combine(Directory, name + extension);
             if (File.Exists(path)) return path;
         }
 
-        return Path.Combine(Directory, name + TorrentExtension);
+        return null;
     }
 
     /// <summary>
@@ -63,10 +79,13 @@ public sealed class UploadFolder
     /// working name, flushed and then renamed, so a reference never names half a file.
     /// </summary>
     /// <param name="extension">One of <see cref="TorrentExtension"/> and <see cref="ContainerExtensions"/>.</param>
-    /// <exception cref="InvalidDataException">Nothing was sent, or more than <paramref name="maxBytes"/>.</exception>
+    /// <exception cref="UploadTooLargeException">More than <paramref name="maxBytes"/> was sent.</exception>
+    /// <exception cref="InvalidDataException">Nothing was sent.</exception>
     public async Task<string> SaveAsync(Stream source, string extension, long maxBytes, CancellationToken cancellationToken)
     {
         if (!Extensions.Contains(extension, StringComparer.Ordinal)) throw new ArgumentException("Not a kind of file kept here.", nameof(extension));
+        // Made here too, so an endpoint whose folder wasn't prepared (or was removed since) still keeps the file.
+        System.IO.Directory.CreateDirectory(Directory);
         Clean();
         var name = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
         var partial = Path.Combine(Directory, name + PartialExtension);
@@ -80,7 +99,7 @@ public sealed class UploadFolder
                 while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
                 {
                     total += read;
-                    if (total > maxBytes) throw new InvalidDataException("too large");
+                    if (total > maxBytes) throw new UploadTooLargeException();
                     await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 }
 
@@ -100,7 +119,7 @@ public sealed class UploadFolder
         return ReferencePrefix + name;
     }
 
-    /// <summary>Removes uploads older than a day and all but the newest <see cref="MaxFiles"/>. Best effort.</summary>
+    /// <summary>Removes uploads older than a day and all but the newest <see cref="MaxFiles"/> of each kind. Best effort.</summary>
     public void Clean()
     {
         try
@@ -109,13 +128,15 @@ public sealed class UploadFolder
                 .Where(file => Extensions.Contains(file.Extension, StringComparer.Ordinal) || file.Extension == PartialExtension)
                 .OrderByDescending(file => file.LastWriteTimeUtc)
                 .ToList();
-            var kept = 0;
+            var keptTorrents = 0;
+            var keptContainers = 0;
             foreach (var file in files)
             {
                 var old = DateTime.UtcNow - file.LastWriteTimeUtc > KeepFor;
                 // One being written right now is never in the count, so a burst of uploads can't remove it under its writer.
                 if (file.Extension == PartialExtension) { if (old) TryDelete(file.FullName); continue; }
-                if (old || ++kept > MaxFiles) TryDelete(file.FullName);
+                var kept = file.Extension == TorrentExtension ? ++keptTorrents : ++keptContainers;
+                if (old || kept > MaxFiles) TryDelete(file.FullName);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -136,3 +157,6 @@ public sealed class UploadFolder
         }
     }
 }
+
+/// <summary>An upload sent more than its kind may be (<see cref="UploadFolder.SaveAsync"/>). Nothing of it is kept.</summary>
+public sealed class UploadTooLargeException() : IOException("The upload is larger than allowed.");

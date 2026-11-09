@@ -567,8 +567,9 @@ public sealed partial class DownloadManagerService
         }
 
         // D8: whatever a caller from another device calls it (an add, an import, a browser hand-off through the bridge),
-        // it is kept as theirs, so it opens no window on this PC's screen. What it asked for still decides the rest.
-        var storedSource = caller is not null && source != DownloadSource.Remote ? DownloadSource.Web : source;
+        // it is marked as theirs, so it opens no window on this PC's screen. Its source stays what it asked for, which
+        // still decides the rest. A provider's file (Remote) opens none anyway.
+        var fromAnotherDevice = caller is not null && source != DownloadSource.Remote;
 
         var conflictPolicy = ParseEnum(request.ConflictPolicy, ConflictPolicy.Rename);
         var (jobUrl, finalUrl, protectedUrl) = SplitOffProviderLink(request.Url, request.FinalUrl);
@@ -652,7 +653,8 @@ public sealed partial class DownloadManagerService
             PartFilePath = string.Empty,
             StartMode = startMode,
             QueueProcessing = startMode == StartMode.Queue,
-            Source = storedSource,
+            Source = source,
+            AddedFromAnotherDevice = fromAnotherDevice,
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
             PublicNetworkOnly = caller is not null,
@@ -2737,7 +2739,9 @@ public sealed partial class DownloadManagerService
     /// <summary>
     /// Points a download at a new address. One that hasn't finished goes back to the queue and starts from there. A
     /// finished one keeps its file and stays finished: only the address it would be downloaded from again changes
-    /// (Redownload uses it), so nothing is fetched and nothing happens to the file.
+    /// (Redownload uses it), so nothing is downloaded and nothing happens to the file. A new address is still checked
+    /// with <see cref="DirectAddresses"/> first, as for any download: a provider's own link must not become a direct
+    /// address a redownload would use, and that check may ask the provider about the address.
     /// </summary>
     /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify.</param>
     /// <param name="caller">
@@ -4526,8 +4530,11 @@ public sealed partial class DownloadManagerService
 
     /// <summary>
     /// What every client is told about a download. For one whose address is hidden (a direct provider link) or that is
-    /// a provider's file, the page it came from is its site alone, and any address in its note is taken out
-    /// (<see cref="UrlRedactor.HideAddresses"/>), so no client has to know the rule to keep the account's links out of sight.
+    /// a provider's file, the page it came from is its site alone and the address it ended up at is left out, so no
+    /// client has to know the rule to keep the account's links out of sight; the desktop, too, now gets the site alone.
+    /// Its address itself is sent as stored: a link with a key in it is stored masked, and every client shows a hidden
+    /// one as its site (<see cref="ShownAddress"/>, by <c>AddressHidden</c>). Its note never holds more than a host
+    /// today; <see cref="UrlRedactor.HideAddresses"/> is applied to it all the same, so a future note can't leak one.
     /// </summary>
     public static JobDto Map(DownloadJob job)
     {
@@ -4541,7 +4548,7 @@ public sealed partial class DownloadManagerService
             Id = job.Id,
             Url = job.Url,
             AddressHidden = hidden,
-            FinalUrl = job.FinalUrl,
+            FinalUrl = concealed ? null : job.FinalUrl,
             PageUrl = concealed ? SiteOfPage(job.PageUrl) : job.PageUrl,
             FileName = job.FileName,
             IsQueued = job.IsQueued,
@@ -4576,6 +4583,7 @@ public sealed partial class DownloadManagerService
                 ForceSystemAction = job.CompletionOptions.ForceSystemAction },
             EstimatedRemaining = job.EstimatedRemaining,
             Source = JsonNamingPolicy.CamelCase.ConvertName(job.Source.ToString()),
+            AddedFromAnotherDevice = job.AddedFromAnotherDevice,
             ClientRequestId = job.ClientRequestId,
             OwnerExtensionId = job.OwnerExtensionId,
             QueueId = job.QueueId,

@@ -4,7 +4,8 @@
   // The Add button: Add URL on the button itself, and the other ways in under the arrow, in the desktop's order.
   export type AddKind = 'url' | 'links' | 'magnet' | 'torrent' | 'container' | 'list';
   // canProvider: the server has a provider (remote.*); a torrent file and a container's links can only go there.
-  let { onpick, onexport, canProvider = true }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean } = $props();
+  // canUpload: it takes uploaded files (the hello's "uploads"), which a torrent or container file is sent as.
+  let { onpick, onexport, canProvider = true, canUpload = true }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean; canUpload?: boolean } = $props();
 
   let open = $state(false);
 
@@ -33,7 +34,7 @@
   {#if open}
     <ul class="card absolute left-0 right-0 z-40 mt-1 overflow-hidden py-1 shadow-lg" role="menu">
       {#each items as item (item.kind)}
-        {#if (item.kind !== 'torrent' && item.kind !== 'container') || canProvider}
+        {#if (item.kind !== 'torrent' && item.kind !== 'container') || (canProvider && canUpload)}
           <li role="none"><button class="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-hover" role="menuitem" onclick={() => pick(item.kind)}><span>{item.label}</span>{#if item.hint}<span class="text-[11px] text-muted">{item.hint}</span>{/if}</button></li>
         {/if}
       {/each}
