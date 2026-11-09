@@ -76,7 +76,7 @@ console error, page error, sideways scroll or overlapping toolbar buttons. `INBO
 
 ## Rules the code keeps
 
-- Colors only through the tokens in `src/app.css`, which are the desktop app's (`App.xaml`), light and dark.
+- Colors only through the tokens in `src/tokens.css`, which are the desktop app's (`App.xaml`), light and dark. `src/tokens.css` and the component kit `src/ui-kit.css` are shared with the browser extension, whose build copies them; glyphs are in `src/lib/icons.ts`.
 - The protocol is the desktop's (`docs/ipc-protocol.md`): one WebSocket for the snapshot, events and quick commands,
   and `POST /api/ipc` for calls that wait on the network, which would hold up the socket's one-at-a-time queue.
 - A provider link (magnet, hoster, folder link, `.torrent`) is never requested directly. A line nobody can classify

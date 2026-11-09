@@ -33,15 +33,18 @@ export function timeSpanSeconds(value: string | null | undefined): number | null
   return negative ? -total : total;
 }
 
+/**
+ * Time left, in the desktop list's words everywhere (DurationText.TimeLeft): "1h 5m", "1m 45s", "45s"; blank when there
+ * is no estimate. The figures are whole units, cut and not rounded, as a .NET TimeSpan's are.
+ */
 export function duration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return '';
-  const s = Math.round(seconds);
-  if (s < 60) return `${s} s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} s`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h} h ${String(m % 60).padStart(2, '0')} min`;
-  return `${Math.floor(h / 24)} days ${h % 24} h`;
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return '';
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  if (hours >= 1) return `${hours}h ${minutes}m`;
+  return minutes >= 1 ? `${minutes}m ${rest}s` : `${Math.max(1, rest)}s`;
 }
 
 const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -81,12 +84,15 @@ export function stateWord(state: string): string {
     case 'queued': return 'Queued';
     case 'connecting': return 'Connecting';
     case 'downloading': return 'Downloading';
-    case 'retryWaiting': return 'Retrying';
+    case 'retryWaiting':
+    case 'retrying': return 'Retrying';
     case 'verifying': return 'Verifying';
     case 'paused': return 'Paused';
     case 'completed': return 'Completed';
     case 'failed': return 'Failed';
     case 'cancelled': return 'Cancelled';
+    case 'muxing': return 'Merging';
+    case 'scheduled': return 'Scheduled';
     default: return state;
   }
 }
@@ -106,6 +112,7 @@ export function tone(state: string): Tone {
     case 'paused':
     case 'queued':
     case 'retryWaiting':
+    case 'retrying':
       return 'waiting';
     default:
       return 'neutral';
