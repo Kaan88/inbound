@@ -9,10 +9,12 @@ namespace DownloadManager.Desktop.WinUI;
 /// (<see cref="ServerTarget"/>, design D9 section 5). Replies come back to the call that asked; events go to the handlers.
 /// <para>
 /// To a server: reconnecting waits 2 s, then twice as long each time, up to about a minute
-/// (<see cref="ReconnectBackoff"/>); a token the server refuses stops it until <see cref="Retarget"/> or
-/// <see cref="ReconnectNow"/>. While <see cref="SetEventsWanted"/> is false (the window is hidden) it asks the server
-/// for no snapshot and no events. Its <c>host.exiting</c> means "disconnected": only this PC's Host quits the app, and
-/// only this PC's update progress is shown.
+/// (<see cref="ReconnectBackoff"/>). A token the server refuses is first read again from the window's server list
+/// (another window may have paired again meanwhile); if that is the same token, or an http address may not be used,
+/// nothing more is tried until <see cref="Retarget"/>: showing or hiding the window doesn't try again. While
+/// <see cref="SetEventsWanted"/> is false (the window is hidden) it asks the server for no snapshot and no events. Its
+/// <c>host.exiting</c> means "disconnected": only this PC's Host quits the app, and only this PC's update progress is
+/// shown.
 /// </para>
 /// </summary>
 public sealed partial class HostConnection : IAsyncDisposable
@@ -22,7 +24,9 @@ public sealed partial class HostConnection : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<IpcMessage>> _pending = new();
-    private readonly ReconnectBackoff _backoff = new();
+    private readonly ReconnectBackoff _backoff;
+    private readonly Func<ServerTarget, ClientHelloDto?, TimeSpan, CancellationToken, Task<IIpcConnection>> _connect;
+    private readonly Func<string, ServerTarget?>? _reload;
     private readonly Lock _sync = new();
     private IIpcConnection? _client;
     private Task? _loop;
@@ -33,8 +37,21 @@ public sealed partial class HostConnection : IAsyncDisposable
     private volatile HostHelloDto? _hello;
 
     public HostConnection(ServerTarget? target = null)
+        : this(target, connect: null, backoff: null, reload: id => ServerStore.ForThisUser().Target(id))
+    {
+    }
+
+    /// <param name="connect">For tests: opens the connection a target names (<see cref="ServerConnector.ConnectAsync"/>).</param>
+    /// <param name="backoff">For tests: the waits between a server's tries.</param>
+    /// <param name="reload">A saved server's target as the window's server list has it now, by id; null when it isn't saved.</param>
+    internal HostConnection(ServerTarget? target,
+        Func<ServerTarget, ClientHelloDto?, TimeSpan, CancellationToken, Task<IIpcConnection>>? connect,
+        ReconnectBackoff? backoff, Func<string, ServerTarget?>? reload)
     {
         _target = target ?? ServerTarget.Local;
+        _connect = connect ?? ((server, hello, timeout, token) => ServerConnector.ConnectAsync(server, hello, timeout, token));
+        _backoff = backoff ?? new ReconnectBackoff();
+        _reload = reload;
     }
 
     public event Action<SnapshotDto>? SnapshotReceived;
@@ -60,6 +77,9 @@ public sealed partial class HostConnection : IAsyncDisposable
     /// <summary>The server refused the token: nothing more is tried until the user pairs again.</summary>
     public bool PairingEnded { get; private set; }
 
+    // A refused token or an http address that may not be used: no more tries until Retarget.
+    private bool _stopped;
+
     public void Start()
     {
         _loop ??= Task.Run(() => RunAsync(_cts.Token));
@@ -75,33 +95,36 @@ public sealed partial class HostConnection : IAsyncDisposable
         {
             _target = target;
             PairingEnded = false;
+            _stopped = false;
             _hello = null;
-        }
-
-        ReconnectNow();
-    }
-
-    /// <summary>Drops the current connection, or the wait before the next try, and connects again now.</summary>
-    public void ReconnectNow()
-    {
-        lock (_sync)
-        {
             _backoff.Reset();
-            try { _session?.Cancel(); }
-            catch (ObjectDisposedException) { }
+            CancelSession();
             _wake.TrySetResult();
         }
     }
 
     /// <summary>
     /// False while the window is hidden: a server is then asked for no events (and no snapshot), so it sends nothing
-    /// while nobody looks. This PC's pipe is left as it is.
+    /// while nobody looks. A connection that is open, or being opened, starts again with the new choice; while waiting
+    /// for the next try, showing the window tries at once and hiding it changes only what the next try asks for. After
+    /// a refused token nothing is tried. This PC's pipe is left as it is.
     /// </summary>
     public void SetEventsWanted(bool wanted)
     {
-        if (_eventsWanted == wanted) return;
-        _eventsWanted = wanted;
-        if (IsRemote) ReconnectNow();
+        lock (_sync)
+        {
+            if (_eventsWanted == wanted) return;
+            _eventsWanted = wanted;
+            if (!IsRemote || _stopped) return;
+            if (_session is not null) CancelSession();
+            else if (wanted) _wake.TrySetResult();
+        }
+    }
+
+    private void CancelSession()
+    {
+        try { _session?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     public async Task<SnapshotDto> RefreshAsync(CancellationToken cancellationToken = default)
@@ -348,11 +371,12 @@ public sealed partial class HostConnection : IAsyncDisposable
             var remote = !target.IsLocal;
             IIpcConnection? client = null;
             var stopTrying = false;
+            var retryNow = false;
             try
             {
                 // A server is asked only for what the window shows: nothing while it is hidden.
                 var hello = remote ? new ClientHelloDto { Snapshot = _eventsWanted, Events = _eventsWanted } : null;
-                client = await ServerConnector.ConnectAsync(target, hello, remote ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2), session.Token)
+                client = await _connect(target, hello, remote ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2), session.Token)
                     .ConfigureAwait(false);
 
                 var greeting = await client.ReadAsync(session.Token).ConfigureAwait(false);
@@ -409,11 +433,29 @@ public sealed partial class HostConnection : IAsyncDisposable
             {
                 // Retargeted, shown or hidden: connect again at once, below.
             }
+            catch (Exception ex) when (ex is RemotePairingEndedException && Reloaded(target) is { } paired)
+            {
+                // Paired again meanwhile (by the main window, while this one kept the old token): use the new one now.
+                lock (_sync)
+                {
+                    if (_target == target) _target = paired;
+                }
+
+                retryNow = true;
+            }
             catch (Exception ex) when (ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
             {
                 // Trying again can't help: the token is refused, or may not be sent. The user decides in File > Servers.
                 stopTrying = true;
-                PairingEnded = ex is RemotePairingEndedException;
+                lock (_sync)
+                {
+                    if (_target == target)
+                    {
+                        _stopped = true;
+                        PairingEnded = ex is RemotePairingEndedException;
+                    }
+                }
+
                 ConnectionChanged?.Invoke(false, ex.Message);
             }
             catch (Exception ex)
@@ -454,7 +496,7 @@ public sealed partial class HostConnection : IAsyncDisposable
                 }
             }
 
-            var askedFor = session.IsCancellationRequested;
+            var askedFor = session.IsCancellationRequested || retryNow;
             session.Dispose();
             if (askedFor)
             {
@@ -464,6 +506,7 @@ public sealed partial class HostConnection : IAsyncDisposable
 
             try
             {
+                // Stopped: only Retarget wakes it (SetEventsWanted leaves a stopped connection alone).
                 var delay = stopTrying ? Timeout.InfiniteTimeSpan : remote ? _backoff.Next() : LocalRetryDelay;
                 await wake.WaitAsync(delay, cancellationToken).ConfigureAwait(false);
             }
@@ -478,12 +521,26 @@ public sealed partial class HostConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>The saved server's target with a token other than the refused one, or null.</summary>
+    private ServerTarget? Reloaded(ServerTarget refused)
+    {
+        if (_reload is null || refused.Id is not { } id) return null;
+        try
+        {
+            return _reload(id) is { } now && now.Token != refused.Token ? now : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            return null;
+        }
+    }
+
     private void Dispatch(IpcMessage message, bool snapshot)
     {
         if (message.Type == MessageTypes.HostExiting)
         {
             // Another server going away is a disconnection, which its closing socket reports; it never quits this app.
-            if (!IsRemote) HostExiting?.Invoke();
+            if (RemoteDataRules.HostExitQuitsApp(IsRemote)) HostExiting?.Invoke();
             return;
         }
         if (message.Type == MessageTypes.UpdateProgress)

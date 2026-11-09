@@ -83,6 +83,85 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task AServerThatRefusesTheTokenIsNotTriedAgainUntilRetargetedAndCallsSayWhy()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { Fail = () => new RemotePairingEndedException() };
+        var ui = new UiQueue();
+        // With waits this short, a loop that kept trying would try dozens of times below.
+        await using var client = here.NewClient(ui, remoteBackoff: new ReconnectBackoff(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)));
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await Task.Delay(300);
+        Assert.Equal(1, there.Attempts);
+
+        var list = await client.ListAsync();
+        Assert.Contains("Pair it again", list.Error);
+        var items = await client.GetItemsAsync(new RemoteItemRequest { Provider = "torbox", Kind = "torrents" });
+        Assert.Contains("Pair it again", items.Error);
+        await client.SetEventsWantedAsync(false);
+        await client.SetEventsWantedAsync(true);
+        await Task.Delay(100);
+        Assert.Equal(1, there.Attempts);
+
+        // Paired again: the new target is tried at once.
+        there.Fail = null;
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await there.UntilAsync(() => there.Connections.Count == 1);
+        await ui.UntilAsync(() => client.State.IsConnected);
+    }
+
+    [Fact]
+    public async Task AServerThatIsDownIsTriedLessAndLessOften()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { Fail = () => new IOException("down") };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui, remoteBackoff: new ReconnectBackoff(TimeSpan.FromMilliseconds(50), TimeSpan.FromSeconds(5)));
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await Task.Delay(500);
+
+        // 0, 50, 150, 350 ms (then 750): the fixed 10 ms wait this client has for this PC would have made about fifty.
+        Assert.InRange(there.Attempts, 2, 6);
+    }
+
+    [Fact]
+    public async Task AHiddenWindowsCallToAServerGoesAsOneRequestAndLeavesTheEventSocketClosed()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { SnapshotWithHello = false };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await client.SetEventsWantedAsync(false);
+        var before = there.Connections.Count;
+
+        var list = await client.ListAsync();
+
+        Assert.True(list.Ok, list.Error);
+        Assert.Equal(before + 1, there.Connections.Count);
+        Assert.All(there.Connections, pipe => Assert.True(pipe.Disposed));
+    }
+
+    [Fact]
+    public void ATorrentFileForAServerIsReadOnlyFromAFullLocalPathAndUploadedAgainWhenItChanges()
+    {
+        Assert.Contains("network share", RemoteClient.TorrentPathProblem(@"\\nas\share\a.torrent"));
+        Assert.Contains("network share", RemoteClient.TorrentPathProblem("//nas/share/a.torrent"));
+        Assert.Contains("full path", RemoteClient.TorrentPathProblem("a.torrent"));
+        Assert.Null(RemoteClient.TorrentPathProblem(@"C:\Downloads\a.torrent"));
+
+        var written = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
+        var key = RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written);
+        Assert.Equal(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written));
+        Assert.NotEqual(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1201, written));
+        Assert.NotEqual(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written.AddSeconds(1)));
+    }
+
+    [Fact]
     public void ATimeoutAfterTheHostWasReachedIsNotReportedAsAHostThatIsDown()
     {
         Assert.Equal(RemoteText.HostTooSlow, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: true));
@@ -1040,6 +1119,14 @@ public sealed class RemoteClientTests
         public bool Refuse { get; set; }
         public bool Busy { get; set; }
 
+        /// <summary>Each connect throws this, as a server that refuses the token or is down.</summary>
+        public Func<Exception>? Fail { get; set; }
+
+        private int _attempts;
+
+        /// <summary>Every connect asked for, including the ones that failed.</summary>
+        public int Attempts => Volatile.Read(ref _attempts);
+
         /// <summary>False: as another server's socket that asked for no snapshot, the hello comes alone.</summary>
         public bool SnapshotWithHello { get; set; } = true;
 
@@ -1049,8 +1136,8 @@ public sealed class RemoteClientTests
         public RemoteJobDto Job { get; set; } = new() { Id = Guid.NewGuid(), Provider = "torbox", State = "waiting", Status = "Waiting for TorBox" };
         public ArchiveSetDto Set { get; } = new() { Id = Guid.NewGuid(), Name = "archive", State = "downloaded" };
 
-        public RemoteClient NewClient(UiQueue ui, TimeSpan? quickTimeout = null, TimeSpan? slowTimeout = null)
-            => new(ui.Post, ConnectAsync, TimeSpan.FromMilliseconds(10), quickTimeout, slowTimeout);
+        public RemoteClient NewClient(UiQueue ui, TimeSpan? quickTimeout = null, TimeSpan? slowTimeout = null, ReconnectBackoff? remoteBackoff = null)
+            => new(ui.Post, ConnectAsync, TimeSpan.FromMilliseconds(10), quickTimeout, slowTimeout, remoteBackoff);
 
         public int Received(string type)
         {
@@ -1095,6 +1182,8 @@ public sealed class RemoteClientTests
 
         private Task<IRemotePipe> ConnectAsync(TimeSpan timeout, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _attempts);
+            if (Fail?.Invoke() is { } failure) throw failure;
             if (Refuse) throw new TimeoutException();
             if (Busy) throw new HostPipeBusyException();
             var pipe = new FakePipe(this);

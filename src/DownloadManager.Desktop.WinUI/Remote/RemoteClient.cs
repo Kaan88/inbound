@@ -66,9 +66,16 @@ internal sealed class RemoteClient : IAsyncDisposable
     private bool _eventsWanted = true;
     private bool _remoteTarget;
 
-    // A server's .torrent uploads: the server the paths go to, and the reference each local path got there.
+    // A server's event socket: tries wait longer each time (design D9, section 5), and a refused token, or a plain-http
+    // address the user hasn't allowed, stops them until the next RetargetAsync. _parked holds what to say meanwhile.
+    private readonly ReconnectBackoff _remoteBackoff;
+    private string? _parked;
+
+    // A server's .torrent uploads: the server the files go to, and the reference each file got there, kept for a short
+    // while and only for the same file (path, size and time written), so the check before an add and the add share one.
     private ServerTarget? _uploadTarget;
-    private readonly ConcurrentDictionary<string, string> _uploads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (string Reference, DateTimeOffset At)> _uploads = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan UploadKeptFor = TimeSpan.FromMinutes(30);
     private readonly Lock _sync = new();
 
     private TaskCompletionSource<IRemotePipe> _control = NewControlSource();
@@ -81,7 +88,8 @@ internal sealed class RemoteClient : IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task<IRemotePipe>>? connect = null,
         TimeSpan? reconnectDelay = null,
         TimeSpan? quickTimeout = null,
-        TimeSpan? slowTimeout = null)
+        TimeSpan? slowTimeout = null,
+        ReconnectBackoff? remoteBackoff = null)
     {
         _post = post;
         _connect = connect ?? ConnectToHostAsync;
@@ -90,6 +98,7 @@ internal sealed class RemoteClient : IAsyncDisposable
         _reconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(2);
         _quickTimeout = quickTimeout ?? DefaultQuickTimeout;
         _slowTimeout = slowTimeout ?? DefaultSlowTimeout;
+        _remoteBackoff = remoteBackoff ?? new ReconnectBackoff();
     }
 
     public RemoteState State { get; } = new();
@@ -99,7 +108,7 @@ internal sealed class RemoteClient : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (_round.IsCancellationRequested) return;
+            if (_round.IsCancellationRequested || _parked is not null) return;
             var round = _round.Token;
             _loop ??= Task.Run(() => RunAsync(round));
         }
@@ -141,6 +150,8 @@ internal sealed class RemoteClient : IAsyncDisposable
             _remoteTarget = remote;
             _uploadTarget = uploadTarget;
             _uploads.Clear();
+            _parked = null;
+            _remoteBackoff.Reset();
             _firstRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             start = !remote || _eventsWanted;
         }
@@ -159,8 +170,9 @@ internal sealed class RemoteClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// False while the window is hidden: a server's event connection closes, so it sends nothing while nobody looks. A
-    /// call made meanwhile opens it again. This PC's pipe is left as it is.
+    /// False while the window is hidden: a server's event connection closes, so it sends nothing while nobody looks, and
+    /// a call made meanwhile goes as one <c>POST /api/ipc</c> of its own without opening it again. This PC's pipe is left
+    /// as it is.
     /// </summary>
     public async Task SetEventsWantedAsync(bool wanted)
     {
@@ -290,16 +302,16 @@ internal sealed class RemoteClient : IAsyncDisposable
         lock (_sync) target = _uploadTarget;
         if (target is null || !LinkExtractor.IsTorrentPath(text)) return (text, null);
         var path = text.Trim();
-        if (_uploads.TryGetValue(path, out var known)) return (known, null);
-        // A network path is never opened from here: even asking about it sends this Windows account's credentials there.
-        if (!Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
-            return (null, "Copy the .torrent file to this PC first; a file on a network share isn't sent from here.");
+        if (TorrentPathProblem(path) is { } problem) return (null, problem);
         byte[] bytes;
+        string key;
         try
         {
             var info = new FileInfo(path);
             if (!info.Exists) return (null, "That .torrent file isn't on this PC.");
             if (info.Length is 0 or > MostTorrentBytes) return (null, "That file is too large to be a .torrent file.");
+            key = UploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+            if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return (known.Reference, null);
             bytes = await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
@@ -309,9 +321,23 @@ internal sealed class RemoteClient : IAsyncDisposable
 
         var (reference, error) = await RemoteServerHttp.UploadTorrentAsync(target, bytes, cancellationToken).ConfigureAwait(false);
         if (reference is null) return (null, error);
-        _uploads[path] = reference;
+        _uploads[key] = (reference, DateTimeOffset.UtcNow);
         return (reference, null);
     }
+
+    /// <summary>
+    /// Why a typed .torrent path isn't opened here, or null. A network path is never opened from here: even asking about
+    /// it sends this Windows account's credentials there.
+    /// </summary>
+    internal static string? TorrentPathProblem(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+            return "Copy the .torrent file to this PC first; a file on a network share isn't sent from here.";
+        return Path.IsPathFullyQualified(path) ? null : @"Type the .torrent file's full path, such as C:\Downloads\file.torrent.";
+    }
+
+    /// <summary>The same file: its path, size and time written. A changed file is uploaded again.</summary>
+    internal static string UploadKey(string fullPath, long length, DateTime lastWriteUtc) => $"{fullPath}|{length}|{lastWriteUtc.Ticks}";
 
     /// <summary>The server's limit for an uploaded .torrent file.</summary>
     private const long MostTorrentBytes = 16 * 1024 * 1024;
@@ -503,12 +529,35 @@ internal sealed class RemoteClient : IAsyncDisposable
     private async Task<TResult> QuickAsync<TRequest, TResult>(
         string type, TRequest request, string replyType, Func<string, TResult> failed, Func<IpcMessage, TResult> read, CancellationToken cancellationToken)
     {
+        bool remote, eventsWanted, controlReady;
+        string? parked;
+        lock (_sync)
+        {
+            remote = _remoteTarget;
+            eventsWanted = _eventsWanted;
+            controlReady = _control.Task.IsCompletedSuccessfully;
+            parked = _parked;
+        }
+
+        if (remote && parked is not null) return failed(parked);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, RoundToken);
         deadline.CancelAfter(_quickTimeout);
         try
         {
-            Start();
-            var reply = await RequestOnControlAsync(type, request, deadline.Token).ConfigureAwait(false);
+            // A server's call goes as one POST while its event socket is closed (the window is hidden) or not back yet:
+            // that says at once what is wrong, and a hidden window doesn't open the socket again.
+            IpcMessage reply;
+            if (remote && (!eventsWanted || !controlReady))
+            {
+                if (eventsWanted) Start();
+                reply = await RequestOnceAsync(type, request, deadline.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                Start();
+                reply = await RequestOnControlAsync(type, request, deadline.Token).ConfigureAwait(false);
+            }
+
             return Read(reply, replyType, failed, read);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -523,6 +572,9 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private async Task<TResult> SlowAsync<TRequest, TResult>(string type, TRequest request, string replyType, Func<string, TResult> failed, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
+        string? parked;
+        lock (_sync) parked = _remoteTarget ? _parked : null;
+        if (parked is not null) return failed(parked);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, RoundToken);
         deadline.CancelAfter(timeout ?? _slowTimeout);
         var connected = false;
@@ -635,6 +687,20 @@ internal sealed class RemoteClient : IAsyncDisposable
         }
     }
 
+    /// <summary>One request on a connection of its own (to a server: one <c>POST /api/ipc</c>), and its reply.</summary>
+    private async Task<IpcMessage> RequestOnceAsync<T>(string type, T payload, CancellationToken cancellationToken)
+    {
+        await using var pipe = await _connectCall(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+        var message = IpcMessage.Create(type, payload);
+        await pipe.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        while (await pipe.ReadAsync(cancellationToken).ConfigureAwait(false) is { } reply)
+        {
+            if (reply.ReplyTo == message.Id) return reply;
+        }
+
+        throw new IOException("The connection closed before the answer came.");
+    }
+
     private TaskCompletionSource<IRemotePipe> ControlSource()
     {
         lock (_sync) return _control;
@@ -646,6 +712,8 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        bool remote;
+        lock (_sync) remote = _remoteTarget;
         while (!cancellationToken.IsCancellationRequested)
         {
             IRemotePipe? pipe = null;
@@ -660,17 +728,18 @@ internal sealed class RemoteClient : IAsyncDisposable
                     throw new InvalidDataException("The Host did not send a usable greeting.");
                 }
 
-                var remote = hello.GetPayload<HostHelloDto>().Capabilities.Contains("remote", StringComparer.Ordinal);
+                var offersRemote = hello.GetPayload<HostHelloDto>().Capabilities.Contains("remote", StringComparer.Ordinal);
 
                 // The snapshot comes before any event, and this client has no use for it. A server's socket asks for none.
                 if (pipe.SnapshotFollowsHello) _ = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
 
                 lock (_sync) _control.TrySetResult(pipe);
                 published = true;
+                if (remote) _remoteBackoff.Reset();
                 _post(() => State.IsConnected = true);
 
                 // Not awaited: its replies arrive through the loop below.
-                _ = SeedAsync(remote, cancellationToken);
+                _ = SeedAsync(offersRemote, cancellationToken);
 
                 while (await pipe.ReadAsync(cancellationToken).ConfigureAwait(false) is { } message)
                 {
@@ -680,6 +749,18 @@ internal sealed class RemoteClient : IAsyncDisposable
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
+            }
+            catch (RemoteServerException ex) when (remote && ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
+            {
+                // Trying again can't help until the user pairs again or allows the address (File > Servers), which
+                // retargets this client. Calls meanwhile say why at once.
+                lock (_sync)
+                {
+                    _parked = ex.Message;
+                    _firstRead.TrySetResult();
+                }
+
+                _post(() => State.IsReady = true);
             }
             catch (Exception ex) when (IsCommunicationFailure(ex))
             {
@@ -702,9 +783,14 @@ internal sealed class RemoteClient : IAsyncDisposable
                 }
             }
 
+            lock (_sync)
+            {
+                if (_parked is not null) break;
+            }
+
             try
             {
-                await Task.Delay(_reconnectDelay, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(remote ? _remoteBackoff.Next() : _reconnectDelay, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

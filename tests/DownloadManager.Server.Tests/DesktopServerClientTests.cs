@@ -229,6 +229,64 @@ public sealed class DesktopServerClientTests
         Assert.DoesNotContain("invented", refused.Message);
     }
 
+    [Fact]
+    public async Task ARedirectIsNeverFollowedSoTheTokenGoesNowhereElse()
+    {
+        var elsewhere = new List<string>();
+        await using var other = await FakeHttp.StartAsync(context =>
+        {
+            lock (elsewhere) elsewhere.Add($"{context.Request.Path} {context.Request.Headers.Authorization}");
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        });
+        await using var redirecting = await FakeHttp.StartAsync(context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status302Found;
+            context.Response.Headers.Location = new Uri(other.Address, context.Request.Path + context.Request.QueryString).ToString();
+            return Task.CompletedTask;
+        });
+        var target = Target(redirecting.Address, "invented-redirect-token");
+
+        var upgrade = await Assert.ThrowsAnyAsync<RemoteServerException>(() => WebSocketIpcClient.ConnectAsync(target, new ClientHelloDto(), TimeSpan.FromSeconds(5)));
+        Assert.IsNotType<RemotePairingEndedException>(upgrade);
+        await Assert.ThrowsAnyAsync<RemoteServerException>(() => RemoteServerHttp.SendIpcAsync(target, IpcMessage.Create(MessageTypes.HostPing, new { })));
+        Assert.False(await RemoteServerHttp.UnpairAsync(target));
+        var paired = await RemoteServerHttp.PairAsync(redirecting.Address, "invented-password", "Desk PC", plainHttpConfirmed: false);
+        Assert.False(paired.Ok);
+
+        lock (elsewhere) Assert.Empty(elsewhere);
+    }
+
+    [Fact]
+    public async Task ATokenOfAnotherKindFromAnOlderServerIsForgottenThere()
+    {
+        string? forgotten = null;
+        await using var older = await FakeHttp.StartAsync(async context =>
+        {
+            if (context.Request.Path == "/api/pair" && HttpMethods.IsPost(context.Request.Method))
+            {
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("""{ "id": "t1", "token": "ibt_invented-extension-token", "role": "extension" }""");
+                return;
+            }
+
+            if (context.Request.Path == "/api/pair/self" && HttpMethods.IsDelete(context.Request.Method))
+            {
+                forgotten = context.Request.Headers.Authorization.ToString();
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                return;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+        });
+
+        var paired = await RemoteServerHttp.PairAsync(older.Address, "invented-password", "Desk PC", plainHttpConfirmed: false);
+
+        Assert.False(paired.Ok);
+        Assert.Null(paired.Token);
+        Assert.Equal("Bearer ibt_invented-extension-token", forgotten);
+    }
+
     private static async Task<IpcMessage> ReadAsync(IIpcConnection client)
     {
         using var deadline = new CancellationTokenSource(Patience);
@@ -254,6 +312,29 @@ public sealed class DesktopServerClientTests
             if (result.MessageType == WebSocketMessageType.Close) return null;
             memory.Write(buffer, 0, result.Count);
             if (result.EndOfMessage) return JsonSerializer.Deserialize<IpcMessage>(memory.ToArray(), IpcJson.Options);
+        }
+    }
+
+    /// <summary>A plain HTTP endpoint on loopback that answers every request as the test says.</summary>
+    private sealed class FakeHttp(WebApplication app, Uri address) : IAsyncDisposable
+    {
+        public Uri Address { get; } = address;
+
+        public static async Task<FakeHttp> StartAsync(RequestDelegate answer)
+        {
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Logging.ClearProviders();
+            var app = builder.Build();
+            app.Run(answer);
+            await app.StartAsync();
+            return new FakeHttp(app, new Uri(app.Urls.First()));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
         }
     }
 

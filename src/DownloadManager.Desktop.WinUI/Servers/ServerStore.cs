@@ -38,6 +38,12 @@ internal sealed class SavedServer
 /// import). Only the token is secret, and it is kept sealed with DPAPI for this Windows user, bound to the server's id, so
 /// a copied file opens on no other account and a sealed token moved to another entry doesn't open. The password is
 /// never kept. Written to a temporary file, flushed and moved over the old one.
+/// <para>
+/// A file that is there but can't be read now (another program holds it, or access is refused) is never written over:
+/// reading shows no servers, and a change throws <see cref="ServerListUnreadableException"/>, so no saved pairing is
+/// lost to a passing lock. A file that isn't a list at all is copied aside to <c>servers.json.bad</c> before the first
+/// change replaces it.
+/// </para>
 /// </summary>
 internal sealed class ServerStore
 {
@@ -64,11 +70,11 @@ internal sealed class ServerStore
         return new ServerStore(Path.Combine(folder, FileName));
     }
 
-    /// <summary>The saved servers, in the order added. Entries that don't read are left out.</summary>
-    public List<SavedServer> Load() => Read().Servers;
+    /// <summary>The saved servers, in the order added. Entries that don't read are left out; none when the file can't be read now.</summary>
+    public List<SavedServer> Load() => TryRead().File.Servers;
 
     /// <summary>The server the window showed last; null for this PC.</summary>
-    public string? LastShown => Read().LastShown;
+    public string? LastShown => TryRead().File.LastShown;
 
     public SavedServer? Find(string id) => Load().FirstOrDefault(server => string.Equals(server.Id, id, StringComparison.OrdinalIgnoreCase));
 
@@ -86,7 +92,7 @@ internal sealed class ServerStore
 
     public SavedServer Add(string name, Uri address, string token, string? tokenId, bool plainHttpConfirmed, string? hostKind)
     {
-        var file = Read();
+        var file = ReadForChange();
         if (file.Servers.Count >= MaxServers) throw new InvalidOperationException($"At most {MaxServers} servers can be saved.");
         var server = new SavedServer
         {
@@ -107,7 +113,7 @@ internal sealed class ServerStore
     /// <summary>A new pairing for a saved server (its old token stopped working, or the address changed).</summary>
     public void Repair(string id, Uri address, string token, string? tokenId, bool plainHttpConfirmed, string? hostKind)
     {
-        var file = Read();
+        var file = ReadForChange();
         var server = file.Servers.FirstOrDefault(entry => entry.Id == id) ?? throw new InvalidOperationException("That server isn't saved.");
         server.Address = address.ToString();
         server.SealedToken = Seal(id, token);
@@ -121,7 +127,7 @@ internal sealed class ServerStore
     /// <summary>Changes the name or the plain-HTTP choice. The address stays: another address needs a new pairing.</summary>
     public void Update(string id, string? name = null, bool? plainHttpConfirmed = null)
     {
-        var file = Read();
+        var file = ReadForChange();
         var server = file.Servers.FirstOrDefault(entry => entry.Id == id) ?? throw new InvalidOperationException("That server isn't saved.");
         if (name is not null && ServerAddress.TryNormalize(server.Address, out var address, out _)) server.Name = CleanName(name, address);
         if (plainHttpConfirmed is { } confirmed) server.PlainHttpConfirmed = confirmed;
@@ -130,16 +136,21 @@ internal sealed class ServerStore
 
     public void Remove(string id)
     {
-        var file = Read();
+        var file = ReadForChange();
         file.Servers.RemoveAll(entry => entry.Id == id);
         if (file.LastShown == id) file.LastShown = null;
         Write(file);
     }
 
+    /// <summary>Remembers the server shown. Skipped, with no write, when the list can't be read now.</summary>
     public void SetLastShown(string? id)
     {
-        var file = Read();
-        file.LastShown = id is not null && file.Servers.Any(entry => entry.Id == id) ? id : null;
+        var (file, state) = TryRead();
+        if (state == ReadState.Unreadable) return;
+        var last = id is not null && file.Servers.Any(entry => entry.Id == id) ? id : null;
+        if (state is ReadState.Read or ReadState.Missing && last == file.LastShown) return;
+        if (state == ReadState.Damaged) KeepDamagedCopy();
+        file.LastShown = last;
         Write(file);
     }
 
@@ -159,26 +170,52 @@ internal sealed class ServerStore
         return _protector.Protect(token, Purpose(id));
     }
 
-    private ServerFile Read()
+    private enum ReadState { Missing, Read, Damaged, Unreadable }
+
+    /// <summary>The list, and how reading it went. Never throws for the file's sake.</summary>
+    private (ServerFile File, ReadState State) TryRead()
     {
+        string text;
         try
         {
-            if (!File.Exists(_path)) return new ServerFile();
-            var file = JsonSerializer.Deserialize<ServerFile>(File.ReadAllText(_path), Options) ?? new ServerFile();
+            if (!File.Exists(_path)) return (new ServerFile(), ReadState.Missing);
+            text = File.ReadAllText(_path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (new ServerFile(), ReadState.Unreadable);
+        }
+
+        try
+        {
+            var file = JsonSerializer.Deserialize<ServerFile>(text, Options) ?? new ServerFile();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             file.Servers = (file.Servers ?? [])
-                .Where(server => server is not null && server.Id.Length == 32 && server.Id.All(Uri.IsHexDigit) && seen.Add(server.Id)
+                .Where(server => server is { Id: { Length: 32 } id } && id.All(Uri.IsHexDigit) && seen.Add(id)
                     && ServerAddress.TryNormalize(server.Address, out _, out _))
                 .Take(MaxServers)
                 .ToList();
+            foreach (var server in file.Servers) server.Name ??= string.Empty;
             if (file.LastShown is not null && !file.Servers.Any(server => server.Id == file.LastShown)) file.LastShown = null;
-            return file;
+            return (file, ReadState.Read);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException)
         {
-            return new ServerFile();
+            return (new ServerFile(), ReadState.Damaged);
         }
     }
+
+    /// <summary>The list to change and write back. Throws, writing nothing, when the file is there but can't be read now.</summary>
+    private ServerFile ReadForChange()
+    {
+        var (file, state) = TryRead();
+        if (state == ReadState.Unreadable) throw new ServerListUnreadableException();
+        if (state == ReadState.Damaged) KeepDamagedCopy();
+        return file;
+    }
+
+    /// <summary>A file that isn't a list is kept as <c>servers.json.bad</c> before a new list replaces it.</summary>
+    private void KeepDamagedCopy() => File.Copy(_path, _path + ".bad", overwrite: true);
 
     private void Write(ServerFile file)
     {
@@ -201,3 +238,7 @@ internal sealed class ServerStore
         public List<SavedServer> Servers { get; set; } = [];
     }
 }
+
+/// <summary>The server list is there but can't be read now, so it wasn't changed (and nothing in it was lost).</summary>
+internal sealed class ServerListUnreadableException() : IOException(
+    "This PC's list of servers couldn't be read just now, so it wasn't changed. Try again in a moment.");

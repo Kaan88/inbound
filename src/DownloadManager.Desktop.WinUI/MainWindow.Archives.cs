@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
@@ -372,7 +372,8 @@ public sealed partial class MainWindow
 
     private void SyncArchiveNotice(IReadOnlyList<ArchiveSetDto> sets)
     {
-        var notice = _archiveNotices.Update(sets, WatchingSince, _settings?.NotifyOnCompletion != false);
+        // This PC's choice, whichever server is shown, as for the other notifications.
+        var notice = _archiveNotices.Update(sets, WatchingSince, LocalSettings?.NotifyOnCompletion != false);
         if (notice == _archiveNotice) return;
         _archiveNotice = notice;
         ArchiveNoticeBar.Visibility = notice is null ? Visibility.Collapsed : Visibility.Visible;
@@ -609,8 +610,7 @@ public sealed partial class MainWindow
         var fileName = name.Text.Trim();
         if (chosenFolder.Length == 0 || fileName.Length == 0 || fileName.IndexOfAny(['/', '\\']) >= 0) return null;
         // The server's own separator: a Linux server's paths use '/'.
-        var separator = chosenFolder.Contains('\\') ? '\\' : '/';
-        return chosenFolder.TrimEnd('/', '\\') + separator + fileName;
+        return ServerPaths.Join(chosenFolder, fileName);
     }
 
     /// <summary>Asking whether a folder is there stays off the UI thread, because it can be a slow or missing network share.</summary>

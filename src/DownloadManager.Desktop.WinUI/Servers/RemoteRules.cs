@@ -34,9 +34,6 @@ internal static class RemoteDataRules
     /// <summary>An icon read from the file itself; a remote download gets its type's icon only.</summary>
     public static string? IconPath(bool remote, string? completedPath) => remote ? null : completedPath;
 
-    /// <summary>A sound file named in settings is a path on the Host's machine.</summary>
-    public static bool MayPlaySoundFiles(bool remote) => !remote;
-
     /// <summary>
     /// Only this PC's Host quitting quits the app. Another server's <c>host.exiting</c> means it went away, which the
     /// window shows as disconnected.
@@ -44,12 +41,31 @@ internal static class RemoteDataRules
     public static bool HostExitQuitsApp(bool remote) => !remote;
 
     /// <summary>
-    /// The completion window and notification. This PC's Host opens them itself; for another server the window opens
-    /// them from its own job events while it is open (nothing alerts while it is closed). A CLI add on this PC is the
-    /// one case the window opens itself, as before.
+    /// The completion window. This PC's Host opens it itself; for another server the window opens it from its own job
+    /// events while it is open (nothing alerts while it is closed), and whether it does is this PC's setting alone: a
+    /// server's per-download choice is that server's, not this PC's. A CLI add on this PC is the one case the window
+    /// opens it for this PC's Host, with the download's own choice first, as before. For another server
+    /// <see cref="RemoteCompletionGate"/> decides as well.
     /// </summary>
     public static bool WindowOpensCompletion(bool remote, string? source, bool? jobShowsDialog, bool settingShowsDialog) =>
-        (remote || source == "cli") && (jobShowsDialog ?? settingShowsDialog);
+        remote ? settingShowsDialog : source == "cli" && (jobShowsDialog ?? settingShowsDialog);
+
+    /// <summary>
+    /// Whether a completion program typed for a download on another server can be sent there. Only the text is looked
+    /// at, never a file: that path is on the server, and even asking this PC about a network path would send this
+    /// Windows account's credentials there. A full path on the server (<c>/opt/x</c> or <c>C:\x.exe</c>), not a network
+    /// or device path; the server checks the rest. Null when it can be sent.
+    /// </summary>
+    public static string? ServerProgramPathProblem(string? path)
+    {
+        var text = path?.Trim() ?? string.Empty;
+        if (text.Length == 0) return "Type the full path of the program on the server.";
+        if (text.StartsWith(@"\\", StringComparison.Ordinal) || text.StartsWith("//", StringComparison.Ordinal))
+            return "Use a program on the server itself, not on a network share.";
+        var unixFull = text.StartsWith('/');
+        var windowsFull = text.Length >= 3 && char.IsAsciiLetter(text[0]) && text[1] == ':' && text[2] is '\\' or '/';
+        return unixFull || windowsFull ? null : "Type the full path of the program on the server, such as /opt/tools/done.sh.";
+    }
 
     /// <summary>A folder is chosen with this PC's folder dialog, or with the server's folder browser.</summary>
     public static bool UsesServerFolderBrowser(bool remote) => remote;
@@ -64,6 +80,79 @@ internal static class RemoteDataRules
             "archive" => null, // chosen from the server's folders
             _ => $"That file is on this PC, not on {serverName}.",
         };
+}
+
+/// <summary>
+/// For another server: whether a finished download may open a completion window here (each is a process of its own).
+/// Only a download this window saw unfinished while it showed the server, each one once, and at most
+/// <see cref="MostWindows"/> within <see cref="Window"/>: a server that sends many completions, or invented ones, can't
+/// make this PC start a window for each. Nothing here touches the UI.
+/// </summary>
+internal sealed class RemoteCompletionGate
+{
+    public const int MostWindows = 3;
+    public static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
+    private const int MostRemembered = 20_000;
+
+    private readonly HashSet<Guid> _seenUnfinished = [];
+    private readonly HashSet<Guid> _opened = [];
+    private readonly Queue<DateTimeOffset> _recent = new();
+
+    /// <summary>A download's state as the server reports it, from a snapshot or an event.</summary>
+    public void Saw(Guid jobId, string? state)
+    {
+        if (state == "completed" || _seenUnfinished.Count >= MostRemembered) return;
+        _seenUnfinished.Add(jobId);
+    }
+
+    /// <summary>True once for a download seen unfinished, while fewer than <see cref="MostWindows"/> opened in the last minute.</summary>
+    public bool MayOpen(Guid jobId, DateTimeOffset now)
+    {
+        if (!_seenUnfinished.Contains(jobId) || _opened.Contains(jobId)) return false;
+        while (_recent.Count > 0 && now - _recent.Peek() >= Window) _recent.Dequeue();
+        if (_recent.Count >= MostWindows) return false;
+        _recent.Enqueue(now);
+        _opened.Add(jobId);
+        _seenUnfinished.Remove(jobId);
+        return true;
+    }
+
+    /// <summary>Another Host is shown: nothing seen before counts.</summary>
+    public void Clear()
+    {
+        _seenUnfinished.Clear();
+        _opened.Clear();
+        _recent.Clear();
+    }
+}
+
+/// <summary>
+/// Paths on another server, which may use '/' (Linux) or '\' (Windows). This PC's Path methods would put in '\', so a
+/// server's path is split and joined with the separator it already uses.
+/// </summary>
+internal static class ServerPaths
+{
+    public static string FileName(string path)
+    {
+        var trimmed = path.TrimEnd('/', '\\');
+        var cut = trimmed.LastIndexOfAny(['/', '\\']);
+        return cut < 0 ? trimmed : trimmed[(cut + 1)..];
+    }
+
+    /// <summary>The folder part; the root stays the root (<c>/</c>, <c>C:\</c>).</summary>
+    public static string Folder(string path)
+    {
+        var cut = path.LastIndexOfAny(['/', '\\']);
+        if (cut < 0) return string.Empty;
+        var folder = path[..cut];
+        return folder.Length == 0 || (folder.Length == 2 && folder[1] == ':') ? path[..(cut + 1)] : folder;
+    }
+
+    public static string Join(string folder, string name)
+    {
+        var separator = folder.Contains('\\') && !folder.Contains('/') ? '\\' : '/';
+        return folder.TrimEnd('/', '\\') + separator + name.TrimStart('/', '\\');
+    }
 }
 
 /// <summary>
@@ -124,17 +213,12 @@ internal static class RemoteSettingsRules
     /// </summary>
     public static SettingsDto KeepServerValues(SettingsDto edited, SettingsDto serverAtOpen)
     {
-        edited.Theme = serverAtOpen.Theme;
-        edited.LaunchAtStartup = serverAtOpen.LaunchAtStartup;
-        edited.CloseWindowCompletely = serverAtOpen.CloseWindowCompletely;
-        edited.ClipboardMonitoring = serverAtOpen.ClipboardMonitoring;
-        edited.BrowserIntegrationEnabled = serverAtOpen.BrowserIntegrationEnabled;
-        edited.AutoCheckUpdates = serverAtOpen.AutoCheckUpdates;
-        edited.UpdateCheckIntervalHours = serverAtOpen.UpdateCheckIntervalHours;
-        edited.EventSoundFiles = serverAtOpen.EventSoundFiles;
-        edited.PlayCompletionSound = serverAtOpen.PlayCompletionSound;
-        edited.NotifyOnCompletion = serverAtOpen.NotifyOnCompletion;
-        edited.ShowCompletionDialog = serverAtOpen.ShowCompletionDialog;
+        foreach (var name in ThisPcFields)
+        {
+            var property = typeof(SettingsDto).GetProperty(name) ?? throw new InvalidOperationException($"SettingsDto has no {name}.");
+            property.SetValue(edited, property.GetValue(serverAtOpen));
+        }
+
         return edited;
     }
 }
