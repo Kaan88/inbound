@@ -435,16 +435,22 @@ async function refresh(): Promise<void> {
  * the port closing (the popup closed) gives what still waits back to the browser, and its pings keep the worker
  * alive meanwhile. A worker that restarted is connected to again.
  */
+let askPort: chrome.runtime.Port | null = null;
+let popupClosing = false;
+
 function connectAsk(panel: AskPanel, reconnects = 0): void {
+  if (popupClosing) return;
   let port: chrome.runtime.Port;
   try { port = chrome.runtime.connect({ name: "dm.ask" }); } catch { return; }
+  askPort = port;
   const timer = window.setInterval(() => {
     try { port.postMessage({ type: "ping" }); } catch { /* reconnected below */ }
   }, 20000);
   port.onMessage.addListener(() => void panel.refresh());
   port.onDisconnect.addListener(() => {
     window.clearInterval(timer);
-    if (reconnects < 5) {
+    if (askPort === port) askPort = null;
+    if (!popupClosing && reconnects < 5) {
       connectAsk(panel, reconnects + 1);
       void panel.refresh();
     }
@@ -458,6 +464,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!waiting) void refresh();
   });
   connectAsk(ask);
+  // Closing: told at once, since Firefox reports the port closed only about a second later (see background.ts).
+  window.addEventListener("pagehide", () => {
+    popupClosing = true;
+    try { askPort?.postMessage({ type: "dm.askClosing" }); } catch { /* the port closing says the same */ }
+  });
   void ask.refresh();
   void refresh();
 

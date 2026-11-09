@@ -121,6 +121,30 @@ test('EXT.R7 popup: This PC\'s Choose... hands the download to a window with its
   }
 });
 
+test('EXT.R7 popup (review 1): Choose... for This PC, switched from the server, sends the popup\'s target, name, folder and start mode', async () => {
+  let moved;
+  const { page, panel } = panelPage({
+    'dm.askQueue': async () => ({ ok: true, items: [{ id: 'h1', fileName: 'a.iso', url: 'https://site.test/a.iso' }] }),
+    'dm.getHandoff': handoff('server'),
+    'dm.browseServerFolders': serverListing,
+    'dm.askInWindow': async message => { moved = message; return { ok: true }; },
+  });
+  try {
+    await panel.refresh();
+    const local = radios(page).find(radio => radio.value === 'local');
+    local.checked = true;
+    await local.dispatch('change');
+    page.el('askFileName').value = 'renamed.iso';
+    page.el('askStartMode').value = 'later';
+    page.el('askDestination').value = 'D:\\Games';
+    await page.el('askBrowse').click();
+    assert.deepEqual(moved.draft, { target: 'local', fileName: 'renamed.iso', destination: 'D:\\Games', startMode: 'later' });
+    assert.equal(page.closed, true);
+  } finally {
+    page.restore();
+  }
+});
+
 test('EXT.R7 popup: Download and Choose... wait for the request; a queue shows its count and the next one after Keep in browser', async () => {
   const request = deferred();
   let items = [{ id: 'h1', fileName: 'a.iso', url: 'https://site.test/a.iso' }, { id: 'h2', fileName: 'b.iso', url: 'https://site.test/b.iso' }];
@@ -199,6 +223,29 @@ test('EXT.R7 folder window: opened from the popup\'s Choose... (pick=1) it opens
     loadTs('handoff.ts');
     await page.domReady();
     await tick();
+    assert.equal(picked.initialPath, 'D:\\Downloads');
+    assert.equal(page.el('destination').value, 'E:\\Chosen');
+  } finally {
+    page.restore();
+  }
+});
+
+test('EXT.R7 folder window (review 1): opened from the popup\'s Choose..., it starts from the popup\'s target, name and start mode, and the dialog opens', async () => {
+  let picked;
+  const page = installPage('?id=h1&pick=1', {
+    // The default target is the server; the user switched to This PC in the popup.
+    'dm.getHandoff': async () => ({ ...await handoff('server')(), draft: { target: 'local', fileName: 'renamed.iso', startMode: 'later' } }),
+    'dm.browseServerFolders': serverListing,
+    'dm.pickFolder': async message => { picked = message; return { ok: true, path: 'E:\\Chosen' }; },
+  });
+  try {
+    loadTs('handoff.ts');
+    await page.domReady();
+    await tick();
+    const checked = page.el('targetChoice').children.flatMap(label => label.children).find(node => node.type === 'radio' && node.checked);
+    assert.equal(checked.value, 'local');
+    assert.equal(page.el('fileName').value, 'renamed.iso');
+    assert.equal(page.el('startMode').value, 'later');
     assert.equal(picked.initialPath, 'D:\\Downloads');
     assert.equal(page.el('destination').value, 'E:\\Chosen');
   } finally {

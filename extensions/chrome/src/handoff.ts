@@ -92,6 +92,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string };
       targets?: OfferedTarget[];
       target?: TargetId;
+      draft?: { target?: TargetId; fileName?: string; destination?: string; startMode?: string };
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -107,9 +108,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? response.targets
       : [{ id: "local", label: "This PC", chooser: "dialog", defaultFolder: response.defaults?.destination ?? "",
         favorites: response.defaults?.favorites ?? [] }];
-    const first = targets.find((offered) => offered.id === response.target) ?? targets[0]!;
+    // EXT.R7: moved here by the toolbar popup's Choose...: start from what the user set there.
+    const draft = response.draft;
+    const first = targets.find((offered) => offered.id === draft?.target) ??
+      targets.find((offered) => offered.id === response.target) ?? targets[0]!;
     renderTargetChoice(targetField, targetChoice, targets, first.id, useTarget);
     useTarget(first);
+    if (draft) {
+      if (draft.fileName) nameInput.value = draft.fileName;
+      if (draft.startMode === "later" || draft.startMode === "now") startSelect.value = draft.startMode;
+      if (draft.destination && first.id === draft.target) {
+        destinationInput.value = draft.destination;
+        freeSpace.update(first.id, draft.destination);
+      }
+    }
     // A caught download waits in the browser while this window is open; leaving it there is a choice.
     held = response.held === true;
     if (held) holdWorker();

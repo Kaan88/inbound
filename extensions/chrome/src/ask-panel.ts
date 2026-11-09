@@ -270,7 +270,16 @@ export class AskPanel {
     // back to the browser. The waiting downloads move to folder windows, and this one's dialog opens there.
     await this.gate.pick(async () => {
       try {
-        const moved = await chrome.runtime.sendMessage({ type: "dm.askInWindow", id: this.currentId, pick: true }) as { ok?: boolean; error?: string };
+        // The window starts from what is set here, not from the defaults (the target above all: its dialog opens
+        // only for This PC).
+        const typed = this.destinationInput.value.trim();
+        const draft = {
+          target: this.target,
+          fileName: this.nameInput.value.trim(),
+          destination: typed === this.defaultDestination ? "" : typed,
+          startMode: this.startSelect.value === "later" ? "later" : "now",
+        };
+        const moved = await chrome.runtime.sendMessage({ type: "dm.askInWindow", id: this.currentId, pick: true, draft }) as { ok?: boolean; error?: string };
         if (!moved?.ok) {
           this.showError(moved?.error || "Could not open the folder window.");
           return;
