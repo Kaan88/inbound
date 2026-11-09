@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -37,7 +37,20 @@ internal static class WindowPlacement
         if (Load().TryGetValue(key, out var saved) && IsVisible(saved))
         {
             if (restoreSize && saved.Width >= 200 && saved.Height >= 150)
+            {
+#if HAS_UNO
+                // Uno has no MoveAndResize, and before the window is shown it keeps only the first size it is given.
+                void Restore(object sender, WindowActivatedEventArgs args)
+                {
+                    window.Activated -= Restore;
+                    appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
+                    appWindow.Resize(new SizeInt32 { Width = saved.Width, Height = saved.Height });
+                }
+                window.Activated += Restore;
+#else
                 appWindow.MoveAndResize(new RectInt32 { X = saved.X, Y = saved.Y, Width = saved.Width, Height = saved.Height });
+#endif
+            }
             else
                 appWindow.Move(new PointInt32 { X = saved.X, Y = saved.Y });
             if (restoreSize && saved.Maximized && appWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();

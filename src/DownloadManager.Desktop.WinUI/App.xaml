@@ -75,6 +75,9 @@
             <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
             <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
             <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
+            <StaticResource x:Key="SystemControlHighlightListAccentLowBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
+            <StaticResource x:Key="SystemControlHighlightListAccentMediumBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
+            <StaticResource x:Key="SystemControlHighlightListAccentHighBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
 
             <!-- Inbound blue replaces the user's Windows accent so checkboxes, primary buttons and selections match the palette. -->
             <Color x:Key="SystemAccentColor">#1F6FC5</Color>
