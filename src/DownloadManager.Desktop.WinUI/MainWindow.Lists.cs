@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml.Controls;
+﻿using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -23,6 +23,19 @@ public sealed partial class MainWindow
         _jobsHeader.MinimumWidthChanged += width => DownloadListGrid.MinWidth = width;
         _jobsHeader.ApplyToAll();
         _jobsRegion = new RegionDrag(JobsList, JobsRegionLayer, () => false, BeginRegion, ChangeRegion, EndRegion);
+#if HAS_UNO
+        // WinUI's list clears the selection on a click below the rows; Uno's doesn't, so this does.
+        JobsList.AddHandler(UIElement.TappedEvent, new Microsoft.UI.Xaml.Input.TappedEventHandler((_, e) =>
+        {
+            for (var element = e.OriginalSource as DependencyObject; element is not null && !ReferenceEquals(element, JobsList);
+                 element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
+            {
+                if (element is ListViewItem or Microsoft.UI.Xaml.Controls.Primitives.ScrollBar) return;
+            }
+
+            JobsList.SelectedItems.Clear();
+        }), true);
+#endif
     }
 
     private void HeaderSort_Clicked(string key)
@@ -86,12 +99,27 @@ public sealed partial class MainWindow
         var (add, remove) = RegionSelection.Change(before, now);
         foreach (var at in remove)
         {
-            if (at < _visibleJobs.Count && !keep.Contains(_visibleJobs[at])) JobsList.DeselectRange(new ItemIndexRange(at, 1));
+            if (at < _visibleJobs.Count && !keep.Contains(_visibleJobs[at]))
+            {
+#if HAS_UNO
+                // Uno has no SelectRange/DeselectRange.
+                JobsList.SelectedItems.Remove(_visibleJobs[at]);
+#else
+                JobsList.DeselectRange(new ItemIndexRange(at, 1));
+#endif
+            }
         }
 
         foreach (var at in add)
         {
-            if (at < _visibleJobs.Count) JobsList.SelectRange(new ItemIndexRange(at, 1));
+            if (at < _visibleJobs.Count && !JobsList.SelectedItems.Contains(_visibleJobs[at]))
+            {
+#if HAS_UNO
+                JobsList.SelectedItems.Add(_visibleJobs[at]);
+#else
+                JobsList.SelectRange(new ItemIndexRange(at, 1));
+#endif
+            }
         }
 
         UpdateStatusText();

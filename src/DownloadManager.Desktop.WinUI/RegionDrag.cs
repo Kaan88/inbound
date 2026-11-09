@@ -1,4 +1,4 @@
-using Microsoft.UI.Input;
+﻿using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -137,10 +137,20 @@ internal sealed class RegionDrag
     {
         _rowsTop = 0;
         _rowHeight = FallbackRowHeight;
-        if (_list.ItemsPanelRoot is not ItemsStackPanel panel || panel.FirstVisibleIndex < 0) return;
-        if (_list.ContainerFromIndex(panel.FirstVisibleIndex) is not FrameworkElement { ActualHeight: > 0 } row) return;
+#if HAS_UNO
+        // Uno has no FirstVisibleIndex: the first row that has a container is as good.
+        var first = -1;
+        for (var at = 0; at < _list.Items.Count; at++)
+        {
+            if (_list.ContainerFromIndex(at) is FrameworkElement { ActualHeight: > 0 }) { first = at; break; }
+        }
+#else
+        var first = _list.ItemsPanelRoot is ItemsStackPanel panel ? panel.FirstVisibleIndex : -1;
+#endif
+        if (first < 0) return;
+        if (_list.ContainerFromIndex(first) is not FrameworkElement { ActualHeight: > 0 } row) return;
         _rowHeight = row.ActualHeight;
-        _rowsTop = row.TransformToVisual(_list).TransformPoint(default).Y + _scroller!.VerticalOffset - (panel.FirstVisibleIndex * _rowHeight);
+        _rowsTop = row.TransformToVisual(_list).TransformPoint(default).Y + _scroller!.VerticalOffset - (first * _rowHeight);
     }
 
     private void OnTick()
