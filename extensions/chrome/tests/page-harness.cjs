@@ -16,7 +16,8 @@ function loadTs(file) {
     loaded.paths = Module._nodeModulePaths(path.dirname(source));
     cache.set(source, loaded);
     const parentRequire = loaded.require.bind(loaded);
-    loaded.require = id => id.startsWith('./') ? load(path.join(path.dirname(source), `${id.slice(2)}.ts`)) : parentRequire(id);
+    // Relative imports are the extension's own .ts files, or the web UI's shared ones (EXT.R8).
+    loaded.require = id => id.startsWith('.') ? load(path.join(path.dirname(source), `${id}.ts`)) : parentRequire(id);
     loaded._compile(ts.transpileModule(fs.readFileSync(source, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     }).outputText, source);
@@ -39,7 +40,7 @@ function fakeElement(id) {
   const classes = new Set();
   const element = {
     id, value: '', disabled: false, checked: false, indeterminate: false, textContent: '', title: '', className: '', type: '',
-    children: [], placeholder: '', attributes: {},
+    children: [], placeholder: '', attributes: {}, dataset: {}, style: {},
     // A select's first option ("Pick a favorite folder..."), which the folder window keeps when it lists favorites.
     options: [{ value: '', textContent: '' }],
     setAttribute: (name, value) => { element.attributes[name] = String(value); },
@@ -71,6 +72,7 @@ function installPage(search, handlers) {
   global.document = {
     getElementById: id => { if (!elements.has(id)) elements.set(id, fakeElement(id)); return elements.get(id); },
     createElement: tag => fakeElement(tag),
+    createElementNS: (_ns, tag) => fakeElement(tag),
     addEventListener: (type, listener) => documentListeners.set(type, [...(documentListeners.get(type) ?? []), listener]),
     documentElement: { scrollHeight: 400 },
   };

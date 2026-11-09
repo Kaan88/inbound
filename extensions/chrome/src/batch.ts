@@ -1,9 +1,15 @@
+// Download All ("Add links", EXT.R8 §3.5): the links of a page in a table like the desktop's Add links, a filter and a
+// type list, the package name for two or more, and the save form shared with the folder window and the popup.
+// "Start download" and "Download later" add the selection; the primary one follows Options > Default start.
+
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import {
-  FreeSpaceLine, renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget,
-} from "./destination-target";
+import { type OfferedTarget } from "./destination-target";
+import { fileIcon } from "./ui/icon";
+import { firstTarget, markDefaultStart, SaveForm } from "./ui/save-form";
+import { applyTheme, followThemeChanges } from "./ui/theme";
 import type { TargetId } from "./transport";
+import { fitWindowToContent } from "./fit-window";
 
 interface PageLink {
   url: string;
@@ -17,8 +23,10 @@ interface LinksResponse {
   ok?: boolean;
   tabId?: number;
   pageUrl?: string;
+  pageTitle?: string;
   links?: PageLink[];
   error?: string;
+  notWebPage?: boolean;
 }
 
 interface BatchResponse {
@@ -29,37 +37,49 @@ interface BatchResponse {
   error?: string;
 }
 
+type SortKey = "name" | "type" | "host";
+
 const params = new URLSearchParams(location.search);
 const requestedTabId = Number(params.get("tabId") ?? "");
 
 const filterInput = document.getElementById("filter") as HTMLInputElement;
+const typeFilter = document.getElementById("typeFilter") as HTMLSelectElement;
 const selectAll = document.getElementById("selectAll") as HTMLInputElement;
 const linksList = document.getElementById("links") as HTMLUListElement;
 const countLabel = document.getElementById("count") as HTMLSpanElement;
+const pageLabel = document.getElementById("pageTitle") as HTMLSpanElement;
 const selectionLabel = document.getElementById("selection") as HTMLSpanElement;
+const packageField = document.getElementById("packageField") as HTMLElement;
+const packageInput = document.getElementById("packageName") as HTMLInputElement;
 const destinationInput = document.getElementById("destination") as HTMLInputElement;
 const browseDestinationButton = document.getElementById("browseDestination") as HTMLButtonElement;
-const startSelect = document.getElementById("startMode") as HTMLSelectElement;
 const confirmButton = document.getElementById("confirm") as HTMLButtonElement;
+const laterButton = document.getElementById("later") as HTMLButtonElement;
 const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
 const errorBox = document.getElementById("error") as HTMLParagraphElement;
 const successBox = document.getElementById("success") as HTMLParagraphElement;
 
-// EXT.R1: where the batch goes. The background offers the paired server beside this PC.
-let target: TargetId = "local";
-// The chosen target's default folder, shown in Save in as the folder window shows it. Sent only when changed,
-// so the app (or the server) keeps deciding the default when it is left alone.
-let defaultDestination = "";
 // EXT.B7: until the target list has arrived, where the batch goes (and so whose folders Browse shows) is not known:
-// Browse and Download wait, as in the folder window, so a click cannot open this PC's dialog in server mode.
+// Browse and Start wait, as in the folder window, so a click cannot open this PC's dialog in server mode.
 let targetsLoaded = false;
-const freeSpace = new FreeSpaceLine(document.getElementById("freeSpace") as HTMLSpanElement);
 let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
+let scanned = false;
+let sortKey: SortKey | null = null;
+let sortDown = false;
 const selected = new Set<string>();
-// EXT.B2: Send and Choose... exclude each other; updateSelection draws the buttons from this state.
+// EXT.B2: Send and Browse exclude each other; updateSelection draws the buttons from this state.
 const gate = new FormGate(() => updateSelection());
+
+const form = new SaveForm({
+  targetField: document.getElementById("targetField") as HTMLElement,
+  targetChoice: document.getElementById("targetChoice") as HTMLElement,
+  destination: destinationInput,
+  browse: browseDestinationButton,
+  freeSpace: document.getElementById("freeSpace") as HTMLElement,
+  serverFolders: document.getElementById("serverFolders") as HTMLElement,
+}, showError, clearError);
 
 function showError(message: string): void {
   errorBox.textContent = message;
@@ -67,6 +87,12 @@ function showError(message: string): void {
   if (message) {
     successBox.classList.add("hidden");
   }
+}
+
+/** Hides the error line: any error, or only this one. */
+function clearError(message: string): void {
+  if (message && errorBox.textContent !== message) return;
+  showError("");
 }
 
 function showSuccess(message: string): void {
@@ -77,27 +103,41 @@ function showSuccess(message: string): void {
   }
 }
 
+function typeOf(link: PageLink): string {
+  return link.extension ? link.extension.toUpperCase() : link.kind;
+}
+
 function visibleLinks(): PageLink[] {
   const query = filterInput.value.trim().toLowerCase();
-  if (!query) {
-    return links;
+  const type = typeFilter.value;
+  let shown = links.filter((link) => !type || typeOf(link) === type);
+  if (query) {
+    shown = shown.filter((link) =>
+      [link.text, link.extension, link.kind, link.host, link.url]
+        .some((value) => value.toLowerCase().includes(query)));
   }
-
-  return links.filter((link) =>
-    [link.text, link.extension, link.kind, link.host, link.url]
-      .some((value) => value.toLowerCase().includes(query)));
+  if (sortKey) {
+    const key = sortKey;
+    const value = (link: PageLink) => key === "name" ? (link.text || link.url) : key === "type" ? typeOf(link) : link.host;
+    shown = [...shown].sort((a, b) => value(a).localeCompare(value(b), undefined, { sensitivity: "base", numeric: true }) * (sortDown ? -1 : 1));
+  }
+  return shown;
 }
 
 function updateSelection(visible: PageLink[] = visibleLinks()): void {
   const shownSelected = visible.filter((link) => selected.has(link.url)).length;
   selectAll.checked = visible.length > 0 && shownSelected === visible.length;
   selectAll.indeterminate = shownSelected > 0 && shownSelected < visible.length;
-  countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
+  if (scanned) countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
   selectionLabel.textContent = `${selected.size} selected`;
-  confirmButton.disabled = !targetsLoaded || !gate.canSend || selected.size === 0;
+  const off = !targetsLoaded || !gate.canSend || selected.size === 0;
+  confirmButton.disabled = off;
+  laterButton.disabled = off;
   browseDestinationButton.disabled = !targetsLoaded || !gate.canPick;
   cancelButton.disabled = gate.sending;
-  setTargetChoiceEnabled(document.getElementById("targetChoice") as HTMLElement, gate.canPick);
+  form.setTargetChoiceEnabled(gate.canPick);
+  // The package name only means something for two or more (one Download All batch becomes one package).
+  packageField.classList.toggle("hidden", selected.size < 2);
 }
 
 function render(): void {
@@ -107,7 +147,7 @@ function render(): void {
   if (visible.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = links.length === 0 ? "No downloadable links were found." : "No links match this filter.";
+    empty.textContent = links.length === 0 ? "No downloadable links on this page." : "No links match this filter.";
     linksList.append(empty);
     updateSelection(visible);
     return;
@@ -122,6 +162,7 @@ function render(): void {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = selected.has(link.url);
+    checkbox.setAttribute("aria-label", link.text || link.url);
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) {
         selected.add(link.url);
@@ -131,34 +172,51 @@ function render(): void {
 
       updateSelection();
     });
+    label.append(checkbox);
 
     const name = document.createElement("span");
     name.className = "link-name";
-    name.textContent = link.text || link.url;
-    name.title = link.text || link.url;
-    label.append(checkbox, name);
+    const glyph = document.createElement("span");
+    glyph.className = "file-glyph";
+    try { glyph.append(fileIcon(link.text || link.url, 16)); } catch { /* a page without SVG */ }
+    const text = document.createElement("span");
+    text.className = "ellipsis";
+    text.textContent = link.text || link.url;
+    name.append(glyph, text);
+    name.title = link.url;
+    row.setAttribute("aria-description", link.url);
 
-    const meta = document.createElement("span");
-    meta.className = "link-meta";
-    meta.textContent = [link.extension ? link.extension.toUpperCase() : link.kind, link.host]
-      .filter(Boolean)
-      .join(" · ");
+    const type = document.createElement("span");
+    type.className = "link-type";
+    type.textContent = typeOf(link);
 
-    const url = document.createElement("span");
-    url.className = "link-url";
-    url.textContent = link.url;
-    url.title = link.url;
+    const site = document.createElement("span");
+    site.className = "link-site ellipsis";
+    site.textContent = link.host;
+    site.title = link.host;
 
-    row.append(label, meta, url);
+    row.append(label, name, type, site);
     linksList.append(row);
   }
 
   updateSelection(visible);
 }
 
+function fillTypes(): void {
+  const types = [...new Set(links.map(typeOf).filter(Boolean))].sort();
+  typeFilter.replaceChildren(typeFilter.options[0] ?? new Option("All types", ""));
+  for (const type of types) {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    typeFilter.append(option);
+  }
+}
+
 async function loadLinks(): Promise<void> {
   if (!Number.isFinite(requestedTabId) || requestedTabId <= 0) {
-    showError("This window is missing its page reference. Open Download All from the extension popup.");
+    showError("This window is missing its page reference. Open Download all links from the extension popup.");
+    countLabel.textContent = "";
     linksList.replaceChildren();
     return;
   }
@@ -169,13 +227,20 @@ async function loadLinks(): Promise<void> {
       tabId: requestedTabId,
     })) as LinksResponse;
     if (!response?.ok) {
+      // U-EX-14: no "Scanning…" left on screen, and the reason in words that fit the page.
       showError(response?.error || "Could not scan this page.");
+      countLabel.textContent = "";
       linksList.replaceChildren();
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = response?.notWebPage ? "This is not a web page, so there are no links to collect." : "No links were collected.";
+      linksList.append(empty);
       return;
     }
 
     links = response.links ?? [];
     pageUrl = response.pageUrl ?? "";
+    scanned = true;
     // Pre-tick links that point at files; plain page links stay unticked.
     selected.clear();
     for (const link of links) {
@@ -188,19 +253,31 @@ async function loadLinks(): Promise<void> {
     } catch {
       pageTitle = "";
     }
-
-    if (pageTitle) {
-      (document.getElementById("pageTitle") as HTMLElement).textContent = `Links on ${pageTitle}`;
-    }
-
+    pageLabel.textContent = pageTitle ? `${pageTitle} ·` : "";
+    packageInput.value = response.pageTitle || pageTitle || "Links";
+    fillTypes();
     render();
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
+    countLabel.textContent = "";
     linksList.replaceChildren();
   }
 }
 
 filterInput.addEventListener("input", () => render());
+typeFilter.addEventListener("change", () => render());
+
+for (const button of Array.from(document.querySelectorAll?.<HTMLButtonElement>(".link-sort") ?? [])) {
+  button.addEventListener("click", () => {
+    const key = button.dataset.sort as SortKey;
+    sortDown = sortKey === key ? !sortDown : false;
+    sortKey = key;
+    for (const other of Array.from(document.querySelectorAll<HTMLButtonElement>(".link-sort"))) {
+      other.setAttribute("aria-sort", other === button ? (sortDown ? "descending" : "ascending") : "none");
+    }
+    render();
+  });
+}
 
 selectAll.addEventListener("change", () => {
   for (const link of visibleLinks()) {
@@ -214,29 +291,33 @@ selectAll.addEventListener("change", () => {
   render();
 });
 
-confirmButton.addEventListener("click", async () => {
+async function start(startMode: "now" | "later"): Promise<void> {
   if (!targetsLoaded || selected.size === 0 || !gate.canSend) {
     return;
   }
 
   // The server's folder list stays shut while a send runs: a folder picked then would not be the one sent.
-  serverFolders.close();
-  await gate.send(sendToApp);
-});
+  form.serverFolders.close();
+  await gate.send(() => sendToApp(startMode));
+}
 
-async function sendToApp(): Promise<void> {
+confirmButton.addEventListener("click", () => start("now"));
+laterButton.addEventListener("click", () => start("later"));
+
+async function sendToApp(startMode: "now" | "later"): Promise<void> {
   showError("");
   showSuccess("");
-  selectionLabel.textContent = `Adding ${selected.size} download${selected.size === 1 ? "" : "s"}...`;
+  selectionLabel.textContent = `Adding ${selected.size} download${selected.size === 1 ? "" : "s"}…`;
 
   try {
     const response = (await chrome.runtime.sendMessage({
       type: "dm.confirmBatch",
       pageUrl,
       tabId: Number.isFinite(requestedTabId) ? requestedTabId : undefined,
-      destination: destinationInput.value.trim() === defaultDestination ? "" : destinationInput.value.trim(),
-      startMode: startSelect.value,
-      target,
+      destination: form.destinationToSend(),
+      startMode,
+      target: form.target,
+      packageName: selected.size >= 2 ? packageInput.value.trim() : undefined,
       urls: [...selected].map((url) => ({ url })),
     })) as BatchResponse;
 
@@ -268,35 +349,23 @@ async function sendToApp(): Promise<void> {
 
 cancelButton.addEventListener("click", () => window.close());
 
-const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
-  destinationInput.value = path;
-  freeSpace.update(target, path);
-}, showError);
-
-destinationInput.addEventListener("input", () => freeSpace.update(target, destinationInput.value));
-
-function useTarget(offered: OfferedTarget, keepTyped = false): void {
-  target = offered.id;
-  serverFolders.close();
-  // A folder typed for one target means nothing on the other: Save in shows the new target's default.
-  // keepTyped: the list arrived late (it waits on the desktop app) and a folder was already chosen for this target.
-  defaultDestination = offered.defaultFolder ?? "";
-  if (!keepTyped) destinationInput.value = defaultDestination;
-  destinationInput.placeholder = offered.id === "server" ? "Use the server's default folder" : "Use the app's default folder";
-  freeSpace.update(offered.id, destinationInput.value);
-  // The server did not answer when the window opened: say so now rather than only after Download. Only that
-  // message goes on a switch back, so a page-scan error shown meanwhile stays.
-  if (shownTargetError && errorBox.textContent === shownTargetError) showError("");
-  shownTargetError = offered.id === "server" && offered.error ? offered.error : "";
-  if (shownTargetError) showError(shownTargetError);
-}
-
-let shownTargetError = "";
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !gate.sending) {
+    if (form.serverFolders.isOpen) form.serverFolders.close();
+    else window.close();
+  }
+});
 
 async function loadTargets(): Promise<void> {
   try {
-    const response = await chrome.runtime.sendMessage({ type: "dm.targets" }) as { ok?: boolean; targets?: OfferedTarget[]; target?: TargetId };
+    const response = await chrome.runtime.sendMessage({ type: "dm.targets" }) as {
+      ok?: boolean; targets?: OfferedTarget[]; target?: TargetId; startMode?: string; theme?: "system" | "light" | "dark";
+    };
     const offered = response?.ok && Array.isArray(response.targets) ? response.targets : [];
+    if (response?.ok) {
+      markDefaultStart(response.startMode, confirmButton, laterButton);
+      if (response.theme) applyTheme(response.theme);
+    }
     if (offered.length > 0) applyTargets(offered, response.target);
   } catch { /* this PC, as before a server could be paired */ }
   targetsLoaded = true;
@@ -305,28 +374,30 @@ async function loadTargets(): Promise<void> {
 
 /** Shows the offered targets, starting on the default one. */
 function applyTargets(offered: OfferedTarget[], preferred: TargetId | undefined): void {
-  const first = offered.find((item) => item.id === preferred) ?? offered[0]!;
-  const choice = document.getElementById("targetChoice") as HTMLElement;
-  renderTargetChoice(document.getElementById("targetField") as HTMLElement, choice, offered, first.id, useTarget);
-  // Save in starts empty; anything in it now was typed or picked while the list was on its way.
-  useTarget(first, first.id === target && destinationInput.value.trim() !== "");
-  setTargetChoiceEnabled(choice, gate.canPick);
+  const first = firstTarget(offered, preferred);
+  // Destination folder starts empty; anything in it now was typed or picked while the list was on its way.
+  form.showTargets(offered, first, first.id === form.target && destinationInput.value.trim() !== "");
+  document.getElementById("targetLabel")?.classList.toggle("hidden", offered.length < 2);
+  form.setTargetChoiceEnabled(gate.canPick);
 }
 
 browseDestinationButton.addEventListener("click", async () => {
   if (!targetsLoaded) return;
-  if (target === "server") {
+  if (form.target === "server") {
     if (!gate.canPick) return;
-    if (serverFolders.isOpen) serverFolders.close();
-    else void serverFolders.open(destinationInput.value);
+    void form.toggleServerFolders();
     return;
   }
-  await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
+  await gate.pick(async () => {
+    const before = destinationInput.value;
+    await pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+    if (destinationInput.value !== before) clearError("");
+  });
 });
 
+followThemeChanges();
 void loadTargets();
 
 void loadLinks();
-import { fitWindowToContent } from "./fit-window";
 
 void fitWindowToContent().catch(() => undefined);

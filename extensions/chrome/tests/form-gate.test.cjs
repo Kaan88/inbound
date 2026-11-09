@@ -372,7 +372,7 @@ test('EXT.B7 Download All: Browse and Download wait for the target list, so in s
     assert.equal(browsed[0], '/downloads', 'Browse lists the server\'s folders');
     assert.equal(page.el('serverFolders').classList.contains('hidden'), false);
     await new Promise(resolve => setTimeout(resolve, 300));
-    assert.equal(page.el('freeSpace').textContent, '2.0 GB free on the server');
+    assert.equal(page.el('freeSpace').textContent, '2.00 GB free on the server');
     await confirm.click();
     assert.equal(confirmed.target, 'server');
   } finally {

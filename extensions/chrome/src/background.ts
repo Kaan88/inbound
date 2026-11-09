@@ -9,7 +9,7 @@ import {
   browserCookieHeaders, cookieContextForDownload, cookieContextForFrame, type BrowserCookieContext,
 } from "./browser-cookies";
 import {
-  DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
+  applySettingChanges, DEFAULT_SETTINGS, decideCapture, isHttpUrl, migrateSettings, type Settings, type StartMode,
 } from "./capture-rules";
 import { JOB_ACTION_MESSAGES, latestJobs, type JobAction, type JobSummary } from "./job-list";
 import {
@@ -90,6 +90,9 @@ let lastJobs = new Map<string, JobSummary>();
 const native = new NativeTransport(NATIVE_HOST, handleNativeEvent);
 // The user's own Inbound server, once paired from Settings (transport.ts); null otherwise.
 let server: ServerTransport | null = null;
+// EXT.R7: handoff ids waiting in the popup, oldest first. Kept in session storage too, for a worker restart.
+// Declared here, before updateBadge, which shows their count.
+let askQueue: string[] = [];
 const pendingHandoffs = new Map<string, PendingHandoff>();
 const downloadRequestIds = new Map<number, string>();
 // File-name suggestions still owed to the browser for downloads held while the folder window is open.
@@ -290,15 +293,28 @@ function updateBadge(): void {
   if (!action?.setBadgeText) return;
   const paused = Date.now() < pauseUntil;
   const off = !automaticSendingActive();
+  // EXT.R8: downloads waiting in the popup for a folder show their count, on the accent blue (5.07:1 with white);
+  // OFF is on the waiting amber of the status colours (5.93:1), where it was a grey before.
+  const waiting = askQueue.length;
+  // U-EX-4: automatic downloads go to a server that is not answering: say so where the user looks first.
+  const serverDown = !off && !paused && automaticTarget(settings.defaultTarget, server !== null) === "server" &&
+    server !== null && !server.connected;
   try {
-    void action.setBadgeText({ text: off || paused ? "OFF" : "" })?.catch?.(() => undefined);
-    void action.setBadgeBackgroundColor?.({ color: "#6b6b6b" })?.catch?.(() => undefined);
+    void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : "" })
+      ?.catch?.(() => undefined);
+    void action.setBadgeBackgroundColor?.({ color: waiting > 0 ? "#1f6fc5" : serverDown ? "#b3261e" : "#8a5a00" })?.catch?.(() => undefined);
+    void (action as { setBadgeTextColor?: (details: { color: string }) => Promise<void> }).setBadgeTextColor?.({ color: "#ffffff" })
+      ?.catch?.(() => undefined);
     void action.setTitle?.({
-      title: off
+      title: waiting > 0
+        ? `Inbound Download Manager: ${waiting === 1 ? "a download is" : `${waiting} downloads are`} waiting for a folder`
+        : off
         ? "Inbound Download Manager: automatic sending is off"
         : paused
           ? "Inbound Download Manager: catching is paused"
-          : "Inbound Download Manager: catching downloads",
+          : serverDown
+            ? "Inbound Download Manager: the server isn't answering, so downloads stay in the browser"
+            : "Inbound Download Manager: catching downloads",
     })?.catch?.(() => undefined);
   } catch { /* the badge is a convenience */ }
   if (paused && badgeTimer === undefined) {
@@ -412,7 +428,7 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
   await chrome.windows.create({
     url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
     type: "popup",
-    width: 560,
+    width: 520,
     height: 680,
   });
 }
@@ -845,8 +861,6 @@ const ASK_QUEUE_KEY = "askQueue";
 const POPUP_CONNECT_MS = 5000;
 // The open popups' ports (one per browser window at most). Their pings keep the worker alive while open.
 const askPorts = new Set<chrome.runtime.Port>();
-// Handoff ids waiting in the popup, oldest first. Kept in session storage too, for a worker restart.
-let askQueue: string[] = [];
 // The popup was asked to open and has not connected yet. While this is set, openPopup is never called again
 // (Firefox refuses a second call while the first popup is loading, and Chromium may replace it); downloads caught
 // meanwhile join the queue, which the popup reads when it connects. Cleared when its port connects, or when the
@@ -908,6 +922,7 @@ function acceptAskPort(port: chrome.runtime.Port): void {
 }
 
 async function saveAskQueue(): Promise<void> {
+  updateBadge();
   try { await chrome.storage.session.set({ [ASK_QUEUE_KEY]: askQueue }); } catch { /* memory still has it */ }
 }
 
@@ -1112,7 +1127,7 @@ async function openHeldWindow(id: string, pick: boolean): Promise<void> {
     await chrome.windows.create({
       url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}${pick ? "&pick=1" : ""}`),
       type: "popup",
-      width: 560,
+      width: 520,
       height: 680,
     });
   } catch {
@@ -1264,12 +1279,16 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (typeof tab?.id !== "number") {
         return { ok: false, error: "No active page to scan." };
       }
+      // U-EX-14: a browser or extension page has no links to collect, and reloading it can't change that. A web
+      // page's address is known here (host access); one that is not shown is let through and checked by the scan.
+      const shownUrl = tab.url ?? tab.pendingUrl;
+      if (shownUrl && !isHttpUrl(shownUrl)) return { ok: false, error: NOT_A_WEB_PAGE };
 
       await chrome.windows.create({
         url: chrome.runtime.getURL(`batch.html?tabId=${tab.id}`),
         type: "popup",
-        width: 780,
-        height: 680,
+        width: 720,
+        height: 640,
       });
       return { ok: true, tabId: tab.id };
     }
@@ -1301,16 +1320,23 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
             extension: typeof item.extension === "string" ? item.extension.slice(0, 16) : "",
             host: typeof item.host === "string" ? item.host.slice(0, 255) : "",
           }));
+        const tab = await tabInfo(tabId);
         return {
           ok: true,
           tabId,
           pageUrl: typeof response?.pageUrl === "string" ? response.pageUrl : "",
+          // The default package name for two or more links (EXT.R8 §3.5).
+          pageTitle: typeof tab?.title === "string" ? tab.title.slice(0, 100) : "",
           links,
         };
       } catch {
+        // U-EX-14: no page script answers on a browser or extension page; only a web page can be reloaded into one.
+        const tab = await tabInfo(tabId);
+        const shownUrl = tab?.url ?? tab?.pendingUrl;
         return {
           ok: false,
-          error: "This page cannot be scanned. Reload it and try again.",
+          notWebPage: !!shownUrl && !isHttpUrl(shownUrl),
+          error: shownUrl && !isHttpUrl(shownUrl) ? NOT_A_WEB_PAGE : "This page cannot be scanned. Reload it and try again.",
         };
       }
     }
@@ -1334,7 +1360,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       // One Download All batch becomes one package in the list.
       const packageKey = urls.length >= 2 ? crypto.randomUUID() : undefined;
       let packageName: string | undefined;
-      if (packageKey) {
+      // The name typed in the window (EXT.R8 §3.5) wins; else the page's title, as before.
+      const typedName = typeof message.packageName === "string" ? message.packageName.trim().slice(0, 100) : "";
+      if (packageKey && typedName) {
+        packageName = typedName;
+      } else if (packageKey) {
         try {
           const tab = typeof message.tabId === "number" ? await chrome.tabs.get(message.tabId) : undefined;
           packageName = (tab?.title || (pageUrl ? new URL(pageUrl).host : "") || "Links").slice(0, 100);
@@ -1489,7 +1519,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       if (!fromPage(sender, "batch.html") && !fromPage(sender, "popup.html")) {
         return { ok: false, error: "Only the Download All window can do that." };
       }
-      return { ok: true, ...await handoffTargets() };
+      // EXT.R8: with the default start (which of Start download / Download later is primary) and the theme.
+      return { ok: true, ...await handoffTargets(), startMode: settings.startMode, theme: settings.theme };
     }
 
     case "dm.askQueue": {
@@ -1604,15 +1635,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         }
       }
 
-      // A folder selected here belongs only to this request. The configured
-      // default destination is changed exclusively in extension Options.
-      if (ack?.accepted) {
-        settings = {
-          ...settings,
-          startMode,
-        };
-        await chrome.storage.local.set({ settings });
-      }
+      // The folder and the Start button chosen here belong only to this request (U-EX-7): the default start and
+      // the default folder are changed in Options only.
 
       return { ok: true, ack, target: transport.target };
     }
@@ -1624,10 +1648,11 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     }
 
     case "dm.saveSettings": {
-      settings = migrateSettings({
-        ...DEFAULT_SETTINGS,
-        ...message.settings,
-      }).settings;
+      // U-EX-6: Options sends only what its user changed ("changes"), laid over the settings stored now, so an
+      // older tab can't put back what was set since. A whole "settings" object is still taken as it is.
+      settings = message.changes && typeof message.changes === "object"
+        ? applySettingChanges(settings, message.changes)
+        : migrateSettings({ ...DEFAULT_SETTINGS, ...message.settings }).settings;
       await chrome.storage.local.set({ settings });
       settingsLoaded = true;
       updateBadge();
@@ -1773,6 +1798,13 @@ async function handoffTargets(): Promise<{ targets: HandoffTarget[]; target: Tar
     : { id, label: TARGET_LABELS.local, chooser: "dialog", ...local });
   return { targets, target: initialTarget(settings.defaultTarget, offered) };
 }
+
+/** A tab's address and title, or nothing when it is gone or can't be read. Never throws. */
+async function tabInfo(tabId: number): Promise<chrome.tabs.Tab | undefined> {
+  try { return await chrome.tabs.get(tabId); } catch { return undefined; }
+}
+
+const NOT_A_WEB_PAGE = "Download all links works on web pages. This page has no links to collect.";
 
 const SERVER_GONE = "The server is not paired any more. Choose This PC, or pair the server again in Settings.";
 
