@@ -2,7 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
+using DownloadManager.Runtime;
 using DownloadManager.Runtime.Remote;
+using DownloadManager.Runtime.WebUi;
 using TestServer;
 
 namespace DownloadManager.Integration.Tests;
@@ -240,6 +242,46 @@ public sealed partial class RuntimeServiceTests
     }
 
     // ---- A .torrent file's own list ----------------------------------------------------------------
+
+    [Fact]
+    public async Task AnUploadsReferenceIsReadWhateverRootsTheCoordinatorAndTheCallerHave()
+    {
+        // The upload folder is the coordinator's own (D8: the Host's data folder), outside every root it or a caller has.
+        await using var rig = await RemoteRig.CreateAsync(_server);
+        var (bytes, infoHash) = FolderTorrent("Up", ("a.bin", 4 * Kb), ("b.bin", 4 * Kb));
+        var uploads = Path.Combine(Path.GetDirectoryName(rig.Destination)!, $"uploads-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(uploads);
+        try
+        {
+            var folder = new UploadFolder(uploads);
+            var reference = await folder.SaveAsync(new MemoryStream(bytes), UploadFolder.TorrentExtension, bytes.Length, CancellationToken.None);
+            var file = folder.Resolve(reference)!;
+            var roots = new PathRoots([rig.Destination]);
+            rig.Jobs.Roots = roots;
+            rig.Jobs.ResolveReference = folder.Resolve;
+
+            // Its path, given as a path, is outside the roots...
+            var byPath = await rig.Jobs.ClassifyWithFilesAsync(file);
+            Assert.Equal(RemoteInputKind.Unsupported, byPath.Kind);
+            Assert.Equal(roots.OutsideFileText(".torrent file"), byPath.Reason);
+
+            // ...its reference is no path the caller chose: read, whatever the roots.
+            var classified = await rig.Jobs.ClassifyWithFilesAsync(reference, sourceRoots: roots);
+            Assert.Equal(RemoteInputKind.TorrentFile, classified.Kind);
+            Assert.Equal(2, classified.Files!.Count);
+
+            rig.Mock.ScriptTorrentUpload(bytes, infoHash);
+            rig.Mock.ScriptSubmission(infoHash, [MockTorBoxFile.Of(rig.Mock.NextFileId(), "Up/a.bin", 4 * Kb, 67), MockTorBoxFile.Of(rig.Mock.NextFileId(), "Up/b.bin", 4 * Kb, 68)], [MockTorBoxState.Ready]);
+            var added = await rig.Jobs.AddAsync(new RemoteAddRequest { Input = reference, Destination = rig.Destination, ApprovedUncached = true, SourceRoots = roots });
+            Assert.True(added.Error is null, added.Error);
+            Assert.NotNull(added.Job);
+        }
+        finally
+        {
+            try { Directory.Delete(uploads, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+        }
+    }
 
     [Fact]
     public async Task ATorrentFilesOwnListIsChosenFromAndFoundAgainInTheProvidersByPathAndSize()

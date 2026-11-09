@@ -780,7 +780,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     {
         if (UploadGone(request.Input) is { } gone) return (null, gone, null);
         var upload = ResolveUpload(request.Input);
-        if (upload is not null) request = request with { Input = upload };
+        // An upload's reference names the coordinator's own file, so no roots apply to it, neither the caller's nor Roots.
+        if (upload is not null) request = request with { Input = upload, SourceRoots = null };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)

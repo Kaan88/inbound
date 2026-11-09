@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DownloadManager.Server.Auth;
+namespace DownloadManager.Runtime.WebAuth;
 
 /// <summary>A paired app's token, as saved: its SHA-256 only, never the token.</summary>
 public sealed class TokenRecord
@@ -52,6 +52,10 @@ public sealed class AuthFile
 /// turned back into what it was made from. Written to a temporary file next to it, flushed, then moved over it, so a
 /// kill at any point leaves the old file or the new one; owner-only (mode 600) off Windows. A change that can't be
 /// saved is undone in memory too, so what is in force is always what the file says.
+/// <para>
+/// The one copy of the format: the server and its web bridge read and write it, and the desktop Host writes the web
+/// UI's password into it (D8), so it lives here in Runtime, which both reference, and not in either program.
+/// </para>
 /// </summary>
 public sealed class AuthStore
 {
@@ -89,7 +93,7 @@ public sealed class AuthStore
         catch (JsonException)
         {
             // A damaged file would otherwise read as "no password yet" and open the setup page to anyone who comes first.
-            throw new ServerStartException(
+            throw new AuthFileDamagedException(
                 $"The sign-in file {path} is damaged. Restore it from a backup, or delete it to set a new password (paired browsers then pair again).");
         }
     }

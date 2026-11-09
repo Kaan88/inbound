@@ -73,6 +73,9 @@ public sealed class ServerAuth
     public SignInLimiter Limiter { get; }
     public Pairing Pairing { get; }
     public bool PasswordFromEnvironment { get; }
+
+    /// <summary>This server's session cookie (<see cref="CookieName"/>, or the web bridge's per port, <see cref="ServerOptions.SessionCookieName"/>).</summary>
+    public string SessionCookie => _options.SessionCookieName;
     public bool SetupNeeded => Required && Store.Password is null;
 
     /// <summary>The code a browser from elsewhere needs on the setup page; null once a password is set.</summary>
@@ -80,7 +83,25 @@ public sealed class ServerAuth
 
     public static async Task<ServerAuth> CreateAsync(ServerOptions options, string dataFolder, ServerLog log, CancellationToken cancellationToken)
     {
-        var store = AuthStore.Open(dataFolder);
+        AuthStore store;
+        try
+        {
+            store = AuthStore.Open(dataFolder);
+        }
+        catch (AuthFileDamagedException ex)
+        {
+            throw new ServerStartException(ex.Message);
+        }
+
+        if (options.Bridge)
+        {
+            // On Windows the password is set in the app on this PC, never by the first visitor, and sign-in is always on.
+            if (!options.SignInRequired || options.Password is not null || options.PasswordFile is not null || options.TicketKey is not { Length: >= 32 })
+                throw new ServerStartException("The web bridge was started with options it doesn't use.");
+            if (store.Password is null)
+                throw new ServerStartException("No password is set for the web UI. Set one in the app on this PC (Options, Web UI).");
+        }
+
         var password = options.Password?.Value;
         if (password is null && !string.IsNullOrWhiteSpace(options.PasswordFile))
         {
@@ -217,9 +238,10 @@ public sealed class ServerAuth
             return;
         }
 
-        var session = Sessions.Find(request.Cookies[CookieName]);
+        var session = Sessions.Find(request.Cookies[SessionCookie]);
         if (session is not null) context.Items[SessionItem] = session;
-        if (!Required || session is not null || IsPublic(request.Path))
+        if (!Required || session is not null || IsPublic(request.Path) ||
+            (_options.Bridge && request.Path.Equals(TicketPath, StringComparison.OrdinalIgnoreCase)))
         {
             await next().ConfigureAwait(false);
             return;
@@ -283,7 +305,10 @@ public sealed class ServerAuth
     public void Map(WebApplication web)
     {
         web.MapGet("/api/auth/status", (HttpContext context) => Results.Json(Status(context)));
-        web.MapPost("/api/auth/setup", (Func<HttpContext, Task<IResult>>)SetupAsync);
+        // The web bridge on Windows has no setup page: its password is set in the app on this PC, and it doesn't start
+        // without one. It has the "Open in browser" ticket instead.
+        if (_options.Bridge) web.MapGet(TicketPath, (Func<HttpContext, Task<IResult>>)TicketSignInAsync);
+        else web.MapPost("/api/auth/setup", (Func<HttpContext, Task<IResult>>)SetupAsync);
         web.MapPost("/api/auth/signin", (Func<HttpContext, Task<IResult>>)SignInAsync);
         web.MapPost("/api/auth/signout", (HttpContext context) =>
         {
@@ -309,6 +334,54 @@ public sealed class ServerAuth
                 : Results.Json(new { ok = false, error = "No paired app has that id." }, statusCode: StatusCodes.Status404NotFound));
         web.MapPost("/api/pair", (Func<HttpContext, Task<IResult>>)PairAsync);
         web.MapDelete(PairSelfPath, (HttpContext context) => UnpairSelf(context));
+    }
+
+    /// <summary>Where "Open in browser" sends a browser on this PC with its one-time ticket (<c>?t=</c>), bridge only.</summary>
+    public const string TicketPath = WebUiDefaults.TicketPath;
+
+    // Tickets already used, until they expire; pruned on each use (no timer).
+    private readonly Dictionary<string, DateTimeOffset> _usedTickets = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The web bridge's "Open in browser" (D8): the Host made the ticket with this run's key (<see cref="WebUiTicket"/>),
+    /// and it signs in the browser that brings it, once, within a minute, and only from this PC directly (loopback, no
+    /// forwarding headers). The browser then lands on the web UI; a failed one on the sign-in page.
+    /// <para>
+    /// A wrong ticket is not counted in <see cref="Limiter"/>: a ticket is an HMAC under a random key made for each run,
+    /// so it can't be guessed, and counting would let any web page lock this PC's browsers out of signing in (an image
+    /// pointing at this address needs no Origin and carries no cookie, and every such request comes from loopback).
+    /// </para>
+    /// </summary>
+    private Task<IResult> TicketSignInAsync(HttpContext context)
+    {
+        var peer = context.Items.TryGetValue(PeerItem, out var noted) && noted is IPAddress address ? address : context.Connection.RemoteIpAddress;
+        var headers = context.Request.Headers;
+        if (peer is null || !IPAddress.IsLoopback(peer) ||
+            headers.ContainsKey("X-Forwarded-For") || headers.ContainsKey("Forwarded") || headers.ContainsKey("X-Original-For"))
+            return Task.FromResult(Error(StatusCodes.Status403Forbidden, "A sign-in ticket only works in a browser on this PC."));
+
+        var from = AddressOf(context);
+        var now = _time.GetUtcNow();
+        var checkedAgainst = Store.Password;
+        var ticket = _options.TicketKey is { } key ? WebUiTicket.Check(key, context.Request.Query["t"].ToString(), now) : null;
+        var fresh = false;
+        if (ticket is { } valid)
+        {
+            lock (_usedTickets)
+            {
+                foreach (var expired in _usedTickets.Where(used => used.Value <= now).Select(used => used.Key).ToList()) _usedTickets.Remove(expired);
+                fresh = _usedTickets.TryAdd(valid.Nonce, valid.Expires);
+            }
+        }
+
+        if (!fresh || checkedAgainst is null || !StartSession(context, checkedAgainst))
+        {
+            _log.Warn($"A sign-in ticket that is wrong, used or expired from {from}.");
+            return Task.FromResult(Results.Redirect(SignInPath));
+        }
+
+        _log.Info("A browser on this PC was signed in from the app (Open in browser).");
+        return Task.FromResult(Results.Redirect("/"));
     }
 
     /// <summary>
@@ -593,7 +666,7 @@ public sealed class ServerAuth
     {
         if (Sessions.TryCreate(() => ReferenceEquals(Store.Password, password)) is not { } created) return false;
         var (id, session) = created;
-        context.Response.Cookies.Append(CookieName, id, new CookieOptions
+        context.Response.Cookies.Append(SessionCookie, id, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,
@@ -605,8 +678,8 @@ public sealed class ServerAuth
         return true;
     }
 
-    private static void ExpireCookie(HttpContext context) =>
-        context.Response.Cookies.Delete(CookieName, new CookieOptions
+    private void ExpireCookie(HttpContext context) =>
+        context.Response.Cookies.Delete(SessionCookie, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,

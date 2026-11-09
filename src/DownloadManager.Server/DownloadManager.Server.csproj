@@ -36,6 +36,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The sign-in file (auth.json) and its password hash, shared with the desktop Host (D8). -->
+    <Using Include="DownloadManager.Runtime.WebAuth" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The one place that names a concrete provider, shared with the desktop Host rather than copied. -->
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
   </ItemGroup>

@@ -21,6 +21,7 @@
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
   </ItemGroup>
 
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
