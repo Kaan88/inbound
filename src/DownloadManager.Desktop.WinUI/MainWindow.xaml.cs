@@ -99,7 +99,43 @@ public sealed partial class MainWindow : Window
 #if HAS_UNO
         // LightDismissOverlayMode="Off" leaves the list undimmed on Windows; Uno ignores it and dims. Its dismiss layer
         // stays (a click beside the drawer still closes it), only unseen.
-        ProviderSplit.PaneOpening += (_, _) => DispatcherQueue.TryEnqueue(() => ClearDismissLayer(ProviderSplit));
+        ProviderSplit.PaneOpening += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(() => ClearDismissLayer(ProviderSplit));
+            // On a reopen Uno draws the pane in place for a frame before its slide starts: hidden for two frames.
+            // The pane's contents are laid out at the drawer's width only after it opens (a first open builds them, and
+            // from the full view they reflow): hidden until then (a few frames at most), then faded in as it slides.
+            // On the first open the template's pane is built later than this, so it is looked for on each frame too.
+            ProviderSplit.ApplyTemplate();
+            var pane = FindNamed(ProviderSplit, "PaneRoot") as UIElement;
+            ProviderDrawerFrame.Opacity = 0;
+            if (pane is not null) pane.Opacity = 0;
+            var frames = 0;
+            long? fadeStart = null;
+            void Reveal(object? sender, object e)
+            {
+                frames++;
+                if (pane is null && FindNamed(ProviderSplit, "PaneRoot") is UIElement late)
+                {
+                    pane = late;
+                    pane.Opacity = 0;
+                }
+
+                if (fadeStart is null)
+                {
+                    var laidOut = ProviderDrawerHost.Children.FirstOrDefault() is FrameworkElement content &&
+                                  content.ActualWidth > 0 && Math.Abs(content.ActualWidth - ProviderDrawerHost.ActualWidth) < 2;
+                    if (frames < 3 || (!laidOut && frames < 20)) return;
+                    fadeStart = Environment.TickCount64;
+                }
+
+                var progress = Math.Min(1, (Environment.TickCount64 - fadeStart.Value) / 150d);
+                if (pane is not null) pane.Opacity = progress;
+                ProviderDrawerFrame.Opacity = progress;
+                if (progress >= 1) Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Reveal;
+            }
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += Reveal;
+        };
 #endif
         UiTrace.Write("MainWindow collections initialized");
 
@@ -243,6 +279,18 @@ public sealed partial class MainWindow : Window
     }
 
 #if HAS_UNO
+    private static DependencyObject? FindNamed(DependencyObject parent, string name)
+    {
+        for (var at = 0; at < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); at++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, at);
+            if (child is FrameworkElement element && element.Name == name) return child;
+            if (FindNamed(child, name) is { } found) return found;
+        }
+
+        return null;
+    }
+
     private static void ClearDismissLayer(DependencyObject parent)
     {
         for (var at = 0; at < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); at++)
@@ -250,7 +298,6 @@ public sealed partial class MainWindow : Window
             var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, at);
             if (child is FrameworkElement { Name: { } name } element && name.Contains("Dismiss", StringComparison.OrdinalIgnoreCase))
             {
-                UiTrace.Write($"Drawer dismiss layer: {name} ({element.GetType().Name})");
                 element.Opacity = 0;
             }
 
