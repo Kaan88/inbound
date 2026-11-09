@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
   graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
-  priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, startsAscending, statusBarText,
+  priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, hoverPoint, agoText, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
 } from '../src/lib/list';
 import { canRetry, targetOf } from '../src/lib/archives';
@@ -500,21 +500,67 @@ describe('speed graph', () => {
     expect(history.peak()).toBe(5);
   });
 
-  it("starts from the server's own seconds without showing one twice", () => {
+  it("replaces its samples with the server's seconds without showing one twice", () => {
     const empty = new SpeedHistory(4);
     // The last figure is the second still under way, so it is left for this page's own sample.
-    empty.seed([1, 2, 3, 4, 9]);
+    empty.replace([1, 2, 3, 4, 9]);
     expect(empty.samples).toEqual([1, 2, 3, 4]);
 
     const sampled = new SpeedHistory(5);
     sampled.add(7);
     sampled.add(8);
-    sampled.seed([1, 2, 3, 4, 5, 6]);
-    expect(sampled.samples).toEqual([1, 2, 3, 7, 8]);
+    sampled.replace([1, 2, 3, 4, 5, 6]);
+    expect(sampled.samples).toEqual([2, 3, 4, 5, 8]);
 
     const odd = new SpeedHistory(5);
-    odd.seed([-5, Number.NaN, 3, 0]);
+    odd.replace([-5, Number.NaN, 3, 0]);
     expect(odd.samples).toEqual([0, 0, 3]);
+  });
+
+  it('fills the time a hidden tab left as a gap, and ignores a trailing gap', () => {
+    const history = new SpeedHistory();
+    history.add(5);
+    history.add(null);
+    history.add(null);
+    history.replace([1, 2, 3, 4]);
+    expect(history.samples).toEqual([1, 2, 3, 5]);
+    history.replace([9, 9]);
+    expect(history.samples).toEqual([9, 5]);
+  });
+
+  it("keeps the server's whole hour and draws the newest ten minutes", () => {
+    const history = new SpeedHistory();
+    expect(history.limit).toBe(3600);
+    history.replace(Array.from({ length: 3601 }, (_, i) => i));
+    expect(history.samples).toHaveLength(3600);
+    expect(history.recent()).toHaveLength(600);
+    expect(history.recent()[599]).toBe(3599);
+    expect(history.peak()).toBe(3599);
+    history.add(1);
+    expect(history.samples).toHaveLength(3600);
+    expect(history.samples[0]).toBe(1);
+    const short = new SpeedHistory();
+    short.add(2);
+    expect(short.recent()).toEqual([2]);
+  });
+
+  it('finds the sample under the pointer, newest at the right edge', () => {
+    const step = 600 / 599;
+    const samples = [1, null, 3, 4];
+    // The line starts at 600 - 3 steps.
+    expect(hoverPoint(samples, 600)).toEqual({ index: 3, rate: 4, age: 0 });
+    expect(hoverPoint(samples, 600 - 2 * step)).toEqual({ index: 1, rate: null, age: 2 });
+    expect(hoverPoint(samples, 600 - 3 * step - 0.2)).toEqual({ index: 0, rate: 1, age: 3 });
+    expect(hoverPoint(samples, 100)).toBeNull();
+    expect(hoverPoint([], 300)).toBeNull();
+    expect(hoverPoint(samples, Number.NaN)).toBeNull();
+  });
+
+  it('words the age as the desktop graph does', () => {
+    expect(agoText(0)).toBe('now');
+    expect(agoText(30)).toBe('30 s ago');
+    expect(agoText(125)).toBe('2 min 05 s ago');
+    expect(agoText(3725)).toBe('1 h 02 min ago');
   });
 
   it('scales the top of the graph above the peak', () => {

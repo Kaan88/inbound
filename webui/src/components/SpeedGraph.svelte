@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { speed } from '../lib/format';
-  import { graphCeiling, SpeedHistory, speedSample } from '../lib/list';
+  import { agoText, graphCeiling, hoverPoint, SpeedHistory, speedGraphWindow, speedSample } from '../lib/list';
   import { store } from '../lib/store.svelte';
   import type { SpeedHistoryResult } from '../lib/types';
 
-  // The collapsible bar under the list: the total speed of the active downloads, a sample a second. It opens upward.
+  // The collapsible bar under the list: the total speed of the active downloads, a sample a second, the last ten minutes. It opens upward.
   // A gap is a moment the server could not be reached; a download that went quiet counts as zero.
   const width = 600;
   const height = 100;
-  const history = new SpeedHistory(width);
+  const history = new SpeedHistory();
   let version = $state(0);
   let open = $state(readOpen());
 
@@ -31,19 +31,6 @@
     }
   }
 
-  // The first time the graph shows with a connection, the server's own last minutes fill it, so it doesn't start empty.
-  // A server without speed.history answers an error, and the graph then fills as before.
-  let seeded = false;
-  $effect(() => {
-    if (seeded || !open || store.connection !== 'open' || store.model.snapshots === 0) return;
-    seeded = true;
-    void store.ask<SpeedHistoryResult>('speed.history', {}).then((result) => {
-      if (result.intervalSeconds !== 1 || !Array.isArray(result.bytesPerSecond)) return;
-      history.seed(result.bytesPerSecond);
-      version++;
-    }).catch(() => undefined);
-  });
-
   // A timer runs only while the graph is open and the page is showing, so a closed graph or a hidden tab costs nothing.
   let visible = $state(typeof document === 'undefined' ? true : !document.hidden);
   onMount(() => {
@@ -51,6 +38,24 @@
     document.addEventListener('visibilitychange', changed);
     return () => document.removeEventListener('visibilitychange', changed);
   });
+
+  // Whenever the graph shows with a connection (opened, the tab visible again, the connection back) the server's own last
+  // hour replaces what this page sampled, so time spent hidden or offline is filled in. A server without speed.history
+  // answers an error, and the graph then fills as before.
+  const canAsk = $derived(open && visible && store.connection === 'open' && store.model.snapshots > 0);
+  $effect(() => {
+    if (!canAsk) return;
+    let stale = false;
+    untrack(() => {
+      void store.ask<SpeedHistoryResult>('speed.history', {}).then((result) => {
+        if (stale || result.intervalSeconds !== 1 || !Array.isArray(result.bytesPerSecond)) return;
+        history.replace(result.bytesPerSecond);
+        version++;
+      }).catch(() => undefined);
+    });
+    return () => (stale = true);
+  });
+
   $effect(() => {
     if (!open || !visible) return;
     // Time that went by unsampled shows as a gap.
@@ -60,6 +65,32 @@
       version++;
     }, 1000);
     return () => clearInterval(timer);
+  });
+
+  // The point under the pointer (mouse, pen or a finger): set only while one is over the graph, so nothing runs otherwise.
+  let hoverX = $state<number | null>(null);
+  let hoverTime = $state(0);
+  function point(event: PointerEvent) {
+    const box = (event.currentTarget as Element).getBoundingClientRect();
+    if (box.width <= 0) return;
+    hoverX = ((event.clientX - box.left) / box.width) * width;
+    hoverTime = Date.now();
+  }
+  function leave() {
+    hoverX = null;
+  }
+  const hover = $derived.by(() => {
+    void version;
+    if (hoverX === null) return null;
+    const found = hoverPoint(history.recent(), hoverX, width, speedGraphWindow);
+    if (!found) return null;
+    const samples = history.recent();
+    const step = width / (speedGraphWindow - 1);
+    const x = width - found.age * step;
+    const clock = new Date(hoverTime - found.age * 1000).toLocaleTimeString([], { hour12: false });
+    const text = found.rate === null ? `No figure · ${clock}` : `${speed(found.rate) || '0 B/s'} · ${clock} · ${agoText(found.age)}`;
+    const y = found.rate === null ? null : height - Math.min(1, found.rate / ceiling) * height;
+    return { x, y, text, flip: x / width > 0.6, left: (x / width) * 100, count: samples.length };
   });
 
   const now = $derived.by(() => {
@@ -73,9 +104,9 @@
   });
   const shape = $derived.by(() => {
     void version;
-    const samples = history.samples;
+    const samples = history.recent();
     // Newest at the right edge; the line starts where the history does.
-    const step = width / Math.max(1, history.limit - 1);
+    const step = width / (speedGraphWindow - 1);
     const offset = width - (samples.length - 1) * step;
     let line = '';
     let area = '';
@@ -107,15 +138,28 @@
   {#if open}
     <div id="speed-graph" class="relative h-28 px-3 pb-2">
       <svg
-        class="size-full overflow-visible rounded border border-divider bg-surface"
+        class="size-full touch-pan-y overflow-visible rounded border border-divider bg-surface"
+        onpointerdown={point}
+        onpointermove={point}
+        onpointerleave={leave}
+        onpointercancel={leave}
         viewBox="0 0 {width} {height}"
         preserveAspectRatio="none"
         role="img"
-        aria-label="Total download speed over the last {history.samples.length} seconds. Now {now === null ? 'no data' : speed(now) || '0 B/s'}; the top of the graph is {speed(ceiling)}."
+        aria-label="Total download speed over the last {Math.min(history.samples.length, speedGraphWindow)} seconds. Now {now === null ? 'no data' : speed(now) || '0 B/s'}; the top of the graph is {speed(ceiling)}."
       >
         <path d={shape.area} fill="var(--progress)" fill-opacity="0.22" />
         <path d={shape.line} fill="none" stroke="var(--progress)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+        {#if hover}
+          <line x1={hover.x} x2={hover.x} y1="0" y2={height} stroke="var(--muted)" stroke-opacity="0.6" stroke-width="1" vector-effect="non-scaling-stroke" />
+        {/if}
       </svg>
+      {#if hover}
+        {#if hover.y !== null}
+          <span class="pointer-events-none absolute size-[7px] rounded-full bg-progress" style="left: calc(0.75rem + (100% - 1.5rem) * {hover.left / 100} - 3.5px); top: calc((100% - 0.5rem) * {hover.y / height} - 3.5px)"></span>
+        {/if}
+        <span class="tabular pointer-events-none absolute top-0 whitespace-nowrap rounded border border-divider bg-chrome px-1.5 py-0.5 text-[11px] text-text" style="left: calc(0.75rem + (100% - 1.5rem) * {hover.left / 100}); transform: translateX({hover.flip ? 'calc(-100% - 8px)' : '8px'})">{hover.text}</span>
+      {/if}
       <span class="tabular pointer-events-none absolute right-5 top-1 text-[11px] text-muted">{speed(ceiling)}</span>
     </div>
   {/if}
