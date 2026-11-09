@@ -2651,9 +2651,7 @@ public sealed partial class MainWindow : Window
             // U-WL-26: what it does for the person, not how it is built.
             Text = "Downloads files for you, in parts at once where the server allows, and picks up where it left off after a " +
                 "lost connection or a restart. Downloads keep going in the background while this window is closed, and the " +
-                "browser extension hands the browser's downloads to it.
-
-" +
+                "browser extension hands the browser's downloads to it.\n\n" +
                 "If something goes wrong, Help > Open Diagnostics Folder has the logs.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 0),
