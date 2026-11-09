@@ -271,7 +271,9 @@ public static class PipeNames
 /// first can't answer in the Host's place. It is <see cref="PipeOptions.CurrentUserOnly"/>'s check plus one case:
 /// that option compares the pipe's owner with the token's default owner only, which in an elevated process of an
 /// administrator is the Administrators group, so a client in an administrator terminal (the CLI, say) would be refused
-/// by its own user's Host. This user's own SID is accepted too.
+/// by its own user's Host. This user's own SID is accepted too. The Host sets its pipes' owner to the user itself, also
+/// when it runs elevated, so a client that isn't elevated reaches an elevated Host; and the Host checks the same owner on
+/// the pipe it serves (<see cref="VerifyServer"/>), so it never serves an instance of a pipe another account made first.
 /// </summary>
 public static class PipeOwner
 {
@@ -290,6 +292,24 @@ public static class PipeOwner
         using var current = WindowsIdentity.GetCurrent();
         if (!IsTrusted(owner, current.User, current.Owner))
             throw new UnauthorizedAccessException("The app's pipe belongs to another user.");
+    }
+
+    /// <summary>
+    /// Whether a pipe the Host is about to serve is its own. A new instance of a pipe that already exists takes that pipe's
+    /// security, not the Host's, so an instance of a pipe another account made first (with an owner of its own and access
+    /// for itself) would let that account in. The Host makes its pipes with this user as the owner, so only that counts.
+    /// </summary>
+    public static bool IsHostsOwn(SecurityIdentifier? owner, SecurityIdentifier? user)
+        => owner is not null && user is not null && owner == user;
+
+    /// <summary>Throws <see cref="UnauthorizedAccessException"/> unless a pipe instance the Host made is <see cref="IsHostsOwn"/>.</summary>
+    [SupportedOSPlatform("windows")]
+    public static void VerifyServer(NamedPipeServerStream pipe)
+    {
+        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        using var current = WindowsIdentity.GetCurrent();
+        if (!IsHostsOwn(owner, current.User))
+            throw new UnauthorizedAccessException("Another account has made a pipe with the app's name first.");
     }
 }
 

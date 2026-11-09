@@ -12,6 +12,10 @@ page gives the framing rules, the remote provider messages and the archive messa
   user (`PipeOwner`): another account that made a pipe of the same name first can't answer in the Host's place. It is
   `PipeOptions.CurrentUserOnly`'s check, which compares the owner with the token's default owner only, plus this
   user's own SID, so a client in an administrator terminal (default owner Administrators) still reaches its user's Host.
+  The Host makes its pipes with the user itself as the owner, also when it runs elevated, so a client that isn't
+  elevated still reaches it; the web bridge makes the same check. The Host also checks the owner of each pipe instance
+  it is about to serve: an instance of a pipe that another account made first has that account's security, so the Host
+  refuses to serve it, logs it, and tries again every 10 seconds.
 - Each frame is a 4-byte little-endian length, then that many bytes of UTF-8 JSON. The limit is 8 MB per frame.
 - Each message has `v` (protocol version), `type`, `id`, and on replies `replyTo` with the id of the request, plus `payload`.
 - JSON uses camelCase names and leaves out null values. Unknown fields are ignored.

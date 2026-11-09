@@ -85,7 +85,9 @@ public sealed class HostPipeServer
                 _log.Error($"Named-pipe accept failed: {ex.Message}");
                 try
                 {
-                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    // A pipe taken by another account stays taken until that account lets go; don't fill the log meanwhile.
+                    var wait = ex is UnauthorizedAccessException ? TimeSpan.FromSeconds(10) : TimeSpan.FromMilliseconds(500);
+                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -111,7 +113,7 @@ public sealed class HostPipeServer
     {
         var security = PipeSecurityFactory.CreateForCurrentUser();
 
-        return NamedPipeServerStreamAcl.Create(
+        var pipe = NamedPipeServerStreamAcl.Create(
             pipeName,
             PipeDirection.InOut,
             MaxClients,
@@ -120,6 +122,18 @@ public sealed class HostPipeServer
             64 * 1024,
             64 * 1024,
             security);
+        try
+        {
+            // When the pipe already exists, this instance has that pipe's security, not ours: refuse to serve a pipe
+            // another account made first, or that account could connect to it.
+            PipeOwner.VerifyServer(pipe);
+            return pipe;
+        }
+        catch
+        {
+            pipe.Dispose();
+            throw;
+        }
     }
 
     /// <param name="clientSpeaksFirst">
