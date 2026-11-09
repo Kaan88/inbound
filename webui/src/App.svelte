@@ -8,7 +8,7 @@
   import { opensAddUrl } from './lib/keys';
   import type { ClassifyResult } from './lib/types';
   import { clockTime, speed } from './lib/format';
-  import { countJobs, providerEntries, speedSample, statusBarText } from './lib/list';
+  import { countJobs, liveSpeed, providerEntries, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
@@ -87,7 +87,7 @@
   const count = $derived(counts(store.model));
   const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
   // The same figure the speed graph shows (U-WU-14); nothing while the server can't be reached (U-WU-3).
-  const totalSpeed = $derived(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
+  const totalSpeed = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
   const offline = $derived(store.connection !== 'open' && store.connection !== 'connecting' && store.connection !== 'signedOut');
   const offlineText = $derived(
     store.connection === 'incompatible' ? connectionText.incompatible
@@ -130,7 +130,7 @@
     <button class="btn-icon md:hidden" aria-label="Menu" aria-expanded={drawer} onclick={() => (drawer = !drawer)}><Icon name="menu" size={18} /></button>
     <a href="#/all" class="flex items-center gap-2 font-semibold"><img src="/favicon.svg" alt="" width="22" height="22" /> <span class="hidden sm:inline">Inbound</span></a>
     {#if screen.kind === 'list'}
-      <label class="relative ml-2 min-w-0 max-w-sm flex-1">
+      <label class="relative min-w-0 max-w-sm flex-1 md:ml-2">
         <span class="sr-only">Search the list</span>
         <Icon name="search" size={15} class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
         <input id="list-search" class="field h-8 pl-7" type="search" placeholder="Search" title="Search (Ctrl+F). F3 goes to the next row." bind:value={search} />
@@ -138,13 +138,14 @@
     {:else}
       <span class="flex-1"></span>
     {/if}
-    <span class="flex-1"></span>
+    <span class="flex-1 {screen.kind === 'list' ? 'max-md:hidden' : ''}"></span>
     <span class="hidden items-center gap-1.5 text-[12px] text-muted sm:flex" role="status" aria-live="polite">
       <span class="inline-block size-2 rounded-full {store.connection === 'open' ? 'bg-status-active' : store.connection === 'reconnecting' || store.connection === 'connecting' ? 'bg-status-waiting' : 'bg-status-failed'}"></span>
       {connectionText[store.connection]}
     </span>
     <HostSwitcher />
-    <button class="btn-icon" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
+    <!-- On a phone the theme button is in the drawer, so the search box and the host's name have room. -->
+    <button class="btn-icon max-md:hidden" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
     {#if store.signInRequired}
       <button class="btn-icon" title="Sign out" aria-label="Sign out" onclick={() => store.signOut()}><Icon name="logout" size={18} /></button>
     {/if}
@@ -165,7 +166,10 @@
       <!-- The drawer covers the header on a phone, so it has its own close button (U-WU-22). -->
       <div class="mb-2 flex items-center justify-between md:hidden">
         <span class="px-1 text-[13px] font-semibold">Menu</span>
-        <button class="btn-icon" aria-label="Close the menu" onclick={() => (drawer = false)}><Icon name="close" size={18} /></button>
+        <span class="flex items-center gap-1">
+          <button class="btn-icon" title="Theme: {themeNow.label}. Switch to {nextTheme.label.toLowerCase()}." aria-label="Theme: {themeNow.label}" onclick={() => store.setTheme(nextTheme.key)}><Icon name={themeNow.icon} size={18} /></button>
+          <button class="btn-icon" aria-label="Close the menu" onclick={() => (drawer = false)}><Icon name="close" size={18} /></button>
+        </span>
       </div>
       <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} disabled={store.connection !== 'open'} />
       <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>

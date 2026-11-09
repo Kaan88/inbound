@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { clockTime, dateOnly, dateTime } from '../src/lib/format';
-import { lastTryText, statusBarText } from '../src/lib/list';
+import { lastTryText, liveSpeed, statusBarText } from '../src/lib/list';
 import { foldTools, type ToolSize } from '../src/lib/toolbar';
 
 // The toolbar of the list at 1360 px in Waiting for TorBox: the buttons that measured 1226 px in a 1150 px bar (U-WU-2).
@@ -67,5 +67,17 @@ describe('the status bar and dates (U-WR-19, U-WU-21)', () => {
     expect(clockTime(date)).toBe('05:19');
     expect(dateTime('0001-01-01T00:00:00Z')).toBe('');
     expect(dateTime(undefined)).toBe('');
+  });
+});
+
+describe('liveSpeed (U-WU-14)', () => {
+  it('adds up the rates the rows show, however long ago the job was saved, and is empty while offline', () => {
+    const jobs = [
+      { state: 'downloading', bytesPerSecond: 228_000, updatedAt: '2020-01-01T00:00:00Z' },
+      { state: 'paused', bytesPerSecond: 50_000 },
+      { state: 'retryWaiting', bytesPerSecond: 1_000 },
+    ] as never[];
+    expect(liveSpeed(jobs, true, true)).toBe(229_000);
+    expect(liveSpeed(jobs, false, true)).toBeNull();
   });
 });

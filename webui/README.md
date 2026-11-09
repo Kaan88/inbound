@@ -50,11 +50,16 @@ DOWNLOADMANAGER_TORBOX_API=http://127.0.0.1:18731/torbox/v1/api/ \
 `npm run screens` (`scripts/screens.mjs`, Playwright's Chromium) walks every screen against such a server and saves
 screenshots at 1360 and 390 pixels wide, dark and light, into `artifacts\webui\`: the list (row menu, toolbar More menu,
 delete and cancel-package dialogs, package and download details), the Add menu and every add dialog, Extractions, Queues,
-every Options page, My TorBox (its tabs, an item's dialog and a row's menu) and Statistics. It sets the test server's password on a first run, seeds downloads through
+every Options page, My TorBox (its tabs, an item's dialog and a row's menu), Statistics, the host switcher as a page reached
+from another host shows it (Back to that host), numbered addresses in Add links, a folder outside the allowed ones in the
+folder picker, and Options with two invalid values. It sets the test server's password on a first run, seeds downloads through
 the Add URL and Add links dialogs, then does a few things end to end: enters an archive password and checks the
 extraction, stops and resumes, deletes without the file, uploads a `.torrent` file and chooses its files, saves a site
 login and a proxy password in one Options draft (Apply), checks that Cancel and Back ask before dropping a draft, pairs a
-browser token and checks what it may do, revokes it, and signs out. It prints how many steps passed and failed, and any
+browser token and checks what it may do, revokes it (after the question), and signs out. It also checks that Add URL's
+second step has the focus and Escape closes it, that Back closes a dialog and keeps the view, and that My TorBox's
+dialog keeps the focus after a failed download and on Shift+Tab. Besides overlapping toolbar buttons it fails when the
+toolbar's More is off the screen. It prints how many steps passed and failed, and any
 console error, page error, sideways scroll or overlapping toolbar buttons. `INBOUND_ONLY=<regex>` walks only the screens
 (or `e2e:` checks) whose name matches, against the state an earlier run left.
 

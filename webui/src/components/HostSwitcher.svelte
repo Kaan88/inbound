@@ -69,7 +69,7 @@
   <!-- A server glyph, not the theme's monitor (U-WU-19); the host's name shows on a phone too. -->
   <button bind:this={toggle} class="btn h-8 min-w-0 gap-1.5 px-2" aria-expanded={open} aria-haspopup="true" aria-controls="host-list" aria-label="Host: {hereName}. Switch to another host" title="Switch to another host" onclick={() => (open = !open)}>
     <Icon name="server" size={15} class="shrink-0 text-icon-neutral" />
-    <span class="max-w-24 truncate sm:max-w-40">{hereName}</span>
+    <span class="max-w-20 truncate sm:max-w-40">{hereName}</span>
     <Icon name="up" size={12} class="shrink-0 {open ? '' : 'rotate-180'}" />
   </button>
   {#if open}

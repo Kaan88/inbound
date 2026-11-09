@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { speed } from '../lib/format';
-  import { graphCeiling, SpeedHistory, speedSample } from '../lib/list';
+  import { graphCeiling, liveSpeed, SpeedHistory, speedSample } from '../lib/list';
   import { store } from '../lib/store.svelte';
   import type { SpeedHistoryResult } from '../lib/types';
 
@@ -73,7 +73,7 @@
 
   // The figure beside the title is the one the status bar shows, worked out from the same downloads at the same moment
   // (U-WU-14); the line is drawn from the samples, one a second.
-  const now = $derived(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
+  const now = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
   const ceiling = $derived.by(() => {
     void version;
     return graphCeiling(history.peak());
