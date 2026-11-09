@@ -60,6 +60,7 @@ internal sealed class AddLinksDialog
     private readonly FrameworkElement _themeRoot;
     private readonly IntPtr _windowHandle;
     private readonly StackPanel _list = new() { Spacing = 8 };
+    private Border? _listCard;
     private readonly Dictionary<AddLine, LineRow> _rows = [];
     private readonly StatusLine _status = new("Links status");
     private readonly TextBox _paste;
@@ -141,9 +142,20 @@ internal sealed class AddLinksDialog
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 640, Padding = new Thickness(0, 0, 14, 0) };
         if (_focus is AddFocus.Links or AddFocus.Magnet) panel.Children.Add(_paste);
-        panel.Children.Add(_status.Text);
-        panel.Children.Add(_selectAll);
-        panel.Children.Add(new ScrollViewer { Content = _list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        // UI.R31: Select all with the count beside it in secondary text, then the lines in a framed card.
+        _status.Text.Style = InboundUi.Style("InboundSecondaryTextStyle");
+        _status.Text.VerticalAlignment = VerticalAlignment.Center;
+        var selectRow = new Grid { ColumnSpacing = 12 };
+        selectRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        selectRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        selectRow.Children.Add(_selectAll);
+        Grid.SetColumn(_status.Text, 1);
+        selectRow.Children.Add(_status.Text);
+        panel.Children.Add(selectRow);
+        _list.Padding = new Thickness(8, 6, 8, 6);
+        _listCard = InboundUi.Card(new ScrollViewer { Content = _list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, new Thickness(2));
+        _listCard.Visibility = Visibility.Collapsed;
+        panel.Children.Add(_listCard);
         panel.Children.Add(_chooseLater);
         panel.Children.Add(destinationRow);
         panel.Children.Add(destinationError.Text);
@@ -364,6 +376,7 @@ internal sealed class AddLinksDialog
         _dialog.IsPrimaryButtonEnabled = _session.CanAdd;
 
         _selectAll.Visibility = lines.Count >= 2 ? Visibility.Visible : Visibility.Collapsed;
+        if (_listCard is not null) _listCard.Visibility = lines.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _selectAll.IsEnabled = lines.Any(AddLineSession.CanSelect);
         _selectAll.IsChecked = AddLineSession.SelectAllState(lines);
         _chooseLater.Visibility = AddChoices.ChooseLaterApplies(lines) ? Visibility.Visible : Visibility.Collapsed;
@@ -382,7 +395,9 @@ internal sealed class AddLinksDialog
         private readonly bool _archivesSupported;
         private readonly FrameworkElement _themeRoot;
         private readonly TextBlock _name = new() { TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = RowTextWidth };
-        private readonly TextBlock _word = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth };
+        // UI.R31: what the line is, as a small chip.
+        private readonly TextBlock _word = new() { FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth };
+        private readonly Border _wordChip = new() { CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Padding = new Thickness(8, 0, 8, 1), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 2) };
         private readonly TextBlock _detail = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxWidth = RowTextWidth };
         private readonly Button _retry = new() { Content = "Try again", Visibility = Visibility.Collapsed };
         private readonly CheckBox _direct = new() { Visibility = Visibility.Collapsed };
@@ -394,7 +409,8 @@ internal sealed class AddLinksDialog
             _provider = provider;
             _archivesSupported = archivesSupported;
             _themeRoot = themeRoot;
-            Box = new CheckBox { Content = new StackPanel { Children = { _name, _word, _detail } }, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            _wordChip.Child = _word;
+            Box = new CheckBox { Content = new StackPanel { Children = { _name, _wordChip, _detail } }, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             Box.Click += (_, _) => session.Select(line, Box.IsChecked == true);
             HasPassword = new CheckBox { Content = "It needs a password", Visibility = Visibility.Collapsed };
             // The owner, 2026-11-08: the archive password comes first, and the site's password is a box of its own,
@@ -486,8 +502,10 @@ internal sealed class AddLinksDialog
             _detail.Text = view.Detail;
             _detail.Visibility = view.Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             _detail.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _themeRoot);
-            if (view.IsProblem) _word.Foreground = InboundTheme.Brush("InboundErrorTextBrush", _themeRoot);
-            else _word.ClearValue(TextBlock.ForegroundProperty);
+            var chipBrush = InboundTheme.Brush(view.IsProblem ? "InboundErrorTextBrush" : "InboundSecondaryTextBrush", _themeRoot);
+            _word.Foreground = chipBrush;
+            _wordChip.BorderBrush = chipBrush;
+            _wordChip.Visibility = view.Word.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
             Box.IsChecked = _line.IsSelected;
             Box.IsEnabled = view.CanSelect;

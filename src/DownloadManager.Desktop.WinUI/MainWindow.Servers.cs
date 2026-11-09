@@ -461,10 +461,13 @@ public sealed partial class MainWindow
                 ItemsSource = servers.Select(server => $"{server.Name}  ·  {server.Address}").ToList(),
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(list, "Saved servers");
+            // UI.R31: with no server, Add is the accent button and the buttons for a chosen server stay away.
             var add = new Button { Content = "Add…" };
-            var edit = new Button { Content = "Edit…", IsEnabled = false };
-            var remove = new Button { Content = "Remove…", IsEnabled = false };
-            var show = new Button { Content = "Show", IsEnabled = false };
+            if (servers.Count == 0 && InboundUi.Style("AccentButtonStyle") is { } accent) add.Style = accent;
+            var none = servers.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            var edit = new Button { Content = "Edit…", IsEnabled = false, Visibility = none };
+            var remove = new Button { Content = "Remove…", IsEnabled = false, Visibility = none };
+            var show = new Button { Content = "Show", IsEnabled = false, Visibility = none };
             list.SelectionChanged += (_, _) => edit.IsEnabled = remove.IsEnabled = show.IsEnabled = list.SelectedIndex >= 0;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             buttons.Children.Add(add);
@@ -472,12 +475,10 @@ public sealed partial class MainWindow
             buttons.Children.Add(remove);
             buttons.Children.Add(show);
             var panel = new StackPanel { Spacing = 10, MinWidth = 460 };
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the switcher at the right of the toolbar or the left of the status bar, Tasks > Show Downloads Of, or Ctrl+0 to Ctrl+9.",
-                TextWrapping = TextWrapping.Wrap,
-            });
-            panel.Children.Add(servers.Count == 0 ? new TextBlock { Text = "No servers yet.", Opacity = 0.72 } : list);
+            panel.Children.Add(InboundUi.Secondary("Another computer running Inbound (the Windows app with its web UI turned on, or the server) can be shown in this window. Choose which one with the switcher at the right of the toolbar or the left of the status bar, Tasks > Show Downloads Of, or Ctrl+0 to Ctrl+9."));
+            panel.Children.Add(servers.Count == 0
+                ? InboundUi.Card(InboundUi.EmptyState("\uE968", "No servers yet."))
+                : InboundUi.ListCard(list));
             panel.Children.Add(buttons);
             var dialog = new ContentDialog
             {
