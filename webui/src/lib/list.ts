@@ -219,6 +219,27 @@ export function menuLabel(text: string, reason: string | null): string {
   return reason === null ? text : `${text} (${reason})`;
 }
 
+export interface FileCommand { label: string; enabled: boolean; hidden: boolean }
+
+/**
+ * The desktop row menu's file commands the web menu lacked (U-WU-10): Move/Rename… for one finished file, Redownload and
+ * Refresh Download Address… for one file (not a provider's), Change Category… for any downloads. The reasons are the
+ * same words as the other entries.
+ */
+export function fileCommands(
+  single: Pick<Job, 'state' | 'url' | 'isRemote'> | null,
+  plan: FileMenuPlan,
+  files: number,
+): { move: FileCommand; redownload: FileCommand; refresh: FileCommand; category: FileCommand } {
+  const providers = !!single && (single.isRemote === true || single.url.toLowerCase().startsWith('remote://'));
+  return {
+    move: { label: menuLabel('Move/Rename…', plan.openReason), enabled: plan.openReason === null && single?.state === 'completed', hidden: false },
+    redownload: { label: menuLabel('Redownload', plan.fileReason), enabled: plan.fileReason === null, hidden: false },
+    refresh: { label: menuLabel('Refresh Download Address…', plan.fileReason), enabled: plan.fileReason === null && !providers, hidden: providers },
+    category: { label: 'Change Category…', enabled: files > 0, hidden: false },
+  };
+}
+
 /** Grouping takes two files or more, in two rows or more. */
 export function canGroup(files: number, localRows: number): boolean {
   return files >= 2 && localRows >= 2;

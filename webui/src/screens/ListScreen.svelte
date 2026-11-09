@@ -12,7 +12,7 @@
   } from '../lib/archives';
   import {
     archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
-    downloadChoices, emptyText, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
+    downloadChoices, emptyText, fileCommands, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
     pauseTargets, planFileMenu, priorityTargets, queueText, remoteEnterAction, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
@@ -24,6 +24,9 @@
   import { foldTools } from '../lib/toolbar';
   import { buildRows, selectedJobIds, type Row, type ViewKey } from '../lib/views';
   import ArchiveRecord from './ArchiveRecord.svelte';
+  import ChangeCategory from './ChangeCategory.svelte';
+  import MoveRename from './MoveRename.svelte';
+  import RefreshAddress from './RefreshAddress.svelte';
   import ExtractFromDisk from './ExtractFromDisk.svelte';
   import JobDetails from './JobDetails.svelte';
   import PackageDialog from './PackageDialog.svelte';
@@ -67,6 +70,11 @@
   let expanded = $state(loadExpanded());
   let sort = $state<SortState>(parseSort(load('inbound.listSort')));
   let details = $state<string | null>(null);
+  /** Details opened to run Redownload at once (its questions live there). */
+  let detailsStart = $state<'redownload' | undefined>(undefined);
+  let moving = $state<Job | null>(null);
+  let refreshing = $state<Job | null>(null);
+  let recategorizing = $state<Job[] | null>(null);
   let packageOpen = $state<string | null>(null);
   // A package with just one listed file opens that file's own window (ProgressDetailRules.OnlyFile).
   function openPackage(group: { id: string; jobIds: string[] }) {
@@ -701,14 +709,18 @@
       if (items.length) items.push({ separator: true });
       const unfinished = selectedJobs.filter((job) => job.state !== 'completed');
       const sizeOnly = single?.finalFilePath && !single.fileRemovedAfterExtraction;
+      const commands = fileCommands(single, plan, selectedJobs.length);
       items.push(
         { label: menuLabel('Copy path', plan.openReason), disabled: plan.openReason !== null || !sizeOnly, onselect: () => void copy(single?.finalFilePath ?? '', 'Path copied.') },
         { label: menuLabel('Copy folder path', plan.openReason), disabled: plan.openReason !== null || !single?.destinationDirectory, onselect: () => void copy(single?.destinationDirectory ?? '', 'Folder path copied.') },
+        { label: commands.move.label, hint: 'Ctrl+M', disabled: !commands.move.enabled, onselect: () => (moving = single) },
         { separator: true },
         ...(showsArchive ? [...archiveItems(archive, records, null), { separator: true } as MenuItem] : []),
         { label: 'Resume', disabled: !canResume, onselect: () => void resume() },
         { label: 'Stop', disabled: !canPause, onselect: () => void stop() },
         { label: 'Cancel Package…', hidden: packageRows.length === 0, disabled: !canCancelPackage, onselect: askCancelPackage },
+        { label: commands.redownload.label, disabled: !commands.redownload.enabled, onselect: () => { if (single) { detailsStart = 'redownload'; details = single.id; } } },
+        { label: commands.refresh.label, hidden: commands.refresh.hidden, disabled: !commands.refresh.enabled, onselect: () => (refreshing = single) },
         { separator: true },
         { label: 'Add to Queue', items: queues.map((queue) => ({ label: queue.name, onselect: () => void addToQueue(queue.id) })) },
         { label: 'Remove from Queue', disabled: !selectedJobs.some((job) => queueText(job) !== ''), onselect: () => void removeFromQueue() },
@@ -731,6 +743,7 @@
         { label: 'Group into Package…', hidden: !canGroup(selectedJobs.length, localRows.length), onselect: groupSelected },
         { label: 'Remove from Package', hidden: !selectedJobs.some((job) => packageOf(job.id)), onselect: () => void ungroupSelected() },
         { label: 'Rename Package…', hidden: !(firstLocal?.kind === 'package' || (firstLocal?.kind === 'job' && !!packageOf(firstLocal.job.id))), onselect: renamePackage },
+        { label: commands.category.label, disabled: !commands.category.enabled, onselect: () => (recategorizing = selectedJobs) },
         { label: menuLabel('Properties', plan.fileReason), disabled: plan.fileReason !== null, onselect: () => (details = single!.id) },
       );
     }
@@ -922,10 +935,9 @@
       event.preventDefault();
       applySort({ key: 'size', ascending: false });
     } else if (ctrl && !event.shiftKey && key === 'm') {
-      // Move/Rename lives in the download's details.
-      if (firstLocal?.kind === 'job' && firstLocal.job.state === 'completed') {
+      if (firstLocal?.kind === 'job' && firstLocal.job.state === 'completed' && !firstLocal.job.fileRemovedAfterExtraction) {
         event.preventDefault();
-        details = firstLocal.job.id;
+        moving = firstLocal.job;
       }
     }
   }
@@ -1163,7 +1175,19 @@
 {/if}
 
 {#if details}
-  <JobDetails jobId={details} set={archiveByJob.get(details)} onclose={() => (details = null)} onpassword={(target) => { details = null; passwordTarget = target; }} />
+  <JobDetails jobId={details} start={detailsStart} set={archiveByJob.get(details)} onclose={() => { details = null; detailsStart = undefined; }} onpassword={(target) => { details = null; detailsStart = undefined; passwordTarget = target; }} />
+{/if}
+
+{#if moving}
+  <MoveRename job={store.model.jobs[moving.id] ?? moving} onclose={() => (moving = null)} />
+{/if}
+
+{#if refreshing}
+  <RefreshAddress job={store.model.jobs[refreshing.id] ?? refreshing} onclose={() => (refreshing = null)} />
+{/if}
+
+{#if recategorizing}
+  <ChangeCategory jobs={recategorizing} onclose={() => (recategorizing = null)} />
 {/if}
 
 
