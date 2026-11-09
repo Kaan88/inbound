@@ -90,6 +90,17 @@ internal static class ShellWords
         }).ToList();
     }
 
+    /// <summary>
+    /// U-WL-16: the progress window's title. A percentage only while it moves and the size is known; otherwise the
+    /// state, so a failed download doesn't read "0.0%".
+    /// </summary>
+    public static string ProgressTitle(string state, bool complete, double? percent, string name, string stateWords)
+    {
+        if (complete) return $"Download complete — {name}";
+        if (percent is { } done && state is "downloading" or "connecting" or "verifying") return $"{done:0.0}% — {name}";
+        return $"{stateWords} — {name}";
+    }
+
     private static string Rows(int count) => count == 1 ? "1 download" : $"{count} downloads";
 }
 

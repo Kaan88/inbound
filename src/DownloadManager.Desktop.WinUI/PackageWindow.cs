@@ -60,7 +60,7 @@ internal sealed class PackageWindow : Window
     private Guid? _shownFile;
     private bool _selectingFile;
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
-    private readonly Button _pause = new() { Content = "Pause all", MinWidth = 100 };
+    private readonly Button _pause = new() { Content = "Stop all", MinWidth = 100 };
     private readonly Button _resume = new() { Content = "Resume all", MinWidth = 100 };
     private readonly Button _cancel = new() { Content = "Cancel package", MinWidth = 100 };
     private readonly Button _openFolder = new() { Content = "Open folder", MinWidth = 100, Visibility = Visibility.Collapsed };

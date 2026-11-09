@@ -174,7 +174,7 @@ public sealed partial class DownloadWindow : Window
         var percent = JobDetailsPanel.Percent(job);
         var displayName = string.IsNullOrWhiteSpace(job.FileName) ? "Download" : job.FileName;
         Heading.Text = complete ? "Download complete" : JobViewModel.ToDisplayState(job.State);
-        Title = ServerNames.ForWindow(complete ? $"Download complete — {displayName}" : $"{percent:0.0}% — {displayName}", _connection.Target);
+        Title = ServerNames.ForWindow(ShellWords.ProgressTitle(job.State, complete, job.TotalBytes is > 0 ? percent : null, displayName, JobViewModel.ToDisplayState(job.State)), _connection.Target);
         FileNameText.Text = displayName;
         // A file from a provider account has no address of its own: only a reference to the account's item.
         var hasAddress = JobAddress.HasAddress(job);
@@ -345,7 +345,7 @@ public sealed partial class DownloadWindow : Window
             Title = "Cancel download?",
             Content = "Cancel this transfer and delete its partial file?",
             PrimaryButtonText = "Cancel download",
-            CloseButtonText = "Keep downloading",
+            CloseButtonText = _job?.State is "paused" or "queued" or "failed" ? "Keep it" : "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(confirm) == ContentDialogResult.Primary && _job?.CanCancel == true)

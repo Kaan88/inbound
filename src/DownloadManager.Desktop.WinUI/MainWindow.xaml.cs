@@ -2738,7 +2738,7 @@ public sealed partial class MainWindow : Window
         var destinationField = FolderChooser.Attach(destinationRow, destinationBox, () => knownSize, out var refreshSpace);
         var descriptionBox = new TextBox { Header = "Description (optional)" };
         var categoryBox = new ComboBox { Header = "Category", HorizontalAlignment = HorizontalAlignment.Stretch };
-        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (from file type)" });
+        categoryBox.Items.Add(new ComboBoxItem { Content = "Automatic (file extension)" });
         foreach (var category in FileCategories.Names.Append("other"))
             categoryBox.Items.Add(new ComboBoxItem { Content = char.ToUpperInvariant(category[0]) + category[1..], Tag = category });
         foreach (var category in _settings.CustomCategories)
