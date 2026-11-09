@@ -6,7 +6,7 @@
     <StackPanel x:Name="Body" Spacing="8">
         <Grid x:Name="Figures" ColumnSpacing="12" RowSpacing="4">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="110" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
@@ -18,24 +18,24 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <TextBlock Text="Status" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <!-- U-WL-16: every value on the same right edge as the counters below. -->
-            <TextBlock x:Name="StatusValue" Grid.Column="1" Text="Connecting…" TextTrimming="CharacterEllipsis" Style="{StaticResource InboundCounterValueStyle}" />
-            <TextBlock Grid.Row="1" Text="File size" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Status" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <!-- U-WL-16: every value on the same right edge as the counters below. UI.R31: Progress Details' facts: grey 12px keys, values close to them. -->
+            <TextBlock x:Name="StatusValue" Grid.Column="1" Text="Connecting…" TextTrimming="CharacterEllipsis" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock Grid.Row="1" Text="File size" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
             <!-- UI.R6: the live values share one right edge, a fixed distance in, so their units hold still as digits are added. -->
-            <TextBlock x:Name="SizeValue" Grid.Row="1" Grid.Column="1" Text="Unknown" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock x:Name="SizeValue" Grid.Row="1" Grid.Column="1" Text="Unknown" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
 
-            <TextBlock Grid.Row="2" Text="Downloaded" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="DownloadedValue" Grid.Row="2" Grid.Column="1" Text="0 B" TextWrapping="Wrap" Style="{StaticResource InboundCounterValueStyle}" />
-            <TextBlock Grid.Row="3" Text="Transfer rate" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="RateValue" Grid.Row="3" Grid.Column="1" Text="—" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock Grid.Row="2" Text="Downloaded" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <TextBlock x:Name="DownloadedValue" Grid.Row="2" Grid.Column="1" Text="0 B" TextWrapping="Wrap" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock Grid.Row="3" Text="Transfer rate" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <TextBlock x:Name="RateValue" Grid.Row="3" Grid.Column="1" Text="—" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
 
-            <TextBlock Grid.Row="4" Text="Time left" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="TimeLeftValue" Grid.Row="4" Grid.Column="1" Text="—" Style="{StaticResource InboundCounterValueStyle}" />
-            <TextBlock Grid.Row="5" Text="Resume capability" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" Style="{StaticResource InboundCounterValueStyle}" />
-            <TextBlock x:Name="SavePathLabel" Grid.Row="6" Text="Save to" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="SavePathValue" Grid.Row="6" Grid.Column="1" Visibility="Collapsed" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+            <TextBlock Grid.Row="4" Text="Time left" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <TextBlock x:Name="TimeLeftValue" Grid.Row="4" Grid.Column="1" Text="—" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock Grid.Row="5" Text="Resume capability" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <TextBlock x:Name="ResumeValue" Grid.Row="5" Grid.Column="1" Text="Unknown" FontSize="12" MinWidth="120" Style="{StaticResource InboundCounterValueStyle}" />
+            <TextBlock x:Name="SavePathLabel" Grid.Row="6" Text="Save to" Visibility="Collapsed" FontSize="12" Foreground="{ThemeResource InboundSecondaryTextBrush}" />
+            <TextBlock x:Name="SavePathValue" Grid.Row="6" Grid.Column="1" FontSize="12" Visibility="Collapsed" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
         </Grid>
         <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="False" HorizontalContentAlignment="Stretch"
                   HorizontalAlignment="Stretch">
