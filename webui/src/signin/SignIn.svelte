@@ -35,9 +35,18 @@
 
   // Which server this is, and the way back to the host this tab came from (U-WU-1).
   const here = location.origin;
-  const saved = new HostList().all;
-  const came = arrival(tabHandoff.value, here, saved);
-  const serverName = came.selfName || defaultName(here);
+  const hostList = new HostList();
+  let saved = $state(hostList.all);
+  const came = $derived(arrival(tabHandoff.value, here, saved));
+  const serverName = $derived(came.selfName || defaultName(here));
+  // A host this browser hasn't saved is only gone back to once the user agrees to add it: the link may be crafted.
+  let confirmBack = $state(false);
+  function addAndGoBack() {
+    if (!came.from) return;
+    if (!saved.some((host) => host.origin === came.from!.origin)) hostList.add(came.from);
+    saved = hostList.all;
+    location.href = handoffUrl(came.from.origin, here, saved);
+  }
 
   async function load() {
     try {
@@ -138,6 +147,18 @@
       <a class="mt-4 flex items-center justify-center gap-1 text-[13px] text-accent hover:underline" href={handoffUrl(came.back.origin, here, saved)}>
         <span aria-hidden="true">‹</span> Back to {came.back.name}
       </a>
+    {:else if came.from && !confirmBack}
+      <button type="button" class="mx-auto mt-4 flex items-center justify-center gap-1 text-[13px] text-accent hover:underline" onclick={() => (confirmBack = true)}>
+        <span aria-hidden="true">‹</span> Back to {came.from.name}…
+      </button>
+    {:else if came.from}
+      <div class="mt-4 text-[13px]" role="group" aria-label="Go back to {came.from.name}">
+        <p class="hint mb-2">{came.from.origin} is not in this browser's list of hosts. Going back takes that list along, so add it only if you came from there.</p>
+        <div class="flex justify-center gap-2">
+          <button type="button" class="btn-primary" onclick={addAndGoBack}>Add it and go back</button>
+          <button type="button" class="btn" onclick={() => (confirmBack = false)}>Cancel</button>
+        </div>
+      </div>
     {/if}
   </div>
 </main>

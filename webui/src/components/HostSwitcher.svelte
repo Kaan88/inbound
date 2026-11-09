@@ -101,9 +101,9 @@
           <button class="host-action btn-icon shrink-0" aria-label="Remove {host.name}" onclick={() => { open = false; removing = host; }}><Icon name="trash" size={14} /></button>
         </div>
       {/each}
-      {#if came.offered.length > 0 && came.back}
+      {#if came.offered.length > 0 && came.from}
         <div class="my-1 border-t border-divider"></div>
-        <p class="hint px-3 pb-1">{came.back.name} also knows these. They are not in this list yet:</p>
+        <p class="hint px-3 pb-1">{came.back ? `${came.from.name} also knows these. They are not in this list yet:` : `You came from ${came.from.name}. Add it to get a Back link here. Not in this list yet:`}</p>
         {#each came.offered as host (host.origin)}
           <div class="flex items-center hover:bg-hover">
             <a class="host-entry min-w-0 flex-1 px-3 py-1.5 text-[13px]" href={jump(host.origin)} title="Open {host.name}'s own web UI in this tab">

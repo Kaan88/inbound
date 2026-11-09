@@ -538,6 +538,9 @@ await capture(`${at++}-host-switcher-back`, signedIn, async (p) => {
   await p.waitForSelector('main');
   expect(!(await p.evaluate(() => location.hash.includes('inbound-hosts'))), 'the handoff stayed in the address');
   await p.getByRole('button', { name: /^Host: / }).click();
+  // The link could be crafted: an origin this browser hasn't saved gets Add first, and Back only once it is added.
+  expect(await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).count() === 0, 'Back offered for a host that is not saved');
+  await p.getByRole('button', { name: 'Add 127.0.0.1:18999 to this list' }).click();
   await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).waitFor();
 });
 await capture(`${at++}-add-links-numbered`, signedIn, async (p, v) => {
@@ -840,6 +843,29 @@ await step('e2e: sign out', async () => {
   await page.getByRole('button', { name: 'Sign out' }).click();
   // Two navigations to the sign-in page can race (the button's and the closed socket's), so look at where the page is, not at one navigation.
   await page.waitForFunction(() => location.pathname.startsWith('/signin'));
+});
+
+// U-WU-1 on the sign-in page: a link from a host this browser hasn't saved asks before it goes back (and adds it).
+await step('e2e: sign-in Back to an unsaved host asks first', async () => {
+  const { context, page: p } = await newPage(variants[0]);
+  try {
+    await p.route(`${otherHost}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>other</title>' }));
+    await p.goto(`${base}/signin/#inbound-hosts=${handoff}`);
+    expect(await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).count() === 0, 'Back offered as a plain link for a host that is not saved');
+    await p.getByRole('button', { name: /Back to 127\.0\.0\.1:18999/ }).click();
+    const group = p.getByRole('group', { name: /Go back to 127\.0\.0\.1:18999/ });
+    await group.getByRole('button', { name: 'Cancel' }).click();
+    expect(p.url().startsWith(base), 'Cancel left the page');
+    await p.getByRole('button', { name: /Back to 127\.0\.0\.1:18999/ }).click();
+    await group.getByRole('button', { name: 'Add it and go back' }).click();
+    await p.waitForURL((url) => url.origin === otherHost);
+    expect(p.url().includes('#inbound-hosts='), 'the way back lost the list it takes along');
+    await p.goto(`${base}/signin/`);
+    const saved = await p.evaluate(() => localStorage.getItem('inbound.hosts') ?? '');
+    expect(saved.includes(otherHost), 'the host was not added');
+  } finally {
+    await context.close();
+  }
 });
 
 await main.close();
