@@ -106,7 +106,7 @@ public sealed partial class MainWindow : Window
 
             // A size saved at close is real pixels. The first one isn't, or a scaled screen would get a tiny window.
             if (width == UiState.FirstWindowWidth && height == UiState.FirstWindowHeight) WindowLayout.ResizeForDpi(this, width, height);
-            else AppWindow.Resize(new SizeInt32(width, height));
+            else AppWindow.Resize(new SizeInt32 { Width = width, Height = height });
             WindowPlacement.Track(this, "main");
             var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
             if (File.Exists(icon))
@@ -830,7 +830,7 @@ public sealed partial class MainWindow : Window
             if (child is T match) return match;
             if (FindChild<T>(child) is { } nested) return nested;
         }
-        return null;
+        return default;
     }
 
     private void FadeIn(IReadOnlyList<JobViewModel> rows)

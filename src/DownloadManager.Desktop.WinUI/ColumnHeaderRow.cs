@@ -1,4 +1,4 @@
-using Microsoft.UI.Input;
+﻿using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -56,14 +56,35 @@ internal sealed class ColumnHeaderRow
         _header.XYFocusKeyboardNavigation = XYFocusKeyboardNavigationMode.Enabled;
         list.ContainerContentChanging += (_, args) =>
         {
+#if HAS_UNO
+            // Uno raises this before the row's template is built; the row is taken once the container has loaded.
+            if (args.ItemContainer.ContentTemplateRoot is null)
+            {
+                var container = args.ItemContainer;
+                void Loaded(object sender, RoutedEventArgs _)
+                {
+                    container.Loaded -= Loaded;
+                    if (container is not ListViewItem item) return;
+                    UnoListRows.Trim(item);
+                    if (UnoListRows.Root(item) is { } late) Take(late);
+                }
+                container.Loaded += Loaded;
+                return;
+            }
+#endif
             if (args.ItemContainer.ContentTemplateRoot is not Grid row) return;
-            row.Unloaded -= Row_Unloaded;
-            row.Unloaded += Row_Unloaded;
-            row.Loaded -= Row_Loaded;
-            row.Loaded += Row_Loaded;
-            _rows.Add(row);
-            Apply(row);
+            Take(row);
         };
+    }
+
+    private void Take(Grid row)
+    {
+        row.Unloaded -= Row_Unloaded;
+        row.Unloaded += Row_Unloaded;
+        row.Loaded -= Row_Loaded;
+        row.Loaded += Row_Loaded;
+        _rows.Add(row);
+        Apply(row);
     }
 
     /// <summary>Tells the list how wide it must be before it starts scrolling sideways.</summary>

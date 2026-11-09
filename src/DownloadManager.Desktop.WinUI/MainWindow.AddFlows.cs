@@ -451,7 +451,11 @@ public sealed partial class MainWindow
         RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => _autoOpen.Disarm()), handledEventsToo: true);
         Activated += (_, args) =>
         {
+#if HAS_UNO
+            _isForeground = args.WindowActivationState != Windows.UI.Core.CoreWindowActivationState.Deactivated;
+#else
             _isForeground = args.WindowActivationState != WindowActivationState.Deactivated;
+#endif
             if (!_isForeground) _autoOpen.Disarm();
         };
 
