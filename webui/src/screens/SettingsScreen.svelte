@@ -125,7 +125,7 @@
     if (!form) return [];
     const draft = $state.snapshot(form) as OptionsForm;
     const archive = archiveSaved && archiveForm ? { saved: archiveSaved, values: $state.snapshot(archiveForm) as ArchiveValues } : null;
-    return validateAll(draft, archive);
+    return validateAll(draft, archive, { pcOnly });
   }
   $effect(() => {
     if (problems.length === 0 || !form) return;

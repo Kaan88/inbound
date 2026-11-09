@@ -83,6 +83,22 @@ describe('validateForm', () => {
     expect(validateForm(form)).toMatchObject({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy' });
   });
 
+  it('does not ask for a manual proxy address the server hides from a browser', () => {
+    // A web session is sent only the proxy's mode (WebSettingsRules.ForWeb); the host keeps its own address.
+    const form = formOf({ proxy: { mode: 'manual', hasPassword: false } });
+    expect(form.proxy.host).toBe('');
+    expect(validateAll(form)).toEqual([]);
+    form.proxy.host = 'nonsense';
+    expect(validateForm(form)).toMatchObject({ page: 'proxy', field: 'proxy-address' });
+  });
+
+  it('does not check the proxy where only the PC may change it', () => {
+    const form = formOf({ proxy: { mode: 'manual', address: 'h:80', hasPassword: false } });
+    form.proxy.host = 'nonsense';
+    expect(validateForm(form)).toMatchObject({ page: 'proxy' });
+    expect(validateAll(form, null, { pcOnly: true })).toEqual([]);
+  });
+
   it('asks for a login password again when the site changed, and for a name and site on every row', () => {
     const form = formOf({ siteLogins: [{ id: 'a', site: 'x.com', username: 'u', hasPassword: true }] });
     form.logins[0].site = 'y.com';
