@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -91,6 +91,10 @@ public sealed partial class MainWindow
         {
             UiTrace.Write("Host announced application exit");
             Application.Current.Exit();
+#if HAS_UNO
+            // Uno's X11 head leaves the process running after Exit.
+            Environment.Exit(0);
+#endif
         });
     }
 

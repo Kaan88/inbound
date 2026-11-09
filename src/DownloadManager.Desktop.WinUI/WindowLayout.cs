@@ -123,6 +123,10 @@ internal static class WindowLayout
     /// </summary>
     public static void CenterOnMainWindow(Window window)
     {
+#if HAS_UNO
+        // Uno has no DisplayArea lookups (they throw); the window manager places a new window itself.
+        return;
+#endif
         var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var size = window.AppWindow.Size;
         var target = MainWindowBounds(own);

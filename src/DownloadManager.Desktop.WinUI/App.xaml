@@ -23,6 +23,8 @@
                     <SolidColorBrush x:Key="InboundProgressTrackBrush" Color="#383838" />
                     <SolidColorBrush x:Key="InboundErrorTextBrush" Color="#F07A7A" />
                     <SolidColorBrush x:Key="InboundHighlightBrush" Color="#2B3A4F" />
+                    <SolidColorBrush x:Key="InboundCategorySelectedBrush" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="InboundCategorySelectedHoverBrush" Color="#22FFFFFF" />
                     <SolidColorBrush x:Key="InboundIconStartBrush" Color="#8CCF8C" />
                     <SolidColorBrush x:Key="InboundIconPauseBrush" Color="#E8B36A" />
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#E08A8A" />
@@ -53,6 +55,8 @@
                     <SolidColorBrush x:Key="InboundProgressTrackBrush" Color="#E2E2E2" />
                     <SolidColorBrush x:Key="InboundErrorTextBrush" Color="#C42B1C" />
                     <SolidColorBrush x:Key="InboundHighlightBrush" Color="#DCE9F7" />
+                    <SolidColorBrush x:Key="InboundCategorySelectedBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="InboundCategorySelectedHoverBrush" Color="#1E000000" />
                     <SolidColorBrush x:Key="InboundIconStartBrush" Color="#2E8B3E" />
                     <SolidColorBrush x:Key="InboundIconPauseBrush" Color="#B7791F" />
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#C42B1C" />
@@ -75,9 +79,6 @@
             <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SubtleFillColorSecondaryBrush" />
             <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SubtleFillColorTertiaryBrush" />
             <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SubtleFillColorSecondaryBrush" />
-            <StaticResource x:Key="SystemControlHighlightListAccentLowBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
-            <StaticResource x:Key="SystemControlHighlightListAccentMediumBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
-            <StaticResource x:Key="SystemControlHighlightListAccentHighBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
 
             <!-- Inbound blue replaces the user's Windows accent so checkboxes, primary buttons and selections match the palette. -->
             <Color x:Key="SystemAccentColor">#1F6FC5</Color>
@@ -208,31 +209,31 @@
                                         </VisualState>
                                         <VisualState x:Name="Selected">
                                             <VisualState.Setters>
-                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource SystemControlHighlightListAccentLowBrush}" />
+                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource InboundCategorySelectedBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource SystemControlHighlightAltBaseHighBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="SelectedUnfocused">
                                             <VisualState.Setters>
-                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource SystemControlHighlightListAccentLowBrush}" />
+                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource InboundCategorySelectedBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource SystemControlHighlightAltBaseHighBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="SelectedDisabled">
                                             <VisualState.Setters>
-                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource SystemControlHighlightListAccentLowBrush}" />
+                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource InboundCategorySelectedBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource SystemControlDisabledBaseMediumLowBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="SelectedPointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource SystemControlHighlightListAccentMediumBrush}" />
+                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource InboundCategorySelectedHoverBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource SystemControlHighlightAltBaseHighBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="SelectedPressed">
                                             <VisualState.Setters>
-                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource SystemControlHighlightListAccentHighBrush}" />
+                                                <Setter Target="LayoutRoot.Background" Value="{ThemeResource InboundCategorySelectedHoverBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource SystemControlHighlightAltBaseHighBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>

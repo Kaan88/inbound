@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using DownloadManager.Contracts;
@@ -275,6 +275,20 @@ internal sealed class ProviderPanel
         ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
     };
 
+    /// <summary>Uno's list items fill a selected item with the older accent-blue brushes; here they are the subtle fills WinUI 3 uses.</summary>
+    private static void UseSubtleSelection(ListView list)
+    {
+        foreach (var (key, subtle) in new[]
+                 {
+                     ("SystemControlHighlightListAccentLowBrush", "SubtleFillColorSecondaryBrush"),
+                     ("SystemControlHighlightListAccentMediumBrush", "SubtleFillColorTertiaryBrush"),
+                     ("SystemControlHighlightListAccentHighBrush", "SubtleFillColorSecondaryBrush"),
+                 })
+        {
+            if (Application.Current.Resources.TryGetValue(subtle, out var brush)) list.Resources[key] = brush;
+        }
+    }
+
     private readonly DataTemplate _rowTemplate = (DataTemplate)XamlReader.Load(ItemTemplate);
     private readonly DataTemplate _cardTemplate = (DataTemplate)XamlReader.Load(CardTemplate);
     private readonly Style? _rowStyle = InboundUi.Style("InboundListRowStyle");
@@ -326,6 +340,7 @@ internal sealed class ProviderPanel
         }
 
         _tabs.SelectionChanged += (_, _) => ShowSelectedTab();
+        UseSubtleSelection(_list);
         _list.SelectionChanged += (_, _) => OnItemSelected();
         _list.ContextRequested += List_ContextRequested;
         _refresh.Click += (_, _) => RefreshPage();
