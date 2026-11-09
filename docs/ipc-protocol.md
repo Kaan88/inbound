@@ -483,10 +483,12 @@ prints the note, because it can go on for hours and a script shouldn't stop for 
 
 **`queue.action` `start`** starts what waits in that queue: queued downloads, "later" ones (`startMode: later`, which a
 running queue holds until it is started), and ones its own stop, quota, a move or an exit paused. A download the user
-paused (`job.pause`, or Stop All) keeps `pausedByUser: true` until it runs again and stays paused. A failed one is
+paused (`job.pause`, or Stop All) keeps `pausedByUser: true` until it runs again and stays paused; so does a job saved paused
+before `pausedByUser` existed, since which pause it was is not known. A failed one is
 tried again only when the queue would have retried it itself: it ran from the queue (`queueProcessing`), it didn't
-fail its check, and the queue's `retryLimit` is unset or not yet used up (that retry counts). A `stop` gives back a
-retry the queue was waiting to make. A client offers Start for a stopped queue and for a running one that holds
+fail its check, and the queue's `retryLimit` is unset or not yet used up (that retry counts). A retry already waiting
+(`queueRetryAt` set) was counted when it was set, so a start runs it at once without counting it again. A `stop`
+gives back a retry the queue was waiting to make. A client offers Start for a stopped queue and for a running one that holds
 "later" or queue-paused downloads.
 
 **`job.refreshUrl`** points a download at a new address. One that isn't finished goes back to the queue and starts
