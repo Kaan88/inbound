@@ -60,7 +60,7 @@ internal sealed class PackageWindow : Window
     private Guid? _shownFile;
     private bool _selectingFile;
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
-    private readonly Button _pause = new() { Content = "Pause all", MinWidth = 100 };
+    private readonly Button _pause = new() { Content = "Stop all", MinWidth = 100 };
     private readonly Button _resume = new() { Content = "Resume all", MinWidth = 100 };
     private readonly Button _cancel = new() { Content = "Cancel package", MinWidth = 100 };
     private readonly Button _openFolder = new() { Content = "Open folder", MinWidth = 100, Visibility = Visibility.Collapsed };
@@ -81,8 +81,9 @@ internal sealed class PackageWindow : Window
         _connection = new HostConnection(target);
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
-        Title = "Package status — Inbound Download Manager";
-        WindowLayout.ResizeForDpi(this, 720, 820);
+        Title = ServerNames.ForWindow("Package status — Inbound Download Manager", _connection.Target);
+        // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
+        WindowLayout.ResizeForDpi(this, 720, 680);
         WindowPlacement.Track(this, "package");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
@@ -440,9 +441,11 @@ internal sealed class PackageWindow : Window
             _list.Items.Remove(_rows[stale].Item);
             _rows.Remove(stale);
         }
+        var names = ShellWords.PackageFileNames(members.Select(job => ((string?)FolderOf(job), job.FileName)).ToList());
         for (var index = 0; index < members.Count; index++)
         {
             var job = members[index];
+            var name = names[index];
             if (!_rows.TryGetValue(job.Id, out var row)) _rows[job.Id] = row = CreateRow(job.Id);
             var at = _list.Items.IndexOf(row.Item);
             if (at != index)
@@ -450,8 +453,8 @@ internal sealed class PackageWindow : Window
                 if (at >= 0) _list.Items.RemoveAt(at);
                 _list.Items.Insert(Math.Min(index, _list.Items.Count), row.Item);
             }
-            row.Name.Text = job.FileName;
-            AutomationProperties.SetName(row.Item, $"{job.FileName}, {StateText(job)}");
+            row.Name.Text = name;
+            AutomationProperties.SetName(row.Item, $"{name}, {StateText(job)}");
             row.Status.Text = StateText(job);
             row.Bar.IsIndeterminate = job.TotalBytes is not > 0 && job.State is "connecting" or "downloading";
             row.Bar.Value = job.State == "completed" ? 100 : Percent(job.ReceivedBytes, job.TotalBytes);
@@ -469,7 +472,8 @@ internal sealed class PackageWindow : Window
         var completed = members.Count(job => job.State == "completed");
         var speed = members.Sum(job => job.State is "downloading" ? job.BytesPerSecond ?? 0 : 0);
         var allKnown = members.Count > 0 && members.All(job => job.TotalBytes is > 0);
-        _summary.Text = members.Count == 0 ? string.Empty : $"{completed} of {members.Count} files complete";
+        var states = members.Select(job => (string?)job.State).ToList();
+        _summary.Text = members.Count == 0 ? string.Empty : CompletionBurst.Summary(states);
         _overall.Value = members.Count > 0 && completed == members.Count ? 100 : allKnown ? Percent(received, total) : 0;
         _overall.IsIndeterminate = !allKnown && completed < members.Count && speed > 0;
         var remaining = allKnown && speed > 0 ? TimeSpan.FromSeconds((total - received) / speed) : (TimeSpan?)null;
@@ -480,14 +484,17 @@ internal sealed class PackageWindow : Window
             remaining is { } left ? $"{FormatDuration(left)} left" : null,
         }.Where(part => part is not null));
 
-        var allDone = members.Count > 0 && completed == members.Count;
+        // Every file has finished one way or another (some may have failed): the window is done, says how, and the
+        // files that were saved can be shown in their folder (U-WR-16).
+        var settled = CompletionBurst.Settled(states);
         // Another server's folder is on that machine.
-        _openFolder.Visibility = allDone && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
+        _openFolder.Visibility = settled && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
         _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
         _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
         _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
-        _close.Content = allDone ? "Close" : "Hide";
-        if (allDone) Title = "Package complete — Inbound Download Manager";
+        _close.Content = settled ? "Close" : "Hide";
+        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package status"} — Inbound Download Manager", _connection.Target);
+        if (Title != title) Title = title;
     }
 
     private Row CreateRow(Guid jobId)
@@ -550,6 +557,9 @@ internal sealed class PackageWindow : Window
         };
         if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
     }
+
+    private static string? FolderOf(JobDto job)
+        => !string.IsNullOrWhiteSpace(job.FinalFilePath) ? Path.GetDirectoryName(job.FinalFilePath) : job.DestinationDirectory;
 
     private void OpenFileWindow(Guid jobId)
     {

@@ -21,10 +21,11 @@ public sealed class CallerScope(PathRoots roots)
 
     public PathRoots Roots { get; } = roots;
 
+    // "This PC" would be the reader's own PC to someone at another device, so the computer the Host runs on is named so.
     public const string LocalAddressRefused =
-        "Downloads added from another device can't use addresses on this PC or its local network.";
+        "Downloads added from another device can't use addresses of the computer Inbound runs on or of its local network.";
 
-    public const string FtpRefused = "FTP downloads can only be added in the app on this PC.";
+    public const string FtpRefused = "FTP downloads can only be added in the Inbound app on the computer it runs on.";
 
     public const string OutsideJobRefused =
         "This download's file is outside the app's folders, so it can't be changed from another device.";

@@ -78,7 +78,10 @@ public sealed partial class HostConnection : IAsyncDisposable
     public bool PairingEnded { get; private set; }
 
     // A refused token or an http address that may not be used: no more tries until Retarget.
-    private bool _stopped;
+    private volatile bool _stopped;
+
+    /// <summary>A refused token or an http address that may not be used: nothing more is tried until <see cref="Retarget"/>.</summary>
+    public bool StoppedTrying => _stopped;
 
     public void Start()
     {

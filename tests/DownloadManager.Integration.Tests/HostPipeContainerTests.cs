@@ -181,7 +181,8 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal("locked.rar", preview.Entries[0].DisplayName);
         Assert.Equal("127.0.0.1", preview.Entries[0].DisplayHost);
         Assert.Contains("TorBox won't take this", preview.Entries[5].Reason);
-        Assert.Contains("normal download", preview.Entries[5].Reason);
+        Assert.Contains(DownloadManager.Runtime.Remote.ContainerImportService.NotDirect, preview.Entries[5].Reason);
+        Assert.DoesNotContain("normal download", preview.Entries[5].Reason);
         Assert.False(preview.Entries[5].CanAdd);
         Assert.False(preview.Entries[6].CanAdd);
         Assert.False(string.IsNullOrEmpty(preview.Entries[6].Reason));
@@ -198,7 +199,7 @@ public sealed class HostPipeContainerTests : IAsyncLifetime
         Assert.Equal(5, added.Outcomes.Count);
         Assert.All(added.Outcomes.Take(4), outcome => Assert.True(outcome.Ok, outcome.Error));
         Assert.False(added.Outcomes[4].Ok);
-        Assert.Contains("normal download", added.Outcomes[4].Error);
+        Assert.Contains(DownloadManager.Runtime.Remote.ContainerImportService.NotDirect, added.Outcomes[4].Error);
         Assert.True(added.Outcomes[0].Job!.HasArchivePassword);
 
         // The cached one is fetched, downloaded by the engine from the CDN, and extracted with the container's password.

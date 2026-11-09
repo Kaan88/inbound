@@ -59,6 +59,8 @@ internal sealed class ColumnHeaderRow
             if (args.ItemContainer.ContentTemplateRoot is not Grid row) return;
             row.Unloaded -= Row_Unloaded;
             row.Unloaded += Row_Unloaded;
+            row.Loaded -= Row_Loaded;
+            row.Loaded += Row_Loaded;
             _rows.Add(row);
             Apply(row);
         };
@@ -70,6 +72,18 @@ internal sealed class ColumnHeaderRow
     private void Row_Unloaded(object sender, RoutedEventArgs e)
     {
         if (sender is Grid row) _rows.Remove(row);
+    }
+
+    /// <summary>
+    /// U-WL-5: a recycled row can be unloaded after the list has already shown it again, which took it out of
+    /// <see cref="_rows"/> while it was on screen, so a column appearing later left it with the old widths. A row
+    /// that loads is on screen, so it is tracked again and gets the widths as they are now.
+    /// </summary>
+    private void Row_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Grid row) return;
+        _rows.Add(row);
+        Apply(row);
     }
 
     private void Build()

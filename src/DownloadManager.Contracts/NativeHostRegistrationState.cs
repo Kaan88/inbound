@@ -61,7 +61,8 @@ public readonly record struct NativeHostRegistrationState(NativeHostKeyState Chr
             problems.Add("Edge registration is broken");
         }
 
-        return problems.Count == 0 ? "connected" : "connected; " + string.Join("; ", problems);
+        // U-WL-9: "on", not "connected": a registration says a browser can reach the app, not that one is running.
+        return problems.Count == 0 ? "on" : "on; " + string.Join("; ", problems);
     }
 
     /// <param name="keyValue">The value of the browser's key; null when the key is missing.</param>

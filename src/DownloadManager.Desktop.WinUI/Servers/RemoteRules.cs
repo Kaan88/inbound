@@ -149,13 +149,36 @@ internal sealed class RemoteCompletionGate
     /// <summary>True once for a download seen unfinished, while fewer than <see cref="MostWindows"/> opened in the last minute.</summary>
     public bool MayOpen(Guid jobId, DateTimeOffset now)
     {
+        if (!_seenUnfinished.Contains(jobId) || _opened.Contains(jobId) || !HasRoom(now)) return false;
+        Finished(jobId);
+        MayOpenWindow(now);
+        return true;
+    }
+
+    /// <summary>
+    /// True once for a download seen unfinished here: its finish is news. Whether a window opens for it is decided with
+    /// the rest of its burst (<see cref="CompletionBurst"/>) and <see cref="MayOpenWindow"/>.
+    /// </summary>
+    public bool Finished(Guid jobId)
+    {
         if (!_seenUnfinished.Contains(jobId) || _opened.Contains(jobId)) return false;
-        while (_recent.Count > 0 && now - _recent.Peek() >= Window) _recent.Dequeue();
-        if (_recent.Count >= MostWindows) return false;
-        _recent.Enqueue(now);
         _opened.Add(jobId);
         _seenUnfinished.Remove(jobId);
         return true;
+    }
+
+    /// <summary>True, and counted, while fewer than <see cref="MostWindows"/> windows opened in the last minute.</summary>
+    public bool MayOpenWindow(DateTimeOffset now)
+    {
+        if (!HasRoom(now)) return false;
+        _recent.Enqueue(now);
+        return true;
+    }
+
+    private bool HasRoom(DateTimeOffset now)
+    {
+        while (_recent.Count > 0 && now - _recent.Peek() >= Window) _recent.Dequeue();
+        return _recent.Count < MostWindows;
     }
 
     /// <summary>Another Host is shown: nothing seen before counts.</summary>
@@ -164,6 +187,71 @@ internal sealed class RemoteCompletionGate
         _seenUnfinished.Clear();
         _opened.Clear();
         _recent.Clear();
+    }
+}
+
+/// <summary>One completion window to open: a package's, or a single download's.</summary>
+internal readonly record struct CompletionWindow(bool IsPackage, Guid Id);
+
+/// <summary>
+/// Downloads that finished close together, gathered for a moment and then given their windows (U-WL-4, U-WR-16): a
+/// package gets one window, once all of its files have settled (some may have failed), however many of them finished in the burst, and a file that
+/// is still waiting for its package's other files gets none. Waiting also lets a package that was only just made
+/// (its list is announced a moment after its first files) be known before its files are judged one by one.
+/// </summary>
+internal static class CompletionBurst
+{
+    /// <summary>How long finishes are gathered before their windows open.</summary>
+    public static readonly TimeSpan Gather = TimeSpan.FromSeconds(1.2);
+
+    /// <param name="finished">The downloads that finished, in the order they did.</param>
+    /// <param name="packageOf">A download's package and whether every file of it has settled (<see cref="Settled"/>); null when it is in none.</param>
+    public static IReadOnlyList<CompletionWindow> Plan(IEnumerable<Guid> finished, Func<Guid, (Guid Package, bool Settled)?> packageOf)
+    {
+        var windows = new List<CompletionWindow>();
+        var seen = new HashSet<Guid>();
+        foreach (var job in finished)
+        {
+            if (!seen.Add(job)) continue;
+            if (packageOf(job) is not { } package)
+            {
+                windows.Add(new CompletionWindow(false, job));
+                continue;
+            }
+
+            var window = new CompletionWindow(true, package.Package);
+            if (package.Settled && !windows.Contains(window)) windows.Add(window);
+        }
+
+        return windows;
+    }
+
+    /// <summary>
+    /// Every file of a package has finished one way or another and at least one was saved, so its completion window is
+    /// due (U-WR-16): a package with a failed or cancelled file still gets one, with the counts, rather than none.
+    /// </summary>
+    public static bool Settled(IReadOnlyCollection<string?> states) =>
+        states.Count > 0 && states.All(state => state is "completed" or "failed" or "cancelled") && states.Any(state => state == "completed");
+
+    /// <summary>"3 of 5 files complete · 2 failed": the package window's line, with what didn't finish counted.</summary>
+    public static string Summary(IReadOnlyCollection<string?> states)
+    {
+        var completed = states.Count(state => state == "completed");
+        var failed = states.Count(state => state == "failed");
+        var cancelled = states.Count(state => state == "cancelled");
+        return $"{completed} of {states.Count} files complete" + (failed > 0 ? $" · {failed} failed" : string.Empty)
+               + (cancelled > 0 ? $" · {cancelled} cancelled" : string.Empty);
+    }
+
+    /// <summary>The package window's title once it has settled, without the app's name; null while files are still going.</summary>
+    public static string? Title(IReadOnlyCollection<string?> states)
+    {
+        if (!Settled(states)) return null;
+        var failed = states.Count(state => state == "failed");
+        var cancelled = states.Count(state => state == "cancelled");
+        if (failed > 0) return $"Package finished, {failed} of {states.Count} files failed";
+        if (cancelled > 0) return $"Package finished, {cancelled} of {states.Count} files cancelled";
+        return "Package complete";
     }
 }
 
@@ -455,4 +543,83 @@ internal static class WindowInstance
             (update ? ".Update" : job is { } id ? $".Job.{id:D}" : package is { } pid ? $".Package.{pid:D}" : string.Empty);
         return serverId is null || update || (job is null && package is null) ? name : name + ".Server." + serverId;
     }
+}
+
+/// <summary>The words of Options while another server is shown (U-WR-4, U-WR-6, U-WR-13).</summary>
+internal static class RemoteOptionsText
+{
+    public const string ThisPcUnreachable =
+        "This PC's Host isn't running, so Options can't be shown. Open Inbound again to start it.";
+
+    /// <summary>Options opens anyway, with this PC's own pages: they never needed the server.</summary>
+    public static string ServerUnreachable(string serverName) =>
+        $"Can't reach {serverName}, so its options can't be shown right now. This PC's own options are here, and {serverName}'s come back once it can be reached.";
+
+    /// <summary>
+    /// The first line of the server's own page. The Docker server's web UI has every option; the Windows app's web bridge
+    /// has the same short list as here, so its folders and the rest are changed in the app on that PC.
+    /// </summary>
+    public static string ServerPageHint(string serverName, string? hostKind) => hostKind == HostKinds.Server
+        ? $"{serverName}'s own options, saved on {serverName}. Its other options (proxy, site logins, categories and more) are changed in its web UI."
+        : $"{serverName}'s own options that can be changed from another device, saved on {serverName}. Its folders and its other options are changed in the Inbound app on {serverName}.";
+
+    /// <summary>Under a provider's API key: where the key is kept. Null server: this PC.</summary>
+    public static string ProviderKeyNote(string? serverName, string? hostKind) => serverName is null
+        ? "These buttons take effect straight away, whichever way this window is closed. The key is kept encrypted for your Windows account."
+        : hostKind == HostKinds.Windows
+            ? $"This is the account {serverName} uses, and the key is saved on {serverName}, encrypted for the Windows account Inbound runs under there. These buttons take effect straight away, whichever way this window is closed."
+            : hostKind == HostKinds.Server
+                ? $"This is the account {serverName} uses, and the key is saved on {serverName}, encrypted in its data folder. These buttons take effect straight away, whichever way this window is closed."
+                : $"This is the account {serverName} uses, and the key is saved on {serverName}. These buttons take effect straight away, whichever way this window is closed.";
+}
+
+/// <summary>What Add URL says when the Host won't add an address (U-WR-2).</summary>
+internal static class AddRules
+{
+    /// <summary>Before Start: the Host said it would refuse this address, so Start and Download later are off.</summary>
+    public static string RefusedText(string reason, ServerTarget target) =>
+        $"{reason.Trim()} So this address can't be added to {target.Name}; Start download and Download later are off.";
+
+    /// <summary>After Start: shown in the dialog, which opens again with everything that was typed.</summary>
+    public static string NotAddedText(string? error, ServerTarget target) =>
+        $"Not added{(target.IsLocal ? string.Empty : $" to {target.Name}")}: {(string.IsNullOrWhiteSpace(error) ? "the Host rejected the request." : error.Trim())} Change what is needed and try again, or Cancel.";
+
+    /// <summary>How often a dialog that couldn't be shown again is tried again, a tenth of a second apart, before its
+    /// reason goes to the status bar instead.</summary>
+    public const int MostReshowTries = 100;
+
+    /// <summary>
+    /// After a show of the add dialog (U-WR-2). <paramref name="shown"/> is false when it couldn't be shown (another
+    /// dialog was still open on the window); <paramref name="problem"/> is why the Start that was chosen didn't add it;
+    /// <paramref name="lastProblem"/> is the reason it is being shown again, null on its first show. A dialog shown again
+    /// holds what was typed, so it is tried again rather than dropped.
+    /// </summary>
+    public static ReshowStep AfterShow(bool shown, string? problem, string? lastProblem, int failedShows)
+    {
+        if (!shown) return lastProblem is null ? ReshowStep.Stop : failedShows < MostReshowTries ? ReshowStep.TryAgain : ReshowStep.GiveUp;
+        return problem is null ? ReshowStep.Stop : ReshowStep.ShowAgain;
+    }
+
+    /// <summary>
+    /// The refusal that holds after a file-info check (U-WR-2). A refusal from the Host sets it, an answer without one
+    /// clears it, and a check that got no answer (timed out, failed, or was overtaken) leaves it as it was.
+    /// </summary>
+    public static string? RefusalAfter(string? current, bool answered, bool refused, string? error)
+    {
+        if (!answered) return current;
+        return refused ? error ?? "This address can't be added." : null;
+    }
+}
+
+/// <summary>What Add URL does after its dialog closes (<see cref="AddRules.AfterShow"/>).</summary>
+internal enum ReshowStep
+{
+    /// <summary>Added, cancelled, or never shown: nothing typed is waiting.</summary>
+    Stop,
+    /// <summary>The Start failed: show the dialog again, with the reason and everything typed.</summary>
+    ShowAgain,
+    /// <summary>It couldn't be shown again yet: wait a moment and try again.</summary>
+    TryAgain,
+    /// <summary>It couldn't be shown again after many tries: the reason goes to the status bar.</summary>
+    GiveUp,
 }
