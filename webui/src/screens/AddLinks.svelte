@@ -5,7 +5,7 @@
   import { conflictOptions, findExisting, packageNameFor, type ConflictPolicy } from '../lib/addflow';
   import { routeOf, showsAddress, type AddLine } from '../lib/addlines';
   import {
-    addReport, addSummary, addedWords, alreadyListed, canAdd, canSelect, chooseLaterApplies, chosen, extractInputs, fileChoiceFrom, filesToChoose,
+    addReport, addSummary, addedWords, alreadyListed, canAdd, canSelect, chooseLaterApplies, chosen, extractInputs, patternProblem, fileChoiceFrom, filesToChoose,
     isFullPath, isMagnet, isUpload, lineWords, newLine, refused, removeInputs, selectAllState, toggleAll, withDefaults, type FileChoice,
   } from '../lib/addview';
   import { bytes } from '../lib/format';
@@ -119,6 +119,7 @@
       if (old) { next.push(old); continue; }
       const line = newLine(input, 0, findExisting(Object.values(store.model.jobs), input) !== undefined);
       if (mode === 'magnet' && !isMagnet(input)) line.result = { ok: true, kind: 'unsupported', reason: "This isn't a magnet. Use Add links for other links.", checkIncomplete: false };
+      else if (patternProblem(input)) line.result = { ok: true, kind: 'unsupported', reason: patternProblem(input)!, checkIncomplete: false };
       next.push(line);
       if (!line.result) fresh.push(input);
     }
@@ -430,7 +431,8 @@
       <label class="label" for="add-text">{mode === 'magnet' ? 'Paste magnet links' : 'Paste links or any text containing links'}</label>
       <textarea id="add-text" class="field h-28 resize-y font-mono text-[12px]" bind:value={text} spellcheck="false"
         placeholder={mode === 'magnet' ? 'magnet:?xt=urn:btih:…' : `Links, folder links and magnets, one per line`} oninput={typed}></textarea>
-      <div class="mt-1"><button class="btn py-0.5 text-[12px]" type="button" onclick={paste}><Icon name="link" size={14} /> Paste</button></div>
+      <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><button class="btn py-0.5 text-[12px]" type="button" onclick={paste}><Icon name="link" size={14} /> Paste</button>
+        {#if mode !== 'magnet'}<span class="hint">A numbered address such as img[1-20].jpg, [01-10] or [a,b,c] becomes one line each.</span>{/if}</div>
     {/if}
 
     {#if showUpload}
