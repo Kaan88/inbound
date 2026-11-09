@@ -10,7 +10,7 @@
 ;   %LOCALAPPDATA%\Inbound Download Manager\   user data: jobs, settings, logs - kept on uninstall
 
 #ifndef AppVersion
-  #define AppVersion "0.6.2"
+  #define AppVersion "0.6.3"
 #endif
 #ifndef SourceRoot
   #define SourceRoot "..\artifacts"
@@ -24,7 +24,11 @@
 #define StoreExtensionId "olhbcdbjdnfoiinllnlpandggadfabfm"
 #define FirefoxExtensionId "inbound-bridge@kaan88"
 #define ChromeStoreUrl "https://chromewebstore.google.com/detail/" + StoreExtensionId
-#define FirefoxAddonUrl "https://addons.mozilla.org/firefox/addon/inbound-download-manager/"
+; EXT.S4: the Firefox add-on is self-distributed. build-installer.ps1 passes /DFirefoxXpi=<signed XPI>; Setup
+; installs it as {app}\firefox\{#FirefoxXpiName}, and Firefox updates it from the manifest's update_url.
+#define FirefoxXpiName "inbound-bridge.xpi"
+; The first extension version with an update_url (an older copy never updates and has to be added again).
+#define FirefoxSelfUpdateSince "0.5.3"
 
 [Setup]
 AppId={{6F4B7C2E-3D91-4E8A-9B57-2C1D0A8E5F13}
@@ -64,6 +68,9 @@ Source: "..\scripts\apply-update.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\repair.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\register-native-host.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\stop-for-setup.ps1"; DestDir: "{app}"; Flags: ignoreversion
+#ifdef FirefoxXpi
+Source: "{#FirefoxXpi}"; DestDir: "{app}\firefox"; DestName: "{#FirefoxXpiName}"; Flags: ignoreversion
+#endif
 ; Extracted to {tmp} before files are replaced (the installed copy may be older or missing).
 Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 
@@ -71,6 +78,7 @@ Source: "..\scripts\stop-for-setup.ps1"; Flags: dontcopy
 ; Upgrades replace the program folder completely, like install.ps1 does.
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\extension"
+Type: filesandordirs; Name: "{app}\firefox"
 ; Leftovers of an interrupted or failed auto-update.
 Type: filesandordirs; Name: "{app}\app-new"
 Type: filesandordirs; Name: "{app}\extension-new"
@@ -100,7 +108,15 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\app\{#HostExe}"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\INSTALL.txt"; Description: "Show how to add the browser extension"; Flags: postinstall shellexec skipifsilent unchecked
 Filename: "{#ChromeStoreUrl}"; Description: "Open the extension in the Chrome Web Store (Chrome, Edge)"; Flags: postinstall shellexec skipifsilent unchecked nowait
-Filename: "{#FirefoxAddonUrl}"; Description: "Open the extension on Firefox Add-ons"; Flags: postinstall shellexec skipifsilent unchecked nowait
+#ifdef FirefoxXpi
+; Firefox opens the XPI and asks the user to add it. Ticked when Firefox is installed and no profile in the
+; usual place has the add-on yet. Where one has it, offered unticked: a copy older than
+; FirefoxSelfUpdateSince has no update_url and never updates, so it must be added again once; later copies
+; update themselves. Not detected: Firefox from the Microsoft Store (no App Paths entry; the user adds the
+; XPI by hand, as INSTALL.txt says) and profiles kept outside the usual folder (they get the ticked entry).
+Filename: "{code:GetFirefoxExe}"; Parameters: """{app}\firefox\{#FirefoxXpiName}"""; Description: "Add the extension to Firefox (Firefox asks you to confirm)"; Flags: postinstall nowait skipifsilent; Check: FirefoxNeedsInbound
+Filename: "{code:GetFirefoxExe}"; Parameters: """{app}\firefox\{#FirefoxXpiName}"""; Description: "Add the extension to Firefox again (needed once if your copy is older than {#FirefoxSelfUpdateSince}, so it updates itself)"; Flags: postinstall nowait skipifsilent unchecked; Check: FirefoxHasInboundAlready
+#endif
 
 [UninstallDelete]
 Type: files; Name: "{app}\install.json"
@@ -130,6 +146,56 @@ begin
   // No BOM: JSON readers such as Chrome's native-messaging loader reject it.
   if not SaveStringsToUTF8FileWithoutBOM(FileName, [Text], False) then
     RaiseException('Could not write ' + FileName);
+end;
+
+// EXT.S4: Firefox's exe from App Paths (per user first), or '' when Firefox is not installed.
+function FirefoxPath(): String;
+var
+  Key: String;
+begin
+  Result := '';
+  Key := 'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe';
+  if not RegQueryStringValue(HKCU, Key, '', Result) then
+    if not RegQueryStringValue(HKLM64, Key, '', Result) then
+      if not RegQueryStringValue(HKLM32, Key, '', Result) then
+        Result := '';
+  Result := RemoveQuotes(Result);
+  if (Result <> '') and not FileExists(Result) then
+    Result := '';
+end;
+
+function GetFirefoxExe(Param: String): String;
+begin
+  Result := FirefoxPath();
+end;
+
+// Whether a Firefox profile in the usual folder already has the add-on (Firefox keeps it as <id>.xpi).
+function FirefoxHasInbound(): Boolean;
+var
+  FindRec: TFindRec;
+  Base: String;
+begin
+  Result := False;
+  Base := ExpandConstant('{userappdata}\Mozilla\Firefox\Profiles\');
+  if FindFirst(Base + '*', FindRec) then
+  try
+    repeat
+      if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        Result := FileExists(Base + FindRec.Name + '\extensions\{#FirefoxExtensionId}.xpi');
+    until Result or not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function FirefoxNeedsInbound(): Boolean;
+begin
+  Result := (FirefoxPath() <> '') and not FirefoxHasInbound();
+end;
+
+function FirefoxHasInboundAlready(): Boolean;
+begin
+  Result := (FirefoxPath() <> '') and FirefoxHasInbound();
 end;
 
 // Restart Manager cannot close the tray-only Host, so ask it to exit through
@@ -263,14 +329,26 @@ begin
     'Chrome or Edge: install Inbound Download Manager Bridge from the Chrome Web Store:' + #13#10 +
     '  {#ChromeStoreUrl}' + #13#10 +
     'Edge may ask you to allow extensions from other stores.' + #13#10 + #13#10 +
-    'Firefox: install Inbound Download Manager from Firefox Add-ons:' + #13#10 +
-    '  {#FirefoxAddonUrl}' + #13#10 + #13#10 +
+#ifdef FirefoxXpi
+    'Firefox: drag this file onto a Firefox window, or open Add-ons and themes,' + #13#10 +
+    'the gear menu, Install Add-on From File, and choose it. Firefox updates it after that:' + #13#10 +
+    '  ' + Root + '\firefox\{#FirefoxXpiName}' + #13#10 + #13#10 +
+#else
+    'Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,' + #13#10 +
+    '  https://github.com/Kaan88/inbound/releases/latest' + #13#10 +
+    'and drag it onto a Firefox window. Firefox updates it after that.' + #13#10 + #13#10 +
+#endif
     'Or, in Chrome, load the unpacked copy that came with this install:' + #13#10 +
     '  1. Open chrome://extensions' + #13#10 +
     '  2. Turn on Developer mode (top right)' + #13#10 +
     '  3. Click "Load unpacked" and select:' + #13#10 +
     '     ' + Root + '\extension' + #13#10 +
     '  4. Check that the extension ID is {#ExtensionId}' + #13#10 + #13#10 +
+    'Web UI (off by default):' + #13#10 +
+    '  Options > Web UI turns on a page you can open from a browser on this PC or on your home network.' + #13#10 +
+    '  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.' + #13#10 +
+    '  Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network' + #13#10 +
+    '  protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".' + #13#10 + #13#10 +
     'The app lives in the notification area (tray). Closing the main window hides it;' + #13#10 +
     'downloads continue. Use Exit in the tray menu to stop it.' + #13#10 + #13#10 +
     'Uninstall from Settings > Apps. Your download list and settings are kept in' + #13#10 +

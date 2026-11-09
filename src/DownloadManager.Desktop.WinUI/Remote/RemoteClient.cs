@@ -10,6 +10,9 @@ internal interface IRemotePipe : IAsyncDisposable
 {
     Task SendAsync(IpcMessage message, CancellationToken cancellationToken);
     Task<IpcMessage?> ReadAsync(CancellationToken cancellationToken);
+
+    /// <summary>Whether <c>jobs.snapshot</c> follows the hello. A server's event socket asks for none.</summary>
+    bool SnapshotFollowsHello => true;
 }
 
 /// <summary>
@@ -27,7 +30,7 @@ internal interface IRemotePipe : IAsyncDisposable
 /// that fails is never sent again by itself, because an add or a delete may have reached the Host.
 /// Nothing here writes a log, and no exception's words reach a message: a key or password passes through.
 /// </summary>
-internal sealed class RemoteClient : IAsyncDisposable
+internal sealed partial class RemoteClient : IAsyncDisposable
 {
     private const int MostSlowCalls = 3;
 
@@ -43,7 +46,10 @@ internal sealed class RemoteClient : IAsyncDisposable
     internal static readonly TimeSpan SendToJdTimeout = TimeSpan.FromMinutes(5.5);
 
     private readonly Action<Action> _post;
-    private readonly Func<TimeSpan, CancellationToken, Task<IRemotePipe>> _connect;
+    private Func<TimeSpan, CancellationToken, Task<IRemotePipe>> _connect;
+
+    /// <summary>For the calls that get a connection each: the same as <see cref="_connect"/> on this PC, one POST each to a server.</summary>
+    private Func<TimeSpan, CancellationToken, Task<IRemotePipe>> _connectCall;
     private readonly TimeSpan _reconnectDelay;
     private readonly TimeSpan _quickTimeout;
     private readonly TimeSpan _slowTimeout;
@@ -53,7 +59,23 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     // The Host has eight pipe instances for every client on the machine, so these wait their turn.
     private readonly SemaphoreSlim _slowCalls = new(MostSlowCalls, MostSlowCalls);
-    private readonly TaskCompletionSource _firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // One per Host this client goes to (RetargetAsync): ending it ends the event connection and the calls to that Host.
+    private CancellationTokenSource _round;
+    private bool _eventsWanted = true;
+    private bool _remoteTarget;
+
+    // A server's event socket: tries wait longer each time (design D9, section 5), and a refused token, or a plain-http
+    // address the user hasn't allowed, stops them until the next RetargetAsync. _parked holds what to say meanwhile.
+    private readonly ReconnectBackoff _remoteBackoff;
+    private string? _parked;
+
+    // A server's .torrent uploads: the server the files go to, and the reference each file got there, kept for a short
+    // while and only for the same file (path, size and time written), so the check before an add and the add share one.
+    private ServerTarget? _uploadTarget;
+    private readonly ConcurrentDictionary<string, (string Reference, DateTimeOffset At)> _uploads = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan UploadKeptFor = TimeSpan.FromMinutes(30);
     private readonly Lock _sync = new();
 
     private TaskCompletionSource<IRemotePipe> _control = NewControlSource();
@@ -66,13 +88,17 @@ internal sealed class RemoteClient : IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task<IRemotePipe>>? connect = null,
         TimeSpan? reconnectDelay = null,
         TimeSpan? quickTimeout = null,
-        TimeSpan? slowTimeout = null)
+        TimeSpan? slowTimeout = null,
+        ReconnectBackoff? remoteBackoff = null)
     {
         _post = post;
         _connect = connect ?? ConnectToHostAsync;
+        _connectCall = _connect;
+        _round = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
         _reconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(2);
         _quickTimeout = quickTimeout ?? DefaultQuickTimeout;
         _slowTimeout = slowTimeout ?? DefaultSlowTimeout;
+        _remoteBackoff = remoteBackoff ?? new ReconnectBackoff();
     }
 
     public RemoteState State { get; } = new();
@@ -80,7 +106,117 @@ internal sealed class RemoteClient : IAsyncDisposable
     /// <summary>Starts the event connection. A call does this by itself if it comes first.</summary>
     public void Start()
     {
-        lock (_sync) _loop ??= Task.Run(() => RunAsync(_stopping.Token));
+        lock (_sync)
+        {
+            if (_round.IsCancellationRequested || _parked is not null) return;
+            var round = _round.Token;
+            _loop ??= Task.Run(() => RunAsync(round));
+        }
+    }
+
+    private CancellationToken RoundToken
+    {
+        get
+        {
+            lock (_sync) return _round.Token;
+        }
+    }
+
+    /// <summary>
+    /// Goes to another Host (design D9, section 5): the event connection closes, calls waiting on the old one fail, what
+    /// is known is cleared, and the new one is read from the start. A server gets a WebSocket for events and one
+    /// <c>POST /api/ipc</c> for each call that would have had a connection of its own.
+    /// </summary>
+    public Task RetargetAsync(ServerTarget target)
+    {
+        Func<TimeSpan, CancellationToken, Task<IRemotePipe>> events = target.IsLocal
+            ? ConnectToHostAsync
+            : (timeout, token) => ConnectToServerAsync(target, timeout, token);
+        Func<TimeSpan, CancellationToken, Task<IRemotePipe>> calls = target.IsLocal
+            ? ConnectToHostAsync
+            : (_, _) => Task.FromResult<IRemotePipe>(new OneShotPipe(target));
+        return RetargetAsync(events, calls, !target.IsLocal, target.IsLocal ? null : target);
+    }
+
+    internal async Task RetargetAsync(Func<TimeSpan, CancellationToken, Task<IRemotePipe>> events,
+        Func<TimeSpan, CancellationToken, Task<IRemotePipe>> calls, bool remote, ServerTarget? uploadTarget = null)
+    {
+        await EndRoundAsync().ConfigureAwait(false);
+        bool start;
+        lock (_sync)
+        {
+            _connect = events;
+            _connectCall = calls;
+            _remoteTarget = remote;
+            _uploadTarget = uploadTarget;
+            _uploads.Clear();
+            _parked = null;
+            _remoteBackoff.Reset();
+            _firstRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            start = !remote || _eventsWanted;
+        }
+
+        _post(() =>
+        {
+            State.IsReady = false;
+            State.IsConnected = false;
+            State.RemoteSupported = false;
+            State.ArchivesSupported = false;
+            State.UploadsOffered = false;
+            State.AccountsKnown = false;
+            State.ClearRemote();
+            State.ApplyArchiveList([]);
+        });
+        if (start) Start();
+    }
+
+    /// <summary>
+    /// False while the window is hidden: a server's event connection closes, so it sends nothing while nobody looks, and
+    /// a call made meanwhile goes as one <c>POST /api/ipc</c> of its own without opening it again. This PC's pipe is left
+    /// as it is.
+    /// </summary>
+    public async Task SetEventsWantedAsync(bool wanted)
+    {
+        bool remote;
+        lock (_sync)
+        {
+            if (_eventsWanted == wanted) return;
+            _eventsWanted = wanted;
+            remote = _remoteTarget;
+        }
+
+        if (!remote) return;
+        if (wanted) Start();
+        else await EndRoundAsync().ConfigureAwait(false);
+    }
+
+    private async Task EndRoundAsync()
+    {
+        CancellationTokenSource old;
+        Task? loop;
+        lock (_sync)
+        {
+            old = _round;
+            loop = _loop;
+            _loop = null;
+            _round = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+        }
+
+        await old.CancelAsync().ConfigureAwait(false);
+        if (loop is not null)
+        {
+            try
+            {
+                await loop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected.
+            }
+        }
+
+        old.Dispose();
+        FailPending();
     }
 
     /// <summary>Waits for what the first connection says, or the time given, whichever is first.</summary>
@@ -89,7 +225,9 @@ internal sealed class RemoteClient : IAsyncDisposable
         Start();
         try
         {
-            await _firstRead.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            Task first;
+            lock (_sync) first = _firstRead.Task;
+            await first.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -134,9 +272,13 @@ internal sealed class RemoteClient : IAsyncDisposable
     // ---- remote.classify, add, list, item, files, select, retry, checkNow, remove, deleteRemote ----
 
     /// <param name="withFiles">For adding: a magnet or a .torrent file also says which files it holds, when that can be known.</param>
-    public Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken = default, bool withFiles = false)
-        => SlowAsync(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles), MessageTypes.RemoteClassifyResult,
-            error => new RemoteClassifyResult { Error = RemoteText.ClassifyFailure(error) }, cancellationToken);
+    public async Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken = default, bool withFiles = false)
+    {
+        var (sent, uploadError) = await ForServerAsync(text, cancellationToken).ConfigureAwait(false);
+        if (sent is null) return new RemoteClassifyResult { Error = uploadError };
+        return await SlowAsync(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles, sent), MessageTypes.RemoteClassifyResult,
+            error => new RemoteClassifyResult { Error = RemoteText.ClassifyFailure(error) }, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// For many lines in a row: one connection, one command at a time, so a long paste doesn't open a
@@ -147,11 +289,69 @@ internal sealed class RemoteClient : IAsyncDisposable
     public IRemoteClassifier OpenClassifier(bool withFiles = false) => new ClassifierChannel(this, withFiles);
 
     /// <summary>Files are asked for only where they can be known, because for a magnet that is a call to the provider.</summary>
-    private static RemoteClassifyRequest ClassifyRequest(string text, bool withFiles)
-        => new() { Text = text, WithFiles = withFiles && AddChoices.WantsFiles(text) };
+    private static RemoteClassifyRequest ClassifyRequest(string text, bool withFiles, string? sent = null)
+        => new() { Text = sent ?? text, WithFiles = withFiles && AddChoices.WantsFiles(text) };
+
+    /// <summary>
+    /// A .torrent file on this PC, for another server: the server can read only its own files, so the file is uploaded
+    /// (<c>POST /api/upload/torrent</c>) and its <c>upload:</c> reference sent instead of the path. Anything else, and
+    /// everything for this PC's Host, goes as it is. Null with the reason when the file can't be sent.
+    /// </summary>
+    private async Task<(string? Sent, string? Error)> ForServerAsync(string text, CancellationToken cancellationToken)
+    {
+        ServerTarget? target;
+        lock (_sync) target = _uploadTarget;
+        if (target is null || !LinkExtractor.IsTorrentPath(text)) return (text, null);
+        var path = text.Trim();
+        if (TorrentPathProblem(path) is { } problem) return (null, problem);
+        byte[] bytes;
+        string key;
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return (null, "That .torrent file isn't on this PC.");
+            if (info.Length is 0 or > MostTorrentBytes) return (null, "That file is too large to be a .torrent file.");
+            key = UploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+            if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return (known.Reference, null);
+            bytes = await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            return (null, "That .torrent file couldn't be read on this PC.");
+        }
+
+        var (reference, error) = await RemoteServerHttp.UploadTorrentAsync(target, bytes, cancellationToken).ConfigureAwait(false);
+        if (reference is null) return (null, error);
+        _uploads[key] = (reference, DateTimeOffset.UtcNow);
+        return (reference, null);
+    }
+
+    /// <summary>
+    /// Why a typed .torrent path isn't opened here, or null. A network path is never opened from here: even asking about
+    /// it sends this Windows account's credentials there.
+    /// </summary>
+    internal static string? TorrentPathProblem(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+            return "Copy the .torrent file to this PC first; a file on a network share isn't sent from here.";
+        return Path.IsPathFullyQualified(path) ? null : @"Type the .torrent file's full path, such as C:\Downloads\file.torrent.";
+    }
+
+    /// <summary>The same file: its path, size and time written. A changed file is uploaded again.</summary>
+    internal static string UploadKey(string fullPath, long length, DateTime lastWriteUtc) => $"{fullPath}|{length}|{lastWriteUtc.Ticks}";
+
+    /// <summary>The server's limit for an uploaded .torrent file.</summary>
+    private const long MostTorrentBytes = 16 * 1024 * 1024;
 
     public async Task<RemoteAddResultDto> AddAsync(RemoteAddRequestDto request, CancellationToken cancellationToken = default)
     {
+        if (request.Input is { } input)
+        {
+            var (sent, uploadError) = await ForServerAsync(input, cancellationToken).ConfigureAwait(false);
+            if (sent is null) return new RemoteAddResultDto { Error = uploadError };
+            request.Input = sent;
+        }
+
         var result = await SlowAsync(MessageTypes.RemoteAdd, request, MessageTypes.RemoteAddResult,
             error => new RemoteAddResultDto { Error = error }, cancellationToken).ConfigureAwait(false);
         Feed(result.Job);
@@ -207,10 +407,120 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     // ---- remote.container.* --------------------------------------------------------------------
 
-    /// <summary>The path goes to the Host untouched. Nothing here looks at it: even asking whether a file on a network path exists sends this Windows account's credentials there, and the Host is the one that refuses those.</summary>
-    public Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = path }, MessageTypes.RemoteContainerPreviewResult,
-            error => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(error) }, cancellationToken);
+    /// <summary>
+    /// For this PC's Host the path goes untouched. Nothing here looks at it: even asking whether a file on a network path
+    /// exists sends this Windows account's credentials there, and the Host is the one that refuses those. For another
+    /// server the file is uploaded first (<see cref="ContainerForServerAsync"/>) and its reference sent instead.
+    /// </summary>
+    public async Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
+        => (await ReadContainerAsync(path, cancellationToken).ConfigureAwait(false)).Result;
+
+    /// <summary>
+    /// As <see cref="PreviewContainerAsync"/>, and says whether asking again could help when the file wasn't read because
+    /// uploading it failed on the way (no answer in time, or the server out of reach). A kept reference the server says
+    /// is gone is dropped, and the file is uploaded once more.
+    /// </summary>
+    public async Task<ContainerReadReply> ReadContainerAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var upload = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        var reply = await PreviewUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceGone(upload, reply.Result.Error)) return reply;
+
+        upload = await ContainerForServerAsync(path, cancellationToken, forceUpload: true).ConfigureAwait(false);
+        return await PreviewUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ContainerReadReply> PreviewUploadedAsync(ContainerUpload upload, CancellationToken cancellationToken)
+    {
+        if (upload.Sent is null) return new ContainerReadReply(new RemoteContainerPreviewResult { Error = upload.Error }, upload.CanRetry);
+        var result = await SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = upload.Sent, FileName = upload.FileName }, MessageTypes.RemoteContainerPreviewResult,
+            failure => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(failure) }, cancellationToken).ConfigureAwait(false);
+        return new ContainerReadReply(result, false);
+    }
+
+    /// <summary>
+    /// A reply that used a kept reference and says its file is gone: the reference is dropped from the cache, so the next
+    /// <see cref="ContainerForServerAsync"/> uploads the file again. False when no kept reference was involved.
+    /// </summary>
+    private bool ReferenceGone(ContainerUpload upload, string? said)
+    {
+        if (upload.KeptKey is not { } key || !UploadReferenceText.IsGone(said)) return false;
+        _uploads.TryRemove(key, out _);
+        return true;
+    }
+
+    /// <summary>What <see cref="ContainerForServerAsync"/> found out.</summary>
+    /// <param name="Sent">What goes to the Host or server as the path. Null when the file can't be sent: <paramref name="Error"/> says why.</param>
+    /// <param name="CanRetry">The upload failed on the way, not because of the file, so asking again could help.</param>
+    /// <param name="KeptKey">The cache entry the reference came from, when it wasn't uploaded just now.</param>
+    private sealed record ContainerUpload(string? Sent, string? FileName, string? Error, bool CanRetry = false, string? KeptKey = null);
+
+    /// <summary>
+    /// A container file on this PC, for another server whose hello lists <c>uploads</c>: uploaded
+    /// (<c>POST /api/upload/container</c>, the name in a header for its kind), and its <c>upload:</c> reference sent with the
+    /// file's name. For this PC's Host, the path as it is. Not sent, with the reason, when the file can't be sent.
+    /// </summary>
+    /// <param name="forceUpload">Ignores a kept reference, because the server said its file is gone.</param>
+    private async Task<ContainerUpload> ContainerForServerAsync(string path, CancellationToken cancellationToken, bool forceUpload = false)
+    {
+        ServerTarget? target;
+        lock (_sync) target = _uploadTarget;
+        if (target is null) return new ContainerUpload(path, null, null);
+        var text = path.Trim();
+        if (ContainerPathProblem(text) is { } problem) return new ContainerUpload(null, null, problem);
+        var name = Path.GetFileName(text);
+        byte[] bytes;
+        string key;
+        try
+        {
+            var info = new FileInfo(text);
+            if (!info.Exists) return new ContainerUpload(null, null, "That container file isn't on this PC.");
+            if (info.Length is 0 or > MostContainerBytes) return new ContainerUpload(null, null, "That file is too large to be a container.");
+            key = ContainerUploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+            if (forceUpload) _uploads.TryRemove(key, out _);
+            else if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return new ContainerUpload(known.Reference, name, null, KeptKey: key);
+            bytes = await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            return new ContainerUpload(null, null, "That container file couldn't be read on this PC.");
+        }
+
+        var (reference, error) = await RemoteServerHttp.UploadContainerAsync(target, bytes, name, cancellationToken).ConfigureAwait(false);
+        if (reference is null) return new ContainerUpload(null, null, error, UploadCanBeRetried(error, target));
+        _uploads[key] = (reference, DateTimeOffset.UtcNow);
+        return new ContainerUpload(reference, name, null);
+    }
+
+    /// <summary>The cache key for a container file: <see cref="UploadKey"/> with its own prefix, so it never meets a .torrent file's.</summary>
+    internal static string ContainerUploadKey(string fullPath, long length, DateTime lastWriteUtc) => "container|" + UploadKey(fullPath, length, lastWriteUtc);
+
+    /// <summary>Keeps a reference as if the file had just been uploaded. For tests.</summary>
+    internal void RememberUpload(string key, string reference) => _uploads[key] = (reference, DateTimeOffset.UtcNow);
+
+    /// <summary>Whether a reference is kept for the key. For tests.</summary>
+    internal bool HasUpload(string key) => _uploads.ContainsKey(key);
+
+    /// <summary>
+    /// Whether an upload failed because the server didn't answer in time or couldn't be reached, so that uploading again
+    /// could work. A server that refuses the file, doesn't take uploads or has ended the pairing won't change its mind.
+    /// The upload reports only words, so these are told by the two sentences it uses (RemoteServerHttp.UploadAsync).
+    /// </summary>
+    internal static bool UploadCanBeRetried(string? error, ServerTarget target)
+        => error is not null &&
+           (error == $"Couldn't reach {target.Name}." ||
+            (error.StartsWith($"{target.Name} didn't take the ", StringComparison.Ordinal) && error.EndsWith(" in time. Try again.", StringComparison.Ordinal)));
+
+    /// <summary>Why a container path isn't opened here for a server, or null: as <see cref="TorrentPathProblem"/>.</summary>
+    internal static string? ContainerPathProblem(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+            return "Copy the container file to this PC first; a file on a network share isn't sent from here.";
+        return Path.IsPathFullyQualified(path) ? null : "The container file needs its full path on this PC.";
+    }
+
+    /// <summary>The server's limit for an uploaded container (ContainerLimits.Default.MaxInputBytes).</summary>
+    private const long MostContainerBytes = 16 * 1024 * 1024;
 
     /// <summary>
     /// Adds the chosen entries. A reply with <see cref="RemoteContainerAddResult.JobsLeftOut"/> has the entries saved and the
@@ -226,9 +536,22 @@ internal sealed class RemoteClient : IAsyncDisposable
     }
 
     /// <summary>Waits for a person to answer in JDownloader. Cancelling stops waiting here, and JDownloader may still be asking.</summary>
-    public Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = path }, MessageTypes.RemoteContainerSendResult,
-            error => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(error) }, cancellationToken, SendToJdTimeout);
+    public async Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var upload = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        var result = await SendUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceGone(upload, result.Message)) return result;
+
+        upload = await ContainerForServerAsync(path, cancellationToken, forceUpload: true).ConfigureAwait(false);
+        return await SendUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<RemoteContainerSendResult> SendUploadedAsync(ContainerUpload upload, CancellationToken cancellationToken)
+    {
+        if (upload.Sent is null) return new RemoteContainerSendResult { Status = "failed", Message = upload.Error ?? string.Empty };
+        return await SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = upload.Sent }, MessageTypes.RemoteContainerSendResult,
+            failure => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(failure) }, cancellationToken, SendToJdTimeout).ConfigureAwait(false);
+    }
 
     // ---- archive.* ----------------------------------------------------------------------------
 
@@ -330,12 +653,35 @@ internal sealed class RemoteClient : IAsyncDisposable
     private async Task<TResult> QuickAsync<TRequest, TResult>(
         string type, TRequest request, string replyType, Func<string, TResult> failed, Func<IpcMessage, TResult> read, CancellationToken cancellationToken)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+        bool remote, eventsWanted, controlReady;
+        string? parked;
+        lock (_sync)
+        {
+            remote = _remoteTarget;
+            eventsWanted = _eventsWanted;
+            controlReady = _control.Task.IsCompletedSuccessfully;
+            parked = _parked;
+        }
+
+        if (remote && parked is not null) return failed(parked);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, RoundToken);
         deadline.CancelAfter(_quickTimeout);
         try
         {
-            Start();
-            var reply = await RequestOnControlAsync(type, request, deadline.Token).ConfigureAwait(false);
+            // A server's call goes as one POST while its event socket is closed (the window is hidden) or not back yet:
+            // that says at once what is wrong, and a hidden window doesn't open the socket again.
+            IpcMessage reply;
+            if (remote && (!eventsWanted || !controlReady))
+            {
+                if (eventsWanted) Start();
+                reply = await RequestOnceAsync(type, request, deadline.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                Start();
+                reply = await RequestOnControlAsync(type, request, deadline.Token).ConfigureAwait(false);
+            }
+
             return Read(reply, replyType, failed, read);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -350,7 +696,10 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private async Task<TResult> SlowAsync<TRequest, TResult>(string type, TRequest request, string replyType, Func<string, TResult> failed, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+        string? parked;
+        lock (_sync) parked = _remoteTarget ? _parked : null;
+        if (parked is not null) return failed(parked);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, RoundToken);
         deadline.CancelAfter(timeout ?? _slowTimeout);
         var connected = false;
         var holdsTurn = false;
@@ -358,7 +707,7 @@ internal sealed class RemoteClient : IAsyncDisposable
         {
             await _slowCalls.WaitAsync(deadline.Token).ConfigureAwait(false);
             holdsTurn = true;
-            await using var pipe = await _connect(ConnectTimeout, deadline.Token).ConfigureAwait(false);
+            await using var pipe = await _connectCall(ConnectTimeout, deadline.Token).ConfigureAwait(false);
             connected = true;
             var message = IpcMessage.Create(type, request);
             await pipe.SendAsync(message, deadline.Token).ConfigureAwait(false);
@@ -412,6 +761,7 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     internal static string DescribeFailure(Exception ex, bool reachedHost) => ex switch
     {
+        RemoteServerException => ex.Message,
         HostPipeBusyException => RemoteText.HostBusy,
         OperationCanceledException or TimeoutException when reachedHost => RemoteText.HostTooSlow,
         OperationCanceledException or TimeoutException => RemoteText.HostNotRunning,
@@ -461,6 +811,20 @@ internal sealed class RemoteClient : IAsyncDisposable
         }
     }
 
+    /// <summary>One request on a connection of its own (to a server: one <c>POST /api/ipc</c>), and its reply.</summary>
+    private async Task<IpcMessage> RequestOnceAsync<T>(string type, T payload, CancellationToken cancellationToken)
+    {
+        await using var pipe = await _connectCall(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+        var message = IpcMessage.Create(type, payload);
+        await pipe.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        while (await pipe.ReadAsync(cancellationToken).ConfigureAwait(false) is { } reply)
+        {
+            if (reply.ReplyTo == message.Id) return reply;
+        }
+
+        throw new IOException("The connection closed before the answer came.");
+    }
+
     private TaskCompletionSource<IRemotePipe> ControlSource()
     {
         lock (_sync) return _control;
@@ -472,6 +836,8 @@ internal sealed class RemoteClient : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        bool remote;
+        lock (_sync) remote = _remoteTarget;
         while (!cancellationToken.IsCancellationRequested)
         {
             IRemotePipe? pipe = null;
@@ -486,17 +852,24 @@ internal sealed class RemoteClient : IAsyncDisposable
                     throw new InvalidDataException("The Host did not send a usable greeting.");
                 }
 
-                var remote = hello.GetPayload<HostHelloDto>().Capabilities.Contains("remote", StringComparer.Ordinal);
+                var capabilities = hello.GetPayload<HostHelloDto>().Capabilities;
+                var offersRemote = capabilities.Contains("remote", StringComparer.Ordinal);
+                var offersUploads = remote && capabilities.Contains("uploads", StringComparer.Ordinal);
 
-                // The snapshot comes before any event, and this client has no use for it.
-                _ = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
+                // The snapshot comes before any event, and this client has no use for it. A server's socket asks for none.
+                if (pipe.SnapshotFollowsHello) _ = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
 
                 lock (_sync) _control.TrySetResult(pipe);
                 published = true;
-                _post(() => State.IsConnected = true);
+                if (remote) _remoteBackoff.Reset();
+                _post(() =>
+                {
+                    State.IsConnected = true;
+                    State.UploadsOffered = offersUploads;
+                });
 
                 // Not awaited: its replies arrive through the loop below.
-                _ = SeedAsync(remote, cancellationToken);
+                _ = SeedAsync(offersRemote, cancellationToken);
 
                 while (await pipe.ReadAsync(cancellationToken).ConfigureAwait(false) is { } message)
                 {
@@ -506,6 +879,18 @@ internal sealed class RemoteClient : IAsyncDisposable
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
+            }
+            catch (RemoteServerException ex) when (remote && ex is RemotePairingEndedException or PlainHttpNotConfirmedException)
+            {
+                // Trying again can't help until the user pairs again or allows the address (File > Servers), which
+                // retargets this client. Calls meanwhile say why at once.
+                lock (_sync)
+                {
+                    _parked = ex.Message;
+                    _firstRead.TrySetResult();
+                }
+
+                _post(() => State.IsReady = true);
             }
             catch (Exception ex) when (IsCommunicationFailure(ex))
             {
@@ -528,9 +913,14 @@ internal sealed class RemoteClient : IAsyncDisposable
                 }
             }
 
+            lock (_sync)
+            {
+                if (_parked is not null) break;
+            }
+
             try
             {
-                await Task.Delay(_reconnectDelay, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(remote ? _remoteBackoff.Next() : _reconnectDelay, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -554,7 +944,7 @@ internal sealed class RemoteClient : IAsyncDisposable
         finally
         {
             _post(() => State.IsReady = true);
-            _firstRead.TrySetResult();
+            lock (_sync) _firstRead.TrySetResult();
         }
     }
 
@@ -624,6 +1014,10 @@ internal sealed class RemoteClient : IAsyncDisposable
                 var change = message.GetPayload<ArchiveChangedDto>();
                 _post(() => State.Apply(change));
             }
+            else if (message.Type == WebUiMessageTypes.Changed)
+            {
+                RaiseWebUiChanged(message);
+            }
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
@@ -652,6 +1046,10 @@ internal sealed class RemoteClient : IAsyncDisposable
             throw new HostPipeBusyException();
         }
     }
+
+    private static async Task<IRemotePipe> ConnectToServerAsync(ServerTarget target, TimeSpan timeout, CancellationToken cancellationToken)
+        => new HostPipe(await WebSocketIpcClient.ConnectAsync(target, new ClientHelloDto { Snapshot = false, Events = true },
+            timeout + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false));
 
     public async ValueTask DisposeAsync()
     {
@@ -683,7 +1081,7 @@ internal sealed class RemoteClient : IAsyncDisposable
         public async Task<RemoteClassifyResult> ClassifyAsync(string text, CancellationToken cancellationToken)
         {
             if (Broken) return new RemoteClassifyResult { Error = RemoteText.ClassifyLost };
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, client._stopping.Token);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, client.RoundToken);
             deadline.CancelAfter(client._slowTimeout);
             var connected = _pipe is not null;
             try
@@ -692,11 +1090,13 @@ internal sealed class RemoteClient : IAsyncDisposable
                 {
                     await client._slowCalls.WaitAsync(deadline.Token).ConfigureAwait(false);
                     _holdsTurn = true;
-                    _pipe = await client._connect(ConnectTimeout, deadline.Token).ConfigureAwait(false);
+                    _pipe = await client._connectCall(ConnectTimeout, deadline.Token).ConfigureAwait(false);
                     connected = true;
                 }
 
-                var message = IpcMessage.Create(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles));
+                var (sent, uploadError) = await client.ForServerAsync(text, deadline.Token).ConfigureAwait(false);
+                if (sent is null) return new RemoteClassifyResult { Error = uploadError };
+                var message = IpcMessage.Create(MessageTypes.RemoteClassify, ClassifyRequest(text, withFiles, sent));
                 await _pipe.SendAsync(message, deadline.Token).ConfigureAwait(false);
                 while (await _pipe.ReadAsync(deadline.Token).ConfigureAwait(false) is { } reply)
                 {
@@ -747,13 +1147,41 @@ internal sealed class RemoteClient : IAsyncDisposable
         }
     }
 
-    private sealed class HostPipe(IpcClient client) : IRemotePipe
+    private sealed class HostPipe(IIpcConnection client) : IRemotePipe
     {
         public Task SendAsync(IpcMessage message, CancellationToken cancellationToken) => client.SendAsync(message, cancellationToken);
 
         public Task<IpcMessage?> ReadAsync(CancellationToken cancellationToken) => client.ReadAsync(cancellationToken);
 
+        public bool SnapshotFollowsHello => client.SnapshotFollowsHello;
+
         public ValueTask DisposeAsync() => client.DisposeAsync();
+    }
+
+    /// <summary>
+    /// A server's call that would have had a pipe of its own: each message sent is one <c>POST /api/ipc</c>, and the
+    /// next read is its reply. Ending the request (cancelling) ends the call on the server, as closing a pipe does.
+    /// </summary>
+    internal sealed class OneShotPipe(ServerTarget target) : IRemotePipe
+    {
+        private Task<IpcMessage>? _reply;
+
+        public Task SendAsync(IpcMessage message, CancellationToken cancellationToken)
+        {
+            _reply = RemoteServerHttp.SendIpcAsync(target, message, cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        public async Task<IpcMessage?> ReadAsync(CancellationToken cancellationToken)
+        {
+            var reply = _reply;
+            _reply = null;
+            return reply is null ? null : await reply.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public bool SnapshotFollowsHello => false;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
 

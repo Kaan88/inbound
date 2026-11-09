@@ -213,9 +213,9 @@ public sealed partial class MainWindow
                 return;
             }
 
-            if (!LinkExtractor.IsWebLink(text) && !LinkExtractor.IsMagnet(text) && !LinkExtractor.IsTorrentPath(text))
+            if (!LinkExtractor.IsDownloadableLink(text) && !LinkExtractor.IsMagnet(text) && !LinkExtractor.IsTorrentPath(text))
             {
-                error.Say("Enter an http or https address, a magnet, or the full path of a .torrent file.", isProblem: true);
+                error.Say("Enter an http, https or ftp address, a magnet, or the full path of a .torrent file.", isProblem: true);
                 return;
             }
 
@@ -307,6 +307,13 @@ public sealed partial class MainWindow
     private async Task ImportJdContainerAsync()
     {
         if (_settings is null) return;
+        // Another server reads a container by its own path, or by an upload where its hello offers that.
+        if (RemoteDataRules.LocalFileProblem(_connection.IsRemote, "container", _connection.Target.Name, _remote.State.UploadsOffered) is { } problem)
+        {
+            await ShowMessageAsync("Import JD Container", problem);
+            return;
+        }
+
         string path;
         try
         {

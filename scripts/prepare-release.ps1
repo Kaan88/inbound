@@ -5,7 +5,10 @@ param(
     [string]$InstallerPath,
     [string]$UpdatePackagePath,
     [string]$SignerExe,
-    [string]$BuildsRepository = "Kaan88/inbound"
+    [string]$BuildsRepository = "Kaan88/inbound",
+    # EXT.S4: the signed Firefox add-on, published with the release (Firefox's update file points here).
+    [string]$FirefoxXpiPath,
+    [switch]$NoFirefoxXpi
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +28,26 @@ if (-not $UpdatePackagePath) {
 }
 if (-not $SignerExe) {
     $SignerExe = Join-Path $root "tools\UpdateSigner\bin\Release\net10.0\UpdateSigner.exe"
+}
+
+$firefoxXpiName = $null
+if (-not $NoFirefoxXpi) {
+    $extensionVersion = ([IO.File]::ReadAllText((Join-Path $root "extensions\chrome\package.json")) | ConvertFrom-Json).version
+    $firefoxXpiName = "inbound-bridge-$extensionVersion-firefox.xpi"
+    if (-not $FirefoxXpiPath) { $FirefoxXpiPath = Join-Path $root "artifacts\firefox-addon\$firefoxXpiName" }
+    if (-not (Test-Path -LiteralPath $FirefoxXpiPath -PathType Leaf)) {
+        throw "The signed Firefox add-on is missing: $FirefoxXpiPath. Run scripts\sign-extension-firefox.ps1 -ReleaseTag v$Version, or pass -NoFirefoxXpi."
+    }
+    # Firefox's update file must point at this release and this exact file, or updates would fail or go elsewhere.
+    $firefoxHash = (Get-FileHash -LiteralPath $FirefoxXpiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $firefoxUpdates = [IO.File]::ReadAllText((Join-Path $root "extensions\firefox-updates.json")) | ConvertFrom-Json
+    $entry = @($firefoxUpdates.addons.'inbound-bridge@kaan88'.updates | Where-Object { $_.version -eq $extensionVersion })
+    $expectedLink = "https://github.com/$BuildsRepository/releases/download/v$Version/$firefoxXpiName"
+    if ($entry.Count -ne 1 -or $entry[0].update_link -cne $expectedLink -or $entry[0].update_hash -cne "sha256:$firefoxHash") {
+        # An app release with an unchanged extension re-points the file at this release with the XPI already
+        # signed: AMO signs a version number only once.
+        throw "extensions\firefox-updates.json does not list $firefoxXpiName at $expectedLink with its hash. Run scripts\sign-extension-firefox.ps1 -ReleaseTag v$Version -SignedXpi `"$FirefoxXpiPath`" (or bump the extension version and sign it)."
+    }
 }
 
 foreach ($requiredPath in @($InstallerPath, $UpdatePackagePath, $PrivateKeyPath, $SignerExe)) {
@@ -110,6 +133,10 @@ $checksumFiles = @(
     "manifest.json",
     "public.pem"
 )
+if ($firefoxXpiName) {
+    Copy-Item -LiteralPath $FirefoxXpiPath -Destination (Join-Path $stagingDir $firefoxXpiName)
+    $checksumFiles += $firefoxXpiName
+}
 foreach ($file in $checksumFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $stagingDir $file) -PathType Leaf)) {
         throw "UpdateSigner or staging did not produce required file '$file'. Staging files remain at $stagingDir."
@@ -124,4 +151,5 @@ $checksumLines = foreach ($file in $checksumFiles) {
 
 [IO.Directory]::Move($stagingDir, $outputDir)
 Write-Host "Prepared local release assets at $outputDir"
-Write-Host "Upload these five files explicitly: DownloadManagerSetup-$Version.exe, $zipName, manifest.json, public.pem, SHA256SUMS"
+$uploads = @($checksumFiles) + "SHA256SUMS"
+Write-Host "Upload these $($uploads.Count) files explicitly: $($uploads -join ', ')"

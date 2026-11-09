@@ -125,7 +125,7 @@ public sealed class JobViewModel : INotifyPropertyChanged
         CanPause = job.CanPause;
         CanResume = job.CanResume;
         IsTerminal = job.IsTerminal;
-        SourceText = ToDisplaySource(job.Source);
+        SourceText = job.AddedFromAnotherDevice ? "Another device" : ToDisplaySource(job.Source);
         Destination = job.DestinationDirectory;
         FinalFilePath = job.FinalFilePath;
         FileGlyph = GlyphFor(FileName);

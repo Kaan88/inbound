@@ -2,7 +2,10 @@
 
 import { apply, emptyModel, hasCapability, type Model } from './model';
 import { HttpStatusError, ProtocolClient, postEnvelope, type ConnectionState, type Envelope } from './protocol';
-import type { Settings } from './types';
+import { notifyEnabled } from './notify';
+import { noticeFor } from './details';
+import { featuresOf, hostTexts, type Features, type HostTexts } from './hostKind';
+import type { Job, Settings } from './types';
 
 export type Theme = 'system' | 'dark' | 'light';
 
@@ -10,6 +13,8 @@ export interface Toast {
   id: number;
   text: string;
   tone: 'info' | 'error';
+  /** A download the toast is about; the toast then offers "Show". */
+  jobId?: string;
 }
 
 function readTheme(): Theme {
@@ -35,6 +40,19 @@ export class Store {
   theme = $state<Theme>(readTheme());
   toasts = $state<Toast[]>([]);
   signInRequired = $state(true);
+  /** A download the list should select and scroll to (set after an add or "Select existing"; the list clears it). */
+  revealId = $state<string | null>(null);
+  /** A download the list screen should open (from a toast's Show). */
+  showJob = $state<string | null>(null);
+  /** Counts every saved or cleared provider key, so screens drop what they read with the old key. */
+  keyEpoch = $state(0);
+  /** The Settings page to open next (a provider's account page, from My provider). */
+  settingsPage = $state<string | null>(null);
+  /**
+   * Set by a screen that must ask before the page address changes (Options with unsaved changes). The shell calls it
+   * on every address change before it swaps the screen; true means the change is held and the screen asks.
+   */
+  leaveGuard: ((event: HashChangeEvent) => boolean) | null = null;
   private client: ProtocolClient | null = null;
   private toastId = 0;
 
@@ -64,8 +82,35 @@ export class Store {
   }
 
   private receive(message: Envelope): void {
+    const event = message.type === 'job.event' ? (message.payload as { job?: Job; eventType?: string } | undefined) : undefined;
+    const before = event?.job?.id ? this.model.jobs[event.job.id]?.state : undefined;
     apply(this.model, message);
+    if (event?.job && event.eventType !== 'removed') this.announce(before, event.job);
     if (message.type === 'jobs.snapshot') void this.afterSnapshot();
+  }
+
+  /** D10: a download that finished or failed gets a toast, and a system notice while this tab is hidden. */
+  private announce(before: string | undefined, job: Job): void {
+    const notice = noticeFor(before, job, this.model.settings?.notifyOnCompletion !== false);
+    if (!notice) return;
+    this.toast(notice.text, notice.tone, notice.jobId);
+    try {
+      // The browser's own notice only when this browser was asked for it in Options (notify.ts).
+      if (document.visibilityState === 'hidden' && notifyEnabled()) {
+        new Notification(notice.tone === 'error' ? 'Download failed' : 'Download complete', { body: notice.text, tag: `inbound-${job.id}` });
+      }
+    } catch {
+      // Notifications can be blocked; the toast was shown.
+    }
+  }
+
+  /** Asks once for the right to show system notices; called from a click, which browsers require. */
+  askForNotices(): void {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default' && this.model.settings?.notifyOnCompletion !== false) void Notification.requestPermission();
+    } catch {
+      // Not offered here.
+    }
   }
 
   /** What isn't in the snapshot: the provider's work and account, and the archive sets. */
@@ -137,9 +182,18 @@ export class Store {
     return hasCapability(this.model, capability);
   }
 
-  toast(text: string, tone: Toast['tone'] = 'info'): void {
+  /** The texts that fit this host (the server or the Windows app), and what this session may use on it. */
+  get texts(): HostTexts {
+    return hostTexts(this.model.hello?.hostKind);
+  }
+
+  get features(): Features {
+    return featuresOf(this.model.hello?.capabilities);
+  }
+
+  toast(text: string, tone: Toast['tone'] = 'info', jobId?: string): void {
     const id = ++this.toastId;
-    this.toasts.push({ id, text, tone });
+    this.toasts.push({ id, text, tone, jobId });
     setTimeout(() => this.dismiss(id), tone === 'error' ? 8000 : 4000);
   }
 

@@ -29,18 +29,30 @@ public sealed class RemoteCommands : IDisposable
     private readonly Dictionary<string, LastAnswer> _answers = new(StringComparer.Ordinal);
     private readonly List<(RemoteAccountStore Store, EventHandler Handler)> _accountHandlers = [];
     private readonly ContainerImportService _containers;
+    private readonly PathRoots? _jobRoots;
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
+    /// <summary>
+    /// Whether uploaded files are read here by their reference (<see cref="RemoteJobCoordinator.ResolveReference"/>):
+    /// set where a web endpoint stores the uploads. The hello's <c>uploads</c> name follows it.
+    /// </summary>
+    public bool AcceptsUploads => _jobs.ResolveReference is not null;
+
     /// <param name="roots">On a server, the folders whose files a client may have it read (container files). Null on the desktop.</param>
+    /// <param name="jobRoots">
+    /// Where these callers may have the coordinator read a .torrent file and save downloads, passed with each call
+    /// because the coordinator is shared: a browser on another device (D8). Null leaves it to the coordinator's own.
+    /// </param>
     public RemoteCommands(RemoteProviderRegistry providers, RemoteJobCoordinator jobs, TimeProvider? timeProvider = null, Action<string>? log = null,
-        ContainerImportService? containers = null, PathRoots? roots = null)
+        ContainerImportService? containers = null, PathRoots? roots = null, PathRoots? jobRoots = null)
     {
         _providers = providers;
         _jobs = jobs;
         _time = timeProvider ?? TimeProvider.System;
         _log = log;
-        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots);
+        _jobRoots = jobRoots;
+        _containers = containers ?? new ContainerImportService(providers, jobs, timeProvider: _time, log: log, roots: roots, jobRoots: jobRoots);
 
         _jobs.Changed += OnJobChanged;
         _jobs.Removed += OnJobRemoved;
@@ -257,7 +269,7 @@ public sealed class RemoteCommands : IDisposable
     public async Task<RemoteClassifyResult> ClassifyAsync(RemoteClassifyRequest request, CancellationToken cancellationToken = default)
     {
         var classified = request.WithFiles
-            ? await _jobs.ClassifyWithFilesAsync(request.Text, cancellationToken).ConfigureAwait(false)
+            ? await _jobs.ClassifyWithFilesAsync(request.Text, cancellationToken, _jobRoots).ConfigureAwait(false)
             : await _jobs.ClassifyAsync(request.Text, cancellationToken).ConfigureAwait(false);
         return new RemoteClassifyResult
         {
@@ -327,6 +339,8 @@ public sealed class RemoteCommands : IDisposable
             ArchivePassword = OfferedLinkPassword(request) ?? request.ArchivePassword,
             // An offer only: a password the package gets from the user meanwhile stays.
             ArchivePasswordOffered = OfferedLinkPassword(request) is not null,
+            SourceRoots = _jobRoots,
+            DestinationRoots = _jobRoots,
         }, cancellationToken).ConfigureAwait(false);
 
         return new RemoteAddResultDto
@@ -444,10 +458,21 @@ public sealed class RemoteCommands : IDisposable
     // ---- Acting -------------------------------------------------------------------------------
 
     public async Task<RemoteActionResultDto> SelectAsync(RemoteSelectRequest request, CancellationToken cancellationToken = default)
-        => ToDto(await _jobs.ChooseFilesAsync(request.JobId, request.All, request.FileIds, cancellationToken).ConfigureAwait(false));
+        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.ChooseFilesAsync(request.JobId, request.All, request.FileIds, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// With <see cref="_jobRoots"/>: a job saved outside them (one the user added on this PC) is left alone by what would
+    /// add or start its downloads, because they would be saved there. Null when it may go ahead, or there is no such job.
+    /// </summary>
+    private RemoteActionResultDto? RefuseOutside(Guid jobId)
+        => _jobRoots is not null && _jobs.Find(jobId) is { Destination: { } destination } && !string.IsNullOrWhiteSpace(destination) &&
+           _jobRoots.Allowed(destination) is null
+            ? new RemoteActionResultDto { Error = CallerScope.OutsideJobRefused }
+            : null;
 
     public async Task<RemoteActionResultDto> RetryAsync(RemoteRetryRequest request, CancellationToken cancellationToken = default)
     {
+        if (RefuseOutside(request.JobId) is { } outside) return outside;
         // Agreeing to a job that is waiting for exactly that isn't a retry of anything.
         if (request.ApproveUncached == true && _jobs.Find(request.JobId) is { ApprovalNeeded: true, State: RemoteJobState.Intended })
         {
@@ -485,7 +510,7 @@ public sealed class RemoteCommands : IDisposable
 
     /// <summary>TB.S1: starts the job's entry in the provider's queue. Removing it is <see cref="DeleteRemoteAsync"/>, confirmed.</summary>
     public async Task<RemoteActionResultDto> StartQueuedAsync(RemoteJobIdRequest request, CancellationToken cancellationToken = default)
-        => ToDto(await _jobs.ControlQueuedAsync(request.JobId, RemoteQueueAction.Start, cancellationToken).ConfigureAwait(false));
+        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.ControlQueuedAsync(request.JobId, RemoteQueueAction.Start, cancellationToken).ConfigureAwait(false));
 
     public async Task<RemoteActionResultDto> DeleteRemoteAsync(RemoteDeleteRequest request, CancellationToken cancellationToken = default)
         => ToDto(await _jobs.RemoveRemoteItemAsync(request.JobId, request.Confirmed, cancellationToken).ConfigureAwait(false));
@@ -503,13 +528,15 @@ public sealed class RemoteCommands : IDisposable
         => !string.IsNullOrEmpty(password) && RemoteJobRules.DescribeBadArchivePassword(password) is null;
 
     public async Task<RemoteActionResultDto> SetArchivePasswordAsync(RemoteArchivePasswordRequest request, CancellationToken cancellationToken = default)
-        => ToDto(await _jobs.SetArchivePasswordAsync(request.JobId, request.Password, cancellationToken).ConfigureAwait(false));
+        => RefuseOutside(request.JobId) ?? ToDto(await _jobs.SetArchivePasswordAsync(request.JobId, request.Password, cancellationToken).ConfigureAwait(false));
 
     // ---- Containers ---------------------------------------------------------------------------
 
     public async Task<RemoteContainerPreviewResult> ContainerPreviewAsync(RemoteContainerPreviewRequest request, CancellationToken cancellationToken = default)
     {
-        var preview = await _containers.PreviewAsync(request.Path, cancellationToken).ConfigureAwait(false);
+        var preview = await _containers.PreviewAsync(request.Path, cancellationToken, request.FileName).ConfigureAwait(false);
+        // A browser on another device can't hand it on (HostCommandDispatcher refuses remote.container.sendToJd there).
+        if (_jobRoots is not null) preview.CanSendToJd = false;
         preview.Error = Safe(preview.Error);
         preview.AccountProblem = Safe(preview.AccountProblem);
         preview.Problems = preview.Problems.Select(problem => Safe(problem) ?? string.Empty).ToList();

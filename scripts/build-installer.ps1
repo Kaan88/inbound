@@ -1,7 +1,9 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "0.6.2",
-    [string]$Iscc
+    [string]$Version = "0.6.3",
+    [string]$Iscc,
+    # A Setup without the Firefox add-on, for local test builds. A release Setup carries it (EXT.S4).
+    [switch]$NoFirefoxXpi
 )
 
 # Builds artifacts\installer\DownloadManagerSetup-<Version>.exe: a per-user Inno Setup installer
@@ -73,7 +75,22 @@ $publishedExtension = Join-Path (Split-Path -Parent $appOut) "extension"
 if (Test-Path -LiteralPath $extOut) { Remove-Item -LiteralPath $extOut -Recurse -Force }
 Copy-Item -LiteralPath $publishedExtension -Destination $extOut -Recurse -Force
 
-& $Iscc "/DAppVersion=$Version" "/DSourceRoot=$(Join-Path $root 'artifacts')" (Join-Path $root "installer\DownloadManager.iss")
+# EXT.S4: the signed Firefox add-on (scripts\sign-extension-firefox.ps1) for the extension version being built.
+$isccArgs = @("/DAppVersion=$Version", "/DSourceRoot=$(Join-Path $root 'artifacts')")
+if (-not $NoFirefoxXpi) {
+    $extensionVersion = ([IO.File]::ReadAllText((Join-Path $root "extensions\chrome\package.json")) | ConvertFrom-Json).version
+    $xpi = Join-Path $root "artifacts\firefox-addon\inbound-bridge-$extensionVersion-firefox.xpi"
+    if (-not (Test-Path -LiteralPath $xpi -PathType Leaf)) {
+        throw "The signed Firefox add-on $xpi is missing. Run scripts\sign-extension-firefox.ps1 first, or pass -NoFirefoxXpi for a test build."
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $xpiZip = [IO.Compression.ZipFile]::OpenRead($xpi)
+    try { $signed = @($xpiZip.Entries | Where-Object { $_.FullName -in 'META-INF/mozilla.rsa', 'META-INF/cose.sig' }).Count -gt 0 }
+    finally { $xpiZip.Dispose() }
+    if (-not $signed) { throw "$xpi is not signed by addons.mozilla.org." }
+    $isccArgs += "/DFirefoxXpi=$xpi"
+}
+& $Iscc @isccArgs (Join-Path $root "installer\DownloadManager.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed." }
 
 $setup = Join-Path $root "artifacts\installer\DownloadManagerSetup-$Version.exe"

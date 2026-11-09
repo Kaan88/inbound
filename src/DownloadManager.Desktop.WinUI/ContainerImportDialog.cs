@@ -221,7 +221,7 @@ internal sealed class ContainerImportDialog
         var folder = _destination.Text.Trim();
         if (folder.Length > 0 && !AddLinksDialog.IsFullPath(folder))
         {
-            _destinationError.Show("The destination has to be a full path, such as D:\\Downloads.", isProblem: true);
+            _destinationError.Show(AddLinksDialog.FullPathWords, isProblem: true);
             _destination.Focus(FocusState.Programmatic);
             return;
         }
@@ -243,9 +243,10 @@ internal sealed class ContainerImportDialog
         UpdateButtons();
         try
         {
-            var preview = await _remote.PreviewContainerAsync(_path, _closing.Token);
+            var reply = await _remote.ReadContainerAsync(_path, _closing.Token);
             if (_closing.IsCancellationRequested) return;
-            var view = RemoteText.ContainerRead(preview, _fileName);
+            var preview = reply.Result;
+            var view = RemoteText.ContainerRead(preview, _fileName, canReadAgain: reply.CanReadAgain);
             _status.Show(view.Status, view.IsProblem);
             _accountProblem.Show(view.AccountProblem ?? string.Empty, isProblem: true);
             ShowNotes(view.Notes);

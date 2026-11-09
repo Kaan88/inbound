@@ -31,6 +31,14 @@
     return list;
   });
 
+  // Recently used destinations that are not favorites, as the desktop's folder menu lists them.
+  const recent = $derived.by(() => {
+    const same = (path: string) => path.replace(/[\/]+$/, '').toLowerCase();
+    const saved = favorites.map((f) => same(f.path));
+    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !saved.includes(same(path)));
+    return list;
+  });
+
   const isFavorite = $derived(!!listing?.path && (store.model.settings?.favoriteFolders ?? []).some((f) => f.path === listing!.path));
 
   async function browse(path: string | null | undefined) {
@@ -92,9 +100,9 @@
   });
 </script>
 
-<Dialog title="Choose a folder on the server" {onclose} wide>
+<Dialog title={store.texts.folderPickerTitle} {onclose} wide>
   <form class="mb-3 flex gap-2" onsubmit={(event) => { event.preventDefault(); void browse(typed); }}>
-    <input class="field font-mono" bind:value={typed} placeholder="Type a path, such as /downloads/movies" aria-label="Folder path" spellcheck="false" autocomplete="off" />
+    <input class="field font-mono" bind:value={typed} placeholder={store.texts.folderPlaceholder} aria-label="Folder path" spellcheck="false" autocomplete="off" />
     <button class="btn shrink-0" type="submit" disabled={busy}>Check</button>
   </form>
   {#if error}
@@ -116,6 +124,14 @@
           </li>
         {/each}
       </ul>
+      {#if recent.length}
+        <h3 class="label mt-3">Recent</h3>
+        <ul class="space-y-0.5">
+          {#each recent as path (path)}
+            <li><button class="w-full truncate rounded px-2 py-1.5 text-left font-mono text-[12px] hover:bg-hover" title={path} onclick={() => browse(path)}>{path}</button></li>
+          {/each}
+        </ul>
+      {/if}
       {#if listing?.roots?.length}
         <h3 class="label mt-3">Allowed folders</h3>
         <ul class="space-y-0.5">
@@ -129,7 +145,7 @@
     <section class="min-w-0">
       <div class="mb-2 flex items-center gap-2">
         <button class="btn px-2" onclick={() => browse(listing?.parent ?? null)} disabled={busy || !listing?.path} title="Up one folder" aria-label="Up one folder"><Icon name="up" size={15} /></button>
-        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? 'The folders this server may use'}</div>
+        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? store.texts.folderListEmpty}</div>
         {#if listing?.path}
           <button class="btn px-2" onclick={toggleFavorite} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={isFavorite}>
             {isFavorite ? '★' : '☆'}

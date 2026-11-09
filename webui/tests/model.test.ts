@@ -93,10 +93,10 @@ describe('views', () => {
     const rows = buildRows(model, 'all', '', new Set());
     expect(rows.map((r) => r.kind)).toEqual(['job', 'package']);
     const pack = rows.find((r) => r.kind === 'package');
-    expect(pack && pack.kind === 'package' && pack.summary).toMatchObject({ state: 'downloading', done: 1, count: 2, progress: 75 });
+    expect(pack && pack.kind === 'package' && pack.summary).toMatchObject({ state: 'active', completedCount: 1, memberCount: 2, progress: 0.75 });
 
     const open = buildRows(model, 'all', '', new Set(['g']));
-    expect(open.map((r) => r.id)).toEqual(['solo', 'package:g', 'b', 'a']);
+    expect(open.map((r) => r.id)).toEqual(['solo', 'package:g', 'a', 'b']);
     // Selecting the package selects its files.
     expect(selectedJobIds(open, new Set(['package:g'])).sort()).toEqual(['a', 'b']);
 
@@ -131,7 +131,9 @@ describe('add lines', () => {
   });
 
   it('never sends a provider link directly', () => {
-    for (const kind of ['magnet', 'torrentFile', 'hosterLink', 'folderLink']) expect(routeOf(line('x', { kind }))).toBe('provider');
+    for (const kind of ['magnet', 'torrentFile', 'hosterLink']) expect(routeOf(line('x', { kind }))).toBe('provider');
+    expect(routeOf(line('x', { kind: 'folderLink', itemId: '1', itemKind: 'torrent', provider: 'p' }))).toBe('provider');
+    expect(routeOf(line('x', { kind: 'folderLink' }))).toBe('none');
     expect(routeOf(line('https://a/b', { kind: 'ordinaryLink' }))).toBe('direct');
     expect(routeOf(line('https://a/b', { kind: 'providerDirectLink' }))).toBe('direct');
     expect(routeOf(line('https://a/b', { kind: 'brandNewKind' }))).toBe('none');

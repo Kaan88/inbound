@@ -7,6 +7,16 @@ built on `webui`, 2026-11-08, in the next section. D3 (the image, compose and th
 the section after that. ROADMAP D1 to D4 and PERF.1 to PERF.3
 track it.
 
+The same server program also runs on Windows as the desktop app's **web bridge** (D8, 2026-11-09,
+`docs/plans/remote-management.md`): `DownloadManager.Server.exe --bridge`, started by the Host when Options, Web UI
+is ticked. It has no engine of its own and passes each browser connection to the Host's pipe; its differences from
+the server (no setup page, the window's one-time ticket, options on standard input, exit codes, a session cookie
+named by its port) are in `docs/ipc-protocol.md` under "The web bridge on Windows". Code shared by both:
+`WebFront.cs` (the endpoints, with an `IEnvelopeBackend`: the server's dispatcher or the bridge's
+`Bridge/PipeBackend.cs`) and `Auth/`. The sign-in file itself (`auth.json`, `AuthStore`, `PasswordHash`) and the
+upload folder and its reference format (`Remote/UploadFolder.cs`) are in `DownloadManager.Runtime`, since the desktop Host writes the
+bridge's password and reads its uploads too.
+
 ## D2: what was built (2026-11-08)
 
 - **Sign-in** (`src/DownloadManager.Server/Auth`), on by default. One user. The password is set on the setup page the
@@ -36,6 +46,23 @@ track it.
   never sees settings or logins. CORS for our extension ids. Evidence: `PairingTests` (5), and the screens walk below
   (a real code from the page, a token refused `settings.get`, a removed token answered 401). The extension's side is
   built too (stream C transport, next item).
+- **Token roles and desktop-app pairing (D9 section 4, server side, 2026-11-09):** a token now has a role in
+  `auth.json`: none (as in older files) means the extension's, `remoteClient` is a desktop app's. A desktop app
+  pairs by sending the server's password to `POST /api/pair` (`{password, name, role: "remoteClient"}`), with the
+  sign-in page's waits and lock-out; a code still makes an extension token only, whatever role the body names, and
+  password pairing is refused with sign-in off. A `remoteClient` token has a signed-in browser's rights on
+  `GET /api/ws` (bearer header) and `POST /api/ipc`; the extension's token is still refused on `/api/ws`. Revoking a
+  token, its own Unpair, or a password change that unpairs closes its open WebSockets at once. A request with no
+  `Origin` and a valid token on a token path, and `POST /api/pair` with no `Origin`, may name the server by any
+  host name (a browser always sends `Origin` there, so a rebinding page gains nothing). `GET /api/ws?hello=1` takes
+  a `client.hello` first (snapshot, events), as the desktop's hello pipe does; without the flag nothing changes.
+  `/api/auth/status` says `hostKind` (`server` here). Settings, Paired apps (formerly Paired browsers) shows each
+  token's role ("Browser extension" or "Desktop app") and says what each may do. A password change always removes the
+  desktop apps' tokens; "Keep the paired browser extensions" keeps only the extensions'. Revoking a token also ends
+  its running `/api/ipc` requests, an open WebSocket keeps its token's last use current, password pairing with an
+  `Origin` is refused, and only a `Bearer ibt_...` header is read as a token on `/api/ws`. Evidence: `RemoteClientTests` (16) in Server.Tests, documented in
+  `docs/ipc-protocol.md`. The desktop side (a Servers list, the WebSocket client, DPAPI for the token, the
+  confirmation before a token goes over plain HTTP) is not built yet.
 - **The extension's server transport (EXT.R1, 2026-11-08):** `extensions/chrome/src/transport.ts` with
   `NativeTransport` (this PC) and `ServerTransport` (`POST /api/ipc` with the bearer token, no cookies, no redirects).
   The extension's Settings has an "Inbound server" card (address, code, Pair, state, Check connection, Open the web UI,
@@ -181,7 +208,8 @@ an archive coming from TorBox itself; a live link expiring on its own.
 `src/DownloadManager.Server` (`net10.0`, ASP.NET Core) runs the Runtime, Engine, Persistence, Archives, Containers
 and the TorBox provider behind the D1a `HostCommandDispatcher`, with no Windows project referenced.
 
-- **Endpoints:** `GET /api/ws` (WebSocket, one JSON envelope per text message, hello and snapshot then events),
+- **Endpoints:** `GET /api/ws` (WebSocket, one JSON envelope per text message, hello and snapshot then events; with
+  `?hello=1` the client's `client.hello` comes first),
   `POST /api/ipc` (one envelope in, one reply out), `GET /health` (no check of any kind), and static files from
   `wwwroot` (a labelled placeholder page until D2). The framing is in `docs/ipc-protocol.md`.
 - **Configuration:** `DOWNLOADMANAGER_DATA` (state, default `/data`), `DOWNLOADMANAGER_ROOTS` (the folders the
@@ -326,6 +354,8 @@ Windows parts: Runtime, Engine, Persistence, Archives, Containers and the TorBox
 - **Browser extension:** native messaging cannot reach a container. Built: pairing by a one-time code, a token for
   `POST /api/ipc` limited to the extension's commands, and the extension's server transport with the This PC /
   Server choice (EXT.R1).
+- **Desktop app (D9):** pairs with the server's password for a `remoteClient` token, used on `GET /api/ws` and
+  `POST /api/ipc` with a signed-in browser's rights (server side built; see D2 above).
 
 ## D3 Docker
 

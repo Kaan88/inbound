@@ -32,6 +32,9 @@
   <ItemGroup>
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.cs" Link="WinUI\RemoteClient.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteState.cs" Link="WinUI\RemoteState.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteClient.WebUi.cs" Link="WinUI\RemoteClient.WebUi.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiForm.cs" Link="WinUI\WebUiForm.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\WebUiFirewall.cs" Link="WinUI\WebUiFirewall.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="WinUI\RemoteText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="WinUI\ArchiveForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteRows.cs" Link="WinUI\RemoteRows.cs" />
@@ -50,6 +53,10 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\ServerStore.cs" Link="WinUI\ServerStore.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Servers\RemoteRules.cs" Link="WinUI\RemoteRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\HostConnection.cs" Link="WinUI\HostConnection.cs" />
+    <Compile Include="..\..\src\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="WinUI\DpapiSecretProtector.cs" />
   </ItemGroup>
 
   <ItemGroup>

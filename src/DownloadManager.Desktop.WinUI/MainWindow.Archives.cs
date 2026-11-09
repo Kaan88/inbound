@@ -372,7 +372,8 @@ public sealed partial class MainWindow
 
     private void SyncArchiveNotice(IReadOnlyList<ArchiveSetDto> sets)
     {
-        var notice = _archiveNotices.Update(sets, WatchingSince, _settings?.NotifyOnCompletion != false);
+        // This PC's choice, whichever server is shown, as for the other notifications.
+        var notice = _archiveNotices.Update(sets, WatchingSince, LocalSettings?.NotifyOnCompletion != false);
         if (notice == _archiveNotice) return;
         _archiveNotice = notice;
         ArchiveNoticeBar.Visibility = notice is null ? Visibility.Collapsed : Visibility.Visible;
@@ -446,14 +447,22 @@ public sealed partial class MainWindow
     private async Task ExtractFromDiskAsync()
     {
         string? file;
-        try
+        if (RemoteDataRules.UsesServerFolderBrowser(_connection.IsRemote))
         {
-            file = (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".rar", ".7z", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".zst", ".001"], multiple: false)).FirstOrDefault();
+            // Another server extracts its own files: only its folders are offered, never this PC's.
+            file = await AskServerArchivePathAsync();
         }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException or UnauthorizedAccessException)
+        else
         {
-            await ShowMessageAsync("Extract archive", "The file picker couldn't open.");
-            return;
+            try
+            {
+                file = (await Pickers.PickFilesAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), [".rar", ".7z", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".zst", ".001"], multiple: false)).FirstOrDefault();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or COMException or UnauthorizedAccessException)
+            {
+                await ShowMessageAsync("Extract archive", "The file picker couldn't open.");
+                return;
+            }
         }
 
         if (file is null) return;
@@ -562,9 +571,53 @@ public sealed partial class MainWindow
         if (problems.Count > 0) await ShowMessageAsync(title, string.Join(Environment.NewLine, problems.Take(5)));
     }
 
+    /// <summary>
+    /// The path of an archive on the server the window shows: a folder of the server's, chosen with its folder browser,
+    /// and the archive's name in it. Null when cancelled.
+    /// </summary>
+    private async Task<string?> AskServerArchivePathAsync()
+    {
+        var target = _connection.Target;
+        var folder = new TextBox { Header = $"Folder on {target.Name}", IsReadOnly = true, PlaceholderText = "Choose a folder" };
+        var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
+        var name = new TextBox { Header = "Archive's file name", PlaceholderText = "movie.part1.rar" };
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(folder);
+        Grid.SetColumn(browse, 1);
+        row.Children.Add(browse);
+        browse.Click += async (_, _) =>
+        {
+            if (await ServerFolderWindow.PickAsync(target, folder.Text) is { } chosen) folder.Text = chosen;
+        };
+        var panel = new StackPanel { Spacing = 10, MinWidth = 440 };
+        panel.Children.Add(new TextBlock { Text = $"The archive is extracted on {target.Name}, from one of its folders.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(row);
+        panel.Children.Add(name);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = "Extract archive",
+            Content = panel,
+            PrimaryButtonText = "Extract",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return null;
+        var chosenFolder = folder.Text.Trim();
+        var fileName = name.Text.Trim();
+        if (chosenFolder.Length == 0 || fileName.Length == 0 || fileName.IndexOfAny(['/', '\\']) >= 0) return null;
+        // The server's own separator: a Linux server's paths use '/'.
+        return ServerPaths.Join(chosenFolder, fileName);
+    }
+
     /// <summary>Asking whether a folder is there stays off the UI thread, because it can be a slow or missing network share.</summary>
     private async Task OpenExtractedFoldersAsync(IReadOnlyList<string> folders)
     {
+        // Another server's folders are on that machine: this PC never asks about them.
+        if (SayIfOnAnotherServer()) return;
         var there = await Task.Run(() => folders.Where(folder => Path.IsPathFullyQualified(folder) && Directory.Exists(folder)).ToList());
         var problems = folders.Except(there, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var folder in there.Take(5))

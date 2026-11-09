@@ -9,6 +9,7 @@ using DownloadManager.Runtime;
 using DownloadManager.Runtime.Archives;
 using DownloadManager.Runtime.Ipc;
 using DownloadManager.Runtime.Remote;
+using DownloadManager.Runtime.WebUi;
 using DownloadManager.Tray;
 
 namespace DownloadManager.Host;
@@ -158,6 +159,12 @@ internal static class Program
             var archives = new ArchiveCoordinator(service, new JsonArchiveStore(paths, log.Warn), log.Info);
             var remoteJobs = remote.CreateCoordinator(paths, service, archives, log.Info);
             var remoteCommands = new RemoteCommands(remote.Registry, remoteJobs, log: log.Info);
+            // D8: a .torrent or container file a browser (or another PC's window) uploaded through the web bridge, by its
+            // reference. The bridge keeps them in <data>\uploads; without the bridge program nothing can upload, so the
+            // hello then has no "uploads" and the web UI and the window keep their upload items hidden.
+            var bridgeLauncher = new WebBridgeLauncher(log.Warn);
+            if (File.Exists(bridgeLauncher.BridgePath))
+                remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
             service.DirectAddresses = remoteJobs;
             service.InitializeAsync().GetAwaiter().GetResult();
 
@@ -194,7 +201,22 @@ internal static class Program
             var controller = new HostController(service, log);
             // Update restarts keep frontends alive (they show restart progress); a user exit closes them too.
             service.UpdateShutdownRequested += (_, _) => controller.RequestShutdown();
-            var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null) { Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null };
+            // D8: a browser on another device, through the web bridge, asks for the web role and gets these rights.
+            var webSessions = new WebSessionProfile(service, controller.Capabilities, archivesStarted ? archives : null,
+                remoteStarted ? remote.Registry : null, remoteStarted ? remoteJobs : null, log.Info);
+            // D8: the web UI. With its box cleared this starts nothing: no process, no timer, nothing listening.
+            var webUi = new WebUiSupervisor(new WebUiConfigStore(paths.Root),
+                new WebUiPlatform(bridgeLauncher, new WindowsFirewallRules(log.Warn), new TcpListenerOwner(),
+                    new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
+                paths.Root, PipeNames.HostHelloPipe(), log);
+            var dispatcher = new HostCommandDispatcher(service, controller, log, remoteStarted ? remoteCommands : null)
+            {
+                Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
+                WebSessions = webSessions.Rights,
+                WebUi = webUi,
+            };
+            webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
+            webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
             var pipe = new HostPipeServer(dispatcher, log);
             archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
             void ExitApplication() => _ = Task.Run(async () =>
@@ -241,6 +263,14 @@ internal static class Program
                 SynchronizationContext.SetSynchronizationContext(context);
                 controller.UiContext = context;
             }
+
+            webUi.Notice = (title, message) => tray.Notify(title, message);
+            // Off the start path: the bridge takes a moment, and the pipe it talks to is open already.
+            _ = Task.Run(async () =>
+            {
+                try { await webUi.StartAsync().ConfigureAwait(false); }
+                catch (Exception ex) { log.Error($"The web UI could not start: {ex.GetType().Name}"); }
+            });
 
             var copiedLinks = new CopiedLinks(service, remoteJobs);
             using var clipboardMonitor = new HostClipboardMonitor(
@@ -342,6 +372,16 @@ internal static class Program
             downloadWindows.Dispose();
             try
             {
+                // First, so no browser starts anything while the rest stops.
+                webUi.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"Web UI shutdown: {ex.GetType().Name}");
+            }
+
+            try
+            {
                 // Broadcasts end before the sessions close, as they did when both lived in the pipe server.
                 dispatcher.Stop();
                 pipe.StopAsync().GetAwaiter().GetResult();
@@ -378,6 +418,7 @@ internal static class Program
                 log.Error($"Service shutdown: {ex.Message}");
             }
 
+            webSessions.Dispose();
             remoteCommands.Dispose();
             sleepPrevention.Dispose();
             remote.Dispose();

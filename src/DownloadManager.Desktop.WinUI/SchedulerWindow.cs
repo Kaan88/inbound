@@ -14,7 +14,7 @@ public sealed class SchedulerWindow : Window
 {
     private readonly ContentControl _editorSurface = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch,
         VerticalContentAlignment = VerticalAlignment.Stretch };
-    private readonly HostConnection _connection = new();
+    private readonly HostConnection _connection;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly ListBox _queues = new() { SelectionMode = SelectionMode.Single };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
@@ -99,9 +99,11 @@ public sealed class SchedulerWindow : Window
         finally { _capturingEditors = false; }
     }
 
-    public SchedulerWindow()
+    /// <param name="target">The Host whose queues these are: this PC, or the server the main window shows.</param>
+    public SchedulerWindow(ServerTarget? target = null)
     {
-        Title = "Scheduler — Inbound Download Manager";
+        _connection = new HostConnection(target);
+        Title = _connection.IsRemote ? $"Scheduler — {_connection.Target.Name} — Inbound Download Manager" : "Scheduler — Inbound Download Manager";
         WindowLayout.ResizeForDpi(this, 1000, 720);
         WindowPlacement.Track(this, "scheduler");
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
@@ -886,7 +888,13 @@ public sealed class SchedulerWindow : Window
             if (reply.Type != MessageTypes.SettingsResult || !result.Ok) { _status.Text = result.Error ?? "The Host rejected the queue change."; return; }
             await RefreshAsync();
             UpdateQueueList(request.Action == "create" ? result.Settings.Queues.OrderByDescending(item => item.Order).FirstOrDefault()?.Id : request.Action == "delete" ? request.MoveContentsToQueueId : request.QueueId);
-            _status.Text = $"Queue {request.Action}d.";
+            _status.Text = request.Action switch
+            {
+                "create" => "Queue created.",
+                "delete" => "Queue deleted.",
+                "policy" => "Queue renamed.", // The rename is the only call that sends "policy".
+                _ => "Queue updated.",
+            };
         }
         catch (Exception ex) { _status.Text = "Could not update queue: " + ex.Message; }
     }

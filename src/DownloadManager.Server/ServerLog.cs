@@ -14,13 +14,16 @@ public sealed class ServerLog : IHostLog
     private readonly object _gate = new();
     private readonly string _directory;
     private readonly bool _console;
+    private readonly string _fileName;
     private string? _currentDate;
     private string? _currentPath;
 
-    public ServerLog(string directory, bool console = true)
+    /// <param name="fileName">The daily file's name before the date: <c>server</c>, or <c>web-bridge</c> in the desktop Host's logs.</param>
+    public ServerLog(string directory, bool console = true, string fileName = "server")
     {
         _directory = directory;
         _console = console;
+        _fileName = fileName;
         Directory.CreateDirectory(_directory);
     }
 
@@ -33,7 +36,7 @@ public sealed class ServerLog : IHostLog
 
     private void Write(string level, string message)
     {
-        var text = UrlRedactor.RedactText(Secrets?.Mask(message) ?? message);
+        var text = OneLine(UrlRedactor.RedactText(Secrets?.Mask(message) ?? message));
         var now = DateTimeOffset.Now;
         var line = $"{now:O} [{level}] {text}";
         lock (_gate)
@@ -56,7 +59,7 @@ public sealed class ServerLog : IHostLog
                 if (_currentDate != date || _currentPath is null)
                 {
                     _currentDate = date;
-                    _currentPath = Path.Combine(_directory, $"server-{date}.log");
+                    _currentPath = Path.Combine(_directory, $"{_fileName}-{date}.log");
                 }
 
                 File.AppendAllText(_currentPath, line + Environment.NewLine, new UTF8Encoding(false));
@@ -66,5 +69,25 @@ public sealed class ServerLog : IHostLog
                 // Logging must never take down the server.
             }
         }
+    }
+
+    /// <summary>
+    /// One message is one line: line breaks and other control characters are written as escapes (<c>\n</c>,
+    /// <c>\u001b</c>), so text a client chose (a message type, a name) can't add a line that looks like the server's
+    /// own, such as a sign-in that never happened. Tabs stay.
+    /// </summary>
+    internal static string OneLine(string text)
+    {
+        if (!text.Any(c => char.IsControl(c) && c != '\t')) return text;
+        var line = new StringBuilder(text.Length + 16);
+        foreach (var c in text)
+        {
+            if (c == '\t' || !char.IsControl(c)) line.Append(c);
+            else if (c == '\n') line.Append("\\n");
+            else if (c == '\r') line.Append("\\r");
+            else line.Append("\\u").Append(((int)c).ToString("x4"));
+        }
+
+        return line.ToString();
     }
 }

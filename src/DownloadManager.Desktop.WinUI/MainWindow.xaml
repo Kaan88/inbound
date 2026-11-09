@@ -66,6 +66,8 @@
                 <MenuFlyoutItem x:Name="FileRedownloadItem" Text="Redownload" AccessKey="R" Click="MenuRedownload_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem x:Name="FileDeleteItem" Text="Delete…" AccessKey="E" KeyboardAcceleratorTextOverride="Delete" Click="MenuDelete_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Servers…" AccessKey="V" Click="MenuServers_Click" />
             </MenuBarItem>
 
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
@@ -499,17 +501,26 @@
 
         <Border Grid.Row="5" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0"
                 Height="23">
-            <Grid Padding="8,0" ColumnSpacing="12">
+            <Grid Padding="2,0,8,0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                <!-- Which Host the window shows: This PC or a saved server (design D9, section 5). -->
+                <DropDownButton x:Name="ServerSwitcher" Content="This PC" FontSize="11" Padding="6,0" MinHeight="0" Height="21"
+                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center"
+                                AutomationProperties.Name="Show downloads of" ToolTipService.ToolTip="Show the downloads of this PC or of another server">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout x:Name="ServerSwitcherMenu" Placement="TopEdgeAlignedLeft" />
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <TextBlock x:Name="StatusText" Grid.Column="1" Text="Starting…" FontSize="11" Foreground="{ThemeResource InboundSecondaryTextBrush}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <!-- Passing messages are announced here. StatusText changes on its own as counts move, so it isn't a live region. -->
-                <TextBlock x:Name="StatusAnnouncer" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
+                <TextBlock x:Name="StatusAnnouncer" Grid.Column="1" Width="0" Height="0" Opacity="0" IsHitTestVisible="False"
                            AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
-                <TextBlock x:Name="ConnectionText" Grid.Column="1" Text="Connecting…" FontSize="11"
+                <TextBlock x:Name="ConnectionText" Grid.Column="2" Text="Connecting…" FontSize="11"
                             Foreground="{ThemeResource InboundSecondaryTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Border>

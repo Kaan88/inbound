@@ -38,6 +38,467 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task ShowingAnotherServerEndsThisHostsConnectionAndStartsTheStateOver()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady && client.State.RemoteSupported);
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        ui.Flush();
+        Assert.False(client.State.RemoteSupported);
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        // The server's socket sent no snapshot, and the client didn't wait for one: it is ready, and talks to the server.
+        Assert.All(here.Connections, pipe => Assert.True(pipe.Disposed));
+        Assert.False(client.State.RemoteSupported);
+        Assert.NotEmpty(there.Connections);
+        Assert.False(there.Connections[0].Disposed);
+    }
+
+    [Fact]
+    public async Task OnlyAnotherServerWhoseHelloListsUploadsIsOfferedTheUploads()
+    {
+        // This PC's Host reads this PC's files by path, whatever its hello says.
+        var here = new FakeHost { Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var offering = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var older = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.False(client.State.UploadsOffered);
+
+        await client.RetargetAsync(offering.Connector, offering.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady && client.State.UploadsOffered);
+
+        await client.RetargetAsync(older.Connector, older.Connector, remote: true);
+        ui.Flush();
+        Assert.False(client.State.UploadsOffered);
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.False(client.State.UploadsOffered);
+    }
+
+    [Fact]
+    public async Task AContainerFileThatCantBeSentToAServerIsRefusedHereWithoutAskingAnything()
+    {
+        var here = new FakeHost();
+        // A documentation address (RFC 5737): nothing listens there, and nothing is sent to it.
+        var server = ServerTarget.Remote("s1", "Home", new Uri("http://192.0.2.10:8080/"), "ibt_" + new string('a', 43), plainHttpConfirmed: true);
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true, server);
+
+        Assert.Equal("Copy the container file to this PC first; a file on a network share isn't sent from here.",
+            (await client.PreviewContainerAsync(@"\\nas\share\links.dlc")).Error);
+        Assert.Equal("The container file needs its full path on this PC.", (await client.PreviewContainerAsync("links.dlc")).Error);
+        var missing = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.rsdf");
+        Assert.Equal("That container file isn't on this PC.", (await client.PreviewContainerAsync(missing)).Error);
+        var send = await client.SendContainerToJdAsync(missing);
+        Assert.Equal("failed", send.Status);
+        Assert.Equal("That container file isn't on this PC.", send.Message);
+        Assert.Equal(0, there.Received(MessageTypes.RemoteContainerPreview) + there.Received(MessageTypes.RemoteContainerSendToJd));
+    }
+
+    // ---- container uploads to another server: retry and a reference that has gone ----------------------
+
+    private const string TokenForTests = "ibt_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    /// <summary>Nothing listens on port 1 of this PC, so an upload there is refused at once.</summary>
+    private static ServerTarget NobodyThere() => ServerTarget.Remote("s1", "Home", new Uri("http://127.0.0.1:1/"), TokenForTests, plainHttpConfirmed: true);
+
+    private static string WriteContainer()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "test-work");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"invented-{Guid.NewGuid():N}.rsdf");
+        File.WriteAllBytes(path, [1, 2, 3, 4]);
+        return path;
+    }
+
+    private static string KeyOf(string path)
+    {
+        var info = new FileInfo(path);
+        return RemoteClient.ContainerUploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task AnUploadThatCouldNotReachTheServerOffersToReadTheFileAgain()
+    {
+        var path = WriteContainer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+
+            var reply = await client.ReadContainerAsync(path).WaitAsync(Patience);
+
+            Assert.Equal("Couldn't reach Home.", reply.Result.Error);
+            Assert.True(reply.CanReadAgain);
+            Assert.True(RemoteText.ContainerRead(reply.Result, "invented.rsdf", canReadAgain: reply.CanReadAgain).CanReadAgain);
+            Assert.False(RemoteText.ContainerRead(reply.Result, "invented.rsdf").CanReadAgain);
+            Assert.Equal(0, there.Received(MessageTypes.RemoteContainerPreview));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AFileThatCantBeReadHereDoesNotOfferToReadItAgain()
+    {
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        await using var client = new FakeHost().NewClient(new UiQueue());
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+
+        var missing = await client.ReadContainerAsync(Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.rsdf")).WaitAsync(Patience);
+        var network = await client.ReadContainerAsync(@"\\nas\share\links.dlc").WaitAsync(Patience);
+
+        Assert.False(missing.CanReadAgain);
+        Assert.False(network.CanReadAgain);
+    }
+
+    [Fact]
+    public void OnlyAnUploadThatTimedOutOrCouldNotReachTheServerCanBeTriedAgain()
+    {
+        var target = ServerTarget.Remote("s1", "Home", new Uri("http://127.0.0.1:1/"), TokenForTests, plainHttpConfirmed: true);
+
+        Assert.True(RemoteClient.UploadCanBeRetried("Couldn't reach Home.", target));
+        Assert.True(RemoteClient.UploadCanBeRetried("Home didn't take the container file in time. Try again.", target));
+        Assert.False(RemoteClient.UploadCanBeRetried("Home doesn't take container files from this app. Import it in the server's web UI instead.", target));
+        Assert.False(RemoteClient.UploadCanBeRetried("Home couldn't take the file.", target));
+        Assert.False(RemoteClient.UploadCanBeRetried("That container file couldn't be read on this PC.", target));
+        Assert.False(RemoteClient.UploadCanBeRetried("Couldn't reach Elsewhere.", target));
+        Assert.False(RemoteClient.UploadCanBeRetried(null, target));
+    }
+
+    [Fact]
+    public async Task AKeptReferenceIsSentAsItIsAndKeptWhileTheServerStillHasTheFile()
+    {
+        var path = WriteContainer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            there.Answer(MessageTypes.RemoteContainerPreview, MessageTypes.RemoteContainerPreviewResult, new RemoteContainerPreviewResult { Ok = true });
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+            client.RememberUpload(KeyOf(path), "upload:kept");
+
+            var reply = await client.ReadContainerAsync(path).WaitAsync(Patience);
+
+            Assert.True(reply.Result.Ok);
+            Assert.Equal("upload:kept", there.LastPayload(MessageTypes.RemoteContainerPreview)!.Value.GetProperty("path").GetString());
+            Assert.True(client.HasUpload(KeyOf(path)));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AReferenceTheServerSaysIsGoneIsDroppedAndTheFileIsUploadedOnceMore()
+    {
+        var path = WriteContainer();
+        using var server = new UploadServer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            var paths = new List<string?>();
+            there.AnswerRaw(MessageTypes.RemoteContainerPreview, request =>
+            {
+                paths.Add(request.Payload!.Value.GetProperty("path").GetString());
+                return IpcMessage.Create(MessageTypes.RemoteContainerPreviewResult,
+                    paths.Count == 1 ? new RemoteContainerPreviewResult { Error = UploadReferenceText.Gone } : new RemoteContainerPreviewResult { Ok = true },
+                    request.Id);
+            });
+            var target = ServerTarget.Remote("s1", "Home", server.Address, TokenForTests, plainHttpConfirmed: true);
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, target);
+            client.RememberUpload(KeyOf(path), "upload:stale");
+
+            var reply = await client.ReadContainerAsync(path).WaitAsync(Patience);
+
+            Assert.True(reply.Result.Ok);
+            Assert.Equal(["upload:stale", UploadServer.Reference], paths);
+            Assert.Equal(1, server.Uploads);
+            Assert.True(client.HasUpload(KeyOf(path)));
+
+            // The new reference is the one kept from now on.
+            await client.ReadContainerAsync(path).WaitAsync(Patience);
+            Assert.Equal(UploadServer.Reference, paths[^1]);
+            Assert.Equal(1, server.Uploads);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AGoneReferenceIsDroppedEvenWhenUploadingAgainFails()
+    {
+        var path = WriteContainer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            there.Answer(MessageTypes.RemoteContainerPreview, MessageTypes.RemoteContainerPreviewResult, new RemoteContainerPreviewResult { Error = UploadReferenceText.Gone });
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, NobodyThere());
+            client.RememberUpload(KeyOf(path), "upload:stale");
+
+            var reply = await client.ReadContainerAsync(path).WaitAsync(Patience);
+
+            Assert.Equal(1, there.Received(MessageTypes.RemoteContainerPreview));
+            Assert.False(client.HasUpload(KeyOf(path)));
+            Assert.Equal("Couldn't reach Home.", reply.Result.Error);
+            Assert.True(reply.CanReadAgain);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AFreshUploadTheServerSaysIsGoneIsNotUploadedAgainInALoop()
+    {
+        var path = WriteContainer();
+        using var server = new UploadServer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            there.Answer(MessageTypes.RemoteContainerPreview, MessageTypes.RemoteContainerPreviewResult, new RemoteContainerPreviewResult { Error = UploadReferenceText.Gone });
+            var target = ServerTarget.Remote("s1", "Home", server.Address, TokenForTests, plainHttpConfirmed: true);
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, target);
+
+            var reply = await client.ReadContainerAsync(path).WaitAsync(Patience);
+
+            Assert.Equal(UploadReferenceText.Gone, reply.Result.Error);
+            Assert.Equal(1, server.Uploads);
+            Assert.Equal(1, there.Received(MessageTypes.RemoteContainerPreview));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task AReferenceTheServerSaysIsGoneIsUploadedAgainForTheHandOverToJdToo()
+    {
+        var path = WriteContainer();
+        using var server = new UploadServer();
+        try
+        {
+            var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+            var paths = new List<string?>();
+            there.AnswerRaw(MessageTypes.RemoteContainerSendToJd, request =>
+            {
+                paths.Add(request.Payload!.Value.GetProperty("path").GetString());
+                return IpcMessage.Create(MessageTypes.RemoteContainerSendResult,
+                    paths.Count == 1
+                        ? new RemoteContainerSendResult { Status = "failed", Message = UploadReferenceText.Gone }
+                        : new RemoteContainerSendResult { Ok = true, Status = "sent", Message = "Sent to JDownloader." },
+                    request.Id);
+            });
+            var target = ServerTarget.Remote("s1", "Home", server.Address, TokenForTests, plainHttpConfirmed: true);
+            await using var client = new FakeHost().NewClient(new UiQueue());
+            await client.RetargetAsync(there.Connector, there.Connector, remote: true, target);
+            client.RememberUpload(KeyOf(path), "upload:stale");
+
+            var sent = await client.SendContainerToJdAsync(path).WaitAsync(Patience);
+
+            Assert.True(sent.Ok);
+            Assert.Equal(["upload:stale", UploadServer.Reference], paths);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>A stand-in server on this PC that takes a container upload and answers with one reference.</summary>
+    private sealed class UploadServer : IDisposable
+    {
+        public const string Reference = "upload:00000000000000000000000000000001";
+        private readonly System.Net.Sockets.TcpListener _listener = new(System.Net.IPAddress.Loopback, 0);
+        private int _uploads;
+
+        public UploadServer()
+        {
+            _listener.Start();
+            Address = new Uri($"http://127.0.0.1:{((System.Net.IPEndPoint)_listener.LocalEndpoint).Port}/");
+            _ = Task.Run(ServeAsync);
+        }
+
+        public Uri Address { get; }
+
+        public int Uploads => Volatile.Read(ref _uploads);
+
+        private async Task ServeAsync()
+        {
+            while (true)
+            {
+                System.Net.Sockets.TcpClient client;
+                try
+                {
+                    client = await _listener.AcceptTcpClientAsync();
+                }
+                catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException)
+                {
+                    return;
+                }
+
+                _ = Task.Run(() => AnswerAsync(client));
+            }
+        }
+
+        private async Task AnswerAsync(System.Net.Sockets.TcpClient client)
+        {
+            using (client)
+            {
+                try
+                {
+                    var stream = client.GetStream();
+                    // Reads the request's head and its whole body, so closing afterwards doesn't reset the connection.
+                    var head = new System.Text.StringBuilder();
+                    var one = new byte[1];
+                    while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal) && await stream.ReadAsync(one) == 1) head.Append((char)one[0]);
+                    var length = 0;
+                    foreach (var line in head.ToString().Split("\r\n"))
+                    {
+                        if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) length = int.Parse(line[15..].Trim());
+                    }
+
+                    var body = new byte[length];
+                    await stream.ReadExactlyAsync(body);
+                    Interlocked.Increment(ref _uploads);
+                    var json = System.Text.Encoding.UTF8.GetBytes($"{{\"upload\":\"{Reference}\"}}");
+                    var reply = System.Text.Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {json.Length}\r\nConnection: close\r\n\r\n");
+                    await stream.WriteAsync(reply);
+                    await stream.WriteAsync(json);
+                }
+                catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException or ObjectDisposedException)
+                {
+                    // The caller gave up; there is nobody to answer.
+                }
+            }
+        }
+
+        public void Dispose() => _listener.Stop();
+    }
+
+    [Fact]
+    public async Task AHiddenWindowClosesAServersEventConnectionButNotThisHosts()
+    {
+        var here = new FakeHost();
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+
+        await client.SetEventsWantedAsync(false);
+        Assert.False(here.Connections[0].Disposed);
+        await client.SetEventsWantedAsync(true);
+
+        var there = new FakeHost { SnapshotWithHello = false };
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await client.SetEventsWantedAsync(false);
+        Assert.True(there.Connections[0].Disposed);
+
+        await client.SetEventsWantedAsync(true);
+        await there.UntilAsync(() => there.Connections.Count == 2);
+    }
+
+    [Fact]
+    public async Task AServerThatRefusesTheTokenIsNotTriedAgainUntilRetargetedAndCallsSayWhy()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { Fail = () => new RemotePairingEndedException() };
+        var ui = new UiQueue();
+        // With waits this short, a loop that kept trying would try dozens of times below.
+        await using var client = here.NewClient(ui, remoteBackoff: new ReconnectBackoff(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10)));
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await Task.Delay(300);
+        Assert.Equal(1, there.Attempts);
+
+        var list = await client.ListAsync();
+        Assert.Contains("Pair it again", list.Error);
+        var items = await client.GetItemsAsync(new RemoteItemRequest { Provider = "torbox", Kind = "torrents" });
+        Assert.Contains("Pair it again", items.Error);
+        await client.SetEventsWantedAsync(false);
+        await client.SetEventsWantedAsync(true);
+        await Task.Delay(100);
+        Assert.Equal(1, there.Attempts);
+
+        // Paired again: the new target is tried at once.
+        there.Fail = null;
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await there.UntilAsync(() => there.Connections.Count == 1);
+        await ui.UntilAsync(() => client.State.IsConnected);
+    }
+
+    [Fact]
+    public async Task AServerThatIsDownIsTriedLessAndLessOften()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { Fail = () => new IOException("down") };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui, remoteBackoff: new ReconnectBackoff(TimeSpan.FromMilliseconds(50), TimeSpan.FromSeconds(5)));
+
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await Task.Delay(500);
+
+        // 0, 50, 150, 350 ms (then 750): the fixed 10 ms wait this client has for this PC would have made about fifty.
+        Assert.InRange(there.Attempts, 2, 6);
+    }
+
+    [Fact]
+    public async Task AHiddenWindowsCallToAServerGoesAsOneRequestAndLeavesTheEventSocketClosed()
+    {
+        var here = new FakeHost();
+        var there = new FakeHost { SnapshotWithHello = false };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady);
+        await client.SetEventsWantedAsync(false);
+        var before = there.Connections.Count;
+
+        var list = await client.ListAsync();
+
+        Assert.True(list.Ok, list.Error);
+        Assert.Equal(before + 1, there.Connections.Count);
+        Assert.All(there.Connections, pipe => Assert.True(pipe.Disposed));
+    }
+
+    [Fact]
+    public void ATorrentFileForAServerIsReadOnlyFromAFullLocalPathAndUploadedAgainWhenItChanges()
+    {
+        Assert.Contains("network share", RemoteClient.TorrentPathProblem(@"\\nas\share\a.torrent"));
+        Assert.Contains("network share", RemoteClient.TorrentPathProblem("//nas/share/a.torrent"));
+        Assert.Contains("full path", RemoteClient.TorrentPathProblem("a.torrent"));
+        Assert.Null(RemoteClient.TorrentPathProblem(@"C:\Downloads\a.torrent"));
+
+        var written = new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Utc);
+        var key = RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written);
+        Assert.Equal(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written));
+        Assert.NotEqual(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1201, written));
+        Assert.NotEqual(key, RemoteClient.UploadKey(@"C:\Downloads\a.torrent", 1200, written.AddSeconds(1)));
+    }
+
+    [Fact]
     public void ATimeoutAfterTheHostWasReachedIsNotReportedAsAHostThatIsDown()
     {
         Assert.Equal(RemoteText.HostTooSlow, RemoteClient.DescribeFailure(new TimeoutException(), reachedHost: true));
@@ -994,13 +1455,26 @@ public sealed class RemoteClientTests
         public bool KnowsArchives { get; set; } = true;
         public bool Refuse { get; set; }
         public bool Busy { get; set; }
+
+        /// <summary>Each connect throws this, as a server that refuses the token or is down.</summary>
+        public Func<Exception>? Fail { get; set; }
+
+        private int _attempts;
+
+        /// <summary>Every connect asked for, including the ones that failed.</summary>
+        public int Attempts => Volatile.Read(ref _attempts);
+
+        /// <summary>False: as another server's socket that asked for no snapshot, the hello comes alone.</summary>
+        public bool SnapshotWithHello { get; set; } = true;
+
+        public Func<TimeSpan, CancellationToken, Task<IRemotePipe>> Connector => ConnectAsync;
         public List<FakePipe> Connections { get; } = [];
         public RemoteAccountDto Account { get; } = new() { Provider = "torbox", ProviderName = "TorBox", Capabilities = ["account"] };
         public RemoteJobDto Job { get; set; } = new() { Id = Guid.NewGuid(), Provider = "torbox", State = "waiting", Status = "Waiting for TorBox" };
         public ArchiveSetDto Set { get; } = new() { Id = Guid.NewGuid(), Name = "archive", State = "downloaded" };
 
-        public RemoteClient NewClient(UiQueue ui, TimeSpan? quickTimeout = null, TimeSpan? slowTimeout = null)
-            => new(ui.Post, ConnectAsync, TimeSpan.FromMilliseconds(10), quickTimeout, slowTimeout);
+        public RemoteClient NewClient(UiQueue ui, TimeSpan? quickTimeout = null, TimeSpan? slowTimeout = null, ReconnectBackoff? remoteBackoff = null)
+            => new(ui.Post, ConnectAsync, TimeSpan.FromMilliseconds(10), quickTimeout, slowTimeout, remoteBackoff);
 
         public int Received(string type)
         {
@@ -1045,12 +1519,14 @@ public sealed class RemoteClientTests
 
         private Task<IRemotePipe> ConnectAsync(TimeSpan timeout, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _attempts);
+            if (Fail?.Invoke() is { } failure) throw failure;
             if (Refuse) throw new TimeoutException();
             if (Busy) throw new HostPipeBusyException();
             var pipe = new FakePipe(this);
             lock (_sync) Connections.Add(pipe);
             pipe.Push(IpcMessage.Create(MessageTypes.ServerHello, new HostHelloDto { ProtocolVersion = Protocol.Version, Capabilities = Capabilities }));
-            pipe.Push(IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
+            if (SnapshotWithHello) pipe.Push(IpcMessage.Create(MessageTypes.JobsSnapshot, new SnapshotDto()));
             return Task.FromResult<IRemotePipe>(pipe);
         }
 
@@ -1107,6 +1583,8 @@ public sealed class RemoteClientTests
         private readonly Channel<IpcMessage?> _toClient = Channel.CreateUnbounded<IpcMessage?>();
 
         public bool Disposed { get; private set; }
+
+        public bool SnapshotFollowsHello => host.SnapshotWithHello;
 
         public Exception? FailNextSend { get; set; }
 

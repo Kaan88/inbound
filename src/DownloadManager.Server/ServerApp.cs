@@ -26,7 +26,8 @@ namespace DownloadManager.Server;
 /// provider) behind HTTP instead of a named pipe, without the Windows parts (tray, sounds, clipboard, sleep prevention,
 /// shutdown actions, start at sign-in, native-host registration, updater).
 /// <list type="bullet">
-/// <item><c>GET /api/ws</c>: WebSocket, one envelope per text message; hello and snapshot, then events.</item>
+/// <item><c>GET /api/ws</c>: WebSocket, one envelope per text message; hello and snapshot, then events. With
+/// <c>?hello=1</c> the client's first message is <c>client.hello</c>, as on the desktop's hello pipe.</item>
 /// <item><c>POST /api/ipc</c>: one request envelope, one reply.</item>
 /// <item><c>GET /health</c>: liveness, no sign-in.</item>
 /// <item>Everything else: the static web UI from <c>wwwroot</c>.</item>
@@ -208,7 +209,7 @@ public sealed class ServerApp : IAsyncDisposable
         dispatcher.Start();
 
         var auth = await ServerAuth.CreateAsync(options, paths.Root, log, cancellationToken).ConfigureAwait(false);
-        var web = BuildWeb(options, dispatcher, log, auth, uploads);
+        var web = WebFront.Build(options, new DispatcherBackend(dispatcher, log), log, auth, uploads);
         var app = new ServerApp(web, log, service, dispatcher, archives, remoteJobs, remoteCommands, remote, engine, paths, dataLock) { Auth = auth };
         try
         {
@@ -246,178 +247,6 @@ public sealed class ServerApp : IAsyncDisposable
         settings.ClipboardMonitoring = false;
         settings.LaunchAtStartup = false;
         await store.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static WebApplication BuildWeb(ServerOptions options, HostCommandDispatcher dispatcher, ServerLog log, ServerAuth auth, TorrentUploads uploads)
-    {
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
-        {
-            ContentRootPath = AppContext.BaseDirectory,
-            WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot"),
-        });
-        builder.WebHost.UseUrls([.. options.Urls]);
-        builder.WebHost.ConfigureKestrel(kestrel =>
-        {
-            kestrel.Limits.MaxRequestBodySize = Protocol.MaxFrameBytes;
-            // The builder reads a "Kestrel" section from every configuration source, unprefixed environment variables
-            // included, and Kestrel:Endpoints would replace the addresses above: Kestrel__Endpoints__X__Url=http://0.0.0.0:80
-            // (a common compose line) would open the port without the loopback rule seeing it. Only the server's own
-            // variables say where it listens.
-            kestrel.Configure(new ConfigurationBuilder().Build(), reloadOnChange: false);
-        });
-        // The server's own log carries what matters; ASP.NET's request logging would repeat addresses it can't redact.
-        builder.Logging.ClearProviders();
-        builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Warning);
-
-        var web = builder.Build();
-        // The address the connection really came from, before a proxy's header replaces it: the setup code's
-        // "this machine" rule goes by it (ServerAuth.NeedsSetupCode).
-        web.Use((context, next) =>
-        {
-            context.Items[ServerAuth.PeerItem] = context.Connection.RemoteIpAddress;
-            return next();
-        });
-        if (options.TrustProxy)
-        {
-            // Only from the listed proxies: the client's address (for the sign-in waits) and whether it came over HTTPS
-            // (for the cookie's Secure flag and the origin check). The nearest hop only. A client that reaches the port
-            // directly is not listed, so what it puts in these headers is ignored.
-            var forwarded = new ForwardedHeadersOptions
-            {
-                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-                ForwardLimit = 1,
-            };
-            forwarded.KnownIPNetworks.Clear();
-            forwarded.KnownProxies.Clear();
-            foreach (var network in options.TrustedProxies) forwarded.KnownIPNetworks.Add(network);
-            web.UseForwardedHeaders(forwarded);
-        }
-
-        web.Use(SecurityHeaders.Middleware);
-        web.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
-        web.Use(ExtensionCors.Middleware);
-        web.Use(OriginCheck.Middleware(options.AllowedHostNames));
-        web.Use(auth.Middleware);
-
-        var stopping = web.Lifetime.ApplicationStopping;
-        web.MapGet("/health", () => Results.Json(new { status = "ok", version = Protocol.HostVersion }));
-        auth.Map(web);
-        uploads.Map(web);
-
-        web.Map("/api/ws", async context =>
-        {
-            if (!context.WebSockets.IsWebSocketRequest)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await context.Response.WriteAsync("A WebSocket upgrade is expected here.").ConfigureAwait(false);
-                return;
-            }
-
-            // Signing out, a changed password or the session's absolute end closes the socket too.
-            var session = ServerAuth.SessionOf(context);
-            using var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-            using var lifetime = session is null
-                ? CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping)
-                : CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping, session.Ended);
-            if (session is not null)
-            {
-                var left = auth.Sessions.AbsoluteEnd(session) - options.Time.GetUtcNow();
-                lifetime.CancelAfter(left > TimeSpan.Zero ? left : TimeSpan.Zero);
-                session.SocketOpened();
-            }
-
-            // An open socket is the session's activity even when the page sends nothing (it only listens to progress), so
-            // its last-seen time is refreshed on the sessions file's own beat; a kill then loses at most that much.
-            var seen = session is null ? Task.CompletedTask : KeepSeenAsync(auth.Sessions, session, options.Time, lifetime.Token);
-            try
-            {
-                await WebSocketTransport.RunAsync(socket, dispatcher, log, lifetime.Token,
-                    session is null ? null : () => auth.Sessions.Touch(session)).ConfigureAwait(false);
-            }
-            finally
-            {
-                lifetime.Cancel();
-                await seen.ConfigureAwait(false);
-                if (session is not null)
-                {
-                    session.SocketClosed();
-                    auth.Sessions.Touch(session);
-                }
-            }
-        });
-
-        web.MapPost("/api/ipc", async context =>
-        {
-            IpcMessage? request;
-            try
-            {
-                request = await JsonSerializer.DeserializeAsync<IpcMessage>(context.Request.Body, IpcJson.Options, context.RequestAborted).ConfigureAwait(false);
-            }
-            catch (JsonException)
-            {
-                request = null;
-            }
-
-            if (request is null || string.IsNullOrWhiteSpace(request.Type) || string.IsNullOrWhiteSpace(request.Id))
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await context.Response.WriteAsJsonAsync(new { error = "One IPC envelope with v, type and id is expected." }).ConfigureAwait(false);
-                return;
-            }
-
-            // A paired extension's token opens its role only, both ways (NativeBridgePolicy.ServerExtension).
-            var paired = ServerAuth.TokenOf(context) is not null;
-            if (paired && !NativeBridgePolicy.AllowFrom(BridgeRole.ServerExtension, request))
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await WriteEnvelopeAsync(context, IpcMessage.Create(MessageTypes.HostActionResult,
-                    new HostActionResult { Ok = false, Message = $"A paired browser can't send '{request.Type}'." }, request.Id), stopping).ConfigureAwait(false);
-                return;
-            }
-
-            var session = new OneShotSession(request.Id);
-            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);
-            if (!dispatcher.RejectIfIncompatible(session, request))
-                await dispatcher.DispatchAsync(session, request, lifetime.Token).ConfigureAwait(false);
-
-            var reply = await session.Reply.WaitAsync(TimeSpan.FromMinutes(5), lifetime.Token).ConfigureAwait(false);
-            if (paired)
-            {
-                reply = NativeBridgePolicy.To(BridgeRole.ServerExtension, reply) ??
-                        IpcMessage.Create(MessageTypes.HostActionResult,
-                            new HostActionResult { Ok = false, Message = "The answer isn't one a paired browser may see." }, request.Id);
-            }
-
-            await WriteEnvelopeAsync(context, reply, lifetime.Token).ConfigureAwait(false);
-        });
-
-        if (Directory.Exists(builder.Environment.WebRootPath))
-        {
-            web.UseDefaultFiles();
-            web.UseStaticFiles(new StaticFileOptions { FileProvider = new PhysicalFileProvider(builder.Environment.WebRootPath) });
-        }
-
-        return web;
-    }
-
-    /// <summary>Touches the session every <see cref="SessionStore.SaveEvery"/> while its socket is open (one wake-up per beat).</summary>
-    private static async Task KeepSeenAsync(SessionStore sessions, Session session, TimeProvider time, CancellationToken cancellationToken)
-    {
-        using var timer = new PeriodicTimer(sessions.SaveEvery, time);
-        try
-        {
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) sessions.Touch(session);
-        }
-        catch (OperationCanceledException)
-        {
-            // The socket closed.
-        }
-    }
-
-    private static async Task WriteEnvelopeAsync(HttpContext context, IpcMessage message, CancellationToken cancellationToken)
-    {
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, message, IpcJson.Options, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Stops listening first, so no client sees a half-stopped service, then the rest in the Host's order.</summary>
@@ -488,9 +317,6 @@ public sealed class ServerApp : IAsyncDisposable
     }
 }
 
-/// <summary>A configuration the server refuses to start with. The message says what to change.</summary>
-public sealed class ServerStartException(string message) : Exception(message);
-
 /// <summary>
 /// Refuses a request to <c>/api/</c> that a web page on another site made through the user's browser: a WebSocket
 /// upgrade or a POST whose <c>Origin</c> isn't this server's own. A request without an <c>Origin</c> (curl, a test)
@@ -504,15 +330,30 @@ public sealed class ServerStartException(string message) : Exception(message);
 /// The browser extension is the one other origin let through, and only where it has its own credential
 /// (<see cref="ExtensionCors.Admits"/>): <c>POST /api/ipc</c> and <c>DELETE /api/pair/self</c> with a bearer token, and
 /// <c>/api/pair</c> with a code.
+/// <para>
+/// An app that isn't a browser (the desktop app managing a server, design D9) may use any name the user typed,
+/// such as <c>http://homeserver:8080</c>, when it sends no <c>Origin</c> and either a valid token or a pairing request
+/// (<see cref="CarriesOwnCredential"/>). A rebinding page gains nothing from that: the token paths are a POST, a
+/// DELETE and a WebSocket, and a browser always sends <c>Origin</c> for those, its own page's included; a page has no
+/// valid token to send anyway; and <c>POST /api/pair</c> without a code or password opens nothing (it is also a POST,
+/// so a page sends <c>Origin</c> there too). Any request with an <c>Origin</c> still meets both rules above.
+/// </para>
 /// </summary>
 public static class OriginCheck
 {
     public const string HostsVariable = "DOWNLOADMANAGER_HOSTS";
 
-    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames) => async (context, next) =>
+    /// <summary>Where a refused name is added, said in the refusal: this server's environment variable.</summary>
+    public const string HostsSetting = "add the name to " + HostsVariable;
+
+    /// <param name="hasValidToken">Whether the request carries a paired app's valid token on a token path (<see cref="ServerAuth.HasValidToken"/>).</param>
+    /// <param name="addName">How the refusal says to add a name (<see cref="HostsSetting"/>; the web bridge names the app's Options).</param>
+    public static Func<HttpContext, Func<Task>, Task> Middleware(IReadOnlyCollection<string> allowedNames, Func<HttpContext, bool> hasValidToken,
+        string addName = HostsSetting) => async (context, next) =>
     {
         if (context.Request.Path.StartsWithSegments("/api") && !ExtensionCors.Admits(context.Request) &&
-            Refusal(context.Request, allowedNames) is { } refusal)
+            !CarriesOwnCredential(context, hasValidToken) &&
+            Refusal(context.Request, allowedNames, addName) is { } refusal)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync(refusal).ConfigureAwait(false);
@@ -522,11 +363,23 @@ public static class OriginCheck
         await next().ConfigureAwait(false);
     };
 
+    /// <summary>
+    /// No <c>Origin</c> (so not a browser's page, see above) and a credential of its own: a valid token, or
+    /// <c>POST /api/pair</c>, where the code or password is the credential and wrong ones make the address wait.
+    /// </summary>
+    internal static bool CarriesOwnCredential(HttpContext context, Func<HttpContext, bool> hasValidToken)
+    {
+        var request = context.Request;
+        if (!string.IsNullOrEmpty(request.Headers.Origin.ToString())) return false;
+        if (HttpMethods.IsPost(request.Method) && request.Path.Equals("/api/pair", StringComparison.OrdinalIgnoreCase)) return true;
+        return hasValidToken(context);
+    }
+
     public static List<string> ParseHosts(string? value) =>
         (value ?? string.Empty).Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
     /// <summary>Why the request is refused, or null.</summary>
-    public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames)
+    public static string? Refusal(HttpRequest request, IReadOnlyCollection<string> allowedNames, string addName = HostsSetting)
     {
         var origin = request.Headers.Origin.ToString();
         var hasOrigin = !string.IsNullOrEmpty(origin);
@@ -546,6 +399,6 @@ public static class OriginCheck
             string.Equals(name, "localhost", StringComparison.OrdinalIgnoreCase) ||
             allowedNames.Contains(name, StringComparer.OrdinalIgnoreCase))
             return null;
-        return $"This server isn't known by the name {name}. Use its IP address, or add the name to {HostsVariable}.";
+        return $"This server isn't known by the name {name}. Use its IP address, or {addName}.";
     }
 }

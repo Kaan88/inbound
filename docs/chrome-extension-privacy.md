@@ -111,7 +111,7 @@ address and a one-time code from the server's web UI. Until you do, nothing belo
   scripts on web pages cannot read it; in Firefox they can (the extension's own script never does). Unpair deletes it from the extension
   and sends the token to the server once more, only to ask it to remove this pairing, so the token stops
   working there too. If the server can't be reached, Settings says so: then remove the browser from the
-  web UI's Paired browsers list yourself.
+  web UI's Paired apps list yourself.
 - **What goes to the server:** for each download you send there (automatically, if you chose the server
   for automatic downloads, or by choosing Server in the folder window), the same details as for the
   desktop app, listed above, your cookies for that site included. The extension asks Chrome for access to

@@ -20,7 +20,7 @@ The extension needs the desktop app, which it reaches through a per-user native-
 
 - **Chrome:** install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/olhbcdbjdnfoiinllnlpandggadfabfm).
 - **Edge:** install the same Chrome Web Store listing.
-- **Firefox:** Firefox has its own build, on [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/inbound-download-manager/) once that page is public. It was checked in Firefox 159.
+- **Firefox:** Firefox has its own build, signed by Mozilla and distributed here rather than on Firefox Add-ons. Setup offers to add it to Firefox (Firefox asks you to confirm). It is also on each [release](https://github.com/Kaan88/inbound/releases/latest) as `inbound-bridge-<version>-firefox.xpi`: drag it onto a Firefox window. Firefox then updates it on its own. It was checked in Firefox 159.
 
 To load it from source, build it (see below), open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked** and select `extensions\chrome\dist`. The extension ID is pinned by the manifest key. For Firefox, run `npm run build:firefox` in `extensions\chrome`; it writes `extensions\chrome\dist-firefox`, which loads as a temporary add-on from `about:debugging`.
 

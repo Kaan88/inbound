@@ -2,7 +2,7 @@
 param(
     [string]$Source,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Inbound Download Manager"),
-    [string]$Version = "0.6.2",
+    [string]$Version = "0.6.3",
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$LaunchAtSignIn
@@ -122,13 +122,20 @@ Browser extension:
   4. Select: $extensionTarget
   5. Confirm the extension ID is $extensionId
 
-  Firefox: install Inbound Download Manager from Firefox Add-ons:
-    https://addons.mozilla.org/firefox/addon/inbound-download-manager/
+  Firefox: download inbound-bridge-<version>-firefox.xpi from the latest release,
+    https://github.com/Kaan88/inbound/releases/latest
+  and drag it onto a Firefox window. Firefox updates it after that.
 
 Native host registration (Chrome and Edge share one manifest; Firefox has its own):
   HKCU\Software\Google\Chrome\NativeMessagingHosts\com.kaank.downloadmanager
   HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.kaank.downloadmanager
   HKCU\Software\Mozilla\NativeMessagingHosts\com.kaank.downloadmanager
+
+Web UI (off by default):
+  Options > Web UI turns on a page you can open from a browser on this PC or on your home network.
+  Turning it on asks Windows once to allow it through the firewall; without that it works on this PC only.
+  Uninstall does not remove that firewall rule. To remove it, open Windows Security > Firewall & network
+  protection > Advanced settings > Inbound Rules and delete "Inbound Download Manager web UI".
 
 The host lives in the notification area. Closing the main window hides it;
 downloads and browser handoff continue. Use the tray Exit action to stop it.

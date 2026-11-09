@@ -16,7 +16,7 @@
 
   $effect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const first = panel?.querySelector<HTMLElement>('input, select, textarea, button:not([data-close])');
+    const first = panel?.querySelector<HTMLElement>('[data-autofocus]') ?? panel?.querySelector<HTMLElement>('input, select, textarea, button:not([data-close])');
     first?.focus();
     return () => previous?.focus?.();
   });

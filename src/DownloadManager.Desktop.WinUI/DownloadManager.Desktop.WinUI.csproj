@@ -41,6 +41,11 @@
     <Compile Include="..\DownloadManager.Core\Providers\ShownAddress.cs" Link="Providers\ShownAddress.cs" />
   </ItemGroup>
 
+  <!-- A saved server's token is sealed for this Windows user the way the Host seals site logins (design D9). -->
+  <ItemGroup>
+    <Compile Include="..\DownloadManager.Persistence\DpapiSecretProtector.cs" Link="Servers\DpapiSecretProtector.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="..\..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

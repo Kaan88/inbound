@@ -65,6 +65,13 @@ public sealed record RemoteAddRequest
     public bool ApprovedUncached { get; init; }
     /// <summary>Nobody asked for this yet, so it waits for the user's go-ahead before anything is sent or asked. See <see cref="RemoteJobRecord.HeldForApproval"/>.</summary>
     public bool HoldForApproval { get; init; }
+    /// <summary>
+    /// The folders this caller may have a .torrent file read from, when they are not the coordinator's own
+    /// (<see cref="RemoteJobCoordinator.Roots"/>): a browser on another device (D8). Null uses the coordinator's.
+    /// </summary>
+    public PathRoots? SourceRoots { get; init; }
+    /// <summary>As <see cref="SourceRoots"/>, for the destination (<see cref="RemoteJobCoordinator.DestinationRoots"/>).</summary>
+    public PathRoots? DestinationRoots { get; init; }
     public string? LinkPassword { get; init; }
     /// <summary>For the archives this brings. Never sent to the provider, and not the same thing as <see cref="LinkPassword"/>.</summary>
     public string? ArchivePassword { get; init; }
@@ -474,6 +481,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyAsync(string? text, CancellationToken cancellationToken = default)
     {
+        if (UploadGone(text) is { } gone) return new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = gone };
         text = Resolve(text);
         var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
         return first.Kind == RemoteInputKind.OrdinaryLink
@@ -490,6 +498,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         foreach (var given in inputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (UploadGone(given) is { } gone)
+            {
+                answers.Add(new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = gone });
+                continue;
+            }
+
             var input = Resolve(given);
             var first = RemoteInputClassifier.Classify(input, plain);
             if (first.Kind == RemoteInputKind.OrdinaryLink)
@@ -510,13 +524,17 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// which also says whether it is cached: one that isn't has no files to show until the provider has fetched it.
     /// That check is all that is sent, and when it can't be made, nothing is said about the cache.
     /// </summary>
-    public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default)
+    /// <param name="sourceRoots">Where this caller may have a .torrent file read from, when not <see cref="Roots"/>.</param>
+    public async Task<RemoteInputClassification> ClassifyWithFilesAsync(string? text, CancellationToken cancellationToken = default,
+        PathRoots? sourceRoots = null)
     {
-        text = Resolve(text);
+        var upload = ResolveUpload(text);
+        text = upload ?? text;
         var classified = await ClassifyAsync(text, cancellationToken).ConfigureAwait(false);
         if (classified.Kind == RemoteInputKind.TorrentFile)
         {
-            var read = await ReadTorrentFileAsync(text!.Trim(), cancellationToken).ConfigureAwait(false);
+            // An upload's reference can name only the upload folder's own file, so the caller's folders don't apply to it.
+            var read = await ReadTorrentFileAsync(text!.Trim(), upload is not null ? null : sourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
             return read.Bytes is null
                 ? new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = read.Error }
                 : RemoteInputClassifier.ClassifyTorrent(read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false), withFiles: true);
@@ -584,11 +602,11 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
             return new RemoteAddResult { Error = "The destination has to be a full path." };
         }
 
-        if (!string.IsNullOrEmpty(request.Destination) && DestinationRoots is { } destinationRoots &&
+        if (!string.IsNullOrEmpty(request.Destination) && (request.DestinationRoots ?? DestinationRoots) is { } destinationRoots &&
             destinationRoots.Allowed(request.Destination) is null)
         {
             // Checked here, before any provider call or quota is spent, and again for each file when it is added.
-            return new RemoteAddResult { Error = PathRoots.OutsideMessage };
+            return new RemoteAddResult { Error = destinationRoots.OutsideTextFor(request.Destination) };
         }
 
         if (request.StartMode is not ("startNow" or "queue" or "later"))
@@ -760,7 +778,10 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
-        if (Resolve(request.Input) is { } resolved && !ReferenceEquals(resolved, request.Input)) request = request with { Input = resolved };
+        if (UploadGone(request.Input) is { } gone) return (null, gone, null);
+        var upload = ResolveUpload(request.Input);
+        // An upload's reference names the coordinator's own file, so no roots apply to it, neither the caller's nor Roots.
+        if (upload is not null) request = request with { Input = upload, SourceRoots = null };
         if (request.ExistingItem is { } item)
         {
             if (_providers.Find(item.Provider) is not { } entry)
@@ -812,7 +833,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
                 }, null, classification.Kind);
 
             case RemoteInputKind.TorrentFile:
-                var read = await ReadTorrentFileAsync(request.Input!.Trim(), cancellationToken).ConfigureAwait(false);
+                // As in ClassifyWithFilesAsync: an upload's reference names nothing outside the upload folder.
+                var read = await ReadTorrentFileAsync(request.Input!.Trim(), upload is not null ? null : request.SourceRoots ?? Roots, cancellationToken).ConfigureAwait(false);
                 return read.Bytes is null
                     ? (null, read.Error, classification.Kind)
                     : BuildTorrentRecord(request, read.Bytes, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
@@ -856,19 +878,31 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     public PathRoots? DestinationRoots { get; set; }
 
     /// <summary>
-    /// On a server, turns a reference to a file a client uploaded (the server's own form, such as <c>upload:…</c>) into
-    /// that file's path, or gives null for anything else. The client then never learns where the server keeps it.
+    /// Turns a reference to a file a browser uploaded (<see cref="UploadFolder"/>, <c>upload:…</c>) into that file's path,
+    /// or gives null for anything else. The client then never learns where the Host keeps it. Set where uploads are
+    /// stored: the Docker server, and the Windows Host where its web bridge is installed. The hello's <c>uploads</c> follows it.
     /// </summary>
     public Func<string, string?>? ResolveReference { get; set; }
 
-    private string? Resolve(string? text) =>
-        text is not null && ResolveReference is { } resolve && resolve(text.Trim()) is { } path ? path : text;
+    private string? Resolve(string? text) => ResolveUpload(text) ?? text;
 
-    private async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, CancellationToken cancellationToken)
+    /// <summary>The uploaded file a reference names (<see cref="ResolveReference"/>), or null when the text isn't one.</summary>
+    public string? ResolveUpload(string? text) =>
+        text is not null && ResolveReference is { } resolve ? resolve(text.Trim()) : null;
+
+    /// <summary>
+    /// <see cref="UploadFolder.GoneText"/> for an upload's reference (<see cref="UploadFolder.IsReference"/>) that names
+    /// no file here (it was cleaned up, or never existed), so the caller hears that rather than a complaint about the
+    /// kind of file. Null otherwise, also for text that only starts like one, which is read as the text it is.
+    /// </summary>
+    public string? UploadGone(string? text) =>
+        ResolveReference is not null && UploadFolder.IsReference(text) && ResolveUpload(text) is null ? UploadFolder.GoneText : null;
+
+    private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, PathRoots? roots, CancellationToken cancellationToken)
     {
-        if (Roots is { } roots)
+        if (roots is not null)
         {
-            if (roots.Allowed(path) is not { } inside) return (null, "That .torrent file is outside the folders this server may use.");
+            if (roots.Allowed(path) is not { } inside) return (null, roots.OutsideFileText(".torrent file"));
             path = inside;
         }
 

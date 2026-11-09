@@ -89,6 +89,38 @@ Publish-Project (Join-Path $root "src\DownloadManager.Host\DownloadManager.Host.
 Publish-Project (Join-Path $root "src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj")
 Publish-Project (Join-Path $root "src\DownloadManager.Cli\DownloadManager.Cli.csproj")
 
+# The web UI bridge (DownloadManager.Server.exe, started by the Host when "Web UI" is on in Options). Its pages come
+# from webui\dist, which the Server project copies into wwwroot at publish time, so build them first. Same folder as
+# the other apps: every app publishes from the same SDK and runtime pack, so shared files are identical, and each exe
+# keeps its own runtimeconfig/deps (the Server's InvariantGlobalization applies to the Server alone).
+Push-Location (Join-Path $root "webui")
+try {
+    # Install when node_modules is missing or older than the lock file (npm ci records its install in .package-lock.json).
+    $installStamp = "node_modules\.package-lock.json"
+    if (-not (Test-Path $installStamp) -or (Get-Item "package-lock.json").LastWriteTimeUtc -gt (Get-Item $installStamp).LastWriteTimeUtc) {
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "Web UI dependency installation failed (npm ci)." }
+    }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Web UI build failed." }
+}
+finally {
+    Pop-Location
+}
+foreach ($page in @("index.html", "signin\index.html")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root "webui\dist\$page") -PathType Leaf)) {
+        throw "Web UI build did not produce webui\dist\$page"
+    }
+}
+# The bridge cannot be self-contained inside a framework-dependent folder: its runtime files (hostfxr.dll, coreclr.dll)
+# would make the other apps look for their framework next to themselves and refuse to start. A plain build therefore
+# needs the ASP.NET Core 10 runtime on the PC for the web UI; release builds pass -SelfContained and need nothing.
+if (-not $SelfContained) {
+    Write-Warning "Plain build: the web UI bridge needs the ASP.NET Core 10 runtime installed. Use -SelfContained for a build that runs anywhere."
+}
+# Workstation GC and no IIS web.config: the bridge runs beside the desktop app, not in a data centre or under IIS.
+Publish-Project (Join-Path $root "src\DownloadManager.Server\DownloadManager.Server.csproj") @("-p:ServerGarbageCollection=false", "-p:IsTransformWebConfigDisabled=true")
+
 # WinUI's incremental XAML resource generation can keep a stale .xbf after a
 # markup change, which makes the published app fail at startup with
 # "XAML parsing failed". Clean this project before publishing it.
@@ -174,6 +206,9 @@ $required = @(
     "app.ico",
     "DownloadManager.NativeHost.exe",
     "DownloadManager.Cli.exe",
+    "DownloadManager.Server.exe",
+    "wwwroot\index.html",
+    "wwwroot\signin\index.html",
     "tools\7-Zip\7z.exe",
     "tools\7-Zip\7z.dll",
     "tools\7-Zip\License.txt"

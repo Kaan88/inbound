@@ -82,6 +82,29 @@ public sealed record ServerOptions
     /// <summary>Names a browser may use for this server besides an IP address and <c>localhost</c> (<see cref="OriginCheck"/>).</summary>
     public IReadOnlyList<string> AllowedHostNames { get; init; } = [];
 
+    /// <summary>
+    /// Which kind of server this is, in <c>/api/auth/status</c>, so the web UI's texts fit it: <c>server</c> for this
+    /// headless server (Docker). The Windows app's web bridge (D8) will say <c>windows</c>. Not read from the environment.
+    /// </summary>
+    public string HostKind { get; init; } = "server";
+
+    /// <summary>
+    /// The desktop Host's web bridge (D8, <c>--bridge</c>): no engine, the Host's data folder for sign-in, no setup page
+    /// (the password is set in the app on this PC), the "Open in browser" ticket sign-in, exclusive use of its port. Not
+    /// read from the environment.
+    /// </summary>
+    public bool Bridge { get; init; }
+
+    /// <summary>With <see cref="Bridge"/>: the key the Host signs this run's sign-in tickets with (<see cref="Contracts.WebUiTicket"/>).</summary>
+    internal byte[]? TicketKey { get; init; }
+
+    /// <summary>
+    /// The session cookie's name. Ports are no cookie boundary, so the web bridge names its cookie by its port
+    /// (<c>inbound_session_8080</c>): a browser signed in to it and to another server on the same address at another
+    /// port (the planned host switcher) keeps both sign-ins. Not read from the environment.
+    /// </summary>
+    internal string SessionCookieName { get; init; } = Auth.ServerAuth.CookieName;
+
     /// <summary>Where downloads go until a client changes it: the first root.</summary>
     public string DefaultDownloadDirectory => Roots.Count > 0 ? Roots[0] : DefaultRoot;
 

@@ -7,14 +7,23 @@ page gives the framing rules, the remote provider messages and the archive messa
 
 ## Connection and framing
 
-- A per-user named pipe, `\\.\pipe\DownloadManager-<hash>`. Only the current user and SYSTEM can open it.
+- A per-user named pipe, `\\.\pipe\DownloadManager-<hash>`. Only the current user and SYSTEM can open it. A client
+  (`IpcClient`, so the window, the CLI and the native host) checks after connecting that the pipe is owned by this
+  user (`PipeOwner`): another account that made a pipe of the same name first can't answer in the Host's place. It is
+  `PipeOptions.CurrentUserOnly`'s check, which compares the owner with the token's default owner only, plus this
+  user's own SID, so a client in an administrator terminal (default owner Administrators) still reaches its user's Host.
+  The Host makes its pipes with the user itself as the owner, also when it runs elevated, so a client that isn't
+  elevated still reaches it; the web bridge makes the same check. The Host also checks the owner of each pipe instance
+  it is about to serve: an instance of a pipe that another account made first has that account's security, so the Host
+  refuses to serve it, logs it, and tries again every 10 seconds.
 - Each frame is a 4-byte little-endian length, then that many bytes of UTF-8 JSON. The limit is 8 MB per frame.
 - Each message has `v` (protocol version), `type`, `id`, and on replies `replyTo` with the id of the request, plus `payload`.
 - JSON uses camelCase names and leaves out null values. Unknown fields are ignored.
 - On connect the Host sends `server.hello` and then `jobs.snapshot`. After that a client gets replies to its own requests and events meant for everyone.
 - A second pipe, `\\.\pipe\DownloadManager-<hash>-hello`, with the same ACL, is for clients that want less (PERF.7).
-  There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool }`, both
-  true when left out. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
+  There the client speaks first: its first frame is `client.hello` with `{ "snapshot": bool, "events": bool, "role":
+  string }`, both bools true when left out. `role` is left out (or `desktop`) by the user at this PC; `web` asks for
+  the rights of a browser on another device (below). A role the Host doesn't offer closes the connection. The Host then sends `server.hello`, then `jobs.snapshot` only if `snapshot` is true, and the
   broadcasts only if `events` is true; replies always come. Any other first frame closes the connection, and one on
   another protocol version gets `server.hello` and `server.incompatible`. The CLI asks for neither (a command that
   needs the list sends `jobs.query`), and the native host asks for events only. The main pipe is unchanged. A Host
@@ -31,13 +40,140 @@ The meaning of every message lives in `HostCommandDispatcher` (`src/DownloadMana
 transport of its own; the desktop Host's named pipe is one transport over it. The capability list is a set: look a
 name up, don't read a position. The pipe Host sends `jobs`, `settings`, `handoff`, `tray`, `status` and, with the
 provider, `remote`, in that order, and a new name is only ever appended; a Host without a tray leaves `tray` out, so
-the names after it sit one place earlier there. A Host on a machine that can't do something answers instead of
+the names after it sit one place earlier there. After those come, when the session has them, `folders`, `updater`,
+`programSettings` (it may set programs the Host runs), `folderPicker` (`host.pickFolder` opens a dialog),
+`openUi`, `shutdown` and `completionActions` (a finished download or schedule may open the file, exit or shut the
+machine down), `archives` (the `archive.*` messages are answered, and an extractor was there when the session
+started: 7-Zip found; one installed later shows on the next connection, and at once in `archive.settings.get`'s
+`tool`), and `uploads` (the server takes `POST /api/upload/torrent` and `/api/upload/container`, and the `remote.*`
+commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
+installed, since the bridge serves both uploads into the Host's data folder). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+`hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
 available here." A Host whose clients may not set what it runs (a network server) refuses a `settings.update` that
 changes `postDownloadCommand`, `ffmpegPath`, `updateManifestUrl`, `updatePublicKey` or
 `allowSystemCompletionActions`, and a `job.update` that sets a completion program; sending those values back
 unchanged is fine. The desktop Host can do all of these.
+
+### Web sessions on the desktop Host (D8)
+
+A session whose `client.hello` has `role: "web"` is a browser on another device, through the web bridge. It gets
+what a client of the server gets, held to the app's folders, and nothing that acts on this PC beyond its downloads.
+Every other session keeps the desktop rights above. `HostCommandDispatcher.CloseSessions("web")` ends them all.
+
+- Refused: `host.openUi`, `host.pickFolder`, `host.shutdown` and `update.*` (the replies above), program settings
+  and completion programs, a `job.update` that turns on `openFile`, a `systemAction` other than `none` or
+  `forceSystemAction` ("... can only be set in the app on this PC."), `remote.account.setKey`/`clearKey`, and
+  `remote.container.sendToJd` (handing a container to another download manager on this PC; `remote.container.preview`
+  says `canSendToJd: false` to a web session).
+- `folders.browse`/`create` work, limited to **the app's folders**: the download folder, every built-in and custom
+  category folder, the favorites and the extraction folder, worked out again whenever the settings change. The
+  same folders hold for `job.add` and a hand-off, `job.update` Move/Rename (`newFilePath`), `folders.space` (a folder
+  outside them comes back unmeasured), `host.cleanOrphans`, the archive commands' `filePath` and `folder`, and the
+  provider's `.torrent` and container paths and destinations. A refusal says "That folder is outside the app's folders."
+- One of those folders is left out when it can't be used from another device: one on a network, mapped or removable
+  drive (the text check below), and one that is, holds or is inside the user's AppData, Windows, Program Files or
+  ProgramData (a favorite such as `C:\` or the user's own folder). A path in it is refused with "That folder can't
+  be used from another device." and the reason.
+- On Windows a path is checked as text first, and nothing on disk is touched for one that fails: only a drive letter,
+  a colon and a slash, on a fixed local drive; no UNC, `\\?\`, `\\.\` or `\??\` path, no device name (`CON`, `NUL`,
+  `COM1`...), no `:` after the drive (a stream), no part ending in a dot or a space, none of `<>"|?*`. A link
+  whose target fails the same check (another computer, or a drive letter that isn't a fixed drive) is not followed.
+- A download whose files are outside the app's folders is read-only for a web session: it may pause, resume, retry
+  and remove it without its file, but `job.update`, `job.refreshUrl`, removing or cancelling with its file,
+  `archive.extract` of it (by `jobIds` or `packageId`) and `archive.setPassword` for a package with such a
+  download are refused with "This download's file is outside the app's folders, so it can't be changed from another
+  device." The same goes for a provider job saved to a folder outside them (`remote.select`, `remote.retry`,
+  `remote.startQueued`, `remote.archivePassword`).
+- An archive set whose folder or output folder is outside the app's folders is not listed in `archive.list` for a
+  web session (nor, on a server, one outside its folders), and `archive.retry`, `archive.cancel`, `archive.remove` and `archive.setPassword` by `setId` leave it
+  alone ("These archives are outside the app's folders, so they can't be changed from another device.").
+- `job.refreshUrl` is refused for a download set to open its file or run a program when it is done: those would then
+  act on whatever the new address sends.
+- What a web session adds or hands off (an add, an import, a hand-off) is marked `addedFromAnotherDevice: true` on
+  the job, so the Host opens no progress or completion window for it on this PC's screen. Its `source` stays the one
+  it named (an unknown name such as `web` is read as `api`), and a provider's file keeps `remote`. The mark is a
+  property of its own rather than a source value, so a job file written now still loads in an older build. A local
+  client can't set it. Resuming or refreshing a download added at this PC from a web session still opens its windows
+  here (known, not changed).
+- `settings.update` follows an allow-list (`WebSettingsRules`): queues, schedules, connections, speed, categories'
+  names and file types. Every other field must be sent back as it is, or the save is refused with the names of
+  the changed fields and nothing is saved; what the Host keeps itself (recent folders and addresses, packages, the
+  last update check) is taken from the Host instead. A schedule's when-done fields (`openFileWhenDone`,
+  `exitWhenDone`, `shutdownWhenDone`, `shutdownMode`, `forceShutdown`) and a category's folder stay as they are.
+  `archive.settings.set` may not change `folder`, nor turn on `deleteArchives` or `conflictPolicy: "overwrite"`:
+  those apply to every archive the user downloads, wherever it is. Turning them off is allowed.
+- What a web session is shown of the settings (`settings.get`, the snapshot, every `settingsResult`) leaves out the
+  post-download command, the FFmpeg path, the update source, the proxy's address and user (its mode stays), the site
+  logins, the sound files and the recent addresses and folders. Sent back as shown, they are kept as they are; sent
+  with another value, they are refused like any field it may not change.
+- No local network: a download added, handed off or pointed at a new address by a web session never reaches
+  loopback, private, link-local, carrier-grade NAT or `.local` addresses (`errorCode: "local_network"` on `job.add`
+  and `handoff.request`), and an address's name is resolved and checked again when the connection is made. Any
+  connection that isn't to the proxy the user set is checked so. Through the proxy, the site's name is resolved on
+  this PC first and refused the same way; a name only the proxy can resolve goes ahead, as does one that resolves
+  differently by the time the proxy asks. FTP is refused. A hand-off's `extensionId` is not checked and grants
+  nothing, and request ids are kept apart from a local client's.
+- A finished download a web session added gets the mark Windows gives files from the internet (`Zone.Identifier`,
+  zone 3, with only the site's scheme and host), so SmartScreen and Office warn before it is opened. A drive without
+  streams keeps it unmarked.
+- Removing several downloads with their files skips one that is already gone, as it does for any other session.
+- `jobs.snapshot`, `jobs.query` and `host.status` leave `stateDirectory` empty and list only leftovers inside the
+  app's folders.
+
+### The web UI's own settings: `webui.*` (desktop Host, D8)
+
+Options, Web UI in the window sets the web UI up over the pipe. These commands are answered for a desktop session
+(`role` left out or `desktop`) only. A `web` session, and the Host scope of a remote session, get
+`host.actionResult` `{ok: false, message: "The web UI can only be set up in the app on this PC."}` and nothing
+changes; a Host without the web UI (the headless server) says "The web UI is not available here." The settings live
+in `<data>/webui.json` (written to a temporary file, flushed, then moved over it), never in `settings.json`, export
+or import. A damaged file counts as off.
+
+| Request | Payload | Reply |
+| --- | --- | --- |
+| `webui.get` | `{}` | `webui.status` |
+| `webui.set` | `{enabled?, port?, alsoReachableAs?}`; a field left out stays | `webui.status` |
+| `webui.setPassword` | `{password, keepPairedBrowsers?}` | `webui.status` |
+| `webui.recheck` | `{}` | `webui.status` |
+| `webui.openTicket` | `{}` | `webui.ticket` `{url?, error?}` |
+
+`webui.status` (and the broadcast `webui.changed`) carry `WebUiStatusDto`:
+
+- `enabled`, `port` (default 8080), `alsoReachableAs` (computer names a browser may use besides an IP address,
+  `localhost` and this PC's own names, its DNS host name and its NetBIOS name, which the bridge adds itself: at most
+  16, lower case, without `http://` or a port), `hasPassword`;
+- `state`: `off`, `starting`, `running` or `failed`, and `error` (plain words, for Options and the tray) when a
+  request was refused or the bridge could not run;
+- `firewall`: `ready` when, for at least one network profile in force now, there is an enabled inbound allow rule
+  named `ruleName` for `bridgePath`, TCP, covering the port, with remote addresses `LocalSubnet` only, covering that
+  profile, and no enabled inbound block rule for that program covering the port and that profile; `missing`
+  otherwise (a rule widened to other addresses, or one for Private while the network in force is Public, is not
+  ready); or `unknown` (the rules could not be read; a process below medium integrity is refused the read);
+- `localOnly`: the bridge listens on 127.0.0.1 (and ::1) only, which it does while `firewall` isn't `ready`;
+  `addresses`: `http://<ip>:<port>/` for each of this PC's network addresses, empty while `localOnly` or not running;
+- `bridgePath` (the program the firewall rule names) and `ruleName` ("Inbound Download Manager web UI").
+
+Refusals come back as `webui.status` with `error` set and nothing changed: turning the box on without a password
+("Set a password first. Other devices sign in with it."), a port outside 1024 to 65535, a name that isn't one, a
+password the sign-in rules refuse. `webui.set` saves first and then starts, restarts (a changed port or names) or
+stops the bridge. Turning it off also ends every web session and every browser's sign-in (`sessions.json` is removed
+once the bridge has stopped), so a browser signs in again when it is turned on; paired apps stay paired, since their
+tokens were made with the password that is still in force. `webui.setPassword` with the password already in force
+changes nothing (no restart, nobody signed out or unpaired). Otherwise it stops the bridge, ends the web sessions,
+writes the hash to `<data>/auth.json` (unpairing every paired desktop app, and every browser extension unless
+`keepPairedBrowsers` is true, as on the web UI's own password change; removing `sessions.json`: every browser signs
+in again), and starts the bridge again if the box is ticked. `webui.recheck` reads the firewall rules again and, when
+the bridge is running on the wrong addresses (this PC only with the rule ready, or every address without it),
+restarts it on the right ones; open pages reconnect, still signed in. It starts nothing that isn't running: a bridge
+that is off, failed (a port in use, say) or waiting to restart after a crash is left as it is (the last reads the
+rule when it starts). `webui.openTicket` checks that the bridge it started is the program listening on the port, and
+answers `http://127.0.0.1:<port>/api/auth/ticket?t=<ticket>`: a one-time sign-in for a browser on this PC, valid
+60 s. When another program listens there, or nothing does (the bridge ended between two checks), `error` says which.
+
+`webui.changed` goes to desktop sessions that take events, never to a `web` session, whenever any of the above
+changes, the bridge included (started, ready, stopped, failed).
 
 ### The server's transports (D1b)
 
@@ -46,7 +182,12 @@ unchanged is fine. The desktop Host can do all of these.
 - `GET /api/ws` is a WebSocket. Each text message carries exactly one envelope, as JSON, with no length prefix (the
   WebSocket frames it). Binary messages and messages over 8 MB close the connection. On connect the server sends
   `server.hello` and `jobs.snapshot`, then replies and events, exactly as on the pipe, and the one-command-at-a-time
-  rule below holds per WebSocket.
+  rule below holds per WebSocket. `GET /api/ws?hello=1` works like the hello pipe instead (PERF.7): the client speaks
+  first, and its first message must be `client.hello` with `{ "snapshot": bool, "events": bool }` (both true when
+  left out), within 5 seconds. The server then sends `server.hello`, `jobs.snapshot` only if `snapshot` is true, and
+  broadcasts only if `events` is true. Another first message closes the socket (policy violation); a first message
+  on another protocol version gets `server.hello` and `server.incompatible`, then the socket closes. Without the
+  flag nothing changes, so the web UI needs no change.
 - `POST /api/ipc` takes one envelope as the request body and answers with the one reply envelope. There is no hello,
   no snapshot and no events. A request with another version gets `server.incompatible` back. It is for short-lived
   clients that needn't hold a connection.
@@ -54,33 +195,86 @@ unchanged is fine. The desktop Host can do all of these.
 - A request to `/api/` that carries an `Origin` header (every browser request does) must come from the server's own
   origin. Every request to `/api/`, with an `Origin` or without (a page's same-origin `GET` carries none), must name
   the server in its `Host` by an IP address, `localhost` or a name in `DOWNLOADMANAGER_HOSTS`. Anything else gets
-  403. The one exception is below: a paired extension's `POST /api/ipc`, `POST /api/pair` and
-  `DELETE /api/pair/self`.
+  403. There are two exceptions. A paired extension's `POST /api/ipc`, `POST /api/pair` and `DELETE /api/pair/self`
+  (below). And an app that isn't a browser, such as the desktop app managing a server by name
+  (`http://homeserver:8080`), may use any name when its request carries no `Origin` and either a valid token on a
+  token path (`GET /api/ws`, `POST /api/ipc`, `DELETE /api/pair/self`) or is `POST /api/pair`. A page that points
+  its own name at the server (DNS rebinding) gains nothing from this: a browser always sends `Origin` on a POST, a
+  DELETE and a WebSocket upgrade, its own page's too, and a page has no valid token. A request with an `Origin`, a
+  token or not, meets both rules.
 - Sign-in (D2) is on by default; see the next section.
 
 The server's hello leaves out `tray` and adds `folders`. Its Host can't open a window, show a folder dialog, exit on
 request, update itself or run programs a client names, so those commands answer as described above.
 
-### Sign-in and paired browsers (D2)
+### The web bridge on Windows (D8)
+
+With the web UI ticked, the desktop Host starts `DownloadManager.Server.exe --bridge` (next to the Host, or in its
+`web` folder) with no window, and gives it its options as one JSON line on standard input (`WebBridgeStartDto`: the
+Host's data folder, its hello pipe, the port, `localOnly`, the extra names, and a random 32-byte ticket key for this
+run). Nothing is on the command line. The bridge writes `ready` to standard output once it listens; closing its
+standard input stops it, so it never outlives the Host. All three streams are UTF-8 at both ends, whatever the
+console's code page (the data folder's path holds the Windows user's name). Its exit code says why it ended:
+0 stopped (its standard input closed), 1 crashed (also when its web front ended without being asked), 2 refused (bad
+options, no password), 3 the port is in use, 4 Windows doesn't allow the port; the last line of standard error is
+the reason, in plain words. The Host restarts a crashed bridge after 1, 2, 4... seconds (at most
+60), and gives up with a tray notice after 5 crashes that each ran less than 2 minutes; a refused or busy port is
+not retried.
+
+It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent`, `/api/upload/container` and sign-in as the
+server, and differs so:
+
+- No engine and no state of its own: each WebSocket and each `/api/ipc` call is one connection to the Host's hello
+  pipe (this Windows user's only, both ends checked), with `client.hello` `role: "web"` whatever the browser sent
+  (`?hello=1` keeps its `snapshot` and `events`). Envelopes pass through unchanged, one per WebSocket message and
+  one per pipe frame. The Host ending the connection (the web UI turned off, the password changed, an exit) closes
+  the socket with 1001. At most 32 browser connections hold a pipe at once. A Host that can't be reached, or that
+  sends something that isn't a frame, is 503 `"The app on this PC isn't answering. Try again in a moment."`; an
+  `/api/ipc` call it doesn't answer within 5 minutes is 504 with the same `{ok: false, error}` form.
+- Sign-in is always on, from `auth.json` and `sessions.json` in the Host's data folder. There is no
+  `/api/auth/setup` and no setup code, and the bridge refuses to start without a stored password. Changing the
+  password, pairing codes and paired apps work as on the server, behind sign-in. A paired extension keeps the
+  extension's commands only; a paired desktop app (`remoteClient`) has a signed-in browser's rights.
+- The session cookie is named by the port, `inbound_session_<port>`, since ports are no cookie boundary: a browser
+  signed in to this PC's bridge and to another server on the same address keeps both. After a port change a
+  browser signs in again.
+- Names: besides IP addresses and `localhost`, the names set in Options (`alsoReachableAs`) and this PC's own DNS
+  host name and NetBIOS name. A refused name says to add it under Web UI in the app's Options.
+- `GET /api/auth/ticket?t=...` signs in a browser on this PC with the window's ticket ("Open in browser"): the
+  ticket is a nonce, an expiry and an HMAC-SHA256 with the run's key; it works once, for 60 s, from a loopback
+  address with no forwarding header (`X-Forwarded-For`, `Forwarded`, `X-Original-For`), else 403. A good one sets the
+  session cookie and redirects to `/`; a wrong, used or expired one redirects to `/signin/`. Wrong tickets are not
+  counted as wrong sign-ins: a ticket can't be guessed, and counting them would let any web page make this PC's
+  browsers wait (an image pointing at the address needs no Origin, and it comes from loopback like the owner's own
+  browser). The ticket travels in the query, so it can sit in the browser's history for its 60 s; it is single use,
+  and the bridge logs no request URLs.
+- Uploads go to `<data>/uploads` (the Host's data folder), which the Host reads through the same `upload:<id>`
+  reference for `remote.classify`, `remote.add` and `remote.container.preview`.
+- It listens with exclusive address use, on 127.0.0.1 and ::1 while the firewall rule is missing, and on every
+  address once it is there. Its log is `<data>/logs/web-bridge-<date>.log`.
+- `GET /api/auth/status` says `hostKind: "windows"`.
+
+### Sign-in and paired apps (D2, D9)
 
 With sign-in on (the default), every path except `/health`, `/favicon.svg`, `/theme.js`, `/signin/...` and the calls
-below needs a session cookie or, for `POST /api/ipc` and `DELETE /api/pair/self` only, a paired browser's token. Without one, `/api/...` answers
+below needs a session cookie or, on the token paths only, a paired app's token (see "A paired token" below). Without one, `/api/...` answers
 401 with `{"ok":false,"error":...,"signIn":"/signin/"}`, a page `GET` is sent to `/signin/` (302), and the WebSocket
 upgrade is refused with 401. A failure always answers `{"ok":false,"error":"...","retryAfterSeconds":n?}`; a wait after
 wrong tries is 429 with `Retry-After`.
 
 | Call | Session? | Body / answer |
 | --- | --- | --- |
-| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, and `version` only for a signed-in browser |
+| `GET /api/auth/status` | no | `signInRequired`, `signedIn`, `setupNeeded`, `setupCodeNeeded`, `passwordFromEnvironment`, `sessionEndsAt`, `hostKind` (`server` for this server; the Windows app's web bridge says `windows`), and `version` only for a signed-in browser. `hostKind` is shown to anyone because the sign-in page and a desktop app that hasn't paired yet need it; it tells a stranger whether this is a server or a Windows PC, not which version runs there. |
 | `POST /api/auth/setup` | no | `{password, setupCode?}`: the first password (8 to 1,024 characters). A browser that isn't on the server's own machine (or comes through a proxy) also gives the setup code the server wrote to its log. Signs this browser in. 409 once a password exists. |
 | `POST /api/auth/signin` | no | `{password}`; sets the cookie. |
 | `POST /api/auth/signout` | no | ends this browser's session and closes its WebSockets. |
-| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, and every paired browser is unpaired unless `keepPairedBrowsers` is true. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
+| `POST /api/auth/password` | yes | `{current, password, keepPairedBrowsers?}`; every other session ends, every paired desktop app (`remoteClient`, made with the old password) is unpaired, and so is every browser extension unless `keepPairedBrowsers` is true; their WebSockets and running `/api/ipc` requests end. Answers `{ok, unpaired}`. 409 when the password comes from the environment. |
 | `POST` / `DELETE /api/auth/pairing/code` | yes | makes (or cancels) the one pairing code: `{code, expiresAt}`, 8 characters from `A-Z` and `2-9` without look-alikes, ten minutes, once. |
-| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired browsers (`id`, `name`, `createdAt`, `lastUsedAt`), and revoking one. |
-| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name}` once. 1,000 wrong codes (from all addresses together) end the code. |
-| `DELETE /api/pair/self` | token | the extension's Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
-| `POST /api/upload/torrent` | yes | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
+| `GET /api/auth/tokens`, `DELETE /api/auth/tokens/{id}` | yes | the paired apps (`id`, `name`, `createdAt`, `lastUsedAt`, `role`: `extension` or `remoteClient`), and revoking one, which also closes its WebSockets and ends its running `/api/ipc` requests (401). An open WebSocket counts as use on the sessions' 10-minute beat, so a desktop app that stays connected keeps a current `lastUsedAt` and isn't the first pushed out when a 51st app pairs. |
+| `POST /api/pair` | no | `{code, name}` from the extension; answers `{ok, token, id, name, role}` once, `role` always `extension`: a code never makes another role, whatever `role` the body names. 1,000 wrong codes (from all addresses together) end the code. A desktop app sends `{password, name, role: "remoteClient"}` instead, with no `Origin` header, and gets a `remoteClient` token; with an `Origin` (a page or an extension) it is 403. The password is checked as on `POST /api/auth/signin`, with the same waits: a wrong one counts as a wrong sign-in from that address (401), and while the address waits it is 429. 400 with sign-in off (there is no password then) and for a role the server doesn't know; 409 before a password is set. |
+| `DELETE /api/pair/self` | token | the app's own Unpair, with `Authorization: Bearer ibt_...` and no body: removes the record of that token, and only that one (an id in the query or body is ignored), closes its WebSockets, and answers 204 with no body. 401 without a token, with an unknown or removed one, or with only a session cookie; 500 when `auth.json` can't be written (nothing removed then). |
+| `POST /api/upload/torrent` | yes, or a `remoteClient` token | the raw `.torrent` (16 MB at most); answers `{ok, upload}`, a reference (`upload:` and 32 hex digits, not the file's path) that the server's own `remote.classify` and `remote.add` accept as their text or input. |
+| `POST /api/upload/container` | yes, or a `remoteClient` token | the raw `.rsdf`, `.ccf` or `.dlc` file (16 MB at most), its file name in the `X-File-Name` header, percent-encoded (`encodeURIComponent`), so it stays out of the address and the access logs; its kind is the name's extension (400 for any other). Answers `{ok, upload}` as above, which `remote.container.preview` accepts as its `path`, with the file's `fileName` to name its packages. Too large is 413, with or without `Content-Length`; an empty body is 400. Torrents and containers are kept 1 day, at most 200 of each kind; a reference whose file has gone gets "The uploaded file is no longer there. Upload it again." |
 
 - **Password:** PBKDF2-SHA256, 600,000 iterations, 16-byte salt, kept in `<data>/auth.json` (mode 600 off Windows) with
   the token hashes. `DOWNLOADMANAGER_PASSWORD` or `DOWNLOADMANAGER_PASSWORD_FILE` sets it instead (hashed at start;
@@ -111,10 +305,27 @@ wrong tries is 429 with `Retry-After`.
 - **Setup code:** asked of every browser except one on the server's own machine connecting directly: a connection
   from a listed proxy, or with `X-Forwarded-For` / `Forwarded`, always needs it.
 - **Origin:** every state change and the WebSocket upgrade must carry the server's own origin (above).
-- **A paired token** (`Authorization: Bearer ibt_...`) is for `POST /api/ipc` (and for unpairing itself), and only for what the extension
-  role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
-  `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
-  comes without settings. Only the token's SHA-256 is stored. Requests from our Chrome extension ids
+- **A paired token** (`Authorization: Bearer ibt_...`) has a role, kept with its hash in `auth.json`. A record
+  without one is the extension's, so files from before roles read as they did, and a role this version doesn't know
+  opens nothing.
+  - `extension` (from a code) is for `POST /api/ipc` (and for unpairing itself), and only for what the extension
+    role allows (`NativeBridgePolicy`, `BridgeRole.ServerExtension`): the extension's own commands plus
+    `folders.browse`. Anything else answers 403 with `host.actionResult`. Replies pass the same filter, so a snapshot
+    comes without settings. `GET /api/ws` and the two uploads with it are refused (403).
+  - `remoteClient` (from the password, for a desktop app managing the server) has a signed-in browser's rights on
+    `GET /api/ws` (with or without `?hello=1`), `POST /api/ipc` and the two uploads (`POST /api/upload/torrent` and
+    `/api/upload/container`, so the window sends its `.torrent` and container files), and can unpair itself. It is not a session: the
+    other calls in the table still want the cookie. Its WebSockets close, and its running `POST /api/ipc` requests
+    end with 401, when it is revoked, unpaired, or removed by a password change (always, whatever
+    `keepPairedBrowsers` says).
+  - On `GET /api/ws` and the two uploads only `Authorization: Bearer ibt_...` is read as a token, so a browser behind
+    a proxy that sends its own header (`Basic` for the proxy's password, or a `Bearer` token of the proxy's own) keeps using its cookie
+    there.
+  - Turning sign-in off and on again keeps the paired tokens, though the sessions are dropped: a desktop app's token
+    was made with the password that is still in force, so its holder could pair again anyway. A password change, on
+    the page or in the environment, removes them.
+
+  Only the token's SHA-256 is stored. Requests from our Chrome extension ids
   (`chrome-extension://`, the store and the unpacked id) and from any `moz-extension://` origin (Firefox gives each
   install a random id) pass the origin check for `POST /api/ipc` and `DELETE /api/pair/self` with a bearer token,
   which the sign-in gate then checks, and for `POST /api/pair`, where the one-time code is the credential. They get
@@ -125,16 +336,22 @@ wrong tries is 429 with `Retry-After`.
 
 ### Folder browsing: `folders.*`
 
-Only a Host whose hello lists `folders` answers these; the desktop Host doesn't (it has a folder dialog) and replies
-with `error` "Folder browsing is not available here." Both requests reply with `folders.browseResult`
+Only a session whose hello lists `folders` gets these answered; the desktop Host's own sessions don't (they have a
+folder dialog) and get `error` "Folder browsing is not available here." A web session there does. Both requests reply with `folders.browseResult`
 (`FolderBrowseResult` in `FolderBrowseDtos.cs`).
 
-- `folders.browse` `{ path }`: the folders inside `path`, sorted by name, files never listed, hidden folders (the
+- `folders.browse` `{ path, files? }`: the folders inside `path`, sorted by name, hidden folders (the
   Hidden or System attribute on Windows, a leading dot on Linux) and unreadable ones left out, at most 2,000 (then
   `truncated: true`, and the 2,000 are the first by name, not the first the disk returned). A hidden folder is left
   out of the list, not out of reach: its path typed in opens it. An empty or missing `path` lists the allowed roots. The
   reply carries `path` (with links resolved), `parent` (null at a root), `roots`, `folders` (`name`, `path`),
-  `freeBytes` and `totalBytes` of the mount that holds the folder.
+  `files`, `freeBytes` and `totalBytes` of the mount that holds the folder. Files are listed only with
+  `files: "archives"`, for an extraction's chooser: the files whose names extraction can start from, by name only
+  (`ArchiveNames.IsChooserName`): any `.rar`, a `.7z`, `.zip` or `.tar`, a compressed tar (`.tar.gz`, `.tgz`,
+  `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`) and the first piece of a split 7z, zip, RAR or
+  tar set (`name.7z.001`); not a lone `.gz` or `.xz`, any other `.001`, or a set's later pieces. Each has `name`,
+  `path` and `size` (a link's target's size), under the same rules as the folders (hidden ones left out, a link only
+  when it leads inside the roots, at most 2,000). Any other `files` value is refused.
 - `folders.create` `{ parent, name }`: makes the folder `name` inside `parent` and answers with the listing of the
   new folder. A name with a slash, a leading or trailing space or a trailing dot, `.`, `..`, a colon, a control
   character, more than 255 bytes, a character or device name Windows can't keep (`<>"|?*`, `CON`) or the app's own
@@ -148,7 +365,21 @@ with `error` "Folder browsing is not available here." Both requests reply with `
   folder settings it falls back on) answers `invalid_destination`; `job.update` Move/Rename, `settings.update` with a
   changed folder outside them, `remote.container.preview`/`sendToJd`, a `.torrent` path in `remote.add`/`classify`,
   `archive.extract` and `archive.setPassword` with a `filePath`, and `archive.settings.set` with a `folder` answer
-  `ok: false` with an error. The desktop Host has no roots.
+  `ok: false` with an error. The desktop Host has no roots for its own sessions; a web session there has the app's
+  folders (above).
+
+### Downloads as every client sees them
+
+- A download whose address is hidden (`addressHidden`, a direct provider link) or that is a provider's file carries
+  `pageUrl` as its site alone (`https://host[:port]/`, no user name, path or query) and no `finalUrl`. The Host does
+  this, so every client (the window, the web UI, the CLI) gets the same; the desktop window, which showed such a
+  page in full when it wasn't on a provider's host, now shows its site too. `url` is sent as stored: a link with a key
+  in it is stored masked, and every client shows a hidden one as its site by `addressHidden`. `statusNote` has any
+  address taken out as well, as a safeguard: today it holds at most a host name.
+- `speed.history` `{}` answers `speed.historyResult`: the total download speed of the last hour, one figure a second
+  (`start`, `intervalSeconds`, `bytesPerSecond`, oldest first, the last the second under way), the desktop's speed
+  graph's own. Every session gets it, web sessions and the server's clients too, so a graph opened later starts full.
+  A Host from before it answers with an error.
 
 ## One command at a time per connection
 
@@ -250,7 +481,10 @@ those. A frontend with a hoster link has to route it through `remote.add`. `dm a
 counts as failed. An `undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
 prints the note, because it can go on for hours and a script shouldn't stop for it.
 
-**`job.refreshUrl`** does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
+**`job.refreshUrl`** points a download at a new address. One that isn't finished goes back to the queue and starts
+(`job.event` `refreshed`). A finished one keeps its file and its state, and only the address it would be downloaded
+from again changes (`updated`); nothing is downloaded, though a new address is still checked as below (which may
+ask the provider), so a provider's link can't become the address a redownload uses. It does classify, because it isn't a request to add anything: it takes `jobId`, `url` and
 the optional `explicitDirect`. While a usable key exists, a changed http or https address that is a
 `hosterLink` or `folderLink` gets `ok: false` with words pointing to Add Links, with or without the flag.
 So does an `unsupported` one. An `undetermined` one, or one that couldn't be classified at all, gets
@@ -347,7 +581,10 @@ by itself.
 A container is a local `.rsdf`, `.ccf` or `.dlc` file. Reading one takes two steps, because a decrypted link
 is a secret and a client never gets to see it.
 
-**`remote.container.preview`** reads the file by its full path. A path has to start with a drive. Network and
+**`remote.container.preview`** reads the file by its full path, or by the reference of one a browser uploaded
+(`upload:...`, from the server's or the web bridge's `POST /api/upload/container`; `fileName` then gives the name the
+packages are called by). A reference can only name a file in the upload folder, so it is read even though that folder
+is outside the caller's folders, while that folder's path typed in is refused like any outside one. A path has to start with a drive. Network and
 device paths are refused before anything looks at them, because even asking whether such a file exists
 sends this Windows account's credentials to the host it names. Files are limited to 16 MB and 5000 links. The
 reply has:

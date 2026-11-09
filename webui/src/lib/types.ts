@@ -31,6 +31,8 @@ export interface Job {
   bytesPerSecond?: number;
   estimatedRemaining?: string;
   source?: string;
+  /** Added from a browser on another device: the Host opens no window for it. */
+  addedFromAnotherDevice?: boolean;
   queueId: number;
   queueName?: string;
   priority?: number;
@@ -42,6 +44,69 @@ export interface Job {
   isRemote?: boolean;
   remoteProvider?: string;
   queueRetryAt?: string;
+  /** False when the download was taken out of its queue (the Q column is then empty). Older servers leave it out (then it is true). */
+  isQueued?: boolean;
+  pageUrl?: string;
+  canCancel?: boolean;
+  /** Set on a file a package's Cancel stopped; Resume on the package brings all of them back only if every file has it. */
+  cancelledByPackageId?: string;
+  startMode?: string;
+  conflictPolicy?: string;
+  expectedSha256?: string;
+  // D-items: the details view.
+  resumeSupported?: boolean | null;
+  speedLimitBytesPerSecond?: number | null;
+  canChangeSpeedLimit?: boolean;
+  categoryIsAutomatic?: boolean;
+  showCompletionDialog?: boolean | null;
+  completionOptions?: JobCompletionOptions;
+}
+
+/** What happens when one download completes: a program (null = the global one, '' = none), opening it, a system action. */
+export interface JobCompletionOptions {
+  programPath?: string | null;
+  openFile: boolean;
+  systemAction: string;
+  forceSystemAction: boolean;
+}
+
+export interface Segment {
+  start: number;
+  end: number;
+  completed: number;
+  isComplete: boolean;
+  fraction: number;
+}
+
+export interface ConnectionInfo {
+  id: string;
+  host: string;
+  state: string;
+  rangeStart?: number | null;
+  rangeEnd?: number | null;
+  receivedBytes: number;
+  bytesPerSecond: number;
+  statusCode?: number | null;
+  httpVersion?: string | null;
+  startedAt: string;
+}
+
+export interface Statistics {
+  capturedAt: string;
+  firstRecordedAt?: string | null;
+  recordedBytes: number;
+  completedBytes: number;
+  completedTodayBytes: number;
+  completedCount: number;
+  completedTodayCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  retainedCount: number;
+  archivedCount: number;
+  activeCount: number;
+  queuedCount: number;
+  pausedCount: number;
+  bytesPerSecond: number;
 }
 
 export interface DownloadGroup {
@@ -110,6 +175,13 @@ export interface FavoriteFolder {
   path: string;
 }
 
+export interface CategoryDefinition {
+  id: string;
+  name: string;
+  destinationDirectory?: string;
+  extensions: string[];
+}
+
 export interface ConnectionProfile {
   pattern: string;
   maxConnections: number;
@@ -141,10 +213,18 @@ export interface Settings {
   downloadGroups: DownloadGroup[];
   excludedFileExtensions: string[];
   excludedHosts: string[];
+  /** Built-in category name to its folder; a category left out uses the default folder. */
+  categoryFolders?: Record<string, string>;
+  customCategories?: CategoryDefinition[];
+  deleteCategoryIds?: string[];
+  notifyOnCompletion?: boolean;
+  showCompletionDialog?: boolean;
   [key: string]: unknown;
 }
 
 export interface HostStatus {
+  /** Part files that belong to no download, as of the last scan. */
+  orphanPartFiles?: string[];
   hostVersion: string;
   activeDownloads: number;
   queuedDownloads: number;
@@ -163,6 +243,8 @@ export interface Hello {
   protocolVersion: number;
   startedAt: string;
   capabilities: string[];
+  /** `windows` for the desktop app's web bridge, `server` for the headless server; absent from an older server. */
+  hostKind?: string;
 }
 
 export interface RemoteJob {
@@ -183,6 +265,12 @@ export interface RemoteJob {
   heldForApproval: boolean;
   hasLinkPassword: boolean;
   hasArchivePassword: boolean;
+  /** The provider's own word for the state, as it sent it. */
+  rawState?: string;
+  /** The provider's item this job covers; empty while the provider has not queued it. */
+  itemId?: string;
+  startMode?: string;
+  selectedFileIds?: string[];
   failureKind?: string;
   failureMessage?: string;
   nextCheckAt?: string;
@@ -193,6 +281,16 @@ export interface RemoteJob {
   notes: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RemoteAddResult {
+  ok: boolean;
+  error?: string;
+  /** Something asked for that didn't happen, because an active job already covers this input. */
+  note?: string;
+  existing?: boolean;
+  inputKind?: string;
+  job?: RemoteJob;
 }
 
 export interface RemoteAccount {
@@ -253,7 +351,10 @@ export interface RemoteItem {
   cached: boolean;
   error?: string;
   createdAt?: string;
+  updatedAt?: string;
   expiresAt?: string;
+  rawState?: string;
+  etaSeconds?: number;
   fileCount: number;
   files?: RemoteFile[];
 }
@@ -293,9 +394,14 @@ export interface ArchiveSet {
   phase?: string;
   percent?: number;
   destination?: string;
+  /** The archives were deleted after extracting, so extracting again could only fail. */
+  archivesDeleted?: boolean;
   note?: string;
   packageId?: string;
   jobIds: string[];
+  attempts?: number;
+  createdAt?: string;
+  completedAt?: string;
   updatedAt: string;
 }
 
@@ -315,9 +421,40 @@ export interface FolderBrowseResult {
   parent?: string;
   roots: string[];
   folders: { name: string; path: string }[];
+  /** Only with `files: 'archives'` in the request: the archive files in the folder. */
+  files?: { name: string; path: string; size: number }[];
   truncated: boolean;
   freeBytes?: number;
   totalBytes?: number;
+}
+
+/** The server's last hour of total download speed (speed.history), one figure a second, oldest first. */
+export interface SpeedHistoryResult {
+  start: string;
+  intervalSeconds: number;
+  bytesPerSecond: number[];
+}
+
+/** remote.container.preview: what a container holds, without its links. */
+export interface ContainerPreview {
+  ok?: boolean;
+  error?: string;
+  format: string;
+  notSupported?: boolean;
+  previewId?: string;
+  expiresAt?: string;
+  accountProblem?: string;
+  packages: { index: number; name?: string; comment?: string; hasArchivePassword: boolean; entryCount: number }[];
+  entries: { entryId: number; packageIndex?: number; displayHost?: string; displayName?: string; size?: number; kind: string; reason?: string; canAdd: boolean }[];
+  problems: string[];
+}
+
+/** remote.container.add: how each chosen entry went. */
+export interface ContainerAddResult {
+  ok: boolean;
+  error?: string;
+  outcomes: { entryId: number; ok: boolean; error?: string; note?: string; existing?: boolean }[];
+  jobsLeftOut?: boolean;
 }
 
 export interface FolderSpace {

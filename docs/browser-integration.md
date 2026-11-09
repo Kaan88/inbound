@@ -101,10 +101,30 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   manifest is the Chrome one with `browser_specific_settings.gecko.id` `inbound-bridge@kaan88`,
   `background.scripts` instead of a service worker, and no `key` or `minimum_chrome_version`.
   `scripts\package-extension-firefox.ps1` checks it and zips it for addons.mozilla.org (AMO) into
-  `artifacts\firefox-addon`. Release Firefox runs only signed add-ons, so the zip has to be uploaded as an
-  unlisted version from the owner's AMO account; the owner uploaded one (2026-11-08). An unlisted add-on has no
-  public page. Setup links to `https://addons.mozilla.org/firefox/addon/inbound-download-manager/` (EXT.S3),
-  which opens only once a listed version is approved.
+  `artifacts\firefox-addon`. Release Firefox runs only signed add-ons.
+- **Self-distributed (EXT.S4, owner 2026-11-08).** The add-on stays unlisted on AMO, which signs it but gives it
+  no public page and no updates. `scripts\sign-extension-firefox.ps1 -ReleaseTag v<app version>` builds the
+  package, has AMO sign it as an unlisted version (`web-ext sign --channel unlisted`, with the owner's AMO API
+  key pair from a file outside the repository, passed to web-ext only through its environment), or takes an XPI
+  signed by hand with `-SignedXpi`. It checks that the XPI carries AMO's signature and exactly the files built,
+  writes `artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi`, and writes
+  `extensions/firefox-updates.json` with that version, its release download address and its SHA-256.
+  The Firefox manifest's `update_url` is that file on `main`
+  (`https://raw.githubusercontent.com/Kaan88/inbound/main/extensions/firefox-updates.json`), so Firefox finds an
+  update once the release squash puts the file there, and the XPI must be on that release by then. A version
+  number can be signed only once.
+- **In Setup.** `build-installer.ps1` requires the signed XPI for the extension's version (`-NoFirefoxXpi` for
+  a test build) and Setup installs it as `{app}\firefox\inbound-bridge.xpi`. Its last page offers "Add the
+  extension to Firefox", ticked, when Firefox is installed (App Paths) and no profile under
+  `%APPDATA%\Mozilla\Firefox\Profiles` already has `inbound-bridge@kaan88.xpi`. It starts Firefox with the XPI,
+  and Firefox asks the user to add it. Firefox no longer installs add-ons put in place by other programs
+  (registry or folder sideloading), and enterprise policy would mark the browser as managed, so the user's
+  click is the step left. `INSTALL.txt` says how to add the file by hand. A copy older than 0.5.3 has no
+  `update_url`, so Firefox asks addons.mozilla.org, which serves only listed versions: Setup then offers the
+  same entry unticked, to add it again once. Gaps: Firefox from the Microsoft Store has no App Paths entry and
+  keeps its profiles elsewhere, so Setup offers nothing there; a profile outside the usual folder gets the
+  ticked entry. The in-app update installs only the app and the Chrome extension folder, so a Firefox user
+  updated that way gets no XPI and no prompt; the release page has the XPI.
 - **Caught before the Save dialog (EXT.B5).** Only the Firefox manifest adds `webRequest` and
   `webRequestBlocking`. A blocking `webRequest.onHeadersReceived` listener sees each page and frame load's
   response. `response-download.ts` says whether Firefox would save it: a GET answered 200 or 206 that is an
@@ -202,7 +222,7 @@ automatic downloads back to this PC, and asks the server to remove the token too
 with the same `Authorization: Bearer <token>` as `/api/ipc` (no body, `credentials: "omit"`,
 `redirect: "error"`, a 4-second limit; the token is forgotten here first, whatever the answer). On 204
 Settings says the server removed the pairing too; on anything else (no answer, an older server without the
-call, a token already removed) it says to remove this browser from the web UI's Paired browsers list.
+call, a token already removed) it says to remove this browser from the web UI's Paired apps list.
 Only `options.html` may pair or unpair. A plain-http address that is not loopback gets a one-line
 note that the token and cookies cross the network unencrypted.
 
@@ -228,7 +248,7 @@ note that the token and cookies cross the network unencrypted.
   server's card shows the state. One place not answering leaves the other's list.
 
 The server's side (pairing, the token, the extension role with `folders.browse`, CORS for our extension ids
-and any `moz-extension://` origin) is in `docs/ipc-protocol.md` (Sign-in and paired browsers).
+and any `moz-extension://` origin) is in `docs/ipc-protocol.md` (Sign-in and paired apps).
 `scripts/server-smoke.mjs` runs `transport.ts` against a running test server (pair, folders, handoff,
 duplicate, list, delete, a refused command, a removed token).
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Core.Providers;
@@ -11,7 +12,9 @@ namespace DownloadManager.Runtime.Ipc;
 /// The Host's whole IPC protocol without a transport: the hello and snapshot a client gets first, every command's
 /// answer, and the broadcasts (<c>job.event</c>, <c>update.progress</c>, <c>groups.changed</c>, <c>remote.changed</c>,
 /// <c>archive.changed</c>, <c>host.exiting</c>). The desktop Host's named pipe is one transport; a server's
-/// WebSocket is another. What the machine itself can do comes from <see cref="IHostPlatform"/>.
+/// WebSocket is another. What the machine itself can do comes from <see cref="IHostPlatform"/>; what one client may do
+/// is its session's <see cref="SessionRights"/>, given when it opens: the platform's own, or a web session's
+/// (<see cref="WebSessions"/>) when its <c>client.hello</c> asked for that role.
 /// </summary>
 public sealed partial class HostCommandDispatcher
 {
@@ -19,6 +22,13 @@ public sealed partial class HostCommandDispatcher
     private const string ProgramSettingsUnavailable =
         "The post-download command, FFmpeg path, update source and system completion actions can't be changed from here.";
     private const string CompletionProgramUnavailable = "A completion program can't be set from here.";
+    private const string CompletionActionsUnavailable =
+        "What happens when a download is done (open the file, shut down, exit) can only be set in the app on this PC.";
+    private const string SendToOtherProgramUnavailable = "A container can only be handed to another download manager in the app on this PC.";
+    private const string ProviderKeyUnavailable = "The provider's key can only be changed in the app on this PC.";
+    private const string ExtractionFolderUnavailable = "The extraction folder can only be set in the app on this PC.";
+    private const string ExtractionRemovalUnavailable =
+        "Deleting archives after extraction and overwriting files can only be turned on in the app on this PC.";
     private static readonly TimeSpan GroupsBroadcastDelay = TimeSpan.FromMilliseconds(100);
 
     private readonly DownloadManagerService _service;
@@ -26,6 +36,10 @@ public sealed partial class HostCommandDispatcher
     private readonly IHostLog _log;
     private readonly RemoteCommands? _remote;
     private readonly ConcurrentDictionary<Guid, IClientSession> _sessions = new();
+    // Every open session with its rights, events or not, for CloseSessions. The rights also live on the session object
+    // itself (_rights), so a command still being answered after its session closed keeps that session's rights.
+    private readonly ConcurrentDictionary<Guid, (IClientSession Client, SessionRights Rights)> _open = new();
+    private readonly ConditionalWeakTable<IClientSession, SessionRights> _rights = new();
     private readonly CancellationTokenSource _stopping = new();
     private readonly object _groupsGate = new();
     private int _updateWindowOpened;
@@ -50,26 +64,67 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public FolderBrowser? Folders { get; init; }
 
-    private FolderBrowser? AvailableFolders => _platform.Capabilities.SupportsFolderBrowse ? Folders : null;
+    /// <summary>
+    /// The rights a <c>web</c> session gets (<see cref="WebSessionProfile"/>). Null: this Host has no such role, and a
+    /// <c>client.hello</c> that asks for it is refused (<see cref="OffersRole"/>).
+    /// </summary>
+    public SessionRights? WebSessions { get; init; }
+
+    /// <summary>The platform's own rights: the desktop window, the CLI, the browser's native host, or a server's client.</summary>
+    public SessionRights PlatformRights => new()
+    {
+        Role = ClientRoles.Desktop,
+        Capabilities = _platform.Capabilities,
+        Archives = Archives,
+        Folders = Folders,
+        Remote = _remote,
+    };
+
+    /// <summary>What the hello offers a session with the platform's own rights. See <see cref="CapabilitiesOf"/>.</summary>
+    public List<string> Capabilities => CapabilitiesOf(PlatformRights);
 
     /// <summary>
-    /// What the hello offers. It is a set: clients look a name up (<c>Contains</c>) and never read a position. The desktop
-    /// Host's list is still exactly the one it has sent since protocol 1, in that order, and a new name is only ever
-    /// appended. A platform without something leaves its name out, so on one without a tray the names after
+    /// What the hello offers a session with these rights. It is a set: clients look a name up (<c>Contains</c>) and never
+    /// read a position. The desktop Host's list starts exactly as it has since protocol 1, in that order, and a new name
+    /// is only ever appended. A platform without something leaves its name out, so on one without a tray the names after
     /// <c>tray</c> sit one place earlier; that is why a position can't be relied on.
     /// </summary>
-    public List<string> Capabilities
+    public static List<string> CapabilitiesOf(SessionRights rights)
     {
-        get
-        {
-            var capabilities = new List<string> { "jobs", "settings", "handoff" };
-            if (_platform.Capabilities.SupportsTray) capabilities.Add("tray");
-            capabilities.Add("status");
-            if (_remote is not null) capabilities.Add("remote");
-            if (AvailableFolders is not null) capabilities.Add("folders");
-            return capabilities;
-        }
+        var platform = rights.Capabilities;
+        var capabilities = new List<string> { "jobs", "settings", "handoff" };
+        if (platform.SupportsTray) capabilities.Add("tray");
+        capabilities.Add("status");
+        if (rights.Remote is not null) capabilities.Add("remote");
+        if (FoldersOf(rights) is not null) capabilities.Add("folders");
+        if (platform.SupportsUpdater) capabilities.Add("updater");
+        if (platform.SupportsProgramSettings) capabilities.Add("programSettings");
+        if (platform.SupportsFolderPicker) capabilities.Add("folderPicker");
+        if (platform.SupportsOpenUi) capabilities.Add("openUi");
+        if (platform.SupportsShutdown) capabilities.Add("shutdown");
+        if (platform.SupportsCompletionActions) capabilities.Add("completionActions");
+        // archive.* is answered (extraction started) and an extractor is there (7-Zip found), as of the hello. A 7-Zip
+        // installed later shows on the next connection, or at once in archive.settings.get's tool.
+        if (rights.Archives is { } archives && archives.Coordinator.CanExtract) capabilities.Add("archives");
+        // A .torrent file or a container can be uploaded (POST /api/upload/...) and then named by its reference.
+        if (rights.Remote is { AcceptsUploads: true }) capabilities.Add("uploads");
+        return capabilities;
     }
+
+    private static FolderBrowser? FoldersOf(SessionRights rights) => rights.Capabilities.SupportsFolderBrowse ? rights.Folders : null;
+
+    /// <summary>Whether a <c>client.hello</c> may ask for this role. Null and <c>desktop</c> always; <c>web</c> where there is one.</summary>
+    public bool OffersRole(string? role) => RightsFor(role) is not null;
+
+    private SessionRights? RightsFor(string? role) => role switch
+    {
+        null or "" or ClientRoles.Desktop => PlatformRights,
+        ClientRoles.Web => WebSessions,
+        _ => null,
+    };
+
+    /// <summary>The session's rights. One that was never opened (a server's one-shot request) has the platform's.</summary>
+    private SessionRights RightsOf(IClientSession client) => _rights.TryGetValue(client, out var rights) ? rights : PlatformRights;
 
     /// <summary>Starts the broadcasts. Before any transport accepts a client.</summary>
     public void Start()
@@ -108,10 +163,14 @@ public sealed partial class HostCommandDispatcher
     /// <summary>
     /// As <see cref="OpenSessionAsync(IClientSession, CancellationToken)"/>, with what the client asked for in its
     /// <c>client.hello</c> (PERF.7); null is everything, as before. Without the snapshot only the hello is sent. Without
-    /// events the session is never registered, so no broadcast reaches it; its replies still do.
+    /// events the session is never registered, so no broadcast reaches it; its replies still do. The role it asked for
+    /// gives its rights for good; a role this Host doesn't offer throws, so check <see cref="OffersRole"/> first.
     /// </summary>
     public async Task OpenSessionAsync(IClientSession client, ClientHelloDto? options, CancellationToken cancellationToken)
     {
+        var rights = RightsFor(options?.Role) ?? throw new ArgumentException("This Host doesn't offer that role.", nameof(options));
+        _rights.AddOrUpdate(client, rights);
+        _open[client.Id] = (client, rights);
         // PERF.7: a client that asked for no events is never registered, so no broadcast reaches it.
         if (options?.Events ?? true) _sessions[client.Id] = client;
         // UI.B12: once the user asked for an exit, a new client gets host.exiting instead of the hello, so a Host
@@ -129,14 +188,38 @@ public sealed partial class HostCommandDispatcher
             HostVersion = Protocol.HostVersion,
             ProtocolVersion = Protocol.Version,
             StartedAt = _service.StartedAt,
-            Capabilities = Capabilities,
+            Capabilities = CapabilitiesOf(rights),
+            HostKind = _platform.Capabilities.HostKind,
         }), cancellationToken).ConfigureAwait(false);
 
-        if (options?.Snapshot ?? true) await SendSnapshotAsync(client, cancellationToken).ConfigureAwait(false);
+        if (options?.Snapshot ?? true) await SendSnapshotAsync(client, rights, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>No more broadcasts go to this session.</summary>
-    public void CloseSession(IClientSession client) => _sessions.TryRemove(client.Id, out _);
+    public void CloseSession(IClientSession client)
+    {
+        _sessions.TryRemove(client.Id, out _);
+        _open.TryRemove(client.Id, out _);
+    }
+
+    /// <summary>
+    /// Ends every open session of this role (<see cref="ClientRoles"/>), such as all web sessions when the web UI is
+    /// turned off: no broadcast reaches them from now on, and their transports close them. Returns how many.
+    /// </summary>
+    public int CloseSessions(string role)
+    {
+        var closed = 0;
+        foreach (var (id, (client, rights)) in _open)
+        {
+            if (!string.Equals(rights.Role, role, StringComparison.Ordinal)) continue;
+            _sessions.TryRemove(id, out _);
+            _open.TryRemove(id, out _);
+            client.Close();
+            closed++;
+        }
+
+        return closed;
+    }
 
     /// <summary>
     /// A frame on another protocol version is answered with <c>server.incompatible</c>; the transport then ends the
@@ -159,9 +242,9 @@ public sealed partial class HostCommandDispatcher
     /// A snapshot too large for a frame would refuse every client on every connect, for as long as
     /// the saved jobs stay as they are. Failure words go first, because the jobs are what a client needs.
     /// </summary>
-    private async Task SendSnapshotAsync(IClientSession client, CancellationToken cancellationToken)
+    private async Task SendSnapshotAsync(IClientSession client, SessionRights rights, CancellationToken cancellationToken)
     {
-        var snapshot = _service.GetSnapshot();
+        var snapshot = ForSession(_service.GetSnapshot(), rights);
         try
         {
             await client.SendDirectAsync(IpcMessage.Create(MessageTypes.JobsSnapshot, snapshot), cancellationToken).ConfigureAwait(false);
@@ -187,16 +270,27 @@ public sealed partial class HostCommandDispatcher
     /// </summary>
     public async Task DispatchAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
     {
+        var rights = RightsOf(client);
+        var caller = rights.Scope;
+        var platform = rights.Capabilities;
         try
         {
-            if (await TryDispatchRemoteAsync(client, message, cancellationToken).ConfigureAwait(false))
+            if (await TryDispatchRemoteAsync(client, rights, message, cancellationToken).ConfigureAwait(false))
             {
                 return;
             }
 
-            if (Archives is { } archives && ArchiveIpcDispatcher.Handles(message.Type))
+            if (rights.Archives is { } archives && ArchiveIpcDispatcher.Handles(message.Type))
             {
-                client.Enqueue(await archives.DispatchAsync(message, cancellationToken).ConfigureAwait(false));
+                client.Enqueue(caller is not null && RefuseArchiveFor(archives, caller, message) is { } refused
+                    ? refused
+                    : await archives.DispatchAsync(message, cancellationToken).ConfigureAwait(false));
+                return;
+            }
+
+            if (WebUiMessageTypes.IsRequest(message.Type))
+            {
+                await AnswerWebUiAsync(client, rights, message, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -209,13 +303,13 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.HostStatus:
                     await Reply(client, message, MessageTypes.HostStatusResult,
-                        _service.GetStatus()).ConfigureAwait(false);
+                        ForSession(_service.GetStatus(), rights)).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.HostCleanOrphans:
                     var cleanOrphans = message.GetPayload<CleanOrphansRequest>() ?? new CleanOrphansRequest();
                     await Reply(client, message, MessageTypes.HostCleanOrphansResult,
-                        await _service.CleanOrphanPartFilesAsync(cleanOrphans.Delete, cancellationToken)
+                        await _service.CleanOrphanPartFilesAsync(cleanOrphans.Delete, cancellationToken, caller)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -230,23 +324,23 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobsSnapshot:
                 case MessageTypes.JobsQuery:
-                    await Reply(client, message, MessageTypes.JobsSnapshot, _service.GetSnapshot())
+                    await Reply(client, message, MessageTypes.JobsSnapshot, ForSession(_service.GetSnapshot(), rights))
                         .ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobAdd:
                     var add = message.GetPayload<AddJobRequest>();
-                    var addResult = await _service.AddJobAsync(add, cancellationToken).ConfigureAwait(false);
+                    var addResult = await _service.AddJobAsync(add, cancellationToken, caller).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.JobAddResult, addResult).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.FileMetadata:
-                    var metadata = await _service.ReadFileMetadataAsync(message.GetPayload<FileMetadataRequest>(), cancellationToken).ConfigureAwait(false);
+                    var metadata = await _service.ReadFileMetadataAsync(message.GetPayload<FileMetadataRequest>(), cancellationToken, caller).ConfigureAwait(false);
                     await Reply(client, message, MessageTypes.FileMetadataResult, metadata).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.HandoffRequest:
-                    await HandleHandoffAsync(client, message, cancellationToken).ConfigureAwait(false);
+                    await HandleHandoffAsync(client, message, caller, cancellationToken).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.JobPause:
@@ -268,7 +362,7 @@ public sealed partial class HostCommandDispatcher
                     var cancel = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
                         await _service.CancelAsync(cancel.JobId, cancel.DeleteFile, cancellationToken,
-                            onlyIfUnfinished: cancel.OnlyIfUnfinished).ConfigureAwait(false))
+                            onlyIfUnfinished: cancel.OnlyIfUnfinished, caller: caller).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
@@ -276,8 +370,8 @@ public sealed partial class HostCommandDispatcher
                     var remove = message.GetPayload<JobActionRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
                         await (remove.JobIds is { Count: > 0 } removeIds
-                            ? _service.RemoveManyAsync(removeIds, remove.DeleteFile, cancellationToken)
-                            : _service.RemoveAsync(remove.JobId, remove.DeleteFile, cancellationToken)).ConfigureAwait(false))
+                            ? _service.RemoveManyAsync(removeIds, remove.DeleteFile, cancellationToken, caller)
+                            : _service.RemoveAsync(remove.JobId, remove.DeleteFile, cancellationToken, caller)).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
@@ -293,7 +387,7 @@ public sealed partial class HostCommandDispatcher
                 case MessageTypes.JobRefreshUrl:
                     var refreshUrl = message.GetPayload<JobRefreshUrlRequest>();
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken)
+                        await _service.RefreshUrlAsync(refreshUrl.JobId, refreshUrl.Url, refreshUrl.ExplicitDirect, cancellationToken, caller)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -306,15 +400,23 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.JobUpdate:
                     var jobUpdate = message.GetPayload<JobUpdateRequest>();
-                    if (!_platform.Capabilities.SupportsProgramSettings && ChangesCompletionProgram(jobUpdate))
+                    if (!platform.SupportsProgramSettings && ChangesCompletionProgram(jobUpdate))
                     {
                         await Reply(client, message, MessageTypes.JobActionResult,
                             new JobActionResponse { Error = CompletionProgramUnavailable, Job = _service.GetJob(jobUpdate.JobId) }).ConfigureAwait(false);
                         break;
                     }
 
+                    // Only for a web session: the server runs no completion actions, so setting them there changes nothing.
+                    if (caller is not null && !platform.SupportsCompletionActions && RaisesCompletionActions(jobUpdate))
+                    {
+                        await Reply(client, message, MessageTypes.JobActionResult,
+                            new JobActionResponse { Error = CompletionActionsUnavailable, Job = _service.GetJob(jobUpdate.JobId) }).ConfigureAwait(false);
+                        break;
+                    }
+
                     await Reply(client, message, MessageTypes.JobActionResult,
-                        await _service.UpdateJobAsync(jobUpdate, cancellationToken)
+                        await _service.UpdateJobAsync(jobUpdate, cancellationToken, caller)
                             .ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
@@ -328,7 +430,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.UpdateCheck:
-                    if (!_platform.Capabilities.SupportsUpdater)
+                    if (!platform.SupportsUpdater)
                     {
                         await Reply(client, message, MessageTypes.UpdateCheckResult, new UpdateCheckResult { Error = UpdatesUnavailable }).ConfigureAwait(false);
                         break;
@@ -340,7 +442,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.UpdateDownload:
-                    if (!_platform.Capabilities.SupportsUpdater)
+                    if (!platform.SupportsUpdater)
                     {
                         await Reply(client, message, MessageTypes.UpdateDownloadResult, new UpdateDownloadResult { Error = UpdatesUnavailable }).ConfigureAwait(false);
                         break;
@@ -352,7 +454,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.UpdateInstall:
-                    if (!_platform.Capabilities.SupportsUpdater)
+                    if (!platform.SupportsUpdater)
                     {
                         await Reply(client, message, MessageTypes.UpdateInstallResult, new UpdateInstallResult { Error = UpdatesUnavailable }).ConfigureAwait(false);
                         break;
@@ -377,7 +479,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.UpdateDefer:
-                    if (!_platform.Capabilities.SupportsUpdater)
+                    if (!platform.SupportsUpdater)
                     {
                         await Reply(client, message, MessageTypes.SettingsResult, new SettingsResult { Error = UpdatesUnavailable, Settings = _service.GetSettings() }).ConfigureAwait(false);
                         break;
@@ -426,19 +528,25 @@ public sealed partial class HostCommandDispatcher
 
                 case MessageTypes.FolderSpace:
                     await Reply(client, message, MessageTypes.FolderSpaceResult,
-                        await _service.GetFolderSpaceAsync(message.GetPayload<FolderSpaceRequest>(), cancellationToken).ConfigureAwait(false))
+                        await _service.GetFolderSpaceAsync(message.GetPayload<FolderSpaceRequest>(), cancellationToken, caller).ConfigureAwait(false))
                         .ConfigureAwait(false);
                     break;
 
                 case MessageTypes.FoldersBrowse:
                 case MessageTypes.FoldersCreate:
                     await Reply(client, message, MessageTypes.FoldersBrowseResult,
-                        await BrowseFoldersAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+                        await BrowseFoldersAsync(rights, message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
                     break;
 
                 case MessageTypes.SettingsUpdate:
                     var update = message.GetPayload<SettingsUpdateRequest>();
-                    if (!_platform.Capabilities.SupportsProgramSettings &&
+                    if (caller is not null && RefuseSettingsForCaller(update) is { } settingsRefusal)
+                    {
+                        await Reply(client, message, MessageTypes.SettingsResult, settingsRefusal).ConfigureAwait(false);
+                        break;
+                    }
+
+                    if (!platform.SupportsProgramSettings &&
                         _service.GetSettings() is var currentSettings && ChangesProgramSettings(update.Settings, currentSettings))
                     {
                         await Reply(client, message, MessageTypes.SettingsResult,
@@ -466,7 +574,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.HostOpenUi:
-                    if (!_platform.Capabilities.SupportsOpenUi)
+                    if (!platform.SupportsOpenUi)
                     {
                         await Reply(client, message, MessageTypes.HostActionResult,
                             new HostActionResult { Ok = false, Message = "Opening the desktop UI is not available here." }).ConfigureAwait(false);
@@ -488,7 +596,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.HostPickFolder:
-                    if (!_platform.Capabilities.SupportsFolderPicker)
+                    if (!platform.SupportsFolderPicker)
                     {
                         await Reply(client, message, MessageTypes.HostFolderPicked,
                             new FolderPickResult { Error = "Folder selection is unavailable here." }).ConfigureAwait(false);
@@ -502,7 +610,7 @@ public sealed partial class HostCommandDispatcher
                     break;
 
                 case MessageTypes.HostShutdown:
-                    if (!_platform.Capabilities.SupportsShutdown)
+                    if (!platform.SupportsShutdown)
                     {
                         await Reply(client, message, MessageTypes.HostActionResult,
                             new HostActionResult { Ok = false, Message = "Shutting down is not available here." }).ConfigureAwait(false);
@@ -533,9 +641,9 @@ public sealed partial class HostCommandDispatcher
     }
 
     /// <summary>Off the dispatcher's thread: a folder on a share that doesn't answer can take a while to list.</summary>
-    private async Task<FolderBrowseResult> BrowseFoldersAsync(IpcMessage message, CancellationToken cancellationToken)
+    private static async Task<FolderBrowseResult> BrowseFoldersAsync(SessionRights rights, IpcMessage message, CancellationToken cancellationToken)
     {
-        if (AvailableFolders is not { } folders)
+        if (FoldersOf(rights) is not { } folders)
             return new FolderBrowseResult { Error = "Folder browsing is not available here." };
         if (message.Type == MessageTypes.FoldersCreate)
         {
@@ -544,7 +652,7 @@ public sealed partial class HostCommandDispatcher
         }
 
         var browse = message.Payload is null ? new FolderBrowseRequest() : message.GetPayload<FolderBrowseRequest>();
-        return await Task.Run(() => folders.Browse(browse.Path), cancellationToken).ConfigureAwait(false);
+        return await Task.Run(() => folders.Browse(browse.Path, browse.Files), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -567,6 +675,93 @@ public sealed partial class HostCommandDispatcher
         => request.CompletionOptions?.ProgramPath is { } program && !string.IsNullOrWhiteSpace(program) &&
            !SameText(program, _service.GetJob(request.JobId)?.CompletionOptions.ProgramPath);
 
+    /// <summary>
+    /// Whether the request turns on something a finished download does on this machine: opening the file, a system
+    /// action, forcing one. Turning them off, or sending back what the download already has, is no change.
+    /// </summary>
+    private bool RaisesCompletionActions(JobUpdateRequest request)
+    {
+        if (request.CompletionOptions is not { } requested) return false;
+        var current = _service.GetJob(request.JobId)?.CompletionOptions ?? new JobCompletionOptionsDto();
+        static bool None(string? action) => string.IsNullOrWhiteSpace(action) || string.Equals(action, "none", StringComparison.OrdinalIgnoreCase);
+        return (requested.OpenFile && !current.OpenFile) ||
+               (!None(requested.SystemAction) && !string.Equals(requested.SystemAction, current.SystemAction, StringComparison.OrdinalIgnoreCase)) ||
+               (requested.ForceSystemAction && !current.ForceSystemAction);
+    }
+
+    /// <summary>A web session's save, held to <see cref="WebSettingsRules"/>. Null when it may go ahead.</summary>
+    private SettingsResult? RefuseSettingsForCaller(SettingsUpdateRequest update)
+    {
+        var current = _service.GetSettings();
+        if (update.Settings is null) return new SettingsResult { Error = "No settings were sent.", Settings = current };
+        WebSettingsRules.KeepHostOwned(update.Settings, current);
+        return WebSettingsRules.DescribeRefusal(update.Settings, current) is { } refusal
+            ? new SettingsResult { Error = refusal, Settings = current }
+            : null;
+    }
+
+    /// <summary>
+    /// For a web session: extracting a download's or a package's archives, or giving a package its password (which
+    /// starts its waiting sets), only where all their files are inside its folders (a path or set it names is held to
+    /// them by the archive commands themselves). The extraction folder stays as it is, and extraction can't be made to
+    /// delete archives or overwrite files: those apply to every archive the user downloads, wherever it is.
+    /// </summary>
+    private IpcMessage? RefuseArchiveFor(ArchiveIpcDispatcher archives, CallerScope caller, IpcMessage message)
+    {
+        switch (message.Type)
+        {
+            case ArchiveMessageTypes.Extract:
+                var extract = message.GetPayload<ArchiveExtractRequest>();
+                return HoldsAll(extract.JobIds, extract.PackageId, caller)
+                    ? null
+                    : IpcMessage.Create(ArchiveMessageTypes.ExtractResult, new ArchiveExtractResult { Error = CallerScope.OutsideJobRefused }, message.Id);
+            case ArchiveMessageTypes.SetPassword:
+                var password = message.GetPayload<ArchiveSetPasswordRequest>();
+                return password.PackageId is not { } passwordPackage || HoldsAll(null, passwordPackage, caller)
+                    ? null
+                    : IpcMessage.Create(ArchiveMessageTypes.ActionResult, new ArchiveActionResult { Error = CallerScope.OutsideJobRefused }, message.Id);
+            case ArchiveMessageTypes.SettingsSet:
+                var settings = message.GetPayload<ArchiveSettingsUpdate>();
+                var current = archives.Coordinator.GetSettings();
+                var error = settings.Folder is not null && !SameText(settings.Folder, current.Settings.Folder) ? ExtractionFolderUnavailable
+                    : (settings.DeleteArchives == true && !current.Settings.DeleteArchives) ||
+                      (string.Equals(settings.ConflictPolicy?.Trim(), "overwrite", StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(current.Settings.ConflictPolicy, "overwrite", StringComparison.OrdinalIgnoreCase)) ? ExtractionRemovalUnavailable
+                    : null;
+                if (error is null) return null;
+                current.Ok = false;
+                current.Error = error;
+                return IpcMessage.Create(ArchiveMessageTypes.SettingsResult, current, message.Id);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Whether every download named, and every one of the package, is inside the caller's folders. One that is gone counts as held.</summary>
+    private bool HoldsAll(IEnumerable<Guid>? jobIds, Guid? packageId, CallerScope caller)
+    {
+        var jobs = (jobIds ?? []).ToList();
+        if (packageId is { } package)
+            jobs.AddRange(_service.GetDownloadGroups().FirstOrDefault(group => group.Id == package)?.JobIds ?? []);
+        return !jobs.Distinct().Any(id => _service.HeldBy(id, caller) == false);
+    }
+
+    /// <summary>What a web session is told about the Host: not where it keeps its state, nor leftovers outside its folders.</summary>
+    private static HostStatusDto ForSession(HostStatusDto status, SessionRights rights)
+    {
+        if (rights.Scope is not { } caller) return status;
+        status.StateDirectory = string.Empty;
+        status.OrphanPartFiles = status.OrphanPartFiles.Where(path => caller.Roots.Allowed(path) is not null).ToList();
+        return status;
+    }
+
+    private static SnapshotDto ForSession(SnapshotDto snapshot, SessionRights rights)
+    {
+        snapshot.Status = ForSession(snapshot.Status, rights);
+        if (rights.Scope is not null) snapshot.Settings = WebSettingsRules.ForWeb(snapshot.Settings);
+        return snapshot;
+    }
+
     // The settings store trims the command and the FFmpeg path and keeps an empty one as none, so " x" and "x", and
     // "" and null, are the same setting and sending one back is no change.
     private static bool SameText(string? left, string? right)
@@ -575,7 +770,12 @@ public sealed partial class HostCommandDispatcher
             string.IsNullOrWhiteSpace(right) ? null : right.Trim(),
             StringComparison.Ordinal);
 
-    private async Task HandleHandoffAsync(IClientSession client, IpcMessage message, CancellationToken cancellationToken)
+    /// <param name="caller">
+    /// Set for a web session: the extension id in the payload says nothing about who sent it there (the bridge's own
+    /// sign-in decided that), so it is not checked and grants nothing; the download is held to the session's folders and
+    /// addresses like any it adds.
+    /// </param>
+    private async Task HandleHandoffAsync(IClientSession client, IpcMessage message, CallerScope? caller, CancellationToken cancellationToken)
     {
         var handoff = message.GetPayload<HandoffRequest>();
         if (string.IsNullOrWhiteSpace(handoff.RequestId) || string.IsNullOrWhiteSpace(handoff.Url))
@@ -589,7 +789,7 @@ public sealed partial class HostCommandDispatcher
             return;
         }
 
-        if (!BrowserBridge.IsTrustedExtensionId(handoff.ExtensionId))
+        if (caller is null && !BrowserBridge.IsTrustedExtensionId(handoff.ExtensionId))
         {
             await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck
             {
@@ -631,7 +831,7 @@ public sealed partial class HostCommandDispatcher
             PackageName = handoff.PackageName,
         };
 
-        var result = await _service.AddJobAsync(request, cancellationToken).ConfigureAwait(false);
+        var result = await _service.AddJobAsync(request, cancellationToken, caller).ConfigureAwait(false);
         await Reply(client, message, MessageTypes.HandoffAck, new HandoffAck
         {
             Accepted = result.Accepted,
@@ -643,8 +843,11 @@ public sealed partial class HostCommandDispatcher
         }).ConfigureAwait(false);
     }
 
-    private static Task Reply<T>(IClientSession client, IpcMessage request, string type, T payload)
+    /// <summary>A web session's copy of the settings, in whichever reply carries them, leaves out what it isn't shown.</summary>
+    private Task Reply<T>(IClientSession client, IpcMessage request, string type, T payload)
     {
+        if (payload is SettingsResult { Settings: { } settings } result && RightsOf(client).Scope is not null)
+            result.Settings = WebSettingsRules.ForWeb(settings);
         client.Enqueue(IpcMessage.Create(type, payload, request.Id));
         return Task.CompletedTask;
     }

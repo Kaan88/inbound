@@ -15,7 +15,7 @@ host.
 Never commit cookies, credentials, browser profiles, or captures containing
 secrets.
 
-## Current status (2026-11-08, release 0.6.2, extension 0.5.1)
+## Current status (2026-11-09, release 0.6.3, extension 0.5.3)
 
 Phases 0–5 are substantially implemented: single-stream engine, resume/crash
 recovery, tray/host/IPC/CLI, the WinUI shell, segmented transfers, and
@@ -51,7 +51,7 @@ explicit live-stream exclusion and DRM detection are implemented. HLS AES-128
 VOD decryption supports key rotation. Authenticated HTTP/HTTPS proxy,
 SOCKS4/4a and SOCKS5, DPAPI site logins and proxy-password protection, redirect
 credential boundaries, and expired-URL refresh are verified.
-TorBox and archive extraction ship in 0.5.x. The headless server, web UI and Docker image (ROADMAP D1–D4) ship in
+TorBox and archive extraction ship in 0.5.x. 0.6.3 adds the web UI to the Windows app (D8): Setup ships `DownloadManager.Server.exe`, which the Host runs as a bridge (`--bridge`) only while Options > Web UI is on, with browser sessions limited to the app's folders. The desktop window can manage another Inbound server and the web UI can switch hosts (D9); the web UI follows the desktop window's flows (D2c). These were built and tested automatically but not yet tried in the running app. The headless server, web UI and Docker image (ROADMAP D1–D4) ship in
 0.6.0 for linux/amd64 only (D1 is still in progress); see `docs\docker.md` and `docs\docker-webui-plan.md`.
 Clean install, upgrade (0.5.3 to 0.6.0), sign-in start and uninstall are verified on a fresh Windows VM (TEST.2).
 Setup uses Windows Restart Manager rather than force-killing by process name, and uninstall retains state.

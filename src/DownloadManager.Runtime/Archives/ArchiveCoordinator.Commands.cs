@@ -37,6 +37,15 @@ public sealed partial class ArchiveCoordinator
         }
     }
 
+    /// <summary>The extraction folder the user chose, or null. Unlike <see cref="GetSettings"/> it reads nothing on disk.</summary>
+    public string? ExtractionFolder
+    {
+        get
+        {
+            lock (_sync) return _settings.ChosenFolder;
+        }
+    }
+
     public ArchiveSettingsResult GetSettings()
     {
         ArchiveSettings settings;
@@ -542,6 +551,12 @@ public sealed partial class ArchiveCoordinator
     /// <summary>Says what is wrong with a password without repeating any of it.</summary>
     private static string? DescribeBadPassword(string? password) =>
         password is not null && password.AsSpan().IndexOfAny('\r', '\n', '\0') >= 0 ? "An archive password cannot contain a line break." : null;
+
+    /// <summary>
+    /// Whether an extraction could run now: the extractor it was given, or a 7-Zip found where <see cref="ToolStatus"/>
+    /// looks (a few file checks, nothing started). The hello's <c>archives</c> name follows it.
+    /// </summary>
+    public bool CanExtract => _options.ExtractorFactory is not null || SevenZipTool.Find(_options.SevenZipPath) is not null;
 
     private ArchiveToolStatusDto ToolStatus()
     {

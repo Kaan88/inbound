@@ -1145,7 +1145,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.unpairServer": {
       if (!fromPage(sender, "options.html")) return { ok: false, error: "Only the extension's Settings can do that." };
       // The token asks the server to remove it (DELETE /api/pair/self), briefly; it is forgotten here whatever
-      // the answer. When that fails, the server's web UI lists it under Paired browsers until removed there.
+      // the answer. When that fails, the server's web UI lists it under Paired apps until removed there.
       const leaving = server;
       server = null;
       await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: null });
