@@ -2,7 +2,7 @@
   import { DialogStack, wrapTarget } from '../lib/dialogs';
 
   // One stack for every dialog on the page: Back closes the top one, and only the top one answers keys.
-  const stack = new DialogStack(() => (typeof history === 'undefined' ? null : history));
+  const stack = new DialogStack(() => (typeof history === 'undefined' ? null : history), () => (typeof location === 'undefined' ? '' : location.href));
   let listening = false;
   function listen() {
     if (listening || typeof window === 'undefined') return;

@@ -18,13 +18,18 @@ export interface HistoryLike {
   back(): void;
 }
 
-interface Entry { id: number; close: () => void }
+/** A dialog, and the address its history entry has (the address when it opened). */
+interface Entry { id: number; close: () => void; href: string }
 
 /**
  * The open dialogs, newest last. Each one adds a history entry with the same address, so Back takes that entry away
  * and closes the dialog, and the view behind it stays. A dialog closed some other way takes its own entry back out.
  * A Back of our own is still on its way while a new dialog opens (one dialog replacing another): the new one adds its
  * entry only after that Back has landed, or the Back would take the new entry instead.
+ *
+ * A #fragment navigation (a link, a typed address) fires popstate too. It is told from a Back by where the page lands:
+ * a Back out of a dialog's entry lands on the same address, a navigation on another one, and a Back or Forward onto the
+ * top dialog's own entry is no Back out of it. Those close nothing.
  */
 export class DialogStack {
   private open: Entry[] = [];
@@ -32,12 +37,16 @@ export class DialogStack {
   private ownBacks = 0;
   private waiting: number[] = [];
 
-  constructor(private readonly history: () => HistoryLike | null) {}
+  constructor(
+    private readonly history: () => HistoryLike | null,
+    /** The page's address now (`location.href`). */
+    private readonly here: () => string = () => '',
+  ) {}
 
   /** A dialog opened; returns its id. */
   opened(close: () => void): number {
     const id = this.nextId++;
-    this.open.push({ id, close });
+    this.open.push({ id, close, href: this.address() });
     if (this.ownBacks > 0) this.waiting.push(id);
     else this.push(id);
     return id;
@@ -69,7 +78,12 @@ export class DialogStack {
       }
       return;
     }
-    this.open[this.open.length - 1]?.close();
+    const top = this.open[this.open.length - 1];
+    if (!top) return;
+    const state = this.safe()?.state;
+    if (isMarker(state, top.id)) return;
+    if (this.address() !== top.href) return;
+    top.close();
   }
 
   isTop(id: number): boolean {
@@ -82,6 +96,10 @@ export class DialogStack {
 
   private push(id: number) {
     try { this.safe()?.pushState({ inboundDialog: id }, ''); } catch { /* no history: Back simply isn't caught */ }
+  }
+
+  private address(): string {
+    try { return this.here(); } catch { return ''; }
   }
 
   private safe(): HistoryLike | null {

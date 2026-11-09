@@ -657,33 +657,41 @@ if (torrent && mockKey) {
 }
 
 // Review of D2d, items 1 and 2: a download that fails keeps the dialog open with the focus inside, so Escape works,
-// and Shift+Tab from the panel stays inside.
-if (mockKey) {
-  await step('e2e: My TorBox dialog keeps the focus after a failed download', async () => {
-    await app(page, '#/provider');
-    const row = (await itemRow(page)).locator(':scope > button').first();
-    await row.click();
+// and Shift+Tab from the panel stays inside. Never skipped: without the mock provider it fails and says why, and it
+// opens items until one can still take a folder (one already on the list can't, after an earlier run's download).
+await step('e2e: My TorBox dialog keeps the focus after a failed download', async () => {
+  expect(mockKey, 'needs INBOUND_MOCK_KEY (tools/TestServer --torbox) to reach the failure path');
+  await app(page, '#/provider');
+  await itemRow(page);
+  const rows = page.locator('.item-row');
+  let folder = null;
+  for (let i = 0, n = await rows.count(); i < n && !folder; i++) {
+    await rows.nth(i).locator(':scope > button').first().click();
     await dialog(page).waitFor();
-    const folder = dialog(page).locator('#item-dest');
-    if (await folder.isEnabled()) {
-      await folder.fill('C:\\Windows\\Temp');
-      await page.waitForFunction(() => {
-        const button = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Download all');
-        return button && !button.disabled;
-      }, null, { timeout: 10000 });
-      await dialog(page).getByRole('button', { name: 'Download all' }).click();
-      await dialog(page).locator('.text-error[role="status"]').waitFor({ timeout: 10000 });
-      expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'the focus left the dialog after the failed download');
-      // The page keeps the box as typed; the next check wants the default folder again.
-      await folder.fill('');
+    const box = dialog(page).locator('#item-dest');
+    if (await box.count() && await box.isEnabled()) folder = box;
+    else {
+      await page.keyboard.press('Escape');
+      await dialog(page).waitFor({ state: 'detached' });
     }
-    await dialog(page).focus();
-    await page.keyboard.press('Shift+Tab');
-    expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'Shift+Tab from the panel left the dialog');
-    await page.keyboard.press('Escape');
-    await dialog(page).waitFor({ state: 'detached' });
-  });
-}
+  }
+  expect(folder, 'every My TorBox item is already on the download list, so none can fail on its folder');
+  await folder.fill('C:\\Windows\\Temp');
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Download all');
+    return button && !button.disabled;
+  }, null, { timeout: 10000 });
+  await dialog(page).getByRole('button', { name: 'Download all' }).click();
+  await dialog(page).locator('.text-error[role="status"]').waitFor({ timeout: 10000 });
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'the focus left the dialog after the failed download');
+  // The page keeps the box as typed; the next check wants the default folder again.
+  await folder.fill('');
+  await dialog(page).focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'Shift+Tab from the panel left the dialog');
+  await page.keyboard.press('Escape');
+  await dialog(page).waitFor({ state: 'detached' });
+});
 
 // D2d: My TorBox's item dialog by keyboard (Enter opens, Tab stays inside, Escape closes, the row has the focus again),
 // the row menu by Shift+F10, and Download selected from the dialog, which closes it and says so under the list.
@@ -748,6 +756,37 @@ await step('e2e: Back closes the dialog and keeps the view', async () => {
   await page.goBack();
   await dialog(page).waitFor({ state: 'detached' });
   expect(await page.evaluate(() => location.hash) === '#/finished', `Back changed the view to ${await page.evaluate(() => location.hash)}`);
+});
+
+// U-WU-7 on a phone (full-screen dialogs, touch): Back closes only the dialog and the view stays. A #fragment
+// navigation while a dialog is open leaves it open; Back from there returns to the view, the next Back closes it.
+await step('e2e: phone Back with a dialog open', async () => {
+  const phoneVariant = variants.find(phone) ?? allVariants.find(phone);
+  const { context, page: p } = await newPage(phoneVariant, signedIn);
+  try {
+    await app(p, '#/all');
+    await app(p, '#/finished');
+    await tool(p, 'Add URL');
+    await dialog(p).waitFor();
+    await p.goBack();
+    await dialog(p).waitFor({ state: 'detached' });
+    expect(await p.evaluate(() => location.hash) === '#/finished', `Back changed the view to ${await p.evaluate(() => location.hash)}`);
+
+    await tool(p, 'Add URL');
+    await dialog(p).waitFor();
+    await p.evaluate(() => { location.hash = '#/all'; });
+    await p.waitForTimeout(400);
+    expect(await dialog(p).count() === 1, 'a #fragment navigation closed the dialog');
+    await p.goBack();
+    await p.waitForFunction(() => location.hash === '#/finished');
+    await p.waitForTimeout(400);
+    expect(await dialog(p).count() === 1, 'Back onto the dialog\'s own entry closed it');
+    await p.goBack();
+    await dialog(p).waitFor({ state: 'detached' });
+    expect(await p.evaluate(() => location.hash) === '#/finished', `the last Back changed the view to ${await p.evaluate(() => location.hash)}`);
+  } finally {
+    await context.close();
+  }
 });
 
 // A site login and a proxy with passwords: the server keeps them and says only that one is saved. One draft, Apply.
@@ -853,6 +892,7 @@ await step('e2e: sign-in Back to an unsaved host asks first', async () => {
     await p.goto(`${base}/signin/#inbound-hosts=${handoff}`);
     expect(await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).count() === 0, 'Back offered as a plain link for a host that is not saved');
     await p.getByRole('button', { name: /Back to 127\.0\.0\.1:18999/ }).click();
+    await p.screenshot({ path: resolve(out, 'e2e-signin-back-asks.desktop-dark.png') });
     const group = p.getByRole('group', { name: /Go back to 127\.0\.0\.1:18999/ });
     await group.getByRole('button', { name: 'Cancel' }).click();
     expect(p.url().startsWith(base), 'Cancel left the page');
