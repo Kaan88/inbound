@@ -105,6 +105,11 @@
   // The figure beside the title is the one the status bar shows, worked out from the same downloads at the same moment
   // (U-WU-14); the line is drawn from the samples, one a second.
   const now = $derived(liveSpeed(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0));
+  // history is not reactive state; version is, so the label follows the samples as shape and ceiling do.
+  const shownSeconds = $derived.by(() => {
+    void version;
+    return Math.min(history.samples.length, speedGraphWindow);
+  });
   const ceiling = $derived.by(() => {
     void version;
     return graphCeiling(history.peak());
@@ -153,7 +158,7 @@
         viewBox="0 0 {width} {height}"
         preserveAspectRatio="none"
         role="img"
-        aria-label="Total download speed over the last {Math.min(history.samples.length, speedGraphWindow)} seconds. Now {now === null ? 'no data' : speed(now) || '0 B/s'}; the top of the graph is {speed(ceiling)}."
+        aria-label="Total download speed over the last {shownSeconds} seconds. Now {now === null ? 'no data' : speed(now) || '0 B/s'}; the top of the graph is {speed(ceiling)}."
       >
         <path d={shape.area} fill="var(--progress)" fill-opacity="0.22" />
         <path d={shape.line} fill="none" stroke="var(--progress)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
