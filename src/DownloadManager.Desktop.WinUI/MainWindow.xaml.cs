@@ -2447,7 +2447,7 @@ public sealed partial class MainWindow : Window
             if (File.Exists(icon))
             {
                 var image = new Image { Width = 64, Height = 64, VerticalAlignment = VerticalAlignment.Top, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(icon)) };
-                AutomationProperties.SetAccessibilityView(image, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(image, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
                 row.Children.Add(image);
             }
         }

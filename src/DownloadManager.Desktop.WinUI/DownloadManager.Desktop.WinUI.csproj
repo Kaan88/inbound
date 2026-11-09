@@ -48,6 +48,6 @@
 
   <ItemGroup>
     <Content Include="..\..\assets\app.ico" Link="app.ico" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..ssetspp.png" Link="app.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\app.png" Link="app.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
