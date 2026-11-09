@@ -9,7 +9,9 @@
 // Output:
 //   docs/chrome-store/images/         the store set: 1280x800 and 440x280, 24-bit RGB PNG without alpha
 //   artifacts/extension-screens/      the QA set (not committed): every state, dark (and light with SCREENS_LIGHT=1)
-// Screenshot 5 (the desktop window) is a capture of the real app, not made here; see docs/chrome-store/LISTING.md.
+// Screenshot 5 (the desktop window) frames a capture of the real app, a test instance in dark mode with the same four
+// downloads (docs/chrome-store/LISTING.md); without SCREENS_APP_CAPTURE it is left as it is.
+//   SCREENS_APP_CAPTURE=path  that capture (a PNG at 1:1, 984 px wide): screenshot 5 is made from it
 //
 //   SCREENS_ONLY=regex      only the shots whose name matches
 //   SCREENS_NO_QA=1         the store set only
@@ -30,6 +32,7 @@ const qaOut = path.join(repo, "artifacts", "extension-screens");
 const data = JSON.parse(readFileSync(path.join(root, "tests", "fixtures", "screens-data.json"), "utf8"));
 const stub = readFileSync(path.join(root, "tests", "fixtures", "chrome-stub.js"), "utf8");
 const only = process.env.SCREENS_ONLY ? new RegExp(process.env.SCREENS_ONLY) : null;
+const appCapture = process.env.SCREENS_APP_CAPTURE ? path.resolve(process.env.SCREENS_APP_CAPTURE) : "";
 const FIXED_TIME = "2026-11-09T10:00:00";
 
 // ---- 24-bit RGB PNG ---------------------------------------------------------------------------------------------
@@ -126,6 +129,11 @@ function serve() {
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     let file;
+    if (url.pathname === "/__capture/app.png" && appCapture) {
+      response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
+      response.end(readFileSync(appCapture));
+      return;
+    }
     if (url.pathname.startsWith("/__screens/")) file = path.join(root, "scripts", path.basename(url.pathname));
     else file = path.join(dist, path.normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, ""));
     if (!file.startsWith(root) || !existsSync(file)) {
@@ -168,13 +176,29 @@ async function settle(frame, ready, label) {
 
 /** A store image: the frame page with a caption and the extension page. */
 async function storeShot(browser, shot) {
-  const params = new URLSearchParams({ kind: shot.kind ?? "shot", caption: shot.caption ?? "", sub: shot.sub ?? "", page: shot.page,
+  const params = new URLSearchParams({ kind: shot.kind ?? "shot", caption: shot.caption ?? "", sub: shot.sub ?? "", page: shot.page ?? "",
     w: String(shot.width), h: shot.height ? String(shot.height) : "auto", scale: String(shot.scale ?? 1) });
+  if (shot.image) params.set("image", shot.image);
+  if (shot.compact) params.set("compact", "1");
   if (shot.captionWidth) params.set("captionWidth", String(shot.captionWidth));
   if (shot.top !== undefined) params.set("top", String(shot.top));
   if (shot.clip !== undefined) params.set("clip", String(shot.clip));
   const size = shot.kind === "promo" ? { width: 440, height: 280 } : { width: 1280, height: 800 };
   const { context, page } = await open(browser, { url: `__screens/store-frame.html?${params}`, viewport: size, theme: shot.theme, scenario: shot.scenario });
+  if (shot.image) {
+    // A capture at 1:1: no page inside to wait for, only the picture and the caption's font.
+    await page.waitForFunction(() => document.querySelector(".surface img")?.complete && document.querySelector(".surface img").naturalWidth > 0);
+    await settle(page, ".caption h1", shot.file);
+    await page.evaluate(() => window.fitFrame());
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const png = encodeRgbPng(decodePng(await page.screenshot({ type: "png" })));
+    const file = path.join(storeOut, shot.file);
+    writeFileSync(file, png);
+    checkStoreImage(file, size.width, size.height);
+    await context.close();
+    console.log(`store  ${shot.file}`);
+    return;
+  }
   const frame = await (await page.waitForSelector("iframe")).contentFrame();
   await settle(frame, shot.ready, shot.file);
   if (shot.act) await shot.act(frame);
@@ -217,6 +241,8 @@ const STORE = [
   { file: "screenshot-4-options.png", theme: "light", page: "options.html#general", width: 760, height: 600, ready: "body[data-settings-loaded=true]",
     captionWidth: 400, caption: "Your rules, your folders", sub: "Send downloads automatically or ask each time, pick file types and sites, pair your own server.",
     scenario: PAIRED },
+  { file: "screenshot-5-app.png", theme: "dark", image: "__capture/app.png", width: 984, compact: true, captionWidth: 256,
+    caption: "Everything in the desktop app", sub: "The same downloads in the Windows app, with queues, the speed graph and every detail." },
   { file: "promo-small-440x280.png", kind: "promo", theme: "dark", page: "popup.html", width: 380, top: 40, clip: 114, ready: ".job .job-name",
     scenario: {} },
 ];
@@ -279,6 +305,7 @@ try {
   try {
     for (const shot of STORE) {
       if (only && !only.test(shot.file)) continue;
+      if (shot.image && !appCapture) continue;
       await storeShot(browser, shot);
     }
     if (!process.env.SCREENS_NO_QA) {
