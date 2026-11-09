@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     private const string DefaultEmptyText = "No downloads in this view.\nUse Add URL or the browser extension to start one.";
 
     private readonly Dictionary<Guid, JobViewModel> _remoteRows = [];
-    private readonly Dictionary<string, MyProviderWindow> _providerWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProviderWindow> _providerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<MenuFlyoutItemBase> _localContextItems = [];
     private readonly List<MenuFlyoutItemBase> _remoteContextItems = [];
     private readonly List<MenuFlyoutItemBase> _remoteTasksItems = [];
@@ -217,6 +217,7 @@ public sealed partial class MainWindow
         }
 
         SyncRemoteTasksMenu(accounts);
+        SyncProviderViews();
     }
 
     /// <summary>The one glyph brush that follows the theme by itself is one set from XAML, so this piece is built that way.</summary>
@@ -226,22 +227,6 @@ public sealed partial class MainWindow
             "<FontIcon xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             $"Glyph=\"{glyph}\" FontSize=\"14\" Foreground=\"{{ThemeResource InboundIconInfoBrush}}\" />");
         return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { icon, new TextBlock { Text = text } } };
-    }
-
-    private void RestoreCategorySelection()
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            _refreshingCategories = true;
-            try
-            {
-                CategoryList.SelectedItem = CategoryList.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag as string == _category);
-            }
-            finally
-            {
-                _refreshingCategories = false;
-            }
-        });
     }
 
     private void SyncRemoteTasksMenu(List<RemoteAccountDto> accounts)
@@ -285,6 +270,7 @@ public sealed partial class MainWindow
 
         foreach (var account in browsable)
         {
+            // UI.R32: A, the sidebar view, is the default way in (owner, 2026-11-09).
             Add($"Browse My {RemoteText.ProviderName(account)}…", "B", (_, _) => OpenProviderWindow(account.Provider));
         }
 
@@ -304,32 +290,12 @@ public sealed partial class MainWindow
         else ShowPassingStatus("Checking remote status now…");
     }
 
-    private void OpenProviderWindow(string provider)
-    {
-        if (_remote.State.FindAccount(provider) is not { } account || !RemoteRules.CanBrowse(account)) return;
-        if (!_providerWindows.TryGetValue(provider, out var window))
-        {
-            window = new MyProviderWindow(_remote, account, new MyProviderContext(
-                () => _settings,
-                LocalStatusOf,
-                RememberFolder,
-                _uiState,
-                () => SaveUiState()));
-            _providerWindows[provider] = window;
-            window.Closed += (_, _) => _providerWindows.Remove(provider);
-        }
-
-        window.ShowWindow();
-    }
-
     private List<JobViewModel> LocalFilesOf(RemoteJobDto job)
     {
         if (job.PackageId is not { } package || _groups.FirstOrDefault(group => group.Id == package) is not { } found) return [];
         return found.JobIds.Where(_jobsById.ContainsKey).Select(id => _jobsById[id]).ToList();
     }
 
-    private string? LocalStatusOf(RemoteJobDto job)
-        => RemoteText.LocalWords(LocalFilesOf(job).Select(file => file.Dto).OfType<JobDto>().ToList());
 
 
     /// <summary>The same memory Add URL fills: <c>remote.add</c> leaves it alone, so a folder chosen for a provider's item is saved here.</summary>

@@ -343,6 +343,8 @@ public sealed partial class MainWindow
         _settingsWindow?.Close();
         _schedulerWindow?.Close();
         _statisticsWindow?.Close();
+        // UI.R32: My provider shows the account of the Host shown, so the old one's catalog goes.
+        ResetProviderViews(closeWindows: true);
 
         ShownServer.Target = target;
         // What it said when it was paired, until its own hello and settings say more.
@@ -829,6 +831,7 @@ public sealed partial class MainWindow
         };
         var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = mine.LaunchAtStartup };
         var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = mine.CloseWindowCompletely };
+        var providerOpens = ProviderOpensBox();
         var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };
         var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = mine.ClipboardMonitoring };
         var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = mine.ShowCompletionDialog };
@@ -846,7 +849,7 @@ public sealed partial class MainWindow
             allThisPc,
             SettingsWindow.Hint("Shows this PC's downloads in the window and opens this PC's Options, with its folders, connection and the rest."),
             SettingsWindow.Section("Startup"), launch,
-            SettingsWindow.Section("Window"), themeBox, closeCompletely,
+            SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
             SettingsWindow.Section("Capturing downloads"), integration, clipboard,
             SettingsWindow.Section($"When a download on {serverName} finishes, while this window is open"), completionDialog, notify,
             SettingsWindow.Hint($"For {serverName}, the notification is a line in this window's status bar, and no sound plays."),
@@ -1034,6 +1037,7 @@ public sealed partial class MainWindow
                 localLatest.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
                 localLatest.LaunchAtStartup = launch.IsChecked == true;
                 localLatest.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                SaveProviderOpens(providerOpens);
                 localLatest.BrowserIntegrationEnabled = integration.IsChecked == true;
                 localLatest.ClipboardMonitoring = clipboard.IsChecked == true;
                 localLatest.ShowCompletionDialog = completionDialog.IsChecked == true;
