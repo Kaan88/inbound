@@ -1,6 +1,7 @@
 // What the add dialog shows and ticks, in the desktop's words and with its defaults (AddLines.cs, AddLinksDialog.cs):
 // extraction of links from text, the ticks, the summary line, each line's words, and the file choice. No DOM here.
 
+import { expandNumbered } from './batch';
 import { removeInputs, routeOf, type AddLine } from './addlines';
 
 export { removeInputs };
@@ -30,14 +31,28 @@ export function extractInputs(text: string | null | undefined): string[] {
   if (!text || !text.trim()) return [];
   const seen = new Set<string>();
   const found: string[] = [];
-  for (const match of text.matchAll(/(?:(?:https?|ftp):\/\/|magnet:)[^\s"'<>`]+/gi)) {
-    const input = trimLink(match[0]);
-    if (!/^(?:(?:https?|ftp):\/\/.|magnet:.)/i.test(input) || seen.has(input)) continue;
+  const add = (input: string) => {
+    if (seen.has(input) || found.length >= 1000) return;
     seen.add(input);
     found.push(input);
+  };
+  for (const match of text.matchAll(/(?:(?:https?|ftp):\/\/|magnet:)[^\s"'<>`]+/gi)) {
+    const input = trimLink(match[0]);
+    if (!/^(?:(?:https?|ftp):\/\/.|magnet:.)/i.test(input)) continue;
+    // A numbered address becomes one line per number, as on the desktop (U-WU-11). One that can't be expanded stays
+    // as typed, and its line says why (patternProblem).
+    const expanded = expandNumbered(input);
+    if (expanded?.ok) for (const url of expanded.urls) add(url);
+    else add(input);
     if (found.length >= 1000) break;
   }
   return found;
+}
+
+/** Why a typed numbered address could not be expanded, or null. */
+export function patternProblem(input: string): string | null {
+  const expanded = expandNumbered(input);
+  return expanded && !expanded.ok ? `${expanded.error} Nothing was added for this line.` : null;
 }
 
 export function isMagnet(input: string): boolean {

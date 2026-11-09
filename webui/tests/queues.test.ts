@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ALL_DAYS, canMoveFile, checkQueueForm, checkScheduleDraft, defaultMoveTarget, editScheduleDraft, isMember, mbText, moveFile,
-  newScheduleDraft, normalizeDays, queueForm, queueMembers, scheduleConflict, scheduleSummary, schedulesOf, sortQueueFiles, toggleDay, whenText,
+  ALL_DAYS, canMoveFile, canStartQueue, canStopQueue, checkQueueForm, checkScheduleDraft, defaultMoveTarget, editScheduleDraft, isMember, mbText, moveFile,
+  newScheduleDraft, normalizeDays, queueForm, queueMembers, queueStateText, scheduleConflict, scheduleSummary, schedulesOf, sortQueueFiles, toggleDay, waitingForStart, whenText,
 } from '../src/lib/queues';
 import type { Job, Queue, Schedule } from '../src/lib/types';
 
@@ -184,5 +184,39 @@ describe('schedule text (Q3, Q11)', () => {
     const b = { ...a, id: 'b', name: 'Alpha' };
     const c = { ...a, id: 'c', queueId: 1 };
     expect(schedulesOf([a, b, c], 0).map((s) => s.name)).toEqual(['Alpha', 'beta']);
+  });
+});
+
+describe('queue Start and Stop follow the host (U-WL-1, U-WL-2)', () => {
+  const running = queue(0, { isRunning: true });
+
+  it('offers Start on a running queue while a later download waits for it', () => {
+    const jobs = [job('1', { state: 'queued', startMode: 'later' }), job('2', { state: 'downloading' })];
+    expect(waitingForStart(running, jobs)).toBe(1);
+    expect(canStartQueue(running, jobs)).toBe(true);
+    expect(canStopQueue(running)).toBe(true);
+    expect(queueStateText(running, jobs)).toBe('Running, 1 waiting for Start');
+  });
+
+  it('does not count a download the user paused, one in another queue, or one out of its queue', () => {
+    const jobs = [
+      job('1', { state: 'paused', pausedByUser: true }),
+      job('2', { state: 'queued', startMode: 'later', queueId: 1 }),
+      job('3', { state: 'queued', startMode: 'later', isQueued: false }),
+      job('4', { state: 'queued', startMode: 'startNow' }),
+    ];
+    expect(canStartQueue(running, jobs)).toBe(false);
+    expect(queueStateText(running, jobs)).toBe('Running');
+  });
+
+  it('counts a download the queue itself paused', () => {
+    expect(canStartQueue(running, [job('1', { state: 'paused', pausedByUser: false })])).toBe(true);
+  });
+
+  it('always offers Start, and never Stop, on a stopped queue', () => {
+    const stopped = queue(0, { isRunning: false });
+    expect(canStartQueue(stopped, [])).toBe(true);
+    expect(canStopQueue(stopped)).toBe(false);
+    expect(queueStateText(stopped, [job('1', { state: 'queued', startMode: 'later' })])).toBe('Stopped');
   });
 });

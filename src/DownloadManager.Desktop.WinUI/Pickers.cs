@@ -34,7 +34,7 @@ internal static class Pickers
     /// </summary>
     public static async Task<string?> PickFolderAsync(IntPtr window, bool startInDownloads = true, string? start = null)
     {
-        if (RemoteDataRules.UsesServerFolderBrowser(ShownServer.IsRemote)) return await ServerFolderWindow.PickAsync(ShownServer.Target, start);
+        if (RemoteDataRules.UsesServerFolderBrowser(ShownServer.IsRemote)) return await ServerFolderWindow.PickAsync(ShownServer.Target, window, start);
 
         var picker = new FolderPicker(Win32Interop.GetWindowIdFromWindow(window)) { ViewMode = PickerViewMode.List };
         if (startInDownloads) picker.SuggestedStartLocation = PickerLocationId.Downloads;

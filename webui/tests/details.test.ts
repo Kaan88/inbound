@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addressLabel, barValue, cancelTargets, categoryChoices, categoryOf, completionFrom, detailRows, failureLabel, fileToShow, hasOwnAddress,
   heading, looksLikeArchive, mergeSegments, moveTarget, noticeFor, noticeText, packageActionNotice, packageFigures, pauseTargets,
-  programModeOf, clock, displaySource, hideAddresses, sortedByName, updateRates, redownloadRefusal, refreshStart, resumeTargets, segmentRows, shownAddress, showsArchiveSection, speedLimitFrom,
+  programModeOf, displaySource, hideAddresses, sortedByName, updateRates, redownloadRefusal, refreshStart, resumeTargets, segmentRows, shownAddress, showsArchiveSection, speedLimitFrom,
   speedLimitText, splitPath, stemLength,
 } from '../src/lib/details';
 import type { Job, Segment } from '../src/lib/types';
@@ -160,11 +160,14 @@ describe('review fixes', () => {
     expect(names).toEqual(['a', 'File10', 'file2']);
   });
 
-  it('shows time left as a clock', () => {
-    expect(clock(0)).toBe('00:00:00');
-    expect(clock(3725)).toBe('01:02:05');
-    expect(clock(86400 + 61)).toBe('1d 00:01:01');
-    expect(detailRows(job({ state: 'downloading', totalBytes: 100, receivedBytes: 50, estimatedRemaining: '00:00:05' })).find((r) => r.label === 'Time left')?.value).toBe('00:00:05');
+  it("shows time left in the desktop list's words (EXT.R8 Q2)", () => {
+    const left = (estimatedRemaining: string) =>
+      detailRows(job({ state: 'downloading', totalBytes: 100, receivedBytes: 50, estimatedRemaining })).find((r) => r.label === 'Time left')?.value;
+    expect(left('00:00:05')).toBe('5s');
+    expect(left('00:01:45')).toBe('1m 45s');
+    expect(left('01:02:05')).toBe('1h 2m');
+    expect(left('1.00:01:01')).toBe('24h 1m');
+    expect(left('00:00:00')).toBe('—');
   });
 
   it('takes the percent from the byte counts', () => {
@@ -276,7 +279,7 @@ describe('package (D15, D16)', () => {
     const figures = packageFigures(files);
     expect(figures.summary).toBe('1 of 2 files complete');
     expect(figures.bar).toBe(75);
-    expect(figures.detail).toBe('1.50 KB of 2.00 KB   ·   256 B/s   ·   2 s left');
+    expect(figures.detail).toBe('1.50 KB of 2.00 KB   ·   256 B/s   ·   2s left');
     expect(packageFigures([part('a', { state: 'completed', totalBytes: 10, receivedBytes: 10 })]).bar).toBe(100);
     expect(packageFigures([part('a', { state: 'downloading', receivedBytes: 10, bytesPerSecond: 5 })]).bar).toBeNull();
     expect(packageFigures([part('a', { state: 'queued' })]).bar).toBe(0);

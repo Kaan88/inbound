@@ -1,13 +1,15 @@
 using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 
 namespace DownloadManager.Desktop.WinUI;
 
 /// <summary>
 /// Chooses a folder on another server (design D9, section 5): its <c>folders.browse</c> and <c>folders.create</c>, one
 /// <c>POST /api/ipc</c> each, so a folder box never offers a folder of this PC for a download saved there. A window of
-/// its own rather than a dialog, because it is opened from dialogs too.
+/// its own rather than a dialog, because it is opened from dialogs too. It is owned by, modal to and centred on the
+/// window that opened it (U-WR-10).
 /// </summary>
 internal sealed class ServerFolderWindow : Window
 {
@@ -16,14 +18,28 @@ internal sealed class ServerFolderWindow : Window
     private readonly TextBox _path = new() { Header = "Folder", PlaceholderText = "Choose one of the server's folders below" };
     private readonly ListView _folders = new() { SelectionMode = ListViewSelectionMode.Single, MinHeight = 240 };
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Visibility = Visibility.Collapsed };
-    private readonly TextBlock _space = new() { FontSize = 12, Opacity = 0.72 };
+    private readonly TextBlock _empty = new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(12),
+        Visibility = Visibility.Collapsed,
+    };
+    private readonly TextBlock _space = new() { FontSize = 12 };
     private readonly Button _up = new() { Content = "Up one level" };
     private readonly Button _newFolder = new() { Content = "New folder…" };
     private readonly Button _choose = new() { Content = "Choose this folder" };
     private FolderBrowseResult? _shown;
     private int _version;
+    private ServerFolderListing.Message? _said;
 
-    private ServerFolderWindow(ServerTarget target)
+    // Whole paths wrap rather than being cut off, so two roots that differ only at the end can be told apart, and each
+    // row's tooltip has the whole path too.
+    private const string RowTemplate =
+        "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
+        "<TextBlock Text=\"{Binding Name}\" ToolTipService.ToolTip=\"{Binding Path}\" TextWrapping=\"Wrap\" Margin=\"0,6\" />" +
+        "</DataTemplate>";
+
+    private ServerFolderWindow(ServerTarget target, nint owner)
     {
         _target = target;
         Title = $"Choose a folder on {target.Name}";
@@ -45,8 +61,12 @@ internal sealed class ServerFolderWindow : Window
         Grid.SetRow(top, 1);
         root.Children.Add(top);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_folders, "Folders");
-        Grid.SetRow(_folders, 2);
-        root.Children.Add(_folders);
+        var listArea = new Grid();
+        listArea.Children.Add(_folders);
+        listArea.Children.Add(_empty);
+        var listFrame = new Border { Child = listArea, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4) };
+        Grid.SetRow(listFrame, 2);
+        root.Children.Add(listFrame);
         var status = new StackPanel { Spacing = 4 };
         status.Children.Add(_space);
         status.Children.Add(_message);
@@ -61,11 +81,32 @@ internal sealed class ServerFolderWindow : Window
         root.Children.Add(footer);
         Content = root;
         WindowLayout.ApplyChrome(this, root);
-        WindowLayout.CenterOnMainWindow(this);
 
-        _folders.DisplayMemberPath = nameof(FolderEntryDto.Name);
+        // The window's own surface and the shared tokens (UI.B16): without a background a window is drawn black
+        // behind its controls, whatever the theme.
+        void ApplyColors()
+        {
+            root.Background = InboundTheme.Brush("InboundSurfaceBrush", root);
+            listFrame.BorderBrush = InboundTheme.Brush("InboundDividerBrush", root);
+            _space.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", root);
+            _empty.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", root);
+            // Red only for a problem; the notice about a long folder is information (review of UI.B16).
+            _message.Foreground = InboundTheme.Brush(_said?.Brush ?? ServerFolderListing.NoticeBrush, root);
+        }
+
+        _applyColors = ApplyColors;
+
+        ApplyColors();
+        root.Loaded += (_, _) => ApplyColors();
+        root.ActualThemeChanged += (_, _) => ApplyColors();
+        WindowLayout.CenterOn(this, owner);
+        WindowLayout.OwnModally(this, owner);
+
+        _folders.ItemTemplate = (DataTemplate)XamlReader.Load(RowTemplate);
         _folders.IsItemClickEnabled = true;
         _folders.ItemClick += (_, e) => { if (e.ClickedItem is FolderEntryDto entry) _ = BrowseAsync(entry.Path); };
+        _choose.IsEnabled = false;
+        _path.TextChanged += (_, _) => _choose.IsEnabled = ServerFolderListing.CanChoose(_path.Text);
         _up.Click += (_, _) => _ = BrowseAsync(_shown?.Parent);
         _newFolder.Click += (_, _) => _ = CreateFolderAsync();
         _path.KeyDown += (_, e) =>
@@ -79,7 +120,7 @@ internal sealed class ServerFolderWindow : Window
             var chosen = _path.Text.Trim();
             if (chosen.Length == 0)
             {
-                Say("Open a folder first.");
+                Say(ServerFolderListing.NothingChosen);
                 return;
             }
 
@@ -90,10 +131,13 @@ internal sealed class ServerFolderWindow : Window
         Closed += (_, _) => _result.TrySetResult(null);
     }
 
+    private readonly Action _applyColors;
+
     /// <summary>The chosen folder's path on the server, or null when cancelled.</summary>
-    public static Task<string?> PickAsync(ServerTarget target, string? start = null)
+    /// <param name="owner">The window it is opened from, which it is centred on and modal to.</param>
+    public static Task<string?> PickAsync(ServerTarget target, nint owner, string? start = null)
     {
-        var window = new ServerFolderWindow(target);
+        var window = new ServerFolderWindow(target, owner);
         window.Activate();
         _ = window.BrowseAsync(string.IsNullOrWhiteSpace(start) ? null : start.Trim(), fallBackToRoots: true);
         return window._result.Task;
@@ -110,7 +154,7 @@ internal sealed class ServerFolderWindow : Window
     {
         if (_shown?.Path is not { } parent)
         {
-            Say("Open one of the folders first; a new folder is made inside it.");
+            Say(ServerFolderListing.NewFolderNeedsAFolder);
             return;
         }
 
@@ -118,6 +162,7 @@ internal sealed class ServerFolderWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
+            RequestedTheme = ((FrameworkElement)Content).ActualTheme,
             Title = "New folder",
             Content = name,
             PrimaryButtonText = "Create",
@@ -152,27 +197,30 @@ internal sealed class ServerFolderWindow : Window
         if (result is null) return;
         if (!result.Ok)
         {
-            Say(result.Error ?? "That folder can't be opened.");
+            Say(ServerFolderListing.Refusal(result));
             return;
         }
 
         _shown = result;
         _path.Text = result.Path ?? string.Empty;
-        // The roots are listed with their whole paths, a folder's contents by name.
-        _folders.ItemsSource = result.Path is null
-            ? result.Roots.Select(root => new FolderEntryDto { Name = root, Path = root }).ToList()
-            : result.Folders;
-        _up.IsEnabled = result.Path is not null;
-        _newFolder.IsEnabled = result.Path is not null;
+        var view = ServerFolderListing.For(result);
+        _folders.ItemsSource = view.Rows;
+        _empty.Text = view.Empty ?? string.Empty;
+        _empty.Visibility = view.Empty is null ? Visibility.Collapsed : Visibility.Visible;
+        _up.IsEnabled = view.CanGoUp;
+        _newFolder.IsEnabled = view.CanCreate;
         _space.Text = result.FreeBytes is { } free
             ? result.TotalBytes is { } total ? $"{FolderChooser.Size(free)} free of {FolderChooser.Size(total)}" : $"{FolderChooser.Size(free)} free"
             : string.Empty;
-        if (result.Truncated) Say("Only the first 2,000 folders are listed. Type a path to open one further down.");
+        if (view.Message is { } notice) Say(notice);
     }
 
-    private void Say(string text)
+    /// <summary>A line under the list, in the colour <see cref="ServerFolderListing.Message.Brush"/> gives it.</summary>
+    private void Say(ServerFolderListing.Message message)
     {
-        _message.Text = text;
+        _said = message;
+        _message.Text = message.Text;
         _message.Visibility = Visibility.Visible;
+        _applyColors();
     }
 }

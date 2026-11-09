@@ -4,63 +4,101 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inbound Download Manager</title>
-  <link rel="stylesheet" href="styles.css" />
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="ui-kit.css" />
+  <link rel="stylesheet" href="extension.css" />
 </head>
 <body class="popup">
-  <header class="brand">
-    <img src="icons/icon32.png" alt="" width="24" height="24" />
-    <div>
-      <strong>Inbound Download Manager</strong>
-      <span id="statusText" class="muted">Checking connection…</span>
-    </div>
+  <!-- EXT.R8: the popup is the desktop window in small: a header of icon buttons, notices only when there is something
+       to say, one scrolling list of downloads and a status bar with "Send to", the counts and the connection. -->
+  <header class="pop-header">
+    <img src="icons/icon16.png" alt="" width="16" height="16" />
+    <span class="pop-title">Inbound Download Manager</span>
+    <span class="spacer"></span>
+    <button id="downloadAll" class="btn-icon tint-info" type="button" title="Download all links on this page" aria-label="Download all links on this page"><span data-icon="download"></span></button>
+    <button id="pauseCatching" class="btn-icon tint-pause" type="button" title="Let the browser keep downloads for 5 minutes" aria-label="Pause catching"><span data-icon="pause"></span></button>
+    <button id="openApp" class="btn-icon tint-neutral" type="button" title="Open Inbound" aria-label="Open Inbound"><span data-icon="monitor"></span></button>
+    <button id="options" class="btn-icon tint-neutral" type="button" title="Options" aria-label="Options"><span data-icon="settings"></span></button>
   </header>
 
-  <section id="statusCard" class="card status-card">
-    <span id="statusDot" class="dot"></span>
-    <span id="statusLabel">Desktop app</span>
-    <span id="statusDetail" class="muted"></span>
-  </section>
-  <section id="serverCard" class="card status-card hidden">
-    <span id="serverDot" class="dot"></span>
-    <span id="serverLabel">Server</span>
-    <span id="serverDetail" class="muted"></span>
-    <button id="openServer" class="link-button" type="button">Open the web UI</button>
-  </section>
-  <section id="targetCard" class="card target-card hidden" role="group" aria-labelledby="targetHeading">
-    <span id="targetHeading">Send downloads to</span>
-    <div class="segmented">
-      <button id="targetLocal" type="button" data-target="local" aria-pressed="false">This PC</button>
-      <button id="targetServer" type="button" data-target="server" aria-pressed="false">Server</button>
+  <div id="notices" class="notices"></div>
+
+  <!-- EXT.R7: "ask where to save" for a caught download, under the toolbar icon instead of a window. While a download
+       waits, this replaces the rest of the popup (body.asking). The form is the one of the folder window (save-form.ts). -->
+  <section id="askCard" class="ask hidden" aria-labelledby="askHeading">
+    <header class="pop-header">
+      <img src="icons/icon16.png" alt="" width="16" height="16" />
+      <span id="askHeading" class="pop-title">Download file info</span>
+      <span class="spacer"></span>
+      <span id="askCount" class="muted small tabular"></span>
+      <button id="askPrev" class="btn-icon tint-neutral hidden" type="button" title="Previous download" aria-label="Previous download"><span data-icon="chevron-left"></span></button>
+      <button id="askNext" class="btn-icon tint-neutral hidden" type="button" title="Next download" aria-label="Next download"><span data-icon="chevron-right"></span></button>
+      <button id="askClose" class="btn-icon tint-neutral" type="button" title="Keep in browser" aria-label="Keep in browser"><span data-icon="close"></span></button>
+    </header>
+    <div class="ask-body">
+      <div class="ask-file">
+        <span id="askFileIcon" class="file-glyph" aria-hidden="true"></span>
+        <div class="ask-file-text">
+          <strong id="askFileTitle" class="ellipsis"></strong>
+          <span id="askSource" class="muted small ellipsis"></span>
+        </div>
+      </div>
+      <label class="form-row">
+        <span class="label">File name</span>
+        <input id="askFileName" class="field" type="text" spellcheck="false" />
+      </label>
+      <fieldset id="askTargetField" class="form-row target-field hidden">
+        <legend class="label">Send to</legend>
+        <div id="askTargetChoice" class="target-choice segmented"></div>
+      </fieldset>
+      <div class="form-row">
+        <label class="label" for="askDestination">Destination folder</label>
+        <div class="destination-picker">
+          <input id="askDestination" class="field mono" type="text" spellcheck="false" placeholder="The default folder" />
+          <label id="askFavoritesField" class="favorites hidden" title="Favorite folders">
+            <span class="visually-hidden">Favorite folders</span>
+            <select id="askFavorites" class="field favorites-select" aria-label="Favorite folders">
+              <option value="">Favorite folders</option>
+            </select>
+          </label>
+          <button id="askBrowse" class="btn" type="button" disabled>Browse…</button>
+        </div>
+        <span id="askFreeSpace" class="hint free-space"></span>
+      </div>
+      <div id="askServerFolders" class="hidden"></div>
+      <p id="askError" class="error hidden" role="alert"></p>
+      <p id="askOthers" class="hint hidden"></p>
+      <details class="what-is-sent">
+        <summary>What is sent</summary>
+        <p class="hint">
+          Closing this popup leaves the download in your browser.
+          <span id="askLocalHint">Start download gives the desktop app the address, the page it came from, your browser's user agent and your cookies for that site, which the app keeps with the download (the cookies encrypted) and sends only to that site.</span>
+          <span id="askServerHint" class="hidden">Start download gives your server the address, the page it came from, your browser's user agent and your cookies for that site, which the server keeps with the download (the cookies encrypted) and sends only to that site.</span>
+        </p>
+      </details>
     </div>
-  </section>
-  <section id="autoCard" class="card auto-card">
-    <span id="autoState" class="auto-state">Automatic sending: checking…</span>
-    <button id="autoTurnOn" class="link-button hidden" type="button">Turn on in Settings</button>
-  </section>
-  <section id="leftCard" class="card hidden">
-    <strong>Left in your browser</strong>
-    <ul id="leftList" class="left-list"></ul>
-  </section>
-  <p id="getAppRow" class="get-app"><a id="getApp" class="hidden" href="https://github.com/Kaan88/inbound/releases/latest" target="_blank" rel="noopener">Get the desktop app</a></p>
-
-  <section class="card">
-    <div class="row">
-      <strong>Downloads in Inbound</strong>
-      <button id="refresh" class="link-button" type="button">Refresh</button>
-    </div>
-    <ul id="jobs" class="job-list">
-      <li class="empty">No downloads.</li>
-    </ul>
+    <footer class="dialog-footer">
+      <button id="askConfirm" class="btn-primary" type="button" disabled>Start download</button>
+      <button id="askLater" class="btn" type="button" disabled>Download later</button>
+      <button id="askKeep" class="btn" type="button">Keep in browser</button>
+    </footer>
   </section>
 
-  <div class="actions">
-    <button id="downloadAll" type="button">Download all links…</button>
-    <button id="openApp" class="primary" type="button">Open app</button>
-    <button id="options" type="button">Settings</button>
-    <button id="pauseCatching" class="quiet" type="button">Pause catching for 5 min</button>
-  </div>
+  <main id="listArea" class="list-area">
+    <ul id="jobs" class="job-list" role="list" aria-label="Downloads"></ul>
+    <div id="emptyState" class="empty-state hidden"></div>
+  </main>
 
-  <p id="error" class="error hidden"></p>
+  <p id="error" class="action-error hidden" role="alert"><span id="errorText"></span><button id="errorClose" class="btn-icon tint-neutral" type="button" aria-label="Hide this message" title="Hide"><span data-icon="close" data-icon-size="14"></span></button></p>
+  <p id="live" class="visually-hidden" aria-live="polite"></p>
+
+  <footer class="status-bar">
+    <button id="targetSwitch" class="status-switch hidden" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+    <span id="counts" class="status-counts tabular"></span>
+    <span class="spacer"></span>
+    <span id="connection" class="status-connection">Connecting…</span>
+  </footer>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -3,70 +3,71 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Send to Inbound Download Manager</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>Download file info - Inbound Download Manager</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="ui-kit.css" />
+  <link rel="stylesheet" href="extension.css" />
 </head>
-<body class="handoff">
-  <main class="page narrow">
-    <header class="brand">
-      <img src="icons/icon48.png" alt="" width="36" height="36" />
-      <div>
-        <h1>Send to Inbound Download Manager</h1>
-        <p class="muted small">Choose where to save this download.</p>
-      </div>
-    </header>
+<body class="window handoff">
+  <!-- EXT.R8: the desktop app's "Download file info", on the save form shared with the popup and Download All. -->
+  <header class="window-header">
+    <img src="icons/icon16.png" alt="" width="16" height="16" />
+    <h1>Download file info</h1>
+  </header>
 
-    <section class="card form-card">
-      <label class="field">
-        <span>URL</span>
-        <input id="url" type="text" readonly />
-      </label>
-      <label class="field">
-        <span>File name</span>
-        <input id="fileName" type="text" spellcheck="false" />
-      </label>
+  <main class="window-body">
+    <div class="form-grid">
+      <span class="label">Address</span>
+      <div class="address-row">
+        <span id="url" class="address mono"></span>
+        <button id="copyUrl" class="btn" type="button" title="Copy the address">Copy</button>
+      </div>
+
+      <label class="label" for="fileName">File name</label>
+      <input id="fileName" class="field" type="text" spellcheck="false" />
+
       <!-- EXT.R1: shown only when a server is paired and this PC can be used too. -->
-      <fieldset id="targetField" class="field target-field hidden">
-        <legend>Save to</legend>
-        <div id="targetChoice" class="target-choice"></div>
+      <fieldset id="targetField" class="form-row target-field hidden">
+        <legend class="label">Send to</legend>
+        <div id="targetChoice" class="target-choice segmented"></div>
       </fieldset>
-      <label class="field">
-        <span>Save in</span>
+
+      <label class="label" for="destination">Destination folder</label>
+      <div>
         <div class="destination-picker">
-          <input id="destination" type="text" spellcheck="false" placeholder="The app's default folder" />
-          <button id="browseDestination" type="button" disabled>Choose…</button>
+          <input id="destination" class="field mono" type="text" spellcheck="false" placeholder="The default folder" />
+          <label id="favoritesField" class="favorites hidden" title="Favorite folders">
+            <span class="visually-hidden">Favorite folders</span>
+            <select id="favorites" class="field favorites-select" aria-label="Favorite folders">
+              <option value="">Favorite folders</option>
+            </select>
+          </label>
+          <button id="browseDestination" class="btn" type="button" disabled>Browse…</button>
         </div>
-      </label>
-      <div id="serverFolders" class="hidden"></div>
-      <label id="favoritesField" class="field hidden">
-        <span>Favorite folders</span>
-        <select id="favorites">
-          <option value="">Pick a favorite folder…</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Start</span>
-        <select id="startMode">
-          <option value="now">Start immediately</option>
-          <option value="later">Download later</option>
-        </select>
-      </label>
-      <p id="hint" class="muted small">
-        The folder applies to this download only; the next one starts at the default folder again. Your
-        Start choice becomes the default for later downloads.
+        <span id="freeSpace" class="hint free-space"></span>
+        <p class="hint">Applies to this download only.</p>
+      </div>
+    </div>
+    <div id="serverFolders" class="hidden"></div>
+
+    <details class="what-is-sent">
+      <summary>What is sent</summary>
+      <p class="hint">
         <span id="localHint">Sending a download gives the desktop app its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses.</span>
         <span id="serverHint" class="hidden">Sending a download to your server gives it the same details: the address, the page it came from, your browser's user agent and your cookies for that site. The server keeps them with the download, the cookies encrypted, until you remove it there, and sends the cookies only to that site.</span>
       </p>
-    </section>
-
-    <div class="actions">
-      <button id="confirm" class="primary" type="button" disabled>Download</button>
-      <button id="cancel" type="button">Cancel</button>
-      <button id="keepInBrowser" class="hidden" type="button">Keep in browser</button>
-    </div>
-    <p id="error" class="error hidden"></p>
-    <p id="success" class="success hidden"></p>
+    </details>
+    <p id="error" class="error hidden" role="alert"></p>
+    <p id="success" class="success hidden" role="status"></p>
   </main>
+
+  <footer class="dialog-footer window-footer">
+    <button id="confirm" class="btn-primary" type="button" disabled>Start download</button>
+    <button id="later" class="btn" type="button" disabled>Download later</button>
+    <button id="cancel" class="btn" type="button">Cancel</button>
+    <button id="keepInBrowser" class="btn hidden" type="button">Keep in browser</button>
+  </footer>
   <script src="handoff.js"></script>
 </body>
 </html>

@@ -10,6 +10,7 @@
 //   INBOUND_MOCK_KEY       the mock TorBox key the TestServer prints (an invented one), optional
 //   INBOUND_TEST_PASSWORD  the throwaway password to set or sign in with
 //   INBOUND_OUT            where screenshots go (default ../artifacts/webui)
+//   INBOUND_VARIANTS       a regex of the variants to walk (desktop-dark, desktop-light, phone-dark, phone-light), optional
 
 import { chromium } from '@playwright/test';
 import { mkdirSync, readdirSync } from 'node:fs';
@@ -25,12 +26,14 @@ const out = resolve(process.env.INBOUND_OUT ?? resolve(import.meta.dirname, '../
 if (!password) throw new Error('Set INBOUND_TEST_PASSWORD to a throwaway password for the test server.');
 mkdirSync(out, { recursive: true });
 
-const variants = [
+const allVariants = [
   { name: 'desktop-dark', viewport: { width: 1360, height: 820 }, colorScheme: 'dark' },
   { name: 'desktop-light', viewport: { width: 1360, height: 820 }, colorScheme: 'light' },
   { name: 'phone-dark', viewport: { width: 390, height: 844 }, colorScheme: 'dark', isMobile: true, hasTouch: true },
   { name: 'phone-light', viewport: { width: 390, height: 844 }, colorScheme: 'light', isMobile: true, hasTouch: true },
 ];
+// INBOUND_VARIANTS=regex keeps only the matching variants (dark, say); the first one left runs the end-to-end checks.
+const variants = process.env.INBOUND_VARIANTS ? allVariants.filter((v) => new RegExp(process.env.INBOUND_VARIANTS).test(v.name)) : allVariants;
 
 // INBOUND_ONLY=regex walks only the screens (or, with a name starting "e2e:", the end-to-end checks) whose name matches,
 // to try one fix quickly; the screens' state then must come from an earlier run.
@@ -91,12 +94,20 @@ async function overflow(page, name, variant) {
   for (const text of box) problems.push(`${variant.name}/${name}: ${text}`);
   // Toolbar buttons side by side must not overlap (they used to shrink into one another).
   const crowded = await page.evaluate(() => {
-    const rects = [...document.querySelectorAll('[role="toolbar"] .toolbtn')].map((el) => ({ name: el.textContent.trim(), r: el.getBoundingClientRect() })).filter((x) => x.r.width > 0);
+    const rects = [...document.querySelectorAll('[role="toolbar"] .toolbtn')].filter((el) => !el.closest('[inert]')).map((el) => ({ name: el.textContent.trim(), r: el.getBoundingClientRect() })).filter((x) => x.r.width > 0);
     const found = [];
     for (let i = 1; i < rects.length; i++) if (rects[i].r.left < rects[i - 1].r.right - 1 && Math.abs(rects[i].r.top - rects[i - 1].r.top) < 4) found.push(`${rects[i - 1].name} / ${rects[i].name}`);
     return found;
   });
   for (const text of crowded) problems.push(`${variant.name}/${name}: toolbar buttons overlap: ${text}`);
+  // The bar folds what doesn't fit into More: More stays inside the window and nothing is scrolled out of sight (U-WU-2).
+  const bar = await page.evaluate(() => {
+    const toolbar = document.querySelector('[role="toolbar"]');
+    if (!toolbar) return null;
+    const more = [...toolbar.querySelectorAll('.toolbtn')].find((el) => el.textContent.trim() === 'More' && !el.closest('[inert]'));
+    return { scroll: toolbar.scrollWidth - toolbar.clientWidth, moreRight: more ? more.getBoundingClientRect().right : 0, width: window.innerWidth };
+  });
+  if (bar && bar.moreRight > bar.width + 1) problems.push(`${variant.name}/${name}: the toolbar's More is off the screen (right edge ${Math.round(bar.moreRight)})`);
 }
 
 /** One screen in every variant: open() gets the page to the state to capture. */
@@ -129,7 +140,7 @@ const phone = (variant) => variant.viewport.width < 768;
 
 /** The side menu on a phone is a drawer behind the Menu button. */
 async function menu(page, variant) {
-  if (phone(variant)) await page.getByRole('button', { name: 'Menu' }).click();
+  if (phone(variant)) await page.getByRole('button', { name: 'Menu', exact: true }).click();
 }
 
 /** The Add menu (the arrow beside Add URL in the side menu). */
@@ -141,7 +152,7 @@ async function addMenu(page, variant) {
 
 async function addItem(page, variant, label) {
   await addMenu(page, variant);
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await page.getByRole('menuitem', { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}…?$`) }).click();
 }
 
 const toolbar = (page) => page.getByRole('toolbar', { name: 'Download actions' });
@@ -154,6 +165,16 @@ async function openMore(page) {
   await page.waitForTimeout(400);
   await more.click();
   await page.getByRole('menu').waitFor();
+}
+
+async function tool(page, name) {
+  const button = toolbar(page).getByRole('button', { name, exact: true });
+  if (await button.count()) {
+    await button.click();
+    return;
+  }
+  await openMore(page);
+  await page.getByRole('menuitem', { name, exact: true }).click();
 }
 
 async function expandAll(page) {
@@ -179,7 +200,7 @@ async function openRowMenu(page, variant, row) {
 
 /** Add URL for one address: the address step, then the info step, then Start download. */
 async function addOne(page, address) {
-  await toolbar(page).getByRole('button', { name: 'Add URL' }).click();
+  await tool(page, 'Add URL');
   await page.fill('#url-box', address);
   await dialog(page).getByRole('button', { name: /^(Next|Try again)$/ }).click();
   const start = dialog(page).getByRole('button', { name: 'Start download' });
@@ -330,18 +351,18 @@ await capture('11-delete-dialog', signedIn, async (p) => {
   const boxes = p.getByRole('checkbox', { name: /^Select (?!all)/ });
   expect(await boxes.count() > 0, 'nothing finished to delete');
   await boxes.first().check();
-  await toolbar(p).getByRole('button', { name: 'Delete', exact: true }).click();
+  await tool(p, 'Delete');
   await dialog(p).waitFor();
 });
 await capture('12-delete-completed-dialog', signedIn, async (p) => {
   await app(p, '#/all');
-  await toolbar(p).getByRole('button', { name: 'Delete Completed' }).click();
+  await tool(p, 'Delete Completed');
   await dialog(p).waitFor();
 });
 await capture('13-cancel-package-dialog', signedIn, async (p) => {
   await app(p, '#/all');
   await p.getByRole('checkbox', { name: 'Select Holiday', exact: true }).check();
-  await toolbar(p).getByRole('button', { name: 'Cancel Package' }).click();
+  await tool(p, 'Cancel Package');
   await dialog(p).waitFor();
 });
 await capture('14-job-details', signedIn, async (p, v) => {
@@ -368,12 +389,12 @@ await capture('16-add-menu', signedIn, async (p, v) => {
 });
 await capture('17-add-url-address', signedIn, async (p) => {
   await app(p, '#/all');
-  await toolbar(p).getByRole('button', { name: 'Add URL' }).click();
+  await tool(p, 'Add URL');
   await p.fill('#url-box', `${testServer}/file/manual.pdf?size=1048576`);
 });
 await capture('18-add-url-info', signedIn, async (p) => {
   await app(p, '#/all');
-  await toolbar(p).getByRole('button', { name: 'Add URL' }).click();
+  await tool(p, 'Add URL');
   await p.fill('#url-box', `${testServer}/file/manual.pdf?size=1048576`);
   await dialog(p).getByRole('button', { name: 'Next' }).click();
   await dialog(p).getByRole('button', { name: 'Start download' }).waitFor();
@@ -381,7 +402,7 @@ await capture('18-add-url-info', signedIn, async (p) => {
 });
 await capture('19-add-url-duplicate', signedIn, async (p) => {
   await app(p, '#/all');
-  await toolbar(p).getByRole('button', { name: 'Add URL' }).click();
+  await tool(p, 'Add URL');
   await p.fill('#url-box', `${testServer}/file/report.pdf?size=2097152`);
   await dialog(p).getByRole('button', { name: 'Next' }).click();
   // The list is asked when Start download is pressed, as on the desktop.
@@ -417,7 +438,7 @@ await capture('23-import-download-list', signedIn, async (p, v) => {
 });
 await capture('24-extract-archive-from-disk', signedIn, async (p) => {
   await app(p, '#/all');
-  await toolbar(p).getByRole('button', { name: 'Extract archive…' }).click();
+  await tool(p, 'Extract archive…');
   await dialog(p).waitFor();
 });
 await capture('25-waiting-at-provider', signedIn, async (p) => {
@@ -485,7 +506,73 @@ for (const index of [0, 1, 2, 3]) {
     await p.waitForTimeout(1500);
   });
 }
+// D2d: a row opens a dialog (files, destination, Download), and its menu has the quick actions.
+/** A My TorBox row whose files the provider lists ("3 files"), or the first row. */
+async function itemRow(p) {
+  await p.locator('.item-row').first().waitFor();
+  const listed = p.locator('.item-row', { hasText: / \d+ files? / }).first();
+  return (await listed.count()) ? listed : p.locator('.item-row').first();
+}
+await capture(`${at++}-my-torbox-item-dialog`, signedIn, async (p) => {
+  await app(p, '#/provider');
+  const row = (await itemRow(p)).locator(':scope > button').first();
+  await row.click();
+  await dialog(p).waitFor();
+  await dialog(p).getByRole('button', { name: 'Download selected' }).waitFor();
+  await p.waitForTimeout(800); // the file tree
+});
+await capture(`${at++}-my-torbox-row-menu`, signedIn, async (p, v) => {
+  await app(p, '#/provider');
+  const row = await itemRow(p);
+  if (phone(v)) await row.getByRole('button', { name: /^Actions for / }).click();
+  else await row.locator(':scope > button').first().click({ button: 'right' });
+  await p.getByRole('menu').waitFor();
+});
 await capture(`${at++}-statistics`, signedIn, (p) => app(p, '#/statistics'), { fullPage: true });
+// U-WU-1: a page reached from another host's switcher offers the way back and the hosts it lacks. The fragment is what
+// the other host's link carries; no second server is needed to see this side.
+const otherHost = 'http://127.0.0.1:18999';
+const handoff = encodeURIComponent(JSON.stringify({ v: 1, f: otherHost, h: [{ n: 'This one', o: new URL(base).origin }, { n: 'Attic', o: 'http://192.168.1.30:8080' }] }));
+await capture(`${at++}-host-switcher-back`, signedIn, async (p) => {
+  await p.goto(`${base}/#inbound-hosts=${handoff}`);
+  await p.waitForSelector('main');
+  expect(!(await p.evaluate(() => location.hash.includes('inbound-hosts'))), 'the handoff stayed in the address');
+  await p.getByRole('button', { name: /^Host: / }).click();
+  // The link could be crafted: an origin this browser hasn't saved gets Add first, and Back only once it is added.
+  expect(await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).count() === 0, 'Back offered for a host that is not saved');
+  await p.getByRole('button', { name: 'Add 127.0.0.1:18999 to this list' }).click();
+  await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).waitFor();
+});
+await capture(`${at++}-add-links-numbered`, signedIn, async (p, v) => {
+  await app(p, '#/all');
+  await addItem(p, v, 'Add links');
+  await p.fill('#add-text', `${testServer}/file/img[1-3].jpg?size=1000`);
+  await p.waitForTimeout(2500);
+  expect(/3 of 3/.test(await dialog(p).innerText()), 'img[1-3].jpg did not become three lines');
+});
+await capture(`${at++}-folder-picker-outside`, signedIn, async (p, v) => {
+  await app(p, '#/settings');
+  await optionsPage(p, v, 'Save to');
+  await p.getByRole('button', { name: 'Browse…' }).first().click();
+  await dialog(p).waitFor();
+  await p.waitForTimeout(800);
+  const box = dialog(p).getByLabel('Folder path');
+  await box.fill('C:\\Windows');
+  await dialog(p).getByRole('button', { name: 'Check' }).click();
+  await dialog(p).getByRole('alert').waitFor();
+  expect(await box.inputValue() === 'C:\\Windows', 'the typed path was replaced');
+});
+await capture(`${at++}-options-invalid`, signedIn, async (p, v) => {
+  await app(p, '#/settings');
+  await optionsPage(p, v, 'Connection');
+  await p.fill('#set-concurrent', '0');
+  await p.fill('#set-connections', '999');
+  await optionsPage(p, v, 'General');
+  await p.getByRole('button', { name: 'Apply', exact: true }).click();
+  await p.waitForTimeout(500);
+  expect(await p.locator('[aria-invalid="true"]').count() === 2, 'the two bad boxes are not both marked');
+  expect(/2 values need fixing/.test(await p.getByRole('alert').first().innerText()), 'the message does not count both problems');
+});
 await capture(`${at++}-menu-open`, signedIn, async (p, v) => {
   await app(p, '#/all');
   await menu(p, v);
@@ -516,11 +603,11 @@ await step('e2e: Stop and Resume holiday-video.mkv', async () => {
   const video = page.locator('[role="grid"] [role="row"]', { hasText: 'holiday-video' }).last();
   expect(/Downloading/.test(await video.innerText()), `holiday-video.mkv is not downloading: ${(await video.innerText()).replace(/\s+/g, ' ')}`);
   await video.click();
-  await toolbar(page).getByRole('button', { name: 'Stop', exact: true }).click();
+  await tool(page, 'Stop');
   await page.waitForTimeout(1500);
   expect(/Paused|Stopped/.test(await video.innerText()), `Stop did not stop holiday-video.mkv: ${(await video.innerText()).replace(/\s+/g, ' ')}`);
   await video.click();
-  await toolbar(page).getByRole('button', { name: 'Resume', exact: true }).click();
+  await tool(page, 'Resume');
   await page.waitForTimeout(2500);
   expect(/Downloading|Connecting|Starting/.test(await video.innerText()), `Resume did not restart holiday-video.mkv: ${(await video.innerText()).replace(/\s+/g, ' ')}`);
 });
@@ -530,7 +617,7 @@ await step('e2e: Delete without the file keeps setup-tool.exe on disk', async ()
   const setup = page.locator('[role="grid"] [role="row"]', { hasText: 'setup-tool.exe' });
   expect(await setup.count() > 0, 'setup-tool.exe is not finished');
   await setup.getByRole('checkbox').check();
-  await toolbar(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await tool(page, 'Delete');
   const box = dialog(page).getByRole('checkbox');
   if (await box.count()) expect(!(await box.isChecked()), 'Delete from disk starts ticked');
   await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
@@ -568,6 +655,139 @@ if (torrent && mockKey) {
     expect(/torrent-(?!5b1e7c3d)\w+[\s\S]*Waiting for TorBox/.test(await page.locator('main').innerText()), 'the uploaded torrent is not waiting at the provider');
   });
 }
+
+// Review of D2d, items 1 and 2: a download that fails keeps the dialog open with the focus inside, so Escape works,
+// and Shift+Tab from the panel stays inside. Never skipped: without the mock provider it fails and says why, and it
+// opens items until one can still take a folder (one already on the list can't, after an earlier run's download).
+await step('e2e: My TorBox dialog keeps the focus after a failed download', async () => {
+  expect(mockKey, 'needs INBOUND_MOCK_KEY (tools/TestServer --torbox) to reach the failure path');
+  await app(page, '#/provider');
+  await itemRow(page);
+  const rows = page.locator('.item-row');
+  let folder = null;
+  for (let i = 0, n = await rows.count(); i < n && !folder; i++) {
+    await rows.nth(i).locator(':scope > button').first().click();
+    await dialog(page).waitFor();
+    const box = dialog(page).locator('#item-dest');
+    if (await box.count() && await box.isEnabled()) folder = box;
+    else {
+      await page.keyboard.press('Escape');
+      await dialog(page).waitFor({ state: 'detached' });
+    }
+  }
+  expect(folder, 'every My TorBox item is already on the download list, so none can fail on its folder');
+  await folder.fill('C:\\Windows\\Temp');
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Download all');
+    return button && !button.disabled;
+  }, null, { timeout: 10000 });
+  await dialog(page).getByRole('button', { name: 'Download all' }).click();
+  await dialog(page).locator('.text-error[role="status"]').waitFor({ timeout: 10000 });
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'the focus left the dialog after the failed download');
+  // The page keeps the box as typed; the next check wants the default folder again.
+  await folder.fill('');
+  await dialog(page).focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'Shift+Tab from the panel left the dialog');
+  await page.keyboard.press('Escape');
+  await dialog(page).waitFor({ state: 'detached' });
+});
+
+// D2d: My TorBox's item dialog by keyboard (Enter opens, Tab stays inside, Escape closes, the row has the focus again),
+// the row menu by Shift+F10, and Download selected from the dialog, which closes it and says so under the list.
+if (mockKey) {
+  await step('e2e: My TorBox item dialog and row menu by keyboard, then Download selected', async () => {
+    await app(page, '#/provider');
+    const row = (await itemRow(page)).locator(':scope > button').first();
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await dialog(page).waitFor();
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'the dialog did not take the focus');
+    for (let i = 0; i < 12; i++) await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), 'Tab left the dialog');
+    await page.keyboard.press('Escape');
+    await dialog(page).waitFor({ state: 'detached' });
+    expect(await row.evaluate((el) => el === document.activeElement), 'the focus did not come back to the row');
+
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menu').waitFor();
+    expect(await page.getByRole('menuitem', { name: /Copy name/ }).count() === 1, 'the row menu has no Copy name');
+    await page.keyboard.press('Escape');
+    await page.getByRole('menu').waitFor({ state: 'detached' });
+    expect(await row.evaluate((el) => el === document.activeElement), 'the focus did not come back to the row after the menu');
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menuitem', { name: /Choose files and download/ }).click();
+    await dialog(page).waitFor();
+    const selected = dialog(page).getByRole('button', { name: 'Download selected' });
+    await page.waitForFunction(() => {
+      const button = [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Download selected');
+      return button && !button.disabled;
+    }, null, { timeout: 10000 });
+    await selected.click();
+    await dialog(page).waitFor({ state: 'detached', timeout: 10000 }).catch(async () => {
+      throw new Error(`Download selected kept the dialog open: ${(await dialog(page).innerText()).replace(/\s+/g, ' ').slice(-300)}`);
+    });
+    expect(/Added '.+' to the download list|will download/.test(await page.locator('main').innerText()), 'Download selected did not say it was added');
+    await page.screenshot({ path: resolve(out, 'e2e-my-torbox-added.desktop-dark.png') });
+  });
+}
+
+// U-WU-6: Add URL's second step takes the focus, so Escape still closes it.
+await step('e2e: Add URL step two has the focus and Escape closes it', async () => {
+  await app(page, '#/all');
+  await tool(page, 'Add URL');
+  await page.fill('#url-box', `${testServer}/file/manual.pdf?size=1048576`);
+  await page.keyboard.press('Enter');
+  await dialog(page).getByRole('button', { name: 'Start download' }).waitFor();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => document.activeElement?.id) === 'file-name', `the focus is on ${await page.evaluate(() => document.activeElement?.tagName)}, not File name`);
+  await page.keyboard.press('Escape');
+  await dialog(page).waitFor({ state: 'detached' });
+});
+
+// U-WU-7: Back with a dialog open closes the dialog and leaves the view.
+await step('e2e: Back closes the dialog and keeps the view', async () => {
+  await app(page, '#/all');
+  await app(page, '#/finished');
+  // A download's own row (a package row's double-click opens it in place instead).
+  const row = page.locator('[role="grid"] [role="row"]').filter({ hasNot: page.getByRole('button', { name: /^(Expand|Collapse)$/ }) }).first();
+  await row.dblclick();
+  await dialog(page).waitFor();
+  await page.goBack();
+  await dialog(page).waitFor({ state: 'detached' });
+  expect(await page.evaluate(() => location.hash) === '#/finished', `Back changed the view to ${await page.evaluate(() => location.hash)}`);
+});
+
+// U-WU-7 on a phone (full-screen dialogs, touch): Back closes only the dialog and the view stays. A #fragment
+// navigation while a dialog is open leaves it open; Back from there returns to the view, the next Back closes it.
+await step('e2e: phone Back with a dialog open', async () => {
+  const phoneVariant = variants.find(phone) ?? allVariants.find(phone);
+  const { context, page: p } = await newPage(phoneVariant, signedIn);
+  try {
+    await app(p, '#/all');
+    await app(p, '#/finished');
+    await tool(p, 'Add URL');
+    await dialog(p).waitFor();
+    await p.goBack();
+    await dialog(p).waitFor({ state: 'detached' });
+    expect(await p.evaluate(() => location.hash) === '#/finished', `Back changed the view to ${await p.evaluate(() => location.hash)}`);
+
+    await tool(p, 'Add URL');
+    await dialog(p).waitFor();
+    await p.evaluate(() => { location.hash = '#/all'; });
+    await p.waitForTimeout(400);
+    expect(await dialog(p).count() === 1, 'a #fragment navigation closed the dialog');
+    await p.goBack();
+    await p.waitForFunction(() => location.hash === '#/finished');
+    await p.waitForTimeout(400);
+    expect(await dialog(p).count() === 1, 'Back onto the dialog\'s own entry closed it');
+    await p.goBack();
+    await dialog(p).waitFor({ state: 'detached' });
+    expect(await p.evaluate(() => location.hash) === '#/finished', `the last Back changed the view to ${await p.evaluate(() => location.hash)}`);
+  } finally {
+    await context.close();
+  }
+});
 
 // A site login and a proxy with passwords: the server keeps them and says only that one is saved. One draft, Apply.
 await step('e2e: site login and proxy password are saved and not shown', async () => {
@@ -645,6 +865,9 @@ await step('e2e: pair a browser, limited token, revoke', async () => {
   expect(/Screens walk/.test(await page.locator('main').innerText()), 'the paired browser is not listed');
   await page.screenshot({ path: resolve(out, 'e2e-paired-browser.desktop-dark.png') });
   await page.locator('li', { hasText: 'Screens walk' }).getByRole('button', { name: 'Remove' }).click();
+  await dialog(page).waitFor();
+  expect(/Screens walk \(browser extension\) will lose access/.test(await dialog(page).innerText()), 'removing a paired app did not ask first');
+  await dialog(page).getByRole('button', { name: 'Remove', exact: true }).click();
   await page.waitForTimeout(800);
   const after = await fetch(`${base}/api/ipc`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${paired.token}` },
@@ -659,6 +882,30 @@ await step('e2e: sign out', async () => {
   await page.getByRole('button', { name: 'Sign out' }).click();
   // Two navigations to the sign-in page can race (the button's and the closed socket's), so look at where the page is, not at one navigation.
   await page.waitForFunction(() => location.pathname.startsWith('/signin'));
+});
+
+// U-WU-1 on the sign-in page: a link from a host this browser hasn't saved asks before it goes back (and adds it).
+await step('e2e: sign-in Back to an unsaved host asks first', async () => {
+  const { context, page: p } = await newPage(variants[0]);
+  try {
+    await p.route(`${otherHost}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>other</title>' }));
+    await p.goto(`${base}/signin/#inbound-hosts=${handoff}`);
+    expect(await p.getByRole('link', { name: /Back to 127\.0\.0\.1:18999/ }).count() === 0, 'Back offered as a plain link for a host that is not saved');
+    await p.getByRole('button', { name: /Back to 127\.0\.0\.1:18999/ }).click();
+    await p.screenshot({ path: resolve(out, 'e2e-signin-back-asks.desktop-dark.png') });
+    const group = p.getByRole('group', { name: /Go back to 127\.0\.0\.1:18999/ });
+    await group.getByRole('button', { name: 'Cancel' }).click();
+    expect(p.url().startsWith(base), 'Cancel left the page');
+    await p.getByRole('button', { name: /Back to 127\.0\.0\.1:18999/ }).click();
+    await group.getByRole('button', { name: 'Add it and go back' }).click();
+    await p.waitForURL((url) => url.origin === otherHost);
+    expect(p.url().includes('#inbound-hosts='), 'the way back lost the list it takes along');
+    await p.goto(`${base}/signin/`);
+    const saved = await p.evaluate(() => localStorage.getItem('inbound.hosts') ?? '');
+    expect(saved.includes(otherHost), 'the host was not added');
+  } finally {
+    await context.close();
+  }
 });
 
 await main.close();

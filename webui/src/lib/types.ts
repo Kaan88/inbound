@@ -44,6 +44,8 @@ export interface Job {
   isRemote?: boolean;
   remoteProvider?: string;
   queueRetryAt?: string;
+  /** The user paused it (its own Pause, or Stop All): a queue start leaves it paused. Older servers leave it out. */
+  pausedByUser?: boolean;
   /** False when the download was taken out of its queue (the Q column is then empty). Older servers leave it out (then it is true). */
   isQueued?: boolean;
   pageUrl?: string;

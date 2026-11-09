@@ -7,7 +7,10 @@ namespace DownloadManager.Desktop.WinUI;
 /// <param name="OpenReason">For what needs the file itself to be there: Open, Open Folder, Move/Rename.</param>
 /// <param name="ShellReason">For what this PC's shell does with the file (Open, Open With, Open Folder): also off for a
 /// download on another server, whose file is on that machine.</param>
-internal sealed record FileMenuPlan(string? FileReason, string? LocalReason, string? RemoveReason, string? OpenReason = null, string? ShellReason = null);
+/// <param name="LaunchReason">For Open and Open With, which start the file itself: also off until the download has
+/// finished, since there is no file yet (U-WL-13). Open Folder can still show the folder.</param>
+internal sealed record FileMenuPlan(string? FileReason, string? LocalReason, string? RemoveReason, string? OpenReason = null, string? ShellReason = null,
+    string? LaunchReason = null);
 
 /// <summary>Which file the progress windows talk about. Nothing here touches the UI.</summary>
 internal static class ProgressDetailRules
@@ -34,24 +37,31 @@ internal static class FileMenuRules
     /// <summary>A finished download whose archive went on purpose after extraction. Nothing is wrong with it, and there is no file to act on.</summary>
     public const string FileRemovedReason = "archive removed after extraction";
 
+    /// <summary>An unfinished, failed or cancelled download has no file to open yet.</summary>
+    public const string NotFinishedReason = "not downloaded yet";
+
     /// <param name="singleFile">The selection's first local row is a file, which is what Open and its like act on.</param>
     /// <param name="package">The selection's first local row is a package.</param>
     /// <param name="sideRows">Selected rows with no local download behind them: remote jobs and archive records.</param>
     /// <param name="removableSideRows">Those of them that Delete can take off the list. An archive still extracting can't go.</param>
     /// <param name="fileRemoved">That file's archive was removed after extraction.</param>
     /// <param name="remote">The window shows another server (<see cref="RemoteDataRules"/>).</param>
-    public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false, bool remote = false)
+    /// <param name="finished">That file's download has completed.</param>
+    public static FileMenuPlan Plan(bool singleFile, bool package, int sideRows, int removableSideRows, bool fileRemoved = false, bool remote = false,
+        bool finished = true)
     {
         var local = singleFile || package;
         var noLocalRow = local ? null : sideRows > 0 ? "no local file selected" : "select a download first";
         var fileReason = singleFile ? null : package ? "select a file, not a package" : noLocalRow;
         var openReason = fileReason ?? (fileRemoved ? FileRemovedReason : null);
+        var shellReason = openReason ?? (RemoteDataRules.MayUseFiles(remote) ? null : RemoteDataRules.OnAnotherServer);
         return new FileMenuPlan(
             fileReason,
             noLocalRow,
             local || removableSideRows > 0 ? null : sideRows > 0 ? "cancel the extraction first" : "select a download first",
             openReason,
-            openReason ?? (RemoteDataRules.MayUseFiles(remote) ? null : RemoteDataRules.OnAnotherServer));
+            shellReason,
+            shellReason ?? (finished ? null : NotFinishedReason));
     }
 
     public static string Label(string text, string? reason) => reason is null ? text : $"{text} ({reason})";
@@ -73,8 +83,22 @@ internal static class JobNotes
         // The wait for a connection is the row's status itself, so it isn't said twice.
         if (WaitingText(job) is not null) return job.FileRemovedAfterExtraction ? RemovedWords : null;
         var note = UrlRedactor.HideAddresses(job.StatusNote);
+        // U-WL-3: a failed download says why, first, in the Status tooltip, the Description column and Properties.
+        var reason = FailureReason(job);
+        if (reason is not null) return string.IsNullOrWhiteSpace(note) ? reason : $"{reason} {note}";
         if (!string.IsNullOrWhiteSpace(note)) return note;
         return job.FileRemovedAfterExtraction ? RemovedWords : null;
+    }
+
+    /// <summary>"Failed: " and the Host's reason, with any address taken out. Null unless the download failed with one.</summary>
+    public static string? FailureReason(JobDto job) => FailureMessage(job) is { } message ? $"Failed: {message}" : null;
+
+    /// <summary>The Host's reason a download failed, with any address taken out, for a window whose heading already says Failed.</summary>
+    public static string? FailureMessage(JobDto job)
+    {
+        if (job.State != "failed" || job.Failure is not { } failure) return null;
+        var message = UrlRedactor.HideAddresses(failure.Message).Trim();
+        return string.IsNullOrWhiteSpace(message) ? null : message;
     }
 
     /// <summary>UI.B7: what a running download waiting for a free connection to its host says. The host name only.</summary>
@@ -114,4 +138,22 @@ internal static class DeleteRules
     /// selection only, so for them a selection of side rows alone removes those rows.</summary>
     public static IReadOnlyList<T> Targets<T>(IReadOnlyList<T> selected, T? recordDownload, bool fromContextMenu) where T : class
         => selected.Count > 0 ? selected : fromContextMenu && recordDownload is not null ? [recordDownload] : [];
+
+    /// <summary>
+    /// UI.B19: what Delete sends as deleteFile for one download. An unfinished one has only partial data, which nothing
+    /// can use once it is off the list, so it always goes, whatever the box says, as it does when that download is
+    /// deleted alone. "Delete from disk" decides only a finished file.
+    /// </summary>
+    public static bool DeleteFileFor(bool finished, bool deleteFinishedFiles) => !finished || deleteFinishedFiles;
+
+    /// <summary>The selection split by what <see cref="DeleteFileFor"/> sends: those whose data goes, then those whose file stays.</summary>
+    public static (IReadOnlyList<T> WithData, IReadOnlyList<T> KeepFile) Split<T>(
+        IReadOnlyList<T> jobs, Func<T, bool> finished, bool deleteFinishedFiles)
+    {
+        var withData = jobs.Where(job => DeleteFileFor(finished(job), deleteFinishedFiles)).ToList();
+        return (withData, jobs.Where(job => !withData.Contains(job)).ToList());
+    }
+
+    /// <summary>The dialog's note when the selection holds both kinds and the box is offered.</summary>
+    public const string MixedNote = "Unfinished downloads always lose their partial data; the box decides only the finished files.";
 }

@@ -73,7 +73,7 @@ the provider, Direct provider link, Ordinary link, Unsupported, Can't tell. A li
 only its host and its position in the list, never its address. A hoster link has no control that sends it
 anywhere but the provider. A link nobody could classify gets a retry, and a direct download only by a box
 ticked for that line. Whether something is cached is known only after it is added, so the approval to fetch
-what isn't cached comes in a second step, unticked, and closing that step loses nothing. Import JD Container
+what isn't cached comes in a second step, unticked, and closing that step loses nothing. Import Link Container
 follows the same rules with the same words. Its list is virtualized, because a container can hold 5000 links, so a
 link password is entered from the download list rather than from a row.
 
@@ -164,7 +164,10 @@ default window width. With one remote or archive row selected, the status bar sa
   a gray box.
 - Groups, separated by `InboundToolSeparatorStyle`: Add URL | Resume, Stop,
   Stop All | Delete, Delete Completed | Options, Scheduler | Start Queue,
-  Stop Queue.
+  Stop Queue. A button that only some selections have, such as Cancel Package,
+  goes in a group of its own at the end, so showing it moves no other button.
+- The main window can't be made smaller than 1000x560, where the whole toolbar fits; Cancel Package, when it shows,
+  can scroll the toolbar sideways, and the list scrolls sideways for its columns.
 - Icons are outline glyphs colored with the `InboundIcon*Brush` tokens: start
   green, pause/stop amber, delete red, add/scheduler blue, settings neutral.
   Stop (keeps partial data) uses the pause glyph; Stop All and Stop Queue use
@@ -225,10 +228,30 @@ The browser front end (`webui/`) follows the same rules with web tools:
   is kept per browser.
 - **Status colors and bars** are the desktop's: the state's color on the status text, a 6 px bar under it while a
   download is active or paused with progress, a moving bar when the size is unknown.
-- **Layout:** header, sidebar of views with counts, toolbar (icon over label; icons alone below 768 px, the words kept
-  for screen readers), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
-  lines per download on a phone. The sidebar becomes a drawer below 768 px; dialogs fill the screen on a phone.
+- **Layout:** header, sidebar of views with counts, toolbar (icon over label, smaller below 768 px; the bar never
+  scrolls sideways: the buttons that don't fit go into More, least needed first), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
+  lines per download on a phone. The sidebar becomes a drawer below 768 px, with its own close button; dialogs fill
+  the screen on a phone, and Back closes them. On a touch screen every target is at least 40 px each way.
 - **Icons:** our own outline glyphs on a 24-unit grid (`Icon.svelte`), colored with the icon tokens.
 - **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
   themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look
   at the pictures, as with the desktop captures above.
+
+## 9. The browser extension (EXT.R8)
+
+- **One look.** The extension's build copies the web UI's `webui/src/tokens.css` (the palette, equal to `App.xaml`),
+  `webui/src/ui-kit.css` (buttons, fields, notices, the 6 px bar, menus, dialogs, the segmented control) and
+  `webui/public/theme.js`. Its own `extensions/chrome/extension.css` holds layout only and names no colour.
+  `tests/tokens-parity.test.cjs` keeps the tokens equal to `App.xaml` and checks the contrast pairs.
+- **Shared code.** Words and numbers come from `webui/src/lib/format.ts` (time left as the desktop writes it, `1m 45s`),
+  glyphs from `webui/src/lib/icons.ts`, with file-kind glyphs grouped as the desktop list's.
+- **Popup anatomy** (380 wide, up to 600 tall, fixed px only): a 40 px header of icon buttons, notices only when there
+  is something to say, one list that alone scrolls with 56 px rows (name and size, status line, a reserved bar slot) and
+  at most two buttons each, group rows This PC / `<server> (server)` when a server is paired, and a 24 px status bar with
+  Send to, the counts and the connection. Rows are keyed and updated in place. Delete is a dialog over the list.
+- **Save forms.** The right-click window, the popup's ask view and Add links share `src/ui/save-form.ts`: Send to,
+  Destination folder with the target's favorites and Browse…, the server's folder panel. Start download and Download
+  later send this download only; Options > Default start picks the primary one.
+- **Options** is the desktop's Options window: pages on the left, OK / Cancel / Apply, only changed settings saved.
+- **Store images** are made by `extensions/chrome/scripts/store-screens.mjs` from the real pages (see
+  `docs/chrome-store/LISTING.md`), never by hand.

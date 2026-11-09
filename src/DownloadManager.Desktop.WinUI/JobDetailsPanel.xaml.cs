@@ -377,10 +377,7 @@ public sealed partial class JobDetailsPanel : UserControl
         ? $"{bytes / (1024.0 * 1024 * 1024):N2} GB" : bytes >= 1024L * 1024
         ? $"{bytes / (1024.0 * 1024):N2} MB" : bytes >= 1024 ? $"{bytes / 1024.0:N1} KB" : $"{bytes:N0} B";
 
+    /// <summary>U-WL-15: the list's own words for time left, such as 12m 4s.</summary>
     private static string FormatDuration(TimeSpan duration)
-    {
-        if (duration < TimeSpan.Zero) return "—";
-        if (duration.TotalDays >= 1) return $"{(int)duration.TotalDays}d {duration.Hours:D2}:{duration.Minutes:D2}:{duration.Seconds:D2}";
-        return duration.ToString(@"hh\:mm\:ss", CultureInfo.CurrentCulture);
-    }
+        => DurationText.TimeLeft(duration) is { Length: > 0 } words ? words : "—";
 }

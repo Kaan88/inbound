@@ -81,7 +81,8 @@
             <!-- Overview: ring and tiles, the last minute's speed, a thin map of the file, and where it comes from and goes. -->
             <ScrollViewer x:Name="OverviewPage" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Spacing="12" Padding="0,0,12,4">
-                    <InfoBar x:Name="FailureBar" Severity="Error" IsClosable="False" IsOpen="False" />
+                    <!-- U-WL-3: why it failed comes first, before the ring and tiles. -->
+                    <InfoBar x:Name="FailureBar" Severity="Error" IsClosable="False" IsOpen="False" AutomationProperties.Name="Why it failed" />
                     <Grid ColumnSpacing="20">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="124" />
@@ -166,7 +167,8 @@
 
                     <!-- Finished: what to do with the file, Open first. -->
                     <StackPanel x:Name="CompletedActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
-                        <Button x:Name="OpenButton" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" Padding="16,7" MinWidth="110" AutomationProperties.Name="Open">
+                        <Button x:Name="OpenButton" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" Padding="16,7" MinWidth="110" AutomationProperties.Name="Open"
+                                AutomationProperties.AcceleratorKey="Enter">
                             <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8A7;" FontSize="14" /><TextBlock Text="Open" /></StackPanel>
                         </Button>
                         <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7" AutomationProperties.Name="Show in folder">
@@ -267,7 +269,7 @@
                                 <TextBlock Text="When it finishes" FontSize="13" FontWeight="SemiBold" />
                                 <CheckBox x:Name="ShowCompletionForJob" Content="Show the completion window for this download"
                                           Click="ShowCompletionForJob_Click" />
-                                <TextBlock Text="The global completion preference can be changed from the completion window."
+                                <TextBlock Text="For every download, this is in Options &gt; Downloads, under When a download finishes."
                                            TextWrapping="Wrap" FontSize="12"
                                            Foreground="{ThemeResource InboundSecondaryTextBrush}" />
                             </StackPanel>
@@ -302,10 +304,18 @@
             <CheckBox x:Name="DontShowAgain" Content="Don't show this window again" Visibility="Collapsed"
                       Click="DontShowAgain_Click" VerticalAlignment="Center" />
             <StackPanel x:Name="ActionRow" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button x:Name="PauseButton" Click="Pause_Click" AutomationProperties.Name="Pause">
+                <!-- U-WL-17: Delete first and set apart, so it is never next to the default action. -->
+                <Button x:Name="DeleteButton" Click="Delete_Click" Margin="0,0,16,0" AutomationProperties.Name="Delete" ToolTipService.ToolTip="Remove this download and delete its file">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                        <TextBlock Text="Delete" />
+                    </StackPanel>
+                </Button>
+                <!-- U-WL-15: Stop, as the toolbar and the menus say it. The partial data is kept. -->
+                <Button x:Name="PauseButton" Click="Pause_Click" AutomationProperties.Name="Stop" ToolTipService.ToolTip="Stop this download (partial data is kept)">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE769;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
-                        <TextBlock Text="Pause" />
+                        <TextBlock Text="Stop" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="ResumeButton" Click="Resume_Click" AutomationProperties.Name="Resume">
@@ -315,12 +325,6 @@
                     </StackPanel>
                 </Button>
                 <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-                <Button x:Name="DeleteButton" Click="Delete_Click" AutomationProperties.Name="Delete" ToolTipService.ToolTip="Remove this download and delete its file">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
-                        <TextBlock Text="Delete" />
-                    </StackPanel>
-                </Button>
                 <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="80" />
             </StackPanel>
         </Grid>

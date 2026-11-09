@@ -41,16 +41,6 @@ export function barValue(job: Pick<Job, 'state' | 'totalBytes' | 'progress' | 'r
   return percent(job) ?? 0;
 }
 
-/** hh:mm:ss, with "Nd hh:mm:ss" from one day (JobDetailsPanel.FormatDuration). */
-export function clock(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const days = Math.floor(total / 86400);
-  const h = String(Math.floor((total % 86400) / 3600)).padStart(2, '0');
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
-  const s = String(total % 60).padStart(2, '0');
-  return days > 0 ? `${days}d ${h}:${m}:${s}` : `${h}:${m}:${s}`;
-}
-
 /** The Host's note without any web address in it (UrlRedactor.HideAddresses). */
 export function hideAddresses(text: string | null | undefined): string {
   return (text ?? '').replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, 'a web address').trim();
@@ -92,7 +82,7 @@ export function detailRows(job: Job): DetailRow[] {
     value: job.totalBytes && job.totalBytes > 0 ? `${bytes(job.receivedBytes)} (${(complete ? 100 : p).toFixed(2)}%)` : bytes(job.receivedBytes) || '0 B',
   });
   rows.push({ label: 'Transfer rate', value: job.bytesPerSecond && job.bytesPerSecond > 0 ? speed(job.bytesPerSecond) : '—' });
-  rows.push({ label: 'Time left', value: complete ? 'Complete' : eta !== null && eta >= 0 ? clock(eta) : '—' });
+  rows.push({ label: 'Time left', value: complete ? 'Complete' : duration(eta) || '—' });
   rows.push({ label: 'Resume capability', value: job.resumeSupported === true ? 'Yes' : job.resumeSupported === false ? 'No' : 'Unknown' });
   return rows;
 }

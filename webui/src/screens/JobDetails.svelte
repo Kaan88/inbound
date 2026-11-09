@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { copyText } from '../lib/clipboard';
   import { untrack } from 'svelte';
   import AskDialog from '../components/AskDialog.svelte';
   import Dialog from '../components/Dialog.svelte';
@@ -18,7 +19,8 @@
   import Properties from './Properties.svelte';
   import RefreshAddress from './RefreshAddress.svelte';
 
-  let { jobId, set, onclose, onpassword }: { jobId: string; set?: ArchiveSet; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void } = $props();
+  // start: 'redownload' when the row menu's Redownload opened this, so its questions show here (U-WU-10).
+  let { jobId, set, start, onclose, onpassword }: { jobId: string; set?: ArchiveSet; start?: 'redownload'; onclose: () => void; onpassword: (target: ArchivePasswordTarget) => void } = $props();
 
   // The download as the server has it. When it leaves the list the dialog stays, saying so, until it is closed (D21).
   let last = $state<Job | null>(untrack(() => store.model.jobs[jobId] ?? null));
@@ -236,6 +238,13 @@
     await addDirect(current);
   }
 
+  let started = false;
+  $effect(() => {
+    if (started || start !== 'redownload' || !job) return;
+    started = true;
+    void redownload();
+  });
+
   async function addDirect(current: Job) {
     question = null;
     working = true;
@@ -268,12 +277,8 @@
   }
 
   async function copy(text: string, done: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      store.toast(done);
-    } catch {
-      notice = 'The browser did not allow copying. Select the text and copy it by hand.';
-    }
+    if (await copyText(text)) store.toast(done);
+    else notice = 'The browser did not allow copying. Select the text and copy it by hand.';
   }
 
   const rows = $derived(job ? detailRows(job) : []);

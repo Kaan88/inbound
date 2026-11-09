@@ -378,7 +378,7 @@ public sealed class ArchiveFormTests
         Assert.Equal("Choose the folder to extract to.", empty);
 
         Assert.Null(ArchiveForm.Changes(Saved(), Form() with { DestinationIndex = 2, Folder = "relative\\path" }, out var relative));
-        Assert.Contains("full path", relative);
+        Assert.Contains("full folder path", relative);
     }
 
     [Fact]

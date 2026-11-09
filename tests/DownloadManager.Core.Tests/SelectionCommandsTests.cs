@@ -238,4 +238,19 @@ public sealed class DeleteRulesTests
         Assert.Empty(DeleteRules.Targets<string>([], "record", fromContextMenu: false));
         Assert.Empty(DeleteRules.Targets<string>([], null, fromContextMenu: true));
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UI_B19_unfinished_rows_always_lose_their_partial_data_whatever_the_box_says(bool boxTicked)
+    {
+        (string Name, bool Finished)[] selection = [("done", true), ("paused", false), ("failed", false)];
+
+        var (withData, keepFile) = DeleteRules.Split(selection, row => row.Finished, boxTicked);
+
+        Assert.True(DeleteRules.DeleteFileFor(finished: false, deleteFinishedFiles: boxTicked));
+        Assert.Equal(boxTicked, DeleteRules.DeleteFileFor(finished: true, deleteFinishedFiles: boxTicked));
+        Assert.Equal(boxTicked ? ["done", "paused", "failed"] : ["paused", "failed"], withData.Select(row => row.Name));
+        Assert.Equal(boxTicked ? [] : ["done"], keepFile.Select(row => row.Name));
+    }
 }

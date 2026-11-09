@@ -3,69 +3,77 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Download All - Inbound Download Manager</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>Add links - Inbound Download Manager</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="ui-kit.css" />
+  <link rel="stylesheet" href="extension.css" />
 </head>
-<body class="batch">
-  <main class="page">
-    <header class="brand large">
-      <img src="icons/icon48.png" alt="" width="36" height="36" />
-      <div>
-        <h1>Download All</h1>
-        <p class="muted small">Pick the links on this page to send to the desktop app.</p>
-      </div>
-    </header>
+<body class="window batch">
+  <!-- EXT.R8 §3.5: the desktop app's Add links, on the save form shared with the popup and the folder window. -->
+  <header class="window-header">
+    <img src="icons/icon16.png" alt="" width="16" height="16" />
+    <h1>Add links</h1>
+    <span class="spacer"></span>
+    <span id="pageTitle" class="muted small"></span>
+    <span id="count" class="muted small tabular">Scanning the page…</span>
+  </header>
+  <div class="batch-toolbar">
+    <input id="filter" class="field" type="search" spellcheck="false" placeholder="Filter by name, type or site" aria-label="Filter links" />
+    <select id="typeFilter" class="field type-filter" aria-label="File type">
+      <option value="">All types</option>
+    </select>
+  </div>
 
-    <section class="card">
-      <div class="row">
-        <strong id="pageTitle">Links on this page</strong>
-        <span id="count" class="muted small">Scanning...</span>
-      </div>
-      <div class="filter-row">
-        <input id="filter" type="text" spellcheck="false" placeholder="Filter by name, type or site" />
-        <label class="inline-check">
-          <input id="selectAll" type="checkbox" />
-          Select all shown
-        </label>
-      </div>
-      <ul id="links" class="link-list">
-        <li class="empty">Scanning page...</li>
-      </ul>
-    </section>
-
-    <section class="card form-card batch-options">
-      <!-- EXT.R1: shown only when a server is paired and this PC can be used too. -->
-      <fieldset id="targetField" class="field target-field hidden">
-        <legend>Save to</legend>
-        <div id="targetChoice" class="target-choice"></div>
-      </fieldset>
-      <label class="field">
-        <span>Destination folder (optional)</span>
-        <div class="destination-picker">
-          <input id="destination" type="text" spellcheck="false" placeholder="Use the app's default folder" />
-          <button id="browseDestination" type="button">Browse…</button>
-        </div>
-      </label>
-      <div id="serverFolders" class="hidden"></div>
-      <label class="field">
-        <span>Start</span>
-        <select id="startMode">
-          <option value="now">Start immediately</option>
-          <option value="later">Download later</option>
-        </select>
-      </label>
-    </section>
-
-    <p class="muted small">Sending a download gives the desktop app (or your server, when you send it there) its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you send two or more, the page's title names the group in the app. YouTube links are not listed.</p>
-
-    <div class="actions">
-      <button id="confirm" class="primary" type="button" disabled>Download selected</button>
-      <button id="cancel" type="button">Close</button>
-      <span id="selection" class="muted small">0 selected</span>
+  <div class="link-table" role="group" aria-label="Links on this page">
+    <div class="link-head">
+      <label class="link-check" title="Select all shown"><input id="selectAll" type="checkbox" aria-label="Select all shown" /></label>
+      <button class="link-sort" type="button" data-sort="name">File Name</button>
+      <button class="link-sort" type="button" data-sort="type">Type</button>
+      <button class="link-sort" type="button" data-sort="host">Site</button>
     </div>
-    <p id="error" class="error hidden"></p>
-    <p id="success" class="success hidden"></p>
-  </main>
+    <ul id="links" class="link-list">
+      <li class="empty"><span>Scanning the page…</span><span class="progress indeterminate"><span></span></span></li>
+    </ul>
+  </div>
+
+  <section class="batch-options">
+    <label id="packageField" class="form-inline hidden">
+      <span class="label">Package name</span>
+      <input id="packageName" class="field" type="text" spellcheck="false" />
+    </label>
+    <div class="form-inline">
+      <span id="targetLabel" class="label target-label hidden">Send to</span>
+      <!-- EXT.R1: shown only when a server is paired and this PC can be used too. -->
+      <fieldset id="targetField" class="target-field hidden" aria-labelledby="targetLabel">
+        <div id="targetChoice" class="target-choice segmented"></div>
+      </fieldset>
+    </div>
+    <div class="form-inline">
+      <label class="label" for="destination">Destination folder</label>
+      <div class="grow">
+        <div class="destination-picker">
+          <input id="destination" class="field mono" type="text" spellcheck="false" placeholder="The app's default folder" />
+          <button id="browseDestination" class="btn" type="button" disabled>Browse…</button>
+        </div>
+        <span id="freeSpace" class="hint free-space"></span>
+      </div>
+    </div>
+    <div id="serverFolders" class="hidden"></div>
+    <details class="what-is-sent">
+      <summary>What is sent</summary>
+      <p class="hint">Sending a download gives the desktop app (or your server, when you send it there) its address, the page it came from, your browser's user agent and your cookies for that site, so the app can download files that need your own login. The app keeps these with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you send two or more, the page's title names the group in the app. YouTube links are not listed.</p>
+    </details>
+    <p id="error" class="error hidden" role="alert"></p>
+    <p id="success" class="success hidden" role="status"></p>
+  </section>
+
+  <footer class="dialog-footer window-footer">
+    <span id="selection" class="muted small tabular footer-start">0 selected</span>
+    <button id="confirm" class="btn-primary" type="button" disabled>Start download</button>
+    <button id="later" class="btn" type="button" disabled>Download later</button>
+    <button id="cancel" class="btn" type="button">Cancel</button>
+  </footer>
   <script src="batch.js"></script>
 </body>
 </html>
