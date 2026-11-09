@@ -25,8 +25,9 @@ other easily. maybe I want to manage my homeserver from my desktop ui or vice ve
    the app's folders, and texts that today name Docker follow a new `hostKind` (`windows` or `server`) in the hello
    and the sign-in status. Its header gains a host switcher: a dropdown of saved hosts (kept in that host's
    web UI settings) that opens the chosen host's own web UI in the same tab.
-3. **Servers in the desktop window**: a Servers list (File → Servers, and a switcher in the status bar); the
-   window itself shows the chosen server (section 5).
+3. **Servers in the desktop window**: a Servers list (File → Servers), and a switcher at the right end of the
+   toolbar, in the status bar and under Tasks → Show Downloads Of (Ctrl+Shift+O opens it; Ctrl+0 shows This PC,
+   Ctrl+1 to Ctrl+9 the saved servers). The window itself shows the chosen server (section 5), and its title names it.
 
 ## Architecture
 
@@ -201,7 +202,8 @@ allow rule. So the bridge never listens beyond this PC until the rule check pass
 - Folder choosers use a dialog backed by `folders.browse`; `.torrent` and container files are uploaded; "extract
   from disk" offers only the server's folders.
 - Options split: this PC's settings (theme, start at sign-in, clipboard, updates, sounds) always go to the local
-  Host; the server's own page shows the fields it allows. Settings saves carry a revision so two clients saving at
+  Host; the server's own page shows the fields it allows. This PC's Web UI page is there too ("Web UI on this PC"),
+  on a client of the local Host of its own, and Tasks or File → Web UI on This PC… opens Options on it. Settings saves carry a revision so two clients saving at
   once do not overwrite each other silently.
 - Completion window and notifications come from the window's own job events while it is open; nothing alerts for
   a remote server while it is closed.
