@@ -12,8 +12,10 @@ public sealed class StatisticsWindow : Window
     private readonly HostConnection _connection;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _captured = new() { Opacity = 0.72, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _captured = InboundUi.Secondary();
     private readonly Dictionary<string, TextBlock> _values = new(StringComparer.Ordinal);
+    // UI.R31: the transfer totals are Progress Details' tiles, a value with its unit in a smaller grey run.
+    private readonly Dictionary<string, InfoTile> _tiles = new(StringComparer.Ordinal);
     private bool _closed;
     private bool _refreshing;
 
@@ -30,15 +32,17 @@ public sealed class StatisticsWindow : Window
 
         var root = new StackPanel { Spacing = 14, Margin = new Thickness(16) };
         AppTheme.Track(root);
-        root.Children.Add(new TextBlock
-        {
-            Text = "Download statistics", FontSize = 23,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
-        root.Children.Add(_captured);
+        var heading = new StackPanel { Spacing = 2 };
+        heading.Children.Add(InboundUi.PageTitle("Download statistics"));
+        heading.Children.Add(_captured);
+        root.Children.Add(heading);
+        // An empty notice takes no room, so the title doesn't float away from the tiles.
+        _notice.Visibility = Visibility.Collapsed;
+        _notice.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
+            _notice.Visibility = string.IsNullOrEmpty(_notice.Text) ? Visibility.Collapsed : Visibility.Visible);
         root.Children.Add(_notice);
 
-        AddSection(root, "Transfer totals",
+        AddTiles(root, "Transfer totals",
             ("recorded", "Recorded progress"),
             ("completed", "Completed download data"),
             ("todayBytes", "Completed today"),
@@ -55,13 +59,9 @@ public sealed class StatisticsWindow : Window
             ("queued", "Queued"),
             ("paused", "Paused"));
 
-        root.Children.Add(new TextBlock
-        {
-            Text = "Recorded data measures saved download progress, not network-interface traffic. Removed entries stay in the statistics.",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.78,
-            Margin = new Thickness(0, 3, 0, 4),
-        });
+        var note = InboundUi.Secondary("Recorded data measures saved download progress, not network-interface traffic. Removed entries stay in the statistics.");
+        note.Margin = new Thickness(0, 0, 0, 4);
+        root.Children.Add(note);
         var scroller = new ScrollViewer
         {
             Content = root,
@@ -114,21 +114,41 @@ public sealed class StatisticsWindow : Window
         Activate();
     }
 
+    private void AddTiles(StackPanel root, string title, params (string Key, string Label)[] tiles)
+    {
+        var section = new StackPanel { Spacing = 8 };
+        section.Children.Add(InboundUi.SectionTitle(title));
+        var grid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var index = 0; index < tiles.Length; index++)
+        {
+            if (index % 2 == 0) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var tile = new InfoTile();
+            tile.Set(tiles[index].Label, "—");
+            Grid.SetRow(tile.Element, index / 2);
+            Grid.SetColumn(tile.Element, index % 2);
+            grid.Children.Add(tile.Element);
+            _tiles[tiles[index].Key] = tile;
+        }
+        section.Children.Add(grid);
+        root.Children.Add(section);
+    }
+
+    /// <summary>A section of counts: one card of rows, grey names and the values on the right.</summary>
     private void AddSection(StackPanel root, string title, params (string Key, string Label)[] rows)
     {
-        var section = new StackPanel { Spacing = 7 };
-        section.Children.Add(new TextBlock
-        {
-            Text = title, FontSize = 16,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Margin = new Thickness(0, 2, 0, 1),
-        });
+        var section = new StackPanel { Spacing = 8 };
+        section.Children.Add(InboundUi.SectionTitle(title));
+        var list = new StackPanel { Spacing = 6 };
         foreach (var (key, label) in rows)
         {
             var row = new Grid { ColumnSpacing = 12 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var name = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+            var name = InboundUi.Secondary(label);
+            name.FontSize = 13;
+            name.VerticalAlignment = VerticalAlignment.Center;
             var value = new TextBlock
             {
                 Text = "—", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
@@ -137,9 +157,10 @@ public sealed class StatisticsWindow : Window
             Grid.SetColumn(value, 1);
             row.Children.Add(name);
             row.Children.Add(value);
-            section.Children.Add(row);
+            list.Children.Add(row);
             _values[key] = value;
         }
+        section.Children.Add(InboundUi.Card(list));
         root.Children.Add(section);
     }
 
@@ -184,10 +205,11 @@ public sealed class StatisticsWindow : Window
 
     private void Apply(DownloadStatisticsDto stats)
     {
-        Set("recorded", FormatBytes(stats.RecordedBytes), ExactBytes(stats.RecordedBytes));
-        Set("completed", FormatBytes(stats.CompletedBytes), ExactBytes(stats.CompletedBytes));
-        Set("todayBytes", FormatBytes(stats.CompletedTodayBytes), ExactBytes(stats.CompletedTodayBytes));
-        Set("rate", FormatBytes(stats.BytesPerSecond) + "/s", ExactBytes(stats.BytesPerSecond) + " per second");
+        SetTile("recorded", stats.RecordedBytes, string.Empty, ExactBytes(stats.RecordedBytes));
+        SetTile("completed", stats.CompletedBytes, string.Empty, ExactBytes(stats.CompletedBytes));
+        SetTile("todayBytes", stats.CompletedTodayBytes, string.Empty, ExactBytes(stats.CompletedTodayBytes));
+        var rate = double.IsFinite(stats.BytesPerSecond) ? Math.Max(0, stats.BytesPerSecond) : 0;
+        SetTile("rate", (long)rate, "/s", ExactBytes(stats.BytesPerSecond) + " per second");
         Set("completedCount", Number(stats.CompletedCount));
         Set("todayCount", Number(stats.CompletedTodayCount));
         Set("failed", Number(stats.FailedCount));
@@ -197,8 +219,9 @@ public sealed class StatisticsWindow : Window
         Set("active", Number(stats.ActiveCount));
         Set("queued", Number(stats.QueuedCount));
         Set("paused", Number(stats.PausedCount));
-        _captured.Text = $"Updated {stats.CapturedAt.ToLocalTime():g}" +
-            (stats.FirstRecordedAt is { } first ? $" · Tracking since {first.ToLocalTime():d}" : " · No recorded downloads yet");
+        // UI.R31: moments as the list writes them.
+        _captured.Text = $"Updated {UiFormat.Moment(stats.CapturedAt)}" +
+            (stats.FirstRecordedAt is { } first ? $" · Tracking since {UiFormat.Moment(first)}" : " · No recorded downloads yet");
     }
 
     private void Set(string key, string value, string? exact = null)
@@ -208,29 +231,21 @@ public sealed class StatisticsWindow : Window
         ToolTipService.SetToolTip(text, exact ?? value);
     }
 
+    private void SetTile(string key, long bytes, string suffix, string exact)
+    {
+        if (!_tiles.TryGetValue(key, out var tile)) return;
+        tile.SetBytes(tile.Label.Text, bytes, suffix);
+        ToolTipService.SetToolTip(tile.Element, exact);
+    }
+
     private void ClearValues()
     {
         foreach (var value in _values.Values) { value.Text = "—"; ToolTipService.SetToolTip(value, null); }
+        foreach (var tile in _tiles.Values) { tile.Set(tile.Label.Text, "—"); ToolTipService.SetToolTip(tile.Element, null); }
     }
 
     private static string Number(int value) => Math.Max(0, value).ToString("N0", CultureInfo.CurrentCulture);
     private static string ExactBytes(long value) => $"{Math.Max(0, value).ToString("N0", CultureInfo.CurrentCulture)} bytes";
     private static string ExactBytes(double value) => $"{Math.Max(0, double.IsFinite(value) ? value : 0).ToString("N0", CultureInfo.CurrentCulture)} bytes";
 
-    private static string FormatBytes(long value) => FormatBytes((double)Math.Max(0, value));
-
-    private static string FormatBytes(double value)
-    {
-        value = Math.Max(0, double.IsFinite(value) ? value : 0);
-        string[] units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
-        var unit = 0;
-        while (value >= 1024 && unit < units.Length - 1)
-        {
-            value /= 1024;
-            unit++;
-        }
-        return unit == 0
-            ? $"{value.ToString("N0", CultureInfo.CurrentCulture)} {units[unit]}"
-            : $"{value.ToString("N2", CultureInfo.CurrentCulture)} {units[unit]}";
-    }
 }

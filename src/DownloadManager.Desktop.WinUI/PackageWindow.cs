@@ -42,15 +42,18 @@ internal sealed class PackageWindow : Window
     private bool _archivesRead;
     private int _archiveRead;
 
-    private readonly Grid _root = new() { Padding = new Thickness(18), RowSpacing = 10 };
-    private readonly TextBlock _title = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-    private readonly TextBlock _summary = new() { Opacity = 0.8 };
+    private readonly Grid _root = new() { Padding = new Thickness(20, 16, 20, 16), RowSpacing = 12 };
+    // UI.R31: Progress Details' header: a folder glyph on a tile, the package's name, how far it is, and a state chip.
+    private readonly ItemHeader _header = new("\uE8B7");
     // UI.R29 direction B: the package's ring and four tiles, then Files and Extraction tabs.
     private readonly ProgressRing _ring = new() { Width = 124, Height = 124, IsIndeterminate = false, Maximum = 100 };
     private readonly TextBlock _ringValue = new() { FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly FontIcon _ringGlyph = new() { Glyph = "\uE73E", FontSize = 32, Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _ringCaption = new() { FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
-    private readonly List<(TextBlock Label, TextBlock Value)> _tiles = [];
+    private readonly List<InfoTile> _tiles = [];
+    // With no Extraction tab, one tab would look odd: the files get a section heading instead.
+    private readonly TextBlock _filesHeading = InboundUi.SectionTitle("Files");
+    private readonly Grid _tabRow = new();
     private readonly SelectorBar _tabs = new() { Margin = new Thickness(-12, 0, -12, 0) };
     private readonly SelectorBarItem _filesTab = new() { Text = "Files", IsSelected = true };
     private readonly SelectorBarItem _extractionTab = new() { Text = "Extraction", Visibility = Visibility.Collapsed };
@@ -62,18 +65,22 @@ internal sealed class PackageWindow : Window
         SelectionMode = ListViewSelectionMode.Single,
         ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection(),
     };
-    private readonly TextBlock _fileHeading = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-    private readonly SegmentMapBar _fileMap = new() { Visibility = Visibility.Collapsed };
-    private readonly ProgressBar _fileMoving = InboundTheme.Styled(new ProgressBar { Maximum = 100, Height = 14, MinHeight = 14, CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed });
+    private readonly TextBlock _fileHeading = InboundUi.SectionTitle(string.Empty);
+    // The thin map of Progress Details' Overview, not the Connections tab's 14px one.
+    private readonly SegmentMapBar _fileMap = new() { Visibility = Visibility.Collapsed, Height = 6, CornerRadius = new CornerRadius(3) };
+    private readonly ProgressBar _fileMoving = InboundTheme.Styled(new ProgressBar { Maximum = 100, Visibility = Visibility.Collapsed });
     private readonly JobDetailsPanel _fileDetails = new() { ShowSavePath = true };
     private Guid? _pickedFile;
     private Guid? _shownFile;
     private bool _selectingFile;
-    private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
-    private readonly Button _pause = new() { Content = "Stop all", MinWidth = 100 };
-    private readonly Button _resume = new() { Content = "Resume all", MinWidth = 100 };
-    private readonly Button _cancel = new() { Content = "Cancel package", MinWidth = 100 };
-    private readonly Button _openFolder = new() { Content = "Open folder", MinWidth = 100, Visibility = Visibility.Collapsed };
+    private readonly TextBlock _notice = InboundUi.Secondary();
+    // UI.R31: labelled buttons with glyphs, as Progress Details has them. Once the package is done, the actions
+    // that can't apply hide, Open folder is the accent button and Delete is the red-trash button.
+    private readonly Button _delete = InboundUi.DeleteButton();
+    private readonly Button _pause = InboundUi.IconButton("\uE769", "Stop all", "InboundIconPauseBrush");
+    private readonly Button _resume = InboundUi.IconButton("\uE768", "Resume all", "InboundIconStartBrush");
+    private readonly Button _cancel = InboundUi.IconButton("\uE711", "Cancel package", "InboundIconDangerBrush");
+    private readonly Button _openFolder = InboundUi.IconButton("\uE838", "Open folder", accent: true);
     private readonly Button _close = new() { Content = "Hide", MinWidth = 92 };
     private readonly StackPanel _archivePanel = new() { Spacing = 6, Visibility = Visibility.Collapsed };
     private readonly PasswordBox _archivePassword = new() { Header = "Archive password", PasswordRevealMode = PasswordRevealMode.Hidden };
@@ -101,16 +108,19 @@ internal sealed class PackageWindow : Window
         // The chosen file's details are the longer of the two, and the list scrolls well in less room.
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
             _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 110 : 0 });
-        var header = new StackPanel { Spacing = 2 };
-        header.Children.Add(_title);
-        header.Children.Add(_summary);
-        _root.Children.Add(header);
+        _openFolder.Visibility = Visibility.Collapsed;
+        _delete.Visibility = Visibility.Collapsed;
+        _delete.Margin = new Thickness(0, 0, 16, 0);
+        ToolTipService.SetToolTip(_delete, "Remove this package's files from the list and delete them");
+        _root.Children.Add(_header.Element);
         Add(BuildOverview(), 1);
         _tabs.Items.Add(_filesTab);
         _tabs.Items.Add(_extractionTab);
         _tabs.SelectionChanged += (_, _) => ShowTab();
-        Add(_tabs, 2);
-        var listFrame = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(4), Child = _list };
+        // The tabs are in the window only while the Extraction tab applies; a collapsed SelectorBar still kept its room.
+        _tabRow.Children.Add(_filesHeading);
+        Add(_tabRow, 2);
+        var listFrame = InboundUi.ListCard(_list);
         _listFrame = listFrame;
         AutomationProperties.SetName(_list, "Files in this package");
         if (Application.Current.Resources.TryGetValue("InboundListRowStyle", out var rowStyle) && rowStyle is Style style) _list.ItemContainerStyle = style;
@@ -127,10 +137,11 @@ internal sealed class PackageWindow : Window
         Add(_archivePanel, 5);
         var footer = new Grid { ColumnSpacing = 8 };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        for (var i = 0; i < 5; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        for (var i = 0; i < 6; i++) footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _notice.VerticalAlignment = VerticalAlignment.Center;
         footer.Children.Add(_notice);
         var column = 1;
-        foreach (var button in new[] { _openFolder, _pause, _resume, _cancel, _close })
+        foreach (var button in new[] { _delete, _openFolder, _pause, _resume, _cancel, _close })
         {
             Grid.SetColumn(button, column++);
             footer.Children.Add(button);
@@ -140,20 +151,9 @@ internal sealed class PackageWindow : Window
         void ApplyColors()
         {
             _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
-            listFrame.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
-            listFrame.Background = InboundTheme.Brush("InboundCardBrush", _root);
             _ring.Background = InboundTheme.Brush("InboundProgressTrackBrush", _root);
             _ringCaption.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
             _ringGlyph.Foreground = InboundTheme.Brush("InboundStatusDoneBrush", _root);
-            foreach (var tile in _tiles)
-            {
-                tile.Label.Foreground = InboundTheme.Brush("InboundSecondaryTextBrush", _root);
-                if (tile.Label.Parent is FrameworkElement { Parent: Border card })
-                {
-                    card.Background = InboundTheme.Brush("InboundCardBrush", _root);
-                    card.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
-                }
-            }
             Render();
         }
         _root.Loaded += (_, _) => ApplyColors();
@@ -163,6 +163,7 @@ internal sealed class PackageWindow : Window
         _resume.Click += async (_, _) => await RunPackageActionAsync("resume");
         _cancel.Click += async (_, _) => await ConfirmCancelAsync();
         _openFolder.Click += (_, _) => OpenFolder();
+        _delete.Click += async (_, _) => await ConfirmDeleteAsync();
         _close.Click += (_, _) => Close();
 
         _archives.ArchiveSets.CollectionChanged += (_, _) => { if (!_closed) RenderArchives(); };
@@ -267,16 +268,11 @@ internal sealed class PackageWindow : Window
         tiles.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         for (var index = 0; index < 4; index++)
         {
-            var name = new TextBlock { FontSize = 12 };
-            var value = new TextBlock { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
-            var stack = new StackPanel();
-            stack.Children.Add(name);
-            stack.Children.Add(value);
-            var card = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(12, 8, 12, 8), Child = stack };
-            Grid.SetRow(card, index / 2);
-            Grid.SetColumn(card, index % 2);
-            tiles.Children.Add(card);
-            _tiles.Add((name, value));
+            var tile = new InfoTile();
+            Grid.SetRow(tile.Element, index / 2);
+            Grid.SetColumn(tile.Element, index % 2);
+            tiles.Children.Add(tile.Element);
+            _tiles.Add(tile);
         }
         Grid.SetColumn(tiles, 1);
         row.Children.Add(tiles);
@@ -286,6 +282,12 @@ internal sealed class PackageWindow : Window
     private void ShowTab()
     {
         var extraction = _tabs.SelectedItem == _extractionTab && _archivesApply;
+        if (_archivesApply != _tabRow.Children.Contains(_tabs))
+        {
+            if (_archivesApply) _tabRow.Children.Insert(0, _tabs);
+            else _tabRow.Children.Remove(_tabs);
+        }
+        _filesHeading.Visibility = _archivesApply ? Visibility.Collapsed : Visibility.Visible;
         if (_listFrame is { } list) list.Visibility = extraction ? Visibility.Collapsed : Visibility.Visible;
         if (_fileDetailsView is { } details) details.Visibility = extraction ? Visibility.Collapsed : Visibility.Visible;
         _archivePanel.Visibility = extraction ? Visibility.Visible : Visibility.Collapsed;
@@ -293,11 +295,7 @@ internal sealed class PackageWindow : Window
         Grid.SetRow(_archivePanel, extraction ? 3 : 5);
     }
 
-    private void SetTile(int index, string label, string value)
-    {
-        _tiles[index].Label.Text = label;
-        _tiles[index].Value.Text = value;
-    }
+    private void SetTile(int index, string label, string value, string unit = "") => _tiles[index].Set(label, value, unit);
 
     /// <summary>The same segment map and figures as a file's own window, for the selected file.</summary>
     private FrameworkElement BuildFileDetails()
@@ -312,7 +310,9 @@ internal sealed class PackageWindow : Window
         panel.Children.Add(_fileHeading);
         panel.Children.Add(bars);
         panel.Children.Add(_fileDetails);
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        // UI.R31: the selected file's facts sit in a card, as Progress Details' Connections tab has them.
+        var scroller = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        return InboundUi.Card(scroller, new Thickness(12, 8, 0, 8));
     }
 
     /// <summary>Someone chose a file. It stays the one shown until it leaves the package.</summary>
@@ -344,12 +344,13 @@ internal sealed class PackageWindow : Window
         {
             _members = [];
             _groupKnown = false;
-            _title.Text = "Package removed";
+            _header.Title.Text = "Package removed";
+            _header.Chip.Set("Removed", "InboundStatusNeutralBrush");
             _notice.Text = "This package no longer exists. Its files are listed individually in the main window.";
         }
         else
         {
-            _title.Text = group.Name;
+            _header.Title.Text = group.Name;
             _groupKnown = true;
             _members = [.. group.JobIds];
         }
@@ -541,9 +542,12 @@ internal sealed class PackageWindow : Window
             row.Name.Text = name;
             AutomationProperties.SetName(row.Item, $"{name}, {StateText(job)}");
             row.Status.Text = StateText(job);
+            // UI.R31: the list's status colors.
+            row.Status.Foreground = InboundTheme.Brush(InboundUi.StateBrush(job.State), _root);
             row.Bar.IsIndeterminate = job.TotalBytes is not > 0 && job.State is "connecting" or "downloading";
             row.Bar.Value = job.State == "completed" ? 100 : Percent(job.ReceivedBytes, job.TotalBytes);
-            row.Size.Text = job.TotalBytes is > 0 ? $"{Bytes(job.ReceivedBytes)} / {Bytes(job.TotalBytes.Value)}" : Bytes(job.ReceivedBytes);
+            row.Size.Text = job.TotalBytes is > 0 ? (job.State == "completed" ? Bytes(job.TotalBytes.Value) : $"{Bytes(job.ReceivedBytes)} / {Bytes(job.TotalBytes.Value)}") : Bytes(job.ReceivedBytes);
+            row.Bar.Visibility = job.State == "completed" ? Visibility.Collapsed : Visibility.Visible;
         }
 
         var shown = ProgressDetailRules.FileToShow(members, _pickedFile);
@@ -558,9 +562,10 @@ internal sealed class PackageWindow : Window
         var speed = members.Sum(job => job.State is "downloading" ? job.BytesPerSecond ?? 0 : 0);
         var allKnown = members.Count > 0 && members.All(job => job.TotalBytes is > 0);
         var states = members.Select(job => (string?)job.State).ToList();
-        _summary.Text = members.Count == 0 ? string.Empty : CompletionBurst.Summary(states);
+        _header.Subline.Text = members.Count == 0 ? string.Empty : CompletionBurst.Summary(states);
         var allDone = members.Count > 0 && completed == members.Count;
         var anyFailed = members.Any(job => job.State == "failed");
+        if (_groupKnown) SetHeaderChip(members, allDone, anyFailed, speed);
         var percent = allDone ? 100 : allKnown ? Percent(received, total) : 0;
         _ring.Value = percent;
         _ring.IsIndeterminate = !allKnown && !allDone && speed > 0;
@@ -571,12 +576,28 @@ internal sealed class PackageWindow : Window
         _ringCaption.Text = members.Count == 0 ? string.Empty : allDone ? "complete" : $"{completed} of {members.Count} files";
         AutomationProperties.SetName(_ring, allDone ? "Package complete" : $"Package {percent:0} percent downloaded");
         var remaining = allKnown && speed > 0 ? TimeSpan.FromSeconds((total - received) / speed) : (TimeSpan?)null;
-        SetTile(0, "Downloaded", allKnown ? $"{Bytes(received)} / {Bytes(total)}" : members.Count == 0 ? "—" : Bytes(received));
-        SetTile(1, "Speed", speed > 0 ? $"{Bytes((long)speed)}/s" : "—");
+        if (allKnown)
+        {
+            var (number, unit) = UiFormat.Of(received, total);
+            SetTile(0, "Downloaded", number, unit);
+        }
+        else if (members.Count == 0) SetTile(0, "Downloaded", "—");
+        else
+        {
+            var (number, unit) = UiFormat.Split(received);
+            SetTile(0, "Downloaded", number, unit);
+        }
+        if (speed > 0)
+        {
+            var (number, unit) = UiFormat.Split((long)speed);
+            SetTile(1, "Speed", number, unit + "/s");
+        }
+        else SetTile(1, "Speed", "—");
         // U-WL-15: the list's own words for time left.
         SetTile(2, "Time left", remaining is { } left && DurationText.TimeLeft(left) is { Length: > 0 } words ? words : "—");
-        SetTile(3, "Files", members.Count == 0 ? "—" : $"{completed} of {members.Count} done");
-        _filesTab.Text = members.Count > 0 ? $"Files ({members.Count})" : "Files";
+        if (members.Count == 0) SetTile(3, "Files", "—");
+        else SetTile(3, "Files", $"{completed}", $"of {members.Count} done");
+        _filesTab.Text = _filesHeading.Text = members.Count > 0 ? $"Files ({members.Count})" : "Files";
 
         // Every file has finished one way or another (some may have failed): the window is done, says how, and the
         // files that were saved can be shown in their folder (U-WR-16).
@@ -586,6 +607,11 @@ internal sealed class PackageWindow : Window
         _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
         _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
         _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
+        // UI.R31: once every file has settled, what can't apply hides rather than greys out.
+        _pause.Visibility = !settled || _pause.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        _resume.Visibility = !settled || _resume.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        _cancel.Visibility = !settled || _cancel.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        _delete.Visibility = settled && members.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _close.Content = settled ? "Close" : "Hide";
         var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package status"} — Inbound Download Manager", _connection.Target);
         if (Title != title) Title = title;
@@ -600,8 +626,9 @@ internal sealed class PackageWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var name = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis };
-        var status = new TextBlock { Opacity = 0.8 };
-        var size = new TextBlock { Opacity = 0.8, HorizontalAlignment = HorizontalAlignment.Right };
+        var status = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        var size = new TextBlock { FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        InboundUi.Follow(size, "InboundSecondaryTextBrush", brush => size.Foreground = brush);
         var bar = InboundTheme.Styled(new ProgressBar { Minimum = 0, Maximum = 100, Margin = new Thickness(0, 4, 0, 0) });
         Grid.SetColumn(status, 1);
         Grid.SetColumn(size, 2);
@@ -652,6 +679,55 @@ internal sealed class PackageWindow : Window
         if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
     }
 
+    /// <summary>The header's chip: the package's state in its status color.</summary>
+    private void SetHeaderChip(List<JobDto> members, bool allDone, bool anyFailed, double speed)
+    {
+        if (members.Count == 0) { _header.Chip.Set(string.Empty, "InboundStatusNeutralBrush"); return; }
+        var settled = CompletionBurst.Settled(members.Select(job => (string?)job.State).ToList());
+        if (allDone) _header.Chip.Set("Completed", "InboundStatusDoneBrush");
+        else if (anyFailed && settled) _header.Chip.Set("Failed", "InboundStatusFailedBrush");
+        else if (settled) _header.Chip.Set("Stopped", "InboundStatusNeutralBrush");
+        else if (speed > 0 || members.Any(job => job.State is "downloading" or "connecting")) _header.Chip.Set("Downloading", "InboundStatusActiveBrush");
+        else _header.Chip.Set(members.Any(job => job.State == "queued") ? "Queued" : "Paused", "InboundStatusWaitingBrush");
+    }
+
+    /// <summary>Delete, as Progress Details has it: the package's files leave the list, and their files go too unless unticked.</summary>
+    private async Task ConfirmDeleteAsync()
+    {
+        var ids = _members.Where(_jobs.ContainsKey).ToList();
+        if (ids.Count == 0) return;
+        var deleteFiles = new CheckBox { Content = "Also delete the downloaded files", IsChecked = true };
+        var body = new StackPanel { Spacing = 10 };
+        body.Children.Add(new TextBlock
+        {
+            Text = $"Remove the {ids.Count} file(s) of this package from the list?",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(deleteFiles);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = _root.XamlRoot,
+            RequestedTheme = _root.ActualTheme,
+            Title = "Delete package?",
+            Content = body,
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary || _closed) return;
+        try
+        {
+            var reply = await _connection.RemoveManyAsync(ids, deleteFiles.IsChecked == true);
+            if (reply.Type == MessageTypes.JobActionResult && reply.GetPayload<JobActionResponse>() is { Ok: false } result)
+            {
+                _notice.Text = result.Error ?? "The Host could not delete this package.";
+                return;
+            }
+            Close();
+        }
+        catch (Exception ex) { if (!_closed) _notice.Text = ex.Message; }
+    }
+
     private static string? FolderOf(JobDto job)
         => !string.IsNullOrWhiteSpace(job.FinalFilePath) ? Path.GetDirectoryName(job.FinalFilePath) : job.DestinationDirectory;
 
@@ -690,7 +766,5 @@ internal sealed class PackageWindow : Window
     private static double Percent(long received, long? total)
         => total is > 0 ? Math.Clamp(received * 100.0 / total.Value, 0, 100) : 0;
 
-    private static string Bytes(long bytes) => bytes >= 1024L * 1024 * 1024
-        ? $"{bytes / (1024.0 * 1024 * 1024):N2} GB" : bytes >= 1024L * 1024
-        ? $"{bytes / (1024.0 * 1024):N1} MB" : bytes >= 1024 ? $"{bytes / 1024.0:N0} KB" : $"{bytes:N0} B";
+    private static string Bytes(long bytes) => UiFormat.Bytes(bytes);
 }
