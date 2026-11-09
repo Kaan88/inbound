@@ -26,6 +26,8 @@ public sealed partial class DownloadWindow : Window
     private bool _completedLayout;
     private bool _refreshingCompletion;
     private long? _displayedSpeedLimit;
+    // UI.B20: the graph takes one sample a second on this window's clock, as the main window's does, not one per update.
+    private readonly DispatcherTimer _chartTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     /// <param name="target">The Host the download is on: this PC, or a saved server (<c>--server</c>).</param>
     public DownloadWindow(Guid jobId, bool manual = false, ServerTarget? target = null)
@@ -95,9 +97,11 @@ public sealed partial class DownloadWindow : Window
         VisibilityChanged += (_, _) => UpdateChartSeen();
         Activated += (_, _) => UpdateChartSeen();
         AppWindow.Changed += (_, change) => { if (change.DidPresenterChange || change.DidVisibilityChange) UpdateChartSeen(); };
+        _chartTimer.Tick += (_, _) => SampleChart();
         Closed += async (_, _) =>
         {
             _closed = true;
+            _chartTimer.Stop();
             Details.Stop();
             await _connection.DisposeAsync();
         };
@@ -121,6 +125,17 @@ public sealed partial class DownloadWindow : Window
         ConnectionsPage.Visibility = selected == ConnectionsTab && !_completedLayout ? Visibility.Visible : Visibility.Collapsed;
         OptionsPage.Visibility = selected == OptionsTab && !_completedLayout ? Visibility.Visible : Visibility.Collapsed;
         UpdateChartSeen();
+    }
+
+    /// <summary>
+    /// UI.B20: the same rule as the main window's graph. The last update's rate is held until the next one (or until
+    /// it is 10 seconds old), so irregular updates draw one steady line instead of separate strokes.
+    /// </summary>
+    private void SampleChart()
+    {
+        if (_closed || _job is not { } job) return;
+        var now = DateTimeOffset.UtcNow;
+        Chart.AddSample(now, SpeedSample.Total(_connected, [SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now)]));
     }
 
     private void UpdateChartSeen() => Chart.IsSeen = !_closed && AppWindow.IsVisible && OverviewPage.Visibility == Visibility.Visible
@@ -338,8 +353,13 @@ public sealed partial class DownloadWindow : Window
         if (!complete && !failed)
         {
             UpdateChartSeen();
-            Chart.AddSample(DateTimeOffset.UtcNow, rate);
+            if (!_chartTimer.IsEnabled)
+            {
+                SampleChart();
+                _chartTimer.Start();
+            }
         }
+        else _chartTimer.Stop();
         CompletedActions.Visibility = complete && !job.FileRemovedAfterExtraction && RemoteDataRules.MayUseFiles(_connection.IsRemote)
             ? Visibility.Visible : Visibility.Collapsed;
 

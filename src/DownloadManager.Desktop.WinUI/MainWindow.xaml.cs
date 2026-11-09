@@ -72,13 +72,11 @@ public sealed partial class MainWindow : Window
         _speedHistoryTimer.Tick += (_, _) =>
         {
             var now = DateTimeOffset.UtcNow;
-            var active = _jobsById.Values.Where(job => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting").ToArray();
             // A gap means "no data" (Host disconnected). A download that has gone quiet (stalled,
             // connecting, waiting to retry) is transferring nothing, so it counts as 0, not unknown.
-            double? rate = !_graphConnected || !_graphSnapshotReady
-                ? null
-                : active.Where(job => now - job.LastUpdated <= TimeSpan.FromSeconds(10))
-                    .Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
+            // UI.B20: Progress Details samples its one download by the same rule.
+            var rate = SpeedSample.Total(_graphConnected && _graphSnapshotReady,
+                _jobsById.Values.Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.LastUpdated, now)));
             SpeedGraph.IsSeen = AppWindow.IsVisible
                 && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized }
                 && SpeedGraph.Visibility == Visibility.Visible;
