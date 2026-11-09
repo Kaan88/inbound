@@ -187,7 +187,9 @@ internal static class RemoteRules
     /// that row, plus copying the name. The provider's items carry no link, so the name is all there is to copy.
     /// Delete needs a job that knows the item, as the window's button does. A null action is a separator.
     /// </summary>
-    public static IReadOnlyList<RemoteItemMenuEntry> ItemMenu(bool canDownload, RemoteJobDto? job, string provider, bool acting, bool loading)
+    /// <param name="onList">UI.R32: the item's downloads are on the list, so the menu leads there.</param>
+    /// <param name="ownWindow">UI.R32: the panel is in the main window and can move to a window of its own.</param>
+    public static IReadOnlyList<RemoteItemMenuEntry> ItemMenu(bool canDownload, RemoteJobDto? job, string provider, bool acting, bool loading, bool onList = false, bool ownWindow = false)
     {
         var active = job is not null && job.State != "failed";
         var entries = new List<RemoteItemMenuEntry>
@@ -196,9 +198,11 @@ internal static class RemoteRules
             new("downloadAll", active ? "Download all its files" : "Download all", acting || !canDownload),
             new(null, string.Empty, false),
         };
+        if (onList) entries.Add(new("showInList", "Show in download list", false));
         if (job is not null && Actions(job).CheckNow) entries.Add(new("checkNow", "Check now", acting));
         entries.Add(new("copyName", "Copy name", false));
         entries.Add(new("refresh", "Refresh list", loading));
+        if (ownWindow) entries.Add(new("ownWindow", "Open in its own window", false));
         if (CanDeleteFromProvider(job))
         {
             entries.Add(new(null, string.Empty, false));
@@ -225,19 +229,7 @@ internal static partial class RemoteText
     /// <summary>Binary multiples with the same labels as the download list. An unknown size stays blank.</summary>
     public static string Bytes(long bytes)
     {
-        if (bytes <= 0) return string.Empty;
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double value = bytes;
-        var index = 0;
-        while (value >= 1024 && index < units.Length - 1)
-        {
-            value /= 1024;
-            index++;
-        }
-
-        return index == 0
-            ? $"{bytes} {units[index]}"
-            : string.Create(CultureInfo.CurrentCulture, $"{value:0.0} {units[index]}");
+        return bytes <= 0 ? string.Empty : UiFormat.Bytes(bytes);
     }
 
     public static string KindSingular(string? kind) => kind switch

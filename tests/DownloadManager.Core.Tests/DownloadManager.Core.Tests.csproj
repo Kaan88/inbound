@@ -38,6 +38,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="WinUI\RemoteText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="WinUI\ArchiveForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteRows.cs" Link="WinUI\RemoteRows.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProviderViews.cs" Link="WinUI\ProviderViews.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveRows.cs" Link="WinUI\ArchiveRows.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />
@@ -50,7 +51,9 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SelectionCommands.cs" Link="WinUI\SelectionCommands.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ListColumns.cs" Link="WinUI\ListColumns.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\DurationText.cs" Link="WinUI\DurationText.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedSample.cs" Link="WinUI\SpeedSample.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProgressOverviewText.cs" Link="WinUI\ProgressOverviewText.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\UiFormat.cs" Link="WinUI\UiFormat.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\RegionSelection.cs" Link="WinUI\RegionSelection.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\SpeedLimitText.cs" Link="WinUI\SpeedLimitText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\PackageArchiveSection.cs" Link="WinUI\PackageArchiveSection.cs" />

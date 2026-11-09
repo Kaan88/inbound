@@ -212,6 +212,17 @@
                             <TextBlock Text="Scheduler" Style="{StaticResource InboundToolLabelStyle}" />
                         </StackPanel>
                     </Button>
+                    <!-- UI.R32: My provider as a drawer over the list's right side (Ctrl+T). Only while an account can be browsed. -->
+                    <StackPanel x:Name="ProviderToolGroup" Orientation="Horizontal" Visibility="Collapsed">
+                    <Border Style="{StaticResource InboundToolSeparatorStyle}" />
+                    <Button x:Name="ProviderDrawerButton" Style="{StaticResource InboundToolButtonStyle}" Click="ProviderDrawerButton_Click"
+                            AutomationProperties.AcceleratorKey="Ctrl+T">
+                        <StackPanel>
+                            <FontIcon Glyph="&#xE753;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
+                            <TextBlock x:Name="ProviderDrawerLabel" Text="My provider" Style="{StaticResource InboundToolLabelStyle}" />
+                        </StackPanel>
+                    </Button>
+                    </StackPanel>
                     <Border Style="{StaticResource InboundToolSeparatorStyle}" />
                     <Button x:Name="StartQueueButton" AutomationProperties.Name="Start Queue" Style="{StaticResource InboundToolButtonStyle}"
                             Click="StartQueueButton_Click"
@@ -429,7 +440,38 @@
                 </Grid>
             </Border>
 
-            <ScrollViewer x:Name="DownloadListViewport" Grid.Column="1"
+            <!-- UI.R32: My provider's drawer (C) is this split view's right pane: over the list, or docked beside it when
+                 pinned and there is room. Its full view (A) covers the list's place in the content. -->
+            <SplitView x:Name="ProviderSplit" Grid.Column="1" PanePlacement="Right" DisplayMode="Overlay" IsPaneOpen="False"
+                       OpenPaneLength="420" LightDismissOverlayMode="Off" PaneBackground="{ThemeResource InboundDrawerBrush}"
+                       PaneClosing="ProviderSplit_PaneClosing" PaneClosed="ProviderSplit_PaneClosed" SizeChanged="ProviderSplit_SizeChanged">
+                <SplitView.Pane>
+                    <Grid x:Name="ProviderDrawerFrame" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="1,0,0,0">
+                        <Grid x:Name="ProviderDrawerHost" />
+                        <local:ProviderDrawerGrip x:Name="ProviderDrawerGrip" Width="6" HorizontalAlignment="Left" Background="Transparent"
+                                                  AutomationProperties.Name="Drawer width"
+                                                  PointerPressed="ProviderDrawerGrip_PointerPressed" PointerMoved="ProviderDrawerGrip_PointerMoved"
+                                                  PointerReleased="ProviderDrawerGrip_PointerReleased" PointerCaptureLost="ProviderDrawerGrip_PointerReleased"
+                                                  DoubleTapped="ProviderDrawerGrip_DoubleTapped" />
+                    </Grid>
+                </SplitView.Pane>
+            <Grid x:Name="ListArea">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <!-- UI.R32, B's notice: what a Download from My provider added, with the way to it and back. -->
+                <InfoBar x:Name="ProviderNoticeBar" Severity="Success" IsOpen="False" IsClosable="True" Margin="8,6,8,6"
+                         AutomationProperties.Name="Added from My provider" AutomationProperties.LiveSetting="Polite">
+                    <InfoBar.Content>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+                            <Button x:Name="ProviderNoticeShow" Content="Show" FontSize="12" Padding="10,2" Click="ProviderNoticeShow_Click"
+                                    ToolTipService.ToolTip="Select these downloads in the list" />
+                            <Button x:Name="ProviderNoticeBack" Content="Back to My provider" FontSize="12" Padding="10,2" Click="ProviderNoticeBack_Click" />
+                        </StackPanel>
+                    </InfoBar.Content>
+                </InfoBar>
+            <ScrollViewer x:Name="DownloadListViewport" Grid.Row="1"
                           HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
             <Grid x:Name="DownloadListGrid" Background="{ThemeResource InboundSurfaceBrush}" RowSpacing="0"
@@ -547,17 +589,23 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
-                    <TextBlock x:Name="EmptyText"
-                               Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                                TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    <!-- UI.R31: an empty view shows an outline glyph above its words; the glyph follows the words' visibility. -->
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" IsHitTestVisible="False">
+                        <FontIcon Glyph="&#xE896;" FontSize="32" HorizontalAlignment="Center"
+                                  Foreground="{ThemeResource InboundSecondaryTextBrush}"
+                                  Visibility="{Binding Visibility, ElementName=EmptyText}" />
+                        <TextBlock x:Name="EmptyText"
+                                   Text="No downloads in this view.&#x0a;Use Add URL or the browser extension to start one."
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center" Foreground="{ThemeResource InboundSecondaryTextBrush}" FontSize="12" />
+                    </StackPanel>
                     <Canvas x:Name="JobsRegionLayer" IsHitTestVisible="False" />
                 </Grid>
             </Grid>
             </ScrollViewer>
             <!-- Always-visible scrollbar, outside the horizontal scroller so it stays at the right edge; kept in sync with the list's own ScrollViewer
                  (WinUI's built-in one collapses to a thin auto-hiding line). -->
-            <Grid x:Name="JobsScrollTrack" Grid.Column="1" Width="12" HorizontalAlignment="Right" Margin="0,27,0,0" Visibility="Collapsed"
+            <Grid x:Name="JobsScrollTrack" Grid.Row="1" Width="12" HorizontalAlignment="Right" Margin="0,27,0,0" Visibility="Collapsed"
                   Background="{ThemeResource InboundChromeBrush}"
                   PointerPressed="JobsScrollTrack_PointerPressed"
                   PointerMoved="JobsScrollTrack_PointerMoved"
@@ -570,6 +618,10 @@
                         CornerRadius="3" Opacity="0.45"
                         Background="{ThemeResource InboundSecondaryTextBrush}" />
             </Grid>
+                <!-- UI.R32, A: the sidebar's My provider entry shows the panel here, in place of the list. -->
+                <Grid x:Name="ProviderFullHost" Grid.RowSpan="2" Visibility="Collapsed" />
+            </Grid>
+            </SplitView>
         </Grid>
 
         <local:DownloadSpeedGraph x:Name="SpeedGraph" Grid.Row="4" />

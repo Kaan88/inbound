@@ -23,6 +23,15 @@ internal sealed class UiState
     /// <summary>Null keeps the order the provider answers in.</summary>
     public string? ProviderSortKey { get; set; }
     public bool ProviderSortAscending { get; set; }
+
+    /// <summary>UI.R32: My provider's drawer docks beside the list instead of covering it.</summary>
+    public bool ProviderDrawerPinned { get; set; }
+
+    /// <summary>UI.R32: the drawer's width as last dragged; null for the default.</summary>
+    public double? ProviderDrawerWidth { get; set; }
+
+    /// <summary>UI.R32: "full" (the default) or "drawer", the view My provider opens in first (Options > General).</summary>
+    public string? ProviderOpensAs { get; set; }
     public bool ToolbarLarge { get; set; } = true;
     public bool HideCategories { get; set; }
     public bool ShowSpeedGraph { get; set; } = true;

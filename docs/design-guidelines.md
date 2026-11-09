@@ -10,7 +10,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
 
 | Token | Use | Dark | Light |
 |---|---|---|---|
-| `InboundWindowBrush` | every window's root: transparent, so the Mica backdrop shows; solid where Mica isn't available | Transparent (fallback `#202020`) | Transparent (fallback `#F3F3F3`) |
+| `InboundWindowBrush` | every window's root: lets the Mica backdrop show; solid where Mica isn't available. Light lays an 85% neutral veil over Mica, which otherwise takes a strong wallpaper tint (UI.B21) | Transparent (fallback `#202020`) | `#D9F3F3F3` (fallback `#F3F3F3`) |
 | `InboundChromeBrush` | menu bar, toolbar, sidebar, list header, status bar: a faint layer over Mica | `#08FFFFFF` | `#80FFFFFF` |
 | `InboundSurfaceBrush` | the download list and other lists, opaque for reading; popups drawn over a plot | `#181818` | `#FFFFFF` |
 | `InboundCardBrush` / `InboundCardStrokeBrush` | cards, tiles and framed lists on the frosted window, with a 1px edge, radius 8 | `#0DFFFFFF` / `#14FFFFFF` | `#B3FFFFFF` / `#13000000` |
@@ -36,7 +36,7 @@ All colors come from the theme dictionaries in `App.xaml`. Never hard-code
   the theme from `ui-state.json`; a test checks that only `AppTheme` does.
 - Every window calls `WindowLayout.ApplyChrome(window, root)` after setting
   `Content`. It sets the app icon, a Mica backdrop (`MicaBackdrop`, Windows 11) behind a transparent root
-  (`InboundWindowBrush`; a root with no background gets it), and a title bar in the solid color under Mica
+  (`InboundWindowBrush`, transparent in dark and a mostly opaque neutral veil in light; a root with no background gets it), and a title bar in the solid color under Mica
   (`#202020` / `#F3F3F3`), so the caption meets the frosted body. Where Mica isn't supported (Windows 10),
   `App` makes `InboundWindowBrush` that same solid color before any window opens, so nothing is see-through.
 - The look is frosted: the window is Mica, chrome is a faint translucent layer, and cards and tiles are
@@ -149,6 +149,10 @@ default window width. With one remote or archive row selected, the status bar sa
   Use "—" for missing live values in summaries.
 - Units: binary multiples labelled `KB`/`MB`/`GB` (1024-based), the same in the
   list, the dialogs and the speed graph. Don't mix in `KiB`/`MiB`.
+- One way to write each figure (UI.R31): sizes go through `UiFormat.Bytes` (one decimal, "2.9 MB"; a tile uses
+  `UiFormat.Split` to put the unit in a smaller grey run), moments through `UiFormat.Moment` (the list's
+  "Nov 09 19:19:28 2026"), and durations in the list's words ("1m 11s", "under 1s"). An exact byte count may go
+  in a tooltip, never in place of the size.
 - The speed graph is secondary and must never take more space than the list: a
   23px bar styled like the status bar, holding the figures and the period, with
   an 85px plot that opens upward from it, so the bar stays where it was clicked.
@@ -193,6 +197,37 @@ default window width. With one remote or archive row selected, the status bar sa
   the parent is off.
 - Windows that can be empty show an empty-state explanation, and every
   secondary window has a Close or OK/Cancel button at the bottom right.
+- Progress Details is the reference for every window (UI.R31). Windows built in code use `InboundUi` and the
+  `App.xaml` styles rather than their own sizes and opacities:
+  - Titles: `InboundPageTitleStyle` (20 SemiBold) for a page or window title, `InboundSectionTitleStyle`
+    (14 SemiBold) for a section. A window about one item (a package, a provider item) uses `ItemHeader`: a glyph on
+    a 40px tile, the name at 15 SemiBold, a grey 12px subline and a `StatusChip`.
+  - Cards and tiles: `InboundUi.Card` (`InboundCardStyle`) and `InfoTile` (`InboundTileStyle`: a 12px grey label
+    over an 18 SemiBold value with its unit in a smaller grey run). A list on a frosted window sits in
+    `InboundUi.ListCard` (`InboundListCardStyle`: the opaque surface inside a radius-8 card edge), never as a
+    square grid on the window.
+  - A word that names a state is a `StatusChip` (radius 10, 1px edge and text in the `InboundStatus*Brush`
+    color) or, in a list row, status text in that color. A word that names a kind (Ordinary link, Magnet) is a
+    neutral chip in the secondary color.
+  - Empty states: `InboundUi.EmptyState`, a 32px outline glyph over a line of secondary text, centred where the
+    content would be, with the action that fills it as the accent button when there is one.
+  - Secondary text: `InboundSecondaryTextStyle` (12px, `InboundSecondaryTextBrush`), not `Opacity`.
+  - Buttons: labelled, with an outline glyph where Progress Details has one (`InboundUi.IconButton`); the primary
+    action is the accent button; Delete is `InboundUi.DeleteButton`, a red trash glyph with its label. Once a
+    window's work is done, actions that can't apply hide rather than grey out.
+  - Account or check results are an `InfoBar` (Success, Error or Informational), not a plain sentence.
+- My provider (UI.R32) is one `ProviderPanel` in two layouts. In the main window the sidebar's My provider entry shows
+  its full layout in the list's place (A: catalog columns, a 360px details pane with the file tree, the folder and the
+  Download buttons); the toolbar button and Ctrl+T show it as a drawer, the right pane of a `SplitView` (C: two-line
+  cards, the chosen one holding its files). Which opens first is Options > Window > "Open My provider as" (full view by
+  default); each layout has the button to the other, and the switch keeps the tab, the chosen item, the scroll and the
+  folder. The drawer covers the list unless pinned, and a pinned drawer still covers it when the list would get
+  narrower than 520px. It is the one place with in-app Acrylic (`InboundDrawerBrush`), because it lies over the opaque
+  list where Mica can't show. "Open in its own window" puts the same panel in a window for a second screen. Nothing in
+  the panel reads or ticks while no view of it shows. After a Download the list shows an `InfoBar` (Added N files from
+  the item, Show, Back to My provider).
+- Selection in a list of places (the sidebar, the Scheduler's queues) is a rounded fill set in from the edges
+  (`InboundCategoryItemStyle`: radius 4, margin 4,1), matching the Options page list.
 - Secondary text uses `TextFillColorSecondaryBrush` in XAML or
   `InboundSecondaryTextBrush` in code. Error text uses `InboundErrorTextBrush`.
 

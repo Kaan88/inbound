@@ -228,7 +228,7 @@ public sealed class WindowLocalFindingsTests
     [Fact]
     public void U_WL_11_the_row_menu_selects_its_row_and_download_says_the_window_closes()
     {
-        var source = File.ReadAllText(WinUiFile("MyProviderWindow.cs"));
+        var source = File.ReadAllText(WinUiFile("ProviderPanel.cs"));
         Assert.Contains("_list.ContextRequested += List_ContextRequested;", source);
         Assert.Contains("_list.SelectedItem = row;", source);
         Assert.Contains("then closes this window", source);
@@ -253,7 +253,7 @@ public sealed class WindowLocalFindingsTests
         var progress = File.ReadAllText(WinUiFile("DownloadWindow.xaml"));
         Assert.Contains("AutomationProperties.Name=\"Stop\"", progress);
         Assert.Contains("<TextBlock Text=\"Stop\" />", progress);
-        Assert.Contains("Content = \"Stop all\"", File.ReadAllText(WinUiFile("PackageWindow.cs")));
+        Assert.Contains("\"Stop all\", \"InboundIconPauseBrush\"", File.ReadAllText(WinUiFile("PackageWindow.cs")));
         Assert.Contains("DurationText.TimeLeft(duration)", File.ReadAllText(WinUiFile("JobDetailsPanel.xaml.cs")));
         Assert.DoesNotContain("Automatic (from file type)", File.ReadAllText(WinUiFile("MainWindow.xaml.cs")));
     }

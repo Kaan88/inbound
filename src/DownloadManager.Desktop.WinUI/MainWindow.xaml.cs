@@ -72,13 +72,11 @@ public sealed partial class MainWindow : Window
         _speedHistoryTimer.Tick += (_, _) =>
         {
             var now = DateTimeOffset.UtcNow;
-            var active = _jobsById.Values.Where(job => job.State is "connecting" or "downloading" or "verifying" or "retryWaiting").ToArray();
             // A gap means "no data" (Host disconnected). A download that has gone quiet (stalled,
             // connecting, waiting to retry) is transferring nothing, so it counts as 0, not unknown.
-            double? rate = !_graphConnected || !_graphSnapshotReady
-                ? null
-                : active.Where(job => now - job.LastUpdated <= TimeSpan.FromSeconds(10))
-                    .Sum(job => double.IsFinite(job.BytesPerSecond) ? Math.Max(0, job.BytesPerSecond) : 0);
+            // UI.B20: Progress Details samples its one download by the same rule.
+            var rate = SpeedSample.Total(_graphConnected && _graphSnapshotReady,
+                _jobsById.Values.Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.LastUpdated, now)));
             SpeedGraph.IsSeen = AppWindow.IsVisible
                 && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized }
                 && SpeedGraph.Visibility == Visibility.Visible;
@@ -166,6 +164,8 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.O,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             OpenServerMenuFromKeyboard));
+        InitializeProviderViews();
+        foreach (var accelerator in ProviderAccelerators()) RootGrid.KeyboardAccelerators.Add(accelerator);
         for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
         {
             var chosen = number;
@@ -921,11 +921,12 @@ public sealed partial class MainWindow : Window
 
             if (tag.StartsWith(RemoteBrowseTag, StringComparison.Ordinal))
             {
+                // UI.R32, A: My provider takes the list's place; the category shown before stays the one to go back to.
                 OpenProviderWindow(tag[RemoteBrowseTag.Length..]);
-                RestoreCategorySelection();
                 return;
             }
 
+            LeaveProviderFull(selectCategory: false);
             _category = tag;
             RebuildVisible();
         }
@@ -1058,6 +1059,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
         _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuDelete, separatorAfterRemove, progressDetails, _menuProperties]);
         AddRemoteContextItems(flyout);
+        AddShowInProviderItem(flyout);
         JobsList.ContextFlyout = flyout;
     }
 
@@ -1129,6 +1131,7 @@ public sealed partial class MainWindow : Window
 
         HideLocalContextItemsIfRemoteOnly();
         ShowArchiveContextItems();
+        ShowProviderContextItem();
 
         if (_priorityMenu is not null)
         {
@@ -2238,6 +2241,29 @@ public sealed partial class MainWindow : Window
             ? "No leftover partial files were found at the last scan. The host rescans before cleaning."
             : $"{known.Count} partial file(s) are not attached to any download:\n" +
               string.Join("\n", known.Take(8)) + (known.Count > 8 ? "\n..." : string.Empty);
+        // UI.R31: nothing found at the last scan offers nothing to do: a success bar and Close.
+        if (known.Count == 0)
+        {
+            var clean = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                RequestedTheme = RootGrid.ActualTheme,
+                Title = "Clean up leftover partial files",
+                Content = new InfoBar
+                {
+                    Severity = InfoBarSeverity.Success,
+                    IsOpen = true,
+                    IsClosable = false,
+                    Title = "Nothing to clean up",
+                    Message = "No leftover partial files were found at the last scan. Partial files of existing downloads are never touched.",
+                },
+                CloseButtonText = "Close",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            await DialogGuard.ShowAsync(clean);
+            return;
+        }
+
         var dialog = new ContentDialog
         {
             XamlRoot = Content.XamlRoot,
@@ -3044,7 +3070,9 @@ public sealed partial class MainWindow : Window
                     if (addDialog is not null) addDialog.IsPrimaryButtonEnabled = addDialog.IsSecondaryButtonEnabled = true;
                 }
                 if (!metadata.Ok) throw new InvalidOperationException(metadata.Error ?? "File information is unavailable.");
-                var size = metadata.TotalBytes is { } bytes ? $"{bytes:N0} bytes" : "Size unknown";
+                // UI.R31: the list's size format; the exact count is in the tooltip.
+                var size = metadata.TotalBytes is { } bytes ? UiFormat.Bytes(bytes) : "Size unknown";
+                ToolTipService.SetToolTip(metadataText, metadata.TotalBytes is { } exact ? $"{exact:N0} bytes" : null);
                 knownSize = metadata.TotalBytes;
                 refreshSpace();
                 var serverName = RemoteText.ServerNameToShow(metadata.FileName, url, addressResult);
@@ -4012,6 +4040,7 @@ public sealed partial class MainWindow : Window
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
             var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
+            var providerOpens = ProviderOpensBox();
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
             // UI.R23: the source of every window's theme. View > Dark Mode sets it too, so the box follows that.
             string[] themeValues = [ThemeChoices.System, ThemeChoices.Light, ThemeChoices.Dark];
@@ -4032,7 +4061,8 @@ public sealed partial class MainWindow : Window
             {
                 Header = "Run this program after each download (optional)",
                 Text = settings.PostDownloadCommand ?? string.Empty,
-                PlaceholderText = @"C:\Program Files\Scanner\scan.exe",
+                // UI.R31: a hint that can't be taken for a real value.
+                PlaceholderText = "Path to a program",
             };
             // The update feed, key and channel are not on any page, and Options leaves them as they are: hidden boxes
             // once wrote them back, and the key's box kept only its first line (UP.B1). The CLI still sets them.
@@ -4110,6 +4140,9 @@ public sealed partial class MainWindow : Window
 
             var loginRows = new List<(SiteLoginDto Original, TextBox Site, TextBox User, PasswordBox Password)>();
             var loginPanel = new StackPanel { Spacing = 10 };
+            // UI.R31: the page says when there is nothing on it yet.
+            var loginEmpty = SettingsWindow.Hint("No site logins yet.");
+            void ShowLoginEmpty() => loginEmpty.Visibility = loginRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             void AddLoginRow(SiteLoginDto original)
             {
                 var site = new TextBox { Header = "Site or URL prefix", Text = original.Site,
@@ -4128,20 +4161,21 @@ public sealed partial class MainWindow : Window
                 row.Children.Add(site);
                 row.Children.Add(credentials);
                 row.Children.Add(remove);
-                var border = new Border { Child = row, Padding = new Thickness(12), BorderThickness = new Thickness(1),
-                    BorderBrush = InboundTheme.Brush("InboundDividerBrush", RootGrid),
-                    CornerRadius = new CornerRadius(4) };
+                var border = InboundUi.Card(row, new Thickness(12));
                 var entry = (original, site, user, password);
                 loginRows.Add(entry);
                 loginPanel.Children.Add(border);
+                ShowLoginEmpty();
                 remove.Click += (_, _) =>
                 {
                     password.Password = string.Empty;
                     loginRows.Remove(entry);
                     loginPanel.Children.Remove(border);
+                    ShowLoginEmpty();
                 };
             }
             foreach (var login in settings.SiteLogins) AddLoginRow(login);
+            ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
             addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
             var loginHelp = SettingsWindow.Hint("Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
@@ -4242,7 +4276,7 @@ public sealed partial class MainWindow : Window
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
-                SettingsWindow.Section("Window"), themeBox, closeCompletely,
+                SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
                 SettingsWindow.Section("Capturing downloads"), integration, clipboard);
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
                 SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.") };
@@ -4273,10 +4307,10 @@ public sealed partial class MainWindow : Window
                 SettingsWindow.Hint("Leave the speed limit empty for unlimited."),
                 SettingsWindow.Section("Per-site limits"), profilesBox);
             window.AddPage("Proxy", "\uE968", proxyMode, manualProxy);
-            window.AddPage("Site logins", "\uE8D7", loginHelp, loginPanel, addLogin);
+            window.AddPage("Site logins", "\uE8D7", loginHelp, loginEmpty, loginPanel, addLogin);
             // The update source (channel, manifest URL, signing key) is set by the installer and is
             // not user-editable; the hidden boxes only carry the saved values through Save.
-            window.AddPage("Updates", "\uE895", autoUpdate, updateInterval);
+            window.AddPage("Updates", "\uE895", SettingsWindow.Section("Updates"), autoUpdate, updateInterval);
             var soundEditor = new SoundOptionsEditor(settings.EventSoundFiles, window);
             window.AddPage("Sounds", "\uE767", soundEditor.Content);
 
@@ -4302,7 +4336,8 @@ public sealed partial class MainWindow : Window
             }
 
             var webUi = new WebUiOptionsPage(_remote) { PageIndex = nextPage + (extraction is null ? 0 : 1) };
-            window.AddPage("Web UI", "\uE12B", webUi.Controls);
+            // UI.R31: a screen, not Connection's globe.
+            window.AddPage("Web UI", "\uE7F4", webUi.Controls);
 
             window.Closed += (_, _) =>
             {
@@ -4394,6 +4429,7 @@ public sealed partial class MainWindow : Window
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;
                 settings.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                SaveProviderOpens(providerOpens);
                 settings.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
                 settings.UseCategoryFolders = useCategoryFolders.IsChecked == true;
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;
