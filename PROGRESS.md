@@ -1,5 +1,10 @@
 ﻿# Progress — session handoff
 
+### D7 stage 1, step 3: tray icon on Linux (2026-11-09, `linux-host`)
+- `StatusNotifierTray`: a StatusNotifierItem with a `com.canonical.dbusmenu` menu (Open Inbound, Options, Pause all, Resume all, Exit), registered with the session's watcher; a click opens the window; the tooltip follows the active count. Optional: without a watcher the Host runs without it, and the hello lists `tray` only when it registered.
+- Checked live on KDE Plasma (Wayland): the watcher lists the item; Title and ToolTip read back; GetLayout and GetGroupProperties return the menu; a "clicked" event on Exit stopped the Host cleanly.
+- Not yet: registering again when the panel restarts (plasmashell restart); the app's own icon (a themed icon is used until the AppImage installs one).
+
 ### D7 stage 1, step 2: notifications, sleep prevention, sign-in start, completion actions (2026-11-09, `linux-host`)
 - D-Bus through `Tmds.DBus.Protocol` 0.95.2 (no native parts). `LinuxDesktop.cs` in `DownloadManager.Host.Linux`.
 - Notifications: `org.freedesktop.Notifications`, on the same settings as the Windows tray balloons (download and remote notices).
