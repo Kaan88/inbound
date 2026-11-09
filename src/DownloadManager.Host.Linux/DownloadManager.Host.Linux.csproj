@@ -24,6 +24,9 @@
     <Compile Include="..\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
     <Compile Include="..\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
+    <Compile Include="..\DownloadManager.Host\WebBridgeLauncher.cs" Link="WebBridgeLauncher.cs" />
+    <Compile Include="..\DownloadManager.Host\WebUiPasswordFile.cs" Link="WebUiPasswordFile.cs" />
+    <Compile Include="..\DownloadManager.Host\LocalNetworkAddresses.cs" Link="LocalNetworkAddresses.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Runtime.WebUi;
@@ -13,7 +13,7 @@ namespace DownloadManager.Host;
 /// </summary>
 public sealed class WebBridgeLauncher : IWebBridgeLauncher
 {
-    public const string ExecutableName = "DownloadManager.Server.exe";
+    public static readonly string ExecutableName = OperatingSystem.IsWindows() ? "DownloadManager.Server.exe" : "DownloadManager.Server";
 
     /// <summary>
     /// A test or portable instance only (one with its own <c>DOWNLOADMANAGER_DATA</c>): the bridge program to start

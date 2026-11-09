@@ -1,5 +1,10 @@
 ﻿# Progress — session handoff
 
+### D7 stage 1, step 6: the web UI on the Linux Host (2026-11-09, `linux-host`)
+- The Windows Host's web UI (D8) on Linux: `WebUiSupervisor` with the shared `WebBridgeLauncher` (program name per OS), `WebUiPasswordFile` and `LocalNetworkAddresses`; `ProcListenerCheck` (`/proc/net/tcp[6]` and the bridge's `/proc/<pid>/fd`) in place of `GetExtendedTcpTable`; `LinuxFirewall` reports `ready` (no per-program rule exists on Linux to add).
+- The bridge (`DownloadManager.Server --bridge`) opens the Linux Host's hello socket through `UnixSockets` and reports host kind `linux`.
+- Checked live with a sandbox data folder: password set and web UI turned on over the socket, the bridge reached `running` on port 18780, the "Open in browser" ticket signed in, and `POST /api/ipc` `jobs.query` came back through bridge, socket and Host; turned off cleanly. Server and Windows Host still compile.
+
 ### D7 stage 1, step 5: browser integration on Linux (2026-11-09, `linux-host`)
 - `LinuxNativeMessaging`: at each start the Host writes `<data>/bin/inbound-native-host` (a launcher, mode 700, that runs the AppImage with `--native-host` or the native host beside the Host) and the native-messaging manifests for each browser whose folder exists (Chrome, Chromium, Edge, Brave, Vivaldi under `~/.config`; Firefox under `~/.mozilla`). A manifest of this name pointing at another existing program is left alone. Skipped for a sandbox data folder.
 - NativeHost: finds `inbound-host` on Linux and starts it with `setsid -f`, so it outlives the browser's bridge.
