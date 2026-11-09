@@ -142,8 +142,8 @@ default window width. With one remote or archive row selected, the status bar sa
   Stop All | Delete, Delete Completed | Options, Scheduler | Start Queue,
   Stop Queue. A button that only some selections have, such as Cancel Package,
   goes in a group of its own at the end, so showing it moves no other button.
-- The main window can't be made smaller than 900x560; below the toolbar's full
-  width the toolbar scrolls sideways.
+- The main window can't be made smaller than 1000x560, where the whole toolbar fits; Cancel Package, when it shows,
+  can scroll the toolbar sideways, and the list scrolls sideways for its columns.
 - Icons are outline glyphs colored with the `InboundIcon*Brush` tokens: start
   green, pause/stop amber, delete red, add/scheduler blue, settings neutral.
   Stop (keeps partial data) uses the pause glyph; Stop All and Stop Queue use

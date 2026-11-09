@@ -28,8 +28,8 @@ public sealed partial class MainWindow : Window
     private string _category = "all";
     private string _search = string.Empty;
 
-    /// <summary>U-WL-7: how small the window can be dragged, the same as the smallest remembered size it starts at. The toolbar scrolls sideways below its full width.</summary>
-    private const int MinimumWindowWidth = 900;
+    /// <summary>U-WL-7: how small the window can be dragged: the whole toolbar fits, and the list scrolls sideways for its columns. Cancel Package, when it shows, can scroll.</summary>
+    private const int MinimumWindowWidth = 1000;
     private const int MinimumWindowHeight = 560;
     private readonly PassingLine _passing;
     private string _sortKey = "added";
@@ -2241,18 +2241,34 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>The secondary text color for an editable box's placeholder, in its own theme and when the theme changes.</summary>
-    private static void DimPlaceholder(ComboBox box)
+    /// <param name="theme">The window's theme, for before the box is in the tree.</param>
+    private static void DimPlaceholder(ComboBox box, ElementTheme theme)
     {
-        void Apply()
+        // The editable box's inner text box draws the placeholder, and with no placeholder color of its own it takes
+        // the focused text color while it has the focus. So the color goes on that text box once it exists.
+        void Apply(ElementTheme current)
         {
-            var brush = InboundTheme.Brush("InboundSecondaryTextBrush", box);
+            var brush = InboundTheme.Brush("InboundSecondaryTextBrush", current);
             box.PlaceholderForeground = brush;
-            foreach (var key in new[] { "TextControlPlaceholderForeground", "TextControlPlaceholderForegroundPointerOver", "TextControlPlaceholderForegroundFocused" })
-                box.Resources[key] = brush;
+            if (FindDescendant<TextBox>(box, "EditableText") is { } text) text.PlaceholderForeground = brush;
         }
 
-        box.Loaded += (_, _) => Apply();
-        box.ActualThemeChanged += (_, _) => Apply();
+        Apply(theme);
+        box.Loaded += (_, _) => Apply(box.ActualTheme);
+        box.GotFocus += (_, _) => Apply(box.ActualTheme);
+        box.ActualThemeChanged += (_, _) => Apply(box.ActualTheme);
+    }
+
+    private static T? FindDescendant<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && match.Name == name) return match;
+            if (FindDescendant<T>(child, name) is { } deeper) return deeper;
+        }
+
+        return null;
     }
 
     /// <summary>Turns every control inside a panel on or off, however deep the panels go.</summary>
@@ -2588,7 +2604,7 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         // U-WL-21: an editable box draws its placeholder in the text color, so it read as a typed address.
-        DimPlaceholder(urlBox);
+        DimPlaceholder(urlBox, RootGrid.ActualTheme);
         foreach (var recent in _settings.RecentUrls.Take(20))
         {
             urlBox.Items.Add(recent);
