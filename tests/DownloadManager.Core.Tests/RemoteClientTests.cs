@@ -60,6 +60,51 @@ public sealed class RemoteClientTests
     }
 
     [Fact]
+    public async Task OnlyAnotherServerWhoseHelloListsUploadsIsOfferedTheUploads()
+    {
+        // This PC's Host reads this PC's files by path, whatever its hello says.
+        var here = new FakeHost { Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var offering = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var older = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        client.Start();
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.False(client.State.UploadsOffered);
+
+        await client.RetargetAsync(offering.Connector, offering.Connector, remote: true);
+        await ui.UntilAsync(() => client.State.IsReady && client.State.UploadsOffered);
+
+        await client.RetargetAsync(older.Connector, older.Connector, remote: true);
+        ui.Flush();
+        Assert.False(client.State.UploadsOffered);
+        await ui.UntilAsync(() => client.State.IsReady);
+        Assert.False(client.State.UploadsOffered);
+    }
+
+    [Fact]
+    public async Task AContainerFileThatCantBeSentToAServerIsRefusedHereWithoutAskingAnything()
+    {
+        var here = new FakeHost();
+        // A documentation address (RFC 5737): nothing listens there, and nothing is sent to it.
+        var server = ServerTarget.Remote("s1", "Home", new Uri("http://192.0.2.10:8080/"), "ibt_" + new string('a', 43), plainHttpConfirmed: true);
+        var there = new FakeHost { SnapshotWithHello = false, Capabilities = ["jobs", "settings", "remote", "uploads"] };
+        var ui = new UiQueue();
+        await using var client = here.NewClient(ui);
+        await client.RetargetAsync(there.Connector, there.Connector, remote: true, server);
+
+        Assert.Equal("Copy the container file to this PC first; a file on a network share isn't sent from here.",
+            (await client.PreviewContainerAsync(@"\\nas\share\links.dlc")).Error);
+        Assert.Equal("The container file needs its full path on this PC.", (await client.PreviewContainerAsync("links.dlc")).Error);
+        var missing = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.rsdf");
+        Assert.Equal("That container file isn't on this PC.", (await client.PreviewContainerAsync(missing)).Error);
+        var send = await client.SendContainerToJdAsync(missing);
+        Assert.Equal("failed", send.Status);
+        Assert.Equal("That container file isn't on this PC.", send.Message);
+        Assert.Equal(0, there.Received(MessageTypes.RemoteContainerPreview) + there.Received(MessageTypes.RemoteContainerSendToJd));
+    }
+
+    [Fact]
     public async Task AHiddenWindowClosesAServersEventConnectionButNotThisHosts()
     {
         var here = new FakeHost();

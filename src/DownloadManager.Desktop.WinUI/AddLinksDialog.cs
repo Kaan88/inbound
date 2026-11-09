@@ -207,7 +207,7 @@ internal sealed class AddLinksDialog
             var needsFullPath = _session.Chosen.Any(line => line.Route is AddRoute.Provider or AddRoute.FolderLink);
             if (needsFullPath && folder.Length > 0 && !IsFullPath(folder))
             {
-                destinationError.Show("The destination has to be a full path, such as D:\\Downloads.", isProblem: true);
+                destinationError.Show(FullPathWords, isProblem: true);
                 destination.Focus(FocusState.Programmatic);
                 args.Cancel = true;
             }
@@ -266,8 +266,15 @@ internal sealed class AddLinksDialog
         });
     }
 
+    /// <summary>What a destination that isn't a full path is told: on this PC's drive letters, on a server either kind.</summary>
+    internal static string FullPathWords => ShownServer.IsRemote
+        ? "The destination has to be a full path on the server, such as /downloads or D:\\Downloads."
+        : "The destination has to be a full path, such as D:\\Downloads.";
+
+    /// <summary>A full path on this PC, or on the server the window shows (<see cref="ServerPaths.IsFull"/>).</summary>
     internal static bool IsFullPath(string folder)
     {
+        if (ShownServer.IsRemote) return ServerPaths.IsFull(folder);
         try
         {
             return Path.IsPathFullyQualified(folder);

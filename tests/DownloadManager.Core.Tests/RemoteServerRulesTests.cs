@@ -262,7 +262,22 @@ public sealed class RemoteServerRulesTests
         Assert.Null(RemoteDataRules.LocalFileProblem(remote: false, "container", "Home"));
         Assert.Null(RemoteDataRules.LocalFileProblem(remote: true, "torrent", "Home"));
         Assert.Contains("Home", RemoteDataRules.LocalFileProblem(remote: true, "container", "Home"));
+        // A server whose hello lists "uploads" takes the container file from here.
+        Assert.Null(RemoteDataRules.LocalFileProblem(remote: true, "container", "Home", uploadsOffered: true));
     }
+
+    [Theory]
+    [InlineData("/srv/downloads", true)]
+    [InlineData("/", true)]
+    [InlineData(@"D:\Downloads", true)]
+    [InlineData("D:/Downloads", true)]
+    [InlineData(@"\\nas\share", false)]
+    [InlineData("//nas/share", false)]
+    [InlineData("downloads", false)]
+    [InlineData("D:", false)]
+    [InlineData("", false)]
+    public void AServersFullPathIsALinuxOrAWindowsOneButNoNetworkPath(string path, bool full)
+        => Assert.Equal(full, ServerPaths.IsFull(path));
 
     [Fact]
     public void OpenOpenWithAndOpenFolderAreOffForAnotherServersDownload()

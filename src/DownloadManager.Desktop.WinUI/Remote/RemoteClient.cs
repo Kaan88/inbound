@@ -162,6 +162,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
             State.IsConnected = false;
             State.RemoteSupported = false;
             State.ArchivesSupported = false;
+            State.UploadsOffered = false;
             State.AccountsKnown = false;
             State.ClearRemote();
             State.ApplyArchiveList([]);
@@ -406,10 +407,64 @@ internal sealed partial class RemoteClient : IAsyncDisposable
 
     // ---- remote.container.* --------------------------------------------------------------------
 
-    /// <summary>The path goes to the Host untouched. Nothing here looks at it: even asking whether a file on a network path exists sends this Windows account's credentials there, and the Host is the one that refuses those.</summary>
-    public Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = path }, MessageTypes.RemoteContainerPreviewResult,
-            error => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(error) }, cancellationToken);
+    /// <summary>
+    /// For this PC's Host the path goes untouched. Nothing here looks at it: even asking whether a file on a network path
+    /// exists sends this Windows account's credentials there, and the Host is the one that refuses those. For another
+    /// server the file is uploaded first (<see cref="ContainerForServerAsync"/>) and its reference sent instead.
+    /// </summary>
+    public async Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var (sent, fileName, error) = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        if (sent is null) return new RemoteContainerPreviewResult { Error = error };
+        return await SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = sent, FileName = fileName }, MessageTypes.RemoteContainerPreviewResult,
+            failure => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(failure) }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A container file on this PC, for another server whose hello lists <c>uploads</c>: uploaded
+    /// (<c>POST /api/upload/container</c>, the name in a header for its kind), and its <c>upload:</c> reference sent with the
+    /// file's name. For this PC's Host, the path as it is. Null with the reason when the file can't be sent.
+    /// </summary>
+    private async Task<(string? Sent, string? FileName, string? Error)> ContainerForServerAsync(string path, CancellationToken cancellationToken)
+    {
+        ServerTarget? target;
+        lock (_sync) target = _uploadTarget;
+        if (target is null) return (path, null, null);
+        var text = path.Trim();
+        if (ContainerPathProblem(text) is { } problem) return (null, null, problem);
+        var name = Path.GetFileName(text);
+        byte[] bytes;
+        string key;
+        try
+        {
+            var info = new FileInfo(text);
+            if (!info.Exists) return (null, null, "That container file isn't on this PC.");
+            if (info.Length is 0 or > MostContainerBytes) return (null, null, "That file is too large to be a container.");
+            key = "container|" + UploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+            if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return (known.Reference, name, null);
+            bytes = await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            return (null, null, "That container file couldn't be read on this PC.");
+        }
+
+        var (reference, error) = await RemoteServerHttp.UploadContainerAsync(target, bytes, name, cancellationToken).ConfigureAwait(false);
+        if (reference is null) return (null, null, error);
+        _uploads[key] = (reference, DateTimeOffset.UtcNow);
+        return (reference, name, null);
+    }
+
+    /// <summary>Why a container path isn't opened here for a server, or null: as <see cref="TorrentPathProblem"/>.</summary>
+    internal static string? ContainerPathProblem(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+            return "Copy the container file to this PC first; a file on a network share isn't sent from here.";
+        return Path.IsPathFullyQualified(path) ? null : "The container file needs its full path on this PC.";
+    }
+
+    /// <summary>The server's limit for an uploaded container (ContainerLimits.Default.MaxInputBytes).</summary>
+    private const long MostContainerBytes = 16 * 1024 * 1024;
 
     /// <summary>
     /// Adds the chosen entries. A reply with <see cref="RemoteContainerAddResult.JobsLeftOut"/> has the entries saved and the
@@ -425,9 +480,13 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     }
 
     /// <summary>Waits for a person to answer in JDownloader. Cancelling stops waiting here, and JDownloader may still be asking.</summary>
-    public Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
-        => SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = path }, MessageTypes.RemoteContainerSendResult,
-            error => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(error) }, cancellationToken, SendToJdTimeout);
+    public async Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var (sent, _, error) = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        if (sent is null) return new RemoteContainerSendResult { Status = "failed", Message = error };
+        return await SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = sent }, MessageTypes.RemoteContainerSendResult,
+            failure => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(failure) }, cancellationToken, SendToJdTimeout).ConfigureAwait(false);
+    }
 
     // ---- archive.* ----------------------------------------------------------------------------
 
@@ -728,7 +787,9 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                     throw new InvalidDataException("The Host did not send a usable greeting.");
                 }
 
-                var offersRemote = hello.GetPayload<HostHelloDto>().Capabilities.Contains("remote", StringComparer.Ordinal);
+                var capabilities = hello.GetPayload<HostHelloDto>().Capabilities;
+                var offersRemote = capabilities.Contains("remote", StringComparer.Ordinal);
+                var offersUploads = remote && capabilities.Contains("uploads", StringComparer.Ordinal);
 
                 // The snapshot comes before any event, and this client has no use for it. A server's socket asks for none.
                 if (pipe.SnapshotFollowsHello) _ = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -736,7 +797,11 @@ internal sealed partial class RemoteClient : IAsyncDisposable
                 lock (_sync) _control.TrySetResult(pipe);
                 published = true;
                 if (remote) _remoteBackoff.Reset();
-                _post(() => State.IsConnected = true);
+                _post(() =>
+                {
+                    State.IsConnected = true;
+                    State.UploadsOffered = offersUploads;
+                });
 
                 // Not awaited: its replies arrive through the loop below.
                 _ = SeedAsync(offersRemote, cancellationToken);
