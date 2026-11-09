@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Windows.Graphics;
@@ -141,6 +141,13 @@ internal static class WindowLayout
     /// </summary>
     public static void CenterOn(Window window, nint owner)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows())
+        {
+            CenterOnMainWindow(window);
+            return;
+        }
+
         if (owner == 0 || !GetWindowRect(owner, out var rect))
         {
             CenterOnMainWindow(window);
@@ -148,11 +155,11 @@ internal static class WindowLayout
         }
 
         var size = window.AppWindow.Size;
-        var bounds = new RectInt32(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        var bounds = new RectInt32 { X = rect.Left, Y = rect.Top, Width = rect.Right - rect.Left, Height = rect.Bottom - rect.Top };
         var screen = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Primary).WorkArea;
         var x = Math.Clamp(bounds.X + (bounds.Width - size.Width) / 2, screen.X, Math.Max(screen.X, screen.X + screen.Width - size.Width));
         var y = Math.Clamp(bounds.Y + (bounds.Height - size.Height) / 2, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - size.Height));
-        window.AppWindow.Move(new PointInt32(x, y));
+        window.AppWindow.Move(new PointInt32 { X = x, Y = y });
     }
 
     /// <summary>
@@ -161,6 +168,8 @@ internal static class WindowLayout
     /// </summary>
     public static void OwnModally(Window window, nint owner)
     {
+        // A Win32 owner window; Windows only.
+        if (!OperatingSystem.IsWindows()) return;
         if (owner == 0) return;
         var own = WinRT.Interop.WindowNative.GetWindowHandle(window);
         SetWindowLongPtr(own, GwlpHwndParent, owner);
@@ -183,6 +192,8 @@ internal static class WindowLayout
     /// <summary>The largest visible, not minimised top-level window of another process running this same program.</summary>
     private static RectInt32? MainWindowBounds(nint own)
     {
+        // The Win32 window calls below are Windows-only; elsewhere this does what it does when nothing is found.
+        if (!OperatingSystem.IsWindows()) return null;
         var self = Environment.ProcessId;
         var exe = Environment.ProcessPath;
         RectInt32? best = null;

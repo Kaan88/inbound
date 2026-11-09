@@ -14,6 +14,9 @@ internal static class Program
         var data = Environment.GetEnvironmentVariable("DOWNLOADMANAGER_DATA");
         if (!string.IsNullOrWhiteSpace(data))
             Uno.WinRTFeatureConfiguration.ApplicationData.ApplicationDataPathOverride = Path.Combine(data, "uno-appdata");
+        // Software rendering on X11, to compare with OpenGL (D7 on KDE Wayland with NVIDIA, through XWayland).
+        if (Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UNO_SOFTWARE") == "1")
+            Uno.UI.FeatureConfiguration.Rendering.UseOpenGLOnX11 = false;
         try
         {
             var host = UnoPlatformHostBuilder.Create()

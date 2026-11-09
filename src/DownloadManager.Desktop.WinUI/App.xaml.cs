@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using Microsoft.UI.Xaml;
 
 namespace DownloadManager.Desktop.WinUI;
@@ -10,8 +10,7 @@ public partial class App : Application
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int processId);
 
-    private readonly EventWaitHandle _showEvent;
-    private readonly EventWaitHandle _settingsEvent;
+    private readonly ActivationSignal _activation;
     private readonly bool _secondaryInstance;
     private MainWindow? _window;
     private DownloadWindow? _downloadWindow;
@@ -60,8 +59,7 @@ public partial class App : Application
         // The prototype runs beside the WinUI window on the same instance; it must not take over its activation.
         name += ".Uno";
 #endif
-        _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name, out var createdNew);
-        _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Settings");
+        _activation = ActivationSignal.Create(name, out var createdNew);
         _secondaryInstance = !createdNew;
         UiTrace.Write($"App ctor end secondary={_secondaryInstance}");
     }
@@ -102,8 +100,8 @@ public partial class App : Application
         {
             // This launch came from a click, so it may take the foreground; the running window may not unless
             // it is allowed to, and without this Windows leaves it behind (UI.B4).
-            AllowSetForegroundWindow(AnyProcess);
-            (openSettings ? _settingsEvent : _showEvent).Set();
+            if (OperatingSystem.IsWindows()) AllowSetForegroundWindow(AnyProcess);
+            _activation.Signal(openSettings);
             Exit();
             return;
         }
@@ -117,7 +115,7 @@ public partial class App : Application
             {
                 while (true)
                 {
-                    _showEvent.WaitOne();
+                    _activation.Show.WaitOne();
                     _updateWindow.DispatcherQueue.TryEnqueue(() => _updateWindow.ShowWindow());
                 }
             });
@@ -146,7 +144,7 @@ public partial class App : Application
             {
                 while (true)
                 {
-                    _showEvent.WaitOne();
+                    _activation.Show.WaitOne();
                     _packageWindow.DispatcherQueue.TryEnqueue(() => _packageWindow.ShowWindow());
                 }
             });
@@ -162,7 +160,7 @@ public partial class App : Application
             {
                 while (true)
                 {
-                    _showEvent.WaitOne();
+                    _activation.Show.WaitOne();
                     _downloadWindow.DispatcherQueue.TryEnqueue(() => _downloadWindow.ShowWindow());
                 }
             });
@@ -192,7 +190,7 @@ public partial class App : Application
         {
             while (true)
             {
-                var activation = WaitHandle.WaitAny([_showEvent, _settingsEvent]);
+                var activation = WaitHandle.WaitAny([_activation.Show, _activation.Settings]);
                 _window.DispatcherQueue.TryEnqueue(() =>
                 {
                     _window.ShowFromTray();
