@@ -190,7 +190,6 @@ internal sealed class PackageWindow : Window
         _root.KeyboardAccelerators.Add(Escape());
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
-        WindowCascade.Apply(this);
         Render();
         _connection.Start();
     }

@@ -115,7 +115,9 @@ internal static class ServerBannerRules
         if (error is null)
             return new ServerBanner(true, $"Connecting to {name}…", false, ServerBannerAction.None, false, $"Connecting to {name}…", false);
 
-        return new ServerBanner(true, $"{error}{stale}", true, ServerBannerAction.Retry, everConnected,
+        // "Couldn't reach the server." says which one only through the window; the bar names it.
+        var reason = error.Contains(name, StringComparison.OrdinalIgnoreCase) ? error : $"{name}: {error}";
+        return new ServerBanner(true, $"{reason}{stale}", true, ServerBannerAction.Retry, everConnected,
             $"{name} can't be reached, so its downloads can't be shown.\nThey are still on {name}.", false);
     }
 }

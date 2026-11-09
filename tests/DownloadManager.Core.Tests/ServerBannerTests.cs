@@ -76,6 +76,15 @@ public sealed class ServerBannerTests
     }
 
     [Fact]
+    public void AReasonThatDoesNotNameTheServerIsGivenItsName()
+    {
+        var banner = ServerBannerRules.For(Server, connected: false, everConnected: false, pairingEnded: false, stopped: false,
+            error: "Couldn't reach the server.");
+
+        Assert.Equal("Test server: Couldn't reach the server.", banner.Text);
+    }
+
+    [Fact]
     public void ARefusedPairingOffersPairingAgainNotTryAgain()
     {
         var banner = ServerBannerRules.For(Server, connected: false, everConnected: true, pairingEnded: true, stopped: true,

@@ -2914,6 +2914,14 @@ public sealed partial class MainWindow : Window
             {
                 addProblem.Text = problem;
                 addProblem.Visibility = Visibility.Visible;
+                // The dialog that just closed is still on its way out for a moment, and DialogGuard would refuse to
+                // show it again until it is gone.
+                for (var wait = 0; wait < 40 && DialogGuard.IsOpen(dialog.XamlRoot); wait++) await Task.Delay(50);
+                if (DialogGuard.IsOpen(dialog.XamlRoot))
+                {
+                    ShowPassingStatus(problem);
+                    break;
+                }
             }
         }
         finally
