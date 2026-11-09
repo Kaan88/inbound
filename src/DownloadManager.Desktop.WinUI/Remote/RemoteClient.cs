@@ -492,7 +492,7 @@ internal sealed partial class RemoteClient : IAsyncDisposable
         return new ContainerUpload(reference, name, null);
     }
 
-    /// <summary>The cache key for a container file: as <see cref="UploadKey"/>, apart from a .torrent file's.</summary>
+    /// <summary>The cache key for a container file: <see cref="UploadKey"/> with its own prefix, so it never meets a .torrent file's.</summary>
     internal static string ContainerUploadKey(string fullPath, long length, DateTime lastWriteUtc) => "container|" + UploadKey(fullPath, length, lastWriteUtc);
 
     /// <summary>Keeps a reference as if the file had just been uploaded. For tests.</summary>

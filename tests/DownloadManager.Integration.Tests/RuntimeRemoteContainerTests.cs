@@ -152,6 +152,18 @@ public sealed partial class RuntimeServiceTests
     // ---- Preview ------------------------------------------------------------------------------
 
     [Fact]
+    public async Task HandingOverAnUploadThatIsGoneSaysSoSoTheClientUploadsAgain()
+    {
+        await using var rig = await ContainerRig.CreateAsync(_server);
+        rig.Remote.Jobs.ResolveReference = _ => null;
+
+        var result = await rig.Service.SendToJDownloaderAsync("upload:" + new string('0', 32));
+
+        Assert.Equal(JDownloaderBridgeStatus.InvalidInput, result.Status);
+        Assert.Equal(UploadFolder.GoneText, result.Message);
+    }
+
+    [Fact]
     public async Task APreviewSortsEveryLinkKeepsPackagesAndShowsNoLinkOrPassword()
     {
         await using var rig = await ContainerRig.CreateAsync(_server);
