@@ -20,3 +20,14 @@ Output contains `manifest.json` and `public.pem` only. Publish the manifest and
 ZIP; never publish the signing key. The manifest binds the version, channel,
 download URL, exact byte length and SHA-256 using RSA/SHA-256. Installed clients
 must trust the matching public key before using the feed.
+
+## AppImage
+
+The AppImage updates itself from `manifest-linux-x64.json` in the same release (an installed AppImage derives its
+name from the Windows `manifest.json` address). Sign the `.AppImage` with the same key, naming that manifest:
+
+```sh
+scripts/prepare-appimage-release.sh 0.6.6 artifacts/Inbound-0.6.6-x86_64.AppImage secrets/update-signing.pem
+```
+
+Upload `Inbound-<version>-x86_64.AppImage` and `manifest-linux-x64.json` with the Windows assets.

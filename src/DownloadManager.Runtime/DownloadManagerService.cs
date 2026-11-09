@@ -1824,7 +1824,7 @@ public sealed partial class DownloadManagerService
             };
         }
 
-        if (!Uri.TryCreate(_settings.UpdateManifestUrl, UriKind.Absolute, out var manifestUri) ||
+        if (!Uri.TryCreate(ManifestUrlFor(install, _settings.UpdateManifestUrl), UriKind.Absolute, out var manifestUri) ||
             (manifestUri.Scheme != "https" && !manifestUri.IsLoopback))
         {
             return new UpdateCheckResult
@@ -1939,6 +1939,22 @@ public sealed partial class DownloadManagerService
                 Error = ex.Message,
             };
         }
+    }
+
+    /// <summary>The name of the AppImage's signed manifest next to the Windows one in a release.</summary>
+    public const string AppImageManifestName = "manifest-linux-x64.json";
+
+    /// <summary>
+    /// An AppImage reads its own manifest, which names the .AppImage instead of the Windows package. It sits next to the
+    /// Windows one in the same release, so a manifest address ending in <c>manifest.json</c> points to it by its name.
+    /// </summary>
+    public static string ManifestUrlFor(InstallMetadata install, string manifestUrl)
+    {
+        if (install.AppImagePath is null) return manifestUrl;
+        const string windows = "/manifest.json";
+        return manifestUrl.EndsWith(windows, StringComparison.OrdinalIgnoreCase)
+            ? manifestUrl[..^windows.Length] + "/" + AppImageManifestName
+            : manifestUrl;
     }
 
     public async Task<UpdateDownloadResult> DownloadUpdateAsync(
@@ -2262,6 +2278,8 @@ public sealed partial class DownloadManagerService
                 return new UpdateInstallResult { Ok = false, Status = "busy", Error = "Downloads became active while the update was downloading." };
             _updateQuiescing = true;
         }
+        if (install.AppImagePath is { } appImage)
+            return ReplaceAppImage(appImage, download.Path, check.AvailableVersion, download.Size);
         RemoveUpdatePackages(keepVersion: check.AvailableVersion);
         var staging = Path.Combine(_paths.Root, "updates", $"stage-{check.AvailableVersion}");
         ReportUpdateProgress("staging", check.AvailableVersion, download.Size ?? 0, download.Size);
@@ -2361,6 +2379,55 @@ public sealed partial class DownloadManagerService
                 Version = check.AvailableVersion,
             };
         }
+    }
+
+    /// <summary>
+    /// The AppImage update: the verified file is copied next to the running one, made executable, flushed, and renamed
+    /// over it, so the old one stays whole until the rename. The running program keeps its mount of the old file. A
+    /// restarter started now waits for this Host to exit and then starts the new file, opening the window again only when
+    /// one was open.
+    /// </summary>
+    private UpdateInstallResult ReplaceAppImage(string appImage, string package, string version, long? size)
+    {
+        var folder = Path.GetDirectoryName(appImage)!;
+        var temporary = Path.Combine(folder, $".{Path.GetFileName(appImage)}.{version}.new");
+        ReportUpdateProgress("installing", version, size ?? 0, size);
+        try
+        {
+            File.Copy(package, temporary, overwrite: true);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            using (var stream = new FileStream(temporary, FileMode.Open, FileAccess.ReadWrite)) stream.Flush(flushToDisk: true);
+            File.Move(temporary, appImage, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            DeleteFileQuietly(temporary);
+            return new UpdateInstallResult
+            {
+                Ok = false,
+                Status = "failed",
+                Error = $"The AppImage could not be replaced ({ex.GetType().Name}). Check that its folder is writable: {folder}",
+                Version = version,
+            };
+        }
+
+        var journal = UpdateJournal;
+        journal.ClearForNewInstall();
+        journal.RecordSucceeded(version);
+        RemoveUpdatePackages();
+        try
+        {
+            AppImageRestarter.Start(appImage, Environment.ProcessId);
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _log?.Invoke($"AppImage {version} is in place, but the restarter did not start ({ex.GetType().Name}); start Inbound again.");
+        }
+
+        _log?.Invoke($"AppImage updated to {version}; the Host exits and the new one starts.");
+        return new UpdateInstallResult { Ok = true, Status = "scheduled", Version = version, ResultPath = journal.ResultPath };
     }
 
     private UpdateInstallJournal UpdateJournal => new(Path.Combine(_paths.Root, "updates"));

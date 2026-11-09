@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace DownloadManager.Core;
 
-public sealed record InstallMetadata(string Version, string Channel, string InstallRoot);
+/// <param name="AppImagePath">Set when this build runs from an AppImage: the file an update replaces.</param>
+public sealed record InstallMetadata(string Version, string Channel, string InstallRoot, string? AppImagePath = null);
 
 public static class InstalledBuild
 {
@@ -14,6 +15,8 @@ public static class InstalledBuild
         {
             return Read(Path.Combine(overrideRoot, "install.json"), overrideRoot);
         }
+
+        if (startDirectory is null && AppImage() is { } appImage) return appImage;
 
         var directory = new DirectoryInfo(startDirectory ?? AppContext.BaseDirectory);
         for (var depth = 0; depth < 5 && directory is not null; depth++)
@@ -28,6 +31,25 @@ public static class InstalledBuild
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A build running from an AppImage: the AppImage runtime sets <c>APPIMAGE</c> (the file) and <c>APPDIR</c> (where it
+    /// is mounted), and this program must be inside that mount, so a copy started some other way with the variables
+    /// inherited doesn't count. Its version is this build's own.
+    /// </summary>
+    public static InstallMetadata? AppImage(string? appImage = null, string? appDir = null, string? baseDirectory = null, string? version = null)
+    {
+        if (!OperatingSystem.IsLinux() && appImage is null) return null;
+        appImage ??= Environment.GetEnvironmentVariable("APPIMAGE");
+        appDir ??= Environment.GetEnvironmentVariable("APPDIR");
+        baseDirectory ??= AppContext.BaseDirectory;
+        if (string.IsNullOrWhiteSpace(appImage) || string.IsNullOrWhiteSpace(appDir) || !Path.IsPathFullyQualified(appImage)) return null;
+        var mount = Path.TrimEndingDirectorySeparator(Path.GetFullPath(appDir)) + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(baseDirectory).StartsWith(mount, StringComparison.Ordinal)) return null;
+        version ??= typeof(InstalledBuild).Assembly.GetName().Version?.ToString(3);
+        if (string.IsNullOrWhiteSpace(version)) return null;
+        return new InstallMetadata(version, "stable", Path.GetDirectoryName(appImage) ?? "/", appImage);
     }
 
     private static InstallMetadata? Read(string path, string root)

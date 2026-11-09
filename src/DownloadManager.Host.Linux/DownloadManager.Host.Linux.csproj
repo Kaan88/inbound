@@ -22,6 +22,7 @@
   <ItemGroup>
     <!-- Shared with the Windows Host rather than copied: neither uses anything of Windows. -->
     <Compile Include="..\DownloadManager.Host\FileLogger.cs" Link="FileLogger.cs" />
+    <Compile Include="..\DownloadManager.Host\HostUpdateMonitor.cs" Link="HostUpdateMonitor.cs" />
     <Compile Include="..\DownloadManager.Host\RemoteProviderSetup.cs" Link="RemoteProviderSetup.cs" />
     <Compile Include="..\DownloadManager.Host\HostPostDownloadHook.cs" Link="HostPostDownloadHook.cs" />
     <Compile Include="..\DownloadManager.Host\WebBridgeLauncher.cs" Link="WebBridgeLauncher.cs" />

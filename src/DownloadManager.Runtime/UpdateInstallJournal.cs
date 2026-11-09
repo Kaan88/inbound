@@ -47,6 +47,13 @@ public sealed class UpdateInstallJournal
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    /// <summary>An update this Host applied itself (an AppImage replaced in place): told once the new version starts.</summary>
+    public void RecordSucceeded(string version, DateTimeOffset? now = null)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ResultPath)!);
+        Write(new UpdateInstallOutcome(true, version, null, now ?? DateTimeOffset.Now));
+    }
+
     /// <summary>True while the helper named by the pending file is still at work.</summary>
     public bool HelperStillRunning(Func<int, bool>? isHelperRunning = null) =>
         TryReadPending(out _, out var helperId) && (isHelperRunning ?? IsHelperRunning)(helperId);
