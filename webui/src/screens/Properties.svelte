@@ -41,7 +41,7 @@
       ['Note', hideAddresses(job.statusNote)],
       ['Size', job.totalBytes !== undefined && job.totalBytes !== null && job.totalBytes >= 0 ? bytes(job.totalBytes) : 'Unknown'],
       ['Queue', queue],
-      ['Source', job.isRemote ? providerName : displaySource(job.source)],
+      ['Source', job.isRemote ? providerName : job.addedFromAnotherDevice ? 'Another device' : displaySource(job.source)],
       ['Package', job.isRemote ? packageName : undefined],
       [addressLabel(job), hasOwnAddress(job) ? shownAddress(job) : undefined],
       ['Saved to', job.finalFilePath],

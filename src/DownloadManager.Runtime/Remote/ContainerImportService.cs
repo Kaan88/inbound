@@ -91,6 +91,7 @@ public sealed class ContainerImportService : IDisposable
     /// <param name="fileName">For an upload, the name the file had, which names its packages; ignored for a path.</param>
     public async Task<RemoteContainerPreviewResult> PreviewAsync(string? path, CancellationToken cancellationToken = default, string? fileName = null)
     {
+        if (_jobs.UploadGone(path) is { } gone) return new RemoteContainerPreviewResult { Error = gone };
         var uploaded = _jobs.ResolveUpload(path) is not null;
         if (Confine(ref path) is { } refused)
         {

@@ -8,7 +8,8 @@ namespace DownloadManager.Server;
 
 /// <summary>
 /// The web UI's file uploads, as the request body: <c>POST /api/upload/torrent</c> for a <c>.torrent</c> file and
-/// <c>POST /api/upload/container?name=...</c> for an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> container. The server can
+/// <c>POST /api/upload/container</c> for an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> container, its file name in the
+/// <c>X-File-Name</c> header (percent-encoded, so it stays out of the address and the access logs). The server can
 /// only read such a file by a path, so it is kept in <see cref="UploadFolder"/> (<c>uploads</c> in the data folder) and
 /// the answer gives a reference to it (<c>upload:</c> and a random name), not its path, which would tell where the
 /// server keeps its state. <c>remote.classify</c> and <c>remote.add</c> take a torrent's reference, and
@@ -17,6 +18,8 @@ namespace DownloadManager.Server;
 /// </summary>
 public sealed class TorrentUploads
 {
+    /// <summary>The container's own file name, percent-encoded (<c>encodeURIComponent</c>). Only its extension is used.</summary>
+    public const string FileNameHeader = "X-File-Name";
     public const string FolderName = UploadFolder.FolderName;
     public const string ReferencePrefix = UploadFolder.ReferencePrefix;
 
@@ -39,7 +42,7 @@ public sealed class TorrentUploads
         web.MapPost("/api/upload/container", context =>
         {
             // The kind is the file's own extension: an .rsdf file is told apart by it. Only the name's extension is used.
-            var extension = Path.GetExtension(context.Request.Query["name"].ToString()).ToLowerInvariant();
+            var extension = Path.GetExtension(DecodedName(context.Request.Headers[FileNameHeader].ToString())).ToLowerInvariant();
             if (!UploadFolder.ContainerExtensions.Contains(extension))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -66,7 +69,8 @@ public sealed class TorrentUploads
         {
             upload = await _folder.SaveAsync(context.Request.Body, extension, maxBytes, context.RequestAborted).ConfigureAwait(false);
         }
-        catch (InvalidDataException ex) when (ex.Message == "too large")
+        // Past the limit while reading: ours, or Kestrel's for a body sent without a length (chunked).
+        catch (Exception ex) when (ex is UploadTooLargeException or BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge })
         {
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             await context.Response.WriteAsJsonAsync(new { ok = false, error = tooLarge }).ConfigureAwait(false);
@@ -81,4 +85,7 @@ public sealed class TorrentUploads
 
         await context.Response.WriteAsJsonAsync(new { ok = true, upload }).ConfigureAwait(false);
     }
+
+    /// <summary>The header's name, decoded. A sequence that isn't valid percent-encoding is left as sent.</summary>
+    private static string DecodedName(string header) => Uri.UnescapeDataString(header);
 }

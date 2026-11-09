@@ -481,6 +481,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// </summary>
     public async Task<RemoteInputClassification> ClassifyAsync(string? text, CancellationToken cancellationToken = default)
     {
+        if (UploadGone(text) is { } gone) return new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = gone };
         text = Resolve(text);
         var first = RemoteInputClassifier.Classify(text, await ClassifierProvidersAsync(false, cancellationToken).ConfigureAwait(false));
         return first.Kind == RemoteInputKind.OrdinaryLink
@@ -497,6 +498,12 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
         foreach (var given in inputs)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (UploadGone(given) is { } gone)
+            {
+                answers.Add(new RemoteInputClassification { Kind = RemoteInputKind.Unsupported, Reason = gone });
+                continue;
+            }
+
             var input = Resolve(given);
             var first = RemoteInputClassifier.Classify(input, plain);
             if (first.Kind == RemoteInputKind.OrdinaryLink)
@@ -771,6 +778,7 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     private async Task<(RemoteJobRecord? Record, string? Error, RemoteInputKind? Kind)> BuildRecordAsync(RemoteAddRequest request, CancellationToken cancellationToken)
     {
+        if (UploadGone(request.Input) is { } gone) return (null, gone, null);
         var upload = ResolveUpload(request.Input);
         if (upload is not null) request = request with { Input = upload };
         if (request.ExistingItem is { } item)
@@ -870,8 +878,8 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Turns a reference to a file a browser uploaded (<see cref="UploadFolder"/>, <c>upload:…</c>) into that file's path,
-    /// or gives null for anything else. The client then never learns where the Host keeps it. Set on a server, and on the
-    /// desktop Host for its web sessions' uploads.
+    /// or gives null for anything else. The client then never learns where the Host keeps it. Set where uploads are
+    /// stored: the Docker server (the Windows web bridge once it stores them). The hello's <c>uploads</c> follows it.
     /// </summary>
     public Func<string, string?>? ResolveReference { get; set; }
 
@@ -880,6 +888,14 @@ public sealed partial class RemoteJobCoordinator : IAsyncDisposable
     /// <summary>The uploaded file a reference names (<see cref="ResolveReference"/>), or null when the text isn't one.</summary>
     public string? ResolveUpload(string? text) =>
         text is not null && ResolveReference is { } resolve ? resolve(text.Trim()) : null;
+
+    /// <summary>
+    /// <see cref="UploadFolder.GoneText"/> for an upload's reference (<see cref="UploadFolder.IsReference"/>) that names
+    /// no file here (it was cleaned up, or never existed), so the caller hears that rather than a complaint about the
+    /// kind of file. Null otherwise, also for text that only starts like one, which is read as the text it is.
+    /// </summary>
+    public string? UploadGone(string? text) =>
+        ResolveReference is not null && UploadFolder.IsReference(text) && ResolveUpload(text) is null ? UploadFolder.GoneText : null;
 
     private static async Task<(byte[]? Bytes, string? Error)> ReadTorrentFileAsync(string path, PathRoots? roots, CancellationToken cancellationToken)
     {

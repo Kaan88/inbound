@@ -28,8 +28,10 @@
     if (!/\.(rsdf|ccf|dlc)$/i.test(file.name)) { problem = 'Only .rsdf, .ccf and .dlc files can be imported.'; return; }
     step = 'reading';
     try {
-      const response = await fetch(`/api/upload/container?name=${encodeURIComponent(file.name)}`, {
-        method: 'POST', body: file, credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' },
+      // The name goes in a header, not the address, so it stays out of the server's access logs.
+      const response = await fetch('/api/upload/container', {
+        method: 'POST', body: file, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
       });
       // A reference to the uploaded file (upload:…), not its path on the server.
       const body = (await response.json()) as { ok: boolean; upload?: string; error?: string };

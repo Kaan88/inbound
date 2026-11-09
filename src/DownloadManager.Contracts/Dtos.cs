@@ -63,6 +63,8 @@ public sealed class JobDto
     public bool CanCancel { get; set; }
     public TimeSpan? EstimatedRemaining { get; set; }
     public string Source { get; set; } = "cli";
+    /// <summary>D8: a browser on another device added it; it opens no window on the Host's screen.</summary>
+    public bool AddedFromAnotherDevice { get; set; }
     public string? ClientRequestId { get; set; }
     public string? OwnerExtensionId { get; set; }
     public int QueueId { get; set; }

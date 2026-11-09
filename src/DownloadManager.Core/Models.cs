@@ -60,11 +60,6 @@ public enum DownloadSource
     CliBatch,
     /// <summary>UI.B14: CLI import of a list. Headless and without per-job completion windows, like <see cref="CliBatch"/>.</summary>
     CliImport,
-    /// <summary>
-    /// D8: added from a browser on another device (the web UI, or a hand-off through the web bridge). Opens no progress
-    /// or completion window on this PC's screen, since nobody there asked for it.
-    /// </summary>
-    Web,
 }
 
 public enum StartMode
@@ -170,6 +165,14 @@ public sealed class DownloadJob
     public TimeSpan? EstimatedRemaining { get; set; }
 
     public DownloadSource Source { get; set; } = DownloadSource.Cli;
+
+    /// <summary>
+    /// D8: a browser on another device added it (the web UI, or a hand-off through the web bridge), so it opens no
+    /// progress or completion window on this PC's screen: nobody there asked for it. A flag beside <see cref="Source"/>
+    /// rather than a source of its own, so a job file written now still loads in an older build, which ignores a
+    /// property it doesn't know but would set aside a job whose source it can't read.
+    /// </summary>
+    public bool AddedFromAnotherDevice { get; set; }
 
     /// <summary>
     /// A browser on another device added this download or last changed its address (D8), so it never reaches this PC

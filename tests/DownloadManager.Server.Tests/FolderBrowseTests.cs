@@ -218,6 +218,8 @@ public sealed class FolderBrowseTests : IDisposable
 
         var listing = new FolderBrowser([Root]).Browse(Root, FolderBrowseFiles.Archives);
         Assert.Equal(["in.zip", "real.zip"], listing.Files.Select(file => file.Name));
+        // A link's size is its target's, not the link's own (0 on Windows).
+        Assert.Equal(1, listing.Files[0].Size);
     }
 
     [Fact]

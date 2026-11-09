@@ -241,7 +241,7 @@
     try {
       const result = await store.ask<{ accepted: boolean; error?: string }>('job.add', {
         url: current.url, destinationDirectory: current.destinationDirectory, fileName: current.fileName, categoryId: current.categoryId,
-        // TODO(A28): 'web' is not a DownloadSource and the Host reads it as Api; change it with the rest of the source fix.
+        // The Host reads 'web' as an app add and marks it as added from another device (it opens no window there).
         conflictPolicy: 'rename', rememberDestination: false, source: 'web',
       });
       if (!result.accepted) notice = result.error ?? 'The server rejected the redownload.';

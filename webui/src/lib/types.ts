@@ -31,6 +31,8 @@ export interface Job {
   bytesPerSecond?: number;
   estimatedRemaining?: string;
   source?: string;
+  /** Added from a browser on another device: the Host opens no window for it. */
+  addedFromAnotherDevice?: boolean;
   queueId: number;
   queueName?: string;
   priority?: number;
