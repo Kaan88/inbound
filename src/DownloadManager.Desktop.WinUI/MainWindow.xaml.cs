@@ -912,13 +912,10 @@ public sealed partial class MainWindow : Window
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
 #if HAS_UNO
-        // Uno's ListBox ignores SelectionMode="Single" and keeps the earlier item selected too: keep only the new one.
-        if (e.AddedItems.Count > 0 && CategoryList.SelectedItems.Count > 1)
+        // Uno's ListBox leaves the earlier item looking selected: clear every other item's own flag.
+        foreach (var other in CategoryList.Items.OfType<ListBoxItem>())
         {
-            var chosen = e.AddedItems[^1];
-            foreach (var old in CategoryList.SelectedItems.Where(item => !ReferenceEquals(item, chosen)).ToList())
-                CategoryList.SelectedItems.Remove(old);
-            CategoryList.SelectedItem = chosen;
+            if (!ReferenceEquals(other, CategoryList.SelectedItem) && other.IsSelected) other.IsSelected = false;
         }
 #endif
         if (_refreshingCategories) return;
