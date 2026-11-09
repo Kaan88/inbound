@@ -87,8 +87,12 @@ public sealed class ContainerImportService : IDisposable
     }
 
     /// <summary>What was read and how it would be handled. Any problem with the file comes back in words, never as an exception.</summary>
-    public async Task<RemoteContainerPreviewResult> PreviewAsync(string? path, CancellationToken cancellationToken = default)
+    /// <param name="path">The file's full path, or an upload's reference (<see cref="UploadFolder"/>).</param>
+    /// <param name="fileName">For an upload, the name the file had, which names its packages; ignored for a path.</param>
+    public async Task<RemoteContainerPreviewResult> PreviewAsync(string? path, CancellationToken cancellationToken = default, string? fileName = null)
     {
+        if (_jobs.UploadGone(path) is { } gone) return new RemoteContainerPreviewResult { Error = gone };
+        var uploaded = _jobs.ResolveUpload(path) is not null;
         if (Confine(ref path) is { } refused)
         {
             return new RemoteContainerPreviewResult { Error = refused };
@@ -119,7 +123,10 @@ public sealed class ContainerImportService : IDisposable
             return result;
         }
 
-        await FillAsync(result, read, Path.GetFileNameWithoutExtension(path!), cancellationToken).ConfigureAwait(false);
+        var stem = uploaded
+            ? (string.IsNullOrWhiteSpace(fileName) ? "Uploaded container" : Path.GetFileNameWithoutExtension(Path.GetFileName(fileName.Trim())))
+            : Path.GetFileNameWithoutExtension(path!);
+        await FillAsync(result, read, stem, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
@@ -313,9 +320,16 @@ public sealed class ContainerImportService : IDisposable
     /// <summary>
     /// <see cref="RefusePath"/>, and on a server also its roots: a client there is not the machine's user, so it may only
     /// have the server read files in the folders it may use. The path becomes the resolved one, so a link can't lead out.
+    /// An upload's reference becomes its file in the upload folder, which it can only name, so the roots don't apply.
     /// </summary>
     private string? Confine(ref string? path)
     {
+        if (_jobs.ResolveUpload(path) is { } upload)
+        {
+            path = upload;
+            return RefusePath(path);
+        }
+
         if (RefusePath(path) is { } refused) return refused;
         if (_roots is null) return null;
         if (_roots.Allowed(path) is not { } inside) return _roots.OutsideFileText();

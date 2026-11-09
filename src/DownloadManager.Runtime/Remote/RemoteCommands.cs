@@ -33,6 +33,12 @@ public sealed class RemoteCommands : IDisposable
 
     private sealed record LastAnswer(RemoteAccountInfo Info, DateTimeOffset At);
 
+    /// <summary>
+    /// Whether uploaded files are read here by their reference (<see cref="RemoteJobCoordinator.ResolveReference"/>):
+    /// set where a web endpoint stores the uploads. The hello's <c>uploads</c> name follows it.
+    /// </summary>
+    public bool AcceptsUploads => _jobs.ResolveReference is not null;
+
     /// <param name="roots">On a server, the folders whose files a client may have it read (container files). Null on the desktop.</param>
     /// <param name="jobRoots">
     /// Where these callers may have the coordinator read a .torrent file and save downloads, passed with each call
@@ -528,7 +534,7 @@ public sealed class RemoteCommands : IDisposable
 
     public async Task<RemoteContainerPreviewResult> ContainerPreviewAsync(RemoteContainerPreviewRequest request, CancellationToken cancellationToken = default)
     {
-        var preview = await _containers.PreviewAsync(request.Path, cancellationToken).ConfigureAwait(false);
+        var preview = await _containers.PreviewAsync(request.Path, cancellationToken, request.FileName).ConfigureAwait(false);
         // A browser on another device can't hand it on (HostCommandDispatcher refuses remote.container.sendToJd there).
         if (_jobRoots is not null) preview.CanSendToJd = false;
         preview.Error = Safe(preview.Error);

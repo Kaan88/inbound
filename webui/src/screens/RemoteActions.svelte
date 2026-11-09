@@ -123,22 +123,24 @@
       <p class="label !mb-0">Enter the link's password</p>
       <p class="hint">{linkPasswordHint(remote)}</p>
       <input id="link-password" class="field" type="password" bind:value={linkPassword} autocomplete="off" aria-label="Site password" />
-      {#if !remote.hasArchivePassword}
+      {#if !remote.hasArchivePassword && store.has('archives')}
         <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={forArchives} /> Use it as the archive password too</label>
       {/if}
       <div><button class="btn-primary" type="submit" disabled={busy || !linkPassword}>Retry with this password</button></div>
     </form>
   {/if}
 
-  <form class="mb-1 flex flex-wrap items-end gap-2" onsubmit={(event) => { event.preventDefault(); if (archivePassword) void sendArchivePassword(false); }}>
-    <div class="min-w-48 flex-1">
-      <label class="label" for="remote-archive-password">Archive password {remote.hasArchivePassword ? '(one is saved)' : ''}</label>
-      <input id="remote-archive-password" class="field" type="password" bind:value={archivePassword} autocomplete="off" />
-    </div>
-    <button class="btn" type="submit" disabled={busy || !archivePassword}>Save Password</button>
-    {#if remote.hasArchivePassword}<button class="btn" type="button" disabled={busy} onclick={() => sendArchivePassword(true)}>Forget Saved Password</button>{/if}
-  </form>
-  <p class="hint mb-3">For the archives this download brings. It never leaves the server.</p>
+  {#if store.has('archives')}
+    <form class="mb-1 flex flex-wrap items-end gap-2" onsubmit={(event) => { event.preventDefault(); if (archivePassword) void sendArchivePassword(false); }}>
+      <div class="min-w-48 flex-1">
+        <label class="label" for="remote-archive-password">Archive password {remote.hasArchivePassword ? '(one is saved)' : ''}</label>
+        <input id="remote-archive-password" class="field" type="password" bind:value={archivePassword} autocomplete="off" />
+      </div>
+      <button class="btn" type="submit" disabled={busy || !archivePassword}>Save Password</button>
+      {#if remote.hasArchivePassword}<button class="btn" type="button" disabled={busy} onclick={() => sendArchivePassword(true)}>Forget Saved Password</button>{/if}
+    </form>
+    <p class="hint mb-3">For the archives this download brings. It never leaves the server.</p>
+  {/if}
 
   {#snippet footer()}
     {#if actions.checkNow}<button class="btn" disabled={busy} onclick={() => act('remote.checkNow', {}, 'Checking now…', false)}>Check Now</button>{/if}

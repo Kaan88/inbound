@@ -566,6 +566,11 @@ public sealed partial class DownloadManagerService
             source = DownloadSource.Api;
         }
 
+        // D8: whatever a caller from another device calls it (an add, an import, a browser hand-off through the bridge),
+        // it is marked as theirs, so it opens no window on this PC's screen. Its source stays what it asked for, which
+        // still decides the rest. A provider's file (Remote) opens none anyway.
+        var fromAnotherDevice = caller is not null && source != DownloadSource.Remote;
+
         var conflictPolicy = ParseEnum(request.ConflictPolicy, ConflictPolicy.Rename);
         var (jobUrl, finalUrl, protectedUrl) = SplitOffProviderLink(request.Url, request.FinalUrl);
 
@@ -649,6 +654,7 @@ public sealed partial class DownloadManagerService
             StartMode = startMode,
             QueueProcessing = startMode == StartMode.Queue,
             Source = source,
+            AddedFromAnotherDevice = fromAnotherDevice,
             ClientRequestId = clientRequestId,
             OwnerExtensionId = owner,
             PublicNetworkOnly = caller is not null,
@@ -2730,6 +2736,13 @@ public sealed partial class DownloadManagerService
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
     }
 
+    /// <summary>
+    /// Points a download at a new address. One that hasn't finished goes back to the queue and starts from there. A
+    /// finished one keeps its file and stays finished: only the address it would be downloaded from again changes
+    /// (Redownload uses it), so nothing is downloaded and nothing happens to the file. A new address is still checked
+    /// with <see cref="DirectAddresses"/> first, as for any download: a provider's own link must not become a direct
+    /// address a redownload would use, and that check may ask the provider about the address.
+    /// </summary>
     /// <param name="explicitDirect">The user chose a direct request for an address nobody could classify.</param>
     /// <param name="caller">
     /// A caller limited to some folders may point only a download inside them at a new address, never one on this PC or
@@ -2765,6 +2778,7 @@ public sealed partial class DownloadManagerService
         {
             JobRuntime? runtime;
             var askFirst = false;
+            var finished = false;
             lock (_sync)
             {
                 if (!_jobs.TryGetValue(id, out runtime))
@@ -2795,11 +2809,7 @@ public sealed partial class DownloadManagerService
                     };
                 }
 
-                if (runtime.Job.State == DownloadState.Completed)
-                {
-                    return new JobActionResponse { Ok = false, Error = "Job is already complete.", Job = Map(runtime.Job) };
-                }
-
+                finished = runtime.Job.State == DownloadState.Completed;
                 if (runtime.Starting || runtime.Runner is { IsCompleted: false })
                 {
                     return new JobActionResponse
@@ -2841,11 +2851,15 @@ public sealed partial class DownloadManagerService
                     runtime.Job.ResolvedUrl = null;
                     runtime.Job.FinalUrl = null;
                     if (caller is not null) runtime.Job.PublicNetworkOnly = true;
-                    runtime.Job.State = DownloadState.Queued;
-                    runtime.Job.StartMode = StartMode.StartNow;
-                    runtime.Job.Failure = null;
-                    runtime.Job.CompletedAt = null;
-                    runtime.Job.AutoResumeAfterRestart = true;
+                    if (!finished)
+                    {
+                        runtime.Job.State = DownloadState.Queued;
+                        runtime.Job.StartMode = StartMode.StartNow;
+                        runtime.Job.Failure = null;
+                        runtime.Job.CompletedAt = null;
+                        runtime.Job.AutoResumeAfterRestart = true;
+                    }
+
                     runtime.Job.Touch();
                 }
             }
@@ -2862,6 +2876,13 @@ public sealed partial class DownloadManagerService
             }
 
             await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
+            if (finished)
+            {
+                // Still finished: the list shows the new address, and no client takes it for a restart.
+                Raise(runtime, "updated");
+                return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
+            }
+
             Raise(runtime, "refreshed");
             Schedule();
             return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
@@ -4507,14 +4528,28 @@ public sealed partial class DownloadManagerService
            !(job.Description?.Contains("dash+xml", StringComparison.OrdinalIgnoreCase) ?? false) &&
            !(job.Description?.Contains(".mpd", StringComparison.OrdinalIgnoreCase) ?? false);
 
+    /// <summary>
+    /// What every client is told about a download. For one whose address is hidden (a direct provider link) or that is
+    /// a provider's file, the page it came from is its site alone and the address it ended up at is left out, so no
+    /// client has to know the rule to keep the account's links out of sight; the desktop, too, now gets the site alone.
+    /// Its address itself is sent as stored: a link with a key in it is stored masked, and every client shows a hidden
+    /// one as its site (<see cref="ShownAddress"/>, by <c>AddressHidden</c>). Its note never holds more than a host
+    /// today; <see cref="UrlRedactor.HideAddresses"/> is applied to it all the same, so a future note can't leak one.
+    /// </summary>
     public static JobDto Map(DownloadJob job)
-        => new()
+    {
+        var hidden = job.RemoteSource is null && (job.ProtectedUrl is not null || ShownAddress.IsHidden(job.Url));
+        var concealed = hidden || job.RemoteSource is not null;
+        var note = job.FileRemovedAfterExtraction ? "Archive removed after extraction"
+            : WaitingHostShown(job) is { } waitingHost ? WaitingForConnectionText(waitingHost)
+            : null;
+        return new()
         {
             Id = job.Id,
             Url = job.Url,
-            AddressHidden = job.RemoteSource is null && (job.ProtectedUrl is not null || ShownAddress.IsHidden(job.Url)),
-            FinalUrl = job.FinalUrl,
-            PageUrl = job.PageUrl,
+            AddressHidden = hidden,
+            FinalUrl = concealed ? null : job.FinalUrl,
+            PageUrl = concealed ? SiteOfPage(job.PageUrl) : job.PageUrl,
             FileName = job.FileName,
             IsQueued = job.IsQueued,
             QueueProcessing = job.QueueProcessing, QueueRetryCount = job.QueueRetryCount, QueueRetryAt = job.QueueRetryAt,
@@ -4548,6 +4583,7 @@ public sealed partial class DownloadManagerService
                 ForceSystemAction = job.CompletionOptions.ForceSystemAction },
             EstimatedRemaining = job.EstimatedRemaining,
             Source = JsonNamingPolicy.CamelCase.ConvertName(job.Source.ToString()),
+            AddedFromAnotherDevice = job.AddedFromAnotherDevice,
             ClientRequestId = job.ClientRequestId,
             OwnerExtensionId = job.OwnerExtensionId,
             QueueId = job.QueueId,
@@ -4564,9 +4600,7 @@ public sealed partial class DownloadManagerService
             IsRemote = job.RemoteSource is not null,
             RemoteProvider = job.RemoteSource?.Provider,
             FileRemovedAfterExtraction = job.FileRemovedAfterExtraction,
-            StatusNote = job.FileRemovedAfterExtraction ? "Archive removed after extraction"
-                : WaitingHostShown(job) is { } waitingHost ? WaitingForConnectionText(waitingHost)
-                : null,
+            StatusNote = concealed && note is not null ? UrlRedactor.HideAddresses(note) : note,
             Failure = job.Failure is null
                 ? null
                 : new FailureDto
@@ -4579,6 +4613,18 @@ public sealed partial class DownloadManagerService
                     HttpStatus = job.Failure.HttpStatus,
                 },
         };
+    }
+
+    /// <summary>
+    /// A page address as its site alone (scheme, host and a port other than the default, without any user name), the
+    /// form every client shows for a hidden download. Null for none, or one that can't be read as an address.
+    /// </summary>
+    private static string? SiteOfPage(string? pageUrl)
+    {
+        if (string.IsNullOrWhiteSpace(pageUrl) || !Uri.TryCreate(pageUrl.Trim(), UriKind.Absolute, out var page) || page.Host.Length == 0)
+            return null;
+        return page.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped) + "/";
+    }
 
     public static SettingsDto MapSettings(AppSettings settings)
         => new()

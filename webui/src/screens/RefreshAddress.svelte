@@ -20,7 +20,8 @@
 
   async function send(next: string, explicitDirect: boolean) {
     await store.ask('job.refreshUrl', { jobId: job.id, url: next, explicitDirect });
-    store.toast('The address was refreshed.');
+    // A finished download stays finished with its file; Redownload uses the new address.
+    store.toast(job.state === 'completed' ? 'The address was changed. Redownload uses it.' : 'The address was refreshed.');
     onclose();
   }
 

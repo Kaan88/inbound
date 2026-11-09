@@ -411,3 +411,37 @@ describe('review fixes', () => {
     expect(noticeBoard).toBeDefined();
   });
 });
+
+import { containerAddSummary, containerChoice, containerEntryName } from '../src/lib/remote';
+
+describe('importing a container file', () => {
+  const preview = {
+    entries: [
+      { entryId: 0, displayName: 'one.rar', kind: 'hosterLink', canAdd: true },
+      { entryId: 1, displayHost: 'files.example', kind: 'hosterLink', canAdd: true },
+      { entryId: 2, kind: 'unsupported', reason: 'An ordinary link.', canAdd: false },
+    ],
+  };
+
+  it('starts with every entry that can be added chosen', () => {
+    expect(containerChoice(preview)).toEqual([0, 1]);
+  });
+
+  it('names an entry by its name, else its site, else its number', () => {
+    expect(preview.entries.map(containerEntryName)).toEqual(['one.rar', 'files.example', 'Link 3']);
+  });
+
+  it('says how the add went and what failed', () => {
+    const summary = containerAddSummary({
+      ok: true,
+      outcomes: [
+        { entryId: 0, ok: true },
+        { entryId: 1, ok: true, existing: true },
+        { entryId: 2, ok: false, error: 'Not a provider link.' },
+      ],
+    }, preview, 'TorBox');
+    expect(summary.text).toBe("1 sent to TorBox. 1 was already listed. 1 couldn't be added.");
+    expect(summary.problems).toEqual(['Link 3: Not a provider link.']);
+    expect(containerAddSummary({ ok: false, error: 'This preview has expired.', outcomes: [] }, preview, 'TorBox').text).toBe('This preview has expired.');
+  });
+});

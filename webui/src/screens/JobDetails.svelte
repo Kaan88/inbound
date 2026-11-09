@@ -241,7 +241,7 @@
     try {
       const result = await store.ask<{ accepted: boolean; error?: string }>('job.add', {
         url: current.url, destinationDirectory: current.destinationDirectory, fileName: current.fileName, categoryId: current.categoryId,
-        // TODO(A28): 'web' is not a DownloadSource and the Host reads it as Api; change it with the rest of the source fix.
+        // The Host reads 'web' as an app add and marks it as added from another device (it opens no window there).
         conflictPolicy: 'rename', rememberDestination: false, source: 'web',
       });
       if (!result.accepted) notice = result.error ?? 'The server rejected the redownload.';
@@ -403,7 +403,8 @@
           <button class="btn" onclick={() => copy(job.finalFilePath, 'The path was copied.')}>Copy path</button>
           <button class="btn" onclick={() => copy(folderOf, 'The folder path was copied.')}>Copy folder path</button>
         {/if}
-        {#if !complete && !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
+        <!-- A finished download keeps its file: only the address Redownload uses changes. -->
+        {#if !job.isRemote && !job.url.toLowerCase().startsWith('remote://')}
           <button class="btn" disabled={!connected || working} onclick={() => (dialog = 'refresh')}>Refresh download address…</button>
         {/if}
         <button class="btn" disabled={!connected} onclick={() => (dialog = 'properties')}>Properties…</button>
