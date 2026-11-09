@@ -291,8 +291,26 @@ export class ServerTransport implements Transport {
   readonly target = "server" as const;
   connected = false;
   lastError = "";
+  /** Called when the server starts or stops answering (the badge's "!"), not for every request. */
+  onStateChange: (() => void) | undefined;
+  // "unknown" until a request has been made: a server never asked is not a server that is down (U-EX-4).
+  private state: "unknown" | "up" | "down" = "unknown";
 
   constructor(readonly pairing: ServerPairing, private readonly fetchImpl: FetchLike = defaultFetch) {}
+
+  /** True only after a request to the server failed, and until one gets an answer. */
+  get down(): boolean {
+    return this.state === "down";
+  }
+
+  /** Records whether the server answered (pairing counts as an answer). */
+  settle(connected: boolean): void {
+    this.connected = connected;
+    const next = connected ? "up" : "down";
+    if (next === this.state) return;
+    this.state = next;
+    try { this.onStateChange?.(); } catch { /* the badge is a convenience */ }
+  }
 
   get address(): string {
     return this.pairing.address;
@@ -311,7 +329,7 @@ export class ServerTransport implements Transport {
 
     const { status, body } = answer;
     if (status === 401) {
-      this.connected = false;
+      this.settle(false);
       this.lastError = typeof body?.error === "string" && body.error
         ? body.error
         : "This browser isn't paired with the server, or its pairing was removed. Pair it again.";
@@ -320,14 +338,13 @@ export class ServerTransport implements Transport {
 
     // An envelope answers the request, a refusal of the paired role (403) included.
     if (body && typeof body === "object" && typeof body.type === "string") {
-      this.connected = true;
       this.lastError = "";
+      this.settle(true);
       return body as Envelope;
     }
 
-    this.connected = status < 500 && status !== 0;
     const reason = typeof body?.error === "string" && body.error ? body.error : `The Inbound server answered HTTP ${status}.`;
-    throw this.failed(reason, this.connected);
+    throw this.failed(reason, status < 500 && status !== 0);
   }
 
   async send(type: string, payload: unknown, timeoutMs = 12000): Promise<any> {
@@ -354,8 +371,8 @@ export class ServerTransport implements Transport {
   }
 
   private failed(message: string, connected = false): Error {
-    this.connected = connected;
     this.lastError = message;
+    this.settle(connected);
     return new Error(message);
   }
 }

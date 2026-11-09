@@ -79,6 +79,9 @@ test('the colour pairs of the pages meet WCAG 2 (text 4.5:1, controls and bars 3
     ['--status-waiting', '--highlight', 4.5], ['--status-active', '--selected', 4.5], ['--status-done', '--surface', 4.5],
     ['--status-failed', '--surface', 4.5], ['--error', '--surface', 4.5], ['--accent-text', '--accent', 4.5],
     ['--progress', '--track', 3], ['--muted', '--surface', 3],
+    // The notice bar (its blue is --highlight): the error notice's text, and the glyphs the notices show.
+    ['--status-failed', '--highlight', 4.5], ['--status-waiting', '--highlight', 3], ['--icon-danger', '--highlight', 3],
+    ['--icon-info', '--highlight', 3],
   ];
   for (const [name, tokens] of [['light', light], ['dark', darkSystem]]) {
     for (const [fore, back, minimum] of pairs) {
@@ -95,4 +98,14 @@ test('the badge colours read with white text (OFF on the waiting amber, a waitin
   assert.ok(contrast('#ffffff', '#1f6fc5') >= 4.5);
   const background = fs.readFileSync(path.join(__dirname, '..', 'src', 'background.ts'), 'utf8');
   assert.match(background, /"#1f6fc5" : serverDown \? "#b3261e" : "#8a5a00"/);
+});
+
+test('the notice bar uses the colours checked above: the error text and the pause glyph', () => {
+  const kit = fs.readFileSync(path.join(repo, 'webui', 'src', 'ui-kit.css'), 'utf8');
+  const own = fs.readFileSync(path.join(__dirname, '..', 'extension.css'), 'utf8');
+  assert.match(kit, /\.notice\.notice-error \{ color: var\(--status-failed\); \}/);
+  assert.match(own, /\.notice-glyph\.tint-pause \{ color: var\(--status-waiting\); \}/);
+  // --error itself on the notice's blue would fail in dark (4.27:1), and the icon amber in light (2.95:1).
+  assert.ok(contrast(darkSystem['--error'], darkSystem['--highlight']) < 4.5);
+  assert.ok(contrast(light['--icon-pause'], light['--highlight']) < 3);
 });

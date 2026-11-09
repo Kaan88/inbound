@@ -186,6 +186,7 @@ export class AskPanel {
       this.loading = false;
       this.showError(answer?.error || "This download request has expired.");
       this.renderButtons();
+      this.focusStart(this.keepButton);
       return;
     }
 
@@ -197,13 +198,28 @@ export class AskPanel {
     this.form.showTargets(targets, firstTarget(targets, answer.target));
     this.loading = false;
     this.renderButtons();
+    this.focusStart(this.defaultStart === "later" ? this.laterButton : this.confirmButton);
+  }
+
+  /**
+   * Decision 1: Enter presses the primary button. The popup opens with nothing focused, so the primary takes the focus
+   * once the download is loaded, unless the user is already in the form (typing a name, on ‹ ›).
+   */
+  private focusStart(button: HTMLButtonElement): void {
+    const active = document.activeElement as HTMLElement | null;
+    const busy = active && active !== document.body && this.card.contains(active) && !(active as HTMLButtonElement).disabled;
+    if (busy || button.disabled) return;
+    try { button.focus(); } catch { /* not shown */ }
   }
 
   private renderButtons(): void {
     const ready = !this.loading && !this.unavailable;
     this.confirmButton.disabled = !ready || !this.gate.canSend;
     this.laterButton.disabled = !ready || !this.gate.canSend;
-    this.confirmButton.textContent = this.gate.sending ? "Sending…" : "Start download";
+    // Spec §3.4: the primary reads "Sending…", whichever of the two it is.
+    const sending = this.gate.sending ? "Sending…" : "";
+    this.confirmButton.textContent = sending && this.defaultStart === "now" ? sending : "Start download";
+    this.laterButton.textContent = sending && this.defaultStart === "later" ? sending : "Download later";
     this.browseButton.disabled = !ready || !this.gate.canPick;
     this.keepButton.disabled = this.gate.sending || !this.currentId;
     this.closeButton.disabled = this.keepButton.disabled;

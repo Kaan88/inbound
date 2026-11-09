@@ -80,6 +80,14 @@ function markUnavailable(message: string): void {
   unavailable = true;
   loading = false;
   renderButtons();
+  focusFirst(cancelButton);
+}
+
+/** Focuses a button when nothing else has the focus yet (the window opens with none). */
+function focusFirst(button: HTMLButtonElement): void {
+  const active = document.activeElement;
+  if (button.disabled || (active && active !== document.body)) return;
+  try { button.focus(); } catch { /* not shown */ }
 }
 
 function showError(message: string): void {
@@ -152,6 +160,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     cancelButton.classList.toggle("hidden", held);
     loading = false;
     renderButtons();
+    // Decision 1: Enter presses the primary button, so it has the focus once the download is loaded.
+    if (!pickAtOnce) focusFirst(defaultStart === "later" ? laterButton : confirmButton);
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
     void fitWindowToContent().catch(() => undefined);
     if (pickAtOnce && form.target === "local" && !browseDestinationButton.disabled) browseDestinationButton.click();

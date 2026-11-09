@@ -9,6 +9,7 @@ import {
   FreeSpaceLine, renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget,
 } from "../destination-target";
 import type { TargetId } from "../transport";
+import { attachPathField } from "./path-field";
 
 export interface SaveFormElements {
   targetField: HTMLElement;
@@ -52,6 +53,8 @@ export class SaveForm {
 
   constructor(private readonly elements: SaveFormElements, private readonly showError: (message: string) => void,
     private readonly clearError: (message: string) => void = () => undefined) {
+    // A long folder shows its end, with the middle left out, and the whole path as the tooltip.
+    attachPathField(elements.destination);
     this.freeSpace = new FreeSpaceLine(elements.freeSpace);
     this.serverFolders = new ServerFolderBrowser(elements.serverFolders, (path) => {
       elements.destination.value = path;
@@ -83,7 +86,6 @@ export class SaveForm {
     // A folder typed for one target means nothing on the other. keepTyped: a folder was set for this same target
     // while the list was on its way.
     if (!keepTyped) destination.value = this.defaultDestination;
-    destination.title = destination.value;
     destination.placeholder = FOLDER_PLACEHOLDER[offered.id];
     browse.title = offered.id === "server" ? "Choose a folder on the server" : "Choose a folder on this PC";
     this.serverFolders.close();
@@ -137,5 +139,10 @@ export function markDefaultStart(startMode: string | undefined, startButton: HTM
   const mode = startMode === "later" ? "later" : "now";
   startButton.className = mode === "now" ? "btn-primary" : "btn";
   laterButton.className = mode === "later" ? "btn-primary" : "btn";
+  // Guidelines §6: the primary comes first, so with Download later as the default the two swap places.
+  const [first, second] = mode === "later" ? [laterButton, startButton] : [startButton, laterButton];
+  if (first.parentElement && first.parentElement === second.parentElement && first.nextElementSibling !== second) {
+    first.parentElement.insertBefore(first, second);
+  }
   return mode;
 }

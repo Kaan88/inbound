@@ -1,5 +1,5 @@
 // A small menu from a button (EXT.R8): the kit's .menu, opening upward from the popup's status bar like the desktop's
-// server switcher. Arrow keys move, Enter or Space chooses, Esc closes, and focus goes back to the button.
+// server switcher. Arrow keys move, Enter or Space chooses, Esc closes, and focus goes back to the button either way.
 
 export interface MenuItem {
   label: string;
@@ -39,7 +39,8 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], options: { upwa
     const text = document.createElement("span");
     text.textContent = item.label;
     button.append(mark, text);
-    button.addEventListener("click", () => { close(); item.onSelect(); });
+    // Focus goes back to the button the menu came from, as after Esc, so the keyboard does not land on the page.
+    button.addEventListener("click", () => { close(); anchor.focus(); item.onSelect(); });
     menu.append(button);
     return button;
   });

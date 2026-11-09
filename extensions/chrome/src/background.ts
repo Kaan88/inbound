@@ -271,7 +271,9 @@ async function loadSettings(): Promise<void> {
   const pairing = readPairing((await chrome.storage.local.get(SERVER_STORAGE_KEY))[SERVER_STORAGE_KEY]);
   // The same pairing keeps its transport, so its connection state survives a settings reload.
   if (!pairing) server = null;
-  else if (server?.pairing.token !== pairing.token || server.pairing.address !== pairing.address) server = new ServerTransport(pairing);
+  else if (server?.pairing.token !== pairing.token || server.pairing.address !== pairing.address) {
+    server = serverTransport(pairing);
+  }
   try {
     const notes = (await chrome.storage.session.get(LEFT_IN_BROWSER_KEY))[LEFT_IN_BROWSER_KEY];
     leftInBrowser = Array.isArray(notes) ? notes.slice(0, 5) : [];
@@ -282,6 +284,8 @@ async function loadSettings(): Promise<void> {
   } catch { askQueue = []; }
   settingsLoaded = true;
   updateBadge();
+  // A worker start is also when entries of right-click windows closed meanwhile are dropped.
+  void forgetClosedHandoffWindows().catch(() => undefined);
 }
 
 /**
@@ -296,9 +300,10 @@ function updateBadge(): void {
   // EXT.R8: downloads waiting in the popup for a folder show their count, on the accent blue (5.07:1 with white);
   // OFF is on the waiting amber of the status colours (5.93:1), where it was a grey before.
   const waiting = askQueue.length;
-  // U-EX-4: automatic downloads go to a server that is not answering: say so where the user looks first.
+  // U-EX-4: automatic downloads go to a server that is not answering: say so where the user looks first. Only after
+  // a request really failed: a worker that just started has not asked yet, and that is not "down".
   const serverDown = !off && !paused && automaticTarget(settings.defaultTarget, server !== null) === "server" &&
-    server !== null && !server.connected;
+    server !== null && server.down;
   try {
     void action.setBadgeText({ text: waiting > 0 ? String(Math.min(waiting, 99)) : off || paused ? "OFF" : serverDown ? "!" : "" })
       ?.catch?.(() => undefined);
@@ -423,6 +428,8 @@ async function onContextMenu(info: chrome.contextMenus.OnClickData, tab?: chrome
     createdAt: Date.now(),
     cookieContext: await cookieContextForFrame(tab?.id, info.frameId ?? 0),
   };
+  // Entries of earlier right-click windows that were closed with their X go now.
+  await forgetClosedHandoffWindows().catch(() => undefined);
   pendingHandoffs.set(id, pending);
   await chrome.storage.session.set({ [`handoff.${id}`]: pending });
   await chrome.windows.create({
@@ -839,6 +846,39 @@ async function handoffWindowClosed(id: string): Promise<void> {
   }
   const pending = await pendingHandoff(id).catch(() => undefined);
   if (pending && heldByWindow(pending)) await keepInBrowser(pending);
+}
+
+/**
+ * A right-click folder window holds no download, so it keeps no port open, and one closed with its X used to leave its
+ * entry in session storage until the browser restarted. This drops the entries of right-click windows that are no
+ * longer open (runtime.getContexts, Chrome 116+ and Firefox 131+; without it nothing is dropped). A held download is
+ * left alone: its window's port closing gives it back to the browser.
+ */
+async function forgetClosedHandoffWindows(now = Date.now()): Promise<void> {
+  const runtime = chrome.runtime as { getContexts?: (filter: { contextTypes: string[] }) => Promise<Array<{ documentUrl?: string }>> };
+  if (typeof runtime.getContexts !== "function") return;
+  let open: Set<string>;
+  let stored: Record<string, unknown>;
+  try {
+    const page = chrome.runtime.getURL("handoff.html");
+    const contexts = await runtime.getContexts({ contextTypes: ["TAB", "POPUP"] });
+    open = new Set(contexts.map((context) => context.documentUrl ?? "")
+      .filter((url) => url.split(/[?#]/)[0] === page)
+      .map((url) => { try { return new URL(url).searchParams.get("id") ?? ""; } catch { return ""; } }));
+    stored = await chrome.storage.session.get(null);
+  } catch {
+    return;
+  }
+  for (const [key, value] of Object.entries(stored)) {
+    if (!key.startsWith("handoff.")) continue;
+    const pending = value as PendingHandoff | undefined;
+    const id = key.slice("handoff.".length);
+    if (!pending || pending.isAutoIntercept || heldByWindow(pending)) continue;
+    if (open.has(id) || connectedHandoffs.has(id) || confirmingHandoffs.has(id) || askQueue.includes(id)) continue;
+    // A window still loading is not in the list yet.
+    if (now - (pending.createdAt ?? 0) < 60_000) continue;
+    await forgetHandoff(id);
+  }
 }
 
 // ---- EXT.R7: "ask where to save" in the toolbar popup ----------------------------------------------------
@@ -1492,8 +1532,9 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
       const pairing = await pairWithServer(String(message.address ?? ""), String(message.code ?? ""), pairingName(navigator.userAgent));
       await storageRestricted;
       await chrome.storage.local.set({ [SERVER_STORAGE_KEY]: pairing });
-      server = new ServerTransport(pairing);
-      server.connected = true;
+      server = serverTransport(pairing);
+      server.settle(true);
+      updateBadge();
       return { ok: true, server: serverStatus() };
     }
 
@@ -1509,6 +1550,7 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         settings = { ...settings, defaultTarget: "local" };
         await chrome.storage.local.set({ settings });
       }
+      updateBadge();
       return { ok: true, settings, server: null, revoked, wasPaired: Boolean(leaving) };
     }
 
@@ -1827,6 +1869,13 @@ function localMissing(): boolean {
 }
 
 /** The paired server as Settings and the popup show it; never the token. */
+/** The paired server's transport; the badge follows it starting or stopping to answer, whichever request found out. */
+function serverTransport(pairing: ServerPairing): ServerTransport {
+  const transport = new ServerTransport(pairing);
+  transport.onStateChange = () => updateBadge();
+  return transport;
+}
+
 function serverStatus(): { address: string; name?: string; pairedAt?: number; connected: boolean; lastError: string } | null {
   if (!server) return null;
   const { address, name, pairedAt } = server.pairing as ServerPairing;
