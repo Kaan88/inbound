@@ -2,8 +2,8 @@ namespace DownloadManager.Runtime;
 
 /// <summary>
 /// The mark Windows and browsers give a file from the internet (the <c>Zone.Identifier</c> stream, zone 3), so
-/// SmartScreen and Office warn before it is opened. Written for a download a browser on another device added (D8); the
-/// general item is recorded separately.
+/// SmartScreen and Office warn before it is opened, as they would for the browser's own download. REV.4: written on
+/// every completed download from the network; a download from this PC itself (loopback) or a local file is not marked.
 /// </summary>
 public static class MarkOfTheWeb
 {
@@ -15,7 +15,7 @@ public static class MarkOfTheWeb
     /// </summary>
     public static void TryWrite(string path, string? address, Action<string>? log = null)
     {
-        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        if (!OperatingSystem.IsWindows() || !Applies(address) || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
         var host = Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
             ? $"HostUrl={uri.Scheme}://{uri.IdnHost}/" + Environment.NewLine
             : string.Empty;
@@ -26,7 +26,13 @@ public static class MarkOfTheWeb
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            log?.Invoke($"The file from another device could not be marked as from the internet: {ex.GetType().Name}.");
+            log?.Invoke($"The download could not be marked as from the internet: {ex.GetType().Name}.");
         }
     }
+
+    /// <summary>A download from the network is marked; one from this PC itself, or with no network address, is not.</summary>
+    public static bool Applies(string? address) =>
+        Uri.TryCreate(address, UriKind.Absolute, out var uri)
+        && uri.Scheme is "http" or "https" or "ftp" or "ftps"
+        && !uri.IsLoopback;
 }

@@ -3979,8 +3979,8 @@ public sealed partial class DownloadManagerService
 
         if (changeType == "completed")
         {
-            // Before anything opens or extracts it: a download a browser on another device added is marked as from the web.
-            if (job.PublicNetworkOnly) MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
+            // REV.4: before anything opens or extracts it, the file is marked as from the internet, as a browser marks it.
+            MarkOfTheWeb.TryWrite(job.FinalFilePath, job.EffectiveUrl, _log);
             try
             {
                 await PersistAsync(runtime, CancellationToken.None, requireSuccess: true).ConfigureAwait(false);
