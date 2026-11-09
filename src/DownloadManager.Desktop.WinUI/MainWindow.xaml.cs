@@ -292,6 +292,7 @@ public sealed partial class MainWindow : Window
             var vm = new JobViewModel();
             vm.Update(job);
             _jobsById[vm.Id] = vm;
+            if (_connection.IsRemote) _remoteCompletions.Saw(job.Id, job.State);
         }
 
         RebuildVisible(selectedId);
@@ -326,6 +327,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyJobEvent(JobDto job, string changeType)
     {
+        if (_connection.IsRemote && changeType != "completed") _remoteCompletions.Saw(job.Id, job.State);
         if (changeType == "removed")
         {
             if (_jobsById.Remove(job.Id, out var removed))
@@ -397,13 +399,19 @@ public sealed partial class MainWindow : Window
         // Preserve notifications for headless jobs when the main UI is already open. Only a single CLI add: a CLI
         // batch or import ("cliBatch", "cliImport") opens no completion window per job (UI.B14).
         // Another server's completions are shown from these events, while this window is open (design D9, section 5):
-        // whether to is this PC's choice. This PC's Host opens its own.
+        // whether to is this PC's setting alone, and only for a download seen unfinished here, a few a minute at most
+        // (RemoteCompletionGate). This PC's Host opens its own.
         if (changeType == "completed" && RemoteDataRules.WindowOpensCompletion(_connection.IsRemote, job.Source, job.ShowCompletionDialog,
                 (_connection.IsRemote ? LocalSettings : _settings)?.ShowCompletionDialog == true))
         {
             // A package opens one window, when its last file is done, as the Host does for the other sources.
-            if (PackageOf(job.Id) is not { } package) OpenDownloadWindow(job.Id);
-            else if (PackageMembers(package).All(member => member.State == "completed")) OpenPackageWindow(package.Id);
+            var package = PackageOf(job.Id);
+            var due = package is null || PackageMembers(package).All(member => member.State == "completed");
+            if (due && (!_connection.IsRemote || _remoteCompletions.MayOpen(job.Id, DateTimeOffset.UtcNow)))
+            {
+                if (package is null) OpenDownloadWindow(job.Id);
+                else OpenPackageWindow(package.Id);
+            }
         }
 
         if (changeType == "completed") NoteRemoteCompletion(job);
@@ -1252,14 +1260,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var nameBox = new TextBox { Header = "File name", Text = Path.GetFileName(job.FinalFilePath) };
-        var folderBox = new TextBox { Text = Path.GetDirectoryName(job.FinalFilePath) ?? string.Empty };
+        // Another server's path is split and joined with its own separator: a Linux server's paths use '/'.
+        var remote = _connection.IsRemote;
+        var nameBox = new TextBox { Header = "File name", Text = remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath) };
+        var folderBox = new TextBox { Text = (remote ? ServerPaths.Folder(job.FinalFilePath) : Path.GetDirectoryName(job.FinalFilePath)) ?? string.Empty };
         var browse = new Button { Content = "Browse…", VerticalAlignment = VerticalAlignment.Bottom };
         browse.Click += async (_, _) =>
         {
             try
             {
-                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this)) is { } folder) folderBox.Text = folder;
+                // For another server this is its folder browser, starting at the download's folder.
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), start: remote ? folderBox.Text : null) is { } folder) folderBox.Text = folder;
             }
             catch (Exception)
             {
@@ -1299,9 +1310,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var target = Path.Combine(folderBox.Text.Trim(), nameBox.Text.Trim());
+        var newName = nameBox.Text.Trim();
+        if (remote && newName.IndexOfAny(['/', '\\']) >= 0)
+        {
+            await ShowMessageAsync("Move/Rename", "Type the file name without a folder; choose the folder above it.");
+            return;
+        }
+
+        var target = remote ? ServerPaths.Join(folderBox.Text.Trim(), newName) : Path.Combine(folderBox.Text.Trim(), newName);
         if (string.Equals(target, job.FinalFilePath, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(Path.GetFileName(target), Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
+            string.Equals(remote ? ServerPaths.FileName(target) : Path.GetFileName(target),
+                remote ? ServerPaths.FileName(job.FinalFilePath) : Path.GetFileName(job.FinalFilePath), StringComparison.Ordinal))
         {
             return;
         }
@@ -1724,7 +1743,13 @@ public sealed partial class MainWindow : Window
         categoryBox.SelectedItem = categoryBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
             item.Tag as string == (job.CategoryIsAutomatic ? "" : job.CategoryId)) ?? categoryBox.Items[0];
         var originalCategorySelection = categoryBox.SelectedItem;
-        var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions);
+        // Another server's download: its program is a path there, never looked for on this PC, and only what its hello
+        // allows can be changed.
+        var capabilities = _connection.Hello?.Capabilities ?? [];
+        var remoteScope = _connection.IsRemote
+            ? new RemoteCompletionScope(_connection.Target.Name, capabilities.Contains("programSettings"), capabilities.Contains("completionActions"))
+            : null;
+        var completionEditor = new JobCompletionEditor(job.CompletionOptions, this, _settings.AllowSystemCompletionActions, remoteScope);
         var canEditCompletion = job.State != "completed";
         if (completionEditor.Content is Control completionControl) completionControl.IsEnabled = canEditCompletion;
         JobCompletionOptionsDto? completionOptions = null;

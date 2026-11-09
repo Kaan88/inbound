@@ -122,9 +122,25 @@ public static class ServerAddress
             return false;
         }
 
-        var port = !typedScheme && parsed.IsDefaultPort ? DefaultPort : parsed.Port;
+        // Uri calls an explicit :80 the default port too, so whether a port was typed is read from the text.
+        var port = !typedScheme && !TypedPort(trimmed) ? DefaultPort : parsed.Port;
         address = new UriBuilder(parsed.Scheme, parsed.IdnHost.ToLowerInvariant(), port).Uri;
         return true;
+    }
+
+    /// <summary>Whether the host part of an address typed without a scheme ends in <c>:port</c>.</summary>
+    private static bool TypedPort(string withoutScheme)
+    {
+        var end = withoutScheme.IndexOfAny(['/', '?', '#', '\\']);
+        var authority = end < 0 ? withoutScheme : withoutScheme[..end];
+        authority = authority[(authority.LastIndexOf('@') + 1)..];
+        if (authority.StartsWith('['))
+        {
+            var close = authority.IndexOf(']');
+            return close >= 0 && close + 1 < authority.Length && authority[close + 1] == ':';
+        }
+
+        return authority.Contains(':');
     }
 
     /// <summary><c>localhost</c> or a loopback IP address: a token sent there never leaves this PC.</summary>
@@ -258,9 +274,20 @@ public sealed class WebSocketIpcClient : IIpcConnection
 
     public bool SnapshotFollowsHello { get; }
 
-    /// <param name="invoker">For tests: the HTTP stack the upgrade goes through. Redirects are never followed.</param>
+    /// <summary>
+    /// The HTTP stack every upgrade goes through. A redirect is never followed, so the token goes only to the address the
+    /// user typed, and no proxy is used: a proxy (or one found by WPAD) would see the token over plain http.
+    /// </summary>
+    private static readonly Lazy<HttpMessageInvoker> Upgrades = new(() => new HttpMessageInvoker(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseProxy = false,
+        UseCookies = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+    }));
+
     public static async Task<WebSocketIpcClient> ConnectAsync(ServerTarget target, ClientHelloDto hello, TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default, HttpMessageInvoker? invoker = null)
+        CancellationToken cancellationToken = default)
     {
         ServerAddress.EnsureMaySend(target);
         var socket = new ClientWebSocket();
@@ -270,7 +297,7 @@ public sealed class WebSocketIpcClient : IIpcConnection
         deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(10));
         try
         {
-            await socket.ConnectAsync(ServerAddress.WebSocketAddress(target.Address!), invoker, deadline.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(ServerAddress.WebSocketAddress(target.Address!), Upgrades.Value, deadline.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is WebSocketException or HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
@@ -391,7 +418,7 @@ public sealed class RemotePairResult
 /// <summary>
 /// The server's plain HTTP calls a desktop app makes: pairing with the password, its own Unpair, one-shot
 /// <c>/api/ipc</c> and the <c>.torrent</c> upload. Redirects are never followed (a token goes only to the address the user
-/// typed) and no cookie is kept.
+/// typed), no proxy is used (it would see the token and the password over plain http) and no cookie is kept.
 /// </summary>
 public static class RemoteServerHttp
 {
@@ -401,6 +428,7 @@ public static class RemoteServerHttp
     private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient(new SocketsHttpHandler
     {
         AllowAutoRedirect = false,
+        UseProxy = false,
         UseCookies = false,
         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
         ConnectTimeout = TimeSpan.FromSeconds(10),
@@ -409,10 +437,7 @@ public static class RemoteServerHttp
         Timeout = Timeout.InfiniteTimeSpan,
     });
 
-    /// <summary>For tests: the client every call here uses instead of the shared one.</summary>
-    public static HttpClient? ClientForTests { get; set; }
-
-    private static HttpClient Http => ClientForTests ?? Shared.Value;
+    private static HttpClient Http => Shared.Value;
 
     /// <summary>
     /// <c>POST /api/pair</c> with <c>{password, name, role: "remoteClient"}</c> and no <c>Origin</c>. Answers with the token
@@ -424,6 +449,7 @@ public static class RemoteServerHttp
         if (!ServerAddress.MaySend(address, plainHttpConfirmed)) return new RemotePairResult { Error = new PlainHttpNotConfirmedException().Message };
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        string? issued = null;
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, ServerAddress.Endpoint(address, "/api/pair"))
@@ -435,10 +461,21 @@ public static class RemoteServerHttp
             if (response.StatusCode == HttpStatusCode.OK && body is { } ok)
             {
                 var role = Text(ok, "role");
-                var token = Text(ok, "token");
-                if (role != RemoteClientRole || string.IsNullOrEmpty(token))
+                issued = Text(ok, "token");
+                if (role != RemoteClientRole || string.IsNullOrEmpty(issued))
+                {
+                    // An older server may have made another kind of token. It is of no use here, so the server forgets it.
+                    var unwanted = issued;
+                    issued = null;
+                    await ForgetTokenAsync(address, unwanted, plainHttpConfirmed).ConfigureAwait(false);
                     return new RemotePairResult { Error = "The server didn't give this PC the access it asked for, so nothing was saved. Update the server and try again." };
-                return new RemotePairResult { Token = token, TokenId = Text(ok, "id"), HostKind = await HostKindAsync(address, deadline.Token).ConfigureAwait(false) };
+                }
+
+                // On a short deadline of its own: not knowing the server's kind never fails a pairing that worked.
+                var hostKind = await HostKindAsync(address, cancellationToken).ConfigureAwait(false);
+                var result = new RemotePairResult { Token = issued, TokenId = Text(ok, "id"), HostKind = hostKind };
+                issued = null;
+                return result;
             }
 
             return new RemotePairResult { Error = PairingError(response, body) };
@@ -451,7 +488,21 @@ public static class RemoteServerHttp
         {
             return new RemotePairResult { Error = $"Couldn't reach a server at {address}. Check the address and that the server is running." };
         }
+        finally
+        {
+            // A token made but never handed back (cancelled, or failed on the way) mustn't stay valid on the server.
+            if (issued is not null) _ = ForgetTokenAsync(address, issued, plainHttpConfirmed);
+        }
     }
+
+    /// <summary>
+    /// Best effort: the server forgets a token this PC won't keep (a pairing it couldn't save, or a token it didn't ask
+    /// for). True when the server forgot it, or already had.
+    /// </summary>
+    public static Task<bool> ForgetTokenAsync(Uri address, string? token, bool plainHttpConfirmed) =>
+        string.IsNullOrEmpty(token)
+            ? Task.FromResult(true)
+            : UnpairAsync(ServerTarget.Remote("pairing", "server", address, token, plainHttpConfirmed), CancellationToken.None);
 
     private static string PairingError(HttpResponseMessage response, JsonElement? body)
     {
@@ -472,13 +523,15 @@ public static class RemoteServerHttp
         return said ?? $"The server refused the pairing ({(int)response.StatusCode}).";
     }
 
-    /// <summary>The <c>hostKind</c> in the server's public sign-in status, or null.</summary>
+    /// <summary>The <c>hostKind</c> in the server's public sign-in status, or null, within five seconds.</summary>
     private static async Task<string?> HostKindAsync(Uri address, CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
-            using var response = await Http.GetAsync(ServerAddress.Endpoint(address, "/api/auth/status"), cancellationToken).ConfigureAwait(false);
-            return await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false) is { } body ? Text(body, "hostKind") : null;
+            using var response = await Http.GetAsync(ServerAddress.Endpoint(address, "/api/auth/status"), deadline.Token).ConfigureAwait(false);
+            return await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false) is { } body ? Text(body, "hostKind") : null;
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
@@ -549,6 +602,8 @@ public static class RemoteServerHttp
     /// </summary>
     public static async Task<(string? Reference, string? Error)> UploadTorrentAsync(ServerTarget target, byte[] content, CancellationToken cancellationToken = default)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(UploadTimeout);
         try
         {
             ServerAddress.EnsureMaySend(target);
@@ -558,12 +613,16 @@ public static class RemoteServerHttp
             };
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", target.Token);
-            using var response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var body = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
+            using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
+            var body = await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.OK && body is { } ok && Text(ok, "upload") is { } reference) return (reference, null);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
                 return (null, $"{target.Name} doesn't take .torrent files from this app. Paste the magnet link instead, or add the file in the server's web UI.");
             return (null, body is { } failed && Text(failed, "error") is { } said ? said : $"{target.Name} couldn't take the file.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (null, $"{target.Name} didn't take the .torrent file in time. Try again, or paste the magnet link instead.");
         }
         catch (RemoteServerException ex)
         {
@@ -574,6 +633,9 @@ public static class RemoteServerHttp
             return (null, $"Couldn't reach {target.Name}.");
         }
     }
+
+    /// <summary>How long a <c>.torrent</c> upload (at most 16 MB) may take.</summary>
+    public static readonly TimeSpan UploadTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>An HTTP status that ended a remote call, in words.</summary>
     internal static RemoteServerException Describe(HttpStatusCode status, bool timedOut) => status switch

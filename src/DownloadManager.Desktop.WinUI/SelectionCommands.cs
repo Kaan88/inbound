@@ -1,4 +1,4 @@
-﻿using DownloadManager.Contracts;
+using DownloadManager.Contracts;
 using DownloadManager.Core.Providers;
 
 namespace DownloadManager.Desktop.WinUI;

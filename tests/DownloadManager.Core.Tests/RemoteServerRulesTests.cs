@@ -27,6 +27,20 @@ public sealed class RemoteServerRulesTests
     }
 
     [Theory]
+    [InlineData("homeserver:80", 80)]
+    [InlineData("192.168.1.5:80", 80)]
+    [InlineData("[::1]:80", 80)]
+    [InlineData("homeserver:80/web", 80)]
+    [InlineData("homeserver", 8080)]
+    [InlineData("homeserver/web", 8080)]
+    [InlineData("[::1]", 8080)]
+    public void APortTypedAsEightyIsKeptAndOnlyAnAddressWithoutOneGetsTheDefault(string typed, int port)
+    {
+        Assert.True(ServerAddress.TryNormalize(typed, out var address, out var error), error);
+        Assert.Equal(port, address.Port);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("ftp://homeserver")]
@@ -176,6 +190,10 @@ public sealed class RemoteServerRulesTests
               { "id": "{{good}}", "name": "Home", "address": "http://homeserver:8080/", "sealedToken": "plain:dmrc_x" },
               { "id": "{{good}}", "name": "Twice", "address": "http://homeserver:8080/" },
               { "id": "short", "name": "Bad id", "address": "http://homeserver:8080/" },
+              { "id": null, "name": "No id", "address": "http://homeserver:8080/" },
+              { "name": "Missing id", "address": "http://homeserver:8080/" },
+              { "id": "{{new string('f', 32)}}", "name": "No address", "address": null },
+              null,
               { "id": "{{new string('d', 32)}}", "name": "Bad address", "address": "ftp://homeserver/" }
             ] }
             """);
@@ -183,6 +201,41 @@ public sealed class RemoteServerRulesTests
         Assert.Equal("Home", Assert.Single(servers).Name);
         Assert.Equal(good, store.LastShown);
         Assert.Equal("dmrc_x", store.Target(good)!.Token);
+    }
+
+    [Fact]
+    public void AListThatCantBeReadNowIsNeverWrittenOver()
+    {
+        var path = Path.Combine(NewFolder(), ServerStore.FileName);
+        var store = new ServerStore(path, new PlainProtector());
+        var kept = store.Add("Home", new Uri("http://homeserver:8080/"), "dmrc_invented", "t1", plainHttpConfirmed: false, HostKinds.Server);
+        var before = File.ReadAllText(path);
+
+        // Another program holds the file for a moment (a scanner, a backup).
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Empty(store.Load());
+            Assert.Throws<ServerListUnreadableException>(() => store.Add("Attic", new Uri("http://attic:8080/"), "dmrc_other", "t2", false, null));
+            Assert.Throws<ServerListUnreadableException>(() => store.Update(kept.Id, name: "Renamed"));
+            Assert.Throws<ServerListUnreadableException>(() => store.Remove(kept.Id));
+            store.SetLastShown(kept.Id);
+        }
+
+        Assert.Equal(before, File.ReadAllText(path));
+        Assert.Equal("Home", Assert.Single(store.Load()).Name);
+    }
+
+    [Fact]
+    public void ADamagedListIsKeptAsideBeforeANewOneReplacesIt()
+    {
+        var path = Path.Combine(NewFolder(), ServerStore.FileName);
+        var store = new ServerStore(path, new PlainProtector());
+        File.WriteAllText(path, "{ not json");
+
+        store.Add("Home", new Uri("http://homeserver:8080/"), "dmrc_invented", "t1", plainHttpConfirmed: false, HostKinds.Server);
+
+        Assert.Equal("{ not json", File.ReadAllText(path + ".bad"));
+        Assert.Equal("Home", Assert.Single(store.Load()).Name);
     }
 
     [Fact]
@@ -201,8 +254,6 @@ public sealed class RemoteServerRulesTests
         Assert.False(RemoteDataRules.MayUseFiles(remote: true));
         Assert.Null(RemoteDataRules.IconPath(remote: true, @"C:\downloads\movie.mkv"));
         Assert.Equal(@"C:\downloads\movie.mkv", RemoteDataRules.IconPath(remote: false, @"C:\downloads\movie.mkv"));
-        Assert.False(RemoteDataRules.MayPlaySoundFiles(remote: true));
-        Assert.True(RemoteDataRules.MayPlaySoundFiles(remote: false));
         Assert.True(RemoteDataRules.HostExitQuitsApp(remote: false));
         Assert.False(RemoteDataRules.HostExitQuitsApp(remote: true));
         Assert.True(RemoteDataRules.UsesServerFolderBrowser(remote: true));
@@ -231,13 +282,73 @@ public sealed class RemoteServerRulesTests
 
     [Theory]
     [InlineData(true, null, null, true, true)]
-    [InlineData(true, null, false, true, false)]
+    // For another server, only this PC's setting counts: the server's per-download choice is the server's own.
+    [InlineData(true, null, false, true, true)]
+    [InlineData(true, null, true, false, false)]
     [InlineData(true, null, null, false, false)]
     [InlineData(false, null, null, true, false)]
     [InlineData(false, "cli", null, true, true)]
     [InlineData(false, "cli", false, true, false)]
     public void TheWindowOpensTheCompletionWindowForAnotherServerItself(bool remote, string? source, bool? job, bool setting, bool opens)
         => Assert.Equal(opens, RemoteDataRules.WindowOpensCompletion(remote, source, job, setting));
+
+    [Fact]
+    public void AServerOpensACompletionWindowOnlyForADownloadSeenUnfinishedHereAndAFewAMinute()
+    {
+        var gate = new RemoteCompletionGate();
+        var now = DateTimeOffset.UtcNow;
+        var invented = Guid.NewGuid();
+        Assert.False(gate.MayOpen(invented, now));
+
+        var finishedBefore = Guid.NewGuid();
+        gate.Saw(finishedBefore, "completed");
+        Assert.False(gate.MayOpen(finishedBefore, now));
+
+        var jobs = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var job in jobs) gate.Saw(job, "downloading");
+        Assert.True(gate.MayOpen(jobs[0], now));
+        Assert.False(gate.MayOpen(jobs[0], now));
+        Assert.True(gate.MayOpen(jobs[1], now));
+        Assert.True(gate.MayOpen(jobs[2], now));
+        Assert.Equal(3, RemoteCompletionGate.MostWindows);
+        Assert.False(gate.MayOpen(jobs[3], now.AddSeconds(30)));
+
+        Assert.True(gate.MayOpen(jobs[3], now + RemoteCompletionGate.Window));
+        gate.Clear();
+        Assert.False(gate.MayOpen(jobs[4], now + RemoteCompletionGate.Window));
+    }
+
+    [Theory]
+    [InlineData("/data/dl/movie.mkv", "/data/dl", "movie.mkv")]
+    [InlineData("/movie.mkv", "/", "movie.mkv")]
+    [InlineData(@"D:\dl\movie.mkv", @"D:\dl", "movie.mkv")]
+    [InlineData(@"D:\movie.mkv", @"D:\", "movie.mkv")]
+    public void AServersPathIsSplitWithItsOwnSeparator(string path, string folder, string name)
+    {
+        Assert.Equal(folder, ServerPaths.Folder(path));
+        Assert.Equal(name, ServerPaths.FileName(path));
+        Assert.Equal(path, ServerPaths.Join(folder, name));
+    }
+
+    [Fact]
+    public void AServersPathIsJoinedWithItsOwnSeparator()
+    {
+        Assert.Equal("/data/dl/new name.mkv", ServerPaths.Join("/data/dl/", "new name.mkv"));
+        Assert.Equal(@"D:\dl\a.mkv", ServerPaths.Join(@"D:\dl\", "a.mkv"));
+        Assert.Equal("D:/dl/a.mkv", ServerPaths.Join("D:/dl", "a.mkv"));
+        Assert.DoesNotContain('\\', ServerPaths.Join("/srv/downloads", "a.mkv"));
+    }
+
+    [Theory]
+    [InlineData("/opt/tools/done.sh", true)]
+    [InlineData(@"C:\Tools\done.exe", true)]
+    [InlineData("C:/Tools/done.exe", true)]
+    [InlineData(@"\\attacker\share\x.exe", false)]
+    [InlineData("//attacker/share/x.exe", false)]
+    [InlineData("done.exe", false)]
+    [InlineData("", false)]
+    public void AProgramForAServerIsCheckedByItsTextAlone(string path, bool accepted)
+        => Assert.Equal(accepted, RemoteDataRules.ServerProgramPathProblem(path) is null);
 
     [Fact]
     public void AServersOptionsShowOnlyWhatItsHelloAllows()
@@ -286,8 +397,10 @@ public sealed class RemoteServerRulesTests
         Assert.Equal("/srv/sound.wav", sent.EventSoundFiles["complete"]);
         // The server's own settings are what was edited.
         Assert.Equal(6, sent.MaxConnectionsPerHost);
-        // Every field this PC keeps is one KeepServerValues puts back.
+        // Every field this PC keeps is a setting, named once, and KeepServerValues puts each one back.
         Assert.Equal(11, RemoteSettingsRules.ThisPcFields.Length);
+        Assert.Equal(RemoteSettingsRules.ThisPcFields.Length, RemoteSettingsRules.ThisPcFields.Distinct().Count());
+        Assert.All(RemoteSettingsRules.ThisPcFields, name => Assert.NotNull(typeof(SettingsDto).GetProperty(name)));
     }
 
     [Fact]

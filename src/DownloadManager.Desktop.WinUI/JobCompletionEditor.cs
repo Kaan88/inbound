@@ -6,11 +6,18 @@ using WinRT.Interop;
 
 namespace DownloadManager.Desktop.WinUI;
 
+/// <summary>
+/// For a download on another server (design D9, section 5): its name, and what its hello lets this app set there. The
+/// program is a path on the server, so it is never looked for or chosen on this PC.
+/// </summary>
+public sealed record RemoteCompletionScope(string ServerName, bool ProgramSettings, bool CompletionActions);
+
 /// <summary>Stages per-job completion behavior without mutating the supplied options.</summary>
 public sealed class JobCompletionEditor
 {
     private readonly Window _owner;
     private readonly bool _systemActionsEnabled;
+    private readonly RemoteCompletionScope? _remote;
     private readonly ComboBox _programMode = new() { Header = "When this download completes", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _programPath = new() { MinWidth = 0, PlaceholderText = "Select an executable" };
     private readonly Button _browse = new() { Content = "Browse…" };
@@ -22,11 +29,14 @@ public sealed class JobCompletionEditor
 
     public UIElement Content { get; }
 
-    public JobCompletionEditor(JobCompletionOptionsDto current, Window owner, bool systemActionsEnabled)
+    /// <param name="remote">Null for this PC's Host. For another server: no file is checked or picked here, and only what
+    /// its hello allows can be changed.</param>
+    public JobCompletionEditor(JobCompletionOptionsDto current, Window owner, bool systemActionsEnabled, RemoteCompletionScope? remote = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
-        _systemActionsEnabled = systemActionsEnabled;
+        _remote = remote;
+        _systemActionsEnabled = systemActionsEnabled && remote?.CompletionActions != false;
 
         _programMode.Items.Add(new ComboBoxItem { Content = "Use global program" });
         _programMode.Items.Add(new ComboBoxItem { Content = "No completion program" });
@@ -44,9 +54,24 @@ public sealed class JobCompletionEditor
             .FirstOrDefault(item => string.Equals(item.Tag as string, action, StringComparison.OrdinalIgnoreCase));
         _openFile.IsChecked = current.OpenFile;
         _force.IsChecked = current.ForceSystemAction;
-        _systemActionNote.Text = systemActionsEnabled
-            ? "A system action runs only when no other downloads are unfinished."
-            : "Enable system completion actions in Scheduler settings to use this option.";
+        _systemActionNote.Text = remote is { CompletionActions: false }
+            ? $"{remote.ServerName} doesn't let this app open files or shut it down when a download finishes."
+            : _systemActionsEnabled
+                ? "A system action runs only when no other downloads are unfinished."
+                : "Enable system completion actions in Scheduler settings to use this option.";
+        if (remote is not null)
+        {
+            // A path on the server: there is nothing on this PC to browse for.
+            _browse.Visibility = Visibility.Collapsed;
+            _programPath.PlaceholderText = $"Full path of the program on {remote.ServerName}";
+            if (!remote.ProgramSettings)
+            {
+                _programMode.IsEnabled = false;
+                _programMode.Description = $"{remote.ServerName} doesn't let this app set programs it runs.";
+            }
+
+            if (!remote.CompletionActions) _openFile.IsEnabled = _systemAction.IsEnabled = false;
+        }
 
         _systemAction.SelectionChanged += (_, _) => UpdateForceChoice();
         UpdateForceChoice();
@@ -93,9 +118,12 @@ public sealed class JobCompletionEditor
 
         if (_programMode.SelectedIndex < 0)
             error = "Choose how to handle the program after completion.";
+        else if (_programMode.SelectedIndex == 2 && _remote is not null)
+            error = _remote.ProgramSettings ? RemoteDataRules.ServerProgramPathProblem(options.ProgramPath) : null;
         else if (_programMode.SelectedIndex == 2 && !IsAbsoluteExecutable(options.ProgramPath))
             error = "Choose an absolute path to an existing .exe file.";
-        else if (options.SystemAction != "none" && !_systemActionsEnabled)
+        // Off for a server that doesn't allow it, so whatever it has is sent back unchanged.
+        else if (options.SystemAction != "none" && !_systemActionsEnabled && _remote is not { CompletionActions: false })
             error = "Enable system completion actions in Scheduler settings before choosing a system action.";
         else if (!new[] { "none", "exit", "shutdown", "restart", "logoff" }.Contains(options.SystemAction, StringComparer.Ordinal))
             error = "Choose a valid system action.";
@@ -112,7 +140,7 @@ public sealed class JobCompletionEditor
 
     private void UpdateProgramMode()
     {
-        var enabled = _programMode.SelectedIndex == 2;
+        var enabled = _programMode.SelectedIndex == 2 && _remote?.ProgramSettings != false;
         _programPath.IsEnabled = enabled;
         _browse.IsEnabled = enabled;
     }
@@ -138,6 +166,7 @@ public sealed class JobCompletionEditor
         }
     }
 
+    /// <summary>This PC's Host only: a program on this PC, so it is looked for here.</summary>
     private static bool IsAbsoluteExecutable(string? path)
     {
         try

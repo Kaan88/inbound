@@ -18,6 +18,9 @@ public sealed partial class MainWindow
     private HostStatusDto? _localStatus;
     private int _switches;
 
+    // Which of the shown server's downloads may open a completion window here.
+    private readonly RemoteCompletionGate _remoteCompletions = new();
+
     /// <summary>This PC's settings, whichever server is shown.</summary>
     private SettingsDto? LocalSettings => _connection.IsRemote ? _localSettings : _settings ?? _localSettings;
 
@@ -149,6 +152,7 @@ public sealed partial class MainWindow
 
         _jobsById.Clear();
         _packageRows.Clear();
+        _remoteCompletions.Clear();
         _groups = new();
         _status = target.IsLocal ? _localStatus : null;
         _settings = target.IsLocal ? _localSettings : null;
@@ -379,7 +383,15 @@ public sealed partial class MainWindow
         if (existing is not null && password.Length == 0)
         {
             if (!sameAddress) return "Type the server's password to pair this PC with the new address.";
-            _servers.Update(existing.Id, name, plainHttpConfirmed);
+            try
+            {
+                _servers.Update(existing.Id, name, plainHttpConfirmed);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return ex is ServerListUnreadableException ? ex.Message : "This PC couldn't save the change. Check that the app's data folder can be written to.";
+            }
+
             return null;
         }
 
@@ -388,22 +400,29 @@ public sealed partial class MainWindow
             return "This address starts with http://. Tick the box to allow its sign-in unencrypted, or use an https:// address.";
         var result = await RemoteServerHttp.PairAsync(address, password, $"Inbound on {Environment.MachineName}", plainHttpConfirmed);
         if (!result.Ok) return result.Error;
+
+        // The old pairing, read before the new one replaces it here.
+        var old = existing is null ? null : _servers.Target(existing.Id);
         try
         {
             if (existing is null) _servers.Add(name, address, result.Token!, result.TokenId, plainHttpConfirmed, result.HostKind);
             else
             {
-                // The old token is the server's to forget; a new one replaces it here.
-                if (_servers.Target(existing.Id) is { } old) _ = RemoteServerHttp.UnpairAsync(old);
                 _servers.Repair(existing.Id, address, result.Token!, result.TokenId, plainHttpConfirmed, result.HostKind);
                 _servers.Update(existing.Id, name);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
         {
-            return "The pairing worked, but this PC couldn't save it. Check that the app's data folder can be written to.";
+            // Not kept here, so the server forgets it too; the old pairing, if any, stays as it was.
+            _ = RemoteServerHttp.ForgetTokenAsync(address, result.Token, plainHttpConfirmed);
+            return ex is ServerListUnreadableException
+                ? ex.Message
+                : "The pairing worked, but this PC couldn't save it, so it was undone. Check that the app's data folder can be written to.";
         }
 
+        // Saved: only now is the old token the server's to forget.
+        if (old is not null && old.Token != result.Token) _ = RemoteServerHttp.UnpairAsync(old);
         return null;
     }
 
@@ -421,7 +440,9 @@ public sealed partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            await ShowMessageAsync("Servers", "The server couldn't be removed from this PC's list. Check that the app's data folder can be written to.");
+            await ShowMessageAsync("Servers", ex is ServerListUnreadableException
+                ? ex.Message
+                : "The server couldn't be removed from this PC's list. Check that the app's data folder can be written to.");
             return;
         }
 
@@ -450,16 +471,18 @@ public sealed partial class MainWindow
         var server = _connection;
         var serverName = server.Target.Name;
         SnapshotDto local, remote;
+        var reading = "This PC's Host";
         try
         {
             local = await _local.RefreshAsync();
+            reading = serverName;
             remote = await server.RefreshAsync();
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
         {
             await ShowMessageAsync("Options", ex is InvalidOperationException
-                ? $"{serverName} isn't connected yet."
-                : $"The options couldn't be read: {(ex is RemoteServerException ? ex.Message : "the connection was lost.")}");
+                ? $"{reading} isn't connected yet."
+                : $"{reading}'s options couldn't be read: {(ex is RemoteServerException ? ex.Message : "the connection was lost.")}");
             return;
         }
 
@@ -487,14 +510,19 @@ public sealed partial class MainWindow
         var notify = new CheckBox { Content = "Show a notification", IsChecked = mine.NotifyOnCompletion };
         var autoUpdate = new CheckBox { Content = "Check for and install updates automatically while no downloads are running", IsChecked = mine.AutoCheckUpdates };
         var updateInterval = SettingsWindow.Number("Check every (hours)", mine.UpdateCheckIntervalHours, 1, 168);
+        var sound = new CheckBox { Content = "Play a sound when a download on this PC finishes", IsChecked = mine.PlayCompletionSound };
+        var soundEditor = new SoundOptionsEditor(mine.EventSoundFiles, window);
         window.AddPage("This PC", "",
             SettingsWindow.Hint($"This PC's own choices. They are saved on this PC, whichever server the window shows, and never change {serverName}."),
             SettingsWindow.Section("Startup"), launch,
             SettingsWindow.Section("Window"), themeBox, closeCompletely,
             SettingsWindow.Section("Capturing downloads"), integration, clipboard,
             SettingsWindow.Section($"When a download on {serverName} finishes, while this window is open"), completionDialog, notify,
+            SettingsWindow.Hint($"For {serverName}, the notification is a line in this window's status bar, and no sound plays."),
             SettingsWindow.Section("Updates"), autoUpdate, updateInterval);
         const int ThisPcPage = 0;
+        window.AddPage("Sounds on this PC", "", sound, soundEditor.Content);
+        const int SoundsPage = 1;
 
         // The server.
         var serverControls = new List<UIElement>
@@ -539,7 +567,7 @@ public sealed partial class MainWindow
         }
 
         window.AddPage(serverName, "", serverControls.ToArray());
-        const int ServerPage = 1;
+        const int ServerPage = SoundsPage + 1;
         var nextPage = ServerPage + 1;
 
         // The server's provider and extraction pages, through the provider client, which follows the shown server.
@@ -580,34 +608,15 @@ public sealed partial class MainWindow
 
             if (extraction?.Validate() is { } extractionProblem) return (extractionProblem, extractionPageIndex);
             if (WholeNumber(updateInterval) is not { } checkInterval || checkInterval is < 1 or > 168) return ("Update interval must be 1-168 hours.", ThisPcPage);
+            var sounds = new Dictionary<string, string>(mine.EventSoundFiles, StringComparer.OrdinalIgnoreCase);
+            if (!soundEditor.TryApplyTo(sounds, out var soundError)) return (soundError ?? "Invalid sound choice.", SoundsPage);
             if (WholeNumber(maxConcurrent) is not { } max || max is < 1 or > 16) return ("Maximum simultaneous downloads must be between 1 and 16.", ServerPage);
             if (WholeNumber(connections) is not { } connectionsValue || connectionsValue is < 1 or > 32) return ("Connections per download must be between 1 and 32.", ServerPage);
             long? limit = WholeNumber(speedLimit) is { } kb ? kb * 1024L : null;
             if (limit is <= 0) return ("Speed limit must be a positive number of KB/s.", ServerPage);
 
-            // This PC: from its latest settings, so nothing changed elsewhere meanwhile is undone.
-            var localLatest = CloneSettings((await _local.RefreshAsync()).Settings);
-            localLatest.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
-            localLatest.LaunchAtStartup = launch.IsChecked == true;
-            localLatest.CloseWindowCompletely = closeCompletely.IsChecked == true;
-            localLatest.BrowserIntegrationEnabled = integration.IsChecked == true;
-            localLatest.ClipboardMonitoring = clipboard.IsChecked == true;
-            localLatest.ShowCompletionDialog = completionDialog.IsChecked == true;
-            localLatest.NotifyOnCompletion = notify.IsChecked == true;
-            localLatest.AutoCheckUpdates = autoUpdate.IsChecked == true;
-            localLatest.UpdateCheckIntervalHours = checkInterval;
-            var localResult = (await _local.UpdateSettingsAsync(localLatest)).GetPayload<SettingsResult>();
-            if (!localResult.Ok) return (localResult.Error ?? "This PC's Host didn't take the settings.", ThisPcPage);
-            KeepLocalSettings(localResult.Settings);
-            if (_uiState.DarkMode is not null)
-            {
-                _uiState.DarkMode = null;
-                SaveUiState();
-            }
-
-            AppTheme.Use(localResult.Settings.Theme);
-
-            // The server: only its own fields; this PC's choices go back to it as it has them.
+            // The server first: if it doesn't take its settings, nothing is changed anywhere. Only its own fields; this
+            // PC's choices go back to it as it has them.
             var serverAtSave = (await server.RefreshAsync()).Settings;
             var edited = CloneSettings(serverAtSave);
             if (directory is not null) edited.DefaultDownloadDirectory = directory.Text.Trim();
@@ -619,12 +628,50 @@ public sealed partial class MainWindow
             if (postDownload is not null) edited.PostDownloadCommand = string.IsNullOrWhiteSpace(postDownload.Text) ? null : postDownload.Text.Trim();
             RemoteSettingsRules.KeepServerValues(edited, serverAtSave);
             var serverResult = (await server.UpdateSettingsAsync(edited)).GetPayload<SettingsResult>();
-            if (!serverResult.Ok) return (serverResult.Error ?? $"{serverName} didn't take the settings.", ServerPage);
+            if (!serverResult.Ok) return ($"{serverResult.Error ?? $"{serverName} didn't take the settings."} Nothing was saved, on {serverName} or on this PC.", ServerPage);
             if (server == _connection)
             {
                 _settings = serverResult.Settings;
                 UpdateLimitButtons();
             }
+
+            // Then this PC: from its latest settings, so nothing changed elsewhere meanwhile is undone.
+            string? thisPcProblem = null;
+            try
+            {
+                var localLatest = CloneSettings((await _local.RefreshAsync()).Settings);
+                localLatest.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
+                localLatest.LaunchAtStartup = launch.IsChecked == true;
+                localLatest.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                localLatest.BrowserIntegrationEnabled = integration.IsChecked == true;
+                localLatest.ClipboardMonitoring = clipboard.IsChecked == true;
+                localLatest.ShowCompletionDialog = completionDialog.IsChecked == true;
+                localLatest.NotifyOnCompletion = notify.IsChecked == true;
+                localLatest.AutoCheckUpdates = autoUpdate.IsChecked == true;
+                localLatest.UpdateCheckIntervalHours = checkInterval;
+                localLatest.PlayCompletionSound = sound.IsChecked == true;
+                localLatest.EventSoundFiles = sounds;
+                var localResult = (await _local.UpdateSettingsAsync(localLatest)).GetPayload<SettingsResult>();
+                if (!localResult.Ok) thisPcProblem = localResult.Error ?? "This PC's Host didn't take them.";
+                else
+                {
+                    KeepLocalSettings(localResult.Settings);
+                    if (_uiState.DarkMode is not null)
+                    {
+                        _uiState.DarkMode = null;
+                        SaveUiState();
+                    }
+
+                    AppTheme.Use(localResult.Settings.Theme);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException or InvalidDataException)
+            {
+                thisPcProblem = "This PC's Host isn't connected.";
+            }
+
+            if (thisPcProblem is not null)
+                return ($"{serverName}'s options were saved, but this PC's weren't: {thisPcProblem}", ThisPcPage);
 
             var extractionSaveProblem = extraction is null ? null : await extraction.SaveAsync();
             return extractionSaveProblem is null ? (null, 0) : (extractionSaveProblem, extractionPageIndex);
