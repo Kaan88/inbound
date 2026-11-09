@@ -78,12 +78,12 @@ public sealed class NativeHostRegistrationTests
     }
 
     [Theory]
-    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Usable, true, "connected")]
+    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Usable, true, "on")]
     // Edge may not be installed, and a 0.4.0 install has no Edge key until the Host adds it.
-    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Absent, true, "connected")]
-    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Broken, true, "connected; Edge registration is broken")]
-    [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Usable, true, "connected; not registered for Chrome")]
-    [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Usable, true, "connected; Chrome registration is broken")]
+    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Absent, true, "on")]
+    [InlineData(NativeHostKeyState.Usable, NativeHostKeyState.Broken, true, "on; Edge registration is broken")]
+    [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Usable, true, "on; not registered for Chrome")]
+    [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Usable, true, "on; Chrome registration is broken")]
     [InlineData(NativeHostKeyState.Absent, NativeHostKeyState.Absent, false, "native host not registered")]
     [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Absent, false, "native host not registered")]
     [InlineData(NativeHostKeyState.Broken, NativeHostKeyState.Broken, false, "native host not registered")]
@@ -241,7 +241,7 @@ public sealed class NativeHostRegistrationTests
         Assert.Empty(store.Writes);
         var state = NativeHostRegistrar.Read(store);
         Assert.Equal(NativeHostKeyState.Broken, state.Edge);
-        Assert.Equal("connected; Edge registration is broken", state.IntegrationText(true));
+        Assert.Equal("on; Edge registration is broken", state.IntegrationText(true));
     }
 
     [Fact]
@@ -307,7 +307,7 @@ public sealed class NativeHostRegistrationTests
 
         Assert.Equal("denied", NativeHostRegistrar.TryRepair(store, null));
 
-        Assert.Equal("connected", NativeHostRegistrar.Read(store).IntegrationText(true));
+        Assert.Equal("on", NativeHostRegistrar.Read(store).IntegrationText(true));
     }
 
     [Fact]

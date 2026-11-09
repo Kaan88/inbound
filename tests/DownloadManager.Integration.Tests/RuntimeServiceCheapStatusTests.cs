@@ -45,7 +45,7 @@ public sealed partial class RuntimeServiceTests
         var status = ctx.Service.GetStatus();
         Assert.Equal(snapshot.Status.TotalJobs, status.TotalJobs);
         Assert.Equal(snapshot.Status.QueuedDownloads, status.QueuedDownloads);
-        Assert.Equal("connected", status.BrowserIntegration);
+        Assert.Equal("on", status.BrowserIntegration);
 
         await ctx.Service.PauseAllAsync();
     }

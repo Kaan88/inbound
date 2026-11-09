@@ -821,7 +821,7 @@ public sealed partial class MainWindow
             SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, mine.Theme))),
         };
         var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = mine.LaunchAtStartup };
-        var closeCompletely = new CheckBox { Content = "Closing the window ends it, to use less memory and power while closed", IsChecked = mine.CloseWindowCompletely };
+        var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = mine.CloseWindowCompletely };
         var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };
         var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = mine.ClipboardMonitoring };
         var completionDialog = new CheckBox { Content = "Show the download-complete window", IsChecked = mine.ShowCompletionDialog };

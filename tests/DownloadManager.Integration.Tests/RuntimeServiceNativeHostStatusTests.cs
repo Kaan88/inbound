@@ -15,13 +15,13 @@ public sealed partial class RuntimeServiceTests
 
         ctx.Service.NativeHostState = () => new NativeHostRegistrationState(NativeHostKeyState.Usable, NativeHostKeyState.Absent);
         Assert.True(ctx.Service.GetSnapshot().Status.NativeHostRegistered);
-        Assert.Equal("connected", ctx.Service.GetSnapshot().Status.BrowserIntegration);
+        Assert.Equal("on", ctx.Service.GetSnapshot().Status.BrowserIntegration);
 
         ctx.Service.NativeHostState = () => new NativeHostRegistrationState(NativeHostKeyState.Absent, NativeHostKeyState.Usable);
         Assert.True(ctx.Service.GetSnapshot().Status.NativeHostRegistered);
-        Assert.Equal("connected; not registered for Chrome", ctx.Service.GetSnapshot().Status.BrowserIntegration);
+        Assert.Equal("on; not registered for Chrome", ctx.Service.GetSnapshot().Status.BrowserIntegration);
 
         ctx.Service.NativeHostState = () => new NativeHostRegistrationState(NativeHostKeyState.Usable, NativeHostKeyState.Broken);
-        Assert.Equal("connected; Edge registration is broken", ctx.Service.GetSnapshot().Status.BrowserIntegration);
+        Assert.Equal("on; Edge registration is broken", ctx.Service.GetSnapshot().Status.BrowserIntegration);
     }
 }
