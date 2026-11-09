@@ -57,8 +57,8 @@ internal sealed class HosterWindow : Window
         _search.TextChanged += (_, _) => Fill();
         _downOnly.Click += (_, _) => Fill();
         _reload.Click += (_, _) => _ = LoadAsync();
-        _root.Loaded += (_, _) => _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
-        _root.ActualThemeChanged += (_, _) => _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
+        _root.Loaded += (_, _) => _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
+        _root.ActualThemeChanged += (_, _) => _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
         Content = _root;
         WindowLayout.ApplyChrome(this, _root);
         Closed += (_, _) => _open = null;

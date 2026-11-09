@@ -77,6 +77,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Before any window resolves the window brush; Resources is not ready in the constructor.
+        WindowLayout.UseSolidWindowsWithoutMica(Resources);
         // Files and programs opened from a window inherit the current directory; keep it out of
         // app\, or they hold that folder against updates for as long as they stay open.
         try

@@ -138,7 +138,7 @@ internal sealed class PackageWindow : Window
 
         void ApplyColors()
         {
-            _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
+            _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
             listFrame.BorderBrush = InboundTheme.Brush("InboundCardStrokeBrush", _root);
             listFrame.Background = InboundTheme.Brush("InboundCardBrush", _root);
             _ring.Background = InboundTheme.Brush("InboundProgressTrackBrush", _root);

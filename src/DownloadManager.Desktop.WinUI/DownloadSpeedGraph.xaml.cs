@@ -311,7 +311,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
         var label = new Border
         {
-            Background = InboundTheme.Brush("InboundChromeBrush", this),
+            Background = InboundTheme.Brush("InboundSurfaceBrush", this),
             BorderBrush = InboundTheme.Brush("InboundDividerBrush", this),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(3),

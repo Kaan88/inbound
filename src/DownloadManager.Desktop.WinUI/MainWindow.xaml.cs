@@ -80,6 +80,7 @@ public sealed partial class MainWindow : Window
         };
         _speedHistoryTimer.Start();
         InitializeLimitMenus();
+        WindowLayout.UseBackdrop(this);
         RootGrid.ActualThemeChanged += (_, _) =>
         {
             DarkModeMenuItem.IsChecked = RootGrid.ActualTheme == ElementTheme.Dark;

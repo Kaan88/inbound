@@ -12,7 +12,10 @@
             <!-- Single Inbound palette: every window/control resolves colors from here so dark and light stay consistent. -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="InboundChromeBrush" Color="#202020" />
+                    <!-- Mica shows through the window itself (InboundWindowBrush). App.xaml.cs makes it solid where Mica isn't
+                         available. Chrome is a faint layer over it; the surface under lists stays opaque for reading. -->
+                    <SolidColorBrush x:Key="InboundWindowBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="InboundChromeBrush" Color="#08FFFFFF" />
                     <SolidColorBrush x:Key="InboundSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="InboundDividerBrush" Color="#343434" />
                     <SolidColorBrush x:Key="InboundSecondaryTextBrush" Color="#A3A3A3" />
@@ -34,9 +37,11 @@
                     <!-- Fluent layers: a card or tile lifted off the window, and its 1px edge. Translucent white in dark. -->
                     <SolidColorBrush x:Key="InboundCardBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="InboundCardStrokeBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="InboundWindowFallbackBrush" Color="#202020" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="InboundChromeBrush" Color="#F3F3F3" />
+                    <SolidColorBrush x:Key="InboundWindowBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="InboundChromeBrush" Color="#80FFFFFF" />
                     <SolidColorBrush x:Key="InboundSurfaceBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="InboundDividerBrush" Color="#DADADA" />
                     <SolidColorBrush x:Key="InboundSecondaryTextBrush" Color="#666666" />
@@ -57,6 +62,7 @@
                     <SolidColorBrush x:Key="InboundStatusNeutralBrush" Color="#5F5F5F" />
                     <SolidColorBrush x:Key="InboundCardBrush" Color="#B3FFFFFF" />
                     <SolidColorBrush x:Key="InboundCardStrokeBrush" Color="#13000000" />
+                    <SolidColorBrush x:Key="InboundWindowFallbackBrush" Color="#F3F3F3" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 

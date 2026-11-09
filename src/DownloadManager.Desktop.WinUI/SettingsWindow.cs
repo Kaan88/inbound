@@ -62,9 +62,9 @@ internal sealed class SettingsWindow : Window
 
         void ApplyColors()
         {
-            _root.Background = InboundTheme.Brush("InboundSurfaceBrush", _root);
+            _root.Background = InboundTheme.Brush("InboundWindowBrush", _root);
             var chrome = InboundTheme.Brush("InboundChromeBrush", _root);
-            var divider = InboundTheme.Brush("InboundDividerBrush", _root);
+            var divider = InboundTheme.Brush("InboundCardStrokeBrush", _root);
             navBorder.Background = chrome; navBorder.BorderBrush = divider;
             footer.Background = chrome; footer.BorderBrush = divider;
         }

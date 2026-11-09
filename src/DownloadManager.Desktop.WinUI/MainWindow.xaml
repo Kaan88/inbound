@@ -6,7 +6,7 @@
     xmlns:local="using:DownloadManager.Desktop.WinUI"
     Title="Inbound Download Manager">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource InboundSurfaceBrush}">
+    <Grid x:Name="RootGrid" Background="{ThemeResource InboundWindowBrush}">
         <Grid.Resources>
             <DataTemplate x:Key="QueueFileTemplate">
                 <Grid ColumnSpacing="12" Padding="0,3" ToolTipService.ToolTip="{Binding FileName}">

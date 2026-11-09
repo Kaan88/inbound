@@ -85,7 +85,7 @@ public sealed class StatisticsWindow : Window
         frame.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
 
         AppTheme.Track(frame);
-        void ApplyBackground() => frame.Background = InboundTheme.Brush("InboundSurfaceBrush", frame);
+        void ApplyBackground() => frame.Background = InboundTheme.Brush("InboundWindowBrush", frame);
         frame.ActualThemeChanged += (_, _) => ApplyBackground();
         frame.Loaded += (_, _) => ApplyBackground();
         Content = frame;

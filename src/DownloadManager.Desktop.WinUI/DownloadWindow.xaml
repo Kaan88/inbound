@@ -5,7 +5,7 @@
     xmlns:local="using:DownloadManager.Desktop.WinUI">
     <!-- UI.R29 direction B: a header, Overview / Connections / Options tabs, and the actions at the bottom right. -->
     <Grid x:Name="Root" Padding="20,16,20,16" RowSpacing="12"
-          Background="{ThemeResource InboundSurfaceBrush}">
+          Background="{ThemeResource InboundWindowBrush}">
         <Grid.Resources>
             <Style x:Key="TileStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource InboundCardBrush}" />

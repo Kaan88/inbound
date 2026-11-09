@@ -11,7 +11,7 @@
 
         <!-- This panel's real height is what animates, so the list moves with it and no space is
              ever left blank. The plot keeps its size and is clipped, so it is not redrawn per frame. -->
-        <Grid x:Name="PlotPanel" Height="85" Background="{ThemeResource InboundSurfaceBrush}"
+        <Grid x:Name="PlotPanel" Height="85" Background="{ThemeResource InboundCardBrush}"
               BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
             <Canvas x:Name="Plot" Height="84" Margin="8,0" VerticalAlignment="Top" Background="Transparent"
                     AutomationProperties.Name="Download speed history for this session" />
