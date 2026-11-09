@@ -120,10 +120,34 @@ internal static partial class WebUiForm
         return all;
     }
 
+    /// <summary>
+    /// U-WL-10: while it runs for this PC only, what another device will type once Windows Firewall allows it: this
+    /// PC's name and the names it is also reachable as, with the port. The Host sends its network addresses only once
+    /// they work, so the name is what can be shown before.
+    /// </summary>
+    public static List<string> AddressesOnceAllowed(WebUiStatusDto status, string? machineName)
+    {
+        if (status is not { State: WebUiStates.Running, LocalOnly: true }) return [];
+        var all = new List<string>();
+        foreach (var name in new[] { machineName }.Concat(status.AlsoReachableAs))
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            var address = $"http://{name.Trim().ToLowerInvariant()}:{status.Port}/";
+            if (!all.Contains(address, StringComparer.OrdinalIgnoreCase)) all.Add(address);
+        }
+
+        return all;
+    }
+
+    /// <summary>The address a browser on this PC uses, while it runs: the bridge always listens on this PC's loopback.</summary>
+    public static string? ThisPcAddress(WebUiStatusDto status)
+        => status.State == WebUiStates.Running && status.Port is >= WebUiForm.MinPort and <= WebUiForm.MaxPort ? $"http://127.0.0.1:{status.Port}/" : null;
+
     public static (string Text, bool IsProblem) StateText(WebUiStatusDto status) => status.State switch
     {
         WebUiStates.Starting => ("Starting…", false),
-        WebUiStates.Running when status.LocalOnly => ("On, but only this PC can reach it until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.", false),
+        // U-WR-15: the address is shown before the firewall step, for this PC at least.
+        WebUiStates.Running when status.LocalOnly => ($"On, at {ThisPcAddress(status)} on this PC, but only this PC can reach it until Windows Firewall allows it (see Windows Firewall below). Other devices then use this PC's network address with port {status.Port}.", false),
         WebUiStates.Running => ("On. Other devices on your network can open it.", false),
         WebUiStates.Failed => ($"It couldn't start. {FailureWords(status.Error)}", true),
         _ => ("Off. Nothing is running and no port is open.", false),

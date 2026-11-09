@@ -41,13 +41,24 @@ public sealed partial class DownloadWindow : Window
         WindowPlacement.Track(this, "progress", restoreSize: false);
         var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        Title = "Download status — Inbound Download Manager";
+        Title = ServerNames.ForWindow("Download status — Inbound Download Manager", _connection.Target);
         WindowLayout.ApplyChrome(this, Root);
+        // U-WL-17: Enter opens the finished file, the window's default action.
+        var enter = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Enter };
+        enter.Invoked += (_, args) =>
+        {
+            if (_job?.State != "completed" || OpenButton.Visibility != Visibility.Visible) return;
+            args.Handled = true;
+            OpenPath(false);
+        };
+        Root.KeyboardAccelerators.Add(enter);
+        Root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
         _connection.HostExiting += () => DispatcherQueue.TryEnqueue(() => Application.Current.Exit());
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
             _settings = snapshot.Settings;
+            if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
             // Another server's theme is its own; this window keeps this PC's.
             if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
             _globalShowCompletion = snapshot.Settings.ShowCompletionDialog;
@@ -209,6 +220,9 @@ public sealed partial class DownloadWindow : Window
             Tabs.Visibility = ConnectionsPage.Visibility = OptionsPage.Visibility = Visibility.Collapsed;
             OverviewPage.Visibility = Visibility.Visible;
             WindowLayout.ResizeForDpi(this, 600, 500);
+            // The default action, ready for Enter or Space (U-WL-17).
+            if (OpenButton.Visibility == Visibility.Visible || RemoteDataRules.MayUseFiles(_connection.IsRemote))
+                DispatcherQueue.TryEnqueue(() => { if (OpenButton.Visibility == Visibility.Visible) OpenButton.Focus(FocusState.Programmatic); });
         }
 
         var percent = JobDetailsPanel.Percent(job);
@@ -219,10 +233,8 @@ public sealed partial class DownloadWindow : Window
         var stateWord = complete ? "Complete" : JobViewModel.ToDisplayState(job.State);
         Heading.Text = stateWord;
         SetChip(StateBrush(job));
-        Title = complete ? $"Download complete — {displayName}"
-            : failed ? $"Failed — {displayName}"
-            : paused ? $"Paused · {percent:0}% — {displayName}"
-            : $"{percent:0.0}% — {displayName}";
+        // U-WL-16: a percentage only while it moves and the size is known, otherwise the state; named for another server.
+        Title = ServerNames.ForWindow(ShellWords.ProgressTitle(job.State, complete, job.TotalBytes is > 0 ? percent : null, displayName, JobViewModel.ToDisplayState(job.State)), _connection.Target);
         FileNameText.Text = displayName;
         SubText.Text = complete ? Path.GetDirectoryName(job.FinalFilePath) ?? string.Empty
             : paused && job.ReceivedBytes > 0 ? $"Paused · {Bytes(job.ReceivedBytes)} kept"
@@ -233,16 +245,20 @@ public sealed partial class DownloadWindow : Window
         var hasAddress = JobAddress.HasAddress(job);
         UrlHeader.Visibility = UrlText.Visibility = hasAddress ? Visibility.Visible : Visibility.Collapsed;
         UrlHeader.Text = JobAddress.Label(job);
+        AutomationProperties.SetName(UrlText, JobAddress.Label(job));
         UrlText.Text = JobAddress.Shown(job);
         ToolTipService.SetToolTip(UrlText, UrlText.Text.Length > 0 ? UrlText.Text : null);
         SavedHeader.Text = complete ? "Saved as" : "Save to";
         SavedText.Text = complete || string.IsNullOrEmpty(job.DestinationDirectory) ? job.FinalFilePath : job.DestinationDirectory;
+        AutomationProperties.SetName(SavedText, complete ? "The file saved as" : "Save to");
         CompletionPath.Text = job.FinalFilePath;
         var resume = job.ResumeSupported switch { true => "Supported", false => "Not supported", null => "Unknown" };
         ResumeText.Text = resume;
         // A failure has Resume as a tile of its own.
         ResumeHeader.Visibility = ResumeText.Visibility = complete || failed ? Visibility.Collapsed : Visibility.Visible;
         Details.Show(job);
+        // A finished file has no progress to show: the full bar only filled the middle (U-WL-17).
+        if (complete) SegmentMap.Visibility = OverallFooter.Visibility = OverviewMap.Visibility = Visibility.Collapsed;
 
         // The ring: blue while it runs, amber paused, red failed, green with a check when done.
         Ring.Foreground = InboundTheme.Brush(complete ? "InboundStatusDoneBrush" : failed ? "InboundStatusFailedBrush"
@@ -295,7 +311,8 @@ public sealed partial class DownloadWindow : Window
             }
             else Tile(Tile2Label, Tile2Value, Tile2Unit, "Speed", "—");
             var running = job.State == "downloading";
-            Tile(Tile3Label, Tile3Value, Tile3Unit, "Time left", running ? ProgressOverviewText.Duration(job.EstimatedRemaining) : "—");
+            // U-WL-15: the list's own words for time left, such as 12m 4s.
+            Tile(Tile3Label, Tile3Value, Tile3Unit, "Time left", running ? TimeLeft(job.EstimatedRemaining) : "—");
             Tile(Tile4Label, Tile4Value, Tile4Unit, "Connections", running ? job.ActiveConnections.ToString(CultureInfo.CurrentCulture) : "—",
                 running && job.RequestedConnections > 0 ? $"of {job.RequestedConnections} busy" : string.Empty);
         }
@@ -303,13 +320,16 @@ public sealed partial class DownloadWindow : Window
         else Tile1Value.ClearValue(TextElement.ForegroundProperty);
 
         // The failure first: what went wrong, then what can be done about it.
-        FailureBar.IsOpen = failed && job.Failure is not null;
-        if (failed && job.Failure is { } reason)
+        // U-WL-3: the Host's reason with any address taken out.
+        var failureMessage = JobNotes.FailureMessage(job);
+        FailureBar.IsOpen = failureMessage is not null;
+        if (failureMessage is not null && job.Failure is { } reason)
         {
-            FailureBar.Title = reason.Message;
+            FailureBar.Title = failureMessage;
             var after = new List<string>();
             if (job.QueueRetryCount > 0) after.Add(job.QueueRetryCount == 1 ? "It was retried once." : $"It was retried {job.QueueRetryCount} times.");
             if (job.CanResume && job.ReceivedBytes > 0 && reason.IsResumable) after.Add($"Retry continues from {percent:0}%.");
+            else if (job.CanResume) after.Add("Retry tries the download again.");
             FailureBar.Message = string.Join(" ", after);
         }
 
@@ -327,7 +347,7 @@ public sealed partial class DownloadWindow : Window
         var line = string.Join(" · ", new[]
         {
             rate > 0 ? $"{Bytes((long)rate)}/s" : null,
-            job.State == "downloading" && job.EstimatedRemaining is { } left ? ProgressOverviewText.Duration(left) : null,
+            job.State == "downloading" && job.EstimatedRemaining is { } left ? TimeLeft(left) : null,
             paused ? $"Paused · resume {(job.ResumeSupported == true ? "supported" : job.ResumeSupported == false ? "not supported" : "unknown")}" : null,
             failed || job.State is "queued" or "connecting" or "cancelled" ? stateWord : null,
         }.Where(part => part is not null));
@@ -346,11 +366,14 @@ public sealed partial class DownloadWindow : Window
         ConnectionsNote.Visibility = job.IsTerminal ? Visibility.Visible : Visibility.Collapsed;
         ConnectionsNote.Text = "Connections are listed while the download runs or is paused.";
 
+        // Finished: where the file is, and for another server that it is on that computer (U-WR-1).
         var completionText = complete && job.FileRemovedAfterExtraction ? JobNotes.NoFile(JobNotes.Note(job))
-            : complete || failed ? string.Empty
+            : complete ? ServerNames.Completed(_connection.Target)
+            : failed ? (failureMessage is null && job.CanResume ? "Retry tries the download again." : string.Empty)
             : paused ? "The download is paused. Resume it or close this window."
             : "Closing this window will not stop the download.";
-        if (_connected) Notice.Text = failed && job.Failure is not null ? string.Empty : job.Failure?.Message ?? completionText;
+        // A failure's reason is in the bar above, so the notice doesn't repeat it.
+        if (_connected) Notice.Text = failureMessage is not null ? completionText : job.Failure?.Message ?? completionText;
 
         _updatingControls = true;
         try
@@ -411,6 +434,8 @@ public sealed partial class DownloadWindow : Window
 
     private static string Bytes(long bytes) => JobDetailsPanel.Bytes(bytes);
 
+    private static string TimeLeft(TimeSpan? duration) => DurationText.TimeLeft(duration) is { Length: > 0 } words ? words : "—";
+
     private async Task RunAsync(Func<Task<IpcMessage>> action)
     {
         try
@@ -470,7 +495,7 @@ public sealed partial class DownloadWindow : Window
             Title = "Cancel download?",
             Content = "Cancel this transfer and delete its partial file?",
             PrimaryButtonText = "Cancel download",
-            CloseButtonText = "Keep downloading",
+            CloseButtonText = _job?.State is "paused" or "queued" or "failed" ? "Keep it" : "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(confirm) == ContentDialogResult.Primary && _job?.CanCancel == true)

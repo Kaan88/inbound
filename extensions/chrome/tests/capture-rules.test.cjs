@@ -138,10 +138,30 @@ test('EXT.R2: the popup shows the newest 20 downloads of every kind', () => {
   assert.deepEqual(jobs.latestJobs([{ fileName: 'no id' }, { id: '' }]), []);
 });
 
+test('UI.B19: Delete asks about the file only for a finished download, and always removes partial data', () => {
+  assert.equal(jobs.deleteAsksAboutFile({ state: 'completed' }), true);
+  assert.equal(jobs.deleteFileFor({ state: 'completed' }, false), false);
+  assert.equal(jobs.deleteFileFor({ state: 'completed' }, true), true);
+  for (const state of ['downloading', 'paused', 'failed', 'cancelled', 'queued']) {
+    assert.equal(jobs.deleteAsksAboutFile({ state }), false, state);
+    assert.equal(jobs.deleteFileFor({ state }, false), true, state);
+  }
+});
+
 test('each download offers only what the app says it allows, and always Delete', () => {
   assert.deepEqual(jobs.actionsFor({ state: 'downloading', canPause: true, canResume: false }), ['pause', 'remove']);
   assert.deepEqual(jobs.actionsFor({ state: 'paused', canPause: false, canResume: true }), ['resume', 'remove']);
   assert.deepEqual(jobs.actionsFor({ state: 'failed', canPause: false, canResume: true }), ['retry', 'remove']);
   assert.deepEqual(jobs.actionsFor({ state: 'completed', canPause: false, canResume: true }), ['remove']);
-  assert.deepEqual(jobs.JOB_ACTION_MESSAGES, { pause: 'job.pause', resume: 'job.resume', retry: 'job.retry', remove: 'job.remove' });
+  assert.deepEqual(jobs.JOB_ACTION_MESSAGES, { start: 'job.resume', pause: 'job.pause', resume: 'job.resume', retry: 'job.retry', remove: 'job.remove' });
+});
+
+test('U-EX-8: a "Download later" item, or one waiting for its queue, can be started from the popup', () => {
+  // The Host says a queued job can be paused (CanPause includes Queued); one waiting for the user gets Start instead.
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'later', canPause: true, canResume: false }), ['start', 'remove']);
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'queue', canPause: true, canResume: false }), ['start', 'remove']);
+  // Queued to start now: it starts by itself, so it can be stopped.
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'startNow', canPause: true, canResume: false }), ['pause', 'remove']);
+  assert.equal(jobs.groupLabel('server', 'home-server'), 'home-server (server)');
+  assert.equal(jobs.groupLabel('local', 'home-server'), 'This PC');
 });

@@ -266,24 +266,11 @@ internal sealed class AddLinksDialog
         });
     }
 
-    /// <summary>What a destination that isn't a full path is told: on this PC's drive letters, on a server either kind.</summary>
-    internal static string FullPathWords => ShownServer.IsRemote
-        ? "The destination has to be a full path on the server, such as /downloads or D:\\Downloads."
-        : "The destination has to be a full path, such as D:\\Downloads.";
+    /// <summary>What a destination that isn't a full path is told, in the shown Host's own path style.</summary>
+    internal static string FullPathWords => $"The destination has to be {ServerPaths.FullFolderWords(ShownServer.PathStyle)}.";
 
-    /// <summary>A full path on this PC, or on the server the window shows (<see cref="ServerPaths.IsFull"/>).</summary>
-    internal static bool IsFullPath(string folder)
-    {
-        if (ShownServer.IsRemote) return ServerPaths.IsFull(folder);
-        try
-        {
-            return Path.IsPathFullyQualified(folder);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+    /// <summary>A full path on this PC, or on the server the window shows, by its rules (<see cref="ShownServer.PathStyle"/>).</summary>
+    internal static bool IsFullPath(string folder) => ServerPaths.IsFull(folder, ShownServer.PathStyle);
 
     /// <summary>A folder box with Browse and the line that says what is wrong with it. Used wherever a provider's work gets a destination.</summary>
     internal static (UIElement Row, TextBox Box, StatusLine Error) DestinationRow(string initial, IntPtr windowHandle)

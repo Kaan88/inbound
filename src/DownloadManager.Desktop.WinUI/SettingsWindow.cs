@@ -135,7 +135,7 @@ internal sealed class SettingsWindow : Window
         {
             try
             {
-                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), startInDownloads: false) is { } folder) box.Text = folder;
+                if (await Pickers.PickFolderAsync(WinRT.Interop.WindowNative.GetWindowHandle(this), startInDownloads: false, start: box.Text) is { } folder) box.Text = folder;
             }
             catch (Exception ex)
             {

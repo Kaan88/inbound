@@ -126,7 +126,7 @@
         {@const path = `${prefix}${index}`}
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover focus:bg-hover focus:outline-none disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+          class="menu-entry flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-hover focus:bg-hover focus:outline-none disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           style="padding-left: {12 + depth * 16}px"
           role={item.checked !== undefined ? 'menuitemradio' : 'menuitem'}
           aria-checked={item.checked}
@@ -149,3 +149,9 @@
   {/snippet}
   {@render entries(visible, 0, '')}
 </div>
+
+<style>
+  /* The key-moved entry is marked as clearly as any other focused control (U-WU-18). */
+  .menu-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (pointer: coarse) { .menu-entry { min-height: 44px; } }
+</style>

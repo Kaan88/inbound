@@ -14,7 +14,7 @@ namespace DownloadManager.Desktop.WinUI;
 internal sealed record ContainerImportAnswer(ContainerOutcomes? Outcomes, string? Folder, bool Stopped, bool CouldNotOpen = false);
 
 /// <summary>
-/// Import JD Container. It opens straight away and reads the file on a connection of its own, and closing it
+/// Import Link Container (U-WL-22: once "Import JD Container"). It opens straight away and reads the file on a connection of its own, and closing it
 /// closes that connection, which is what cancels the call. The dialog only ever holds what the Host says:
 /// names, words, and that a password is stated. It never looks at the file: the path goes to the Host, which
 /// refuses a network path before anything asks about it, and that refusal is what gets shown.
@@ -80,7 +80,7 @@ internal sealed class ContainerImportDialog
         {
             XamlRoot = root,
             RequestedTheme = theme,
-            Title = "Import JD Container",
+            Title = "Import Link Container",
             Content = new ScrollViewer
             {
                 Padding = InboundTheme.DialogScrollPadding,

@@ -497,6 +497,8 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Equal("local_network", final.ErrorCode);
         var metadata = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.FileMetadata, new FileMetadataRequest { Url = url })).GetPayload<FileMetadataResult>();
         Assert.Equal(CallerScope.LocalAddressRefused, metadata.Error);
+        // U-WR-2: said before Start, so the dialog can turn Start off rather than fail after it.
+        Assert.True(metadata.AddRefused);
 
         var job = (await web.Service.AddJobAsync(Later("http://203.0.113.10/b.bin", Inside, "b.bin"))).Job!;
         var refresh = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobRefreshUrl, new JobRefreshUrlRequest { JobId = job.Id, Url = url, ExplicitDirect = true })).GetPayload<JobActionResponse>();

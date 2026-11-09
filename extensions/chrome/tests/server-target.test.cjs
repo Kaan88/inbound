@@ -85,7 +85,7 @@ test('EXT.R1: this PC stays the default for automatic sending after pairing', as
 });
 
 for (const [name, handler, reason] of [
-  ['no answer', new TypeError('Failed to fetch'), /not answering/],
+  ['no answer', new TypeError('Failed to fetch'), /Could not connect to the Inbound server .*\(the browser said: Failed to fetch\)/],
   ['a revoked pairing', { status: 401, body: { ok: false, error: 'Pair it again.' } }, /Pair it again/],
   ['a refusal', { accepted: false, error: 'That folder is outside the server\'s download folders.' }, /outside the server/],
 ]) {
@@ -129,7 +129,9 @@ test('EXT.R1: "ask each time" offers this PC and the server, each with its own d
     const listing = sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/downloads' }, ownPage('handoff.html'));
     assert.equal((await listing).ok, true);
     assert.deepEqual(server.of('folders.browse').at(-1).body.payload, { path: '/downloads' });
-    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('popup.html'))).ok, false);
+    // EXT.R7: the popup's ask form lists them too; Settings, or any other page, may not.
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('options.html'))).ok, false);
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.browseServerFolders', path: '/' }, ownPage('popup.html'))).ok, true);
 
     const confirmed = await sendRuntimeMessage(harness,
       { type: 'dm.confirmHandoff', id, destination: '/downloads/music', startMode: 'now', target: 'server' }, ownPage('handoff.html'));
@@ -302,7 +304,7 @@ test('EXT.R1: the popup keeps one place\'s downloads when the other does not ans
     assert.equal(listed.ok, true);
     assert.deepEqual(listed.jobs.map(j => j.fileName), ['here.zip']);
     assert.equal(listed.groups[1].ok, false);
-    assert.match(listed.groups[1].error, /not answering/);
+    assert.match(listed.groups[1].error, /Could not connect to the Inbound server/);
   });
 });
 
@@ -406,5 +408,29 @@ test('Download All: with a server paired each target brings its own default fold
       destination: '', startMode: 'now', target: 'server' }, ownPage('batch.html'));
     assert.equal(sent.ok, true);
     assert.equal(server.of('handoff.request')[0].body.payload.destinationDirectory, undefined);
+  });
+});
+
+test('U-EX-4: the badge shows "!" only after a request to the server failed, and clears when one is answered', async () => {
+  const { harness, log } = paired({ ...catching, defaultTarget: 'server' });
+  const handlers = {};
+  const server = fakeServer(handlers);
+  await withServer(harness, server, async () => {
+    // A worker that just started has asked the server nothing: that is not "down".
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.notEqual(log.badge.at(-1), '!', 'no "!" before any request');
+    assert.equal(log.badge.includes('!'), false);
+    // A request fails (the popup's list, not a status check): the badge says so at once.
+    handlers['jobs.query'] = new TypeError('Failed to fetch');
+    const failed = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+    await answerNative(harness, 'jobs.query', { jobs: [] });
+    await failed;
+    assert.equal(log.badge.at(-1), '!');
+    // The next request is answered: the "!" goes, again without a status check.
+    handlers['jobs.query'] = { jobs: [] };
+    const answered = sendRuntimeMessage(harness, { type: 'dm.jobs' }, ownPage('popup.html'));
+    await answerNative(harness, 'jobs.query', { jobs: [] });
+    await answered;
+    assert.equal(log.badge.at(-1), '');
   });
 });

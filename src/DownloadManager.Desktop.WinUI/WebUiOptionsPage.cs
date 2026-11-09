@@ -19,15 +19,16 @@ internal sealed class WebUiOptionsPage
     private readonly CheckBox _enable = new() { Content = "Let other devices on my network control this PC's downloads" };
     private readonly StatusLine _state = new("Web UI state");
     private readonly NumberBox _port = SettingsWindow.Number("Port", WebUiForm.DefaultPort, WebUiForm.MinPort, WebUiForm.MaxPort);
-    private readonly TextBox _names = new() { Header = "Also reachable as", PlaceholderText = "nas, nas.example.com", MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+    // U-WR-15: fixed widths; sized to their headers they were narrower than what is typed in them.
+    private readonly TextBox _names = new() { Header = "Also reachable as", PlaceholderText = "nas, nas.example.com", Width = 420, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly TextBlock _addresses = new() { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Visibility = Visibility.Collapsed };
     private readonly TextBlock _addressesHint = SettingsWindow.Hint("Type one of these in the browser on the other device.");
     private readonly TextBlock _localOnlyHint = SettingsWindow.Hint("Other devices can't reach the web UI until Windows Firewall allows it (see Windows Firewall below). Open in browser works on this PC.");
     private readonly Button _openInBrowser = new() { Content = "Open in browser", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _openResult = new("Open in browser result");
     private readonly StatusLine _passwordState = new("Web UI password status");
-    private readonly PasswordBox _newPassword = new() { Header = "New password", PasswordRevealMode = PasswordRevealMode.Hidden, MaxWidth = 320, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly PasswordBox _repeatPassword = new() { Header = "Type it again", PasswordRevealMode = PasswordRevealMode.Hidden, MaxWidth = 320, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly PasswordBox _newPassword = new() { Header = "New password", PasswordRevealMode = PasswordRevealMode.Hidden, Width = 320, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly PasswordBox _repeatPassword = new() { Header = "Type it again", PasswordRevealMode = PasswordRevealMode.Hidden, Width = 320, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly Button _setPassword = new() { Content = "Set password", MinWidth = 92, IsEnabled = false };
     private readonly StatusLine _passwordResult = new("Web UI password result");
     private readonly StatusLine _firewallState = new("Windows Firewall status");
@@ -103,17 +104,19 @@ internal sealed class WebUiOptionsPage
         [
             _loadStatus.Text,
             _tryAgain,
-            _enable,
-            _state.Text,
+            // U-WL-10: in the order they are done. The box needs a password, so the password comes first.
             SettingsWindow.Hint("A browser on another device opens an address below and signs in with the password. From there it can add, pause and remove downloads and change speed limits and queues, within the folders Inbound already uses. It can't run programs on this PC. Nothing runs while the box is off."),
-            _port,
-            SettingsWindow.Section("Password"),
+            SettingsWindow.Section("1. Password"),
             _passwordState.Text,
             _newPassword,
             _repeatPassword,
             passwordButtons,
             _passwordResult.Text,
             SettingsWindow.Hint($"At least {WebUiForm.MinPasswordLength} characters. It is set only here."),
+            SettingsWindow.Section("2. Turn it on"),
+            _enable,
+            _state.Text,
+            _port,
             SettingsWindow.Section("Addresses"),
             _names,
             SettingsWindow.Hint("Names that other devices use for this PC, such as nas or nas.local. Separate them with commas."),
@@ -315,9 +318,15 @@ internal sealed class WebUiOptionsPage
         _enable.IsEnabled = status.HasPassword || _enable.IsChecked == true;
 
         var addresses = WebUiForm.AddressesToType(status);
-        _addresses.Text = string.Join(Environment.NewLine, addresses);
-        _addresses.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        _addressesHint.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // U-WL-10: before the firewall step, the addresses that will work once it is done.
+        var later = addresses.Count == 0 ? WebUiForm.AddressesOnceAllowed(status, Environment.MachineName) : [];
+        var shown = addresses.Count > 0 ? addresses : later;
+        _addresses.Text = string.Join(Environment.NewLine, shown);
+        _addresses.Visibility = shown.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _addressesHint.Text = later.Count > 0
+            ? "Once Windows Firewall allows it, type one of these in the browser on the other device."
+            : "Type one of these in the browser on the other device.";
+        _addressesHint.Visibility = shown.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         _localOnlyHint.Visibility = status is { State: WebUiStates.Running, LocalOnly: true } ? Visibility.Visible : Visibility.Collapsed;
         RenderFirewall();
         RenderButtons();

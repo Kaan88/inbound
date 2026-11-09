@@ -255,7 +255,7 @@ public sealed partial class MainWindow
             .Concat(packages.SelectMany(ArchiveSetsOfPackageRow))
             .ToList();
         (Guid, string)? alone = packages is [var package] && JobsList.SelectedItems.Count == 1 ? (package.Id, package.FileName) : null;
-        return ArchiveRules.Plan(files, others, alone, _remote.State.IsConnected);
+        return ArchiveRules.Plan(files, others, alone, _remote.State.IsConnected, ShownServer.PathStyle);
     }
 
     private List<ArchiveSetDto> ArchiveSetsOfPackageRow(JobViewModel row)
@@ -589,7 +589,7 @@ public sealed partial class MainWindow
         row.Children.Add(browse);
         browse.Click += async (_, _) =>
         {
-            if (await ServerFolderWindow.PickAsync(target, folder.Text) is { } chosen) folder.Text = chosen;
+            if (await ServerFolderWindow.PickAsync(target, WinRT.Interop.WindowNative.GetWindowHandle(this), folder.Text) is { } chosen) folder.Text = chosen;
         };
         var panel = new StackPanel { Spacing = 10, MinWidth = 440 };
         panel.Children.Add(new TextBlock { Text = $"The archive is extracted on {target.Name}, from one of its folders.", TextWrapping = TextWrapping.Wrap });

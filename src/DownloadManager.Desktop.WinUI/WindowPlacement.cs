@@ -54,6 +54,51 @@ internal static class WindowPlacement
         window.Closed += (_, _) => { timer.Stop(); Save(key, appWindow); };
     }
 
+    // Windows moved off another of the app's windows when they opened: where to, and where from (one per process here).
+    private static readonly Dictionary<ulong, (PointInt32 To, PointInt32 From)> Cascaded = new();
+
+    /// <summary>
+    /// Shows a window of which several can be open at once, each in its own process (progress, package, completion),
+    /// off the app's other windows (<see cref="WindowCascade"/>, U-WL-4). Several finishing together start together,
+    /// so one at a time places and shows itself, under a lock all of them share, and each sees the ones shown before it.
+    /// The move is not remembered: while the window stays where it was put, the place it came from is what is saved.
+    /// </summary>
+    public static void ActivateCascaded(Window window)
+    {
+        var appWindow = window.AppWindow;
+        Mutex? gate = null;
+        var owned = false;
+        try
+        {
+            gate = new Mutex(false, $"Local\\DownloadManager.UI.Cascade.{PipeNames.CurrentUserKey()}");
+            try
+            {
+                owned = gate.WaitOne(TimeSpan.FromSeconds(3));
+            }
+            catch (AbandonedMutexException)
+            {
+                owned = true;
+            }
+
+            // On the main window's screen first; that place, not the cascade's step from it, is what is remembered.
+            WindowCascade.OntoMainScreen(window);
+            var from = appWindow.Position;
+            WindowCascade.Apply(window);
+            var to = appWindow.Position;
+            if (to.X != from.X || to.Y != from.Y) Cascaded[appWindow.Id.Value] = (to, from);
+            window.Activate();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+        {
+            window.Activate();
+        }
+        finally
+        {
+            if (owned) gate?.ReleaseMutex();
+            gate?.Dispose();
+        }
+    }
+
     private static void Save(string key, AppWindow appWindow)
     {
         try
@@ -63,10 +108,14 @@ internal static class WindowPlacement
             if (presenter?.State == OverlappedPresenterState.Minimized) return;
             var maximized = presenter?.State == OverlappedPresenterState.Maximized;
             var all = Load();
+            // Still where the cascade put it: the place it came from, so windows don't drift down the screen.
+            var position = Cascaded.TryGetValue(appWindow.Id.Value, out var moved) && moved.To.X == appWindow.Position.X && moved.To.Y == appWindow.Position.Y
+                ? moved.From
+                : appWindow.Position;
             // A maximized window keeps its last normal bounds so un-maximizing restores them.
             var bounds = maximized && all.TryGetValue(key, out var previous)
                 ? previous with { Maximized = true }
-                : new Placement(appWindow.Position.X, appWindow.Position.Y, appWindow.Size.Width, appWindow.Size.Height, maximized);
+                : new Placement(position.X, position.Y, appWindow.Size.Width, appWindow.Size.Height, maximized);
             all[key] = bounds;
             var path = FilePath;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

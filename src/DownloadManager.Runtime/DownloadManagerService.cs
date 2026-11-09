@@ -169,7 +169,7 @@ public sealed partial class DownloadManagerService
         }
 
         await ScrubRecentUrlsAsync(cancellationToken).ConfigureAwait(false);
-        ScanOrphanPartFiles();
+        ScanOrphanPartFiles(removeEmptyQuarantine: true);
         // A crash can land between a job's final save and its package's, so this may have news.
         await AdoptUntrackedPackagesAsync(cancellationToken).ConfigureAwait(false);
         await AnnouncePackageCompletionsAsync(cancellationToken).ConfigureAwait(false);
@@ -357,7 +357,7 @@ public sealed partial class DownloadManagerService
     {
         if (!TryValidateUrl(request.Url, out var uri, out var error) || uri.Scheme is not ("http" or "https"))
             return new FileMetadataResult { Error = string.IsNullOrWhiteSpace(error) ? "File information is available for HTTP/HTTPS URLs." : error };
-        if (caller is not null && CallerScope.DescribeAddress(request.Url) is { } refused) return new FileMetadataResult { Error = refused };
+        if (caller is not null && CallerScope.DescribeAddress(request.Url) is { } refused) return new FileMetadataResult { Error = refused, AddRefused = true };
         if (!TryCopyHeaders(request.Headers, out var headers, out error)) return new FileMetadataResult { Error = error };
         if (_engine is not IFileMetadataReader reader) return new FileMetadataResult { Error = "This engine cannot preview file information." };
         if (!await _metadataGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
@@ -604,9 +604,11 @@ public sealed partial class DownloadManagerService
         }
 
         string finalPath;
+        List<string> madeFolders;
         try
         {
-            Directory.CreateDirectory(destination);
+            // UI.B19: a provider file's path folders below its package's folder are recorded as made for it.
+            madeFolders = CreateFolderRecordingMade(destination, remote?.GivenFolder);
             finalPath = ResolveFinalPath(destination, fileName, conflictPolicy);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -649,6 +651,8 @@ public sealed partial class DownloadManagerService
             CategoryId = categoryId,
             CategoryIsAutomatic = string.IsNullOrWhiteSpace(request.CategoryId),
             DestinationDirectory = destination,
+            MadeFoldersBase = remote?.GivenFolder,
+            MadeFolders = madeFolders,
             FinalFilePath = finalPath,
             PartFilePath = string.Empty,
             StartMode = startMode,
@@ -825,6 +829,15 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>
+    /// Whether a queue start tries this failed download again: the queue would have retried it by itself. A retry that
+    /// is already waiting was counted when it was set, so it runs even when that used the last one.
+    /// </summary>
+    private static bool QueueRetriesFailedLocked(DownloadJob job, DownloadQueue queue)
+        => job.State == DownloadState.Failed && !job.IsTerminal && job.QueueProcessing &&
+           job.Failure?.Kind != FailureKind.VerificationFailed &&
+           (job.QueueRetryAt is not null || queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit);
+
+    /// <summary>
     /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
     /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
     /// </summary>
@@ -853,6 +866,7 @@ public sealed partial class DownloadManagerService
             RequestStopLocked(runtime);
 
             runtime.Job.QueueRetryAt = null;
+            runtime.Job.PausedByUser = true;
             runtime.Job.State = DownloadState.Paused;
             runtime.Job.BytesPerSecond = null;
             runtime.Job.EstimatedRemaining = null;
@@ -944,6 +958,7 @@ public sealed partial class DownloadManagerService
             runtime.CancelRequested = false;
             runtime.CancelledForRemoval = false;
             runtime.Job.QueueRetryAt = null;
+            runtime.Job.PausedByUser = false;
             runtime.Job.State = DownloadState.Queued;
             runtime.Job.StartMode = StartMode.StartNow;
             runtime.Job.Failure = null;
@@ -981,6 +996,7 @@ public sealed partial class DownloadManagerService
 
             runtime.CancelRequested = true;
             runtime.DeleteOnCancel = deleteFile;
+            runtime.CancelledBy = caller;
             runtime.Job.DeleteFileOnCancel = deleteFile;
             runtime.Job.QueueRetryAt = null;
             runtime.Job.State = DownloadState.Cancelled;
@@ -996,6 +1012,9 @@ public sealed partial class DownloadManagerService
         if (deleteFile)
         {
             await DeletePayloadAsync(runtime.Job, includeFinal: true, cancellationToken).ConfigureAwait(false);
+            // UI.B19. Its data is gone, so the folders made for it aren't needed until it starts again, which makes
+            // them again. One still stopping takes them away itself once it has stopped (it could still be writing).
+            if (!IsRunning(runtime)) await RemoveEmptyFoldersMadeForAsync(runtime.Job, caller, stillListed: true).ConfigureAwait(false);
         }
 
         await PersistAsync(runtime, cancellationToken).ConfigureAwait(false);
@@ -1021,7 +1040,7 @@ public sealed partial class DownloadManagerService
                 inPackage = _settings.DownloadGroups.Any(group => group.JobIds.Contains(id));
             }
 
-            var removed = await RemoveCoreAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+            var removed = await RemoveCoreAsync(id, deleteFile, cancellationToken, caller).ConfigureAwait(false);
             // Losing its last unfinished file can leave a package finished.
             if (removed.Ok && inPackage) RequestPackageCheck();
             return removed;
@@ -1060,6 +1079,7 @@ public sealed partial class DownloadManagerService
                 {
                     runtime.CancelRequested = true;
                     runtime.CancelledForRemoval = true;
+                    runtime.DeleteOnCancel = deleteFile;
                     runtime.Cts?.Cancel();
                 }
             }
@@ -1070,7 +1090,7 @@ public sealed partial class DownloadManagerService
         {
             foreach (var id in unique)
             {
-                var result = await RemoveAsync(id, deleteFile, cancellationToken).ConfigureAwait(false);
+                var result = await RemoveAsync(id, deleteFile, cancellationToken, caller).ConfigureAwait(false);
                 if (!result.Ok && result.Error != "Job not found.")
                     failures.Add($"{names.GetValueOrDefault(id, id.ToString("D"))}: {result.Error}");
             }
@@ -1091,7 +1111,8 @@ public sealed partial class DownloadManagerService
             : new JobActionResponse { Error = string.Join(Environment.NewLine, failures.Take(5)) };
     }
 
-    private async Task<JobActionResponse> RemoveCoreAsync(Guid id, bool deleteFile, CancellationToken cancellationToken)
+    private async Task<JobActionResponse> RemoveCoreAsync(Guid id, bool deleteFile, CancellationToken cancellationToken,
+        CallerScope? caller = null)
     {
         JobRuntime? runtime;
         Task? runner;
@@ -1104,6 +1125,9 @@ public sealed partial class DownloadManagerService
 
             runtime.CancelRequested = true;
             runtime.CancelledForRemoval = true;
+            // What the runner does with the partial data as it stops: the same as for one that had already
+            // stopped, so keeping it doesn't depend on whether the transfer was still winding down (UI.B19).
+            runtime.DeleteOnCancel = deleteFile;
             runtime.Cts?.Cancel();
             runner = runtime.Runner;
         }
@@ -1177,6 +1201,9 @@ public sealed partial class DownloadManagerService
             lock (_sync) _jobs.Remove(id);
         }
         finally { _persistGate.Release(); }
+        // UI.B19. After it is off the list, so its own folder no longer counts as in use. With its data kept,
+        // the folder still holds that data and stays. A caller limited to some folders removes none outside them.
+        await RemoveEmptyFoldersMadeForAsync(runtime.Job, caller, stillListed: false).ConfigureAwait(false);
         JobChanged?.Invoke(this, new JobChangeEventArgs(Map(runtime.Job), "removed"));
         Schedule();
         return new JobActionResponse { Ok = true, Job = Map(runtime.Job) };
@@ -1218,6 +1245,7 @@ public sealed partial class DownloadManagerService
             {
                 RequestStopLocked(runtime);
                 runtime.Job.QueueRetryAt = null;
+                runtime.Job.PausedByUser = true;
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
                 runtime.Job.EstimatedRemaining = null;
@@ -1657,10 +1685,16 @@ public sealed partial class DownloadManagerService
                 case "start":
                     _completionFiredQueues.Remove(queue.Id);
                     queue.IsRunning = true;
+                    // U-WL-2: starting a queue starts what waits in it: queued and "later" downloads, and those its own
+                    // stop, quota, a move or an exit paused. One the user paused stays paused, and a failed one is tried
+                    // again only when the queue would have retried it by itself (it ran from the queue, retries are on
+                    // and some are left).
                     foreach (var runtime in _jobs.Values.Where(r =>
-                                 r.Job.IsQueued && r.Job.QueueId == queue.Id && (r.Job.State is DownloadState.Paused or DownloadState.Queued ||
-                                     r.Job.State == DownloadState.Failed && !r.Job.IsTerminal)))
+                                 r.Job.IsQueued && r.Job.QueueId == queue.Id && (r.Job.State == DownloadState.Queued ||
+                                     r.Job.State == DownloadState.Paused && !r.Job.PausedByUser ||
+                                     r.Job.State == DownloadState.Failed && QueueRetriesFailedLocked(r.Job, queue))))
                     {
+                        var retry = runtime.Job.State == DownloadState.Failed;
                         if (runtime.Starting || runtime.Runner is { IsCompleted: false })
                         {
                             // The pause is still settling; requeue once the runner exits.
@@ -1672,7 +1706,10 @@ public sealed partial class DownloadManagerService
                         runtime.CancelRequested = false;
                         runtime.CancelledForRemoval = false;
                         runtime.Job.QueueProcessing = true;
-                        runtime.Job.QueueRetryCount = 0;
+                        // A retry counts against the queue's limit, as one the queue makes itself; a retry that was already
+                        // waiting was counted when it was set. Anything else starts a fresh run.
+                        runtime.Job.QueueRetryCount = !retry ? 0
+                            : runtime.Job.QueueRetryAt is null ? runtime.Job.QueueRetryCount + 1 : runtime.Job.QueueRetryCount;
                         runtime.Job.QueueRetryAt = null;
                         runtime.Job.State = DownloadState.Queued;
                         runtime.Job.StartMode = StartMode.StartNow;
@@ -1686,7 +1723,9 @@ public sealed partial class DownloadManagerService
                     queue.IsRunning = false;
                     foreach (var waiting in _jobs.Values.Where(runtime => runtime.Job.IsQueued && runtime.Job.QueueId == queue.Id && runtime.Job.QueueRetryAt is not null))
                     {
+                        // The retry it was waiting for never ran; it is given back, so the next start can make it.
                         waiting.Job.QueueRetryAt = null;
+                        waiting.Job.QueueRetryCount = Math.Max(0, waiting.Job.QueueRetryCount - 1);
                         waiting.Job.Touch();
                         renamed.Add(waiting);
                     }
@@ -2537,7 +2576,7 @@ public sealed partial class DownloadManagerService
                 if ((caller?.Roots ?? Roots) is { } roots)
                 {
                     if (roots.Allowed(directory) is not { } inside)
-                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory) };
+                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory), ErrorCode = JobActionErrorCodes.OutsideRoots };
                     directory = inside;
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }
@@ -2592,6 +2631,9 @@ public sealed partial class DownloadManagerService
 
             lock (_sync)
             {
+                // Only a finished file is moved, and it stays this download's own.
+                if (PathNames.Same(runtime.Job.WrittenFinalPath, moveFrom) || runtime.Job.State == DownloadState.Completed)
+                    runtime.Job.WrittenFinalPath = moveTo;
                 runtime.Job.FinalFilePath = moveTo;
                 runtime.Job.FileName = Path.GetFileName(moveTo);
                 runtime.Job.NameFromAddress = false;
@@ -3063,12 +3105,14 @@ public sealed partial class DownloadManagerService
     /// <summary>
     /// Rescans for unattached <c>.part</c> files and either deletes them or moves them
     /// into a <see cref="OrphanQuarantineFolderName"/> folder next to where they were found.
-    /// Files that became attached to a job since the last scan are never touched.
+    /// Files that became attached to a job since the last scan are never touched, and what is in a quarantine folder is
+    /// never rescanned or deleted: it is kept for the user. A quarantine folder with nothing left in it is removed, here
+    /// and at each start (docs\architecture.md, "Deleting a download").
     /// </summary>
     /// <param name="caller">A caller limited to some folders has only the leftovers inside them cleaned.</param>
     public Task<CleanOrphansResponse> CleanOrphanPartFilesAsync(bool delete, CancellationToken cancellationToken, CallerScope? caller = null)
     {
-        ScanOrphanPartFiles();
+        var scanned = ScanOrphanPartFiles();
         List<string> candidates;
         lock (_sync)
         {
@@ -3107,6 +3151,12 @@ public sealed partial class DownloadManagerService
         lock (_sync)
         {
             _orphanPartFiles.RemoveAll(response.Processed.Contains);
+        }
+
+        foreach (var directory in scanned)
+        {
+            if (caller is not null && caller.Roots.Allowed(directory) is null) continue;
+            RemoveEmptyQuarantine(directory);
         }
 
         response.Ok = response.Failed.Count == 0;
@@ -3160,7 +3210,29 @@ public sealed partial class DownloadManagerService
         _log?.Invoke($"Quarantined orphan partial file: {path} -> {target}");
     }
 
-    private void ScanOrphanPartFiles()
+    /// <summary>
+    /// UI.B19: the app's quarantine folder next to <paramref name="directory"/>, removed once nothing is left in it.
+    /// Never a link, never recursively, so whatever is in it keeps it.
+    /// </summary>
+    private void RemoveEmptyQuarantine(string directory)
+    {
+        var quarantine = Path.Combine(directory, OrphanQuarantineFolderName);
+        try
+        {
+            if (!Directory.Exists(quarantine) || new DirectoryInfo(quarantine).Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
+            if (Directory.EnumerateFileSystemEntries(quarantine).Any()) return;
+            Directory.Delete(quarantine, recursive: false);
+            _log?.Invoke($"Removed the empty quarantine folder in '{directory}'.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Invoke($"Kept the quarantine folder in '{directory}': {ex.Message}");
+        }
+    }
+
+    /// <summary>Finds the unattached partial files and returns the folders it looked in. An empty quarantine folder
+    /// in one of them is removed on the way when asked (at startup, with no caller to limit it).</summary>
+    private List<string> ScanOrphanPartFiles(bool removeEmptyQuarantine = false)
     {
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         HashSet<string> known;
@@ -3229,7 +3301,11 @@ public sealed partial class DownloadManagerService
             {
                 _log?.Invoke($"Could not scan '{directory}' for orphan partial files: {ex.Message}");
             }
+
+            if (removeEmptyQuarantine) RemoveEmptyQuarantine(directory);
         }
+
+        return directories.ToList();
     }
 
     private async Task<bool> ReconcileAsync(JobRuntime runtime, CancellationToken cancellationToken)
@@ -3405,6 +3481,7 @@ public sealed partial class DownloadManagerService
         job.Failure = null;
         job.CompletedAt = _timeProvider.GetUtcNow();
         job.FinalFilePath = finalPath;
+        job.WrittenFinalPath = finalPath;
         job.FileName = final.Name;
         job.ReceivedBytes = final.Length;
         job.TotalBytes = final.Length;
@@ -3667,6 +3744,7 @@ public sealed partial class DownloadManagerService
                     runtime.Cts?.Dispose();
                     cts = new CancellationTokenSource();
                     runtime.Cts = cts;
+                    job.PausedByUser = false;
                     job.KeepCheckpointAfterFinalize = true;
                     job.State = DownloadState.Connecting;
                     job.Failure = null;
@@ -3686,6 +3764,8 @@ public sealed partial class DownloadManagerService
             return;
         }
 
+        // UI.B19: folders a cancel took away are made, and recorded, again before the engine needs them.
+        RecreateMadeFolders(job);
         await PersistAsync(runtime, CancellationToken.None).ConfigureAwait(false);
         Raise(runtime, "updated");
 
@@ -3820,6 +3900,7 @@ public sealed partial class DownloadManagerService
             {
                 job.FinalFilePath = result.FinalFilePath ?? job.FinalFilePath;
                 job.FileName = Path.GetFileName(job.FinalFilePath);
+                job.WrittenFinalPath = job.FinalFilePath;
             }
 
             // A file that is finished stays finished unless the user wanted it gone: a stop that
@@ -3889,6 +3970,11 @@ public sealed partial class DownloadManagerService
             DeleteFileQuietly(job.PartFilePath);
             if (deleteFinal) DeleteFileQuietly(job.FinalFilePath);
             await DeleteCheckpointQuietlyAsync(job.Id).ConfigureAwait(false);
+            // UI.B19: a cancel that deleted its data while it was still running takes its folders away now.
+            bool cancelledToStay;
+            CallerScope? cancelledBy;
+            lock (_sync) (cancelledToStay, cancelledBy) = (changeType == "cancelled" && !runtime.CancelledForRemoval, runtime.CancelledBy);
+            if (cancelledToStay) await RemoveEmptyFoldersMadeForAsync(job, cancelledBy, stillListed: true).ConfigureAwait(false);
         }
 
         if (changeType == "completed")
@@ -4204,13 +4290,23 @@ public sealed partial class DownloadManagerService
         JobChanged?.Invoke(this, new JobChangeEventArgs(dto, changeType));
     }
 
+    /// <summary>
+    /// Whether the file at <see cref="DownloadJob.FinalFilePath"/> is one this download wrote. A completed one's is, as
+    /// it is for a record saved before <see cref="DownloadJob.WrittenFinalPath"/> existed.
+    /// </summary>
+    internal static bool WroteFinalFile(DownloadJob job)
+        => !string.IsNullOrWhiteSpace(job.FinalFilePath) &&
+           (job.State == DownloadState.Completed || PathNames.Same(job.WrittenFinalPath, job.FinalFilePath));
+
     private async Task DeletePayloadAsync(DownloadJob job, bool includeFinal, CancellationToken cancellationToken)
     {
         DeleteFileQuietly(job.PartFilePath);
         DeleteFileQuietly(job.PartFilePath + ".video");
         DeleteFileQuietly(job.PartFilePath + ".audio");
         DeleteFileQuietly(job.PartFilePath + ".mux.mp4");
-        if (includeFinal)
+        // Only a file this download wrote. An unfinished one's final path can name a file it never wrote, such as the
+        // one an Overwrite download would replace at the end; that one is the user's and stays.
+        if (includeFinal && WroteFinalFile(job))
         {
             DeleteFileQuietly(job.FinalFilePath);
         }
@@ -4553,6 +4649,7 @@ public sealed partial class DownloadManagerService
             FileName = job.FileName,
             IsQueued = job.IsQueued,
             QueueProcessing = job.QueueProcessing, QueueRetryCount = job.QueueRetryCount, QueueRetryAt = job.QueueRetryAt,
+            PausedByUser = job.PausedByUser,
             CategoryId = job.CategoryId ?? FileCategories.For(job.FileName),
             CategoryIsAutomatic = job.CategoryIsAutomatic,
             DestinationDirectory = job.DestinationDirectory,
@@ -4947,6 +5044,8 @@ public sealed partial class DownloadManagerService
         public string? LastPhase { get; set; }
         public bool CancelRequested { get; set; }
         public bool DeleteOnCancel { get; set; } = true;
+        /// <summary>The limited caller (D8) whose cancel deleted the data, so the folders it then removes stay in its folders.</summary>
+        public CallerScope? CancelledBy { get; set; }
         public bool CancelledForRemoval { get; set; }
         /// <summary>
         /// A provider run's link host and the provider's per-file cap, in memory only, so a changed default can

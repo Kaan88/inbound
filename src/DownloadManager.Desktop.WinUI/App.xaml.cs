@@ -137,7 +137,7 @@ public partial class App : Application
         {
             _packageWindow = new PackageWindow(package, server);
             _packageWindow.Closed += (_, _) => Exit();
-            _packageWindow.Activate();
+            WindowPlacement.ActivateCascaded(_packageWindow);
             _ = Task.Run(() =>
             {
                 while (true)
@@ -153,7 +153,7 @@ public partial class App : Application
         {
             _downloadWindow = new DownloadWindow(id, commandLine.Contains("--manual"), server);
             _downloadWindow.Closed += (_, _) => Exit();
-            _downloadWindow.Activate();
+            WindowPlacement.ActivateCascaded(_downloadWindow);
             _ = Task.Run(() =>
             {
                 while (true)

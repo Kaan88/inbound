@@ -1,0 +1,207 @@
+/*
+  The component kit shared by the web UI and the browser extension (EXT.R8). Plain CSS with the tokens of tokens.css
+  only, no Tailwind: the web UI imports it into its components layer, so Tailwind utilities still win over it, and the
+  extension's build copies it next to its pages. Sizes are in rem against the 14 px root both set.
+
+  Fixes that go to every frontend through this file (docs/plans/extension-design.md §6): a field has a --control-stroke
+  bottom line (the divider alone is 1.43:1 on the surface) and a focus ring; primary buttons use --accent-text.
+*/
+
+.btn,
+.btn-primary,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--divider);
+  background-color: var(--surface);
+  padding: 0.375rem 0.75rem;
+  font-size: 13px;
+  line-height: 1.25rem;
+}
+.btn-primary {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.btn-danger {
+  border-color: var(--icon-danger);
+  color: var(--status-failed);
+  font-weight: 600;
+}
+@media (hover: hover) {
+  .btn:hover,
+  .btn-danger:hover { background-color: var(--hover); }
+  .btn-primary:hover { background-color: var(--accent-hover); }
+}
+.btn:disabled,
+.btn-primary:disabled { cursor: not-allowed; opacity: 0.45; }
+.btn-danger:disabled { opacity: 0.45; }
+
+.btn-icon {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .btn-icon:hover { background-color: var(--hover); }
+}
+.btn-icon:disabled { opacity: 0.45; }
+
+.field {
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--divider);
+  border-bottom-color: var(--control-stroke);
+  background-color: var(--surface);
+  padding: 0.375rem 0.625rem;
+  font-size: 13px;
+  line-height: 1.25rem;
+}
+.field::placeholder { color: var(--muted); }
+/* The accent border and its 1 px shadow are the field's focus: the page's :focus-visible outline would draw a second ring. */
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); outline: none; }
+
+.label { display: block; margin-bottom: 0.25rem; font-size: 12px; font-weight: 600; color: var(--muted); }
+.hint { font-size: 12px; line-height: 1.375; color: var(--muted); }
+.section-title { margin-bottom: 0.5rem; font-size: 13px; font-weight: 600; }
+.card { border-radius: var(--radius-card); border: 1px solid var(--divider); background-color: var(--surface); }
+
+.tone-active { color: var(--status-active); }
+.tone-done { color: var(--status-done); }
+.tone-failed { color: var(--status-failed); }
+.tone-waiting { color: var(--status-waiting); }
+.tone-neutral { color: var(--status-neutral); }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Links in running text. Links that are styled as something else carry a class and are left alone. */
+a:not([class]),
+.link { color: var(--accent); text-decoration: none; }
+a:not([class]):visited,
+.link:visited { color: var(--accent); }
+a:not([class]):hover,
+.link:hover { text-decoration: underline; }
+
+/* A notice bar: one line with something to say and, at most, one action. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.2857rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  background-color: var(--highlight);
+  color: var(--text);
+  font-size: 12px;
+}
+.notice > .notice-text { flex: 1; min-width: 0; }
+/* --error on the notice's blue is 4.27:1 in dark; the failed status colour is 4.91:1 (light 5.30:1). */
+.notice.notice-error { color: var(--status-failed); }
+
+/* The 6 px bar of the desktop list, with a reserved slot when there is nothing to show. */
+.progress { display: block; height: 6px; overflow: hidden; border-radius: 3px; background-color: var(--track); }
+.progress > span { display: block; height: 100%; border-radius: 3px; background-color: var(--progress); }
+.progress.indeterminate > span { width: 33.3%; animation: kit-progress-move 1.4s ease-in-out infinite; }
+@keyframes kit-progress-move {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+/* A small menu opened from a button. */
+.menu {
+  min-width: 10rem;
+  padding: 0.25rem 0;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-card);
+  background-color: var(--surface);
+  box-shadow: 0 6px 24px var(--shadow);
+  font-size: 13px;
+}
+.menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.menu-item:hover,
+.menu-item:focus { background-color: var(--hover); outline: none; }
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* A dialog over the page: a backdrop, a box with a header, a body and a footer of buttons (primary first). */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgb(0 0 0 / 0.45);
+  z-index: 50;
+}
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-dialog);
+  background-color: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 24px var(--shadow);
+}
+.dialog-header { padding: 0.75rem 1rem 0.25rem; font-size: 14px; font-weight: 600; }
+.dialog-body { padding: 0.5rem 1rem 0.75rem; font-size: 13px; overflow: auto; }
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-height: 3.4286rem;
+  align-items: center;
+  padding: 0 1rem;
+  border-top: 1px solid var(--divider);
+  background-color: var(--chrome);
+}
+.dialog-footer > button { min-width: 6.5714rem; }
+
+/* Two or three choices side by side, one pressed. */
+.segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-control);
+}
+.segmented > button,
+.segmented > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 0;
+  background-color: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+.segmented > * + * { border-left: 1px solid var(--control-stroke); }
+.segmented > [aria-pressed="true"],
+.segmented > label:has(input:checked) { background-color: var(--selected); font-weight: 600; }
+.segmented > label > input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.segmented > label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.segmented > label:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress.indeterminate > span { animation: none; transform: none; opacity: 0.6; }
+}

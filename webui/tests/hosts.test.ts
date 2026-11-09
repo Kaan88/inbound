@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { completionForSession } from '../src/lib/details';
-import { checkHost, defaultName, HostList, normalizeHostAddress, parseHosts, type KeyValue } from '../src/lib/hosts';
+import { arrival, checkHost, defaultName, handoffParam, handoffUrl, HostList, keptHandoff, normalizeHostAddress, parseHosts, readHandoff, type KeyValue, type SavedHost } from '../src/lib/hosts';
+import { refusalLine, refusalText } from '../src/lib/signin';
 import { featuresOf, hostKindOf, hostTexts } from '../src/lib/hostKind';
 
 function memory(initial: string | null = null): KeyValue & { value: string | null } {
@@ -137,5 +138,78 @@ describe('completionForSession', () => {
   });
   it('sends nothing when it may set neither', () => {
     expect(completionForSession(stored, false, false)).toEqual({});
+  });
+});
+
+describe('passing the list along (U-WU-1)', () => {
+  const a = 'http://127.0.0.1:18851';
+  const b = 'http://127.0.0.1:18852';
+  const c = 'http://192.168.1.30:8080';
+  const listOnA: SavedHost[] = [{ id: 'h1', name: 'Second box', origin: b }, { id: 'h2', name: 'Attic', origin: c }];
+
+  it('puts only names and addresses in the fragment, never this host twice', () => {
+    const link = handoffUrl(b, a, [...listOnA, { id: 'h3', name: 'Self', origin: a }]);
+    expect(link.startsWith(`${b}/#${handoffParam}=`)).toBe(true);
+    const back = readHandoff(link.slice(b.length + 1));
+    expect(back).toEqual({ from: a, hosts: [{ name: 'Second box', origin: b }, { name: 'Attic', origin: c }] });
+    expect(link).not.toMatch(/token|password|cookie/i);
+  });
+
+  it('host B offers A and the hosts it lacks to add, and learns its own name; Back waits until A is added', () => {
+    const handoff = readHandoff(new URL(handoffUrl(b, a, listOnA)).hash);
+    const seen = arrival(handoff, b, []);
+    // Anyone can craft the fragment, so an origin B has not saved is never a one-click Back (it would carry B's list).
+    expect(seen.back).toBeNull();
+    expect(seen.from).toEqual({ name: '127.0.0.1:18851', origin: a });
+    expect(seen.selfName).toBe('Second box');
+    expect(seen.offered.map((host) => host.origin)).toEqual([a, c]);
+    const added = arrival(handoff, b, [{ id: 'x', name: '127.0.0.1:18851', origin: a }]);
+    expect(added.back).toEqual({ name: '127.0.0.1:18851', origin: a });
+    expect(added.offered.map((host) => host.origin)).toEqual([c]);
+  });
+
+  it('a crafted link from an unknown origin gets no Back', () => {
+    const crafted = readHandoff(`#${handoffParam}=${encodeURIComponent(JSON.stringify({ v: 1, f: 'https://evil.example', h: [] }))}`);
+    expect(crafted?.from).toBe('https://evil.example');
+    const seen = arrival(crafted, b, [{ id: 'y', name: 'Attic', origin: c }]);
+    expect(seen.back).toBeNull();
+    expect(seen.offered).toEqual([{ name: 'evil.example', origin: 'https://evil.example' }]);
+  });
+
+  it('uses the name B already has for A, and offers nothing B knows', () => {
+    const handoff = readHandoff(new URL(handoffUrl(b, a, listOnA)).hash);
+    const seen = arrival(handoff, b, [{ id: 'x', name: 'Main box', origin: a }, { id: 'y', name: 'Attic', origin: c }]);
+    expect(seen.back?.name).toBe('Main box');
+    expect(seen.offered).toEqual([]);
+  });
+
+  it('drops a malformed or hostile fragment', () => {
+    expect(readHandoff('#/all')).toBeNull();
+    expect(readHandoff(`#${handoffParam}=not-json`)).toBeNull();
+    expect(readHandoff(`#${handoffParam}=${encodeURIComponent(JSON.stringify({ v: 1, f: 'javascript:alert(1)', h: [] }))}`)).toBeNull();
+    const mixed = readHandoff(`#${handoffParam}=${encodeURIComponent(JSON.stringify({ v: 1, f: a, h: [{ n: 'x', o: 'javascript:alert(1)' }, { n: 'y', o: 'http://user:pw@evil.example' }, { n: 'ok', o: c }] }))}`);
+    expect(mixed?.hosts).toEqual([{ name: 'ok', origin: c }]);
+  });
+
+  it('a page with no handoff, or one from itself, offers nothing', () => {
+    expect(arrival(null, b, []).back).toBeNull();
+    expect(arrival(null, b, []).from).toBeNull();
+    expect(arrival({ from: b, hosts: [] }, b, []).back).toBeNull();
+  });
+
+  it('a handoff kept for the tab is checked again on reading', () => {
+    expect(keptHandoff(JSON.stringify({ from: a, hosts: [{ name: 'Attic', origin: c }] }))).toEqual({ from: a, hosts: [{ name: 'Attic', origin: c }] });
+    expect(keptHandoff(JSON.stringify({ from: 'ftp://x', hosts: [] }))).toBeNull();
+    expect(keptHandoff('{')).toBeNull();
+  });
+});
+
+describe('sign-in refusal wording (U-WU-13)', () => {
+  it('keeps one countdown: the server sentence with its number goes when the page counts', () => {
+    expect(refusalText('Too many wrong tries. Wait 4 s and try again.', 4)).toBe('Too many wrong tries.');
+    expect(refusalText('That password is wrong.', 8)).toBe('That password is wrong.');
+    expect(refusalText('Too many wrong tries. Wait 4 s and try again.', null)).toBe('Too many wrong tries. Wait 4 s and try again.');
+    expect(refusalLine('Too many wrong tries.', 3)).toBe('Too many wrong tries. Wait 3 s before trying again.');
+    expect(refusalLine('That password is wrong.', 0)).toBe('That password is wrong.');
   });
 });
