@@ -152,16 +152,75 @@ public sealed class DesktopServerClientTests
     }
 
     [Fact]
-    public async Task ATorrentUploadTheServerRefusesThisAppSaysWhatToDoInstead()
+    public async Task APairedAppUploadsATorrentAndAContainerWithItsTokenAndTheServerReadsThemByReference()
     {
-        // Today the server takes uploads from a signed-in browser only, so a paired app is told to use the magnet link.
         var (server, target) = await PairedAsync();
         await using var _ = server;
+        var uploads = Path.Combine(server.Data, TorrentUploads.FolderName);
 
-        var (reference, error) = await RemoteServerHttp.UploadTorrentAsync(target, Encoding.ASCII.GetBytes("d4:infod4:name1:aee"));
+        var (torrent, torrentError) = await RemoteServerHttp.UploadTorrentAsync(target, Encoding.ASCII.GetBytes("d4:infod4:name1:aee"));
+        Assert.Null(torrentError);
+        Assert.Matches("^upload:[0-9a-f]{32}$", torrent);
+        Assert.True(File.Exists(Path.Combine(uploads, torrent![TorrentUploads.ReferencePrefix.Length..] + ".torrent")));
 
-        if (reference is null) Assert.Contains("Paste the magnet link", error);
-        else Assert.StartsWith("upload:", reference);
+        var (container, containerError) = await RemoteServerHttp.UploadContainerAsync(target, "not really a container"u8.ToArray(), "My links ü.RSDF");
+        Assert.Null(containerError);
+        Assert.True(File.Exists(Path.Combine(uploads, container![TorrentUploads.ReferencePrefix.Length..] + ".rsdf")));
+        var reply = await RemoteServerHttp.SendIpcAsync(target,
+            IpcMessage.Create(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = container, FileName = "My links.rsdf" }));
+        var preview = reply.GetPayload<RemoteContainerPreviewResult>();
+        Assert.Equal("rsdf", preview.Format);
+        Assert.DoesNotContain("outside", preview.Error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        // The server's own rules still hold for a token: only container kinds, and a name it can tell the kind by.
+        var (wrong, wrongError) = await RemoteServerHttp.UploadContainerAsync(target, [1, 2, 3], "links.txt");
+        Assert.Null(wrong);
+        Assert.Equal("Only .rsdf, .ccf and .dlc files can be imported.", wrongError);
+    }
+
+    [Fact]
+    public async Task AnUploadWithARemovedTokenSaysPairAgainAndAnExtensionsTokenUploadsNothing()
+    {
+        var (server, target) = await PairedAsync();
+        await using var _ = server;
+        var uploads = Path.Combine(server.Data, TorrentUploads.FolderName);
+
+        // An invented token of ours: refused at the gate, and the app hears to pair again (not "paste the magnet link").
+        var invented = ServerTarget.Remote("x", "Test server", server.Base, Pairing.TokenPrefix + new string('b', 43), plainHttpConfirmed: false);
+        var (none, error) = await RemoteServerHttp.UploadTorrentAsync(invented, [1, 2, 3]);
+        Assert.Null(none);
+        Assert.Equal(new RemotePairingEndedException().Message, error);
+
+        // The extension's token keeps to /api/ipc and its own unpair, as before: no upload of either kind.
+        var (extension, _) = server.App.Auth.Pairing.Issue(TokenRoles.Extension, "Chrome");
+        using var browser = new AuthClient(server.Base) { Origin = PairingTests.ChromeOrigin };
+        foreach (var path in new[] { ServerAuth.TorrentUploadPath, ServerAuth.ContainerUploadPath })
+        {
+            using var refused = await browser.SendAsync(HttpMethod.Post, path, null, request =>
+            {
+                request.Content = new ByteArrayContent([1, 2, 3]);
+                request.Headers.Add(TorrentUploads.FileNameHeader, "links.dlc");
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", extension);
+            });
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
+
+        Assert.Empty(Directory.Exists(uploads) ? Directory.GetFiles(uploads) : []);
+        Assert.Null((await RemoteServerHttp.UploadTorrentAsync(target, [1, 2, 3])).Error);
+    }
+
+    [Fact]
+    public async Task ABrowserBehindAProxyStillUploadsWithItsCookieWhateverAuthorizationTheProxySends()
+    {
+        await using var server = await AuthServer.StartAsync();
+        using var client = await AuthServer.SetUpAsync(server);
+
+        using var uploaded = await client.SendAsync(HttpMethod.Post, ServerAuth.TorrentUploadPath, null, request =>
+        {
+            request.Content = new ByteArrayContent([1, 2, 3]);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", "cHJveHk6c2VjcmV0");
+        });
+        Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
     }
 
     [Fact]

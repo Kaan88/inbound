@@ -598,31 +598,54 @@ public static class RemoteServerHttp
 
     /// <summary>
     /// <c>POST /api/upload/torrent</c> with the file's bytes; the <c>upload:</c> reference the server's <c>remote.classify</c>
-    /// and <c>remote.add</c> take. A server that doesn't take uploads from a paired app says so in the error.
+    /// and <c>remote.add</c> take. A server that doesn't take uploads from a paired app (one from before they did) says so
+    /// in the error.
     /// </summary>
-    public static async Task<(string? Reference, string? Error)> UploadTorrentAsync(ServerTarget target, byte[] content, CancellationToken cancellationToken = default)
+    public static Task<(string? Reference, string? Error)> UploadTorrentAsync(ServerTarget target, byte[] content, CancellationToken cancellationToken = default)
+        => UploadAsync(target, "/api/upload/torrent", content, "application/x-bittorrent", null,
+            $"{target.Name} doesn't take .torrent files from this app. Paste the magnet link instead, or add the file in the server's web UI.",
+            $"{target.Name} didn't take the .torrent file in time. Try again, or paste the magnet link instead.", cancellationToken);
+
+    /// <summary>
+    /// <c>POST /api/upload/container</c> with an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> file's bytes, its name in the
+    /// <c>X-File-Name</c> header (the server tells the kind by the extension); the <c>upload:</c> reference the server's
+    /// <c>remote.container.preview</c> takes. Only for a server whose hello lists <c>uploads</c>.
+    /// </summary>
+    public static Task<(string? Reference, string? Error)> UploadContainerAsync(ServerTarget target, byte[] content, string fileName, CancellationToken cancellationToken = default)
+        => UploadAsync(target, "/api/upload/container", content, "application/octet-stream", fileName,
+            $"{target.Name} doesn't take container files from this app. Import it in the server's web UI instead.",
+            $"{target.Name} didn't take the container file in time. Try again.", cancellationToken);
+
+    private static async Task<(string? Reference, string? Error)> UploadAsync(ServerTarget target, string path, byte[] content, string contentType,
+        string? fileName, string notTaken, string tooSlow, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(UploadTimeout);
         try
         {
             ServerAddress.EnsureMaySend(target);
-            using var request = new HttpRequestMessage(HttpMethod.Post, ServerAddress.Endpoint(target.Address!, "/api/upload/torrent"))
+            using var request = new HttpRequestMessage(HttpMethod.Post, ServerAddress.Endpoint(target.Address!, path))
             {
                 Content = new ByteArrayContent(content),
             };
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-bittorrent");
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", target.Token);
+            // Percent-encoded, as the web UI sends it (encodeURIComponent), so any name fits in a header.
+            if (fileName is not null) request.Headers.Add("X-File-Name", Uri.EscapeDataString(fileName));
             using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
             var body = await ReadJsonAsync(response, deadline.Token).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.OK && body is { } ok && Text(ok, "upload") is { } reference) return (reference, null);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
-                return (null, $"{target.Name} doesn't take .torrent files from this app. Paste the magnet link instead, or add the file in the server's web UI.");
+            // A server from before the uploads took a paired app's token answers with its sign-in gate ("Sign in
+            // first."); one that takes them refuses only a token it no longer knows.
+            if (response.StatusCode == HttpStatusCode.Unauthorized && body is { } refused && Text(refused, "error") is { } why &&
+                !why.StartsWith("Sign in", StringComparison.Ordinal))
+                return (null, new RemotePairingEndedException().Message);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound) return (null, notTaken);
             return (null, body is { } failed && Text(failed, "error") is { } said ? said : $"{target.Name} couldn't take the file.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return (null, $"{target.Name} didn't take the .torrent file in time. Try again, or paste the magnet link instead.");
+            return (null, tooSlow);
         }
         catch (RemoteServerException ex)
         {
@@ -634,7 +657,7 @@ public static class RemoteServerHttp
         }
     }
 
-    /// <summary>How long a <c>.torrent</c> upload (at most 16 MB) may take.</summary>
+    /// <summary>How long an upload (a <c>.torrent</c> or container file, at most 16 MB) may take.</summary>
     public static readonly TimeSpan UploadTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>An HTTP status that ended a remote call, in words.</summary>
