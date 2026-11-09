@@ -27,6 +27,8 @@ internal static class Program
                 .UseWin32()
                 .Build();
             UiTrace.Write("Uno host built");
+            // Uno names windows for X in Latin-1 only; this gives them their UTF-8 titles (em dashes, file names).
+            X11Titles.Start();
             if (Environment.GetEnvironmentVariable("DOWNLOADMANAGER_UNO_TRACE") == "1")
             {
                 try { UiTrace.Write("MicaController.IsSupported: " + Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported()); }
