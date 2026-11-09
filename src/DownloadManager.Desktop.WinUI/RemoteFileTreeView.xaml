@@ -24,7 +24,8 @@
                        AutomationProperties.LiveSetting="Polite" />
         </Grid>
 
-        <Border Grid.Row="1" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="1" CornerRadius="2"
+        <!-- UI.R31: framed as a card, as Progress Details frames its lists. -->
+        <Border Grid.Row="1" BorderBrush="{ThemeResource InboundCardStrokeBrush}" BorderThickness="1" CornerRadius="8" Padding="4"
                 Background="{ThemeResource InboundSurfaceBrush}">
             <Grid>
                 <!-- No selection in the list itself: the checkboxes are the selection. Arrows move, Space
