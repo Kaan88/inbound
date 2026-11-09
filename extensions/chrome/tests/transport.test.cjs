@@ -133,6 +133,11 @@ test('server addresses: a scheme is added, paths and ports handled, credentials 
     { ok: true, origin: 'https://nas.home.arpa', pattern: 'https://nas.home.arpa/*', cleartext: false });
   assert.equal(normalizeServerAddress('http://localhost:8080').cleartext, false);
   assert.equal(normalizeServerAddress('http://[::1]:8080').pattern, 'http://[::1]/*');
+  // 127.x is loopback only as a dotted IPv4 address; a name that starts with 127 is any host on the network.
+  assert.equal(normalizeServerAddress('http://127.0.0.1:8080').cleartext, false);
+  assert.equal(normalizeServerAddress('http://127.1:8080').cleartext, false);
+  assert.equal(normalizeServerAddress('http://127.evil.example:8080').cleartext, true);
+  assert.equal(normalizeServerAddress('http://127.0.0.1.example:8080').cleartext, true);
   assert.equal(normalizeServerAddress('http://user:pw@nas:8080').ok, false);
   assert.equal(normalizeServerAddress('ftp://nas').ok, false);
   assert.equal(normalizeServerAddress('').ok, false);

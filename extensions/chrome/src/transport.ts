@@ -367,7 +367,9 @@ export function normalizeServerAddress(input: string): { ok: true; origin: strin
     return { ok: false, error: "Leave the user name and password out of the address." };
   }
   if (!url.hostname) return { ok: false, error: "That address has no server name." };
-  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127\./.test(url.hostname);
+  // 127.x only as a dotted IPv4 address (the URL parser has already turned 127.1 into 127.0.0.1): a name such as
+  // 127.example.com is any host on the network. The web UI's hosts.ts uses the same rule.
+  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(url.hostname);
   return {
     ok: true,
     origin: url.origin,
