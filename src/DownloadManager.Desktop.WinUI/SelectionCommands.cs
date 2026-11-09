@@ -138,4 +138,22 @@ internal static class DeleteRules
     /// selection only, so for them a selection of side rows alone removes those rows.</summary>
     public static IReadOnlyList<T> Targets<T>(IReadOnlyList<T> selected, T? recordDownload, bool fromContextMenu) where T : class
         => selected.Count > 0 ? selected : fromContextMenu && recordDownload is not null ? [recordDownload] : [];
+
+    /// <summary>
+    /// UI.B19: what Delete sends as deleteFile for one download. An unfinished one has only partial data, which nothing
+    /// can use once it is off the list, so it always goes, whatever the box says, as it does when that download is
+    /// deleted alone. "Delete from disk" decides only a finished file.
+    /// </summary>
+    public static bool DeleteFileFor(bool finished, bool deleteFinishedFiles) => !finished || deleteFinishedFiles;
+
+    /// <summary>The selection split by what <see cref="DeleteFileFor"/> sends: those whose data goes, then those whose file stays.</summary>
+    public static (IReadOnlyList<T> WithData, IReadOnlyList<T> KeepFile) Split<T>(
+        IReadOnlyList<T> jobs, Func<T, bool> finished, bool deleteFinishedFiles)
+    {
+        var withData = jobs.Where(job => DeleteFileFor(finished(job), deleteFinishedFiles)).ToList();
+        return (withData, jobs.Where(job => !withData.Contains(job)).ToList());
+    }
+
+    /// <summary>The dialog's note when the selection holds both kinds and the box is offered.</summary>
+    public const string MixedNote = "Unfinished downloads always lose their partial data; the box decides only the finished files.";
 }

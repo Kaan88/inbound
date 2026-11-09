@@ -139,6 +139,37 @@ queues for the per-host fair limiter, and the checkpoint format is unchanged.
 - A startup reconciliation pass checks that metadata, checkpoint and part file
   agree; inconsistent jobs become recoverable failures with a clear reason.
 
+### Deleting a download (UI.B19)
+
+- **Files.** With "delete the file" the Host deletes the partial data (`.part` and the media side files
+  `.part.video`, `.part.audio`, `.part.mux.mp4`) and the checkpoints. It deletes the file at the final path only
+  when the download wrote it: a completed download's, or one recorded as written (`WrittenFinalPath`). An
+  unfinished Overwrite download's final path names the user's own file, which stays. Without "delete the file"
+  everything is kept, whether or not the transfer was still running.
+- **The app's window and web UI.** An unfinished download always loses its partial data. "Delete from disk" is
+  offered only when a finished file is selected and decides only the finished files; with both kinds selected the
+  dialog says so. The extension popup asks only for a finished download, too, and an unfinished one's Delete removes
+  only its partial data (a Host older than this rule could also delete a file at its final path). The command line
+  keeps partial data with `--keep-file`.
+- **Folders.** Only a provider file is put below the folder it was given (`Pack\sub\a.bin` under the package
+  folder). The Host records on the job the folders it created for it, when it creates them (`MadeFolders`), and
+  removes only those, once they are empty, deepest first and never recursively. A folder that already existed, the
+  folder a download was given, and any folder the user typed or chose are never recorded. A recorded folder also
+  stays when it is or holds a download, category, favorite, last-used, recent, extraction or server folder, when it
+  is a drive or share root, when it is or lies under a link or junction, or when it is outside the folders of a
+  limited caller (a web session on the desktop Host) that deleted the download. One that another download still
+  uses passes to that download's record and goes with the last one. Paths are compared as the machine compares
+  them; on Windows also by what they lead to (`GetFinalPathNameByHandle`), so a mapped drive and its share, an 8.3
+  name and a `\\?\` form are one folder. A folder that can't be identified stays. A cancel that deletes the data
+  removes the folders too, and a later start makes and records them again. A removal a crash interrupted is finished
+  at the next start, folders included. Records written before this rule have no folders listed, so nothing is
+  removed for them.
+- **Leftover partial files.** `dm host clean-orphans` (and Clean up leftover partial files in the window) finds
+  `.part` files no download owns in the download folders. Quarantine moves them into a `.dm-orphans` folder next to
+  them; Delete deletes them. What is already in `.dm-orphans` is kept for the user: it is never rescanned or deleted.
+  The folder is removed once it is empty, at that command (only inside a limited caller's folders) and at each
+  start, and when it is all that is left in a folder made for a download that is deleted.
+
 ## IPC
 
 Message-level details, including the remote provider messages and why slow calls use their own
