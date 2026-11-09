@@ -185,7 +185,7 @@ internal static class AutostartEntry
         var path = PathOf();
         if (!enabled)
         {
-            File.Delete(path);
+            if (File.Exists(path)) File.Delete(path);
             return;
         }
 
