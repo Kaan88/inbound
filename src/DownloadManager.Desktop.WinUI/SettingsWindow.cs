@@ -74,6 +74,13 @@ internal sealed class SettingsWindow : Window
         _nav.SelectionChanged += (_, _) =>
         {
             if (_nav.SelectedIndex >= 0 && _nav.SelectedIndex < _pages.Count) _page.Content = _pages[_nav.SelectedIndex];
+#if HAS_UNO
+            // Uno leaves the earlier page's item looking selected: set each item's own flag.
+            for (var at = 0; at < _nav.Items.Count; at++)
+            {
+                if (_nav.Items[at] is ListViewItem navItem && navItem.IsSelected != (at == _nav.SelectedIndex)) navItem.IsSelected = at == _nav.SelectedIndex;
+            }
+#endif
         };
         _ok.Click += async (_, _) => { if (await RunSaveAsync()) Close(); };
         _apply.Click += async (_, _) => await RunSaveAsync();

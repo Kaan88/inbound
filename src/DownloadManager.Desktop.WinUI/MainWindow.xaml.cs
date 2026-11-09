@@ -261,6 +261,10 @@ public sealed partial class MainWindow : Window
         {
             sender.Hide();
             Application.Current.Exit();
+#if HAS_UNO
+            // Uno's X11 head leaves the process running after Exit.
+            Environment.Exit(0);
+#endif
             return;
         }
         sender.Hide();
@@ -909,13 +913,32 @@ public sealed partial class MainWindow : Window
         }
     }
 
+#if HAS_UNO
+    private bool _fixingCategoryHighlight;
+#endif
+
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
 #if HAS_UNO
         // Uno's ListBox leaves the earlier item looking selected: clear every other item's own flag.
-        foreach (var other in CategoryList.Items.OfType<ListBoxItem>())
+        if (_fixingCategoryHighlight) return;
+        if (CategoryList.SelectedItem is ListBoxItem chosen)
         {
-            if (!ReferenceEquals(other, CategoryList.SelectedItem) && other.IsSelected) other.IsSelected = false;
+            _fixingCategoryHighlight = true;
+            try
+            {
+                foreach (var other in CategoryList.Items.OfType<ListBoxItem>())
+                {
+                    if (!ReferenceEquals(other, chosen) && other.IsSelected) other.IsSelected = false;
+                }
+
+                if (!chosen.IsSelected) chosen.IsSelected = true;
+                if (!ReferenceEquals(CategoryList.SelectedItem, chosen)) CategoryList.SelectedItem = chosen;
+            }
+            finally
+            {
+                _fixingCategoryHighlight = false;
+            }
         }
 #endif
         if (_refreshingCategories) return;
@@ -2161,6 +2184,10 @@ public sealed partial class MainWindow : Window
         }
 
         Application.Current.Exit();
+#if HAS_UNO
+        // Uno's X11 head leaves the process running after Exit.
+        Environment.Exit(0);
+#endif
     }
 
     private void MenuPause_Click(object sender, RoutedEventArgs e) => PauseButton_Click(sender, e);

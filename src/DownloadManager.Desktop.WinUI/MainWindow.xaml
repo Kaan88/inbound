@@ -137,11 +137,20 @@
 
         <Border Grid.Row="1" Background="{ThemeResource InboundChromeBrush}" BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,1">
             <Border.Resources>
+            <ResourceDictionary>
                 <!-- Toolbar buttons are flat: disabled ones only dim, they do not get a gray box. -->
                 <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
                 <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
                 <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
                 <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                <!-- Light mode's default hover is a near-white fill, invisible on the white toolbar. -->
+                <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Light">
+                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0F000000" />
+                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1A000000" />
+                    </ResourceDictionary>
+                </ResourceDictionary.ThemeDictionaries>
+            </ResourceDictionary>
             </Border.Resources>
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -262,7 +271,8 @@
                                     ToolTipService.ToolTip="Showing the downloads of this PC. Select to show another server's.">
                         <StackPanel>
                             <FontIcon x:Name="ToolbarServerIcon" Glyph="&#xE7F4;" FontSize="25" Foreground="{ThemeResource InboundIconInfoBrush}" />
-                            <TextBlock x:Name="ToolbarServerLabel" Text="This PC" MaxWidth="160" Style="{StaticResource InboundToolLabelStyle}" />
+                            <TextBlock x:Name="ToolbarServerLabel" Text="This PC" MaxWidth="160" Style="{StaticResource InboundToolLabelStyle}"
+                                       Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
                         </StackPanel>
                         <DropDownButton.Flyout>
                             <MenuFlyout x:Name="ToolbarServerMenu" Placement="BottomEdgeAlignedRight" />
@@ -637,6 +647,7 @@
                 </Grid.ColumnDefinitions>
                 <!-- Which Host the window shows: This PC or a saved server (design D9, section 5). -->
                 <DropDownButton x:Name="ServerSwitcher" Content="This PC" FontSize="11" Padding="6,0" MinHeight="0" Height="21"
+                                Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}"
                                 Background="Transparent" BorderThickness="0" VerticalAlignment="Center"
                                 AutomationProperties.Name="Show downloads of" ToolTipService.ToolTip="Show the downloads of this PC or of another server">
                     <DropDownButton.Flyout>

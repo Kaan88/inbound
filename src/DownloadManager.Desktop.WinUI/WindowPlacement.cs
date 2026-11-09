@@ -157,6 +157,10 @@ internal static class WindowPlacement
     /// <summary>True when the title-bar area is on a display that is connected now.</summary>
     private static bool IsVisible(Placement placement)
     {
+#if HAS_UNO
+        // Uno has no DisplayArea lookups (they throw); the window manager keeps a window on a screen there.
+        return true;
+#endif
         var probe = new PointInt32 { X = placement.X + Math.Min(120, Math.Max(1, placement.Width / 2)), Y = placement.Y + 16 };
         var area = DisplayArea.GetFromPoint(probe, DisplayAreaFallback.None);
         if (area is null) return false;
