@@ -180,6 +180,11 @@
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             </Style>
+            <!-- The confirm button of a dialog that deletes, cancels or removes: its label in the danger colour, as
+                 Progress Details' Delete has its red glyph. The safe choice stays the default button. -->
+            <Style x:Key="InboundDangerDialogButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource InboundIconDangerBrush}" />
+            </Style>
             <Style x:Key="InboundSecondaryTextStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="12" />
                 <Setter Property="TextWrapping" Value="Wrap" />

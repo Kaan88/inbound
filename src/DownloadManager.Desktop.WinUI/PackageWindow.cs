@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using DownloadManager.Contracts;
 using Microsoft.UI.Windowing;
@@ -89,8 +89,8 @@ internal sealed class PackageWindow : Window
     private readonly Button _close = new() { Content = "Hide", MinWidth = 92 };
     private readonly StackPanel _archivePanel = new() { Spacing = 6, Visibility = Visibility.Collapsed };
     private readonly PasswordBox _archivePassword = new() { Header = "Archive password", PasswordRevealMode = PasswordRevealMode.Hidden };
-    private readonly Button _savePassword = new() { Content = "Save Password", MinWidth = 100, IsEnabled = false, VerticalAlignment = VerticalAlignment.Bottom };
-    private readonly Button _clearPassword = new() { Content = "Clear Password", MinWidth = 100, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Button _savePassword = new() { Content = "Save password", MinWidth = 100, IsEnabled = false, VerticalAlignment = VerticalAlignment.Bottom };
+    private readonly Button _clearPassword = new() { Content = "Clear password", MinWidth = 100, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly StatusLine _passwordStatus = new("Archive password status");
     private readonly StatusLine _extractionStatus = new("Extraction");
 
@@ -103,7 +103,7 @@ internal sealed class PackageWindow : Window
         _connection = new HostConnection(target);
         ShownServer.Target = _connection.Target;
         AppTheme.Track(_root);
-        Title = ServerNames.ForWindow("Package status — Inbound Download Manager", _connection.Target);
+        Title = ServerNames.ForWindow("Package Progress — Inbound Download Manager", _connection.Target);
         // U-WL-24: short enough for a 768-pixel screen with the taskbar; the file list and details scroll.
         WindowLayout.ResizeForDpi(this, 720, 680);
         WindowPlacement.Track(this, "package");
@@ -388,7 +388,7 @@ internal sealed class PackageWindow : Window
 
     private void BuildArchivePanel()
     {
-        var hint = new TextBlock { Text = ArchiveText.PackagePasswordHint, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
+        var hint = InboundUi.Secondary(ArchiveText.PackagePasswordHint);
         AutomationProperties.SetName(hint, hint.Text);
         AutomationProperties.SetName(_archivePassword, "Archive password for this package. It isn't for the download.");
         AutomationProperties.SetName(_savePassword, "Save the archive password");
@@ -645,7 +645,7 @@ internal sealed class PackageWindow : Window
         _cancel.Visibility = !settled || _cancel.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         _delete.Visibility = settled && members.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _close.Content = settled ? "Close" : "Hide";
-        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package status"} — Inbound Download Manager", _connection.Target);
+        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package Progress"} — Inbound Download Manager", _connection.Target);
         if (Title != title) Title = title;
     }
 
@@ -704,8 +704,9 @@ internal sealed class PackageWindow : Window
                        "Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Cancel Package",
-            CloseButtonText = "Keep Downloading",
+            PrimaryButtonText = "Cancel package",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
+            CloseButtonText = "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary) await RunPackageActionAsync("cancel");
@@ -743,6 +744,7 @@ internal sealed class PackageWindow : Window
             Title = "Delete package?",
             Content = body,
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };

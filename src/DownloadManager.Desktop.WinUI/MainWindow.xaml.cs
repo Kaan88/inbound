@@ -1349,8 +1349,9 @@ public sealed partial class MainWindow : Window
                        " Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.",
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Cancel Package",
-            CloseButtonText = "Keep Downloading",
+            PrimaryButtonText = "Cancel package",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
+            CloseButtonText = "Keep downloading",
             DefaultButton = ContentDialogButton.Close,
         };
         if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
@@ -2314,6 +2315,7 @@ public sealed partial class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap,
             },
             PrimaryButtonText = "Remove from list",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };
@@ -3872,6 +3874,7 @@ public sealed partial class MainWindow : Window
                 Title = "Delete queue?",
                 Content = deletePanel,
                 PrimaryButtonText = "Delete queue",
+                PrimaryButtonStyle = InboundUi.DangerDialogButton,
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
@@ -4963,6 +4966,7 @@ public sealed partial class MainWindow : Window
             Title = selection.Count == 1 ? "Delete download?" : $"Delete {selection.Count} downloads?",
             Content = panel,
             PrimaryButtonText = "Delete",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };

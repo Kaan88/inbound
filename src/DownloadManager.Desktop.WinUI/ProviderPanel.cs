@@ -257,7 +257,7 @@ internal sealed class ProviderPanel
     private readonly SelectorBar _tabs = new();
     private readonly ProgressRing _busy = new() { Width = 18, Height = 18, IsActive = false, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _refresh = InboundUi.IconButton("", "Refresh", "InboundIconInfoBrush");
-    private readonly Button _checkNow = new() { Content = "Check Now", MinWidth = 92 };
+    private readonly Button _checkNow = new() { Content = "Check now", MinWidth = 92 };
     private readonly Button _hosters = new() { Content = "Hosters", MinWidth = 92 };
     private readonly Button _toDrawer = InboundUi.IconButton("", "Show as drawer", "InboundIconNeutralBrush");
     private readonly Button _toFull = IconOnly("", "Open full view");
@@ -1500,6 +1500,7 @@ internal sealed class ProviderPanel
             Title = $"Delete from {_name}?",
             Content = new TextBlock { Text = RemoteText.DeleteQuestion(row.View.Name, _name), TextWrapping = TextWrapping.Wrap },
             PrimaryButtonText = $"Delete from {_name}",
+            PrimaryButtonStyle = InboundUi.DangerDialogButton,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
         };

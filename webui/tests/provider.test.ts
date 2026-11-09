@@ -313,8 +313,8 @@ describe('archives', () => {
   });
 
   it('words the password dialog by case', () => {
-    expect(passwordPrimary(targetOf(set({ needsPassword: true })))).toBe('Extract with This Password');
-    expect(passwordPrimary(targetOf(set()))).toBe('Save Password');
+    expect(passwordPrimary(targetOf(set({ needsPassword: true })))).toBe('Extract with this password');
+    expect(passwordPrimary(targetOf(set()))).toBe('Save password');
     expect(passwordHint(targetOf(set({ name: 'x.rar', failureKind: 'wrongPassword', needsPassword: true })))).toContain('was wrong');
     expect(passwordHint({ packageId: 'p', name: 'Pack', needed: false, wasWrong: false, hasPassword: false })).toContain('including ones still downloading');
   });

@@ -354,8 +354,8 @@
     confirm = {
       title: targets.length === 1 ? 'Cancel package?' : `Cancel ${targets.length} packages?`,
       text: `${targets.length === 1 ? `Cancel the unfinished files in '${targets[0].view.name}'?` : 'Cancel the unfinished files in these packages?'} Finished files and partial data are kept. Resume can undo this only if the cancel stopped every file in the package.`,
-      ok: 'Cancel Package',
-      cancel: 'Keep Downloading',
+      ok: 'Cancel package',
+      cancel: 'Keep downloading',
       onok: () => runOnSelection('Cancel Package', { action: 'cancel' }),
     };
   }

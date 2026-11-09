@@ -22,7 +22,7 @@ public sealed partial class UpdateWindow : Window
         WindowLayout.CenterOnMainWindow(this);
         var icon = WindowLayout.AppIconPath;
         if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
-        Title = "Inbound Download Manager update";
+        Title = "Update — Inbound Download Manager";
         WindowLayout.ApplyChrome(this, Root);
 
         _connection.UpdateProgressChanged += progress => DispatcherQueue.TryEnqueue(() =>

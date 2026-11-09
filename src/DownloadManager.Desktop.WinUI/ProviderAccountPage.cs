@@ -201,6 +201,7 @@ internal sealed class ProviderAccountPage
                     TextWrapping = TextWrapping.Wrap,
                 },
                 PrimaryButtonText = "Clear key",
+                PrimaryButtonStyle = InboundUi.DangerDialogButton,
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
