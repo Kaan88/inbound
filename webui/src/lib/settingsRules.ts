@@ -256,6 +256,8 @@ export function formFrom(settings: Settings): OptionsForm {
 export interface Problem {
   message: string;
   page: OptionsPage;
+  /** The id of the box to mark and focus, when there is one. */
+  field?: string;
 }
 
 /** The desktop's upper bound for the speed box (KB/s). */
@@ -263,31 +265,82 @@ export const maxSpeedKb = 10_000_000;
 
 const whole = (value: number | null | undefined) => (value === null || value === undefined || !Number.isFinite(value) ? null : Math.round(value));
 
-/** What the desktop checks before it saves, in its order; the first problem and the page it is on. */
-export function validateForm(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null): Problem | null {
+/**
+ * Every problem in the draft, in the desktop's order (U-WU-12: the page showed only the first and marked nothing). Each
+ * names its page and its box.
+ */
+export function validateAll(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null): Problem[] {
+  const problems: Problem[] = [];
   if (archive) {
     const { error } = archiveChanges(archive.saved, archive.values);
-    if (error) return { message: error, page: 'extraction' };
+    if (error) problems.push({ message: error, page: 'extraction', field: 'archive-folder' });
   }
   for (const row of form.logins.filter((r) => !r.removed)) {
-    if (!row.site.trim() || !row.username.trim()) return { message: 'Every site login needs a site and user name. Remove unused rows before saving.', page: 'logins' };
-    if (!row.isNew && loginNeedsPassword({ site: row.originalSite, username: row.originalUser, hasPassword: row.hasPassword }, row.site, row.username, row.password))
-      return { message: loginPasswordMessage, page: 'logins' };
+    if (!row.site.trim() || !row.username.trim()) {
+      problems.push({ message: 'Every site login needs a site and user name. Remove unused rows before saving.', page: 'logins', field: row.site.trim() ? `login-user-${row.id}` : `login-site-${row.id}` });
+      break;
+    }
+    if (!row.isNew && loginNeedsPassword({ site: row.originalSite, username: row.originalUser, hasPassword: row.hasPassword }, row.site, row.username, row.password)) {
+      problems.push({ message: loginPasswordMessage, page: 'logins', field: `login-pass-${row.id}` });
+      break;
+    }
   }
   const max = whole(form.maxConcurrentDownloads);
-  if (max === null || max < 1 || max > 16) return { message: 'Maximum simultaneous downloads must be between 1 and 16.', page: 'connection' };
+  if (max === null || max < 1 || max > 16) problems.push({ message: 'Maximum simultaneous downloads must be between 1 and 16.', page: 'connection', field: 'set-concurrent' });
   const connections = whole(form.defaultConnections);
-  if (connections === null || connections < 1 || connections > 32) return { message: 'Connections per download must be between 1 and 32.', page: 'connection' };
+  if (connections === null || connections < 1 || connections > 32) problems.push({ message: 'Connections per download must be between 1 and 32.', page: 'connection', field: 'set-connections' });
   const perSite = whole(form.maxConnectionsPerHost);
-  if (perSite === null || perSite < 1 || perSite > 64) return { message: 'Connections per site must be between 1 and 64.', page: 'connection' };
+  if (perSite === null || perSite < 1 || perSite > 64) problems.push({ message: 'Connections per site must be between 1 and 64.', page: 'connection', field: 'set-host' });
   const limit = whole(form.speedKb);
   const speedUntouched = limit === form.speedKbAtOpen;
-  if (!speedUntouched && limit !== null && (limit < 1 || limit > maxSpeedKb)) return { message: `Speed limit must be between 1 and ${maxSpeedKb} KB/s.`, page: 'connection' };
+  if (!speedUntouched && limit !== null && (limit < 1 || limit > maxSpeedKb)) problems.push({ message: `Speed limit must be between 1 and ${maxSpeedKb} KB/s.`, page: 'connection', field: 'set-speed' });
   if (form.proxy.mode === 'manual' && composeProxyAddress(form.proxy.type, form.proxy.host) === null)
-    return { message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy' };
+    problems.push({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy', field: 'proxy-address' });
   const profiles = parseProfiles(form.profiles);
-  if (profiles.error) return { message: profiles.error, page: 'connection' };
-  return null;
+  if (profiles.error) problems.push({ message: profiles.error, page: 'connection', field: 'set-profiles' });
+  return problems;
+}
+
+/** What the desktop checks before it saves, in its order; the first problem and the page it is on. */
+export function validateForm(form: OptionsForm, archive?: { saved: ArchiveSettings; values: ArchiveValues } | null): Problem | null {
+  return validateAll(form, archive)[0] ?? null;
+}
+
+/** The footer's words for the problems: one says itself; several are counted and each names its page. */
+export function problemsText(problems: readonly Problem[], pageLabel: (page: OptionsPage) => string): string {
+  if (problems.length === 0) return '';
+  if (problems.length === 1) return problems[0].message;
+  return `${problems.length} values need fixing. ${problems.map((problem) => `${pageLabel(problem.page)}: ${problem.message}`).join(' ')}`;
+}
+
+/** The settings' names as Options writes them, for a server refusal that names fields (U-WR-14). */
+const settingLabels: Record<string, string> = {
+  defaultDownloadDirectory: 'Default download folder',
+  categoryFolders: 'Folders by category',
+  favoriteFolders: 'Favorite folders',
+  proxy: 'Proxy',
+  siteLogins: 'Site logins',
+  browserIntegrationEnabled: 'Capture downloads from your browser',
+  allowLocalNetwork: 'Allow downloads from addresses on the local network',
+  clipboardMonitoring: 'Clipboard monitoring',
+  launchAtStartup: 'Start with Windows',
+  notifyOnCompletion: 'Notify when a download finishes',
+  playCompletionSound: 'Completion sound',
+  showCompletionDialog: 'Completion window',
+  preventSleepWhileDownloading: 'Prevent sleep while downloading',
+  excludedFileExtensions: 'File types not captured',
+  excludedHosts: 'Sites not captured',
+  interceptedFileExtensions: 'File types captured',
+  closeWindowCompletely: 'Closing the window',
+  theme: 'Theme',
+};
+
+/** The server's "These settings can only be changed in the app on this PC: a, b." with the names Options uses. */
+export function friendlyRefusal(message: string): string {
+  return message.replace(/(can only be changed in the app on this PC: )([^.]+)\./, (_whole, lead: string, list: string) => {
+    const names = list.split(',').map((name) => settingLabels[name.trim()] ?? name.trim());
+    return `${lead}${names.join(', ')}.`;
+  });
 }
 
 /** Writes the draft into a copy of the server's current settings (which keeps every field the page has no box for). */

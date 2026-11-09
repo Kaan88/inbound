@@ -179,3 +179,6 @@
   input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
   .touch-row { min-height: 44px; }
 }
+
+/* A box with a value to put right (Options, U-WU-12). */
+.field[aria-invalid="true"] { border-color: var(--error); box-shadow: 0 0 0 1px var(--error); }

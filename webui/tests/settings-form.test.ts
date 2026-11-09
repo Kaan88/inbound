@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { justCompleted } from '../src/lib/notify';
 import {
   applyForm, archiveChanges, archiveValues, composeProxyAddress, formFrom, isUnsupportedReply, parseExtensions, parseProfiles, profilesToText,
-  splitProxyAddress, validateForm, type OptionsForm,
+  friendlyRefusal, problemsText, splitProxyAddress, validateAll, validateForm, type OptionsForm,
 } from '../src/lib/settingsRules';
 import type { ArchiveSettings, Settings } from '../src/lib/types';
 
@@ -57,7 +57,7 @@ describe('validateForm', () => {
   it('turns an emptied number box into the desktop message, on its page', () => {
     const form = formOf();
     form.maxConcurrentDownloads = null;
-    expect(validateForm(form)).toEqual({ message: 'Maximum simultaneous downloads must be between 1 and 16.', page: 'connection' });
+    expect(validateForm(form)).toMatchObject({ message: 'Maximum simultaneous downloads must be between 1 and 16.', page: 'connection' });
     form.maxConcurrentDownloads = 17;
     expect(validateForm(form)?.message).toContain('between 1 and 16');
     form.maxConcurrentDownloads = 3;
@@ -80,13 +80,13 @@ describe('validateForm', () => {
     form.proxy.host = 'nonsense';
     expect(validateForm(form)).toBeNull();
     form.proxy.mode = 'manual';
-    expect(validateForm(form)).toEqual({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy' });
+    expect(validateForm(form)).toMatchObject({ message: 'Enter the proxy address as host:port (port 1-65535).', page: 'proxy' });
   });
 
   it('asks for a login password again when the site changed, and for a name and site on every row', () => {
     const form = formOf({ siteLogins: [{ id: 'a', site: 'x.com', username: 'u', hasPassword: true }] });
     form.logins[0].site = 'y.com';
-    expect(validateForm(form)).toEqual({ message: 'Re-enter the password for a login whose site or user name changed.', page: 'logins' });
+    expect(validateForm(form)).toMatchObject({ message: 'Re-enter the password for a login whose site or user name changed.', page: 'logins' });
     form.logins[0].password = 'p';
     expect(validateForm(form)).toBeNull();
     form.logins[0].removed = true;
@@ -102,7 +102,7 @@ describe('validateForm', () => {
     values.destination = 2;
     const form = formOf();
     form.maxConcurrentDownloads = null;
-    expect(validateForm(form, { saved, values })).toEqual({ message: 'Choose the folder to extract to.', page: 'extraction' });
+    expect(validateForm(form, { saved, values })).toMatchObject({ message: 'Choose the folder to extract to.', page: 'extraction' });
   });
 });
 
@@ -243,5 +243,37 @@ describe('speed limit and proxy user name round trips', () => {
     applyForm(current, form);
     expect(current.proxy?.username).toBe('me');
     expect(current.proxy?.address).toBeUndefined();
+  });
+});
+
+describe('every Options problem at once (U-WU-12)', () => {
+  it('lists each bad value with its page and its box, in the desktop order', () => {
+    const form = formOf();
+    form.maxConcurrentDownloads = 0;
+    form.defaultConnections = 999;
+    const problems = validateAll(form);
+    expect(problems.map((p) => [p.page, p.field])).toEqual([['connection', 'set-concurrent'], ['connection', 'set-connections']]);
+    expect(validateForm(form)).toEqual(problems[0]);
+  });
+
+  it('says one problem as it is, and counts several with their pages', () => {
+    const form = formOf();
+    form.maxConcurrentDownloads = 0;
+    expect(problemsText(validateAll(form), () => 'Connection')).toBe('Maximum simultaneous downloads must be between 1 and 16.');
+    form.proxy.mode = 'manual';
+    form.proxy.host = 'nope';
+    const label = (page: string) => (page === 'proxy' ? 'Proxy' : 'Connection');
+    expect(problemsText(validateAll(form), label)).toBe('2 values need fixing. Connection: Maximum simultaneous downloads must be between 1 and 16. Proxy: Enter the proxy address as host:port (port 1-65535).');
+    expect(problemsText([], label)).toBe('');
+  });
+});
+
+describe('a refusal that names settings (U-WR-14)', () => {
+  it('uses the names Options shows', () => {
+    expect(friendlyRefusal('These settings can only be changed in the app on this PC: browserIntegrationEnabled. Nothing was saved.'))
+      .toBe('These settings can only be changed in the app on this PC: Capture downloads from your browser. Nothing was saved.');
+    expect(friendlyRefusal('These settings can only be changed in the app on this PC: proxy, someNewThing. Nothing was saved.'))
+      .toBe('These settings can only be changed in the app on this PC: Proxy, someNewThing. Nothing was saved.');
+    expect(friendlyRefusal('Something else.')).toBe('Something else.');
   });
 });
