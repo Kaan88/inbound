@@ -405,8 +405,8 @@ public sealed class SchedulerWindow : Window
             var selectedLive = queues.FirstOrDefault(queue => queue.Id == selectedId);
             if (selectedLive is not null)
             {
-                _start.IsEnabled = !selectedLive.IsRunning;
-                _stop.IsEnabled = selectedLive.IsRunning;
+                _start.IsEnabled = QueueCommands.CanStart(selectedLive, _snapshot.Jobs);
+                _stop.IsEnabled = QueueCommands.CanStop(selectedLive);
                 var liveJobs = _snapshot.Jobs.ToDictionary(job => job.Id);
                 foreach (var row in _files.Items.OfType<JobViewModel>())
                     if (liveJobs.TryGetValue(row.Id, out var job)) row.Update(job);
@@ -430,8 +430,8 @@ public sealed class SchedulerWindow : Window
             return;
         }
         _lastSelectedQueueId = queue.Id;
-        _start.IsEnabled = !queue.IsRunning;
-        _stop.IsEnabled = queue.IsRunning;
+        _start.IsEnabled = QueueCommands.CanStart(queue, _snapshot.Jobs);
+        _stop.IsEnabled = QueueCommands.CanStop(queue);
         if (!_queueDrafts.ContainsKey(queue.Id)) _queuePolicyBaselines[queue.Id] = Clone(queue);
         LoadQueueLimits(queue);
         LoadQueueFiles(queue);

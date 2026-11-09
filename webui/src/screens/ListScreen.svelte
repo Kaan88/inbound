@@ -16,7 +16,7 @@
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
   } from '../lib/list';
   import { listState } from '../lib/listState.svelte';
-  import { orderedQueues, queueStartedText } from '../lib/queues';
+  import { canStartQueue, canStopQueue, orderedQueues, queueStartedText, queueStateText } from '../lib/queues';
   import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
@@ -201,6 +201,7 @@
   const queueTarget = $derived(
     firstLocal?.kind === 'job' ? firstLocal.job.queueId : firstLocal?.kind === 'package' ? (sharedQueueId(firstLocal.jobs) ?? settings?.defaultQueueId ?? 0) : (settings?.defaultQueueId ?? 0),
   );
+  const targetQueue = $derived(queues.find((queue) => queue.id === queueTarget));
 
   // ---- Selecting ----
 
@@ -564,7 +565,7 @@
   }
 
   function queueMenu(action: 'start' | 'stop'): MenuItem[] {
-    return queues.map((queue) => ({ label: `${action === 'start' ? 'Start' : 'Stop'} ${queue.name} download queue`, disabled: action === 'start' ? queue.isRunning : !queue.isRunning, onselect: () => void queueAction(action, queue.id) }));
+    return queues.map((queue) => ({ label: `${action === 'start' ? 'Start' : 'Stop'} ${queue.name} download queue`, disabled: action === 'start' ? !canStartQueue(queue, allJobs) : !canStopQueue(queue), onselect: () => void queueAction(action, queue.id) }));
   }
 
   function rowMenuItems(): MenuItem[] {
@@ -868,11 +869,11 @@
   <a class="toolbtn" title="Manage scheduled queue runs" href="#/queues"><Icon name="calendar" class="text-icon-info" /><span>Scheduler</span></a>
   <span class="toolsep"></span>
   <span class="inline-flex shrink-0">
-    <button class="toolbtn" title="Start the selected queue" disabled={!connected || !settings} onclick={() => void queueAction('start', queueTarget)}><Icon name="play" class="text-icon-start" /><span>Start Queue</span></button>
+    <button class="toolbtn" title={targetQueue ? `Start the ${targetQueue.name} queue (${queueStateText(targetQueue, allJobs).toLowerCase()})` : 'Start the selected queue'} disabled={!connected || !targetQueue || !canStartQueue(targetQueue, allJobs)} onclick={() => void queueAction('start', queueTarget)}><Icon name="play" class="text-icon-start" /><span>Start Queue</span></button>
     {#if queues.length > 1}<button class="toolcaret" aria-label="Start a queue" title="Start a queue" onclick={(event) => toolbarMenu(event, 'Start a queue', queueMenu('start'))}><Icon name="chevron-down" size={12} /></button>{/if}
   </span>
   <span class="inline-flex shrink-0">
-    <button class="toolbtn" title="Stop the selected queue and pause its downloads" disabled={!connected || !settings} onclick={() => void queueAction('stop', queueTarget)}><Icon name="stop" class="text-icon-pause" /><span>Stop Queue</span></button>
+    <button class="toolbtn" title={targetQueue ? `Stop the ${targetQueue.name} queue and pause its downloads` : 'Stop the selected queue and pause its downloads'} disabled={!connected || !targetQueue || !canStopQueue(targetQueue)} onclick={() => void queueAction('stop', queueTarget)}><Icon name="stop" class="text-icon-pause" /><span>Stop Queue</span></button>
     {#if queues.length > 1}<button class="toolcaret" aria-label="Stop a queue" title="Stop a queue" onclick={(event) => toolbarMenu(event, 'Stop a queue', queueMenu('stop'))}><Icon name="chevron-down" size={12} /></button>{/if}
   </span>
   <span class="toolsep"></span>

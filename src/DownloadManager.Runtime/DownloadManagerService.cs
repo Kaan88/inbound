@@ -825,6 +825,15 @@ public sealed partial class DownloadManagerService
     }
 
     /// <summary>
+    /// Whether a queue start tries this failed download again: the queue would have retried it by itself. A retry that
+    /// is already waiting was counted when it was set, so it runs even when that used the last one.
+    /// </summary>
+    private static bool QueueRetriesFailedLocked(DownloadJob job, DownloadQueue queue)
+        => job.State == DownloadState.Failed && !job.IsTerminal && job.QueueProcessing &&
+           job.Failure?.Kind != FailureKind.VerificationFailed &&
+           (job.QueueRetryAt is not null || queue.RetryLimit is null || job.QueueRetryCount < queue.RetryLimit);
+
+    /// <summary>
     /// A stop from the user, a queue or its quota. It wins over a lower limit's requeue and over a queue
     /// start that is still winding down, so the runner's exit leaves the job Paused instead of Queued.
     /// </summary>
@@ -853,6 +862,7 @@ public sealed partial class DownloadManagerService
             RequestStopLocked(runtime);
 
             runtime.Job.QueueRetryAt = null;
+            runtime.Job.PausedByUser = true;
             runtime.Job.State = DownloadState.Paused;
             runtime.Job.BytesPerSecond = null;
             runtime.Job.EstimatedRemaining = null;
@@ -944,6 +954,7 @@ public sealed partial class DownloadManagerService
             runtime.CancelRequested = false;
             runtime.CancelledForRemoval = false;
             runtime.Job.QueueRetryAt = null;
+            runtime.Job.PausedByUser = false;
             runtime.Job.State = DownloadState.Queued;
             runtime.Job.StartMode = StartMode.StartNow;
             runtime.Job.Failure = null;
@@ -1218,6 +1229,7 @@ public sealed partial class DownloadManagerService
             {
                 RequestStopLocked(runtime);
                 runtime.Job.QueueRetryAt = null;
+                runtime.Job.PausedByUser = true;
                 runtime.Job.State = DownloadState.Paused;
                 runtime.Job.BytesPerSecond = null;
                 runtime.Job.EstimatedRemaining = null;
@@ -1657,10 +1669,16 @@ public sealed partial class DownloadManagerService
                 case "start":
                     _completionFiredQueues.Remove(queue.Id);
                     queue.IsRunning = true;
+                    // U-WL-2: starting a queue starts what waits in it: queued and "later" downloads, and those its own
+                    // stop, quota, a move or an exit paused. One the user paused stays paused, and a failed one is tried
+                    // again only when the queue would have retried it by itself (it ran from the queue, retries are on
+                    // and some are left).
                     foreach (var runtime in _jobs.Values.Where(r =>
-                                 r.Job.IsQueued && r.Job.QueueId == queue.Id && (r.Job.State is DownloadState.Paused or DownloadState.Queued ||
-                                     r.Job.State == DownloadState.Failed && !r.Job.IsTerminal)))
+                                 r.Job.IsQueued && r.Job.QueueId == queue.Id && (r.Job.State == DownloadState.Queued ||
+                                     r.Job.State == DownloadState.Paused && !r.Job.PausedByUser ||
+                                     r.Job.State == DownloadState.Failed && QueueRetriesFailedLocked(r.Job, queue))))
                     {
+                        var retry = runtime.Job.State == DownloadState.Failed;
                         if (runtime.Starting || runtime.Runner is { IsCompleted: false })
                         {
                             // The pause is still settling; requeue once the runner exits.
@@ -1672,7 +1690,10 @@ public sealed partial class DownloadManagerService
                         runtime.CancelRequested = false;
                         runtime.CancelledForRemoval = false;
                         runtime.Job.QueueProcessing = true;
-                        runtime.Job.QueueRetryCount = 0;
+                        // A retry counts against the queue's limit, as one the queue makes itself; a retry that was already
+                        // waiting was counted when it was set. Anything else starts a fresh run.
+                        runtime.Job.QueueRetryCount = !retry ? 0
+                            : runtime.Job.QueueRetryAt is null ? runtime.Job.QueueRetryCount + 1 : runtime.Job.QueueRetryCount;
                         runtime.Job.QueueRetryAt = null;
                         runtime.Job.State = DownloadState.Queued;
                         runtime.Job.StartMode = StartMode.StartNow;
@@ -1686,7 +1707,9 @@ public sealed partial class DownloadManagerService
                     queue.IsRunning = false;
                     foreach (var waiting in _jobs.Values.Where(runtime => runtime.Job.IsQueued && runtime.Job.QueueId == queue.Id && runtime.Job.QueueRetryAt is not null))
                     {
+                        // The retry it was waiting for never ran; it is given back, so the next start can make it.
                         waiting.Job.QueueRetryAt = null;
+                        waiting.Job.QueueRetryCount = Math.Max(0, waiting.Job.QueueRetryCount - 1);
                         waiting.Job.Touch();
                         renamed.Add(waiting);
                     }
@@ -3667,6 +3690,7 @@ public sealed partial class DownloadManagerService
                     runtime.Cts?.Dispose();
                     cts = new CancellationTokenSource();
                     runtime.Cts = cts;
+                    job.PausedByUser = false;
                     job.KeepCheckpointAfterFinalize = true;
                     job.State = DownloadState.Connecting;
                     job.Failure = null;
@@ -4553,6 +4577,7 @@ public sealed partial class DownloadManagerService
             FileName = job.FileName,
             IsQueued = job.IsQueued,
             QueueProcessing = job.QueueProcessing, QueueRetryCount = job.QueueRetryCount, QueueRetryAt = job.QueueRetryAt,
+            PausedByUser = job.PausedByUser,
             CategoryId = job.CategoryId ?? FileCategories.For(job.FileName),
             CategoryIsAutomatic = job.CategoryIsAutomatic,
             DestinationDirectory = job.DestinationDirectory,
