@@ -35,6 +35,20 @@ with the XPI already signed:
 `-ReleaseTag vX.Y.Z -SignedXpi artifacts\firefox-addon\inbound-bridge-<version>-firefox.xpi`.
 Then build Setup (`scripts/build-installer.ps1`, which bundles that XPI).
 
+The Chrome Web Store (Chrome and Edge) is published with the Chrome Web Store API v2. Keep a second key
+file outside the repository, `{ "client_id", "client_secret", "publisher_id", "refresh_token" }`: the OAuth
+client from Google Cloud (Chrome Web Store API enabled), the publisher ID from the Developer Dashboard
+(Publisher, Settings), and a refresh token that `scripts/chrome-store-auth.ps1 -KeysPath <file>` saves after
+a one-time sign-in in the browser (a "Web application" client needs `http://127.0.0.1:53682/` as a redirect
+URI; a "Desktop app" client needs nothing). Then, after `scripts/package-extension-store.ps1`:
+
+```powershell
+.\scripts\publish-extension-chrome.ps1 -KeysPath <file>             # upload and submit for review
+.\scripts\publish-extension-chrome.ps1 -KeysPath <file> -StatusOnly # review state
+```
+
+The store listing (screenshots, texts) is still edited in the dashboard.
+
 For version `X.Y.Z`, prepare from the already-built artifacts:
 
 ```powershell
