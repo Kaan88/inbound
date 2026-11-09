@@ -491,3 +491,15 @@ code {
 }
 
 .job-list li:has(.target-tag) { grid-template-columns: minmax(0, 1fr) auto auto; }
+
+/* EXT.B7: with a server paired, where downloads are saved; the free space of a server folder. */
+.target-folder { margin: 6px 2px 0; overflow-wrap: anywhere; }
+.target-folder:empty, .free-space:empty { display: none; }
+.free-space { display: block; margin-top: 4px; }
+
+/* EXT.R7: "ask where to save" in the toolbar popup. While a download waits, only it is shown. */
+.popup.asking > :not(.brand):not(#askCard):not(script) { display: none !important; }
+.ask-card label.field, .ask-card .target-field { display: block; margin: 10px 0 0; }
+.ask-card .actions { margin-top: 12px; }
+.ask-source { margin: 4px 0 0; overflow-wrap: anywhere; }
+.ask-card .folder-list { max-height: 160px; }

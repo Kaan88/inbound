@@ -1,6 +1,8 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import { renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget } from "./destination-target";
+import {
+  FreeSpaceLine, renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget,
+} from "./destination-target";
 import type { TargetId } from "./transport";
 
 interface PendingHandoff {
@@ -13,6 +15,8 @@ interface PendingHandoff {
 
 const params = new URLSearchParams(location.search);
 const handoffId = params.get("id") ?? "";
+// EXT.R7: opened from the toolbar popup's Choose… for This PC, so the app's folder dialog starts at once.
+const pickAtOnce = params.get("pick") === "1";
 const urlInput = document.getElementById("url") as HTMLInputElement;
 const nameInput = document.getElementById("fileName") as HTMLInputElement;
 const destinationInput = document.getElementById("destination") as HTMLInputElement;
@@ -27,6 +31,8 @@ const targetField = document.getElementById("targetField") as HTMLFieldSetElemen
 const targetChoice = document.getElementById("targetChoice") as HTMLDivElement;
 const localHint = document.getElementById("localHint") as HTMLSpanElement;
 const serverHint = document.getElementById("serverHint") as HTMLSpanElement;
+// EXT.B7: the free space of the folder in Save in, from the server when the download goes there.
+const freeSpace = new FreeSpaceLine(document.getElementById("freeSpace") as HTMLSpanElement);
 // The folder the window opened with, for the target chosen. Sent only when changed, so the app (or the
 // server) keeps deciding the default.
 let defaultDestination = "";
@@ -86,6 +92,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string };
       targets?: OfferedTarget[];
       target?: TargetId;
+      draft?: { target?: TargetId; fileName?: string; destination?: string; startMode?: string };
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -101,9 +108,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? response.targets
       : [{ id: "local", label: "This PC", chooser: "dialog", defaultFolder: response.defaults?.destination ?? "",
         favorites: response.defaults?.favorites ?? [] }];
-    const first = targets.find((offered) => offered.id === response.target) ?? targets[0]!;
+    // EXT.R7: moved here by the toolbar popup's Choose...: start from what the user set there.
+    const draft = response.draft;
+    const first = targets.find((offered) => offered.id === draft?.target) ??
+      targets.find((offered) => offered.id === response.target) ?? targets[0]!;
     renderTargetChoice(targetField, targetChoice, targets, first.id, useTarget);
     useTarget(first);
+    if (draft) {
+      if (draft.fileName) nameInput.value = draft.fileName;
+      if (draft.startMode === "later" || draft.startMode === "now") startSelect.value = draft.startMode;
+      if (draft.destination && first.id === draft.target) {
+        destinationInput.value = draft.destination;
+        freeSpace.update(first.id, draft.destination);
+      }
+    }
     // A caught download waits in the browser while this window is open; leaving it there is a choice.
     held = response.held === true;
     if (held) holdWorker();
@@ -113,6 +131,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderButtons();
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
     void fitWindowToContent().catch(() => undefined);
+    if (pickAtOnce && target === "local" && !browseDestinationButton.disabled) browseDestinationButton.click();
   } catch (error) {
     markUnavailable(error instanceof Error ? error.message : String(error));
   }
@@ -200,7 +219,10 @@ keepButton.addEventListener("click", async () => {
 favoritesSelect.addEventListener("change", () => {
   if (favoritesSelect.value) destinationInput.value = favoritesSelect.value;
   favoritesSelect.value = "";
+  freeSpace.update(target, destinationInput.value);
 });
+
+destinationInput.addEventListener("input", () => freeSpace.update(target, destinationInput.value));
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -214,6 +236,7 @@ document.addEventListener("keydown", (event) => {
 
 const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
   destinationInput.value = path;
+  freeSpace.update(target, path);
 }, showError);
 
 /** Switches the window to one target: its default folder, its favorites, its wording. */
@@ -236,6 +259,7 @@ function useTarget(offered: OfferedTarget): void {
   else errorBox.classList.add("hidden");
   localHint.classList.toggle("hidden", offered.id === "server");
   serverHint.classList.toggle("hidden", offered.id !== "server");
+  freeSpace.update(offered.id, defaultDestination);
   void fitWindowToContent().catch(() => undefined);
 }
 

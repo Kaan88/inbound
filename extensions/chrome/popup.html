@@ -15,6 +15,57 @@
     </div>
   </header>
 
+  <!-- EXT.R7: "ask where to save" for a caught download, shown here under the toolbar icon instead of a window.
+       While a download waits, the rest of the popup is hidden (body.asking). -->
+  <section id="askCard" class="card ask-card hidden" aria-labelledby="askHeading">
+    <div class="row">
+      <strong id="askHeading">Save this download?</strong>
+      <span id="askCount" class="muted small"></span>
+    </div>
+    <p id="askSource" class="muted small ask-source"></p>
+    <label class="field">
+      <span>File name</span>
+      <input id="askFileName" type="text" spellcheck="false" />
+    </label>
+    <fieldset id="askTargetField" class="field target-field hidden">
+      <legend>Save to</legend>
+      <div id="askTargetChoice" class="target-choice"></div>
+    </fieldset>
+    <label class="field">
+      <span>Save in</span>
+      <div class="destination-picker">
+        <input id="askDestination" type="text" spellcheck="false" placeholder="The default folder" />
+        <button id="askBrowse" type="button" disabled>Choose…</button>
+      </div>
+      <span id="askFreeSpace" class="muted small free-space"></span>
+    </label>
+    <div id="askServerFolders" class="hidden"></div>
+    <label id="askFavoritesField" class="field hidden">
+      <span>Favorite folders</span>
+      <select id="askFavorites">
+        <option value="">Pick a favorite folder…</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Start</span>
+      <select id="askStartMode">
+        <option value="now">Start immediately</option>
+        <option value="later">Download later</option>
+      </select>
+    </label>
+    <div class="actions">
+      <button id="askConfirm" class="primary" type="button" disabled>Download</button>
+      <button id="askKeep" type="button">Keep in browser</button>
+    </div>
+    <p id="askError" class="error hidden"></p>
+    <p id="askOthers" class="muted small hidden"></p>
+    <p class="muted small">
+      Closing this popup leaves the download in your browser.
+      <span id="askLocalHint">Download gives the desktop app the address, the page it came from, your browser's user agent and your cookies for that site, which the app keeps with the download (the cookies encrypted) and sends only to that site.</span>
+      <span id="askServerHint" class="hidden">Download gives your server the address, the page it came from, your browser's user agent and your cookies for that site, which the server keeps with the download (the cookies encrypted) and sends only to that site.</span>
+    </p>
+  </section>
+
   <section id="statusCard" class="card status-card">
     <span id="statusDot" class="dot"></span>
     <span id="statusLabel">Desktop app</span>
@@ -33,6 +84,8 @@
       <button id="targetServer" type="button" data-target="server" aria-pressed="false">Server</button>
     </div>
   </section>
+  <!-- EXT.B7: with a server paired, where downloads are saved, from the place they go to. -->
+  <p id="targetFolder" class="muted small target-folder"></p>
   <section id="autoCard" class="card auto-card">
     <span id="autoState" class="auto-state">Automatic sending: checking…</span>
     <button id="autoTurnOn" class="link-button hidden" type="button">Turn on in Settings</button>
