@@ -142,9 +142,14 @@ internal sealed class ProviderAccountPage
         {
             var result = await _client.SetKeyAsync(key, _provider, token);
             key = string.Empty;
-            return result.Ok
-                ? ($"Key saved. Select Validate to check it with {_name}.", false)
-                : (Failed(result), true);
+            if (!result.Ok) return (Failed(result), true);
+
+            // U-WL-25: a saved key is checked at once, so one press says whether it works.
+            _result.Show($"Key saved. Checking it with {_name}…");
+            var check = await _client.ValidateAsync(_provider, token);
+            return check.Ok
+                ? (RemoteText.KeySavedAndChecked(RemoteText.Validated(check.Accounts.FirstOrDefault())), false)
+                : (RemoteText.KeySavedButNotChecked(Failed(check)), true);
         });
     }
 

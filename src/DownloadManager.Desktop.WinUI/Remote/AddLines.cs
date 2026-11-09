@@ -756,6 +756,11 @@ internal static partial class RemoteText
     public static string ContainerImportHelp(string provider)
         => $"Opens an .rsdf, .ccf or .dlc file, such as JDownloader saves, and sends its links to {provider} like pasted ones";
 
+    /// <summary>U-WL-25: Save key checks the key straight away; these say both outcomes in one line.</summary>
+    public static string KeySavedAndChecked(string validated) => $"Key saved. {validated}";
+
+    public static string KeySavedButNotChecked(string failure) => $"Key saved, but it didn't check out: {failure}";
+
     public static string ProviderOffer(string provider)
         => $"{provider} handles this site, so this link can go through your account. It can also download directly from the site instead.";
 
