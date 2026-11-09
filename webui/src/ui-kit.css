@@ -67,7 +67,8 @@
   line-height: 1.25rem;
 }
 .field::placeholder { color: var(--muted); }
-.field:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* The accent border and its 1 px shadow are the field's focus: the page's :focus-visible outline would draw a second ring. */
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); outline: none; }
 
 .label { display: block; margin-bottom: 0.25rem; font-size: 12px; font-weight: 600; color: var(--muted); }
 .hint { font-size: 12px; line-height: 1.375; color: var(--muted); }
