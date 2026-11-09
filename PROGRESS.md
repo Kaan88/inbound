@@ -25,6 +25,10 @@
 - Browser runs on test instances only (test Host `extask`, test server on 127.0.0.1:19580, a local file server; downloads to test folders): Chrome for Testing 158 (server only: the Chromium native-host key was another track's, with its manifest gone, so This PC was "not found") and Firefox 159 (headed, BiDi, both targets; the installed app's Firefox key reached the test Host). Edge not run. The owner's exact EXT.B7 screen was not reproduced: the folder window already showed the server's folders.
 - Left: the owner's check in Edge and Firefox; a release of the extension.
 
+### 0.6.5 release (2026-11-09)
+
+- Owner, 2026-11-09: "make a new release." App 0.6.5 with UI.B20, UI.B21, UI.R31 and UI.R32 (My TorBox in the main window, the drawer option), and the fix for a crash when changing the theme. Only the desktop app changed since 0.6.4; the extension stays 0.6.0 and `extensions/firefox-updates.json` now points at the same signed XPI on v0.6.5. Tests at release: WinUI build and Core.Tests (1,276) per change, as the owner asked for speed; the other suites last ran on `integ` before 0.6.4.
+
 ### 0.6.4 release (2026-11-09)
 
 - Owner, 2026-11-09, after using 0.6.4 (for later): Progress Details' graph differs from the main window's for the same download (UI.B20); light mode's frosted windows take a teal tint that clashes with the list and borders (UI.B21); check the rest of the app against Progress Details' design language (UI.R31). "progress details looks great, thanks."
