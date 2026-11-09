@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -305,6 +305,14 @@ public sealed partial class DownloadSpeedGraph : UserControl
                 upper + chartHeight * (1 - Math.Clamp(sample.Rate.Value / top, 0, 1))));
         }
 
+        // The line slides left until the next sample; without this its end would pull away from "Now" and leave an empty
+        // strip. The last value carries on past the edge (clipped) for as long as a slide lasts.
+        if (line is { Points.Count: > 0 } && visible.LastOrDefault().Rate is not null)
+        {
+            var end = line.Points[^1];
+            line.Points.Add(new Point(left + chartWidth + chartWidth / _seconds * SlideSeconds, end.Y));
+        }
+
         // A new sample moves the line under a pointer that is still there.
         DrawHover();
         Slide(chartWidth / _seconds);
@@ -315,12 +323,14 @@ public sealed partial class DownloadSpeedGraph : UserControl
     /// stepping once a second. The next sample redraws it from where the slide has got to, so nothing jumps.
     /// It is one composition animation of a transform, with no timer, and it stops while the graph can't be seen.
     /// </summary>
+    private const double SlideSeconds = 2;
+
     private void Slide(double pixelsPerSecond)
     {
         _pixelsPerSecond = pixelsPerSecond;
         if (!_seen || !_expanded || pixelsPerSecond <= 0 || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
         // Two seconds at most: a sample that is late leaves the line where it got to, not sliding away.
-        const double longest = 2;
+        const double longest = SlideSeconds;
         var animation = new DoubleAnimation
         {
             From = 0,
