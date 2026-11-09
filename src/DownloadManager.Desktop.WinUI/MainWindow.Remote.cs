@@ -252,21 +252,29 @@ public sealed partial class MainWindow
         var canCheck = _remote.State.Jobs.Any(job => RemoteRules.Actions(job).CheckNow);
 
         // This runs on every job change, and the menu may be open. It only changes when what it offers does.
-        var offers = $"{torrents}|{usable.Count}|{canCheck}|{string.Join('|', browsable.Select(account => RemoteText.ProviderName(account)))}";
+        var offers = $"{_remote.State.RemoteSupported}|{torrents}|{usable.Count}|{canCheck}|{string.Join('|', browsable.Select(account => RemoteText.ProviderName(account)))}";
         if (offers == _remoteTasksOffers) return;
         _remoteTasksOffers = offers;
         foreach (var old in _remoteTasksItems) TasksMenu.Items.Remove(old);
         _remoteTasksItems.Clear();
-        if (usable.Count == 0) return;
 
         // After Add Links, before the export group.
         var at = 2;
-        void Add(string text, string accessKey, RoutedEventHandler click, bool enabled = true)
+        MenuFlyoutItem Add(string text, string accessKey, RoutedEventHandler click, bool enabled = true)
         {
             var item = new MenuFlyoutItem { Text = text, AccessKey = accessKey, IsEnabled = enabled };
             item.Click += click;
             TasksMenu.Items.Insert(at++, item);
             _remoteTasksItems.Add(item);
+            return item;
+        }
+
+        // U-WL-22: the entries of a container go to a provider, so with no key the item says what it needs.
+        if (usable.Count == 0)
+        {
+            if (_remote.State.RemoteSupported)
+                Add(RemoteText.ContainerImportItem(null), "J", (_, _) => { }, enabled: false);
+            return;
         }
 
         if (torrents)
@@ -282,7 +290,8 @@ public sealed partial class MainWindow
 
         if (browsable.Count > 0) Add($"{RemoteText.ProviderName(browsable[0])} Hosters…", "H", (_, _) => HosterWindow.Show(_remote));
 
-        Add("Import JD Container…", "J", async (_, _) => await ImportJdContainerAsync());
+        var import = Add(RemoteText.ContainerImportItem(RemoteText.ProviderName(usable[0])), "J", async (_, _) => await ImportJdContainerAsync());
+        ToolTipService.SetToolTip(import, RemoteText.ContainerImportHelp(RemoteText.ProviderName(usable[0])));
 
         // Dimmed with nothing waiting, because then there is nothing for it to do.
         Add("Check Remote Status Now", "C", async (_, _) => await CheckRemoteStatusNowAsync(), canCheck);

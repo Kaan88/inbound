@@ -36,7 +36,7 @@ internal sealed class StatusLine
         _isProblem = isProblem;
         Text.Text = text;
         Text.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        AutomationProperties.SetName(Text, text.Length == 0 ? AccessibleName : $"{AccessibleName}: {text}");
+        AutomationProperties.SetName(Text, ShellWords.SpokenStatus(AccessibleName, text));
         ApplyColor();
         if (text.Length > 0 && (changed || announceSameWords)) LiveRegion.Announce(Text);
     }

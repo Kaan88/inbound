@@ -104,17 +104,19 @@ internal sealed class WebUiOptionsPage
         [
             _loadStatus.Text,
             _tryAgain,
-            _enable,
-            _state.Text,
+            // U-WL-10: in the order they are done. The box needs a password, so the password comes first.
             SettingsWindow.Hint("A browser on another device opens an address below and signs in with the password. From there it can add, pause and remove downloads and change speed limits and queues, within the folders Inbound already uses. It can't run programs on this PC. Nothing runs while the box is off."),
-            _port,
-            SettingsWindow.Section("Password"),
+            SettingsWindow.Section("1. Password"),
             _passwordState.Text,
             _newPassword,
             _repeatPassword,
             passwordButtons,
             _passwordResult.Text,
             SettingsWindow.Hint($"At least {WebUiForm.MinPasswordLength} characters. It is set only here."),
+            SettingsWindow.Section("2. Turn it on"),
+            _enable,
+            _state.Text,
+            _port,
             SettingsWindow.Section("Addresses"),
             _names,
             SettingsWindow.Hint("Names that other devices use for this PC, such as nas or nas.local. Separate them with commas."),
@@ -316,9 +318,15 @@ internal sealed class WebUiOptionsPage
         _enable.IsEnabled = status.HasPassword || _enable.IsChecked == true;
 
         var addresses = WebUiForm.AddressesToType(status);
-        _addresses.Text = string.Join(Environment.NewLine, addresses);
-        _addresses.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        _addressesHint.Visibility = addresses.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // U-WL-10: before the firewall step, the addresses that will work once it is done.
+        var later = addresses.Count == 0 ? WebUiForm.AddressesOnceAllowed(status, Environment.MachineName) : [];
+        var shown = addresses.Count > 0 ? addresses : later;
+        _addresses.Text = string.Join(Environment.NewLine, shown);
+        _addresses.Visibility = shown.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _addressesHint.Text = later.Count > 0
+            ? "Once Windows Firewall allows it, type one of these in the browser on the other device."
+            : "Type one of these in the browser on the other device.";
+        _addressesHint.Visibility = shown.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         _localOnlyHint.Visibility = status is { State: WebUiStates.Running, LocalOnly: true } ? Visibility.Visible : Visibility.Collapsed;
         RenderFirewall();
         RenderButtons();
