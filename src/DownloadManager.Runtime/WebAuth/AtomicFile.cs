@@ -1,10 +1,10 @@
-namespace DownloadManager.Server.Auth;
+namespace DownloadManager.Runtime.WebAuth;
 
 /// <summary>
 /// A whole-file write that a kill at any point leaves as the old file or the new one: a temporary file next to it,
 /// flushed to disk, then moved over it. Owner-only (mode 600) off Windows, from the moment the temporary file exists.
 /// </summary>
-internal static class AtomicFile
+public static class AtomicFile
 {
     public static void Write(string path, ReadOnlySpan<byte> bytes)
     {

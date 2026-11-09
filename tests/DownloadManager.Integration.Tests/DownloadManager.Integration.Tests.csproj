@@ -49,6 +49,17 @@
     <ProjectReference Include="..\..\src\DownloadManager.Host\DownloadManager.Host.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
     <ProjectReference Include="..\..\src\DownloadManager.Cli\DownloadManager.Cli.csproj" ReferenceOutputAssembly="false" Private="false" />
     <ProjectReference Include="..\..\src\DownloadManager.NativeHost\DownloadManager.NativeHost.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <!-- D8: the web bridge the test Host starts. -->
+    <ProjectReference Include="..\..\src\DownloadManager.Server\DownloadManager.Server.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!-- D8: the Host's web UI parts, tested as they are (no fakes): the firewall and TCP tables are only read. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\DownloadManager.Host\WebBridgeLauncher.cs" Link="WebUi\WebBridgeLauncher.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\WindowsFirewallRules.cs" Link="WebUi\WindowsFirewallRules.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\TcpListenerOwner.cs" Link="WebUi\TcpListenerOwner.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\WebUiPasswordFile.cs" Link="WebUi\WebUiPasswordFile.cs" />
+    <Compile Include="..\..\src\DownloadManager.Host\LocalNetworkAddresses.cs" Link="WebUi\LocalNetworkAddresses.cs" />
   </ItemGroup>
 
   <ItemGroup>
