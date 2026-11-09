@@ -131,6 +131,27 @@ public sealed class DownloadJob
     public string FinalFilePath { get; set; } = string.Empty;
     public string PartFilePath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// UI.B19: the folder a provider file was given (its package's folder). The app makes the file's own path folders
+    /// below it, and records the ones it created in <see cref="MadeFolders"/>. This folder itself is never one of them.
+    /// Null for every other download, which goes straight into the folder it was given.
+    /// </summary>
+    public string? MadeFoldersBase { get; set; }
+
+    /// <summary>
+    /// UI.B19: the folders the app created for this download, recorded when it created them, so deleting the download
+    /// can take them away again once they are empty. A folder that already existed is never listed. An older record
+    /// has none, and then no folder is removed.
+    /// </summary>
+    public List<string> MadeFolders { get; set; } = new();
+
+    /// <summary>
+    /// The final file this download wrote: where its finished file landed. Deleting an unfinished download deletes
+    /// the file at <see cref="FinalFilePath"/> only when it is this one, so a file it never wrote, such as the one an
+    /// Overwrite download would have replaced, stays.
+    /// </summary>
+    public string? WrittenFinalPath { get; set; }
+
     public long? TotalBytes { get; set; }
     public long ReceivedBytes { get; set; }
     public DownloadState State { get; set; } = DownloadState.Queued;
@@ -266,6 +287,7 @@ public sealed class DownloadJob
     {
         var clone = (DownloadJob)MemberwiseClone();
         clone.CompletionOptions = CompletionOptions.Clone();
+        clone.MadeFolders = new List<string>(MadeFolders);
         clone.RequestHeaders = new Dictionary<string, string>(RequestHeaders, StringComparer.OrdinalIgnoreCase);
         clone.RequestHeadersProtected = new Dictionary<string, string>(RequestHeadersProtected, StringComparer.OrdinalIgnoreCase);
         return clone;

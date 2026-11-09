@@ -89,7 +89,7 @@ not used.
 its download list, including downloads you did not send from Chrome: addresses, page addresses, file
 names, folders and progress. The popup shows the newest 20 and lets you pause, resume, retry or delete them in the
 app, and, for a finished download only if you tick "Delete the file too", delete the file. Deleting an unfinished
-download always deletes its partial data. When the folder window opens, the app
+download always deletes its partial data, and never a file it did not write. When the folder window opens, the app
 sends the default download folder and your favorite folders. The app's other settings, passwords and
 cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
 else.
