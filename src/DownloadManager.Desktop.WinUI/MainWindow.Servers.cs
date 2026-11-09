@@ -124,7 +124,7 @@ public sealed partial class MainWindow
         if (_servers.LastShown is { } last)
         {
             if (_servers.Target(last) is { } target) _ = ShowServerAsync(target);
-            else ShowPassingStatus("The server shown last can't be opened on this Windows account. Pair it again in File > Servers.");
+            else ShowPassingStatus($"The server shown last can't be opened on {PlatformText.ThisAccount}. Pair it again in File > Servers.");
         }
     }
 
@@ -332,7 +332,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        await ShowMessageAsync("Servers", "This server's pairing can't be opened on this Windows account. Select it in File > Servers and pair it again.");
+        await ShowMessageAsync("Servers", $"This server's pairing can't be opened on {PlatformText.ThisAccount}. Select it in File > Servers and pair it again.");
     }
 
     /// <summary>
@@ -830,10 +830,10 @@ public sealed partial class MainWindow
         {
             Header = "Theme",
             MinWidth = 200,
-            ItemsSource = new[] { "Same as Windows", "Light", "Dark" },
+            ItemsSource = new[] { PlatformText.FollowSystemTheme, "Light", "Dark" },
             SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, mine.Theme))),
         };
-        var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = mine.LaunchAtStartup };
+        var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = mine.LaunchAtStartup };
         var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = mine.CloseWindowCompletely };
         var providerOpens = ProviderOpensBox();
         var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = mine.BrowserIntegrationEnabled };

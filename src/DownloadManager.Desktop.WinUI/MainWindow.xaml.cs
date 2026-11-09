@@ -3097,7 +3097,7 @@ public sealed partial class MainWindow : Window
         authenticationPanel.Children.Add(useAuthentication);
         authenticationPanel.Children.Add(authenticationUser);
         authenticationPanel.Children.Add(authenticationPassword);
-        authenticationPanel.Children.Add(new TextBlock { Text = "HTTP Basic authentication. Credentials apply only to this download and are protected by Windows when saved.", TextWrapping = TextWrapping.Wrap });
+        authenticationPanel.Children.Add(new TextBlock { Text = $"HTTP Basic authentication. Credentials apply only to this download and are {PlatformText.ProtectedBy} when saved.", TextWrapping = TextWrapping.Wrap });
         var authenticationError = new TextBlock { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         authenticationPanel.Children.Add(authenticationError);
         var rememberFolder = new CheckBox { Content = "Remember this folder for manual downloads", IsChecked = true };
@@ -4138,7 +4138,7 @@ public sealed partial class MainWindow : Window
                 Height = 96,
                 PlaceholderText = "*.example.com=2",
             };
-            var launch = new CheckBox { Content = "Start Inbound when I sign in to Windows", IsChecked = settings.LaunchAtStartup };
+            var launch = new CheckBox { Content = PlatformText.StartAtSignIn, IsChecked = settings.LaunchAtStartup };
             var clipboard = new CheckBox { Content = "Watch the clipboard for download links", IsChecked = settings.ClipboardMonitoring };
             var integration = new CheckBox { Content = "Capture downloads from your browser", IsChecked = settings.BrowserIntegrationEnabled };
             var notify = new CheckBox { Content = "Show a notification", IsChecked = settings.NotifyOnCompletion };
@@ -4155,7 +4155,7 @@ public sealed partial class MainWindow : Window
             {
                 Header = "Theme",
                 MinWidth = 200,
-                ItemsSource = new[] { "Same as Windows", "Light", "Dark" },
+                ItemsSource = new[] { PlatformText.FollowSystemTheme, "Light", "Dark" },
                 // The theme in use, not only the Host's: a Dark Mode click the Host has yet to save is kept in
                 // _uiState, and starting from the Host's value would let OK undo it.
                 SelectedIndex = Math.Max(0, Array.IndexOf(themeValues, ThemeChoices.InUse(_uiState.DarkMode, settings.Theme))),
@@ -4184,7 +4184,7 @@ public sealed partial class MainWindow : Window
             var proxyMode = new RadioButtons
             {
                 Header = "Connection",
-                ItemsSource = new[] { "No proxy", "Use the Windows proxy settings", "Use this proxy server:" },
+                ItemsSource = new[] { "No proxy", PlatformText.SystemProxy, "Use this proxy server:" },
                 SelectedIndex = settings.Proxy.Mode switch { "system" => 1, "manual" => 2, _ => 0 },
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(proxyMode, "Proxy mode");
@@ -4285,7 +4285,7 @@ public sealed partial class MainWindow : Window
             ShowLoginEmpty();
             var addLogin = new Button { Content = "Add site login" };
             addLogin.Click += (_, _) => AddLoginRow(new SiteLoginDto { Id = Guid.NewGuid() });
-            var loginHelp = SettingsWindow.Hint("Credentials are saved securely by Windows and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
+            var loginHelp = SettingsWindow.Hint((OperatingSystem.IsWindows() ? "Credentials are saved securely by Windows" : "Credentials are saved encrypted") + " and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.");
 
             var categoryBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             var categoryRows = new List<UIElement>();
