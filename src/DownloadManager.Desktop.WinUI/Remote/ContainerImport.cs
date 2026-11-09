@@ -32,6 +32,9 @@ internal sealed record ContainerReadView(
     bool CanSendToJd,
     bool CanReadAgain);
 
+/// <summary>The Host's reading of a file, and whether it wasn't read because uploading it failed on the way, so reading again could help.</summary>
+internal sealed record ContainerReadReply(RemoteContainerPreviewResult Result, bool CanReadAgain);
+
 /// <summary>What to say about a hand-over to JDownloader, and whether another try makes sense.</summary>
 internal sealed record ContainerSendView(string Text, bool IsProblem, bool CanSendAgain);
 
@@ -315,7 +318,8 @@ internal static partial class RemoteText
     public static string ContainerSendFailure(string error) => error is HostLost or HostTooSlow ? ContainerSendLost : error;
 
     /// <param name="fileName">Only the file's name. Nothing looks at the file on this side.</param>
-    public static ContainerReadView ContainerRead(RemoteContainerPreviewResult preview, string fileName, IFormatProvider? culture = null)
+    /// <param name="canReadAgain">Uploading the file to a server failed on the way, so reading again could help.</param>
+    public static ContainerReadView ContainerRead(RemoteContainerPreviewResult preview, string fileName, IFormatProvider? culture = null, bool canReadAgain = false)
     {
         var notes = preview.Problems.Select(UrlRedactor.HideAddresses).Where(note => !string.IsNullOrWhiteSpace(note)).ToList();
         var name = UrlRedactor.HideAddresses(fileName);
@@ -329,7 +333,7 @@ internal static partial class RemoteText
                 notes,
                 false,
                 preview.CanSendToJd,
-                preview.Error is ContainerReadLost or HostBusy or HostNotRunning);
+                canReadAgain || preview.Error is ContainerReadLost or HostBusy or HostNotRunning);
         }
 
         var links = preview.Entries.Count == 1 ? "1 link" : $"{preview.Entries.Count} links";

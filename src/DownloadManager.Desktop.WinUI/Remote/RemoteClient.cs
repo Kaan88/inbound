@@ -413,47 +413,103 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     /// server the file is uploaded first (<see cref="ContainerForServerAsync"/>) and its reference sent instead.
     /// </summary>
     public async Task<RemoteContainerPreviewResult> PreviewContainerAsync(string path, CancellationToken cancellationToken = default)
+        => (await ReadContainerAsync(path, cancellationToken).ConfigureAwait(false)).Result;
+
+    /// <summary>
+    /// As <see cref="PreviewContainerAsync"/>, and says whether asking again could help when the file wasn't read because
+    /// uploading it failed on the way (no answer in time, or the server out of reach). A kept reference the server says
+    /// is gone is dropped, and the file is uploaded once more.
+    /// </summary>
+    public async Task<ContainerReadReply> ReadContainerAsync(string path, CancellationToken cancellationToken = default)
     {
-        var (sent, fileName, error) = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
-        if (sent is null) return new RemoteContainerPreviewResult { Error = error };
-        return await SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = sent, FileName = fileName }, MessageTypes.RemoteContainerPreviewResult,
-            failure => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(failure) }, cancellationToken).ConfigureAwait(false);
+        var upload = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        var reply = await PreviewUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceGone(upload, reply.Result.Error)) return reply;
+
+        upload = await ContainerForServerAsync(path, cancellationToken, forceUpload: true).ConfigureAwait(false);
+        return await PreviewUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
     }
+
+    private async Task<ContainerReadReply> PreviewUploadedAsync(ContainerUpload upload, CancellationToken cancellationToken)
+    {
+        if (upload.Sent is null) return new ContainerReadReply(new RemoteContainerPreviewResult { Error = upload.Error }, upload.CanRetry);
+        var result = await SlowAsync(MessageTypes.RemoteContainerPreview, new RemoteContainerPreviewRequest { Path = upload.Sent, FileName = upload.FileName }, MessageTypes.RemoteContainerPreviewResult,
+            failure => new RemoteContainerPreviewResult { Error = RemoteText.ContainerReadFailure(failure) }, cancellationToken).ConfigureAwait(false);
+        return new ContainerReadReply(result, false);
+    }
+
+    /// <summary>
+    /// A reply that used a kept reference and says its file is gone: the reference is dropped from the cache, so the next
+    /// <see cref="ContainerForServerAsync"/> uploads the file again. False when no kept reference was involved.
+    /// </summary>
+    private bool ReferenceGone(ContainerUpload upload, string? said)
+    {
+        if (upload.KeptKey is not { } key || !UploadReferenceText.IsGone(said)) return false;
+        _uploads.TryRemove(key, out _);
+        return true;
+    }
+
+    /// <summary>What <see cref="ContainerForServerAsync"/> found out.</summary>
+    /// <param name="Sent">What goes to the Host or server as the path. Null when the file can't be sent: <paramref name="Error"/> says why.</param>
+    /// <param name="CanRetry">The upload failed on the way, not because of the file, so asking again could help.</param>
+    /// <param name="KeptKey">The cache entry the reference came from, when it wasn't uploaded just now.</param>
+    private sealed record ContainerUpload(string? Sent, string? FileName, string? Error, bool CanRetry = false, string? KeptKey = null);
 
     /// <summary>
     /// A container file on this PC, for another server whose hello lists <c>uploads</c>: uploaded
     /// (<c>POST /api/upload/container</c>, the name in a header for its kind), and its <c>upload:</c> reference sent with the
-    /// file's name. For this PC's Host, the path as it is. Null with the reason when the file can't be sent.
+    /// file's name. For this PC's Host, the path as it is. Not sent, with the reason, when the file can't be sent.
     /// </summary>
-    private async Task<(string? Sent, string? FileName, string? Error)> ContainerForServerAsync(string path, CancellationToken cancellationToken)
+    /// <param name="forceUpload">Ignores a kept reference, because the server said its file is gone.</param>
+    private async Task<ContainerUpload> ContainerForServerAsync(string path, CancellationToken cancellationToken, bool forceUpload = false)
     {
         ServerTarget? target;
         lock (_sync) target = _uploadTarget;
-        if (target is null) return (path, null, null);
+        if (target is null) return new ContainerUpload(path, null, null);
         var text = path.Trim();
-        if (ContainerPathProblem(text) is { } problem) return (null, null, problem);
+        if (ContainerPathProblem(text) is { } problem) return new ContainerUpload(null, null, problem);
         var name = Path.GetFileName(text);
         byte[] bytes;
         string key;
         try
         {
             var info = new FileInfo(text);
-            if (!info.Exists) return (null, null, "That container file isn't on this PC.");
-            if (info.Length is 0 or > MostContainerBytes) return (null, null, "That file is too large to be a container.");
-            key = "container|" + UploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
-            if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return (known.Reference, name, null);
+            if (!info.Exists) return new ContainerUpload(null, null, "That container file isn't on this PC.");
+            if (info.Length is 0 or > MostContainerBytes) return new ContainerUpload(null, null, "That file is too large to be a container.");
+            key = ContainerUploadKey(info.FullName, info.Length, info.LastWriteTimeUtc);
+            if (forceUpload) _uploads.TryRemove(key, out _);
+            else if (_uploads.TryGetValue(key, out var known) && DateTimeOffset.UtcNow - known.At < UploadKeptFor) return new ContainerUpload(known.Reference, name, null, KeptKey: key);
             bytes = await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
         {
-            return (null, null, "That container file couldn't be read on this PC.");
+            return new ContainerUpload(null, null, "That container file couldn't be read on this PC.");
         }
 
         var (reference, error) = await RemoteServerHttp.UploadContainerAsync(target, bytes, name, cancellationToken).ConfigureAwait(false);
-        if (reference is null) return (null, null, error);
+        if (reference is null) return new ContainerUpload(null, null, error, UploadCanBeRetried(error, target));
         _uploads[key] = (reference, DateTimeOffset.UtcNow);
-        return (reference, name, null);
+        return new ContainerUpload(reference, name, null);
     }
+
+    /// <summary>The cache key for a container file: as <see cref="UploadKey"/>, apart from a .torrent file's.</summary>
+    internal static string ContainerUploadKey(string fullPath, long length, DateTime lastWriteUtc) => "container|" + UploadKey(fullPath, length, lastWriteUtc);
+
+    /// <summary>Keeps a reference as if the file had just been uploaded. For tests.</summary>
+    internal void RememberUpload(string key, string reference) => _uploads[key] = (reference, DateTimeOffset.UtcNow);
+
+    /// <summary>Whether a reference is kept for the key. For tests.</summary>
+    internal bool HasUpload(string key) => _uploads.ContainsKey(key);
+
+    /// <summary>
+    /// Whether an upload failed because the server didn't answer in time or couldn't be reached, so that uploading again
+    /// could work. A server that refuses the file, doesn't take uploads or has ended the pairing won't change its mind.
+    /// The upload reports only words, so these are told by the two sentences it uses (RemoteServerHttp.UploadAsync).
+    /// </summary>
+    internal static bool UploadCanBeRetried(string? error, ServerTarget target)
+        => error is not null &&
+           (error == $"Couldn't reach {target.Name}." ||
+            (error.StartsWith($"{target.Name} didn't take the ", StringComparison.Ordinal) && error.EndsWith(" in time. Try again.", StringComparison.Ordinal)));
 
     /// <summary>Why a container path isn't opened here for a server, or null: as <see cref="TorrentPathProblem"/>.</summary>
     internal static string? ContainerPathProblem(string path)
@@ -482,9 +538,18 @@ internal sealed partial class RemoteClient : IAsyncDisposable
     /// <summary>Waits for a person to answer in JDownloader. Cancelling stops waiting here, and JDownloader may still be asking.</summary>
     public async Task<RemoteContainerSendResult> SendContainerToJdAsync(string path, CancellationToken cancellationToken = default)
     {
-        var (sent, _, error) = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
-        if (sent is null) return new RemoteContainerSendResult { Status = "failed", Message = error ?? string.Empty };
-        return await SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = sent }, MessageTypes.RemoteContainerSendResult,
+        var upload = await ContainerForServerAsync(path, cancellationToken).ConfigureAwait(false);
+        var result = await SendUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+        if (!ReferenceGone(upload, result.Message)) return result;
+
+        upload = await ContainerForServerAsync(path, cancellationToken, forceUpload: true).ConfigureAwait(false);
+        return await SendUploadedAsync(upload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<RemoteContainerSendResult> SendUploadedAsync(ContainerUpload upload, CancellationToken cancellationToken)
+    {
+        if (upload.Sent is null) return new RemoteContainerSendResult { Status = "failed", Message = upload.Error ?? string.Empty };
+        return await SlowAsync(MessageTypes.RemoteContainerSendToJd, new RemoteContainerSendRequest { Path = upload.Sent }, MessageTypes.RemoteContainerSendResult,
             failure => new RemoteContainerSendResult { Status = "failed", Message = RemoteText.ContainerSendFailure(failure) }, cancellationToken, SendToJdTimeout).ConfigureAwait(false);
     }
 
