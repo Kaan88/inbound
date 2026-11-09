@@ -15,6 +15,14 @@
               BorderBrush="{ThemeResource InboundDividerBrush}" BorderThickness="0,1,0,0">
             <Canvas x:Name="Plot" Height="84" Margin="8,0" VerticalAlignment="Top" Background="Transparent"
                     AutomationProperties.Name="Download speed history for this session" />
+            <!-- The line itself, clipped to the chart, slides left between samples (see Slide). -->
+            <Canvas x:Name="LineClip" Height="84" Margin="8,0" VerticalAlignment="Top" IsHitTestVisible="False">
+                <Canvas x:Name="Lines">
+                    <Canvas.RenderTransform>
+                        <TranslateTransform x:Name="SlideTransform" />
+                    </Canvas.RenderTransform>
+                </Canvas>
+            </Canvas>
             <!-- Redrawn on its own as the pointer moves, so the plot isn't. -->
             <Canvas x:Name="Hover" Height="84" Margin="8,0" VerticalAlignment="Top" IsHitTestVisible="False" />
         </Grid>
@@ -46,7 +54,7 @@
                             <RotateTransform x:Name="ChevronRotation" />
                         </FontIcon.RenderTransform>
                     </FontIcon>
-                    <TextBlock Grid.Column="1" Text="Download speed" FontSize="11" VerticalAlignment="Center" />
+                    <TextBlock x:Name="HeadingText" Grid.Column="1" Text="Download speed" FontSize="11" VerticalAlignment="Center" />
                     <!-- UI.R6: each rate in a box of its own with the figures on the right, so the words after it don't move as it changes. -->
                     <StackPanel x:Name="Summary" Grid.Column="2" Margin="6,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock x:Name="SummaryCurrent" FontSize="11" MinWidth="64" TextAlignment="Right"

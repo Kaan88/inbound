@@ -38,8 +38,7 @@
         </Grid>
         <Expander x:Name="SegmentDetails" Header="Segment details" IsExpanded="False" HorizontalContentAlignment="Stretch"
                   HorizontalAlignment="Stretch">
-            <StackPanel Spacing="7">
-                <StackPanel x:Name="Segments" Spacing="2" HorizontalAlignment="Stretch" />
+            <StackPanel x:Name="ExpanderBody" Spacing="7">
             </StackPanel>
         </Expander>
     </StackPanel>

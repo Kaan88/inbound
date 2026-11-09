@@ -16,7 +16,6 @@ public sealed partial class DownloadWindow : Window
     private readonly Guid _jobId;
     private readonly HostConnection _connection;
     private readonly JobViewModel _iconJob = new();
-    private readonly SpeedHistory _speed = new();
     private JobDto? _job;
     private SettingsDto? _settings;
     private bool _globalShowCompletion = true;
@@ -26,7 +25,6 @@ public sealed partial class DownloadWindow : Window
     private readonly bool _manual;
     private bool _completedLayout;
     private bool _refreshingCompletion;
-    private bool _chartStale;
     private long? _displayedSpeedLimit;
 
     /// <param name="target">The Host the download is on: this PC, or a saved server (<c>--server</c>).</param>
@@ -80,9 +78,12 @@ public sealed partial class DownloadWindow : Window
         Details.Attach(_connection, SegmentMap, OverallFooter, Root);
         Details.AddMap(OverviewMap);
         Details.Problem += words => Notice.Text = words;
-        // The chart is drawn only while it can be seen; samples still go into the minute behind it.
-        VisibilityChanged += (_, _) => DrawChartIfSeen();
-        Activated += (_, _) => DrawChartIfSeen();
+        // The graph draws and slides only while it can be seen; samples still go into its history.
+        Chart.Heading = "Speed";
+        Chart.PeriodSeconds = 60;
+        VisibilityChanged += (_, _) => UpdateChartSeen();
+        Activated += (_, _) => UpdateChartSeen();
+        AppWindow.Changed += (_, change) => { if (change.DidPresenterChange || change.DidVisibilityChange) UpdateChartSeen(); };
         Closed += async (_, _) =>
         {
             _closed = true;
@@ -108,21 +109,12 @@ public sealed partial class DownloadWindow : Window
         OverviewPage.Visibility = selected == OverviewTab || _completedLayout ? Visibility.Visible : Visibility.Collapsed;
         ConnectionsPage.Visibility = selected == ConnectionsTab && !_completedLayout ? Visibility.Visible : Visibility.Collapsed;
         OptionsPage.Visibility = selected == OptionsTab && !_completedLayout ? Visibility.Visible : Visibility.Collapsed;
-        _chartStale = true;
-        DrawChartIfSeen();
+        UpdateChartSeen();
     }
 
-    private bool ChartSeen => !_closed && AppWindow.IsVisible && OverviewPage.Visibility == Visibility.Visible
+    private void UpdateChartSeen() => Chart.IsSeen = !_closed && AppWindow.IsVisible && OverviewPage.Visibility == Visibility.Visible
         && SpeedPanel.Visibility == Visibility.Visible
         && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
-
-    private void DrawChartIfSeen()
-    {
-        if (!_chartStale || !ChartSeen) return;
-        _chartStale = false;
-        Chart.Show(_speed.Points(), _speed.Peak);
-        PeakText.Text = _speed.Peak > 0 ? $"peak {Bytes((long)_speed.Peak)}/s" : string.Empty;
-    }
 
     private async Task RefreshCompletionAsync(JobDto completed)
     {
@@ -248,7 +240,8 @@ public sealed partial class DownloadWindow : Window
         CompletionPath.Text = job.FinalFilePath;
         var resume = job.ResumeSupported switch { true => "Supported", false => "Not supported", null => "Unknown" };
         ResumeText.Text = resume;
-        ResumeHeader.Visibility = ResumeText.Visibility = complete ? Visibility.Collapsed : Visibility.Visible;
+        // A failure has Resume as a tile of its own.
+        ResumeHeader.Visibility = ResumeText.Visibility = complete || failed ? Visibility.Collapsed : Visibility.Visible;
         Details.Show(job);
 
         // The ring: blue while it runs, amber paused, red failed, green with a check when done.
@@ -324,9 +317,8 @@ public sealed partial class DownloadWindow : Window
         SpeedPanel.Visibility = complete || failed ? Visibility.Collapsed : Visibility.Visible;
         if (!complete && !failed)
         {
-            _speed.Add(DateTimeOffset.UtcNow, rate);
-            _chartStale = true;
-            DrawChartIfSeen();
+            UpdateChartSeen();
+            Chart.AddSample(DateTimeOffset.UtcNow, rate);
         }
         CompletedActions.Visibility = complete && !job.FileRemovedAfterExtraction && RemoteDataRules.MayUseFiles(_connection.IsRemote)
             ? Visibility.Visible : Visibility.Collapsed;
@@ -392,7 +384,7 @@ public sealed partial class DownloadWindow : Window
     private void UpdateButtons()
     {
         var complete = _job?.State == "completed";
-        PauseButton.Visibility = _job is null || _job.IsTerminal ? Visibility.Collapsed : Visibility.Visible;
+        PauseButton.Visibility = _job is null || _job.IsTerminal || _job.State is "failed" or "paused" ? Visibility.Collapsed : Visibility.Visible;
         ResumeButton.Visibility = _job is null || (_job.IsTerminal && !_job.CanResume) ? Visibility.Collapsed : Visibility.Visible;
         CancelButton.Visibility = _job?.CanCancel == true ? Visibility.Visible : Visibility.Collapsed;
         PauseButton.IsEnabled = _connected && _job?.CanPause == true;
@@ -403,12 +395,13 @@ public sealed partial class DownloadWindow : Window
         if (resumeLeads) ResumeButton.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         else ResumeButton.ClearValue(FrameworkElement.StyleProperty);
         ResumeLabel.Text = _job?.State == "failed" ? "Retry" : "Resume";
+        AutomationProperties.SetName(ResumeButton, ResumeLabel.Text);
         ResumeGlyph.Glyph = _job?.State == "failed" ? "" : "";
         if (resumeLeads) ResumeGlyph.ClearValue(FontIcon.ForegroundProperty);
         else ResumeGlyph.Foreground = InboundTheme.Brush("InboundIconStartBrush", Root);
         ShowCompletionForJob.IsEnabled = _connected && _job is not null;
-        MoreButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
-        DeleteItem.IsEnabled = _connected && _job is not null;
+        DeleteButton.Visibility = _job is null ? Visibility.Collapsed : Visibility.Visible;
+        DeleteButton.IsEnabled = _connected && _job is not null;
         // A download on another server: its file is on that machine, so this PC can't open or show it.
         var mayOpen = complete && _job?.FileRemovedAfterExtraction != true && RemoteDataRules.MayUseFiles(_connection.IsRemote);
         OpenButton.Visibility = OpenWithButton.Visibility = FolderButton.Visibility = mayOpen ? Visibility.Visible : Visibility.Collapsed;
