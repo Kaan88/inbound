@@ -30,6 +30,9 @@ public sealed partial class JobDetailsPanel : UserControl
     private readonly Dictionary<long, double> _segmentRate = [];
     private readonly List<SegmentRow> _segmentRows = [];
 
+    // Built here and placed once: in the expander, or straight in the panel for a window that gives the table a tab.
+    private readonly StackPanel Segments = new() { Spacing = 2, HorizontalAlignment = HorizontalAlignment.Stretch };
+
     private sealed record SegmentRow(TextBlock Number, TextBlock Range, ProgressBar Bar, TextBlock Downloaded, TextBlock Speed, TextBlock Info);
 
     public JobDetailsPanel()
@@ -37,6 +40,7 @@ public sealed partial class JobDetailsPanel : UserControl
         InitializeComponent();
         _root = this;
         _timer.Tick += async (_, _) => await LoadSegmentsAsync();
+        Loaded += (_, _) => { if (Segments.Parent is null) ExpanderBody.Children.Add(Segments); };
         SegmentDetails.Expanding += (_, _) => SegmentsLayoutChanged?.Invoke();
         SegmentDetails.Collapsed += (_, _) => SegmentsLayoutChanged?.Invoke();
     }
@@ -63,7 +67,7 @@ public sealed partial class JobDetailsPanel : UserControl
     /// </summary>
     internal void UseTableOnly()
     {
-        if (Segments.Parent is Panel holder) holder.Children.Remove(Segments);
+        if (Segments.Parent is not null) return;
         Figures.Visibility = Visibility.Collapsed;
         SegmentDetails.Visibility = Visibility.Collapsed;
         Body.Children.Add(Segments);
@@ -318,7 +322,7 @@ public sealed partial class JobDetailsPanel : UserControl
         static Grid NewRow()
         {
             var row = new Grid { ColumnSpacing = 10, MinHeight = 24, HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var width in new[] { 24d, 132d, -1d, 150d, 80d, 74d })
+            foreach (var width in new[] { 24d, 136d, -1d, 122d, 74d, 66d })
             {
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = width < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(width) });
             }

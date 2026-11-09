@@ -97,13 +97,16 @@ default window width. With one remote or archive row selected, the status bar sa
 - The progress window (UI.R29, direction B) has a header (the file's icon on a tile, its name, where it
   comes from, a state chip in the status color) and a `SelectorBar`: Overview, Connections (n), Options.
   Overview puts a determinate 124px `ProgressRing` (blue running, amber paused, red failed, green with a check
-  when done) beside four tiles, then a card with the last 60 s of the job's own speed (`SpeedChart`), a thin
+  when done) beside four tiles, then a card holding the main window's `DownloadSpeedGraph` for this job only
+  (1 minute by default, the same periods, scale, labels and hover), a thin
   6px segment map and the address, folder and resume facts. A failure opens an `InfoBar` with the reason
   first. Connections and Options start with a one-line summary (percent, bar, speed and time left).
-  Completed hides the tabs and makes Open the primary button. Tiles and cards use `InboundCardBrush` with an
+  Completed hides the tabs and makes Open the primary button. Delete stays a labelled button. Tiles and cards use `InboundCardBrush` with an
   `InboundCardStrokeBrush` edge, radius 8.
-- The speed chart samples the job updates the window already receives, one sample per second, and draws only
-  while it can be seen. It never asks the Host for anything and has no timer.
+- That graph samples the job updates the window already receives and never asks the Host for anything.
+- `DownloadSpeedGraph` scrolls smoothly: between samples its line slides left at the speed time passes (one
+  composition animation of a transform, at most 2 s), and the next sample redraws from there. It stops while
+  the graph can't be seen and when Windows animations are off. The main window's graph does the same.
 - The Connections tab keeps `SegmentMapBar` (14px, radius 2). It
   draws every segment's completed bytes at its real offset, with a divider at
   each segment start. The plain indeterminate bar appears only

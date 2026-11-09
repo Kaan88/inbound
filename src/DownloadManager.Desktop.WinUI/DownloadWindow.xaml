@@ -136,22 +136,9 @@
                         </Grid>
                     </Grid>
 
-                    <Border x:Name="SpeedPanel" Style="{StaticResource CardStyle}">
-                        <StackPanel Spacing="6">
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Speed" FontSize="13" FontWeight="SemiBold" />
-                                <TextBlock Grid.Column="1" Text="last 60 s" FontSize="12" VerticalAlignment="Bottom"
-                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                                <TextBlock x:Name="PeakText" Grid.Column="2" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                           Foreground="{ThemeResource InboundSecondaryTextBrush}" />
-                            </Grid>
-                            <local:SpeedChart x:Name="Chart" AutomationProperties.Name="Speed over the last 60 seconds" />
-                        </StackPanel>
+                    <!-- The main window's speed graph, for this download only: same drawing, scale, labels and hover. -->
+                    <Border x:Name="SpeedPanel" Style="{StaticResource CardStyle}" Padding="0">
+                        <local:DownloadSpeedGraph x:Name="Chart" />
                     </Border>
 
                     <local:SegmentMapBar x:Name="OverviewMap" Height="6" CornerRadius="3" Visibility="Collapsed"
@@ -179,10 +166,10 @@
 
                     <!-- Finished: what to do with the file, Open first. -->
                     <StackPanel x:Name="CompletedActions" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
-                        <Button x:Name="OpenButton" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" Padding="16,7" MinWidth="110">
+                        <Button x:Name="OpenButton" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" Padding="16,7" MinWidth="110" AutomationProperties.Name="Open">
                             <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8A7;" FontSize="14" /><TextBlock Text="Open" /></StackPanel>
                         </Button>
-                        <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7">
+                        <Button x:Name="FolderButton" Click="Folder_Click" Padding="16,7" AutomationProperties.Name="Show in folder">
                             <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE838;" FontSize="14" /><TextBlock Text="Show in folder" /></StackPanel>
                         </Button>
                         <Button x:Name="OpenWithButton" Content="Open with…" Click="OpenWith_Click" Padding="16,7" />
@@ -315,28 +302,24 @@
             <CheckBox x:Name="DontShowAgain" Content="Don't show this window again" Visibility="Collapsed"
                       Click="DontShowAgain_Click" VerticalAlignment="Center" />
             <StackPanel x:Name="ActionRow" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button x:Name="PauseButton" Click="Pause_Click">
+                <Button x:Name="PauseButton" Click="Pause_Click" AutomationProperties.Name="Pause">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE769;" FontSize="14" Foreground="{ThemeResource InboundIconPauseBrush}" />
                         <TextBlock Text="Pause" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="ResumeButton" Click="Resume_Click">
+                <Button x:Name="ResumeButton" Click="Resume_Click" AutomationProperties.Name="Resume">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon x:Name="ResumeGlyph" Glyph="&#xE768;" FontSize="14" />
                         <TextBlock x:Name="ResumeLabel" Text="Resume" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" />
-                <Button x:Name="MoreButton" AutomationProperties.Name="More actions" ToolTipService.ToolTip="More actions" Padding="10,7">
-                    <FontIcon Glyph="&#xE712;" FontSize="14" />
-                    <Button.Flyout>
-                        <MenuFlyout Placement="TopEdgeAlignedRight">
-                            <MenuFlyoutItem x:Name="DeleteItem" Text="Delete download and file…" Click="Delete_Click">
-                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource InboundIconDangerBrush}" /></MenuFlyoutItem.Icon>
-                            </MenuFlyoutItem>
-                        </MenuFlyout>
-                    </Button.Flyout>
+                <Button x:Name="DeleteButton" Click="Delete_Click" AutomationProperties.Name="Delete" ToolTipService.ToolTip="Remove this download and delete its file">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="{ThemeResource InboundIconDangerBrush}" />
+                        <TextBlock Text="Delete" />
+                    </StackPanel>
                 </Button>
                 <Button x:Name="CloseButton" Content="Hide" Click="Close_Click" MinWidth="80" />
             </StackPanel>

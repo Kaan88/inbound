@@ -29,6 +29,8 @@ public sealed partial class DownloadSpeedGraph : UserControl
     private bool _seen = true;
     private bool _stale;
     private Storyboard? _transition;
+    private Storyboard? _slide;
+    private double _pixelsPerSecond;
 
     // Where the last drawing put things, for the hover layer.
     private double _left, _upper, _chartWidth, _chartHeight, _top;
@@ -86,7 +88,34 @@ public sealed partial class DownloadSpeedGraph : UserControl
         {
             if (_seen == value) return;
             _seen = value;
+            // Nothing moves while nobody can see it.
+            if (!value) StopSlide();
             if (value && _stale) Draw();
+        }
+    }
+
+    /// <summary>The period shown, in seconds: one of the menu's (1 min, 5 min, 30 min, 1 hour).</summary>
+    public int PeriodSeconds
+    {
+        get => _seconds;
+        set
+        {
+            var period = Periods.FirstOrDefault(candidate => candidate.Seconds == value);
+            if (period.Seconds == 0 || period.Seconds == _seconds) return;
+            _seconds = period.Seconds;
+            foreach (var item in PeriodMenu.Items.OfType<RadioMenuFlyoutItem>()) item.IsChecked = item.Text == period.Name;
+            ShowPeriod(period.Short, period.Name);
+            Draw();
+        }
+    }
+
+    /// <summary>The words on the bar, and the name screen readers give the plot.</summary>
+    public string Heading
+    {
+        set
+        {
+            HeadingText.Text = value;
+            AutomationProperties.SetName(Plot, $"{value} history");
         }
     }
 
@@ -216,8 +245,10 @@ public sealed partial class DownloadSpeedGraph : UserControl
         if (SummaryPeak.Text != peakText) SummaryPeak.Text = peakText;
         AutomationProperties.SetName(Summary, $"{currentText}, average {averageText}, peak {peakText}");
 
-        if (!_expanded) return;
+        if (!_expanded) { StopSlide(); return; }
         Plot.Children.Clear();
+        Lines.Children.Clear();
+        StopSlide();
         _drawn = false;
         var width = Plot.ActualWidth;
         var height = Plot.ActualHeight;
@@ -229,6 +260,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
         const int rows = 2, columns = 4;
         var chartWidth = width - left - 8;
         var chartHeight = height - upper - lower;
+        LineClip.Clip = new RectangleGeometry { Rect = new Rect(left, 0, chartWidth, height) };
         (_left, _upper, _chartWidth, _chartHeight, _top, _start, _drawn) = (left, upper, chartWidth, chartHeight, top, start, true);
         var foreground = InboundTheme.Brush("InboundSecondaryTextBrush", this);
         var gridBrush = InboundTheme.Brush("InboundDividerBrush", this);
@@ -267,7 +299,7 @@ public sealed partial class DownloadSpeedGraph : UserControl
             if (line is null)
             {
                 line = new Polyline { Stroke = stroke, StrokeThickness = 1.5, Points = new PointCollection() };
-                Plot.Children.Add(line);
+                Lines.Children.Add(line);
             }
             line.Points.Add(new Point(left + Math.Clamp((sample.Time - start).TotalSeconds / _seconds, 0, 1) * chartWidth,
                 upper + chartHeight * (1 - Math.Clamp(sample.Rate.Value / top, 0, 1))));
@@ -275,7 +307,43 @@ public sealed partial class DownloadSpeedGraph : UserControl
 
         // A new sample moves the line under a pointer that is still there.
         DrawHover();
+        Slide(chartWidth / _seconds);
     }
+
+    /// <summary>
+    /// Between samples the line slides left at the speed time passes, so the graph scrolls smoothly instead of
+    /// stepping once a second. The next sample redraws it from where the slide has got to, so nothing jumps.
+    /// It is one composition animation of a transform, with no timer, and it stops while the graph can't be seen.
+    /// </summary>
+    private void Slide(double pixelsPerSecond)
+    {
+        _pixelsPerSecond = pixelsPerSecond;
+        if (!_seen || !_expanded || pixelsPerSecond <= 0 || !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
+        // Two seconds at most: a sample that is late leaves the line where it got to, not sliding away.
+        const double longest = 2;
+        var animation = new DoubleAnimation
+        {
+            From = 0,
+            To = -pixelsPerSecond * longest,
+            Duration = new Duration(TimeSpan.FromSeconds(longest)),
+            FillBehavior = FillBehavior.HoldEnd,
+        };
+        Storyboard.SetTarget(animation, SlideTransform);
+        Storyboard.SetTargetProperty(animation, nameof(TranslateTransform.X));
+        _slide = new Storyboard();
+        _slide.Children.Add(animation);
+        _slide.Begin();
+    }
+
+    private void StopSlide()
+    {
+        _slide?.Stop();
+        _slide = null;
+        SlideTransform.X = 0;
+    }
+
+    /// <summary>How far the line has slid, in seconds, so the pointer finds the sample that is under it.</summary>
+    private double SlidSeconds => _pixelsPerSecond > 0 ? -SlideTransform.X / _pixelsPerSecond : 0;
 
     /// <summary>
     /// The point under the pointer: a guide line, a dot on the line and its speed and time. A gap says there was no
@@ -285,12 +353,13 @@ public sealed partial class DownloadSpeedGraph : UserControl
     {
         Hover.Children.Clear();
         if (_pointerX is not { } x || !_drawn || !_expanded || x < _left || x > _left + _chartWidth) return;
-        var time = _start + TimeSpan.FromSeconds((x - _left) / _chartWidth * _seconds);
+        var shift = TimeSpan.FromSeconds(SlidSeconds);
+        var time = _start + shift + TimeSpan.FromSeconds((x - _left) / _chartWidth * _seconds);
         var nearest = _samples.Where(sample => sample.Time >= _start)
             .OrderBy(sample => Math.Abs((sample.Time - time).TotalSeconds)).FirstOrDefault();
         var close = nearest.Time != default && Math.Abs((nearest.Time - time).TotalSeconds) <= Math.Max(2, _seconds / _chartWidth * 4);
         var guide = InboundTheme.Brush("InboundSecondaryTextBrush", this);
-        var pointX = close ? _left + Math.Clamp((nearest.Time - _start).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
+        var pointX = close ? _left + Math.Clamp((nearest.Time - _start - shift).TotalSeconds / _seconds, 0, 1) * _chartWidth : x;
         Hover.Children.Add(new Line { X1 = pointX, X2 = pointX, Y1 = _upper, Y2 = _upper + _chartHeight, Stroke = guide, StrokeThickness = 1, Opacity = 0.6 });
 
         string text;

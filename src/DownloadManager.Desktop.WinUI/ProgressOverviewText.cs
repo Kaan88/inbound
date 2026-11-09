@@ -1,43 +1,5 @@
 namespace DownloadManager.Desktop.WinUI;
 
-/// <summary>
-/// The last minute of one download's speed, as the progress window saw it. Samples come from the job
-/// updates the window already receives, so nothing extra is asked of the Host, and nothing runs between
-/// updates. One sample is kept per second, the latest in that second winning.
-/// </summary>
-internal sealed class SpeedHistory
-{
-    public const int Seconds = 60;
-    private readonly List<(long Second, double Rate)> _samples = [];
-
-    public IReadOnlyList<(long Second, double Rate)> Samples => _samples;
-
-    public void Add(DateTimeOffset at, double bytesPerSecond)
-    {
-        var second = at.ToUnixTimeSeconds();
-        var rate = double.IsFinite(bytesPerSecond) ? Math.Max(0, bytesPerSecond) : 0;
-        if (_samples.Count > 0 && _samples[^1].Second == second) _samples[^1] = (second, rate);
-        else if (_samples.Count == 0 || _samples[^1].Second < second) _samples.Add((second, rate));
-        else return; // A clock that went back: keep what is there rather than draw a line backwards.
-        var oldest = second - Seconds;
-        var drop = 0;
-        while (drop < _samples.Count && _samples[drop].Second < oldest) drop++;
-        if (drop > 0) _samples.RemoveRange(0, drop);
-    }
-
-    public void Clear() => _samples.Clear();
-
-    public double Peak => _samples.Count == 0 ? 0 : _samples.Max(sample => sample.Rate);
-
-    /// <summary>Each sample as (x from 0 to 1 across the minute ending at the latest sample, rate).</summary>
-    public IReadOnlyList<(double X, double Rate)> Points()
-    {
-        if (_samples.Count == 0) return [];
-        var end = _samples[^1].Second;
-        return _samples.Select(sample => (1 - (end - sample.Second) / (double)Seconds, sample.Rate)).ToList();
-    }
-}
-
 /// <summary>Words and figures for the progress window's ring and tiles.</summary>
 internal static class ProgressOverviewText
 {
