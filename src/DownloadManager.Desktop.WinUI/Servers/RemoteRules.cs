@@ -268,6 +268,59 @@ internal static class ServerPaths
 }
 
 /// <summary>
+/// What the server folder chooser shows for one <c>folders.browse</c> answer (UI.B16, U-WR-10): the rows with their whole
+/// paths for a tooltip, what to say when a folder holds none, and a notice that informs rather than reports a problem.
+/// </summary>
+internal static class ServerFolderListing
+{
+    public const string TruncatedNotice = "Only the first 2,000 folders are listed. Type a path to open one further down.";
+
+    public const string EmptyFolder = "This folder has no folders inside it. Choose it, or make a new folder in it.";
+
+    public const string NoRoots = "This server has no folders this app may save to.";
+
+    /// <param name="Rows">Each row's text, and its whole path for the tooltip and for opening it. The contract's own
+    /// public type, which the list's binding can read.</param>
+    /// <param name="Notice">Information for the line under the list, never an error; null for none.</param>
+    /// <param name="Empty">Shown in place of the list when it has no rows; null when it has some.</param>
+    public sealed record View(IReadOnlyList<FolderEntryDto> Rows, string? Notice, string? Empty, bool CanGoUp, bool CanCreate);
+
+    /// <summary>The roots are listed with their whole paths, a folder's contents by name.</summary>
+    public static View For(FolderBrowseResult result)
+    {
+        var rows = result.Path is null
+            ? result.Roots.Select(root => new FolderEntryDto { Name = root, Path = root }).ToList()
+            : result.Folders;
+        string? empty = rows.Count > 0 ? null : result.Path is null ? NoRoots : EmptyFolder;
+        return new View(rows, result.Truncated ? TruncatedNotice : null, empty, result.Path is not null, result.Path is not null);
+    }
+
+    /// <summary>'Choose this folder' needs a folder: one opened, or one typed.</summary>
+    public static bool CanChoose(string? typed) => !string.IsNullOrWhiteSpace(typed);
+}
+
+/// <summary>
+/// The words for a Move/Rename the server refused (U-WR-12): its own reason, then the folders it may use, so the user can
+/// put one in the dialog, which stays open with what they typed.
+/// </summary>
+internal static class MoveRefusal
+{
+    /// <summary>
+    /// The server's refusal of a folder outside its roots ("That folder is outside the folders this server may use."),
+    /// the one where listing them helps.
+    /// </summary>
+    public static bool IsOutsideRoots(string? error) => error?.Contains(" is outside ", StringComparison.OrdinalIgnoreCase) == true;
+
+    public static string Text(string? error, IReadOnlyList<string>? roots, string serverName)
+    {
+        var reason = string.IsNullOrWhiteSpace(error) ? $"{serverName} refused the move." : error.Trim();
+        if (roots is not { Count: > 0 }) return reason;
+        var list = string.Join(Environment.NewLine, roots.Select(root => "  " + root));
+        return $"{reason}{Environment.NewLine}The folders {serverName} may use:{Environment.NewLine}{list}";
+    }
+}
+
+/// <summary>
 /// Options when the window shows another server (design D9, section 5): this PC's own choices always go to this PC's
 /// Host, and the server's pages show only what its hello allows. Nothing here touches the UI.
 /// </summary>
