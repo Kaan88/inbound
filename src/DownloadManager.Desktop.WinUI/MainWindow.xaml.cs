@@ -96,6 +96,11 @@ public sealed partial class MainWindow : Window
         JobsList.ItemsSource = _visibleJobs;
         BuildJobsContextMenu();
         MenuBarHover.Attach(MainMenuBar);
+#if HAS_UNO
+        // LightDismissOverlayMode="Off" leaves the list undimmed on Windows; Uno ignores it and dims. Its dismiss layer
+        // stays (a click beside the drawer still closes it), only unseen.
+        ProviderSplit.PaneOpening += (_, _) => DispatcherQueue.TryEnqueue(() => ClearDismissLayer(ProviderSplit));
+#endif
         UiTrace.Write("MainWindow collections initialized");
 
         try
@@ -236,6 +241,23 @@ public sealed partial class MainWindow : Window
         if (OperatingSystem.IsWindows()) SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
         SpeedGraph.IsSeen = SpeedGraph.Visibility == Visibility.Visible;
     }
+
+#if HAS_UNO
+    private static void ClearDismissLayer(DependencyObject parent)
+    {
+        for (var at = 0; at < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); at++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, at);
+            if (child is FrameworkElement { Name: { } name } element && name.Contains("Dismiss", StringComparison.OrdinalIgnoreCase))
+            {
+                UiTrace.Write($"Drawer dismiss layer: {name} ({element.GetType().Name})");
+                element.Opacity = 0;
+            }
+
+            ClearDismissLayer(child);
+        }
+    }
+#endif
 
     public void RequestSettingsPage()
     {
