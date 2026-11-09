@@ -23,12 +23,17 @@ describe('wrapTarget (Tab inside a dialog)', () => {
 
 class FakeHistory implements HistoryLike {
   entries: unknown[] = [null];
+  urls: string[] = ['/#/all'];
   index = 0;
   pendingBacks = 0;
   get state() { return this.entries[this.index]; }
+  /** The address of the entry the page is on. */
+  get href() { return this.urls[this.index]; }
   pushState(data: unknown) {
     this.entries = this.entries.slice(0, this.index + 1);
+    this.urls = this.urls.slice(0, this.index + 1);
     this.entries.push(data);
+    this.urls.push(this.href);
     this.index++;
   }
   back() { this.pendingBacks++; }
@@ -38,17 +43,30 @@ class FakeHistory implements HistoryLike {
     this.index--;
     stack.popped();
   }
-  /** The user presses Back. */
+  /** The user presses Back (the phone's Back button too). */
   userBack(stack: DialogStack) {
     this.index--;
     stack.popped();
   }
+  /** The user presses Forward. */
+  userForward(stack: DialogStack) {
+    this.index++;
+    stack.popped();
+  }
+  /** A link or a typed address changes only the #fragment: a new entry, and popstate fires as for Back. */
+  navigateHash(hash: string, stack: DialogStack) {
+    this.pushState(null);
+    this.urls[this.index] = `/${hash}`;
+    stack.popped();
+  }
 }
+
+const stackOn = (history: FakeHistory) => new DialogStack(() => history, () => history.href);
 
 describe('DialogStack (Back closes the dialog, U-WU-7)', () => {
   it("Back closes the top dialog and leaves the page's own entry alone", () => {
     const history = new FakeHistory();
-    const stack = new DialogStack(() => history);
+    const stack = stackOn(history);
     let closed = 0;
     const id = stack.opened(() => { closed++; stack.closed(id); });
     expect(history.entries).toHaveLength(2);
@@ -61,7 +79,7 @@ describe('DialogStack (Back closes the dialog, U-WU-7)', () => {
 
   it('a dialog closed by its own button takes its entry back out, and that Back closes nothing else', () => {
     const history = new FakeHistory();
-    const stack = new DialogStack(() => history);
+    const stack = stackOn(history);
     let outerClosed = 0;
     const outer = stack.opened(() => { outerClosed++; stack.closed(outer); });
     const inner = stack.opened(() => stack.closed(inner));
@@ -76,7 +94,7 @@ describe('DialogStack (Back closes the dialog, U-WU-7)', () => {
 
   it('a dialog that replaces another waits for that Back before adding its entry', () => {
     const history = new FakeHistory();
-    const stack = new DialogStack(() => history);
+    const stack = stackOn(history);
     const first = stack.opened(() => stack.closed(first));
     stack.closed(first);
     const second = stack.opened(() => stack.closed(second));
@@ -90,11 +108,51 @@ describe('DialogStack (Back closes the dialog, U-WU-7)', () => {
 
   it('a dialog closed after the address changed (a link inside it) does not go back', () => {
     const history = new FakeHistory();
-    const stack = new DialogStack(() => history);
+    const stack = stackOn(history);
     const id = stack.opened(() => stack.closed(id));
     history.pushState(null); // location.hash = '#/settings'
     stack.closed(id);
     expect(history.pendingBacks).toBe(0);
+  });
+
+  it('a #fragment navigation leaves the dialog open; Back from there returns to the view, the next Back closes it', () => {
+    const history = new FakeHistory();
+    const stack = stackOn(history);
+    let closed = 0;
+    const id = stack.opened(() => { closed++; stack.closed(id); });
+    history.navigateHash('#/finished', stack);
+    expect(closed).toBe(0);
+    expect(stack.isTop(id)).toBe(true);
+    history.userBack(stack); // back onto the dialog's own entry: the view behind it returns, the dialog stays
+    expect(closed).toBe(0);
+    history.userBack(stack);
+    expect(closed).toBe(1);
+    expect(history.index).toBe(0);
+  });
+
+  it('Forward onto a dialog entry closes nothing', () => {
+    const history = new FakeHistory();
+    const stack = stackOn(history);
+    let closed = 0;
+    const outer = stack.opened(() => { closed++; stack.closed(outer); });
+    const inner = stack.opened(() => { closed++; stack.closed(inner); });
+    history.index = 1; // the browser is on the outer dialog's entry (a Back that a lagging popstate reports late)
+    history.userForward(stack);
+    expect(closed).toBe(0);
+  });
+
+  it('phone Back with two dialogs open closes only the top one each time', () => {
+    const history = new FakeHistory();
+    const stack = stackOn(history);
+    const order: string[] = [];
+    const outer = stack.opened(() => { order.push('outer'); stack.closed(outer); });
+    const inner = stack.opened(() => { order.push('inner'); stack.closed(inner); });
+    history.userBack(stack);
+    expect(order).toEqual(['inner']);
+    expect(history.pendingBacks).toBe(0);
+    history.userBack(stack);
+    expect(order).toEqual(['inner', 'outer']);
+    expect(history.index).toBe(0);
   });
 
   it('works with no history at all', () => {
