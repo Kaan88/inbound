@@ -4,9 +4,10 @@ namespace DownloadManager.Runtime.Remote;
 
 /// <summary>
 /// Files a browser sent the Host (a <c>.torrent</c> file, or an <c>.rsdf</c>, <c>.ccf</c> or <c>.dlc</c> container), kept
-/// under a random name in <c>uploads</c> in the data folder. Only a server's web endpoints write here: the Docker server
-/// today (<c>TorrentUploads</c>); the Windows app's web bridge does not store uploads yet, so the desktop Host sets no
-/// <see cref="RemoteJobCoordinator.ResolveReference"/> and its hello has no <c>uploads</c>. A client gets a reference
+/// under a random name in <c>uploads</c> in the data folder. Only the web endpoints write here (<c>TorrentUploads</c>):
+/// the Docker server's, and on Windows the web bridge's, into the Host's data folder; the desktop Host then reads them
+/// (<see cref="RemoteJobCoordinator.ResolveReference"/>, set where the bridge program is installed, which also puts
+/// <c>uploads</c> in its hello). A client gets a reference
 /// (<c>upload:</c> and the random name), never the path, which would tell where the state is kept; the provider and
 /// container commands take it (<see cref="RemoteJobCoordinator.ResolveReference"/>). A reference names a file here by
 /// construction, so it is read wherever the caller's own folders are: it can't name anything else. Files older than a

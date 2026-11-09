@@ -38,8 +38,8 @@ the names after it sit one place earlier there. After those come, when the sessi
 machine down), `archives` (the `archive.*` messages are answered, and an extractor was there when the session
 started: 7-Zip found; one installed later shows on the next connection, and at once in `archive.settings.get`'s
 `tool`), and `uploads` (the server takes `POST /api/upload/torrent` and `/api/upload/container`, and the `remote.*`
-commands read their references; the Docker server has it, the Windows Host until its web bridge stores uploads does
-not). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
+commands read their references; the Docker server has it, and the Windows Host where its web bridge program is
+installed, since the bridge serves both uploads into the Host's data folder). The list is per session: a `web` session on the desktop Host gets fewer. `server.hello` also carries
 `hostKind`: `windows` for the desktop Host, `server` for the headless one. A Host on a machine that can't do something answers instead of
 acting: `host.openUi` and `host.shutdown` reply `ok: false`, `host.pickFolder` replies with an `error`, and
 `update.check`, `update.download`, `update.install` and `update.defer` reply `ok: false` with "Updates are not
@@ -213,7 +213,8 @@ the reason, in plain words. The Host restarts a crashed bridge after 1, 2, 4... 
 60), and gives up with a tray notice after 5 crashes that each ran less than 2 minutes; a refused or busy port is
 not retried.
 
-It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent` and sign-in as the server, and differs so:
+It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent`, `/api/upload/container` and sign-in as the
+server, and differs so:
 
 - No engine and no state of its own: each WebSocket and each `/api/ipc` call is one connection to the Host's hello
   pipe (this Windows user's only, both ends checked), with `client.hello` `role: "web"` whatever the browser sent
@@ -239,7 +240,8 @@ It serves the same web UI, `/api/ws`, `/api/ipc`, `/api/upload/torrent` and sign
   browsers wait (an image pointing at the address needs no Origin, and it comes from loopback like the owner's own
   browser). The ticket travels in the query, so it can sit in the browser's history for its 60 s; it is single use,
   and the bridge logs no request URLs.
-- Uploads go to `<data>/uploads`, which the Host reads through the same `upload:<id>` reference.
+- Uploads go to `<data>/uploads` (the Host's data folder), which the Host reads through the same `upload:<id>`
+  reference for `remote.classify`, `remote.add` and `remote.container.preview`.
 - It listens with exclusive address use, on 127.0.0.1 and ::1 while the firewall rule is missing, and on every
   address once it is there. Its log is `<data>/logs/web-bridge-<date>.log`.
 - `GET /api/auth/status` says `hostKind: "windows"`.
