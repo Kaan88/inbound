@@ -199,7 +199,7 @@
     <span class="tabular min-w-0 truncate" title={statusText}>{statusText}</span>
     <span class="tabular shrink-0">{speed(totalSpeed)}</span>
     <span class="flex-1"></span>
-    {#if store.model.hello}<span class="hidden sm:inline">Server {store.model.hello.hostVersion}</span>{/if}
+    {#if store.model.hello}<span class="hidden sm:inline">{store.texts.versionPrefix} {store.model.hello.hostVersion}</span>{/if}
   </footer>
 </div>
 

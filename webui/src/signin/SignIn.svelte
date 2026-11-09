@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { hostKindOf, hostTexts } from '../lib/hostKind';
+  import { arrival, defaultName, handoffUrl, HostList, tabHandoff } from '../lib/hosts';
+  import { refusalLine, refusalText } from '../lib/signin';
   import { tickUntil } from '../lib/ticker';
 
   // The one page a browser sees before signing in: set the password the first time, then sign in with it.
@@ -28,6 +30,14 @@
   // The Windows app has no setup step: its password is set in the desktop app, and the web UI never offers to set one.
   const setupHere = $derived(!!status?.setupNeeded && hostKindOf(status.hostKind) !== 'windows');
   const waitLeft = $derived(Math.max(0, Math.ceil((waitUntil - now) / 1000)));
+  const line = $derived(refusalLine(problem, waitLeft));
+  let passwordBox: HTMLInputElement | undefined = $state();
+
+  // Which server this is, and the way back to the host this tab came from (U-WU-1).
+  const here = location.origin;
+  const saved = new HostList().all;
+  const came = arrival(tabHandoff.value, here, saved);
+  const serverName = came.selfName || defaultName(here);
 
   async function load() {
     try {
@@ -52,15 +62,16 @@
         location.replace('/');
         return;
       }
-      problem = result.error ?? `The server answered ${response.status}.`;
+      problem = refusalText(result.error ?? `The server answered ${response.status}.`, result.retryAfterSeconds);
       if (result.retryAfterSeconds) waitUntil = Date.now() + result.retryAfterSeconds * 1000;
       if (response.status === 409) await load();
     } catch {
       problem = "The server can't be reached. Try again in a moment.";
     } finally {
       busy = false;
-      password = '';
+      // A wrong password stays typed and selected, so it can be checked or typed over (U-WU-13).
       repeat = '';
+      queueMicrotask(() => passwordBox?.select());
     }
   }
 
@@ -85,6 +96,7 @@
       <img src="/favicon.svg" alt="" width="28" height="28" />
       <span class="text-[18px] font-semibold">Inbound</span>
     </div>
+    <p class="hint -mt-3 mb-4 truncate" title={here}>Server: {serverName}{came.selfName ? ` (${location.host})` : ''}</p>
 
     {#if !status}
       <p class="text-[13px] text-muted">{problem || 'Loading…'}</p>
@@ -108,7 +120,7 @@
         <div>
           <label class="label" for="password">{status.setupNeeded ? 'Password (8 characters or more)' : 'Password'}</label>
           <!-- svelte-ignore a11y_autofocus -->
-          <input id="password" class="field" type="password" bind:value={password} autocomplete={status.setupNeeded ? 'new-password' : 'current-password'} required autofocus minlength={status.setupNeeded ? 8 : undefined} />
+          <input id="password" bind:this={passwordBox} class="field" type="password" bind:value={password} autocomplete={status.setupNeeded ? 'new-password' : 'current-password'} required autofocus minlength={status.setupNeeded ? 8 : undefined} />
         </div>
         {#if status.setupNeeded}
           <div>
@@ -116,12 +128,16 @@
             <input id="repeat" class="field" type="password" bind:value={repeat} autocomplete="new-password" required />
           </div>
         {/if}
-        {#if problem}<p class="text-[13px] text-error" role="alert">{problem}</p>{/if}
-        {#if waitLeft > 0}<p class="text-[12px] text-muted" role="status">Wait {waitLeft} s before trying again.</p>{/if}
+        {#if line}<p class="text-[13px] text-error" role="alert">{line}</p>{/if}
         <button class="btn-primary w-full" type="submit" disabled={busy || waitLeft > 0}>{status.setupNeeded ? 'Set the password' : 'Sign in'}</button>
       </form>
       {/if}
-      {#if status.version}<p class="hint mt-5 text-center">Server {status.version}</p>{/if}
+      {#if status.version}<p class="hint mt-5 text-center">{texts.versionPrefix} {status.version}</p>{/if}
+    {/if}
+    {#if came.back}
+      <a class="mt-4 flex items-center justify-center gap-1 text-[13px] text-accent hover:underline" href={handoffUrl(came.back.origin, here, saved)}>
+        <span aria-hidden="true">‹</span> Back to {came.back.name}
+      </a>
     {/if}
   </div>
 </main>

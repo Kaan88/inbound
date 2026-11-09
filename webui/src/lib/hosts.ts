@@ -1,6 +1,12 @@
 // Saved hosts for the header's host switcher (D9). The list lives in this browser, for this web UI's address only
 // (localStorage is per origin), so each host's web UI keeps its own. Choosing a host opens that host's own web UI;
 // nothing here talks to another host.
+//
+// Getting back (U-WU-1): a jump to another host carries this host's address and the names and addresses of the list
+// in the link's #fragment, which the browser never sends to a server. Nothing else goes: no password, token or cookie,
+// and the server sends no Referer. The other host's page takes the fragment off the address at once, offers "Back to"
+// this host for that tab, and offers the hosts it did not know yet; they are kept only when the user adds them, since
+// anyone could make such a link.
 
 export interface SavedHost {
   id: string;
@@ -121,3 +127,106 @@ export class HostList {
 function browserStorage(): KeyValue | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
 }
+
+// ---- Passing the list along when jumping to another host ----
+
+export const handoffParam = 'inbound-hosts';
+/** At most this many hosts travel in one link. */
+export const maxHandoff = 30;
+
+export interface Handoff {
+  /** The host the jump came from. */
+  from: string;
+  /** The hosts that host knows (names and addresses only), this one included when it was named there. */
+  hosts: { name: string; origin: string }[];
+}
+
+/** The address of `target`'s web UI with this host and its list in the fragment. */
+export function handoffUrl(target: string, here: string, hosts: readonly SavedHost[]): string {
+  const list = hosts.filter((host) => host.origin !== here).slice(0, maxHandoff).map((host) => ({ n: host.name, o: host.origin }));
+  const data = JSON.stringify({ v: 1, f: here, h: list });
+  return `${target}/#${handoffParam}=${encodeURIComponent(data)}`;
+}
+
+/** Reads a handoff from an address's #fragment; anything malformed is dropped, as with the saved list. */
+export function readHandoff(hash: string): Handoff | null {
+  const prefix = `#${handoffParam}=`;
+  if (!hash.startsWith(prefix)) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(decodeURIComponent(hash.slice(prefix.length))); } catch { return null; }
+  if (!raw || typeof raw !== 'object') return null;
+  const { v, f, h } = raw as Record<string, unknown>;
+  if (v !== 1 || typeof f !== 'string') return null;
+  const from = normalizeHostAddress(f);
+  if (!from.ok || from.origin !== f) return null;
+  const hosts: Handoff['hosts'] = [];
+  const seen = new Set<string>();
+  for (const entry of Array.isArray(h) ? h.slice(0, maxHandoff) : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { n, o } = entry as Record<string, unknown>;
+    if (typeof o !== 'string') continue;
+    const normal = normalizeHostAddress(o);
+    if (!normal.ok || normal.origin !== o || seen.has(o)) continue;
+    seen.add(o);
+    hosts.push({ name: typeof n === 'string' && n.trim() ? n.trim().slice(0, maxHostName) : defaultName(o), origin: o });
+  }
+  return { from: from.origin, hosts };
+}
+
+export interface Arrival {
+  /** Where "Back to" goes, and what to call it. */
+  back: { name: string; origin: string } | null;
+  /** What the other host calls this one, if it named it. */
+  selfName: string;
+  /** Hosts the other host knows and this browser's list for this address doesn't. */
+  offered: { name: string; origin: string }[];
+}
+
+/** What a page makes of a handoff, given its own address and its saved list. */
+export function arrival(handoff: Handoff | null, here: string, saved: readonly SavedHost[]): Arrival {
+  if (!handoff || handoff.from === here) return { back: null, selfName: '', offered: [] };
+  const known = new Set(saved.map((host) => host.origin));
+  const savedName = saved.find((host) => host.origin === handoff.from)?.name;
+  const back = { name: savedName ?? defaultName(handoff.from), origin: handoff.from };
+  const selfName = handoff.hosts.find((host) => host.origin === here)?.name ?? '';
+  const offered = [back, ...handoff.hosts].filter((host, index, all) =>
+    host.origin !== here && !known.has(host.origin) && all.findIndex((other) => other.origin === host.origin) === index);
+  return { back, selfName: selfName === defaultName(here) ? '' : selfName, offered };
+}
+
+const arrivalKey = 'inbound.hostHandoff';
+
+/**
+ * Takes a handoff off this page's address (so a reload or a bookmark doesn't carry it) and keeps it for this tab.
+ * Called by both the sign-in page and the app before they draw. Returns the handoff of this tab, new or kept.
+ */
+export function takeHandoff(): Handoff | null {
+  if (typeof location === 'undefined') return null;
+  const found = readHandoff(location.hash);
+  if (location.hash.startsWith(`#${handoffParam}=`)) {
+    try { history.replaceState(history.state, '', location.pathname + location.search); } catch { /* the fragment stays */ }
+  }
+  try {
+    if (found) sessionStorage.setItem(arrivalKey, JSON.stringify(found));
+    else return keptHandoff(sessionStorage.getItem(arrivalKey));
+  } catch {
+    // No session storage: the handoff lasts until the page closes.
+  }
+  return found;
+}
+
+/** A handoff kept for this tab, checked again as if it had just come in a link. */
+export function keptHandoff(text: string | null): Handoff | null {
+  if (!text) return null;
+  try {
+    const kept = JSON.parse(text) as Partial<Handoff>;
+    if (typeof kept.from !== 'string' || !Array.isArray(kept.hosts)) return null;
+    const data = { v: 1, f: kept.from, h: kept.hosts.map((host) => ({ n: host?.name, o: host?.origin })) };
+    return readHandoff(`#${handoffParam}=${encodeURIComponent(JSON.stringify(data))}`);
+  } catch {
+    return null;
+  }
+}
+
+/** This tab's handoff, taken by the page's entry point before it draws. */
+export const tabHandoff: { value: Handoff | null } = { value: null };

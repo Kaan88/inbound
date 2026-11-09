@@ -363,7 +363,7 @@
       <h1 class="mb-3 text-[18px] font-semibold">General</h1>
       <div class="grid max-w-xl gap-3">
         {@render section('Startup')}
-        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.autoResume} /> Resume unfinished downloads when the server starts</label>
+        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.autoResume} /> {store.texts.resumeOnStart}</label>
         {@render section('Window')}
         <div class="max-w-xs">
           <label class="label" for="set-theme">Theme</label>
