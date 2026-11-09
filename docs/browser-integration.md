@@ -190,7 +190,8 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   asks. With a server paired the window also offers **This PC or Server** (below).
 - **Popup:** the newest 20 of all the app's downloads, whatever started them, with Pause, Resume (Retry for
   a failed one) and Delete, which asks first. For a finished download it has "Delete the file too", unticked;
-  an unfinished one's partial data is always removed, as in the app's window and the web UI (UI.B19). Each action goes on a
+  an unfinished one's partial data is always removed, as in the app's window and the web UI, and never a final file it did not
+  write (UI.B19). Each action goes on a
   native connection of its own, as the folder picker does: the Host answers one command at a time per
   connection, and a slow delete must not hold up an automatic handoff past its time limit.
 

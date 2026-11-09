@@ -274,7 +274,13 @@ public sealed partial class RuntimeServiceTests
 
         Assert.True(removed.Ok, removed.Error);
         var finished = removed.Job!.State == "completed";
-        Assert.Equal(!deleteFile && finished ? [Path.GetFileName(removed.Job.FinalFilePath)] : [], Entries(ctx.Destination));
+        if (deleteFile)
+            Assert.Empty(Entries(ctx.Destination));
+        else if (finished)
+            Assert.Equal([Path.GetFileName(removed.Job.FinalFilePath)], Entries(ctx.Destination));
+        else
+            // Stopped before it finished: its partial data is kept on purpose (remove --keep-file), and nothing else.
+            Assert.All(Entries(ctx.Destination), entry => Assert.StartsWith(Path.GetFileName(removed.Job.PartFilePath), entry));
     }
 
     private static void CreateJunction(string link, string target)

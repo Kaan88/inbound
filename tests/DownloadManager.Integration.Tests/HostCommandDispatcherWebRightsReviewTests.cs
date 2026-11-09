@@ -299,13 +299,14 @@ public sealed partial class HostCommandDispatcherTests
     {
         var insideJob = SeededJob(Inside, "inside.bin");
         var web = await WebAsync(store => store.SaveAsync(insideJob));
-        File.WriteAllText(insideJob.FinalFilePath, "x");
+        // Paused, so its data is the partial file. A file at its final path it never wrote isn't its own (UI.B19).
+        File.WriteAllText(insideJob.PartFilePath, "x");
 
         var removed = (await AskAsync(web.Dispatcher, web.Session, MessageTypes.JobRemove,
             new JobActionRequest { JobIds = [Guid.NewGuid(), insideJob.Id], DeleteFile = true })).GetPayload<JobActionResponse>();
         Assert.True(removed.Ok, removed.Error);
         Assert.Null(web.Service.GetJob(insideJob.Id));
-        Assert.False(File.Exists(insideJob.FinalFilePath));
+        Assert.False(File.Exists(insideJob.PartFilePath));
     }
 
     // ---- which folders can be roots ----------------------------------------------------------------
