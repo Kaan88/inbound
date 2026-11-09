@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 
 namespace DownloadManager.Persistence;
@@ -107,6 +107,59 @@ public sealed class AesGcmSecretProtector : ISecretProtector
 
             WriteDiscarded(discardedFile, discarded.Concat(foreign));
             warn?.Invoke($"Saved passwords and keys sealed with another key than {full} are discarded ({DiscardVariable}=1). Enter them again.");
+        }
+
+        return protector;
+    }
+
+    /// <summary>
+    /// <see cref="OpenForDataFolder(string, string, bool, Action{string}?)"/> with the key kept somewhere other than a file
+    /// in the data folder (the Linux desktop keeps it in the session's keyring). The same refusals: a data folder holding
+    /// secrets sealed with another key, or with a key the store no longer has, stops the start unless
+    /// <paramref name="discardUnreadable"/>. The record of discarded key ids stays in the data folder
+    /// (<paramref name="discardedRecord"/>). A new key is made only when the store has none and nothing needs the old one.
+    /// </summary>
+    public static AesGcmSecretProtector OpenForDataFolder(ISecretKeyStore store, string dataFolder, string discardedRecord,
+        bool discardUnreadable, Action<string>? warn = null)
+    {
+        var discarded = ReadDiscarded(discardedRecord);
+        var sealedWith = KeyIdsIn(dataFolder)
+            .Where(id => !discarded.Any(known => known.SequenceEqual(id)))
+            .ToList();
+        var key = store.TryRead();
+        if (key is not null && key.Length != KeyBytes)
+        {
+            CryptographicOperations.ZeroMemory(key);
+            throw new InvalidDataException($"The secret key in {store.Describe} is not {KeyBytes} bytes. Remove it there to start a new key; " +
+                "the saved passwords and keys then have to be entered again.");
+        }
+
+        if (key is null)
+        {
+            if (sealedWith.Count > 0 && !discardUnreadable)
+            {
+                throw new SecretKeyMismatchException(
+                    $"The secret key is missing from {store.Describe}, but {dataFolder} holds saved passwords and keys sealed with it. " +
+                    $"Restore it there. To start without them (they have to be entered again), set {DiscardVariable}=1 once.");
+            }
+
+            key = RandomNumberGenerator.GetBytes(KeyBytes);
+            store.Create(key);
+        }
+
+        var protector = new AesGcmSecretProtector(key, store.Describe, warn);
+        var foreign = sealedWith.Where(id => !id.SequenceEqual(protector._keyId)).ToList();
+        if (foreign.Count > 0)
+        {
+            if (!discardUnreadable)
+            {
+                throw new SecretKeyMismatchException(
+                    $"{dataFolder} holds saved passwords and keys sealed with another key than the one in {store.Describe}. Restore " +
+                    $"that key. To start without them (they have to be entered again), set {DiscardVariable}=1 once.");
+            }
+
+            WriteDiscarded(discardedRecord, discarded.Concat(foreign));
+            warn?.Invoke($"Saved passwords and keys sealed with another key than the one in {store.Describe} are discarded ({DiscardVariable}=1). Enter them again.");
         }
 
         return protector;
@@ -365,6 +418,19 @@ public sealed class AesGcmSecretProtector : ISecretProtector
             warn?.Invoke($"The secret key file {keyFile} can be read by others (mode {Convert.ToString((int)mode, 8)}) and could not be changed: {ex.GetType().Name}.");
         }
     }
+}
+
+/// <summary>Where a secret key is kept, other than a file in the data folder.</summary>
+public interface ISecretKeyStore
+{
+    /// <summary>Where it is, for messages ("the KDE Wallet"). Never the key.</summary>
+    string Describe { get; }
+
+    /// <summary>The key, or null when there is none. Throws when the store itself can't be used.</summary>
+    byte[]? TryRead();
+
+    /// <summary>Keeps a new key. Throws when it can't.</summary>
+    void Create(byte[] key);
 }
 
 /// <summary>The data folder's saved secrets were sealed with another key than the key file's. The message says what to do.</summary>

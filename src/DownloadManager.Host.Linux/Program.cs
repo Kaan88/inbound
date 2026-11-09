@@ -70,10 +70,7 @@ internal static class Program
 
     private static async Task<int> RunAsync(StoragePaths paths, FileLogger log, bool open)
     {
-        // There is no DPAPI here: saved keys and passwords are sealed with a key file in the data folder, as on the
-        // server. [TODO D7] Keep that key in the Secret Service (libsecret) when the session has one.
-        var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
-        SecretProtector.Use(AesGcmSecretProtector.OpenForDataFolder(keyFile, paths.Root, discardUnreadable: false, log.Warn));
+        SecretProtector.Use(OpenSecretKey(paths, log));
 
         var jobStore = new JsonJobStore(paths, log.Info);
         var checkpoints = new JsonCheckpointStore(paths);
@@ -292,6 +289,30 @@ internal static class Program
             Console.Error.WriteLine($"Another Inbound Host has the data folder but doesn't answer: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// There is no DPAPI here. The secret key that seals saved passwords and keys is kept in the desktop keyring when the
+    /// session has one, so a copy of the data folder alone opens nothing. A data folder that already has a key file (made
+    /// before the keyring was used, or on a desktop without one) keeps it, as the server does.
+    /// </summary>
+    private static AesGcmSecretProtector OpenSecretKey(StoragePaths paths, FileLogger log)
+    {
+        var keyFile = Path.Combine(paths.Root, AesGcmSecretProtector.DefaultFileName);
+        if (!File.Exists(keyFile))
+        {
+            using var keyring = SecretServiceKeyStore.TryOpen(paths.Root, log.Info);
+            if (keyring is not null)
+            {
+                var protector = AesGcmSecretProtector.OpenForDataFolder(keyring, paths.Root,
+                    keyFile + AesGcmSecretProtector.DiscardedFileSuffix, discardUnreadable: false, log.Warn);
+                log.Info("The secret key is kept in the desktop keyring.");
+                return protector;
+            }
+        }
+
+        log.Info("The secret key is kept in the data folder's key file.");
+        return AesGcmSecretProtector.OpenForDataFolder(keyFile, paths.Root, discardUnreadable: false, log.Warn);
     }
 
     /// <summary>A sandbox data folder (tests, a second profile) must not change the real sign-in start.</summary>
