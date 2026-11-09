@@ -80,6 +80,8 @@ internal static class WindowPlacement
                 owned = true;
             }
 
+            // On the main window's screen first; that place, not the cascade's step from it, is what is remembered.
+            WindowCascade.OntoMainScreen(window);
             var from = appWindow.Position;
             WindowCascade.Apply(window);
             var to = appWindow.Position;

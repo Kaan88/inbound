@@ -471,7 +471,8 @@ internal sealed class PackageWindow : Window
         var completed = members.Count(job => job.State == "completed");
         var speed = members.Sum(job => job.State is "downloading" ? job.BytesPerSecond ?? 0 : 0);
         var allKnown = members.Count > 0 && members.All(job => job.TotalBytes is > 0);
-        _summary.Text = members.Count == 0 ? string.Empty : $"{completed} of {members.Count} files complete";
+        var states = members.Select(job => (string?)job.State).ToList();
+        _summary.Text = members.Count == 0 ? string.Empty : CompletionBurst.Summary(states);
         _overall.Value = members.Count > 0 && completed == members.Count ? 100 : allKnown ? Percent(received, total) : 0;
         _overall.IsIndeterminate = !allKnown && completed < members.Count && speed > 0;
         var remaining = allKnown && speed > 0 ? TimeSpan.FromSeconds((total - received) / speed) : (TimeSpan?)null;
@@ -482,14 +483,17 @@ internal sealed class PackageWindow : Window
             remaining is { } left ? $"{FormatDuration(left)} left" : null,
         }.Where(part => part is not null));
 
-        var allDone = members.Count > 0 && completed == members.Count;
+        // Every file has finished one way or another (some may have failed): the window is done, says how, and the
+        // files that were saved can be shown in their folder (U-WR-16).
+        var settled = CompletionBurst.Settled(states);
         // Another server's folder is on that machine.
-        _openFolder.Visibility = allDone && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
+        _openFolder.Visibility = settled && RemoteDataRules.MayUseFiles(_connection.IsRemote) ? Visibility.Visible : Visibility.Collapsed;
         _pause.IsEnabled = PackageRules.PauseTargets(members).Count > 0;
         _resume.IsEnabled = PackageRules.ResumeTargets(_packageId, members).Count > 0;
         _cancel.IsEnabled = PackageRules.CancelTargets(members).Count > 0;
-        _close.Content = allDone ? "Close" : "Hide";
-        if (allDone) Title = ServerNames.ForWindow("Package complete — Inbound Download Manager", _connection.Target);
+        _close.Content = settled ? "Close" : "Hide";
+        var title = ServerNames.ForWindow($"{CompletionBurst.Title(states) ?? "Package status"} — Inbound Download Manager", _connection.Target);
+        if (Title != title) Title = title;
     }
 
     private Row CreateRow(Guid jobId)

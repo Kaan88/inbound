@@ -47,4 +47,37 @@ internal static class WindowCascadeRules
 
         return (x, y);
     }
+
+    /// <summary>
+    /// Where a new window goes when its remembered place is on another screen than the main window (U-WL-4): over the
+    /// middle of the main window, kept inside that screen's work area, so with the main window on a second screen its
+    /// windows open there too. On the main window's screen the remembered place stays.
+    /// </summary>
+    /// <param name="x">The window's place now, left edge.</param>
+    /// <param name="y">The window's place now, top edge.</param>
+    /// <param name="width">The window's width.</param>
+    /// <param name="height">The window's height.</param>
+    /// <param name="main">The main window's bounds.</param>
+    /// <param name="mainScreen">The bounds of the screen the main window is on.</param>
+    /// <param name="mainWork">That screen's work area.</param>
+    public static (int X, int Y) OntoMainScreen(int x, int y, int width, int height, ScreenRect main, ScreenRect mainScreen, ScreenRect mainWork)
+    {
+        // The title bar is what has to be on the screen, as for a remembered place (WindowPlacement).
+        var probeX = x + Math.Min(120, Math.Max(1, width / 2));
+        var probeY = y + 16;
+        if (mainScreen.Contains(probeX, probeY)) return (x, y);
+
+        var centreX = main.X + (main.Width - width) / 2;
+        var centreY = main.Y + (main.Height - height) / 2;
+        return (Clamp(centreX, mainWork.X, mainWork.X + mainWork.Width - width), Clamp(centreY, mainWork.Y, mainWork.Y + mainWork.Height - height));
+    }
+
+    // A window larger than the work area starts at its top-left corner.
+    private static int Clamp(int value, int low, int high) => high < low ? low : Math.Clamp(value, low, high);
+}
+
+/// <summary>A rectangle on the desktop, in pixels.</summary>
+internal readonly record struct ScreenRect(int X, int Y, int Width, int Height)
+{
+    public bool Contains(int x, int y) => x >= X && x < X + Width && y >= Y && y < Y + Height;
 }

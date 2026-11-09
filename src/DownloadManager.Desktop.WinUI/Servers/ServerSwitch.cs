@@ -74,7 +74,8 @@ internal enum ServerBannerAction
 /// <param name="Stale">The rows on the list are from before the connection was lost: dimmed, and said so.</param>
 /// <param name="EmptyText">What the empty list says instead of "No downloads in this view", or null for the usual words.</param>
 /// <param name="Connected">The counts in the status bar are the server's.</param>
-internal sealed record ServerBanner(bool Visible, string Text, bool IsProblem, ServerBannerAction Action, bool Stale, string? EmptyText, bool Connected)
+/// <param name="Status">What the status bar says instead of the counts, or null while they are the server's (or this PC's).</param>
+internal sealed record ServerBanner(bool Visible, string Text, bool IsProblem, ServerBannerAction Action, bool Stale, string? EmptyText, bool Connected, string? Status = null)
 {
     public string? ActionText => Action switch
     {
@@ -106,19 +107,21 @@ internal static class ServerBannerRules
             return new ServerBanner(true, $"Showing the downloads of {name}.", false, ServerBannerAction.None, false, null, true);
 
         var stale = everConnected ? " The list below is from before the connection was lost." : string.Empty;
+        // While connecting there is nothing wrong yet; "Not connected" is for a connection that failed (U-WR-1).
+        var notConnected = everConnected ? $"Not connected to {name} · the list is out of date" : $"Not connected to {name}";
         if (pairingEnded)
             return new ServerBanner(true, $"{name} no longer accepts this PC's pairing, so its downloads can't be shown or changed.{stale}",
-                true, ServerBannerAction.PairAgain, everConnected, $"{name}'s downloads can't be shown until this PC is paired with it again.", false);
+                true, ServerBannerAction.PairAgain, everConnected, $"{name}'s downloads can't be shown until this PC is paired with it again.", false, notConnected);
         if (stopped)
             return new ServerBanner(true, (error ?? $"{name} can't be reached with its saved settings.") + stale,
-                true, ServerBannerAction.EditServer, everConnected, $"{name}'s downloads can't be shown until its settings are changed.", false);
+                true, ServerBannerAction.EditServer, everConnected, $"{name}'s downloads can't be shown until its settings are changed.", false, notConnected);
         if (error is null)
-            return new ServerBanner(true, $"Connecting to {name}…", false, ServerBannerAction.None, false, $"Connecting to {name}…", false);
+            return new ServerBanner(true, $"Connecting to {name}…", false, ServerBannerAction.None, false, $"Connecting to {name}…", false, $"Connecting to {name}…");
 
         // "Couldn't reach the server." says which one only through the window; the bar names it.
         var reason = error.Contains(name, StringComparison.OrdinalIgnoreCase) ? error : $"{name}: {error}";
         return new ServerBanner(true, $"{reason}{stale}", true, ServerBannerAction.Retry, everConnected,
-            $"{name} can't be reached, so its downloads can't be shown.\nThey are still on {name}.", false);
+            $"{name} can't be reached, so its downloads can't be shown.\nThey are still on {name}.", false, notConnected);
     }
 }
 

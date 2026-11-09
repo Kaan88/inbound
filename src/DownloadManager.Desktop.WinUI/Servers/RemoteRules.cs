@@ -156,7 +156,7 @@ internal readonly record struct CompletionWindow(bool IsPackage, Guid Id);
 
 /// <summary>
 /// Downloads that finished close together, gathered for a moment and then given their windows (U-WL-4, U-WR-16): a
-/// package gets one window, once all of its files are done, however many of them finished in the burst, and a file that
+/// package gets one window, once all of its files have settled (some may have failed), however many of them finished in the burst, and a file that
 /// is still waiting for its package's other files gets none. Waiting also lets a package that was only just made
 /// (its list is announced a moment after its first files) be known before its files are judged one by one.
 /// </summary>
@@ -166,8 +166,8 @@ internal static class CompletionBurst
     public static readonly TimeSpan Gather = TimeSpan.FromSeconds(1.2);
 
     /// <param name="finished">The downloads that finished, in the order they did.</param>
-    /// <param name="packageOf">A download's package and whether every file of it is done; null when it is in none.</param>
-    public static IReadOnlyList<CompletionWindow> Plan(IEnumerable<Guid> finished, Func<Guid, (Guid Package, bool AllDone)?> packageOf)
+    /// <param name="packageOf">A download's package and whether every file of it has settled (<see cref="Settled"/>); null when it is in none.</param>
+    public static IReadOnlyList<CompletionWindow> Plan(IEnumerable<Guid> finished, Func<Guid, (Guid Package, bool Settled)?> packageOf)
     {
         var windows = new List<CompletionWindow>();
         var seen = new HashSet<Guid>();
@@ -181,10 +181,38 @@ internal static class CompletionBurst
             }
 
             var window = new CompletionWindow(true, package.Package);
-            if (package.AllDone && !windows.Contains(window)) windows.Add(window);
+            if (package.Settled && !windows.Contains(window)) windows.Add(window);
         }
 
         return windows;
+    }
+
+    /// <summary>
+    /// Every file of a package has finished one way or another and at least one was saved, so its completion window is
+    /// due (U-WR-16): a package with a failed or cancelled file still gets one, with the counts, rather than none.
+    /// </summary>
+    public static bool Settled(IReadOnlyCollection<string?> states) =>
+        states.Count > 0 && states.All(state => state is "completed" or "failed" or "cancelled") && states.Any(state => state == "completed");
+
+    /// <summary>"3 of 5 files complete · 2 failed": the package window's line, with what didn't finish counted.</summary>
+    public static string Summary(IReadOnlyCollection<string?> states)
+    {
+        var completed = states.Count(state => state == "completed");
+        var failed = states.Count(state => state == "failed");
+        var cancelled = states.Count(state => state == "cancelled");
+        return $"{completed} of {states.Count} files complete" + (failed > 0 ? $" · {failed} failed" : string.Empty)
+               + (cancelled > 0 ? $" · {cancelled} cancelled" : string.Empty);
+    }
+
+    /// <summary>The package window's title once it has settled, without the app's name; null while files are still going.</summary>
+    public static string? Title(IReadOnlyCollection<string?> states)
+    {
+        if (!Settled(states)) return null;
+        var failed = states.Count(state => state == "failed");
+        var cancelled = states.Count(state => state == "cancelled");
+        if (failed > 0) return $"Package finished, {failed} of {states.Count} files failed";
+        if (cancelled > 0) return $"Package finished, {cancelled} of {states.Count} files cancelled";
+        return "Package complete";
     }
 }
 
@@ -375,4 +403,43 @@ internal static class AddRules
     /// <summary>After Start: shown in the dialog, which opens again with everything that was typed.</summary>
     public static string NotAddedText(string? error, ServerTarget target) =>
         $"Not added{(target.IsLocal ? string.Empty : $" to {target.Name}")}: {(string.IsNullOrWhiteSpace(error) ? "the Host rejected the request." : error.Trim())} Change what is needed and try again, or Cancel.";
+
+    /// <summary>How often a dialog that couldn't be shown again is tried again, a tenth of a second apart, before its
+    /// reason goes to the status bar instead.</summary>
+    public const int MostReshowTries = 100;
+
+    /// <summary>
+    /// After a show of the add dialog (U-WR-2). <paramref name="shown"/> is false when it couldn't be shown (another
+    /// dialog was still open on the window); <paramref name="problem"/> is why the Start that was chosen didn't add it;
+    /// <paramref name="lastProblem"/> is the reason it is being shown again, null on its first show. A dialog shown again
+    /// holds what was typed, so it is tried again rather than dropped.
+    /// </summary>
+    public static ReshowStep AfterShow(bool shown, string? problem, string? lastProblem, int failedShows)
+    {
+        if (!shown) return lastProblem is null ? ReshowStep.Stop : failedShows < MostReshowTries ? ReshowStep.TryAgain : ReshowStep.GiveUp;
+        return problem is null ? ReshowStep.Stop : ReshowStep.ShowAgain;
+    }
+
+    /// <summary>
+    /// The refusal that holds after a file-info check (U-WR-2). A refusal from the Host sets it, an answer without one
+    /// clears it, and a check that got no answer (timed out, failed, or was overtaken) leaves it as it was.
+    /// </summary>
+    public static string? RefusalAfter(string? current, bool answered, bool refused, string? error)
+    {
+        if (!answered) return current;
+        return refused ? error ?? "This address can't be added." : null;
+    }
+}
+
+/// <summary>What Add URL does after its dialog closes (<see cref="AddRules.AfterShow"/>).</summary>
+internal enum ReshowStep
+{
+    /// <summary>Added, cancelled, or never shown: nothing typed is waiting.</summary>
+    Stop,
+    /// <summary>The Start failed: show the dialog again, with the reason and everything typed.</summary>
+    ShowAgain,
+    /// <summary>It couldn't be shown again yet: wait a moment and try again.</summary>
+    TryAgain,
+    /// <summary>It couldn't be shown again after many tries: the reason goes to the status bar.</summary>
+    GiveUp,
 }
