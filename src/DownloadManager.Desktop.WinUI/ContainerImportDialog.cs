@@ -221,7 +221,7 @@ internal sealed class ContainerImportDialog
         var folder = _destination.Text.Trim();
         if (folder.Length > 0 && !AddLinksDialog.IsFullPath(folder))
         {
-            _destinationError.Show("The destination has to be a full path, such as D:\\Downloads.", isProblem: true);
+            _destinationError.Show(AddLinksDialog.FullPathWords, isProblem: true);
             _destination.Focus(FocusState.Programmatic);
             return;
         }

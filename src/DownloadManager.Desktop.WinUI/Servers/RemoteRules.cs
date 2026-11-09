@@ -71,11 +71,13 @@ internal static class RemoteDataRules
     public static bool UsesServerFolderBrowser(bool remote) => remote;
 
     /// <summary>Why a file on this PC can't be used as-is for another server, or null when it can be sent.</summary>
-    public static string? LocalFileProblem(bool remote, string kind, string serverName) => !remote
+    /// <param name="uploadsOffered">The server's hello lists <c>uploads</c> (<see cref="RemoteState.UploadsOffered"/>).</param>
+    public static string? LocalFileProblem(bool remote, string kind, string serverName, bool uploadsOffered = false) => !remote
         ? null
         : kind switch
         {
             "torrent" => null, // uploaded
+            "container" when uploadsOffered => null, // uploaded
             "container" => $"A container file can't be sent to {serverName} from this PC. Open it in this PC's view instead, or in the server's web UI.",
             "archive" => null, // chosen from the server's folders
             _ => $"That file is on this PC, not on {serverName}.",
@@ -146,6 +148,16 @@ internal static class ServerPaths
         if (cut < 0) return string.Empty;
         var folder = path[..cut];
         return folder.Length == 0 || (folder.Length == 2 && folder[1] == ':') ? path[..(cut + 1)] : folder;
+    }
+
+    /// <summary>
+    /// A full path on a server: <c>/srv/downloads</c> (Linux) or <c>D:\Downloads</c> (Windows). This PC's
+    /// <see cref="Path.IsPathFullyQualified(string)"/> would refuse the first. A network path is no full path here.
+    /// </summary>
+    public static bool IsFull(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return false;
+        return path.StartsWith('/') || (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/');
     }
 
     public static string Join(string folder, string name)

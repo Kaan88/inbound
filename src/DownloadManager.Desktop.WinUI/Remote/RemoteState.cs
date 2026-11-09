@@ -22,6 +22,7 @@ internal sealed class RemoteState : INotifyPropertyChanged
     private bool _isConnected;
     private bool _remoteSupported;
     private bool _archivesSupported;
+    private bool _uploadsOffered;
     private bool _isReady;
     private bool _accountsKnown;
 
@@ -46,6 +47,12 @@ internal sealed class RemoteState : INotifyPropertyChanged
 
     /// <summary>The Host answers <c>archive.*</c>. It doesn't list this in its hello, so it is found out by asking.</summary>
     public bool ArchivesSupported { get => _archivesSupported; internal set => Set(ref _archivesSupported, value); }
+
+    /// <summary>
+    /// Another server's hello lists <c>uploads</c>: it reads the <c>.torrent</c> and container files this window sends it
+    /// (<c>POST /api/upload/...</c>). False for this PC's Host, which reads this PC's files by their path.
+    /// </summary>
+    public bool UploadsOffered { get => _uploadsOffered; internal set => Set(ref _uploadsOffered, value); }
 
     /// <summary>The first connection has been read, so the two above can be trusted.</summary>
     public bool IsReady { get => _isReady; internal set => Set(ref _isReady, value); }

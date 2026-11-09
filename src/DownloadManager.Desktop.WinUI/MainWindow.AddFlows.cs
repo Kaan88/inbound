@@ -307,8 +307,8 @@ public sealed partial class MainWindow
     private async Task ImportJdContainerAsync()
     {
         if (_settings is null) return;
-        // The server reads a container by its own path, and takes no upload of one.
-        if (RemoteDataRules.LocalFileProblem(_connection.IsRemote, "container", _connection.Target.Name) is { } problem)
+        // Another server reads a container by its own path, or by an upload where its hello offers that.
+        if (RemoteDataRules.LocalFileProblem(_connection.IsRemote, "container", _connection.Target.Name, _remote.State.UploadsOffered) is { } problem)
         {
             await ShowMessageAsync("Import JD Container", problem);
             return;
