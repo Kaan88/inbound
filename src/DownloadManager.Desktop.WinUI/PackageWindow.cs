@@ -149,6 +149,7 @@ internal sealed class PackageWindow : Window
         _connection.SnapshotReceived += snapshot => DispatcherQueue.TryEnqueue(() =>
         {
             if (_closed) return;
+            if (_connection.IsRemote) ShownServer.Describe(_connection.Hello?.HostKind, snapshot.Settings.DefaultDownloadDirectory);
             // Another server's theme is its own; this window keeps this PC's.
             if (!_connection.IsRemote) AppTheme.FollowSettings(snapshot.Settings);
             _jobs.Clear();

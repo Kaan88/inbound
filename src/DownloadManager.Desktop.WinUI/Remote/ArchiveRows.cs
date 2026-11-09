@@ -292,11 +292,13 @@ internal static partial class ArchiveRules
     /// <param name="files">Selected files. A selected package row contributes all of its files.</param>
     /// <param name="otherSets">Sets that are selected by other means: a record's own row, or a selected package's.</param>
     /// <param name="packageAlone">The one package row, when nothing else is selected: its password is the package's.</param>
+    /// <param name="pathStyle">How the Host the files are on writes a full path: a Linux server's are <c>/downloads/x.rar</c>.</param>
     public static ArchivePlan Plan(
         IReadOnlyList<ArchiveSelectedFile> files,
         IReadOnlyList<ArchiveSetDto> otherSets,
         (Guid Id, string Name)? packageAlone,
-        bool connected)
+        bool connected,
+        PathStyle pathStyle = PathStyle.ThisPc)
     {
         var sets = files.Select(file => file.Set).OfType<ArchiveSetDto>().Concat(otherSets)
             .GroupBy(set => set.Id).Select(group => group.First()).ToList();
@@ -325,7 +327,7 @@ internal static partial class ArchiveRules
             reason,
             reason is null ? jobIds : [],
             reason is null ? ownSets : [],
-            PasswordFor(archiveFiles, sets, packageAlone),
+            PasswordFor(archiveFiles, sets, packageAlone, pathStyle),
             retry,
             sets.Where(set => set.State is "waiting" or "extracting").ToList(),
             sets.Where(set => set.State != "extracting").ToList(),
@@ -380,7 +382,8 @@ internal static partial class ArchiveRules
     private static ArchivePasswordTarget? PasswordFor(
         IReadOnlyList<ArchiveSelectedFile> archiveFiles,
         IReadOnlyList<ArchiveSetDto> sets,
-        (Guid Id, string Name)? packageAlone)
+        (Guid Id, string Name)? packageAlone,
+        PathStyle pathStyle)
     {
         if (packageAlone is { } package) return PackageTarget(package.Id, package.Name, sets);
 
@@ -391,7 +394,7 @@ internal static partial class ArchiveRules
         }
 
         // A download with no record yet can still get a password in advance, by its file's path.
-        if (sets.Count == 0 && archiveFiles is [{ FilePath.Length: > 0 } file] && Path.IsPathFullyQualified(file.FilePath))
+        if (sets.Count == 0 && archiveFiles is [{ FilePath.Length: > 0 } file] && ServerPaths.IsFull(file.FilePath, pathStyle))
         {
             return new ArchivePasswordTarget(null, null, file.FilePath, file.FileName, false, false, false);
         }

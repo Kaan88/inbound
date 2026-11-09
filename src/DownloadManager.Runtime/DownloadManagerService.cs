@@ -2576,7 +2576,7 @@ public sealed partial class DownloadManagerService
                 if ((caller?.Roots ?? Roots) is { } roots)
                 {
                     if (roots.Allowed(directory) is not { } inside)
-                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory) };
+                        return new JobActionResponse { Ok = false, Error = roots.OutsideTextFor(directory), ErrorCode = JobActionErrorCodes.OutsideRoots };
                     directory = inside;
                     target = Path.Combine(inside, Path.GetFileName(target));
                 }

@@ -119,7 +119,7 @@ public sealed class JobCompletionEditor
         if (_programMode.SelectedIndex < 0)
             error = "Choose how to handle the program after completion.";
         else if (_programMode.SelectedIndex == 2 && _remote is not null)
-            error = _remote.ProgramSettings ? RemoteDataRules.ServerProgramPathProblem(options.ProgramPath) : null;
+            error = _remote.ProgramSettings ? RemoteDataRules.ServerProgramPathProblem(options.ProgramPath, ShownServer.PathStyle) : null;
         else if (_programMode.SelectedIndex == 2 && !IsAbsoluteExecutable(options.ProgramPath))
             error = "Choose an absolute path to an existing .exe file.";
         // Off for a server that doesn't allow it, so whatever it has is sent back unchanged.

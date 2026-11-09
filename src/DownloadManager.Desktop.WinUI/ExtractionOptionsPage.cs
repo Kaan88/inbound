@@ -88,7 +88,7 @@ internal sealed class ExtractionOptionsPage
     public string? Validate()
     {
         if (_saved is null) return null;
-        ArchiveForm.Changes(_saved, Values(), out var error);
+        ArchiveForm.Changes(_saved, Values(), out var error, ShownServer.PathStyle);
         return error;
     }
 
@@ -96,7 +96,7 @@ internal sealed class ExtractionOptionsPage
     public async Task<string?> SaveAsync()
     {
         if (_saved is null) return null;
-        var update = ArchiveForm.Changes(_saved, Values(), out var error);
+        var update = ArchiveForm.Changes(_saved, Values(), out var error, ShownServer.PathStyle);
         if (error is not null) return error;
         if (update is null) return null;
 
