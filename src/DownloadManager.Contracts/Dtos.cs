@@ -14,6 +14,8 @@ public sealed class JobDto
 {
     public bool IsQueued { get; set; } = true;
     public bool QueueProcessing { get; set; }
+    /// <summary>The user paused it; starting its queue leaves it paused (U-WL-2).</summary>
+    public bool PausedByUser { get; set; }
     public int QueueRetryCount { get; set; }
     public DateTimeOffset? QueueRetryAt { get; set; }
 

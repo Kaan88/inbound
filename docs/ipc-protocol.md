@@ -481,6 +481,14 @@ those. A frontend with a hoster link has to route it through `remote.add`. `dm a
 counts as failed. An `undetermined` one is refused too unless `--direct` is given. `checkIncomplete` only
 prints the note, because it can go on for hours and a script shouldn't stop for it.
 
+**`queue.action` `start`** starts what waits in that queue: queued downloads, "later" ones (`startMode: later`, which a
+running queue holds until it is started), and ones its own stop, quota, a move or an exit paused. A download the user
+paused (`job.pause`, or Stop All) keeps `pausedByUser: true` until it runs again and stays paused. A failed one is
+tried again only when the queue would have retried it itself: it ran from the queue (`queueProcessing`), it didn't
+fail its check, and the queue's `retryLimit` is unset or not yet used up (that retry counts). A `stop` gives back a
+retry the queue was waiting to make. A client offers Start for a stopped queue and for a running one that holds
+"later" or queue-paused downloads.
+
 **`job.refreshUrl`** points a download at a new address. One that isn't finished goes back to the queue and starts
 (`job.event` `refreshed`). A finished one keeps its file and its state, and only the address it would be downloaded
 from again changes (`updated`); nothing is downloaded, though a new address is still checked as below (which may

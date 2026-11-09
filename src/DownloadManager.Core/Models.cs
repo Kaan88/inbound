@@ -105,6 +105,13 @@ public sealed class DownloadJob
 {
     public bool IsQueued { get; set; } = true;
     public bool QueueProcessing { get; set; }
+
+    /// <summary>
+    /// The user paused it (its own Pause, or Stop All). Starting its queue, by hand or by a schedule, leaves it paused;
+    /// a pause from a queue stop, a quota, a move or an exit doesn't set it, so those resume with the queue (U-WL-2).
+    /// Cleared when the job runs again.
+    /// </summary>
+    public bool PausedByUser { get; set; }
     public int QueueRetryCount { get; set; }
     public DateTimeOffset? QueueRetryAt { get; set; }
 
