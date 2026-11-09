@@ -2429,10 +2429,50 @@ public sealed partial class MainWindow : Window
 
     private async void MenuAbout_Click(object sender, RoutedEventArgs e)
     {
-        await ShowMessageAsync("Inbound Download Manager",
-            $"Inbound Download Manager {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}\n\n" +
-            "Private download manager built around a durable background host, a replaceable WinUI 3 frontend, " +
-            "and a Manifest V3 browser bridge.");
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+        var text = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = "Inbound Download Manager", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        text.Children.Add(new TextBlock { Text = $"Version {version}", IsTextSelectionEnabled = true });
+        text.Children.Add(new TextBlock
+        {
+            Text = "A download manager built around a durable background host, a replaceable WinUI 3 frontend, and a Manifest V3 browser bridge.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Padding = InboundTheme.DialogScrollPadding };
+        try
+        {
+            var icon = Path.Combine(AppContext.BaseDirectory, "app.png");
+            if (File.Exists(icon))
+            {
+                var image = new Image { Width = 64, Height = 64, VerticalAlignment = VerticalAlignment.Top, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(icon)) };
+                AutomationProperties.SetAccessibilityView(image, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+                row.Children.Add(image);
+            }
+        }
+        catch (Exception)
+        {
+            // Without the picture the About text still shows.
+        }
+
+        row.Children.Add(text);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            RequestedTheme = RootGrid.ActualTheme,
+            Title = "About",
+            Content = row,
+            CloseButtonText = "OK",
+        };
+        try
+        {
+            if (await ShowDialogAsync(dialog) is null) ShowPassingStatus($"Inbound Download Manager {version}");
+        }
+        catch (Exception)
+        {
+            ShowPassingStatus($"Inbound Download Manager {version}");
+        }
     }
 
     private void MenuDiagnostics_Click(object sender, RoutedEventArgs e)
