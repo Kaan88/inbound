@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Dialog from '../components/Dialog.svelte';
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
@@ -7,10 +7,12 @@
   import { newUuid } from '../lib/ids';
   import { askNotifyPermission, notifyEnabled, notifySupported, storeNotify } from '../lib/notify';
   import {
-    applyForm, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, heldLeave, isUnsupportedReply,
-    nextRowKey, proxyTypes, validateForm, type ArchiveValues, type OptionsForm, type OptionsPage,
+    applyForm, archiveChanges, archiveConflictLabels, archiveDestinationLabels, archiveValues, categoryLabel, categoryNames, formFrom, friendlyRefusal, heldLeave,
+    isUnsupportedReply, nextRowKey, problemsText, proxyTypes, validateAll, type ArchiveValues, type OptionsForm, type OptionsPage, type Problem,
   } from '../lib/settingsRules';
+  import { hostKindOf } from '../lib/hostKind';
   import { tickUntil } from '../lib/ticker';
+  import Confirm from '../components/Confirm.svelte';
   import { providerNameOf } from '../lib/remote';
   import { store, type Theme } from '../lib/store.svelte';
   import type { ArchiveSettings, Settings } from '../lib/types';
@@ -33,6 +35,14 @@
   let message = $state('');
   let saving = $state(false);
   let leaveTo = $state<string | null>(null);
+  // Every problem of the last OK or Apply, checked again as the boxes change, so a mark goes once it is put right (U-WU-12).
+  let problems = $state<Problem[]>([]);
+  const invalid = (field: string) => (problems.some((problem) => problem.field === field) ? 'true' : undefined);
+  const pageHasProblem = (key: string) => problems.some((problem) => problem.page === key);
+  // The Windows app's web UI can't change what reaches beyond the downloads (folders, proxy, logins, capture): those are
+  // shown as they are, set in the app on the PC (U-WR-14).
+  const pcOnly = $derived(hostKindOf(store.model.hello?.hostKind) === 'windows');
+  const pcOnlyNote = 'Set in the app on the PC. A browser can only look at it here.';
 
   // Extraction: read from the server when the screen opens; its page shows only where the server extracts.
   let archiveState = $state<'loading' | 'ready' | 'failed' | 'unsupported'>('loading');
@@ -109,6 +119,25 @@
     return error instanceof Error ? error.message : String(error);
   }
 
+  const pageLabel = (key: OptionsPage) => pages.find((entry) => entry.key === key)?.label ?? key;
+
+  function check(): Problem[] {
+    if (!form) return [];
+    const draft = $state.snapshot(form) as OptionsForm;
+    const archive = archiveSaved && archiveForm ? { saved: archiveSaved, values: $state.snapshot(archiveForm) as ArchiveValues } : null;
+    return validateAll(draft, archive, { pcOnly });
+  }
+  $effect(() => {
+    if (problems.length === 0 || !form) return;
+    void JSON.stringify(form);
+    void JSON.stringify(archiveForm);
+    const now = check();
+    if (JSON.stringify(now) !== JSON.stringify(problems)) {
+      problems = now;
+      message = problemsText(now, pageLabel);
+    }
+  });
+
   async function save(): Promise<boolean> {
     if (!form || saving) return false;
     message = '';
@@ -116,10 +145,13 @@
     try {
       const draft = $state.snapshot(form) as OptionsForm;
       const archive = archiveSaved && archiveForm ? { saved: archiveSaved, values: $state.snapshot(archiveForm) as ArchiveValues } : null;
-      const problem = validateForm(draft, archive);
-      if (problem) {
-        message = problem.message;
-        page = problem.page;
+      problems = check();
+      if (problems.length > 0) {
+        message = problemsText(problems, pageLabel);
+        // The first problem's page opens with its box focused; the others are marked in the page list.
+        const first = problems[0];
+        page = first.page;
+        if (first.field) void tick().then(() => document.getElementById(first.field!)?.focus());
         return false;
       }
       const copy = JSON.parse(JSON.stringify(store.model.settings)) as Settings;
@@ -127,7 +159,7 @@
       try {
         await store.ask('settings.update', { settings: copy });
       } catch (error) {
-        message = text(error);
+        message = friendlyRefusal(text(error));
         return false;
       }
       let extractionProblem = '';
@@ -265,6 +297,7 @@
   // Sign-in and paired apps
   let current = $state('');
   let next = $state('');
+  let repeat = $state('');
   let keepPaired = $state(false);
   let passwordFromEnvironment = $state(false);
   let pairing = $state<{ code: string; expiresAt: string } | null>(null);
@@ -301,6 +334,7 @@
       });
       current = '';
       next = '';
+      repeat = '';
       keepPaired = false;
       const unpaired = result.unpaired ?? 0;
       store.toast(unpaired > 0
@@ -320,11 +354,18 @@
     }
   }
 
-  async function revoke(id: string) {
+  type Token = (typeof tokens)[number];
+  let removingToken = $state<Token | null>(null);
+  const hostWord = $derived(pcOnly ? 'this PC' : 'the server');
+  /** What the paired thing is, in words: a desktop app or a browser extension. */
+  const kindOf = (token: Token) => (token.role === 'remoteClient' ? 'desktop app' : 'browser extension');
+
+  async function revoke(token: Token) {
+    removingToken = null;
     try {
-      await json(`/api/auth/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      tokens = tokens.filter((t) => t.id !== id);
-      store.toast('That browser can no longer reach the server.');
+      await json(`/api/auth/tokens/${encodeURIComponent(token.id)}`, { method: 'DELETE' });
+      tokens = tokens.filter((t) => t.id !== token.id);
+      store.toast(`${token.name}: that ${kindOf(token)} can no longer reach ${hostWord}.`);
     } catch (error) {
       store.toast(error instanceof Error ? error.message : String(error), 'error');
     }
@@ -347,11 +388,14 @@
 <div class="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 content-start gap-4 px-4 py-4 md:grid-cols-[200px_minmax(0,1fr)]">
   <nav aria-label="Options pages">
     <select class="field md:hidden" bind:value={page} aria-label="Options page">
-      {#each pages as p (p.key)}<option value={p.key}>{p.label}</option>{/each}
+      {#each pages as p (p.key)}<option value={p.key}>{p.label}{pageHasProblem(p.key) ? ' (needs fixing)' : ''}</option>{/each}
     </select>
     <ul class="hidden space-y-0.5 md:block">
       {#each pages as p (p.key)}
-        <li><button class="w-full rounded px-3 py-1.5 text-left text-[13px] {page === p.key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" aria-current={page === p.key ? 'page' : undefined} onclick={() => (page = p.key)}>{p.label}</button></li>
+        <li><button class="touch-row flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-[13px] {page === p.key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" aria-current={page === p.key ? 'page' : undefined} onclick={() => (page = p.key)}>
+          <span class="min-w-0 flex-1">{p.label}</span>
+          {#if pageHasProblem(p.key)}<Icon name="alert" size={14} class="shrink-0 text-icon-danger" /><span class="sr-only">(needs fixing)</span>{/if}
+        </button></li>
       {/each}
     </ul>
   </nav>
@@ -363,7 +407,7 @@
       <h1 class="mb-3 text-[18px] font-semibold">General</h1>
       <div class="grid max-w-xl gap-3">
         {@render section('Startup')}
-        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.autoResume} /> Resume unfinished downloads when the server starts</label>
+        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.autoResume} /> {store.texts.resumeOnStart}</label>
         {@render section('Window')}
         <div class="max-w-xs">
           <label class="label" for="set-theme">Theme</label>
@@ -375,17 +419,19 @@
           <p class="hint mt-1">This browser only.</p>
         </div>
         {@render section('Capturing downloads')}
-        <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.browserIntegration} /> Capture downloads from your browser</label>
+        <label class="flex items-center gap-2 text-[13px] {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.browserIntegration} disabled={pcOnly} /> Capture downloads from your browser</label>
+        {#if pcOnly}<p class="hint flex items-start gap-1.5"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
       </div>
     {:else if page === 'saveto'}
       <h1 class="mb-3 text-[18px] font-semibold">Save to</h1>
+      {#if pcOnly}<p class="card mb-3 flex max-w-xl items-start gap-2 bg-highlight p-3 text-[13px]"><Icon name="lock" size={15} class="mt-0.5 shrink-0" /> The folders are set in the app on the PC: a browser may only use them. Category names and file types can be changed here.</p>{/if}
       <div class="grid max-w-xl gap-3">
-        <FolderField id="set-folder" label="Default download folder" bind:value={form.defaultDownloadDirectory} hint="New downloads go here unless you choose another folder." />
+        <FolderField id="set-folder" label="Default download folder" bind:value={form.defaultDownloadDirectory} disabled={pcOnly} hint="New downloads go here unless you choose another folder." />
         {@render section('Folders by category')}
         <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" bind:checked={form.useCategoryFolders} /> Save downloads to a folder for their category</label>
         <p class="hint">Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.</p>
         {#each categoryNames as name (name)}
-          <FolderField id="cat-{name}" label={categoryLabel(name)} bind:value={form.categoryFolders[name]} placeholder="Use the default folder" disabled={!form.useCategoryFolders} />
+          <FolderField id="cat-{name}" label={categoryLabel(name)} bind:value={form.categoryFolders[name]} placeholder="Use the default folder" disabled={pcOnly || !form.useCategoryFolders} />
         {/each}
 
         {#if form.customCategories.length > 0}
@@ -396,13 +442,14 @@
               <div class="grid gap-3 border-t border-divider p-3">
                 <div><label class="label" for="cc-name-{category.id}">Name</label><input id="cc-name-{category.id}" class="field" bind:value={category.name} /></div>
                 <div><label class="label" for="cc-ext-{category.id}">File extensions (space separated)</label><input id="cc-ext-{category.id}" class="field font-mono" bind:value={category.extensions} spellcheck="false" /></div>
-                <FolderField id="cc-folder-{category.id}" label="Destination folder (optional)" bind:value={category.folder} />
+                <FolderField id="cc-folder-{category.id}" label="Destination folder (optional)" bind:value={category.folder} disabled={pcOnly} hint={pcOnly ? 'Set in the app on the PC.' : ''} />
                 <div class="flex justify-end"><button class="btn-danger" type="button" onclick={() => (category.removed = !category.removed)}>{category.removed ? 'Undo removal' : 'Remove category'}</button></div>
               </div>
             </details>
           {/each}
         {/if}
 
+        <fieldset class="contents" disabled={pcOnly}>
         {@render section('Favorite folders')}
         <p class="hint">Named folders offered first wherever a folder is chosen. A name left empty becomes the folder's own name.</p>
         <ul class="grid gap-3">
@@ -421,6 +468,7 @@
           {/each}
         </ul>
         <div><button class="btn" type="button" onclick={() => form?.favorites.push({ key: nextRowKey(), name: '', path: '' })}><Icon name="add" size={15} class="text-icon-info" /> Add favorite</button></div>
+        </fieldset>
       </div>
     {:else if page === 'downloads'}
       <h1 class="mb-3 text-[18px] font-semibold">Downloads</h1>
@@ -439,20 +487,23 @@
     {:else if page === 'connection'}
       <h1 class="mb-3 text-[18px] font-semibold">Connection</h1>
       <div class="grid max-w-xl gap-3 sm:grid-cols-2">
-        <div><label class="label" for="set-concurrent">Maximum simultaneous downloads</label><input id="set-concurrent" class="field" type="number" min="1" max="16" required bind:value={form.maxConcurrentDownloads} aria-invalid={form.maxConcurrentDownloads === null ? 'true' : undefined} /></div>
-        <div><label class="label" for="set-connections">Connections per download</label><input id="set-connections" class="field" type="number" min="1" max="32" required bind:value={form.defaultConnections} aria-invalid={form.defaultConnections === null ? 'true' : undefined} /></div>
-        <div><label class="label" for="set-host">Connections per site</label><input id="set-host" class="field" type="number" min="1" max="64" required bind:value={form.maxConnectionsPerHost} aria-invalid={form.maxConnectionsPerHost === null ? 'true' : undefined} /></div>
-        <div><label class="label" for="set-speed">Total speed limit, all downloads (KB/s)</label><input id="set-speed" class="field" type="number" min="1" max="10000000" placeholder="Unlimited" bind:value={form.speedKb} /></div>
+        <div><label class="label" for="set-concurrent">Maximum simultaneous downloads</label><input id="set-concurrent" class="field" type="number" min="1" max="16" required bind:value={form.maxConcurrentDownloads} aria-invalid={invalid('set-concurrent')} /></div>
+        <div><label class="label" for="set-connections">Connections per download</label><input id="set-connections" class="field" type="number" min="1" max="32" required bind:value={form.defaultConnections} aria-invalid={invalid('set-connections')} /></div>
+        <div><label class="label" for="set-host">Connections per site</label><input id="set-host" class="field" type="number" min="1" max="64" required bind:value={form.maxConnectionsPerHost} aria-invalid={invalid('set-host')} /></div>
+        <div><label class="label" for="set-speed">Total speed limit, all downloads (KB/s)</label><input id="set-speed" class="field" type="number" min="1" max="10000000" placeholder="Unlimited" bind:value={form.speedKb} aria-invalid={invalid('set-speed')} /></div>
         <p class="hint sm:col-span-2">Leave the speed limit empty for unlimited.</p>
         <div class="sm:col-span-2">
           {@render section('Per-site limits')}
           <label class="label mt-2" for="set-profiles">One host pattern=maximum connections per line</label>
-          <textarea id="set-profiles" class="field h-24 font-mono" bind:value={form.profiles} placeholder="*.example.com=2" spellcheck="false"></textarea>
+          <textarea id="set-profiles" class="field h-24 font-mono" aria-invalid={invalid('set-profiles')} bind:value={form.profiles} placeholder="*.example.com=2" spellcheck="false"></textarea>
         </div>
-        <label class="flex items-center gap-2 text-[13px] sm:col-span-2"><input type="checkbox" bind:checked={form.allowLocalNetwork} /> Allow downloads from addresses on the local network</label>
+        <label class="flex items-center gap-2 text-[13px] sm:col-span-2 {pcOnly ? 'opacity-60' : ''}"><input type="checkbox" bind:checked={form.allowLocalNetwork} disabled={pcOnly} /> Allow downloads from addresses on the local network</label>
+        {#if pcOnly}<p class="hint flex items-start gap-1.5 sm:col-span-2"><Icon name="lock" size={13} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
       </div>
     {:else if page === 'proxy'}
       <h1 class="mb-3 text-[18px] font-semibold">Proxy</h1>
+      {#if pcOnly}<p class="card mb-3 flex max-w-xl items-start gap-2 bg-highlight p-3 text-[13px]"><Icon name="lock" size={15} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
+      <fieldset class="contents" disabled={pcOnly}>
       <div class="grid max-w-xl gap-3 sm:grid-cols-2">
         <fieldset class="sm:col-span-2">
           <legend class="label">Connection</legend>
@@ -469,7 +520,7 @@
               {#each proxyTypes as name, i (name)}<option value={i}>{name}</option>{/each}
             </select>
           </div>
-          <div><label class="label" for="proxy-address">Address (host:port)</label><input id="proxy-address" class="field font-mono" bind:value={form.proxy.host} disabled={!manualProxy} placeholder="proxy.example.com:8080" spellcheck="false" /></div>
+          <div><label class="label" for="proxy-address">Address (host:port)</label><input id="proxy-address" class="field font-mono" aria-invalid={invalid('proxy-address')} bind:value={form.proxy.host} disabled={!manualProxy} placeholder="proxy.example.com:8080" spellcheck="false" /></div>
         </div>
         <div class="sm:col-span-2 {manualProxy ? '' : 'opacity-50'}"><label class="label" for="proxy-user">User name (optional; SOCKS4/4a send it as the user ID)</label><input id="proxy-user" class="field" bind:value={form.proxy.username} disabled={!manualProxy} autocomplete="off" /></div>
         <div class="sm:col-span-2 {manualProxy && !form.proxy.forget ? '' : 'opacity-50'}">
@@ -480,15 +531,18 @@
           <label class="flex items-center gap-2 text-[13px] sm:col-span-2 {manualProxy ? '' : 'opacity-50'}"><input type="checkbox" bind:checked={form.proxy.forget} disabled={!manualProxy} /> Forget the saved proxy password</label>
         {/if}
       </div>
+      </fieldset>
     {:else if page === 'logins'}
       <h1 class="mb-3 text-[18px] font-semibold">Site logins</h1>
       <p class="hint mb-3 max-w-xl">Credentials are sealed on the server and used for matching HTTP or FTP downloads. Re-enter the password when changing a saved site's address or user name.</p>
+      {#if pcOnly}<p class="card mb-3 flex max-w-xl items-start gap-2 bg-highlight p-3 text-[13px]"><Icon name="lock" size={15} class="mt-0.5 shrink-0" /> {pcOnlyNote}</p>{/if}
+      <fieldset class="contents" disabled={pcOnly}>
       <div class="grid max-w-xl gap-3">
         {#each form.logins as row, i (row.id)}
           <div class="card grid gap-3 p-3 sm:grid-cols-2 {row.removed ? 'opacity-55' : ''}">
-            <div class="sm:col-span-2"><label class="label" for="login-site-{row.id}">Site or URL prefix</label><input id="login-site-{row.id}" class="field" bind:value={row.site} placeholder="https://example.com/private/ or example.com" disabled={row.removed} spellcheck="false" /></div>
-            <div><label class="label" for="login-user-{row.id}">User name</label><input id="login-user-{row.id}" class="field" bind:value={row.username} autocomplete="off" disabled={row.removed} /></div>
-            <div><label class="label" for="login-pass-{row.id}">{row.hasPassword ? 'Password (saved; leave empty to keep)' : 'Password'}</label><input id="login-pass-{row.id}" class="field" type="password" bind:value={row.password} autocomplete="new-password" disabled={row.removed} /></div>
+            <div class="sm:col-span-2"><label class="label" for="login-site-{row.id}">Site or URL prefix</label><input id="login-site-{row.id}" class="field" aria-invalid={invalid(`login-site-${row.id}`)} bind:value={row.site} placeholder="https://example.com/private/ or example.com" disabled={row.removed} spellcheck="false" /></div>
+            <div><label class="label" for="login-user-{row.id}">User name</label><input id="login-user-{row.id}" class="field" aria-invalid={invalid(`login-user-${row.id}`)} bind:value={row.username} autocomplete="off" disabled={row.removed} /></div>
+            <div><label class="label" for="login-pass-{row.id}">{row.hasPassword ? 'Password (saved; leave empty to keep)' : 'Password'}</label><input id="login-pass-{row.id}" class="field" type="password" aria-invalid={invalid(`login-pass-${row.id}`)} bind:value={row.password} autocomplete="new-password" disabled={row.removed} /></div>
             <div class="flex justify-end sm:col-span-2"><button class="btn-danger" type="button" onclick={() => removeLogin(i)}>{row.removed ? 'Undo removal' : 'Remove'}</button></div>
           </div>
         {:else}
@@ -496,6 +550,7 @@
         {/each}
         <div><button class="btn" type="button" onclick={addLogin}><Icon name="add" size={15} class="text-icon-info" /> Add site login</button></div>
       </div>
+      </fieldset>
     {:else if page === 'updates'}
       <h1 class="mb-3 text-[18px] font-semibold">Updates</h1>
       <div class="card mb-3 max-w-xl bg-highlight p-3 text-[13px]">
@@ -562,12 +617,18 @@
       {:else if passwordFromEnvironment}
         <p class="mb-4 text-[13px] text-muted">{store.texts.passwordSourceNote}</p>
       {:else}
-        <form class="mb-6 grid max-w-xl gap-3 sm:grid-cols-2" onsubmit={(event) => { event.preventDefault(); void changePassword(); }}>
-          <div><label class="label" for="pw-current">Current password</label><input id="pw-current" class="field" type="password" bind:value={current} autocomplete="current-password" /></div>
+        <form class="card mb-6 grid max-w-xl gap-3 p-3 sm:grid-cols-2" onsubmit={(event) => { event.preventDefault(); void changePassword(); }}>
+          <div class="sm:col-span-2">
+            <h2 class="text-[14px] font-semibold">Change password</h2>
+            <p class="hint">This happens as soon as you select Change password, without OK or Apply.</p>
+          </div>
+          <div class="sm:col-span-2"><label class="label" for="pw-current">Current password</label><input id="pw-current" class="field" type="password" bind:value={current} autocomplete="current-password" /></div>
           <div><label class="label" for="pw-new">New password (8 characters or more)</label><input id="pw-new" class="field" type="password" bind:value={next} autocomplete="new-password" minlength="8" /></div>
+          <div><label class="label" for="pw-repeat">The same password again</label><input id="pw-repeat" class="field" type="password" bind:value={repeat} autocomplete="new-password" aria-invalid={repeat && repeat !== next ? 'true' : undefined} />
+            {#if repeat && repeat !== next}<p class="mt-1 text-[12px] text-error">The two passwords aren't the same.</p>{/if}</div>
           <label class="flex items-start gap-2 text-[13px] sm:col-span-2"><input type="checkbox" class="mt-0.5" bind:checked={keepPaired} />
             <span>Keep the paired browser extensions<span class="hint block">Otherwise they are removed and pair again, in case someone who knew the old password paired one. Desktop apps are always removed and pair again with the new password.</span></span></label>
-          <div class="sm:col-span-2"><button class="btn-primary" type="submit" disabled={!current || next.length < 8}>Change password</button>
+          <div class="sm:col-span-2"><button class="btn-primary" type="submit" disabled={!current || next.length < 8 || repeat !== next}>Change password</button>
             <span class="hint ml-2">Other browsers are signed out.</span></div>
         </form>
       {/if}
@@ -589,7 +650,7 @@
           <li class="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]">
             <span class="min-w-0 flex-1"><span class="block truncate font-semibold">{token.name}</span>
               <span class="block text-[12px] text-muted">{token.role && roleNames[token.role] ? `${roleNames[token.role]} · ` : ''}Paired {dateTime(token.createdAt)}{token.lastUsedAt ? ` · last used ${dateTime(token.lastUsedAt)}` : ' · not used yet'}</span></span>
-            <button class="btn-danger" onclick={() => revoke(token.id)}>Remove</button>
+            <button class="btn-danger" onclick={() => (removingToken = token)}>Remove</button>
           </li>
         {:else}
           <li class="px-3 py-6 text-center text-[13px] text-muted">No app is paired.</li>
@@ -604,7 +665,7 @@
 </div>
 
 <footer class="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-divider bg-chrome px-4 py-2.5">
-  <div class="min-w-0 flex-1 text-[13px]">
+  <div class="min-w-0 flex-1 basis-full text-[13px] sm:basis-0">
     {#if message}<p class="tone-failed" role="alert">{message}</p>{:else if dirty}<p class="text-muted" role="status">You have changes that are not saved.</p>{/if}
   </div>
   <button class="btn-primary min-w-20" type="button" disabled={saving} onclick={() => void ok()}>OK</button>
@@ -612,6 +673,18 @@
   <button class="btn min-w-20" type="button" disabled={saving} onclick={() => void save()}>Apply</button>
 </footer>
 </div>
+
+{#if removingToken}
+  {@const token = removingToken}
+  <Confirm
+    title="Remove {token.name}?"
+    message="{token.name} ({kindOf(token)}) will lose access to {hostWord} at once. {token.role === 'remoteClient' ? 'To use it again, pair the desktop app with the password.' : 'To use it again, pair it with a new code.'}"
+    primary="Remove"
+    danger
+    onconfirm={() => revoke(token)}
+    onclose={() => (removingToken = null)}
+  />
+{/if}
 
 {#if leaveTo}
   {@const to = leaveTo}

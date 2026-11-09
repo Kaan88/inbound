@@ -6,6 +6,8 @@
   import type { FolderBrowseResult, FolderSpace } from '../lib/types';
   import Dialog from './Dialog.svelte';
   import Icon from './Icon.svelte';
+  import PathText from './PathText.svelte';
+  import { samePath, uniquePaths } from '../lib/paths';
 
   // The server's folders, under its roots only (folders.browse / folders.create): favorites with their free space,
   // a typed path checked by the server, and a new folder made where you are.
@@ -33,10 +35,8 @@
 
   // Recently used destinations that are not favorites, as the desktop's folder menu lists them.
   const recent = $derived.by(() => {
-    const same = (path: string) => path.replace(/[\/]+$/, '').toLowerCase();
-    const saved = favorites.map((f) => same(f.path));
-    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !saved.includes(same(path)));
-    return list;
+    const list = (store.model.settings?.recentDestinationDirectories ?? []).filter((path) => !favorites.some((f) => samePath(f.path, path)));
+    return uniquePaths(list);
   });
 
   const isFavorite = $derived(!!listing?.path && (store.model.settings?.favoriteFolders ?? []).some((f) => f.path === listing!.path));
@@ -51,11 +51,21 @@
       listing = result;
       typed = result.path ?? '';
     } catch (e) {
-      if (current()) error = e instanceof Error ? e.message : String(e);
+      // The typed path stays in the box and the reason is shown (U-WU-4); the listing doesn't move.
+      if (current()) {
+        const message = e instanceof Error ? e.message : String(e);
+        error = path ? `${path}: ${message}` : message;
+      }
     } finally {
       if (current()) busy = false;
     }
   }
+
+  // The allowed folders, kept from the last answer that had them, each once (U-WR-14).
+  let roots = $state<string[]>([]);
+  $effect(() => {
+    if (listing?.roots?.length) roots = uniquePaths(listing.roots);
+  });
 
   async function create() {
     if (!listing?.path || !newName.trim()) return;
@@ -106,7 +116,7 @@
     <button class="btn shrink-0" type="submit" disabled={busy}>Check</button>
   </form>
   {#if error}
-    <p class="mb-3 rounded border border-icon-danger/50 bg-highlight px-3 py-2 text-[13px] text-error" role="alert">{error}</p>
+    <p class="mb-3 break-all rounded border border-icon-danger/50 bg-highlight px-3 py-2 text-[13px] text-error" role="alert">{error}{roots.length ? ' The folders it may use are under Allowed folders.' : ''}</p>
   {/if}
 
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-[200px_minmax(0,1fr)]">
@@ -128,15 +138,15 @@
         <h3 class="label mt-3">Recent</h3>
         <ul class="space-y-0.5">
           {#each recent as path (path)}
-            <li><button class="w-full truncate rounded px-2 py-1.5 text-left font-mono text-[12px] hover:bg-hover" title={path} onclick={() => browse(path)}>{path}</button></li>
+            <li><button class="w-full rounded px-2 py-1.5 text-left text-[12px] hover:bg-hover" onclick={() => browse(path)}><PathText {path} /></button></li>
           {/each}
         </ul>
       {/if}
-      {#if listing?.roots?.length}
+      {#if roots.length}
         <h3 class="label mt-3">Allowed folders</h3>
         <ul class="space-y-0.5">
-          {#each listing.roots as root (root)}
-            <li><button class="w-full truncate rounded px-2 py-1.5 text-left font-mono text-[12px] hover:bg-hover" onclick={() => browse(root)}>{root}</button></li>
+          {#each roots as root (root)}
+            <li><button class="w-full rounded px-2 py-1.5 text-left text-[12px] hover:bg-hover" onclick={() => browse(root)}><PathText path={root} /></button></li>
           {/each}
         </ul>
       {/if}
@@ -145,7 +155,7 @@
     <section class="min-w-0">
       <div class="mb-2 flex items-center gap-2">
         <button class="btn px-2" onclick={() => browse(listing?.parent ?? null)} disabled={busy || !listing?.path} title="Up one folder" aria-label="Up one folder"><Icon name="up" size={15} /></button>
-        <div class="min-w-0 flex-1 truncate font-mono text-[12px]" title={listing?.path ?? ''}>{listing?.path ?? store.texts.folderListEmpty}</div>
+        <div class="min-w-0 flex-1 text-[12px]">{#if listing?.path}<PathText path={listing.path} />{:else}{store.texts.folderListEmpty}{/if}</div>
         {#if listing?.path}
           <button class="btn px-2" onclick={toggleFavorite} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={isFavorite}>
             {isFavorite ? '★' : '☆'}

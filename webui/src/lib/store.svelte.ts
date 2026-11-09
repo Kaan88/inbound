@@ -37,6 +37,8 @@ export class Store {
   model = $state<Model>(emptyModel());
   connection = $state<ConnectionState>('connecting');
   connectionDetail = $state<string | undefined>(undefined);
+  /** When an open connection was lost; null while connected (U-WU-3). */
+  lostAt = $state<number | null>(null);
   theme = $state<Theme>(readTheme());
   toasts = $state<Toast[]>([]);
   signInRequired = $state(true);
@@ -63,6 +65,8 @@ export class Store {
       url: `${scheme}//${location.host}/api/ws`,
       onMessage: (message) => this.receive(message),
       onState: (state, detail) => {
+        if (state === 'open') this.lostAt = null;
+        else if (this.connection === 'open' || (this.lostAt === null && state === 'reconnecting')) this.lostAt = Date.now();
         this.connection = state;
         this.connectionDetail = detail;
         if (state === 'signedOut') location.assign('/signin/');

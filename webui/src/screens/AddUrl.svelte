@@ -4,7 +4,7 @@
   import FolderField from '../components/FolderField.svelte';
   import Icon from '../components/Icon.svelte';
   import {
-    basicAuthorization, categoryChoices, conflictOptions, customCategories, destinationFor, findExisting, metadataText, nameFromUrl, recentAddresses,
+    basicAuthorization, categoryChoices, fileInfoProblem, conflictOptions, customCategories, destinationFor, findExisting, metadataText, nameFromUrl, recentAddresses,
     serverNameToShow, validUserName, type ConflictPolicy, type FileInfo,
   } from '../lib/addflow';
   import { hideAddresses, isMagnet } from '../lib/addview';
@@ -176,7 +176,7 @@
       info = metadataText(found, server);
       if (!nameEdited && server) { name = server; useCategoryFolder(); }
     } catch (error) {
-      if (mine === generation) info = `File information unavailable: ${error instanceof Error ? error.message : String(error)} You can still start the download.`;
+      if (mine === generation) info = `${fileInfoProblem(error instanceof Error ? error.message : String(error))} You can still start the download.`;
     } finally {
       if (mine === generation) infoBusy = false;
     }
@@ -277,7 +277,7 @@
   {#if step === 'address'}
     <label class="label" for="url-box">URL</label>
     <div class="flex gap-2">
-      <input id="url-box" class="field font-mono" bind:value={address} list="recent-urls" spellcheck="false" autocomplete="off"
+      <input id="url-box" class="field font-mono" data-autofocus bind:value={address} list="recent-urls" spellcheck="false" autocomplete="off"
         placeholder={providerAdd ? 'https://example.com/file.zip, or a magnet' : 'https://example.com/file.zip'}
         oninput={() => { canChooseDirect = false; direct = false; addressStatus = ''; }} />
       <button class="btn shrink-0" type="button" title="Paste the address from the clipboard"
@@ -303,7 +303,7 @@
 
       <div>
         <label class="label" for="file-name">File name (optional)</label>
-        <input id="file-name" class="field" bind:value={name} placeholder="Resolved from the URL or server" oninput={() => { nameEdited = true; useCategoryFolder(); }} />
+        <input id="file-name" class="field" data-autofocus bind:value={name} placeholder="Resolved from the URL or server" oninput={() => { nameEdited = true; useCategoryFolder(); }} />
       </div>
       <div>
         <label class="label" for="category">Category</label>

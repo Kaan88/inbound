@@ -170,3 +170,15 @@
   .tone-neutral { color: var(--status-neutral); }
   .tabular { font-variant-numeric: tabular-nums; }
 }
+
+/* A touch screen: whatever a finger presses is at least 40 px each way (U-WU-8; WCAG 2.5.8 asks 24 with spacing). */
+@media (pointer: coarse) {
+  .btn, .btn-primary, .btn-danger { min-height: 40px; }
+  .btn-icon { min-width: 40px; min-height: 40px; }
+  .field { min-height: 40px; }
+  input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+  .touch-row { min-height: 44px; }
+}
+
+/* A box with a value to put right (Options, U-WU-12). */
+.field[aria-invalid="true"] { border-color: var(--error); box-shadow: 0 0 0 1px var(--error); }

@@ -6,7 +6,7 @@
   import { store } from '../lib/store.svelte';
   import type { ContainerAddResult, ContainerPreview } from '../lib/types';
 
-  // Import container file: an .rsdf, .ccf or .dlc file from this device is uploaded to the server
+  // Import container file: an .rsdf or .ccf file from this device is uploaded to the server
   // (/api/upload/container), which reads it and shows what it holds without its links (remote.container.preview).
   // The chosen entries go to the provider like pasted links (remote.container.add).
   let { onclose }: { onclose: () => void } = $props();
@@ -17,6 +17,8 @@
   let chosen = $state<number[]>([]);
   let destination = $state(store.model.settings?.defaultDownloadDirectory ?? '');
   let problems = $state<string[]>([]);
+  // The file last chosen stays named, so a refusal says which file it was about (U-WU-15).
+  let fileName = $state('');
   const providerName = $derived(store.model.accounts[0]?.providerName ?? 'the provider');
 
   async function picked(event: Event) {
@@ -25,7 +27,11 @@
     input.value = '';
     if (!file) return;
     problem = '';
-    if (!/\.(rsdf|ccf|dlc)$/i.test(file.name)) { problem = 'Only .rsdf, .ccf and .dlc files can be imported.'; return; }
+    problems = [];
+    fileName = file.name;
+    // A DLC can't be opened by this app (DlcSupport), so it isn't sent: one short line says so (U-WU-15).
+    if (/\.dlc$/i.test(file.name)) { problem = "DLC files can't be opened by this app. Open it in the program that made it."; return; }
+    if (!/\.(rsdf|ccf)$/i.test(file.name)) { problem = 'Only .rsdf and .ccf files can be imported.'; return; }
     step = 'reading';
     try {
       // The name goes in a header, not the address, so it stays out of the server's access logs.
@@ -89,8 +95,14 @@
 
 <Dialog title="Import container file" wide {onclose}>
   {#if step === 'pick' || step === 'reading'}
-    <label class="label" for="container-file">Container file (.rsdf, .ccf or .dlc)</label>
-    <input id="container-file" type="file" accept=".rsdf,.ccf,.dlc" class="field" disabled={step === 'reading'} onchange={picked} />
+    <p class="label" id="container-file-label">Container file (.rsdf or .ccf)</p>
+    <div class="flex min-w-0 items-center gap-2">
+      <label class="btn shrink-0 cursor-pointer focus-within:outline-2 focus-within:outline-accent {step === 'reading' ? 'pointer-events-none opacity-45' : ''}">
+        Choose a file…
+        <input id="container-file" type="file" accept=".rsdf,.ccf" class="sr-only" aria-labelledby="container-file-label" disabled={step === 'reading'} onchange={picked} />
+      </label>
+      <span class="min-w-0 truncate text-[13px] {fileName ? '' : 'text-muted'}" title={fileName}>{fileName || 'No file chosen'}</span>
+    </div>
     <p class="hint mt-1">The file is sent to the server, which reads it. Its links are never shown, and they go to {providerName}.</p>
     {#if step === 'reading'}<p class="mt-2 text-[13px]" role="status">Reading the file…</p>{/if}
   {:else if preview}

@@ -3,7 +3,7 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
-import { bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { bytes, dateTime, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
@@ -56,15 +56,10 @@ export function timeLeft(seconds: number | null | undefined): string {
   return minutes >= 1 ? `${minutes}m ${rest}s` : `${Math.max(1, rest)}s`;
 }
 
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** The Last Try Date column, "Nov 09 14:03:22 2026" in the viewer's time zone. */
 export function lastTryText(value: string | number | Date | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000) return '';
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${months[date.getMonth()]} ${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${date.getFullYear()}`;
+  return dateTime(value);
 }
 
 /** The queue's number as the Q column shows it; empty when the download is not in a queue. */
@@ -222,6 +217,27 @@ export function planFileMenu(singleFile: boolean, packageRow: boolean, sideRows:
 
 export function menuLabel(text: string, reason: string | null): string {
   return reason === null ? text : `${text} (${reason})`;
+}
+
+export interface FileCommand { label: string; enabled: boolean; hidden: boolean }
+
+/**
+ * The desktop row menu's file commands the web menu lacked (U-WU-10): Move/Rename… for one finished file, Redownload and
+ * Refresh Download Address… for one file (not a provider's), Change Category… for any downloads. The reasons are the
+ * same words as the other entries.
+ */
+export function fileCommands(
+  single: Pick<Job, 'state' | 'url' | 'isRemote'> | null,
+  plan: FileMenuPlan,
+  files: number,
+): { move: FileCommand; redownload: FileCommand; refresh: FileCommand; category: FileCommand } {
+  const providers = !!single && (single.isRemote === true || single.url.toLowerCase().startsWith('remote://'));
+  return {
+    move: { label: menuLabel('Move/Rename…', plan.openReason), enabled: plan.openReason === null && single?.state === 'completed', hidden: false },
+    redownload: { label: menuLabel('Redownload', plan.fileReason), enabled: plan.fileReason === null, hidden: false },
+    refresh: { label: menuLabel('Refresh Download Address…', plan.fileReason), enabled: plan.fileReason === null && !providers, hidden: providers },
+    category: { label: 'Change Category…', enabled: files > 0, hidden: false },
+  };
 }
 
 /** Grouping takes two files or more, in two rows or more. */
@@ -590,7 +606,7 @@ export function countJobs(jobs: readonly Job[]): ListCounts {
 }
 
 export function statusBarText(counts: ListCounts, selected: number): string {
-  let text = `${counts.total} downloads · ${counts.active} active · ${counts.queued} queued`;
+  let text = `${counts.total} download${counts.total === 1 ? '' : 's'} · ${counts.active} active · ${counts.queued} queued`;
   if (counts.retrying > 0) text += ` · ${counts.retrying} retrying`;
   if (selected > 1) text += `  (${selected} selected)`;
   return text;
@@ -769,6 +785,21 @@ export function speedSample(jobs: readonly Job[], connected: boolean, ready: boo
   for (const job of jobs) {
     if (!activeStates.includes(job.state)) continue;
     if (now - ms(job.updatedAt) > 10_000) continue;
+    const r = job.bytesPerSecond ?? 0;
+    if (Number.isFinite(r) && r > 0) sum += r;
+  }
+  return sum;
+}
+
+/**
+ * The total the status bar and the speed graph's label show (U-WU-14): the rates the rows show, added up, so the three
+ * places never disagree. Null while the server can't be reached.
+ */
+export function liveSpeed(jobs: readonly Job[], connected: boolean, ready: boolean): number | null {
+  if (!connected || !ready) return null;
+  let sum = 0;
+  for (const job of jobs) {
+    if (!activeStates.includes(job.state)) continue;
     const r = job.bytesPerSecond ?? 0;
     if (Number.isFinite(r) && r > 0) sum += r;
   }
