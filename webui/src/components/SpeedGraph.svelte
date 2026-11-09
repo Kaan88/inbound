@@ -49,7 +49,7 @@
     untrack(() => {
       void store.ask<SpeedHistoryResult>('speed.history', {}).then((result) => {
         if (stale || result.intervalSeconds !== 1 || !Array.isArray(result.bytesPerSecond)) return;
-        history.replace(result.bytesPerSecond);
+        history.replace(result.bytesPerSecond, result.start);
         version++;
       }).catch(() => undefined);
     });
@@ -69,12 +69,13 @@
 
   // The point under the pointer (mouse, pen or a finger): set only while one is over the graph, so nothing runs otherwise.
   let hoverX = $state<number | null>(null);
-  let hoverTime = $state(0);
   function point(event: PointerEvent) {
     const box = (event.currentTarget as Element).getBoundingClientRect();
-    if (box.width <= 0) return;
-    hoverX = ((event.clientX - box.left) / box.width) * width;
-    hoverTime = Date.now();
+    const element = event.currentTarget as HTMLElement;
+    // Inside the border: the drawing fills the content box.
+    const inner = box.width - element.clientLeft * 2;
+    if (inner <= 0) return;
+    hoverX = ((event.clientX - box.left - element.clientLeft) / inner) * width;
   }
   function leave() {
     hoverX = null;
@@ -84,13 +85,12 @@
     if (hoverX === null) return null;
     const found = hoverPoint(history.recent(), hoverX, width, speedGraphWindow);
     if (!found) return null;
-    const samples = history.recent();
     const step = width / (speedGraphWindow - 1);
     const x = width - found.age * step;
-    const clock = new Date(hoverTime - found.age * 1000).toLocaleTimeString([], { hour12: false });
+    const clock = new Date(Date.now() - found.age * 1000).toLocaleTimeString([], { hour12: false });
     const text = found.rate === null ? `No figure · ${clock}` : `${speed(found.rate) || '0 B/s'} · ${clock} · ${agoText(found.age)}`;
     const y = found.rate === null ? null : height - Math.min(1, found.rate / ceiling) * height;
-    return { x, y, text, flip: x / width > 0.6, left: (x / width) * 100, count: samples.length };
+    return { x, y, text, flip: x / width > 0.6, left: (x / width) * 100 };
   });
 
   const now = $derived.by(() => {
@@ -156,9 +156,9 @@
       </svg>
       {#if hover}
         {#if hover.y !== null}
-          <span class="pointer-events-none absolute size-[7px] rounded-full bg-progress" style="left: calc(0.75rem + (100% - 1.5rem) * {hover.left / 100} - 3.5px); top: calc((100% - 0.5rem) * {hover.y / height} - 3.5px)"></span>
+          <span class="pointer-events-none absolute size-[7px] rounded-full bg-progress" style="left: calc(0.75rem + 1px + (100% - 1.5rem - 2px) * {hover.left / 100} - 3.5px); top: calc(1px + (100% - 0.5rem - 2px) * {hover.y / height} - 3.5px)"></span>
         {/if}
-        <span class="tabular pointer-events-none absolute top-0 whitespace-nowrap rounded border border-divider bg-chrome px-1.5 py-0.5 text-[11px] text-text" style="left: calc(0.75rem + (100% - 1.5rem) * {hover.left / 100}); transform: translateX({hover.flip ? 'calc(-100% - 8px)' : '8px'})">{hover.text}</span>
+        <span class="tabular pointer-events-none absolute top-0 whitespace-nowrap rounded border border-divider bg-chrome px-1.5 py-0.5 text-[11px] text-text" style="left: calc(0.75rem + 1px + (100% - 1.5rem - 2px) * {hover.left / 100}); transform: translateX({hover.flip ? 'calc(-100% - 8px)' : '8px'})">{hover.text}</span>
       {/if}
       <span class="tabular pointer-events-none absolute right-5 top-1 text-[11px] text-muted">{speed(ceiling)}</span>
     </div>
