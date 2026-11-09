@@ -35,6 +35,8 @@
                     <SolidColorBrush x:Key="InboundIconStartBrush" Color="#8CCF8C" />
                     <SolidColorBrush x:Key="InboundIconPauseBrush" Color="#E8B36A" />
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#E08A8A" />
+                    <!-- Uno's dialog dim layer (UI check F-2: light grey in dark); WinUI's own smoke on Windows. -->
+                    <SolidColorBrush x:Key="ContentDialogLightDismissOverlayBackground" Color="#4D000000" />
                     <SolidColorBrush x:Key="InboundIconInfoBrush" Color="#6FA8DC" />
                     <SolidColorBrush x:Key="InboundIconNeutralBrush" Color="#A8A8A8" />
                     <SolidColorBrush x:Key="InboundIconMediaBrush" Color="#B49AD6" />
@@ -74,6 +76,7 @@
                     <SolidColorBrush x:Key="InboundIconStartBrush" Color="#2E8B3E" />
                     <SolidColorBrush x:Key="InboundIconPauseBrush" Color="#B7791F" />
                     <SolidColorBrush x:Key="InboundIconDangerBrush" Color="#C42B1C" />
+                    <SolidColorBrush x:Key="ContentDialogLightDismissOverlayBackground" Color="#4D000000" />
                     <SolidColorBrush x:Key="InboundIconInfoBrush" Color="#1F6FC5" />
                     <SolidColorBrush x:Key="InboundIconNeutralBrush" Color="#6A6A6A" />
                     <SolidColorBrush x:Key="InboundIconMediaBrush" Color="#7B4FB8" />

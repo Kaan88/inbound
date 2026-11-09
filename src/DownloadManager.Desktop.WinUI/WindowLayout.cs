@@ -22,6 +22,17 @@ internal static class WindowLayout
         var size = ScaledToFit(window, width, height);
         presenter.PreferredMinimumWidth = size.Width;
         presenter.PreferredMinimumHeight = size.Height;
+#if HAS_UNO
+        // Uno's X11 head ignores the preferred minimum (the toolbar clipped under 1000 px, UI check F-10): a window made
+        // smaller than it grows back to it, as Windows would have stopped the drag there.
+        window.AppWindow.Changed += (sender, change) =>
+        {
+            if (!change.DidSizeChange || sender.Presenter is OverlappedPresenter { State: not OverlappedPresenterState.Restored }) return;
+            var now = sender.Size;
+            if (now.Width >= size.Width && now.Height >= size.Height) return;
+            sender.Resize(new SizeInt32 { Width = Math.Max(now.Width, size.Width), Height = Math.Max(now.Height, size.Height) });
+        };
+#endif
     }
 
     private static SizeInt32 ScaledToFit(Window window, int width, int height)

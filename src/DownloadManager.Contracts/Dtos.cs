@@ -345,8 +345,18 @@ public sealed class SnapshotDto
 /// UI.R24: total download speed, one figure per <see cref="IntervalSeconds"/> from <see cref="Start"/>, oldest first,
 /// in bytes per second. It starts no earlier than the Host did; the last figure is the second under way.
 /// </summary>
+/// <summary>F-12: <c>speed.history</c> for one download. Without it (or from a Host that predates it) the answer is the total.</summary>
+public sealed class SpeedHistoryRequest
+{
+    public Guid? JobId { get; set; }
+}
+
 public sealed class SpeedHistoryDto
 {
+    /// <summary>The download these figures are for; null for the total. A client that asked for one download and gets
+    /// null back is talking to an older Host, which only has the total.</summary>
+    public Guid? JobId { get; set; }
+
     public DateTimeOffset Start { get; set; }
     public int IntervalSeconds { get; set; } = 1;
     public List<long> BytesPerSecond { get; set; } = new();

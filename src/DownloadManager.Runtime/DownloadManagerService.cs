@@ -105,6 +105,16 @@ public sealed partial class DownloadManagerService
     private readonly SpeedHistory _speedHistory = new(DateTimeOffset.UtcNow);
 
     /// <summary>UI.R24: the last hour of total download speed, for a window that has just connected.</summary>
+    /// <summary>F-12: one running download's figures, or an empty history for one that isn't running.</summary>
+    public SpeedHistoryDto GetSpeedHistory(Guid jobId)
+    {
+        lock (_sync)
+        {
+            return _speedHistory.Read(jobId, DateTimeOffset.UtcNow)
+                ?? new SpeedHistoryDto { JobId = jobId, Start = DateTimeOffset.UtcNow, BytesPerSecond = [] };
+        }
+    }
+
     public SpeedHistoryDto GetSpeedHistory()
     {
         lock (_sync)

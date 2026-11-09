@@ -42,7 +42,7 @@
 
         <MenuBar x:Name="MainMenuBar" Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
             <MenuBarItem x:Name="TasksMenu" Title="Tasks" AccessKey="T">
-                <MenuFlyoutItem Text="Add New Download…" AccessKey="N" Click="MenuAdd_Click">
+                <MenuFlyoutItem Text="Add URL…" AccessKey="N" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
                         <KeyboardAccelerator Key="N" Modifiers="Control" />
                     </MenuFlyoutItem.KeyboardAccelerators>
@@ -78,7 +78,7 @@
             <MenuBarItem x:Name="DownloadsMenu" Title="Downloads" AccessKey="D">
                 <MenuFlyoutItem Text="Stop All" AccessKey="S" Click="MenuStopAll_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Delete All Completed" AccessKey="D" Click="MenuDeleteCompleted_Click" />
+                <MenuFlyoutItem Text="Delete Completed" AccessKey="D" Click="MenuDeleteCompleted_Click" />
                 <MenuFlyoutItem Text="Clean Up Leftover Partial Files…" AccessKey="L" Click="MenuCleanOrphans_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Find…" AccessKey="F" Click="MenuFind_Click">
