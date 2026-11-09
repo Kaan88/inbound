@@ -38,6 +38,7 @@
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteText.cs" Link="WinUI\RemoteText.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveForm.cs" Link="WinUI\ArchiveForm.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteRows.cs" Link="WinUI\RemoteRows.cs" />
+    <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\ProviderViews.cs" Link="WinUI\ProviderViews.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\ArchiveRows.cs" Link="WinUI\ArchiveRows.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\RemoteFileTree.cs" Link="WinUI\RemoteFileTree.cs" />
     <Compile Include="..\..\src\DownloadManager.Desktop.WinUI\Remote\AddLines.cs" Link="WinUI\AddLines.cs" />

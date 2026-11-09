@@ -82,7 +82,9 @@ internal static class WindowLayout
     public static void ApplyTitleBar(Window window, bool dark)
     {
         if (!AppWindowTitleBar.IsCustomizationSupported()) return;
-        var titleBar = window.AppWindow.TitleBar;
+        // A closed window's root can still hear a theme change (OK in Options closes it as the theme changes); its
+        // AppWindow is gone by then, and touching it ended the whole app.
+        if (window.AppWindow?.TitleBar is not { } titleBar) return;
         // The caption is drawn by Windows, outside the content: the solid color under Mica (#202020 / #F3F3F3), so it meets the frosted body.
         var background = dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 243, 243, 243);
         var foreground = dark ? Windows.UI.Color.FromArgb(255, 235, 235, 235) : Windows.UI.Color.FromArgb(255, 30, 30, 30);

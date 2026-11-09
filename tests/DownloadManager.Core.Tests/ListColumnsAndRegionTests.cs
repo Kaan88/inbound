@@ -136,7 +136,7 @@ public sealed class ListColumnLayoutTests
             Assert.Equal(columns[i].DefaultWidth, double.Parse(widths[i]!, System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", "MyProviderWindow.cs"));
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", "ProviderPanel.cs"));
         var template = source[source.IndexOf("private const string ItemTemplate", StringComparison.Ordinal)..];
         template = template[..template.IndexOf("</Grid.ColumnDefinitions>", StringComparison.Ordinal)];
         Assert.Equal(ListColumnSets.ProviderItems().Columns.Count, template.Split("<ColumnDefinition ").Length - 1);
