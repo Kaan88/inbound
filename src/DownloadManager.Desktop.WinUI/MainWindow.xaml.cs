@@ -2099,7 +2099,7 @@ public sealed partial class MainWindow : Window
                 Content = new TextBlock
                 {
                     Text = text + "\n\nQuarantine moves them into a .dm-orphans folder next to where they were " +
-                           "found. Partial files of existing downloads are never touched.",
+                           "found, and the folder goes once it is empty. Partial files of existing downloads are never touched.",
                     TextWrapping = TextWrapping.Wrap,
                     IsTextSelectionEnabled = true,
                 },
@@ -4424,12 +4424,13 @@ public sealed partial class MainWindow : Window
 
         var deleteFiles = new CheckBox
         {
-            Content = "Delete from disk: the downloaded files and any partial data",
+            Content = "Delete from disk: the downloaded files",
             IsChecked = deleteFromDisk,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(deleteFiles, "DeleteFromDiskBox");
-        // Unfinished downloads only have partial data, which is removed anyway.
+        // Unfinished downloads only have partial data, which is removed anyway (UI.B19), so the box is about finished files.
         var anyCompleted = selection.Any(job => job.State == "completed" && !job.FileRemovedAfterExtraction);
+        var anyUnfinished = selection.Any(job => job.State != "completed");
 
         // Their files went on purpose after extraction. A box offering to delete them would do nothing, and a new file by that name isn't theirs.
         var noFilesLeft = selection.All(job => job.FileRemovedAfterExtraction);
@@ -4439,11 +4440,13 @@ public sealed partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
-            Text = noFilesLeft ? question + " " + JobNotes.NothingToDelete(selection.Count) : anyCompleted ? question : question + " Partial data is always removed.",
+            Text = noFilesLeft ? question + " " + JobNotes.NothingToDelete(selection.Count)
+                : anyCompleted ? (anyUnfinished ? question + " " + DeleteRules.MixedNote : question)
+                : question + " Partial data is always removed.",
             TextWrapping = TextWrapping.Wrap,
         });
         if (anyCompleted) panel.Children.Add(deleteFiles);
-        else deleteFiles.IsChecked = !noFilesLeft;
+        else deleteFiles.IsChecked = false;
 
         var dialog = new ContentDialog
         {
@@ -4464,21 +4467,30 @@ public sealed partial class MainWindow : Window
         var includeFiles = deleteFiles.IsChecked == true;
         if (selection.Count > 1)
         {
-            // One Host operation: every file stops together and none restarts while others are removed.
+            // One Host operation per kind: every unfinished file stops together and none restarts while others are
+            // removed. The unfinished ones go first, with their partial data; then the finished ones as the box says.
             StatusText.Text = $"Deleting {selection.Count} downloads…";
+            var (withData, keepFile) = DeleteRules.Split(selection, job => job.State == "completed", includeFiles);
+            var errors = new List<string>();
             try
             {
-                var result = (await _connection.RemoveManyAsync(selection.Select(job => job.Id).ToList(), includeFiles))
-                    .GetPayload<JobActionResponse>();
+                foreach (var (part, deleteFile) in new[] { (withData, true), (keepFile, false) })
+                {
+                    if (part.Count == 0) continue;
+                    var result = (await _connection.RemoveManyAsync(part.Select(job => job.Id).ToList(), deleteFile))
+                        .GetPayload<JobActionResponse>();
+                    if (!result.Ok) errors.Add(result.Error ?? "Some downloads could not be removed.");
+                }
                 await RefreshAsync();
-                if (!result.Ok) await ShowMessageAsync("Delete incomplete", result.Error ?? "Some downloads could not be removed.");
+                if (errors.Count > 0) await ShowMessageAsync("Delete incomplete", string.Join(Environment.NewLine, errors));
             }
             catch (Exception ex) { await RefreshAsync(); await ShowMessageAsync("Delete incomplete", ex.Message); }
             return;
         }
+        var single = DeleteRules.DeleteFileFor(selection[0].State == "completed", includeFiles);
         await RunBulkActionAsync(
             selection,
-            id => _connection.RemoveAsync(id, deleteFile: includeFiles),
+            id => _connection.RemoveAsync(id, deleteFile: single),
             "Delete");
     }
 

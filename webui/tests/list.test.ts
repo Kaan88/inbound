@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteCompletedText, deletePlan, describe as describeNote,
+  archiveHasOwnRow, archivePasswordText, archivePrimary, archiveRetryText, hideAddresses, providerEntries, canGroup, cancelTargets, categoryForName, categoryOf, countJobs, deleteBatches, deleteCompletedText, deletePlan, mixedDeleteNote, describe as describeNote,
   graphCeiling, jobView, lastTryText, menuLabel, moveCursor, nextSort, orderBy, packageQueueText, packageView, parseSort, pauseTargets, planFileMenu,
   priorityTargets, remoteEnterAction, resumeTargets, selectAfterClick, sharedQueueId, sortRows, SpeedHistory, speedSample, startsAscending, statusBarText,
   statusWords, suggestPackageName, summarizeGroup, timeLeft, emptyText, defaultEmptyText,
@@ -201,6 +201,17 @@ describe('deleting', () => {
     expect(many.text).toBe('Remove 2 downloads from the list? Partial data is always removed.');
     expect(many.offerFiles).toBe(false);
     expect(many.deleteFile).toBe(true);
+  });
+
+  it('UI.B19: a mixed selection always removes the unfinished ones\' partial data, whatever the box says', () => {
+    const jobs = [job('a', 'completed'), job('b', 'paused'), job('c', 'failed')];
+    expect(deletePlan(jobs).text).toBe(`Remove 3 downloads from the list? ${mixedDeleteNote}`);
+    expect(deletePlan(jobs).offerFiles).toBe(true);
+    expect(deleteBatches(jobs, false)).toEqual([{ ids: ['b', 'c'], deleteFile: true }, { ids: ['a'], deleteFile: false }]);
+    expect(deleteBatches(jobs, true)).toEqual([{ ids: ['a', 'b', 'c'], deleteFile: true }]);
+    // A finished file whose archive went after extraction keeps its (absent) file; an unfinished one still loses its data.
+    expect(deleteBatches([job('d', 'completed', { fileRemovedAfterExtraction: true }), job('e', 'queued')], false))
+      .toEqual([{ ids: ['e'], deleteFile: true }, { ids: ['d'], deleteFile: false }]);
   });
 
   it('says there is nothing to delete when the archives went on purpose', () => {
