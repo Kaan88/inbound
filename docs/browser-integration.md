@@ -136,8 +136,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   is cancelled only after the app or server accepts the handoff, so Firefox never starts the download or asks
   where to save it. A cancelled typed address leaves the tab on the page it was on. Refused or unreachable,
   Firefox goes on as before, and the `onCreated` that follows leaves it alone for a minute, since the user was
-  already told. With "ask each time" the folder window opens and the request goes. Keep in browser, or closing
-  the window, starts the download again in Firefox (`downloads.download`), and that one is let through. A
+  already told. With "ask each time" the toolbar popup asks (EXT.R7, below; the folder window when the popup
+  can't open) and the request goes. Keep in browser, or closing the popup or window without a choice, starts
+  the download again in Firefox (`downloads.download`), and that one is let through. A
   form POST is never caught this way, since it can't be sent again; it still reaches `onCreated`.
 - **Differences handled in code.** No `downloads.onDeterminingFilename` (see above);
   `cookies.getPartitionKey` is optional already. A caught download's cookies come from its own cookie store
@@ -176,8 +177,9 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
 
 ## Choosing a folder (EXT.R1) and the popup's list (EXT.R2)
 
-- **When sending a download:** "Use the app's default folder" (default) or "Ask each time". Asking holds the
-  caught download, paused, while `handoff.html` shows the app's default folder (from
+- **When sending a download:** "Use the default folder" (default; the app's, or the server's when downloads
+  go to the server) or "Ask each time". Asking holds the caught download, paused, while the toolbar popup
+  (EXT.R7, below) or, as a fallback, `handoff.html` shows the default folder (from
   `settings.downloadFolders`, which returns only that and the favorite folders), the favorites and
   Choose… (the app's folder picker). Download sends it and removes the browser's copy; Keep in browser, or
   closing the window, gives it back to the browser. The window holds a port open to the worker: its pings
@@ -187,7 +189,52 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   worker restarts anyway, the pending entry (in session storage) still works, and since the file-name
   callback is gone, Keep in browser cancels the stuck download and starts it again in the browser, once. A folder chosen there is for that
   download only; the next window starts at the default folder again (UI.R3). The right-click menu always
-  asks. With a server paired the window also offers **This PC or Server** (below).
+  asks, in the window. With a server paired the window also offers **This PC or Server** (below).
+- **Asking in the toolbar popup (EXT.R7).** An automatically caught download that needs a folder waits in a
+  queue (`askQueue`, also in session storage), and the worker opens the extension's toolbar popup with
+  `action.openPopup({ windowId })` for the normal window in front, so the question appears under the
+  extension's icon like the browser's own download bubble. The popup shows the oldest waiting download
+  (`ask-panel.ts`: file name, This PC or Server, Save in with Choose…, favorites, free space on the server,
+  Start, Download and Keep in browser), "1 of 3" and the names of the others; when nothing waits it is the
+  usual popup with its download list, which then shows the download just sent. Several downloads at once open
+  the popup once and queue in it; a download caught while the popup is open joins the queue. The popup holds a
+  port (`dm.ask`) open to the worker while it is open: its pings keep the worker alive, and the port closing
+  means the popup closed, so whatever still waits goes back to the browser, exactly as when the folder window
+  is closed without a choice (one being sent waits for the answer). A popup closes when it loses the focus (a
+  click on the page, another window, or a tab switch), so that too leaves the download to the browser.
+  Choose… for the server lists its folders inside the popup. Choose… for This PC would open the desktop app's
+  folder dialog, which takes the focus and so closes the popup: instead the waiting downloads move to folder
+  windows (`dm.askInWindow`), the chosen one opening its dialog at once (`handoff.html?pick=1`). Right-click
+  downloads always use the window. API facts relied on:
+  - Chrome: `action.openPopup()` is available to every extension from Chrome 127; from 118 to 126 only to
+    policy-installed extensions ([chrome.action](https://developer.chrome.com/docs/extensions/reference/api/action#method-openPopup),
+    [MDN compatibility data](https://github.com/mdn/browser-compat-data/blob/main/webextensions/api/action.json)).
+    The manifest minimum is 109, so older browsers have no usable call. Edge follows Chromium.
+  - Chrome, and Firefox from 149: a `windowId` naming a window that is not focused is refused
+    ([MDN action.openPopup](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/action/openPopup)).
+    A download item names no window, so the worker asks `windows.getLastFocused({ windowTypes: ["normal"] })`
+    and does not call `openPopup` when that window is not focused.
+  - Firefox: `action.openPopup()` from 109, but before 149 only from a user gesture
+    ([MDN compatibility data](https://github.com/mdn/browser-compat-data/blob/main/webextensions/api/action.json);
+    [Mozilla add-ons blog, Firefox 149-152](https://blog.mozilla.org/addons/2026/04/23/webextensions-api-changes-firefox-149-152/),
+    Desktop only). A caught download is not a gesture, so Firefox 140 to 148 refuses and the window asks. From
+    150, uplifted to 149, it also refuses while a context menu, doorhanger or notification is open
+    ([bug 2022281](https://bugzilla.mozilla.org/show_bug.cgi?id=2022281)).
+  - The call resolves when the popup opens and rejects when it does not (MDN).
+
+  **Fallback to the window:** when `action.openPopup` is missing, when the browser's front window is not
+  focused (or there is none), when the call is refused, or when an opened popup has not connected within
+  5 seconds, every waiting download gets its own folder window, as before EXT.R7. A folder window that can't be
+  opened, or does not connect within 20 seconds, gives its download back to the browser.
+
+  Checked on 2026-11-09 with test instances only (a test Host, a test server on 127.0.0.1 and a local file
+  server; downloads to test folders): Chrome for Testing 158 with the unpacked build and a server-only pairing
+  (the popup opened by itself; three downloads queued, one kept, one sent to the server, the third back to the
+  browser when the popup closed; a minimised browser got the folder window instead), and Firefox 159 with
+  `dist-firefox` installed through WebDriver BiDi, paired with the server and the installed native host
+  reaching the test Host (the popup opened by itself with This PC and Server; switching target, the server's
+  folder list, a send to a server folder; closing the popup started the download again in Firefox; with the
+  window not in front, three folder windows, closed, gave the three back to Firefox). Edge was not run.
 - **Popup:** the newest 20 of all the app's downloads, whatever started them, with Pause, Resume (Retry for
   a failed one) and Delete, which asks first and has "Delete the file too", unticked. Each action goes on a
   native connection of its own, as the folder picker does: the Host answers one command at a time per
@@ -237,12 +284,23 @@ note that the token and cookies cross the network unencrypted.
   installed here (the native host is "not found"). With one target no choice is shown. Each target brings its
   own default folder and favorites (`settings.downloadFolders` from each). Choose… opens the app's folder
   dialog for This PC, and for the server a list of its folders one level at a time (`folders.browse` through
-  `dm.browseServerFolders`, which only `handoff.html` and `batch.html` may use; the server limits it to its
-  roots). The window starts on the default target. A folder chosen there is for that download only.
+  `dm.browseServerFolders`, which only `handoff.html`, `batch.html` and the popup may use; the server limits it
+  to its roots). The window starts on the default target. A folder chosen there is for that download only.
   Both windows fill the folder field (Save in, in Download All) with the chosen target's default folder and
   show the other target's default on a switch; Download All gets them from `dm.targets`, which only
-  `batch.html` may use and which asks the desktop app for its folders even with no server paired. The folder
-  is sent only when it was changed, so an untouched field still lets the app or the server decide.
+  `batch.html` and the popup may use and which asks the desktop app for its folders even with no server
+  paired. The folder is sent only when it was changed, so an untouched field still lets the app or the server
+  decide.
+- **Folders come from the place the download goes (EXT.B7).** In server mode, and whenever Server is the
+  chosen target, every folder the extension shows is the server's: the default folder, the favorites, the
+  folder list behind Choose… and the free space (the server's `folders.browse` answer for the folder in Save
+  in, shown as "… free on the server"; This PC has no such request through the native host, so nothing is
+  shown for it rather than another machine's figure). Recent folders are not offered for either target.
+  Download All's Browse and Download now wait for the target list, as the folder window's already did: before,
+  a click while the list was on its way opened this PC's folder dialog even in server mode. Before the list
+  arrives the windows say "The default folder" rather than "The app's default folder". With a server paired,
+  the popup says where downloads are saved ("Saved in /downloads on the server"), from `dm.targets`, and
+  follows the This PC / Server switch. Settings says "Use the default folder", the app's or the server's.
 - **The popup** lists the newest 20 of each place, labelled This PC or Server, and sends Pause, Resume, Retry
   and Delete to the place the download is in. Without the desktop app here, its card is hidden and the
   server's card shows the state. One place not answering leaves the other's list.
