@@ -5,7 +5,8 @@
   export type AddKind = 'url' | 'links' | 'magnet' | 'torrent' | 'container' | 'list';
   // canProvider: the server has a provider (remote.*); a torrent file and a container's links can only go there.
   // canUpload: it takes uploaded files (the hello's "uploads"), which a torrent or container file is sent as.
-  let { onpick, onexport, canProvider = true, canUpload = true }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean; canUpload?: boolean } = $props();
+  // disabled: the server can't be reached, so nothing can be added (U-WU-3); the toolbar's Add URL says the same.
+  let { onpick, onexport, canProvider = true, canUpload = true, disabled = false }: { onpick: (kind: AddKind) => void; onexport: () => void; canProvider?: boolean; canUpload?: boolean; disabled?: boolean } = $props();
 
   let open = $state(false);
 
@@ -15,12 +16,13 @@
   }
 
   const items: { kind: AddKind; label: string; hint?: string }[] = [
-    { kind: 'url', label: 'Add URL', hint: 'Alt+N' },
-    { kind: 'links', label: 'Add links' },
-    { kind: 'magnet', label: 'Add magnet' },
-    { kind: 'torrent', label: 'Import torrent file' },
-    { kind: 'container', label: 'Import container file' },
-    { kind: 'list', label: 'Import download list' },
+    { kind: 'url', label: 'Add URL…', hint: 'Alt+N' },
+    // '…' on every entry that opens a dialog, as the desktop writes 'Add Links…' (U-WU-21).
+    { kind: 'links', label: 'Add links…' },
+    { kind: 'magnet', label: 'Add magnet…' },
+    { kind: 'torrent', label: 'Import torrent file…' },
+    { kind: 'container', label: 'Import container file…' },
+    { kind: 'list', label: 'Import download list…' },
   ];
 </script>
 
@@ -28,8 +30,8 @@
 
 <div class="relative mb-3" data-add-menu>
   <div class="flex">
-    <button class="btn-primary min-w-0 flex-1 justify-center rounded-r-none" onclick={() => pick('url')} title="Add URL (Alt+N)"><Icon name="add" size={16} /> Add URL</button>
-    <button class="btn-primary rounded-l-none border-l border-white/30 px-2" aria-label="More ways to add" aria-haspopup="menu" aria-expanded={open} onclick={() => (open = !open)}><Icon name="up" size={14} class={open ? '' : 'rotate-180'} /></button>
+    <button class="btn-primary min-w-0 flex-1 justify-center rounded-r-none" {disabled} onclick={() => pick('url')} title={disabled ? "Add URL. Not available until the server can be reached again." : 'Add URL (Alt+N)'}><Icon name="add" size={16} /> Add URL</button>
+    <button class="btn-primary rounded-l-none border-l border-white/30 px-2" {disabled} aria-label="More ways to add" aria-haspopup="menu" aria-expanded={open} onclick={() => (open = !open)}><Icon name="up" size={14} class={open ? '' : 'rotate-180'} /></button>
   </div>
   {#if open}
     <ul class="card absolute left-0 right-0 z-40 mt-1 overflow-hidden py-1 shadow-lg" role="menu">

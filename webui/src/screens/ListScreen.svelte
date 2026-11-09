@@ -21,6 +21,7 @@
   import { actionsOf, dequeueQuestion, isInProviderQueue, providerNameOf, removeQuestion as remoteRemoveQuestion } from '../lib/remote';
   import { store } from '../lib/store.svelte';
   import type { ArchiveSet, DownloadGroup, Job, RemoteJob, Settings } from '../lib/types';
+  import { foldTools } from '../lib/toolbar';
   import { buildRows, selectedJobIds, type Row, type ViewKey } from '../lib/views';
   import ArchiveRecord from './ArchiveRecord.svelte';
   import ExtractFromDisk from './ExtractFromDisk.svelte';
@@ -135,6 +136,8 @@
   });
   // The column is there whenever there is a set to talk about, and the Host answers archive.list.
   const showExtraction = $derived(store.model.archivesAnswered && Object.keys(store.model.archives).length > 0);
+  // The Extractions view lists archives, which have no queue, size, status, time left or rate of their own (U-WU-20).
+  const onlyExtraction = $derived(view === 'extractions' && showExtraction);
 
   // A toast's Show opens that download.
   $effect(() => {
@@ -526,7 +529,98 @@
     ['rate', 'Transfer rate'], ['lastTry', 'Last Try Date'], ['description', 'Description'], ['added', 'Order of addition'],
   ];
 
+  // ---- The toolbar ----
+
+  interface Tool {
+    id: string;
+    label: string;
+    icon: string;
+    tone: string;
+    title: string;
+    disabled?: boolean;
+    run?: () => void;
+    href?: string;
+    /** A caret beside it opens this menu (Start a queue, Stop a queue). */
+    menu?: () => MenuItem[];
+    menuLabel?: string;
+    group: number;
+    /** Lower is kept on the bar longer when the width runs short. */
+    keep: number;
+  }
+
+  const offline = ' Not available until the server can be reached again.';
+  const tools = $derived.by((): Tool[] => {
+    const why = connected ? '' : offline;
+    const list: Tool[] = [
+      { id: 'add', label: 'Add URL', icon: 'add', tone: 'text-icon-info', title: `Add a new download URL.${why}`, disabled: !connected, run: onadd, group: 0, keep: 2 },
+      { id: 'resume', label: 'Resume', icon: 'play', tone: 'text-icon-start', title: `Resume the selected download.${why}`, disabled: !connected || !canResume, run: () => void resume(), group: 1, keep: 1 },
+      { id: 'stop', label: 'Stop', icon: 'stop', tone: 'text-icon-pause', title: `Stop the selected download (partial data is kept).${why}`, disabled: !connected || !canPause, run: () => void stop(), group: 1, keep: 1 },
+      { id: 'stopAll', label: 'Stop All', icon: 'pause', tone: 'text-icon-pause', title: `Stop all active downloads.${why}`, disabled: !connected || !allJobs.some((job) => job.canPause), run: () => void store.attempt('jobs.pauseAll', {}, 'Every download was stopped.'), group: 1, keep: 3 },
+    ];
+    if (packageRows.length > 0) list.push({ id: 'cancelPackage', label: 'Cancel Package', icon: 'close', tone: 'text-icon-danger', title: `Cancel the unfinished files in the selected package (partial data is kept).${why}`, disabled: !connected || !canCancelPackage, run: askCancelPackage, group: 1, keep: 3 });
+    list.push(
+      { id: 'delete', label: 'Delete', icon: 'trash', tone: 'text-icon-danger', title: (selectedJobs.length === 0 && removableSideRows > 0 ? 'Remove the selected rows from the list.' : 'Delete the selected download and its partial data.') + why, disabled: !connected || !canDelete, run: () => askDelete(false), group: 2, keep: 1 },
+      { id: 'deleteCompleted', label: 'Delete Completed', icon: 'sweep', tone: 'text-icon-danger', title: `Remove completed downloads from the list.${why}`, disabled: !connected || completedIds.length === 0, run: askDeleteCompleted, group: 2, keep: 4 },
+      { id: 'extract', label: 'Extract', icon: 'archive', tone: 'text-icon-media', title: archivePlan.extractText, disabled: !archivePlan.canExtract, run: () => void extractSelection(), group: 3, keep: 7 },
+      { id: 'archivePassword', label: 'Archive password', icon: 'key', tone: 'text-icon-pause', title: 'Set the password for the selected archive', disabled: !archivePlan.password, run: () => (passwordTarget = archivePlan.password), group: 3, keep: 7 },
+      { id: 'extractDisk', label: 'Extract archive…', icon: 'archive', tone: 'text-icon-media', title: `Extract an archive that is already there.${why}`, disabled: !connected, run: () => (extractFromDisk = true), group: 3, keep: 8 },
+    );
+    if (view === 'remote') list.push({ id: 'checkNow', label: 'Check now', icon: 'refresh', tone: 'text-icon-info', title: (canCheckRemote ? 'Ask the provider about your waiting items now, without waiting for the next check.' : 'Nothing is waiting on a provider, so there is nothing to check.') + why, disabled: !connected || !canCheckRemote, run: () => void store.attempt('remote.checkNow', {}, 'Checking now…'), group: 4, keep: 2 });
+    list.push(
+      { id: 'options', label: 'Options', icon: 'settings', tone: 'text-icon-neutral', title: 'Open Download Manager settings', href: '#/settings', group: 5, keep: 6 },
+      { id: 'scheduler', label: 'Scheduler', icon: 'calendar', tone: 'text-icon-info', title: 'Manage scheduled queue runs', href: '#/queues', group: 5, keep: 6 },
+      { id: 'startQueue', label: 'Start Queue', icon: 'play', tone: 'text-icon-start', title: `Start the selected queue.${why}`, disabled: !connected || !settings, run: () => void queueAction('start', queueTarget), menu: queues.length > 1 ? () => queueMenu('start') : undefined, menuLabel: 'Start a queue', group: 6, keep: 5 },
+      { id: 'stopQueue', label: 'Stop Queue', icon: 'stop', tone: 'text-icon-pause', title: `Stop the selected queue and pause its downloads.${why}`, disabled: !connected || !settings, run: () => void queueAction('stop', queueTarget), menu: queues.length > 1 ? () => queueMenu('stop') : undefined, menuLabel: 'Stop a queue', group: 6, keep: 5 },
+    );
+    return list;
+  });
+
+  let bar: HTMLDivElement | undefined = $state();
+  let measure: HTMLDivElement | undefined = $state();
+  let barWidth = $state(0);
+  let widths = $state<Record<string, number>>({});
+
+  $effect(() => {
+    if (!bar) return;
+    const observer = new ResizeObserver(() => (barWidth = bar?.clientWidth ?? 0));
+    observer.observe(bar);
+    barWidth = bar.clientWidth;
+    return () => observer.disconnect();
+  });
+  // Every label change (a package selected adds Cancel Package) and every width change is measured again.
+  $effect(() => {
+    void tools.map((tool) => tool.label + (tool.menu ? '+' : '')).join('|');
+    void barWidth;
+    if (!measure) return;
+    const next: Record<string, number> = {};
+    for (const element of measure.querySelectorAll<HTMLElement>('[data-tool]')) next[element.dataset.tool!] = element.getBoundingClientRect().width;
+    if (Object.keys(next).some((id) => Math.abs((widths[id] ?? -1) - next[id]) > 0.5)) widths = next;
+  });
+
+  const folded = $derived.by(() => {
+    if (barWidth <= 0 || !widths.more) return new Set<string>();
+    // The bar's side padding (16) and More with its gap.
+    const available = barWidth - 16 - widths.more - 2;
+    return foldTools(tools.map((tool) => ({ id: tool.id, width: widths[tool.id] ?? 64, keep: tool.keep, group: tool.group })), available);
+  });
+  const shownTools = $derived(tools.filter((tool) => !folded.has(tool.id)));
+
+  /** The buttons that didn't fit, as the first entries of More. */
+  function foldedItems(): MenuItem[] {
+    return tools.filter((tool) => folded.has(tool.id)).map((tool): MenuItem => ({
+      label: tool.label,
+      disabled: tool.disabled,
+      items: tool.menu ? [{ label: 'The selected queue', disabled: tool.disabled, onselect: tool.run }, { separator: true }, ...tool.menu()] : undefined,
+      onselect: tool.href ? () => { location.hash = tool.href!; } : tool.run,
+    }));
+  }
+
   function moreItems(): MenuItem[] {
+    const extra = foldedItems();
+    return extra.length ? [...extra, { separator: true }, ...settingItems()] : settingItems();
+  }
+
+  function settingItems(): MenuItem[] {
     const s = settings;
     const limit = s?.globalSpeedLimitBytesPerSecond && s.globalSpeedLimitBytesPerSecond > 0 ? s.globalSpeedLimitBytesPerSecond : 0;
     return [
@@ -842,41 +936,33 @@
 
 <svelte:window onkeydown={windowKey} />
 
-<!-- Toolbar: Add URL | Resume, Stop, Stop All, [Cancel Package] | Delete, Delete Completed | Options, Scheduler | Start Queue, Stop Queue -->
-<div class="flex items-stretch gap-0.5 overflow-x-auto border-b border-divider bg-chrome px-2 py-1" role="toolbar" aria-label="Download actions">
-  <button class="toolbtn" title="Add a new download URL" disabled={!connected} onclick={onadd}><Icon name="add" class="text-icon-info" /><span>Add URL</span></button>
+<!-- Toolbar: Add URL | Resume, Stop, Stop All, [Cancel Package] | Delete, Delete Completed | Extract | [Check now] | Options, Scheduler | Start Queue, Stop Queue | More.
+     What doesn't fit the width goes into More, least needed first (U-WU-2, U-WU-9); the bar never scrolls sideways. -->
+{#snippet toolFace(tool: Tool)}<Icon name={tool.icon} class={tool.tone} /><span>{tool.label}</span>{/snippet}
+<div bind:this={bar} class="relative flex items-stretch gap-0.5 overflow-hidden border-b border-divider bg-chrome px-2 py-1" role="toolbar" aria-label="Download actions">
+  {#each shownTools as tool, index (tool.id)}
+    {#if index > 0 && tool.group !== shownTools[index - 1].group}<span class="toolsep"></span>{/if}
+    {#if tool.href}
+      <a class="toolbtn" title={tool.title} href={tool.href}>{@render toolFace(tool)}</a>
+    {:else if tool.menu}
+      <span class="inline-flex shrink-0">
+        <button class="toolbtn" title={tool.title} disabled={tool.disabled} onclick={tool.run}>{@render toolFace(tool)}</button>
+        <button class="toolcaret" aria-label={tool.menuLabel} title={tool.menuLabel} onclick={(event) => toolbarMenu(event, tool.menuLabel ?? '', tool.menu?.() ?? [])}><Icon name="chevron-down" size={12} /></button>
+      </span>
+    {:else}
+      <button class="toolbtn" title={tool.title} disabled={tool.disabled} onclick={tool.run}>{@render toolFace(tool)}</button>
+    {/if}
+  {/each}
   <span class="toolsep"></span>
-  <button class="toolbtn" title="Resume the selected download" disabled={!connected || !canResume} onclick={() => void resume()}><Icon name="play" class="text-icon-start" /><span>Resume</span></button>
-  <button class="toolbtn" title="Stop the selected download (partial data is kept)" disabled={!connected || !canPause} onclick={() => void stop()}><Icon name="stop" class="text-icon-pause" /><span>Stop</span></button>
-  <button class="toolbtn" title="Stop all active downloads" disabled={!connected || !allJobs.some((job) => job.canPause)} onclick={() => store.attempt('jobs.pauseAll', {}, 'Every download was stopped.')}><Icon name="pause" class="text-icon-pause" /><span>Stop All</span></button>
-  {#if packageRows.length > 0}
-    <button class="toolbtn" title="Cancel the unfinished files in the selected package (partial data is kept)" disabled={!connected || !canCancelPackage} onclick={askCancelPackage}><Icon name="close" class="text-icon-danger" /><span>Cancel Package</span></button>
-  {/if}
-  <span class="toolsep"></span>
-  <button class="toolbtn" title={selectedJobs.length === 0 && removableSideRows > 0 ? 'Remove the selected rows from the list' : 'Delete the selected download and its partial data'} disabled={!connected || !canDelete} onclick={() => askDelete(false)}><Icon name="trash" class="text-icon-danger" /><span>Delete</span></button>
-  <button class="toolbtn" title="Remove completed downloads from the list" disabled={!connected || completedIds.length === 0} onclick={askDeleteCompleted}><Icon name="sweep" class="text-icon-danger" /><span>Delete Completed</span></button>
-  <span class="toolsep"></span>
-  <button class="toolbtn" disabled={!archivePlan.canExtract} title={archivePlan.extractText} onclick={() => void extractSelection()}><Icon name="archive" class="text-icon-media" /><span>Extract</span></button>
-  <button class="toolbtn" title="Set the password for the selected archive" disabled={!archivePlan.password} onclick={() => (passwordTarget = archivePlan.password)}><Icon name="key" class="text-icon-pause" /><span>Archive password</span></button>
-  <button class="toolbtn" title="Extract an archive that is already on the server" disabled={!connected} onclick={() => (extractFromDisk = true)}><Icon name="archive" class="text-icon-media" /><span>Extract archive…</span></button>
-  {#if view === 'remote'}
-    <span class="toolsep"></span>
-    <button class="toolbtn" disabled={!connected || !canCheckRemote} title={canCheckRemote ? 'Ask the provider about your waiting items now, without waiting for the next check' : 'Nothing is waiting on a provider, so there is nothing to check'} onclick={() => store.attempt('remote.checkNow', {}, 'Checking now…')}><Icon name="refresh" class="text-icon-info" /><span>Check now</span></button>
-  {/if}
-  <span class="toolsep"></span>
-  <a class="toolbtn" title="Open Download Manager settings" href="#/settings"><Icon name="settings" class="text-icon-neutral" /><span>Options</span></a>
-  <a class="toolbtn" title="Manage scheduled queue runs" href="#/queues"><Icon name="calendar" class="text-icon-info" /><span>Scheduler</span></a>
-  <span class="toolsep"></span>
-  <span class="inline-flex shrink-0">
-    <button class="toolbtn" title="Start the selected queue" disabled={!connected || !settings} onclick={() => void queueAction('start', queueTarget)}><Icon name="play" class="text-icon-start" /><span>Start Queue</span></button>
-    {#if queues.length > 1}<button class="toolcaret" aria-label="Start a queue" title="Start a queue" onclick={(event) => toolbarMenu(event, 'Start a queue', queueMenu('start'))}><Icon name="chevron-down" size={12} /></button>{/if}
-  </span>
-  <span class="inline-flex shrink-0">
-    <button class="toolbtn" title="Stop the selected queue and pause its downloads" disabled={!connected || !settings} onclick={() => void queueAction('stop', queueTarget)}><Icon name="stop" class="text-icon-pause" /><span>Stop Queue</span></button>
-    {#if queues.length > 1}<button class="toolcaret" aria-label="Stop a queue" title="Stop a queue" onclick={(event) => toolbarMenu(event, 'Stop a queue', queueMenu('stop'))}><Icon name="chevron-down" size={12} /></button>{/if}
-  </span>
-  <span class="toolsep"></span>
-  <button class="toolbtn" title="Sort, limits, clean up leftover files" aria-haspopup="menu" onclick={(event) => toolbarMenu(event, 'More', moreItems())}><Icon name="more" /><span>More</span></button>
+  <button class="toolbtn" title={folded.size ? 'More actions, sort, limits, clean up leftover files' : 'Sort, limits, clean up leftover files'} aria-haspopup="menu" onclick={(event) => toolbarMenu(event, 'More', moreItems())}><Icon name="more" /><span>More</span></button>
+  <!-- The same buttons, unseen, to know each one's width. -->
+  <div bind:this={measure} class="tool-measure" aria-hidden="true" inert>
+    {#each tools as tool (tool.id)}
+      {#if tool.menu}<span class="inline-flex shrink-0" data-tool={tool.id}><span class="toolbtn">{@render toolFace(tool)}</span><span class="toolcaret"><Icon name="chevron-down" size={12} /></span></span>
+      {:else}<span class="toolbtn" data-tool={tool.id}>{@render toolFace(tool)}</span>{/if}
+    {/each}
+    <span class="toolbtn" data-tool="more"><Icon name="more" /><span>More</span></span>
+  </div>
 </div>
 
 <ArchiveNoticeBar onpassword={(target) => (passwordTarget = target)} onshow={(set) => (archiveOpen = set)} />
@@ -887,15 +973,19 @@
   </div>
 {/snippet}
 
-<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} role="row">
-  <span class="flex items-center justify-center"><input type="checkbox" aria-label="Select all" checked={rows.length > 0 && selected.size === rows.length} onchange={toggleAll} /></span>
+<div class="list-grid sticky top-0 z-10 hidden border-b border-divider bg-chrome text-[12px] font-semibold md:grid" class:with-extraction={showExtraction} class:only-extraction={onlyExtraction} role="row">
+  <label class="flex items-center justify-center self-stretch"><input type="checkbox" aria-label="Select all" checked={rows.length > 0 && selected.size === rows.length} onchange={toggleAll} /></label>
   {@render head('name', 'File Name', 'text-left')}
-  {@render head('queue', 'Q', 'text-center')}
-  {@render head('size', 'Size', 'text-right')}
-  {@render head('status', 'Status', 'text-left')}
+  {#if !onlyExtraction}
+    {@render head('queue', 'Q', 'text-center')}
+    {@render head('size', 'Size', 'text-right')}
+    {@render head('status', 'Status', 'text-left')}
+  {/if}
   {#if showExtraction}{@render head('extraction', 'Extraction', 'text-left')}{/if}
-  {@render head('eta', 'Time left', 'text-right')}
-  {@render head('rate', 'Transfer rate', 'text-right')}
+  {#if !onlyExtraction}
+    {@render head('eta', 'Time left', 'text-right')}
+    {@render head('rate', 'Transfer rate', 'text-right')}
+  {/if}
   {@render head('lastTry', 'Last Try Date', 'hidden text-left lg:block')}
   {@render head('description', 'Description', 'hidden text-left lg:block')}
 </div>
@@ -909,7 +999,9 @@
   aria-multiselectable="true"
   aria-activedescendant={cursor ? domId(cursor) : undefined}
   class="list-body pb-24 outline-none md:pb-6"
+  class:stale={!connected && store.model.snapshots > 0}
   onkeydown={gridKey}
+  onfocus={() => { if (!cursor && rows.length > 0) cursor = rows[0].id; }}
 >
   {#each rows as row (row.id)}
     {@const v = row.view}
@@ -920,6 +1012,7 @@
       animate:flip={{ duration: 180 }}
       class="list-row group border-b border-divider/60 text-[12.5px] {selected.has(row.id) ? 'bg-selected' : 'hover:bg-hover'}"
       class:with-extraction={showExtraction}
+      class:only-extraction={onlyExtraction}
       class:is-cursor={cursor === row.id}
       role="row"
       aria-selected={selected.has(row.id)}
@@ -932,13 +1025,15 @@
       onpointerup={cancelLongPress}
       onpointercancel={cancelLongPress}
     >
-      <span class="cell-check flex items-center justify-center">
+      <!-- The whole cell is the box's target, so a finger can tick it (U-WU-8). -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
+      <label class="cell-check flex items-center justify-center self-stretch" onclick={(event) => event.stopPropagation()}>
         <input type="checkbox" tabindex="-1" aria-label="Select {v.name}" checked={selected.has(row.id)} onclick={(event) => event.stopPropagation()} onchange={() => toggle(row)} />
-      </span>
+      </label>
 
       <span class="cell-name flex min-w-0 items-center gap-1.5 {row.kind === 'job' && row.depth ? 'pl-6' : ''} {row.kind === 'remote' ? 'italic' : ''}">
         {#if row.kind === 'package'}
-          <button tabindex="-1" class="rounded p-0.5 hover:bg-hover" aria-label={row.expanded ? 'Collapse' : 'Expand'} aria-expanded={row.expanded} onclick={(event) => { event.stopPropagation(); toggleExpanded(row.group.id); }}>
+          <button tabindex="-1" class="row-expand rounded p-0.5 hover:bg-hover" aria-label={row.expanded ? 'Collapse' : 'Expand'} aria-expanded={row.expanded} onclick={(event) => { event.stopPropagation(); toggleExpanded(row.group.id); }}>
             <Icon name={row.expanded ? 'chevron-down' : 'chevron-right'} size={14} />
           </button>
           <Icon name="package" size={16} class="shrink-0 text-icon-media" />
@@ -975,8 +1070,8 @@
           {/if}
         </span>
       {/if}
-      <span class="cell-eta tabular text-right">{v.etaText}</span>
-      <span class="cell-rate tabular text-right">{v.rateText}</span>
+      <span class="cell-eta tabular text-right">{connected ? v.etaText : ''}</span>
+      <span class="cell-rate tabular text-right">{#if connected}{v.rateText}{#if v.etaText}<span class="phone-eta">{v.rateText ? ' · ' : ''}{v.etaText} left</span>{/if}{/if}</span>
       <span class="cell-added hidden text-muted lg:block">{v.lastTryText}</span>
       <span class="cell-desc truncate text-muted" title={v.description}>{v.description}</span>
     </div>
@@ -1120,11 +1215,15 @@
   }
   .toolcaret:hover { background: var(--hover); }
   .toolsep { width: 1px; margin: 6px 4px; background: var(--divider); flex-shrink: 0; }
+  /* Unseen copies of the buttons, to measure them; the bar's own overflow hides them. */
+  .tool-measure { position: absolute; left: 0; top: 0; display: flex; gap: 2px; visibility: hidden; pointer-events: none; }
+  /* A phone keeps the words under the icons, smaller (U-WU-9); what doesn't fit is in More. */
   @media (max-width: 767px) {
-    .toolbtn { min-width: 44px; padding: 6px; }
-    /* Icons only on a phone; the words stay for screen readers and as the button's name. */
-    .toolbtn { position: relative; }
-    .toolbtn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .toolbtn { min-width: 52px; padding: 4px 5px; font-size: 10.5px; }
+  }
+  @media (pointer: coarse) {
+    .toolbtn { min-height: 44px; }
+    .toolcaret { min-width: 28px; justify-content: center; }
   }
 
   .list-grid, .list-row {
@@ -1141,13 +1240,24 @@
 
   /* A phone: each download is two lines, name and size over status and speed. The header keeps only the box that
      selects all and the name. */
+  @media (pointer: coarse) { .list-row, .list-grid { --check-column: 44px; } }
   @media (max-width: 767px) {
-    .list-grid { grid-template-columns: 28px 1fr; }
+    .list-grid { grid-template-columns: var(--check-column, 28px) 1fr; }
     .list-grid > :nth-child(n + 3) { display: none; }
   }
   .list-body:focus-visible .list-row.is-cursor { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* The server can't be reached: what the rows say is from before, so it is dimmed (U-WU-3). */
+  .list-body.stale { opacity: 0.6; }
+  .phone-eta { color: var(--muted); }
+  @media (min-width: 768px) { .phone-eta { display: none; } }
+  .list-row.only-extraction :is(.cell-queue, .cell-size, .cell-status, .cell-eta, .cell-rate) { display: none !important; }
+  /* A touch screen: the box column, the expand arrow and the row's menu are a finger wide (U-WU-8). */
+  @media (pointer: coarse) {
+    .list-row .cell-check, .list-grid > :first-child { min-width: 44px; }
+    .row-expand { min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  }
   .list-row {
-    grid-template-columns: 28px 1fr auto;
+    grid-template-columns: var(--check-column, 28px) 1fr auto;
     grid-template-areas: 'check name size' 'check status rate' 'check desc desc';
     padding-top: 6px;
     padding-bottom: 6px;
@@ -1172,7 +1282,7 @@
   .row-menu { display: inline-flex; border-radius: 4px; padding: 2px; color: var(--muted); opacity: 0; }
   .row-menu:hover { background: var(--hover); color: var(--text); }
   .list-row:hover .row-menu, .list-row.is-cursor .row-menu, .row-menu:focus-visible { opacity: 1; }
-  @media (pointer: coarse) { .row-menu { opacity: 1; padding: 6px; } }
+  @media (pointer: coarse) { .row-menu { opacity: 1; min-width: 40px; min-height: 40px; justify-content: center; align-items: center; color: var(--text); } }
 
   @media (min-width: 768px) {
     .list-row {
@@ -1189,9 +1299,13 @@
     .list-row .cell-desc { display: none; }
   }
 
+  @media (min-width: 768px) {
+    .list-grid.only-extraction, .list-row.only-extraction { grid-template-columns: 28px minmax(180px, 1fr) 220px; }
+  }
   @media (min-width: 1024px) {
     .list-grid, .list-row { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 80px 90px 150px minmax(120px, 1fr); }
     .list-grid.with-extraction, .list-row.with-extraction { grid-template-columns: 28px minmax(200px, 2fr) 34px 80px 150px 120px 80px 90px 150px minmax(120px, 1fr); }
+    .list-grid.only-extraction, .list-row.only-extraction { grid-template-columns: 28px minmax(200px, 2fr) 260px 150px minmax(160px, 1.5fr); }
     .list-row .cell-desc, .list-row .cell-added { display: block; font-size: inherit; }
   }
 </style>

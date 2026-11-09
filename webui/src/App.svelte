@@ -7,8 +7,8 @@
   import { serializeList } from './lib/addflow';
   import { opensAddUrl } from './lib/keys';
   import type { ClassifyResult } from './lib/types';
-  import { speed } from './lib/format';
-  import { countJobs, providerEntries, statusBarText } from './lib/list';
+  import { clockTime, speed } from './lib/format';
+  import { countJobs, providerEntries, speedSample, statusBarText } from './lib/list';
   import { listState } from './lib/listState.svelte';
   import { store, type Theme } from './lib/store.svelte';
   import { categoryList, counts, parseViewKey, viewHash, views, type ViewKey } from './lib/views';
@@ -80,9 +80,19 @@
   $effect(() => {
     noticeBoard.update(Object.values(store.model.archives), noticeWatchingSince, store.model.settings?.notifyOnCompletion !== false);
   });
+  const connectionText: Record<string, string> = {
+    connecting: 'Connecting…', open: 'Connected', reconnecting: 'Reconnecting…', signedOut: 'Signed out',
+    incompatible: 'This page is older than the server. Reload it.', closed: 'Not connected',
+  };
   const count = $derived(counts(store.model));
   const providers = $derived(providerEntries(store.model.accounts, Object.values(store.model.remoteJobs)));
-  const totalSpeed = $derived(Object.values(store.model.jobs).reduce((sum, job) => sum + (job.state === 'downloading' ? job.bytesPerSecond ?? 0 : 0), 0));
+  // The same figure the speed graph shows (U-WU-14); nothing while the server can't be reached (U-WU-3).
+  const totalSpeed = $derived(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
+  const offline = $derived(store.connection !== 'open' && store.connection !== 'connecting' && store.connection !== 'signedOut');
+  const offlineText = $derived(
+    store.connection === 'incompatible' ? connectionText.incompatible
+      : `Can't reach the server${store.lostAt ? ` since ${clockTime(store.lostAt)}` : ''}. ${store.connection === 'reconnecting' ? 'Trying again… What the list shows is from before.' : 'Reload the page to try again.'}`,
+  );
   const listCounts = $derived(countJobs(Object.values(store.model.jobs)));
   // A provider's page is marked by its account: `#/provider` alone stands for the first one that can browse.
   const current = $derived(
@@ -91,14 +101,10 @@
       : screen.kind,
   );
   const categories = $derived(categoryList(store.model.settings?.customCategories ?? []));
-  const statusText = $derived(screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
+  const statusText = $derived(offline && store.model.snapshots > 0 ? connectionText[store.connection] : screen.kind === 'list' && listState.sideNote ? listState.sideNote : statusBarText(listCounts, screen.kind === 'list' ? listState.selectedFiles : 0));
   // The Host answers archive.list, or has no extraction to show.
   const showExtractions = $derived(store.model.archivesAnswered);
 
-  const connectionText: Record<string, string> = {
-    connecting: 'Connecting…', open: 'Connected', reconnecting: 'Reconnecting…', signedOut: 'Signed out',
-    incompatible: 'This page is older than the server. Reload it.', closed: 'Not connected',
-  };
 
   const themes: { key: Theme; icon: string; label: string }[] = [
     { key: 'system', icon: 'monitor', label: 'Follow the system' },
@@ -110,7 +116,7 @@
 </script>
 
 {#snippet link(href: string, key: string, icon: string, label: string, n?: number, indent = 0)}
-  <a {href} class="flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style={indent ? `padding-left: ${12 + indent * 16}px` : undefined} aria-current={current === key ? 'page' : undefined}>
+  <a {href} class="touch-row flex items-center gap-2 rounded px-3 py-1.5 text-[13px] {current === key ? 'bg-selected font-semibold' : 'hover:bg-hover'}" style={indent ? `padding-left: ${12 + indent * 16}px` : undefined} aria-current={current === key ? 'page' : undefined}>
     <Icon name={icon} size={16} class="shrink-0 text-icon-neutral" />
     <span class="min-w-0 flex-1 truncate">{label}</span>
     {#if n}<span class="tabular text-[12px] text-muted">{n}</span>{/if}
@@ -144,14 +150,24 @@
     {/if}
   </header>
 
-  {#if store.connection !== 'open' && store.connection !== 'connecting'}
-    <div class="border-b border-divider bg-highlight px-4 py-1.5 text-[12.5px] sm:hidden" role="status">{connectionText[store.connection]}</div>
+  {#if offline}
+    <!-- On every width, above the list (U-WU-3); the phone had it only. -->
+    <div class="flex items-center gap-2 border-b border-divider bg-highlight px-4 py-1.5 text-[12.5px]" role="alert">
+      <Icon name="alert" size={15} class="shrink-0 text-icon-danger" />
+      <span class="min-w-0 flex-1">{offlineText}</span>
+      {#if store.connection !== 'reconnecting'}<button class="btn h-7 py-0" onclick={() => location.reload()}>Reload</button>{/if}
+    </div>
   {/if}
 
   <div class="relative flex min-h-0 flex-1">
-    {#if drawer}<button class="fixed inset-0 z-20 bg-black/30 md:hidden" aria-label="Close the menu" onclick={() => (drawer = false)}></button>{/if}
+    {#if drawer}<button class="fixed inset-0 z-20 bg-black/50 md:hidden" aria-label="Close the menu" tabindex="-1" onclick={() => (drawer = false)}></button>{/if}
     <nav aria-label="Views" class="z-30 w-60 shrink-0 overflow-y-auto border-r border-divider bg-chrome p-2 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:shadow-xl max-md:transition-transform {drawer ? '' : 'max-md:-translate-x-full'}">
-      <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} />
+      <!-- The drawer covers the header on a phone, so it has its own close button (U-WU-22). -->
+      <div class="mb-2 flex items-center justify-between md:hidden">
+        <span class="px-1 text-[13px] font-semibold">Menu</span>
+        <button class="btn-icon" aria-label="Close the menu" onclick={() => (drawer = false)}><Icon name="close" size={18} /></button>
+      </div>
+      <AddMenu onpick={openAdd} onexport={exportList} canProvider={store.has('remote')} canUpload={store.has('uploads')} disabled={store.connection !== 'open'} />
       <p class="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Categories</p>
       {@render link(viewHash('all'), 'all', 'download', 'All Downloads', count.all)}
       {#each categories as category (category.key)}
@@ -197,7 +213,7 @@
 
   <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-divider bg-chrome px-3 text-[12px] text-muted">
     <span class="tabular min-w-0 truncate" title={statusText}>{statusText}</span>
-    <span class="tabular shrink-0">{speed(totalSpeed)}</span>
+    <span class="tabular shrink-0">{totalSpeed === null ? '' : speed(totalSpeed)}</span>
     <span class="flex-1"></span>
     {#if store.model.hello}<span class="hidden sm:inline">{store.texts.versionPrefix} {store.model.hello.hostVersion}</span>{/if}
   </footer>

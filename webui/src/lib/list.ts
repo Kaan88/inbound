@@ -3,7 +3,7 @@
 // so the two lists read alike. Nothing here touches the page, so the tests call it directly.
 
 import { archiveRowView, canRetry, fullText, packageArchiveView } from './archives';
-import { bytes, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
+import { bytes, dateTime, percent, speed as speedText, stateWord, timeSpanSeconds, tone as toneOf, type Tone } from './format';
 import { actionsOf, canBrowse, isRow, jobRow, providerNameOf, sameProvider, showsWaiting } from './remote';
 import type { ArchiveSet, CategoryDefinition, DownloadGroup, Job, RemoteAccount, RemoteJob } from './types';
 
@@ -56,15 +56,10 @@ export function timeLeft(seconds: number | null | undefined): string {
   return minutes >= 1 ? `${minutes}m ${rest}s` : `${Math.max(1, rest)}s`;
 }
 
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** The Last Try Date column, "Nov 09 14:03:22 2026" in the viewer's time zone. */
 export function lastTryText(value: string | number | Date | null | undefined): string {
-  if (value === null || value === undefined || value === '') return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000) return '';
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${months[date.getMonth()]} ${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${date.getFullYear()}`;
+  return dateTime(value);
 }
 
 /** The queue's number as the Q column shows it; empty when the download is not in a queue. */
@@ -569,7 +564,7 @@ export function countJobs(jobs: readonly Job[]): ListCounts {
 }
 
 export function statusBarText(counts: ListCounts, selected: number): string {
-  let text = `${counts.total} downloads · ${counts.active} active · ${counts.queued} queued`;
+  let text = `${counts.total} download${counts.total === 1 ? '' : 's'} · ${counts.active} active · ${counts.queued} queued`;
   if (counts.retrying > 0) text += ` · ${counts.retrying} retrying`;
   if (selected > 1) text += `  (${selected} selected)`;
   return text;
