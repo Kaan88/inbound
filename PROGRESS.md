@@ -4,6 +4,7 @@
 - UI.R33: My TorBox's "Added N files" notice closes itself after 3 s (`MainWindow.ProviderViews.cs`).
 - UI.B22: `DownloadSpeedGraph.Slide` resumes from the time since the newest sample instead of restarting at 0 on every redraw (size, theme, shown again). Probable cause of the stepping in Progress Details; not reproduced on screen.
 - UI.R34: `PackageWindow` gains Progress Details' speed card for the package (collapsed by default).
+- REV.4: `MarkOfTheWeb` now marks every completed network download (not loopback); Integration 1,470/1,474 on the VM, the failures pre-existing or flaky (see ROADMAP REV.4).
 - Uno build (Linux) and WinUI build (Windows VM over SSH) 0 errors. Not run in the app; no tests touched (UI-only).
 
 ### D7 stage 2: the window on Linux and the AppImage layout (2026-11-09, `linux-host`, partial)

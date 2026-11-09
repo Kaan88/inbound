@@ -452,7 +452,7 @@ public sealed partial class HostCommandDispatcherTests
     // ---- the mark of the web -----------------------------------------------------------------------
 
     [Fact]
-    public async Task ADownloadAWebSessionAddedIsMarkedAsFromTheInternetAndOneFromThePipeIsNot()
+    public async Task EveryDownloadFromTheNetworkIsMarkedAsFromTheInternetWithOnlyItsSite()
     {
         if (!OperatingSystem.IsWindows()) return;
         var handler = new FixedResponse("payload");
@@ -476,8 +476,24 @@ public sealed partial class HostCommandDispatcherTests
         Assert.Contains("ZoneId=3", mark);
         Assert.Contains("HostUrl=https://203.0.113.10/", mark);
         Assert.DoesNotContain("invented", mark);
-        Assert.False(File.Exists(web.Service.GetJob(fromPipe.Job.Id)!.FinalFilePath + ":Zone.Identifier"));
+        // REV.4: the owner's own downloads are marked too.
+        var pipeMark = File.ReadAllText(web.Service.GetJob(fromPipe.Job.Id)!.FinalFilePath + ":Zone.Identifier");
+        Assert.Contains("ZoneId=3", pipeMark);
+        Assert.Contains("HostUrl=https://203.0.113.10/", pipeMark);
     }
+
+    [Theory]
+    [InlineData("https://example.com/a.zip", true)]
+    [InlineData("http://203.0.113.10/a.zip", true)]
+    [InlineData("ftp://files.example.com/a.zip", true)]
+    [InlineData("http://127.0.0.1:8080/a.zip", false)]
+    [InlineData("http://localhost/a.zip", false)]
+    [InlineData("http://[::1]/a.zip", false)]
+    [InlineData("file:///C:/a.zip", false)]
+    [InlineData("magnet:?xt=urn:btih:00", false)]
+    [InlineData(null, false)]
+    public void OnlyADownloadFromTheNetworkIsMarked(string? address, bool marked) =>
+        Assert.Equal(marked, MarkOfTheWeb.Applies(address));
 
     private static async Task UntilCompletedAsync(DownloadManagerService service, Guid id)
     {
