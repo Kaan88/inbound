@@ -176,6 +176,32 @@ public sealed class WindowLocalFindingsTests
         Assert.DoesNotContain("JD Container", File.ReadAllText(WinUiFile("MainWindow.Remote.cs")));
     }
 
+    [Fact]
+    public void U_WL_11_a_my_provider_row_has_the_web_UIs_quick_actions()
+    {
+        var none = RemoteRules.ItemMenu(canDownload: true, job: null, "TorBox", acting: false, loading: false);
+        Assert.Equal(["open", "downloadAll", null, "copyName", "refresh"], none.Select(entry => entry.Action));
+        Assert.Equal("Download all", none[1].Label);
+        Assert.False(none[1].Disabled);
+
+        var job = new RemoteJobDto { Id = Guid.NewGuid(), ItemId = "42", State = "waiting", Provider = "torbox" };
+        var known = RemoteRules.ItemMenu(canDownload: true, job, "TorBox", acting: true, loading: true);
+        Assert.Equal("Download all its files", known.First(entry => entry.Action == "downloadAll").Label);
+        Assert.True(known.First(entry => entry.Action == "downloadAll").Disabled);
+        Assert.True(known.First(entry => entry.Action == "refresh").Disabled);
+        Assert.Equal("Delete from TorBox…", known[^1].Label);
+        Assert.True(RemoteRules.ItemMenu(canDownload: false, null, "TorBox", false, false)[1].Disabled);
+    }
+
+    [Fact]
+    public void U_WL_11_the_row_menu_selects_its_row_and_download_says_the_window_closes()
+    {
+        var source = File.ReadAllText(WinUiFile("MyProviderWindow.cs"));
+        Assert.Contains("_list.ContextRequested += List_ContextRequested;", source);
+        Assert.Contains("_list.SelectedItem = row;", source);
+        Assert.Contains("then closes this window", source);
+    }
+
     internal static string WinUiFile(string name) => Path.Combine(RepoRoot(), "src", "DownloadManager.Desktop.WinUI", name);
 
     internal static string RepoRoot()

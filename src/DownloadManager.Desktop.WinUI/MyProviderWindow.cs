@@ -216,6 +216,7 @@ internal sealed class MyProviderWindow : Window
 
         _tabs.SelectionChanged += (_, _) => ShowSelectedTab();
         _list.SelectionChanged += (_, _) => OnItemSelected();
+        _list.ContextRequested += List_ContextRequested;
         _refresh.Click += (_, _) => RefreshPage();
         _loadMore.Click += (_, _) => { if (_page is { } page) _ = LoadAsync(page, fresh: false, more: true); };
         _checkNow.Click += (_, _) => _ = CheckNowAsync();
@@ -273,7 +274,8 @@ internal sealed class MyProviderWindow : Window
 
     private void BuildLayout()
     {
-        foreach (var height in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1.25, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
+        // U-WL-11: the detail, which holds the file tree, gets the larger share.
+        foreach (var height in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1.75, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
         {
             _root.RowDefinitions.Add(new RowDefinition { Height = height });
         }
@@ -293,7 +295,7 @@ internal sealed class MyProviderWindow : Window
         AddAt(top, _refresh, column: 2);
         AddAt(top, _checkNow, column: 3);
         AddAt(top, _hosters, column: 4);
-        AutomationProperties.SetName(_hosters, $"{_name} file hosts");
+        AutomationProperties.SetName(_hosters, $"{_name} hosters");
         ToolTipService.SetToolTip(_hosters, $"Which file hosts {_name} can fetch from, and today's use");
         AddAt(_root, top, row: 0);
 
@@ -309,6 +311,9 @@ internal sealed class MyProviderWindow : Window
         AutomationProperties.SetName(_browse, "Browse for the destination folder");
         AutomationProperties.SetName(_downloadSelected, "Download the selected files");
         AutomationProperties.SetName(_downloadAll, "Download all files of this item");
+        // U-WL-11: closing once a download starts is the owner's choice (TB.F13), so the buttons say it beforehand.
+        ToolTipService.SetToolTip(_downloadAll, "Adds every file of this item to the download list, then closes this window");
+        ToolTipService.SetToolTip(_downloadSelected, "Adds the ticked files to the download list, then closes this window");
         AutomationProperties.SetName(_close, $"Close My {_name}");
         _delete.Content = $"Delete from {_name}…";
         AutomationProperties.SetName(_delete, $"Delete this item from {_name}");
@@ -466,6 +471,77 @@ internal sealed class MyProviderWindow : Window
         Grid.SetRow(element, row);
         Grid.SetColumn(element, column);
         panel.Children.Add(element);
+    }
+
+    // ---- The row menu (U-WL-11, as the web UI's D2d) ------------------------------------------------
+
+    /// <summary>A right-click, the menu key or Shift+F10 on a row selects it first, then opens its quick actions.</summary>
+    private void List_ContextRequested(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs args)
+    {
+        var element = args.OriginalSource as DependencyObject;
+        while (element is not null and not ListViewItem) element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
+        if (element is not ListViewItem { Content: RemoteItemRow row } container) return;
+        args.Handled = true;
+        if (!ReferenceEquals(_list.SelectedItem, row)) _list.SelectedItem = row;
+
+        var job = RemoteRules.JobFor(_client.State.Jobs, row.Item);
+        var menu = new MenuFlyout();
+        foreach (var entry in RemoteRules.ItemMenu(row.View.CanDownload && _hasKey, job, _name, _acting, _loads > 0))
+        {
+            if (entry.Action is not { } action)
+            {
+                menu.Items.Add(new MenuFlyoutSeparator());
+                continue;
+            }
+
+            var item = new MenuFlyoutItem { Text = entry.Label, IsEnabled = !entry.Disabled };
+            item.Click += (_, _) => RunMenuAction(action, row);
+            menu.Items.Add(item);
+        }
+
+        if (args.TryGetPosition(container, out var point)) menu.ShowAt(container, point);
+        else menu.ShowAt(container);
+    }
+
+    private void RunMenuAction(string action, RemoteItemRow row)
+    {
+        if (_closed || !ReferenceEquals(_selected, row)) return;
+        switch (action)
+        {
+            case "open":
+                _tree.Focus(FocusState.Programmatic);
+                break;
+            case "downloadAll":
+                _ = DownloadAsync(all: true);
+                break;
+            case "checkNow":
+                _ = CheckNowAsync();
+                break;
+            case "copyName":
+                CopyName(row.View.Name);
+                break;
+            case "refresh":
+                RefreshPage();
+                break;
+            case "deleteFromProvider":
+                _ = DeleteFromProviderAsync();
+                break;
+        }
+    }
+
+    private void CopyName(string name)
+    {
+        var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        data.SetText(name);
+        try
+        {
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+            _status.Show($"Copied the name of '{name}'.");
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
+        {
+            _status.Show("Another program is using the clipboard. Try again.", isProblem: true);
+        }
     }
 
     // ---- Pages -------------------------------------------------------------------------------------
@@ -902,7 +978,7 @@ internal sealed class MyProviderWindow : Window
             }, token);
             if (!result.Ok) return (RemoteText.Failure(result.Error, null, _name), true, false);
             if (destination.Length > 0) _context.RememberFolder(destination);
-            // Started: the window has done its job and closes. Otherwise it stays and says why.
+            // Started: the window has done its job and closes (TB.F13, the owner's request). Otherwise it stays and says why.
             if (RemoteRules.DownloadStarted(result)) return (string.Empty, false, true);
             if (!string.IsNullOrWhiteSpace(result.Note)) return (DownloadManager.Core.Providers.UrlRedactor.HideAddresses(result.Note) ?? string.Empty, true, false);
             var added = result.Job!;
