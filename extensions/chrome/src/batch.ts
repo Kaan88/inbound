@@ -1,6 +1,8 @@
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import { renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget } from "./destination-target";
+import {
+  FreeSpaceLine, renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget,
+} from "./destination-target";
 import type { TargetId } from "./transport";
 
 interface PageLink {
@@ -48,6 +50,10 @@ let target: TargetId = "local";
 // The chosen target's default folder, shown in Save in as the folder window shows it. Sent only when changed,
 // so the app (or the server) keeps deciding the default when it is left alone.
 let defaultDestination = "";
+// EXT.B7: until the target list has arrived, where the batch goes (and so whose folders Browse shows) is not known:
+// Browse and Download wait, as in the folder window, so a click cannot open this PC's dialog in server mode.
+let targetsLoaded = false;
+const freeSpace = new FreeSpaceLine(document.getElementById("freeSpace") as HTMLSpanElement);
 let links: PageLink[] = [];
 let pageUrl = "";
 let pageTitle = "";
@@ -88,15 +94,10 @@ function updateSelection(visible: PageLink[] = visibleLinks()): void {
   selectAll.indeterminate = shownSelected > 0 && shownSelected < visible.length;
   countLabel.textContent = `${links.length} link${links.length === 1 ? "" : "s"}`;
   selectionLabel.textContent = `${selected.size} selected`;
-  confirmButton.disabled = !gate.canSend || selected.size === 0;
-  browseDestinationButton.disabled = !gate.canPick;
+  confirmButton.disabled = !targetsLoaded || !gate.canSend || selected.size === 0;
+  browseDestinationButton.disabled = !targetsLoaded || !gate.canPick;
   cancelButton.disabled = gate.sending;
   setTargetChoiceEnabled(document.getElementById("targetChoice") as HTMLElement, gate.canPick);
-  if (lateTargets && gate.canPick) {
-    const late = lateTargets;
-    lateTargets = null;
-    applyTargets(late.offered, late.target, true);
-  }
 }
 
 function render(): void {
@@ -214,7 +215,7 @@ selectAll.addEventListener("change", () => {
 });
 
 confirmButton.addEventListener("click", async () => {
-  if (selected.size === 0 || !gate.canSend) {
+  if (!targetsLoaded || selected.size === 0 || !gate.canSend) {
     return;
   }
 
@@ -269,7 +270,10 @@ cancelButton.addEventListener("click", () => window.close());
 
 const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
   destinationInput.value = path;
+  freeSpace.update(target, path);
 }, showError);
+
+destinationInput.addEventListener("input", () => freeSpace.update(target, destinationInput.value));
 
 function useTarget(offered: OfferedTarget, keepTyped = false): void {
   target = offered.id;
@@ -279,6 +283,7 @@ function useTarget(offered: OfferedTarget, keepTyped = false): void {
   defaultDestination = offered.defaultFolder ?? "";
   if (!keepTyped) destinationInput.value = defaultDestination;
   destinationInput.placeholder = offered.id === "server" ? "Use the server's default folder" : "Use the app's default folder";
+  freeSpace.update(offered.id, destinationInput.value);
   // The server did not answer when the window opened: say so now rather than only after Download. Only that
   // message goes on a switch back, so a page-scan error shown meanwhile stays.
   if (shownTargetError && errorBox.textContent === shownTargetError) showError("");
@@ -287,27 +292,20 @@ function useTarget(offered: OfferedTarget, keepTyped = false): void {
 }
 
 let shownTargetError = "";
-// EXT.B2: a target list that arrived while a folder pick or a send was running. Switching target then would
-// put the folder being picked (a This PC path) under the server, so it waits for the gate to be free.
-let lateTargets: { offered: OfferedTarget[]; target?: TargetId } | null = null;
 
 async function loadTargets(): Promise<void> {
   try {
     const response = await chrome.runtime.sendMessage({ type: "dm.targets" }) as { ok?: boolean; targets?: OfferedTarget[]; target?: TargetId };
     const offered = response?.ok && Array.isArray(response.targets) ? response.targets : [];
-    if (offered.length === 0) return;
-    if (!gate.canPick) {
-      lateTargets = { offered, target: response.target };
-      return;
-    }
-    applyTargets(offered, response.target, false);
+    if (offered.length > 0) applyTargets(offered, response.target);
   } catch { /* this PC, as before a server could be paired */ }
+  targetsLoaded = true;
+  updateSelection();
 }
 
-/** Shows the offered targets. userActed: a pick or send ran meanwhile, so the target it used is kept if offered. */
-function applyTargets(offered: OfferedTarget[], preferred: TargetId | undefined, userActed: boolean): void {
-  const first = (userActed ? offered.find((item) => item.id === target) : undefined)
-    ?? offered.find((item) => item.id === preferred) ?? offered[0]!;
+/** Shows the offered targets, starting on the default one. */
+function applyTargets(offered: OfferedTarget[], preferred: TargetId | undefined): void {
+  const first = offered.find((item) => item.id === preferred) ?? offered[0]!;
   const choice = document.getElementById("targetChoice") as HTMLElement;
   renderTargetChoice(document.getElementById("targetField") as HTMLElement, choice, offered, first.id, useTarget);
   // Save in starts empty; anything in it now was typed or picked while the list was on its way.
@@ -316,6 +314,7 @@ function applyTargets(offered: OfferedTarget[], preferred: TargetId | undefined,
 }
 
 browseDestinationButton.addEventListener("click", async () => {
+  if (!targetsLoaded) return;
   if (target === "server") {
     if (!gate.canPick) return;
     if (serverFolders.isOpen) serverFolders.close();

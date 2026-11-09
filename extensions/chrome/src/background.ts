@@ -38,6 +38,30 @@ interface PendingHandoff {
    * starting the download again there.
    */
   restartInBrowser?: boolean;
+  /**
+   * EXT.R7: what the user had set in the toolbar popup before This PC's Choose... moved the download to a window,
+   * so the window starts from it rather than from the defaults.
+   */
+  windowDraft?: WindowDraft;
+}
+
+interface WindowDraft {
+  target?: TargetId;
+  fileName?: string;
+  destination?: string;
+  startMode?: "now" | "later";
+}
+
+/** The popup's draft for a window, keeping only what the window can use. */
+function windowDraftFrom(value: unknown): WindowDraft | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const draft: WindowDraft = {};
+  if (raw.target === "local" || raw.target === "server") draft.target = raw.target;
+  if (typeof raw.fileName === "string") draft.fileName = raw.fileName.slice(0, 1024);
+  if (typeof raw.destination === "string") draft.destination = raw.destination.slice(0, 4096);
+  if (raw.startMode === "now" || raw.startMode === "later") draft.startMode = raw.startMode;
+  return Object.keys(draft).length > 0 ? draft : undefined;
 }
 
 /** Whether the browser is waiting on this handoff's folder window: a held download, or one to start again. */
@@ -187,6 +211,10 @@ if (chrome.downloads.onDeterminingFilename) {
 // open, and the port closing is how a window closed without a choice is seen. This replaces a
 // windows.onRemoved listener, which woke the worker for every browser window that closed.
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === ASK_PORT) {
+    acceptAskPort(port);
+    return;
+  }
   if (!port.name.startsWith(HANDOFF_PORT_PREFIX)) return;
   const sourcePage = (port.sender?.url ?? "").split(/[?#]/)[0];
   if (port.sender?.id !== chrome.runtime.id || sourcePage !== chrome.runtime.getURL("handoff.html")) {
@@ -245,6 +273,10 @@ async function loadSettings(): Promise<void> {
     const notes = (await chrome.storage.session.get(LEFT_IN_BROWSER_KEY))[LEFT_IN_BROWSER_KEY];
     leftInBrowser = Array.isArray(notes) ? notes.slice(0, 5) : [];
   } catch { leftInBrowser = []; }
+  try {
+    const queue = (await chrome.storage.session.get(ASK_QUEUE_KEY))[ASK_QUEUE_KEY];
+    askQueue = Array.isArray(queue) ? queue.filter((id): id is string => typeof id === "string") : [];
+  } catch { askQueue = []; }
   settingsLoaded = true;
   updateBadge();
 }
@@ -651,19 +683,10 @@ async function holdResponseForFolderChoice(url: string, referrer: string | undef
   try {
     pendingHandoffs.set(id, pending);
     await chrome.storage.session.set({ [`handoff.${id}`]: pending });
-    await chrome.windows.create({
-      url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
-      type: "popup",
-      width: 560,
-      height: 680,
-    });
-    // The request is gone, so only this handoff holds the download. A window that never connects (it failed
-    // to load, or was closed before it could) would never give it back: then it starts again in Firefox.
-    const fallback = setTimeout(() => {
-      if (connectedHandoffs.has(id) || confirmingHandoffs.has(id)) return;
-      void pendingHandoff(id).then((still) => { if (still) return keepInBrowser(still); }).catch(() => undefined);
-    }, responseWindowConnectMs());
-    (fallback as { unref?: () => void }).unref?.();
+    // EXT.R7: the toolbar popup asks, or the folder window when the popup can't open. The request is gone, so
+    // only this handoff holds the download: a popup or window that never connects gives it back, and Firefox
+    // starts it again.
+    await askWhereToSave(id);
     return true;
   } catch {
     // No window, no choice: Firefox keeps it, as on any other failure.
@@ -719,12 +742,9 @@ async function holdForFolderChoice(item: chrome.downloads.DownloadItem, fileName
     pendingHandoffs.set(id, pending);
     await chrome.storage.session.set({ [`handoff.${id}`]: pending });
     if (answer) heldSuggestions.set(item.id, answer);
-    await chrome.windows.create({
-      url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}`),
-      type: "popup",
-      width: 560,
-      height: 680,
-    });
+    // EXT.R7: asked in the toolbar popup, like the browser's own download bubble; in the folder window when the
+    // popup can't be opened. Either way, closing it without a choice gives the download back to the browser.
+    await askWhereToSave(id);
     return true;
   } catch {
     // No window, no choice: the browser keeps it, as on any other failure.
@@ -744,6 +764,7 @@ async function pendingHandoff(id: string): Promise<PendingHandoff | undefined> {
 async function forgetHandoff(id: string): Promise<void> {
   pendingHandoffs.delete(id);
   await chrome.storage.session.remove(`handoff.${id}`).catch(() => undefined);
+  await removeFromAskQueue(id);
 }
 
 /** Gives a held download back to the browser: its file name, then the transfer. */
@@ -802,6 +823,309 @@ async function handoffWindowClosed(id: string): Promise<void> {
   }
   const pending = await pendingHandoff(id).catch(() => undefined);
   if (pending && heldByWindow(pending)) await keepInBrowser(pending);
+}
+
+// ---- EXT.R7: "ask where to save" in the toolbar popup ----------------------------------------------------
+//
+// An automatically caught download that needs a folder waits in a queue that the toolbar popup shows, anchored
+// to the extension's icon like the browser's own download bubble. What this relies on (docs/browser-integration.md):
+// - chrome.action.openPopup() works for every extension from Chrome 127 (Edge follows Chromium); from 118 to 126
+//   it was for policy-installed extensions only. It opens the popup in the given window and refuses a window
+//   that is not focused (Firefox too, from 149).
+// - Firefox has action.openPopup() from 109, but before 149 only from a user gesture, which a caught download is
+//   not, so it refuses. From 150 (uplifted to 149) it also refuses while a menu, doorhanger or notification is open.
+// - A popup closes when it loses the focus. Closing it with downloads still waiting gives them back to the browser,
+//   as closing the folder window does.
+// Any refusal, or a popup that does not connect in time, sends the waiting downloads to folder windows instead.
+// Right-click (context menu) downloads always use the window.
+
+const ASK_PORT = "dm.ask";
+const ASK_QUEUE_KEY = "askQueue";
+/** How long an opened popup has to connect before its downloads go to folder windows. */
+const POPUP_CONNECT_MS = 5000;
+// The open popups' ports (one per browser window at most). Their pings keep the worker alive while open.
+const askPorts = new Set<chrome.runtime.Port>();
+// Handoff ids waiting in the popup, oldest first. Kept in session storage too, for a worker restart.
+let askQueue: string[] = [];
+// The popup was asked to open and has not connected yet. While this is set, openPopup is never called again
+// (Firefox refuses a second call while the first popup is loading, and Chromium may replace it); downloads caught
+// meanwhile join the queue, which the popup reads when it connects. Cleared when its port connects, or when the
+// wait runs out (see popupDidNotConnect).
+let popupOpening: { timer?: ReturnType<typeof setTimeout> } | null = null;
+// When each waiting download was first in an open popup (announced to it, or there when its port connected).
+// Closing the popup gives back only those it showed for a while: one caught as the popup was already closing (it
+// closes within about a tenth of a second of losing the focus) was never seen, so the popup opens again for it.
+const askOnScreenSince = new Map<string, number>();
+// Downloads the popup was opened again for once already: the next close gives them back.
+const askReopened = new Set<string>();
+/** How long a download must have been in an open popup to count as seen when the popup closes. */
+const ASK_SEEN_MS = 500;
+
+/** The tests' own value; never set in a browser. */
+function askSeenMs(): number {
+  const override = (globalThis as { __inboundAskSeenMs?: unknown }).__inboundAskSeenMs;
+  return typeof override === "number" ? override : ASK_SEEN_MS;
+}
+
+/** These waiting downloads are in an open popup from now on (unless they were already). */
+function markOnScreen(ids: Iterable<string>): void {
+  const now = Date.now();
+  for (const id of ids) if (!askOnScreenSince.has(id)) askOnScreenSince.set(id, now);
+}
+
+/** The tests' shorter wait; never set in a browser. */
+function popupConnectMs(): number {
+  const override = (globalThis as { __inboundPopupConnectMs?: unknown }).__inboundPopupConnectMs;
+  return typeof override === "number" ? override : POPUP_CONNECT_MS;
+}
+
+function acceptAskPort(port: chrome.runtime.Port): void {
+  const sourcePage = (port.sender?.url ?? "").split(/[?#]/)[0];
+  if (port.sender?.id !== chrome.runtime.id || sourcePage !== chrome.runtime.getURL("popup.html")) {
+    try { port.disconnect(); } catch { /* already closed */ }
+    return;
+  }
+  askPorts.add(port);
+  markOnScreen(askQueue);
+  if (popupOpening) {
+    if (popupOpening.timer) clearTimeout(popupOpening.timer);
+    popupOpening = null;
+  }
+  // The popup says it is closing (pagehide) before its port closes: Firefox reports the port closed about a second
+  // after the popup has gone, and a download caught in that second must not count as seen there.
+  let gone = false;
+  const closed = () => {
+    if (gone) return;
+    gone = true;
+    askPorts.delete(port);
+    if (askPorts.size === 0) void askPopupClosed();
+  };
+  port.onMessage.addListener((message: { type?: string } | undefined) => {
+    // Anything else is a ping: receiving it is the point.
+    if (message?.type === "dm.askClosing") closed();
+  });
+  port.onDisconnect.addListener(closed);
+}
+
+async function saveAskQueue(): Promise<void> {
+  try { await chrome.storage.session.set({ [ASK_QUEUE_KEY]: askQueue }); } catch { /* memory still has it */ }
+}
+
+function announceAskQueue(): void {
+  for (const port of askPorts) {
+    try { port.postMessage({ type: "dm.askChanged", waiting: askQueue.length }); } catch { /* closing */ }
+  }
+}
+
+function forgetAskMarks(ids: Iterable<string>): void {
+  for (const id of ids) { askOnScreenSince.delete(id); askReopened.delete(id); }
+}
+
+async function removeFromAskQueue(id: string): Promise<void> {
+  forgetAskMarks([id]);
+  if (!askQueue.includes(id)) return;
+  askQueue = askQueue.filter((other) => other !== id);
+  await saveAskQueue();
+  announceAskQueue();
+}
+
+async function askQueueItems(): Promise<Array<Record<string, unknown>>> {
+  const items: Array<Record<string, unknown>> = [];
+  for (const id of askQueue) {
+    const pending = await pendingHandoff(id).catch(() => undefined);
+    if (!pending) continue;
+    items.push({ id, fileName: pending.suggestedFileName ?? "", url: pending.url, totalBytes: pending.totalBytes });
+  }
+  return items;
+}
+
+/** Puts a held download in front of the user: in the popup's queue, or in its own folder window. Never throws. */
+async function askWhereToSave(id: string): Promise<void> {
+  askQueue = [...askQueue.filter((other) => other !== id), id];
+  await saveAskQueue();
+  if (askPorts.size > 0) {
+    // A popup is open already (opened by the user, or for an earlier download): it shows this one too. If it is
+    // in fact closing, it never shows it, and askPopupClosed opens the popup again.
+    markOnScreen([id]);
+    announceAskQueue();
+    return;
+  }
+  // Several downloads at once open the popup once; the rest join its queue, also while it is still loading.
+  if (popupOpening) return;
+  await openAskPopup();
+}
+
+/** The browser's normal window that has the focus, if any. Never a popup-type window (a folder window). */
+async function focusedNormalWindow(): Promise<chrome.windows.Window | undefined> {
+  // Firefox's getLastFocused({ windowTypes: ["normal"] }) can return a focused folder window (type "popup"), and
+  // openPopup then "succeeds" there with nothing shown, so the window's own type is checked here.
+  if (typeof chrome.windows?.getAll === "function") {
+    const all = await chrome.windows.getAll({ windowTypes: ["normal"] });
+    return all.find((window) => window.type === "normal" && window.focused && typeof window.id === "number");
+  }
+  if (typeof chrome.windows?.getLastFocused === "function") {
+    const front = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    return front?.type === "normal" && front.focused && typeof front.id === "number" ? front : undefined;
+  }
+  return undefined;
+}
+
+async function openAskPopup(): Promise<void> {
+  const action = (chrome as { action?: typeof chrome.action }).action;
+  const opening: { timer?: ReturnType<typeof setTimeout> } = {};
+  popupOpening = opening;
+  // From now on, not only once openPopup has answered: a call that never answers must not hold the queue either.
+  // A popup page that never loads would hold the downloads for ever.
+  opening.timer = setTimeout(() => { void popupDidNotConnect(opening); }, popupConnectMs());
+  (opening.timer as { unref?: () => void }).unref?.();
+  let opened = false;
+  // Chromium answers openPopup only once the page has loaded, and refuses it ("Failed to open popup.") when the
+  // popup closed before that: then the popup page was there for a moment, and the user closed it.
+  let shownWhileOpening = false;
+  if (typeof action?.openPopup === "function") {
+    try {
+      // A download item names no window: the one in front is where it was started. A browser that is not in
+      // front would refuse, so then the folder window (which comes to the front) is used.
+      const front = await focusedNormalWindow();
+      if (front) {
+        await watchingForPopupPage(action.openPopup({ windowId: front.id }), (seen) => { shownWhileOpening = seen; });
+        opened = true;
+      }
+    } catch {
+      opened = false;
+    }
+  }
+  if (popupOpening !== opening) return; // its port connected already, or the wait ran out
+  if (!opened) {
+    clearTimeout(opening.timer);
+    popupOpening = null;
+    // Shown and closed before it could ask: no choice was made, so the browser keeps the downloads. Refused
+    // without ever showing: the folder windows ask.
+    if (shownWhileOpening) await giveAskQueueBack(askQueue);
+    else await moveAskQueueToWindows();
+  }
+  // Opened, not connected yet: the timer above decides if it never does.
+}
+
+/** Waits for openPopup's answer, telling onSeen whether the popup page existed at some point meanwhile. */
+async function watchingForPopupPage(call: Promise<void>, onSeen: (seen: boolean) => void): Promise<void> {
+  let pending = true;
+  let seen = false;
+  const watch = (async () => {
+    while (pending && !seen) {
+      const open = await popupPageOpen();
+      if (open === undefined) return; // this browser can't tell
+      if (open) seen = true;
+      else await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  })();
+  try {
+    await call;
+  } finally {
+    pending = false;
+    await watch.catch(() => undefined);
+    onSeen(seen);
+  }
+}
+
+/**
+ * Whether the extension's toolbar popup page exists right now: runtime.getContexts (Chrome 116+), or
+ * extension.getViews in Firefox's background page. Undefined when neither can tell.
+ */
+async function popupPageOpen(): Promise<boolean | undefined> {
+  const runtime = chrome.runtime as { getContexts?: (filter: { contextTypes: string[] }) => Promise<unknown[]> };
+  if (typeof runtime.getContexts === "function") {
+    try { return (await runtime.getContexts({ contextTypes: ["POPUP"] })).length > 0; } catch { /* next */ }
+  }
+  const extension = (chrome as { extension?: { getViews?: (filter: { type: string }) => unknown[] } }).extension;
+  if (typeof extension?.getViews === "function") {
+    try { return extension.getViews({ type: "popup" }).length > 0; } catch { /* unknown */ }
+  }
+  return undefined;
+}
+
+/**
+ * The popup opened but its page never connected. Closed already (the user clicked elsewhere while it loaded): no
+ * choice was made, so the browser keeps the downloads, as when an open popup closes. Still there, or no way to
+ * tell: its page is stuck, so the folder windows ask instead.
+ */
+async function popupDidNotConnect(opening: { timer?: ReturnType<typeof setTimeout> }): Promise<void> {
+  if (popupOpening !== opening) return;
+  const open = await popupPageOpen();
+  if (popupOpening !== opening) return; // connected meanwhile
+  popupOpening = null;
+  if (askPorts.size > 0) return;
+  if (open === false) await giveAskQueueBack(askQueue);
+  else await moveAskQueueToWindows();
+}
+
+async function moveAskQueueToWindows(): Promise<void> {
+  const ids = askQueue;
+  if (ids.length === 0) return;
+  askQueue = [];
+  forgetAskMarks(ids);
+  await saveAskQueue();
+  for (const id of ids) await openHeldWindow(id, false);
+}
+
+/** Gives these waiting downloads back to the browser (one being sent waits for the app's answer). */
+async function giveAskQueueBack(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  askQueue = askQueue.filter((id) => !ids.includes(id));
+  forgetAskMarks(ids);
+  await saveAskQueue();
+  for (const id of ids) {
+    if (confirmingHandoffs.has(id)) {
+      // Being sent right now; the answer decides (see dm.confirmHandoff).
+      closedWhileConfirming.add(id);
+      continue;
+    }
+    const pending = await pendingHandoff(id).catch(() => undefined);
+    if (pending && heldByWindow(pending)) await keepInBrowser(pending);
+  }
+}
+
+/**
+ * The popup closed: whatever it showed and was not chosen stays in the browser. A download caught while it was
+ * closing was never shown, so the popup opens again for it (once; the next close gives it back).
+ */
+async function askPopupClosed(): Promise<void> {
+  await ensureSettingsLoaded();
+  if (askPorts.size > 0) return;
+  const ids = askQueue;
+  if (ids.length === 0) return;
+  const now = Date.now();
+  const seen = (id: string) => now - (askOnScreenSince.get(id) ?? now) >= askSeenMs();
+  const unseen = ids.filter((id) => !seen(id) && !askReopened.has(id) && !confirmingHandoffs.has(id));
+  await giveAskQueueBack(ids.filter((id) => !unseen.includes(id)));
+  if (unseen.length === 0 || askPorts.size > 0 || popupOpening) return;
+  for (const id of unseen) askReopened.add(id);
+  await openAskPopup();
+}
+
+/**
+ * The folder window for a held download. One that can't be opened, or never connects (it failed to load, or was
+ * closed before it could), gives the download back to the browser.
+ */
+async function openHeldWindow(id: string, pick: boolean): Promise<void> {
+  try {
+    await chrome.windows.create({
+      url: chrome.runtime.getURL(`handoff.html?id=${encodeURIComponent(id)}${pick ? "&pick=1" : ""}`),
+      type: "popup",
+      width: 560,
+      height: 680,
+    });
+  } catch {
+    const pending = await pendingHandoff(id).catch(() => undefined);
+    if (pending) await keepInBrowser(pending);
+    return;
+  }
+  const fallback = setTimeout(() => {
+    if (connectedHandoffs.has(id) || confirmingHandoffs.has(id) || askQueue.includes(id)) return;
+    void pendingHandoff(id).then((still) => { if (still && heldByWindow(still)) return keepInBrowser(still); })
+      .catch(() => undefined);
+  }, responseWindowConnectMs());
+  (fallback as { unref?: () => void }).unref?.();
 }
 
 /** The transport for a target; the server only while one is paired. */
@@ -1115,7 +1439,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.browseServerFolders": {
       const sourcePage = (sender?.url ?? "").split(/[?#]/)[0];
       if (sender?.id !== chrome.runtime.id ||
-          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html")].includes(sourcePage ?? "")) {
+          ![chrome.runtime.getURL("handoff.html"), chrome.runtime.getURL("batch.html"), chrome.runtime.getURL("popup.html")]
+            .includes(sourcePage ?? "")) {
         return { ok: false, error: "Folder browsing is available from the download destination screen." };
       }
       if (!server) return { ok: false, error: "No server is paired. Pair one in the extension's Settings." };
@@ -1160,8 +1485,42 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
     case "dm.targets": {
       // The batch window's choice of target, each with its default folder, as the folder window gets them.
       // Without a server this is one request to the desktop app, for its default folder.
-      if (!fromPage(sender, "batch.html")) return { ok: false, error: "Only the Download All window can do that." };
+      // EXT.B7: the popup too, to say where downloads are saved: the server's folder when they go to the server.
+      if (!fromPage(sender, "batch.html") && !fromPage(sender, "popup.html")) {
+        return { ok: false, error: "Only the Download All window can do that." };
+      }
       return { ok: true, ...await handoffTargets() };
+    }
+
+    case "dm.askQueue": {
+      // EXT.R7: the downloads waiting in the toolbar popup for a folder, oldest first.
+      if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
+      return { ok: true, items: await askQueueItems() };
+    }
+
+    case "dm.askInWindow": {
+      // EXT.R7: the popup hands its waiting downloads to folder windows. This PC's Choose... opens the desktop
+      // app's folder dialog, which takes the focus and so closes the popup; a window stays open through it.
+      if (!fromPage(sender, "popup.html")) return { ok: false, error: "Only the extension's popup can do that." };
+      const id = String(message.id ?? "");
+      const moved = askQueue.includes(id) ? [id, ...askQueue.filter((other) => other !== id)] : [];
+      if (moved.length === 0) return { ok: false, error: "This download is no longer waiting." };
+      // Out of the queue first, so a popup closing meanwhile does not give them back as well.
+      askQueue = [];
+      forgetAskMarks(moved);
+      // The chosen one's window starts from what the user set in the popup: target, file name, start mode.
+      const draft = message.pick === true ? windowDraftFrom(message.draft) : undefined;
+      if (draft) {
+        const pending = await pendingHandoff(id).catch(() => undefined);
+        if (pending) {
+          const drafted = { ...pending, windowDraft: draft };
+          pendingHandoffs.set(id, drafted);
+          await chrome.storage.session.set({ [`handoff.${id}`]: drafted }).catch(() => undefined);
+        }
+      }
+      await saveAskQueue();
+      for (const each of moved) await openHeldWindow(each, each === id && message.pick === true);
+      return { ok: true };
     }
 
     case "dm.getHandoff": {
@@ -1186,6 +1545,8 @@ async function handleRuntimeMessage(message: any, sender?: chrome.runtime.Messag
         },
         targets: choice.targets,
         target: choice.target,
+        // EXT.R7: set when the popup's Choose... moved this download here.
+        draft: pending.windowDraft,
       };
     }
 

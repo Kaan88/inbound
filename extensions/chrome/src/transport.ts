@@ -232,9 +232,20 @@ export class ServerUnpairedError extends Error {
   readonly unpaired = true;
 }
 
-/** Wording that never matches readableError's desktop-app patterns, so a server problem is never explained as one. */
-function unreachable(address: string): string {
-  return `The Inbound server at ${address} is not answering. Check that it is running and that this address is right.`;
+/**
+ * No HTTP answer at all: the connection failed (refused, no route, a TLS failure, or the browser blocked it). The
+ * browser's own words go along, since a fetch error says no more than that, and "not answering" alone sent the
+ * user to check a server that was running (EXT.B6). Wording that never matches readableError's desktop-app
+ * patterns, so a server problem is never explained as one.
+ */
+export function unreachable(address: string, error?: unknown): string {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const said = raw.trim().replace(/[.\s]+$/, "").slice(0, 200);
+  const https = address.startsWith("https:")
+    ? " For an https:// address the browser must also trust the server's certificate: open the address in a tab to see whether it does."
+    : "";
+  return `Could not connect to the Inbound server at ${address}${said ? ` (the browser said: ${said})` : ""}. ` +
+    `Check that it is running and that this address is right.${https}`;
 }
 
 /**
@@ -295,7 +306,7 @@ export class ServerTransport implements Transport {
         { v: PROTOCOL_VERSION, type, id, payload }, timeoutMs,
         { Authorization: `Bearer ${this.pairing.token}` });
     } catch (error) {
-      throw this.failed(error instanceof TimeoutError ? timeoutMessage : unreachable(this.pairing.address));
+      throw this.failed(error instanceof TimeoutError ? timeoutMessage : unreachable(this.pairing.address, error));
     }
 
     const { status, body } = answer;
@@ -414,7 +425,7 @@ export async function pairWithServer(address: string, code: string, name: string
   try {
     answer = await postJson(fetchImpl, `${normalized.origin}/api/pair`, { code: cleanCode, name: name.slice(0, 100) }, timeoutMs, {});
   } catch (error) {
-    throw new Error(error instanceof TimeoutError ? `The Inbound server at ${normalized.origin} took too long to answer.` : unreachable(normalized.origin));
+    throw new Error(error instanceof TimeoutError ? `The Inbound server at ${normalized.origin} took too long to answer.` : unreachable(normalized.origin, error));
   }
 
   const { status, body } = answer;

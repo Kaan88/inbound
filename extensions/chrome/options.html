@@ -47,11 +47,11 @@
       <label class="field">
         <span>When sending a download</span>
         <select id="destinationMode">
-          <option value="default">Use the app's default folder</option>
+          <option value="default">Use the default folder</option>
           <option value="ask">Ask each time</option>
         </select>
       </label>
-      <p class="muted small">"Ask each time" opens a small window for each caught download, starting at the app's default folder, with Choose… for another folder and Keep in browser to leave it to the browser. The folder you choose there is for that download only. With a server paired below, the window also asks whether to save on this PC or on the server. The right-click menu always asks.</p>
+      <p class="muted small">The default folder is the desktop app's, or the server's when downloads go to the server. "Ask each time" asks in the extension's toolbar popup, under its icon, for each caught download: it starts at the default folder of where the download goes, with Choose… for another folder and Keep in browser to leave it to the browser. Closing the popup also leaves it to the browser. The folder you choose there is for that download only. With a server paired below, it also asks whether to save on this PC or on the server. When the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front), a small window asks instead. The right-click menu always asks in a window.</p>
 
     </section>
 

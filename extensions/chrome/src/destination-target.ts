@@ -193,3 +193,42 @@ export class ServerFolderBrowser {
     return true;
   }
 }
+
+/** The free space of a folder on the server, as its folder list reports it (folders.browse); null when unknown. */
+export async function serverFreeSpace(path: string): Promise<number | null> {
+  if (!path.trim()) return null;
+  try {
+    const listing = await chrome.runtime.sendMessage({ type: "dm.browseServerFolders", path: path.trim() }) as FolderListing;
+    return listing?.ok && typeof listing.freeBytes === "number" ? listing.freeBytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * EXT.B7: a line under Save in with the free space of the folder there, measured by the server for the server.
+ * This PC has no such request through the native host, so for This PC the line stays empty rather than show
+ * anything of the wrong machine.
+ */
+export class FreeSpaceLine {
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private asked = 0;
+
+  constructor(private readonly element: HTMLElement) {}
+
+  update(target: TargetId, path: string): void {
+    clearTimeout(this.timer);
+    const mine = ++this.asked;
+    if (target !== "server" || !path.trim()) {
+      this.element.textContent = "";
+      return;
+    }
+    this.timer = setTimeout(() => {
+      void serverFreeSpace(path).then((free) => {
+        if (mine !== this.asked) return;
+        this.element.textContent = typeof free === "number" ? `${formatBytes(free)} free on the server` : "";
+      });
+    }, 250);
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+}

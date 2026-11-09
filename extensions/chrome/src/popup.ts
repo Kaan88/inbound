@@ -1,3 +1,4 @@
+import { AskPanel } from "./ask-panel";
 import { connectionProblem } from "./connection-problem";
 import { actionsFor, deleteAsksAboutFile, deleteFileFor, latestJobsByTarget, type JobAction, type JobSummary } from "./job-list";
 
@@ -294,6 +295,32 @@ function renderTarget(status: Status): void {
     const button = document.getElementById(id) as HTMLButtonElement;
     button.setAttribute("aria-pressed", String(button.dataset.target === target));
   }
+  if (status.server) void showTargetFolder(target);
+  else (document.getElementById("targetFolder") as HTMLElement).textContent = "";
+}
+
+let targetFolderAsked = 0;
+
+/**
+ * EXT.B7: with a server paired, the folder downloads are saved in, from the place they go to: the server's own
+ * default folder in server mode, never this PC's.
+ */
+async function showTargetFolder(target: "local" | "server"): Promise<void> {
+  const line = document.getElementById("targetFolder") as HTMLSpanElement;
+  const mine = ++targetFolderAsked;
+  try {
+    const answer = (await chrome.runtime.sendMessage({ type: "dm.targets" })) as {
+      ok?: boolean; targets?: Array<{ id: string; defaultFolder?: string; error?: string }>;
+    };
+    if (mine !== targetFolderAsked) return;
+    const place = answer?.ok ? answer.targets?.find((item) => item.id === target) : undefined;
+    line.textContent = place?.defaultFolder
+      ? `Saved in ${place.defaultFolder} ${target === "server" ? "on the server" : "on this PC"}`
+      : "";
+    line.title = line.textContent;
+  } catch {
+    if (mine === targetFolderAsked) line.textContent = "";
+  }
 }
 
 async function setTarget(target: "local" | "server"): Promise<void> {
@@ -407,7 +434,46 @@ async function refresh(): Promise<void> {
   }
 }
 
+/**
+ * EXT.R7: a port to the background while the popup is open. Downloads caught with "ask where to save" wait here;
+ * the port closing (the popup closed) gives what still waits back to the browser, and its pings keep the worker
+ * alive meanwhile. A worker that restarted is connected to again.
+ */
+let askPort: chrome.runtime.Port | null = null;
+let popupClosing = false;
+
+function connectAsk(panel: AskPanel, reconnects = 0): void {
+  if (popupClosing) return;
+  let port: chrome.runtime.Port;
+  try { port = chrome.runtime.connect({ name: "dm.ask" }); } catch { return; }
+  askPort = port;
+  const timer = window.setInterval(() => {
+    try { port.postMessage({ type: "ping" }); } catch { /* reconnected below */ }
+  }, 20000);
+  port.onMessage.addListener(() => void panel.refresh());
+  port.onDisconnect.addListener(() => {
+    window.clearInterval(timer);
+    if (askPort === port) askPort = null;
+    if (!popupClosing && reconnects < 5) {
+      connectAsk(panel, reconnects + 1);
+      void panel.refresh();
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  const ask = new AskPanel((waiting) => {
+    document.body.classList.toggle("asking", waiting);
+    // Back to the list: it shows the download just sent.
+    if (!waiting) void refresh();
+  });
+  connectAsk(ask);
+  // Closing: told at once, since Firefox reports the port closed only about a second later (see background.ts).
+  window.addEventListener("pagehide", () => {
+    popupClosing = true;
+    try { askPort?.postMessage({ type: "dm.askClosing" }); } catch { /* the port closing says the same */ }
+  });
+  void ask.refresh();
   void refresh();
 
   // Only while the popup is open.
