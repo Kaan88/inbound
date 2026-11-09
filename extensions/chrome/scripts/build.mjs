@@ -34,8 +34,18 @@ const staticFiles = [
   "options.html",
   "handoff.html",
   "batch.html",
-  "styles.css",
+  "extension.css",
 ];
+
+// EXT.R8: one look for every frontend. The palette and the component kit are the web UI's files, and theme.js (the
+// theme before the first paint, from localStorage["inbound.theme"]) too; copied as they are, since MV3 allows no
+// inline script and the pages link them by name.
+const webui = path.resolve(root, "..", "..", "webui");
+export const SHARED_FILES = {
+  "tokens.css": path.join(webui, "src", "tokens.css"),
+  "ui-kit.css": path.join(webui, "src", "ui-kit.css"),
+  "theme.js": path.join(webui, "public", "theme.js"),
+};
 
 /**
  * The Firefox manifest from the Chrome one. Firefox runs an event page (background.scripts) where
@@ -76,6 +86,9 @@ export function firefoxManifest(chromeManifest) {
 async function copyStatic() {
   for (const file of staticFiles) {
     await copyFile(path.join(root, file), path.join(dist, file));
+  }
+  for (const [name, source] of Object.entries(SHARED_FILES)) {
+    await copyFile(source, path.join(dist, name));
   }
   for (const size of [16, 32, 48, 128]) {
     await copyFile(path.join(root, "icons", `icon${size}.png`), path.join(dist, "icons", `icon${size}.png`));

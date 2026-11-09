@@ -153,5 +153,15 @@ test('each download offers only what the app says it allows, and always Delete',
   assert.deepEqual(jobs.actionsFor({ state: 'paused', canPause: false, canResume: true }), ['resume', 'remove']);
   assert.deepEqual(jobs.actionsFor({ state: 'failed', canPause: false, canResume: true }), ['retry', 'remove']);
   assert.deepEqual(jobs.actionsFor({ state: 'completed', canPause: false, canResume: true }), ['remove']);
-  assert.deepEqual(jobs.JOB_ACTION_MESSAGES, { pause: 'job.pause', resume: 'job.resume', retry: 'job.retry', remove: 'job.remove' });
+  assert.deepEqual(jobs.JOB_ACTION_MESSAGES, { start: 'job.resume', pause: 'job.pause', resume: 'job.resume', retry: 'job.retry', remove: 'job.remove' });
+});
+
+test('U-EX-8: a "Download later" item, or one waiting for its queue, can be started from the popup', () => {
+  // The Host says a queued job can be paused (CanPause includes Queued); one waiting for the user gets Start instead.
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'later', canPause: true, canResume: false }), ['start', 'remove']);
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'queue', canPause: true, canResume: false }), ['start', 'remove']);
+  // Queued to start now: it starts by itself, so it can be stopped.
+  assert.deepEqual(jobs.actionsFor({ state: 'queued', startMode: 'startNow', canPause: true, canResume: false }), ['pause', 'remove']);
+  assert.equal(jobs.groupLabel('server', 'home-server'), 'home-server (server)');
+  assert.equal(jobs.groupLabel('local', 'home-server'), 'This PC');
 });

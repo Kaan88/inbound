@@ -96,7 +96,8 @@ test('one-off handoff folder is used for that download only', async () => {
     assert.equal((await nextInfo).defaults.destination, 'D:\\Default');
     assert.equal(JSON.stringify(harness.values.settings).includes('This\\Download'), false,
       'a one-off folder is never stored in the extension settings');
-    assert.equal(harness.values.settings.startMode, 'later');
+    // U-EX-7: "Download later" for this download is not the next one's default; Options > Default start is.
+    assert.equal(harness.values.settings?.startMode ?? 'now', 'now');
   } finally {
     global.chrome = oldChrome;
   }
@@ -528,7 +529,9 @@ test('a media setting stored by an older copy is ignored, and the media requests
 
 test('the extension makes no network requests of its own, except to the server the user paired', () => {
   const sourceDir = path.join(__dirname, '..', 'src');
-  for (const name of fs.readdirSync(sourceDir)) {
+  // Every source file, the shared ui/ modules included (EXT.R8).
+  const names = fs.readdirSync(sourceDir, { recursive: true }).filter(name => String(name).endsWith('.ts')).map(String);
+  for (const name of names) {
     const text = fs.readFileSync(path.join(sourceDir, name), 'utf8');
     assert.doesNotMatch(text, /XMLHttpRequest|WebSocket|EventSource|sendBeacon/, name);
     if (name === 'transport.ts') {

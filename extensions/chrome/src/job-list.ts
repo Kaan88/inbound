@@ -16,12 +16,16 @@ export interface JobSummary {
   canPause?: boolean;
   canResume?: boolean;
   isTerminal?: boolean;
+  /** How the download was added: "startNow", "queue" or "later" (the Host's StartMode). */
+  startMode?: string;
 }
 
-export type JobAction = "pause" | "resume" | "retry" | "remove";
+export type JobAction = "start" | "pause" | "resume" | "retry" | "remove";
 
 /** The commands the popup may send, as the native host's allow-list names them. */
 export const JOB_ACTION_MESSAGES: Record<JobAction, string> = {
+  // U-EX-8: starting a "Download later" item is the Host's resume, which sets it to start now.
+  start: "job.resume",
   pause: "job.pause",
   resume: "job.resume",
   retry: "job.retry",
@@ -72,11 +76,25 @@ export function deleteFileFor(job: JobSummary, boxTicked: boolean): boolean {
   return deleteAsksAboutFile(job) ? boxTicked : true;
 }
 
-/** Pause or resume (retry for a failed one), then delete; only what the app says the job allows. */
+/** A download that waits for the user to start it: added with "Download later", or to a queue not running. */
+export function waitsToBeStarted(job: JobSummary): boolean {
+  return job.state === "queued" && (job.startMode === "later" || job.startMode === "queue");
+}
+
+/**
+ * The row's buttons, two at most, from what the app says the job allows: Start for one that waits to be started
+ * (U-EX-8), else Stop while it can stop, else Resume (Retry for a failed or cancelled one), then Delete.
+ */
 export function actionsFor(job: JobSummary): JobAction[] {
   const actions: JobAction[] = [];
-  if (job.canPause) actions.push("pause");
-  if (job.canResume && job.state !== "completed") actions.push(job.state === "failed" || job.state === "cancelled" ? "retry" : "resume");
+  if (waitsToBeStarted(job)) actions.push("start");
+  else if (job.canPause) actions.push("pause");
+  else if (job.canResume && job.state !== "completed") actions.push(job.state === "failed" || job.state === "cancelled" ? "retry" : "resume");
   actions.push("remove");
   return actions;
+}
+
+/** The popup's group heading for a place: "This PC", or the server's name with "(server)". */
+export function groupLabel(target: "local" | "server", serverName?: string): string {
+  return target === "server" ? `${serverName?.trim() || "Server"} (server)` : "This PC";
 }

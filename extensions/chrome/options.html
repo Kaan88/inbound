@@ -3,152 +3,178 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inbound Download Manager Bridge settings</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>Options - Inbound Download Manager</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="ui-kit.css" />
+  <link rel="stylesheet" href="extension.css" />
 </head>
 <body class="options">
-  <main class="page">
-    <header class="brand large">
-      <img src="icons/icon48.png" alt="" width="36" height="36" />
-      <div>
-        <h1>Inbound Download Manager Bridge</h1>
-        <p class="muted">Hands browser downloads to Inbound Download Manager. The desktop app keeps the download list.</p>
-      </div>
-    </header>
+  <!-- EXT.R8 §3.6: the desktop app's Options window: pages on the left, one titled page, OK / Cancel / Apply. -->
+  <header class="options-strip">
+    <img src="icons/icon16.png" alt="" width="16" height="16" />
+    <span>Inbound Download Manager · Browser extension</span>
+  </header>
+  <div class="options-shell">
+    <nav class="page-list" aria-label="Options pages">
+      <a class="page-link" href="#general" data-page="general"><span data-icon="settings"></span>General</a>
+      <a class="page-link" href="#catching" data-page="catching"><span data-icon="download"></span>Catching</a>
+      <a class="page-link" href="#server" data-page="server"><span data-icon="cloud"></span>Server</a>
+      <a id="siteAccessLink" class="page-link hidden" href="#site-access" data-page="site-access"><span data-icon="lock"></span>Site access</a>
+      <a class="page-link" href="#connection" data-page="connection"><span data-icon="plug"></span>Connection</a>
+      <a class="page-link" href="#about" data-page="about"><span data-icon="info"></span>About</a>
+    </nav>
 
-    <section class="card form-card">
-      <h2>Integration</h2>
-      <p id="autoBanner" class="state-banner" data-on="false">Automatic sending: checking…</p>
-      <label class="check">
-        <input id="enabled" type="checkbox" />
-        <span>Allow automatic sending (right-click and Download all links work either way)</span>
-      </label>
-      <label class="check">
-        <input id="autoIntercept" type="checkbox" />
-        <span>Automatically send downloads to the desktop app</span>
-      </label>
-      <p class="consent small">
-        When this is on, downloads that match your rules stop in your browser and start again in the desktop app, and they leave the browser's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you pair your own Inbound server below and send downloads there, the same details go to that server instead. Nothing is sent to the developer.
-        <a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a>
-      </p>
-      <label class="check">
-        <input id="notifications" type="checkbox" />
-        <span>Show notifications about sending downloads</span>
-      </label>
+    <main class="options-page">
+      <p id="elsewhereNote" class="notice hidden" role="status"><span class="notice-text">These settings were changed in another window. What you haven't changed here now shows the new values.</span></p>
 
-      <label class="field">
-        <span>Default start mode</span>
-        <select id="startMode">
-          <option value="now">Start immediately</option>
-          <option value="later">Download later (queued in the app)</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>When sending a download</span>
-        <select id="destinationMode">
-          <option value="default">Use the default folder</option>
-          <option value="ask">Ask each time</option>
-        </select>
-      </label>
-      <p class="muted small">The default folder is the desktop app's, or the server's when downloads go to the server. "Ask each time" asks in the extension's toolbar popup, under its icon, for each caught download: it starts at the default folder of where the download goes, with Choose… for another folder and Keep in browser to leave it to the browser. Closing the popup also leaves it to the browser. The folder you choose there is for that download only. With a server paired below, it also asks whether to save on this PC or on the server. When the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front), a small window asks instead. The right-click menu always asks in a window.</p>
-
-    </section>
-
-    <section class="card form-card">
-      <h2>File and site rules</h2>
-      <label class="field">
-        <span>Catch only these file types (comma-separated). Leave it empty to catch every file type that is not on the list below; files with no file type are also caught, unless they are web pages.</span>
-        <textarea id="interceptedExtensions" rows="4" spellcheck="false"></textarea>
-      </label>
-      <label class="field">
-        <span>Never catch these file types</span>
-        <textarea id="excludedExtensions" rows="2" spellcheck="false"></textarea>
-        <button id="resetExcluded" class="link-button" type="button">Restore the default list</button>
-      </label>
-      <label class="field">
-        <span>Never catch downloads from these sites (one per line or comma-separated)</span>
-        <textarea id="excludedHosts" rows="3" spellcheck="false"></textarea>
-      </label>
-      <p class="muted small">
-        To keep a single download in your browser, hold Delete while you click its link. To keep them all for a
-        while, or for buttons and links inside embedded frames where holding Delete does not work, use Pause
-        catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
-        it does not record what you type.
-      </p>
-    </section>
-
-    <section id="siteAccessCard" class="card form-card hidden">
-      <h2>Access to sites</h2>
-      <p class="muted small">This browser has not given the extension access to the sites you download from, so it cannot read a site's cookies for the app or notice Delete held on a page. Downloads that need your login may fail in the app until you allow it.</p>
-      <div class="row">
-        <button id="grantSiteAccess" type="button">Allow access to all sites</button>
-      </div>
-      <p id="siteAccessResult" class="muted small"></p>
-    </section>
-
-    <section id="serverCard" class="card form-card">
-      <h2>Inbound server</h2>
-      <p class="muted small">
-        Send downloads to your own Inbound server (the Docker or Linux version) as well as, or instead of, this PC.
-        To get a code, open the server's web UI, then Settings, Sign-in and browsers, and choose Pair a browser. The code
-        works once, for ten minutes.
-      </p>
-      <div id="serverUnpaired">
-        <label class="field">
-          <span>Server address</span>
-          <input id="serverAddress" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="http://192.168.1.20:8080" />
+      <section id="page-general" class="settings-page" data-page="general" aria-labelledby="generalTitle">
+        <h1 id="generalTitle">General</h1>
+        <h2 class="section">Automatic sending</h2>
+        <label class="check">
+          <input id="autoSend" type="checkbox" />
+          <span>Send downloads to Inbound automatically</span>
         </label>
-        <p id="serverCleartext" class="muted small hidden">This address uses http://, so the pairing token and the cookies sent with each download cross your network unencrypted. That is fine on a home network you trust; put the server behind https:// otherwise.</p>
-        <label class="field">
-          <span>Pairing code</span>
-          <input id="pairingCode" type="text" spellcheck="false" autocomplete="off" maxlength="12" placeholder="8 letters and digits" />
+        <p class="hint indent">Downloads that match your rules stop in the browser and start in the app, or on your server when they go there. Right-click and Download all links work either way. <a href="#privacy">What is sent</a></p>
+        <label class="check">
+          <input id="notifications" type="checkbox" />
+          <span>Show notifications</span>
         </label>
-        <div class="row">
-          <button id="pairServer" type="button">Pair</button>
-        </div>
-      </div>
-      <div id="serverPaired" class="hidden">
-        <p id="serverState" class="state-banner" data-on="false"></p>
-        <div class="row">
-          <button id="checkServer" type="button">Check connection</button>
-          <button id="openServer" type="button">Open the web UI</button>
-          <button id="unpairServer" type="button">Unpair</button>
-        </div>
-      </div>
-      <label class="field">
-        <span>Automatic downloads go to</span>
-        <select id="defaultTarget">
-          <option value="local">This PC</option>
-          <option value="server">The server</option>
-        </select>
-      </label>
-      <p class="muted small">Saved with Save settings. The server can be chosen once one is paired. If the place chosen can't take a download, it stays in your browser; it is never sent to the other place instead.</p>
-      <p id="serverResult" class="muted small" role="status"></p>
-    </section>
 
-    <section class="card form-card">
-      <h2>Connection</h2>
-      <p class="muted small">
-        This extension needs the Inbound Download Manager desktop app for Windows, or an Inbound server paired
-        above, and sends download details only to that app on this computer or to your server. Using the extension starts the app's background process if it is not
-        running. If the app is not installed or cannot be reached, or it refuses a download, the download stays
-        in your browser. Once the app has accepted one, the browser's copy is gone, so pause catching first for a file from a
-        submitted form or a link that works only once.
-      </p>
-      <div class="row">
-        <button id="test" type="button">Check connection</button>
-        <button id="openApp" type="button">Open Inbound Download Manager</button>
-      </div>
-      <p id="testResult" class="muted small"></p>
-      <p><a id="getApp" class="hidden" href="https://github.com/Kaan88/inbound/releases/latest" target="_blank" rel="noopener">Get the desktop app</a></p>
-    </section>
+        <h2 class="section">When a download is sent</h2>
+        <div class="radio-group" role="radiogroup" aria-label="When a download is sent">
+          <label class="check"><input type="radio" name="destinationMode" value="default" /><span>Save to the app's default folder</span></label>
+          <label class="check"><input type="radio" name="destinationMode" value="ask" /><span>Ask where to save</span></label>
+        </div>
+        <p class="hint indent">The default folder is the desktop app's, or the server's when downloads go to the server. "Ask where to save" asks in the extension's toolbar popup, under its icon; a small window asks instead when the popup can't open (Chrome or Edge before 127, Firefox before 149, or the browser not in front). The folder chosen there is for that download only. The right-click menu always asks in a window.</p>
 
-    <div class="actions sticky">
-      <button id="save" class="primary" type="button">Save settings</button>
-      <span id="saveResult" class="muted small"></span>
-    </div>
-  </main>
+        <div class="form-grid compact">
+          <label class="label" for="startMode">Default start</label>
+          <div>
+            <select id="startMode" class="field auto-width">
+              <option value="now">Start download</option>
+              <option value="later">Download later</option>
+            </select>
+            <p class="hint">Which button the download windows make the main one. A choice there is for that download only.</p>
+          </div>
+          <label class="label" for="theme">Theme</label>
+          <select id="theme" class="field auto-width">
+            <option value="system">Match the browser</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </section>
+
+      <section id="page-catching" class="settings-page hidden" data-page="catching" aria-labelledby="catchingTitle">
+        <h1 id="catchingTitle">Catching</h1>
+        <h2 class="section">File types</h2>
+        <label class="form-row">
+          <span class="label">Catch only these file types</span>
+          <textarea id="interceptedExtensions" class="field mono" rows="3" spellcheck="false"></textarea>
+          <span class="hint">Comma-separated. Leave it empty to catch every file type that is not on the list below; files with no file type are also caught, unless they are web pages.</span>
+        </label>
+        <label class="form-row">
+          <span class="label">Never catch these file types</span>
+          <textarea id="excludedExtensions" class="field mono" rows="3" spellcheck="false"></textarea>
+        </label>
+        <div><button id="resetExcluded" class="btn" type="button">Restore the default list</button></div>
+        <h2 class="section">Sites</h2>
+        <label class="form-row">
+          <span class="label">Never catch downloads from these sites</span>
+          <textarea id="excludedHosts" class="field mono" rows="3" spellcheck="false"></textarea>
+          <span class="hint">One per line or comma-separated.</span>
+        </label>
+        <p class="hint">
+          To keep a single download in your browser, hold Delete while you click its link. To keep them all for a
+          while, or for buttons and links inside embedded frames where holding Delete does not work, use Pause
+          catching in the toolbar popup. The extension's script on each page checks only whether Delete is held;
+          it does not record what you type.
+        </p>
+      </section>
+
+      <section id="page-server" class="settings-page hidden" data-page="server" aria-labelledby="serverTitle">
+        <h1 id="serverTitle">Server</h1>
+        <p class="hint">
+          Send downloads to your own Inbound server (the Docker or Linux version) as well as, or instead of, this PC.
+          To get a code, open the server's web UI, then Settings, Sign-in and browsers, and choose Pair a browser. The code
+          works once, for ten minutes.
+        </p>
+        <div id="serverUnpaired">
+          <div class="form-grid">
+            <label class="label" for="serverAddress">Server address</label>
+            <div>
+              <input id="serverAddress" class="field mono" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="http://192.168.1.20:8080" />
+              <p id="serverCleartext" class="hint hidden">This address uses http://, so the pairing token and the cookies sent with each download cross your network unencrypted. That is fine on a home network you trust; put the server behind https:// otherwise.</p>
+            </div>
+            <label class="label" for="pairingCode">Pairing code</label>
+            <input id="pairingCode" class="field mono auto-width" type="text" spellcheck="false" autocomplete="off" maxlength="12" placeholder="8 letters and digits" />
+          </div>
+          <div class="button-row"><button id="pairServer" class="btn-primary" type="button">Pair</button></div>
+        </div>
+        <div id="serverPaired" class="hidden">
+          <p id="serverState" class="state-line" data-on="false"></p>
+          <div class="button-row">
+            <button id="checkServer" class="btn" type="button">Check connection</button>
+            <button id="openServer" class="btn" type="button">Open the web UI</button>
+            <button id="unpairServer" class="btn" type="button">Unpair…</button>
+          </div>
+        </div>
+        <p id="serverResult" class="hint" role="status"></p>
+        <h2 class="section">Where automatic downloads go</h2>
+        <div class="form-grid compact">
+          <label class="label" for="defaultTarget">Send to</label>
+          <select id="defaultTarget" class="field auto-width">
+            <option value="local">This PC</option>
+            <option value="server">The server</option>
+          </select>
+        </div>
+        <p class="hint">The server can be chosen once one is paired. If the place chosen can't take a download, it stays in your browser; it is never sent to the other place instead.</p>
+      </section>
+
+      <section id="page-site-access" class="settings-page hidden" data-page="site-access" aria-labelledby="siteTitle">
+        <h1 id="siteTitle">Site access</h1>
+        <p class="hint">This browser has not given the extension access to the sites you download from, so it cannot read a site's cookies for the app or notice Delete held on a page. Downloads that need your login may fail in the app until you allow it.</p>
+        <div class="button-row"><button id="grantSiteAccess" class="btn-primary" type="button">Allow access to all sites</button></div>
+        <p id="siteAccessResult" class="hint" role="status"></p>
+      </section>
+
+      <section id="page-connection" class="settings-page hidden" data-page="connection" aria-labelledby="connectionTitle">
+        <h1 id="connectionTitle">Connection</h1>
+        <p class="hint">
+          This extension needs the Inbound Download Manager desktop app for Windows, or an Inbound server paired
+          on the Server page, and sends download details only to that app on this computer or to your server. Using the
+          extension starts the app's background process if it is not running. If the app is not installed or cannot be
+          reached, or it refuses a download, the download stays in your browser. Once the app has accepted one, the
+          browser's copy is gone, so pause catching first for a file from a submitted form or a link that works only once.
+        </p>
+        <div class="button-row">
+          <button id="test" class="btn" type="button">Check connection</button>
+          <button id="openApp" class="btn" type="button">Open Inbound</button>
+          <a id="getApp" class="btn hidden" href="https://github.com/Kaan88/inbound/releases/latest" target="_blank" rel="noopener">Get the app</a>
+        </div>
+        <p id="testResult" class="hint" role="status"></p>
+      </section>
+
+      <section id="page-about" class="settings-page hidden" data-page="about" aria-labelledby="aboutTitle">
+        <h1 id="aboutTitle">About</h1>
+        <p>Inbound Download Manager Bridge <span id="version" class="tabular"></span></p>
+        <p class="hint">Hands browser downloads to Inbound Download Manager. The desktop app keeps the download list.</p>
+        <h2 id="privacy" class="section">What is sent</h2>
+        <p class="consent hint">
+          When automatic sending is on, downloads that match your rules stop in your browser and start again in the desktop app, and they leave the browser's download list. For each one, the extension gives the app the file's address, the address of the page it came from, your browser's user agent, and your cookies for that site, so the app can download files that need your own login. The app keeps these on this computer with the download, the cookies encrypted, until you remove it, and sends the cookies only to that site. The address can also stay in the app's list of recent addresses. If you pair your own Inbound server and send downloads there, the same details go to that server instead. Nothing is sent to the developer.
+        </p>
+        <p><a href="https://github.com/Kaan88/inbound/blob/main/docs/chrome-extension-privacy.md" target="_blank" rel="noopener">Privacy policy</a></p>
+      </section>
+    </main>
+  </div>
+
+  <footer class="options-footer">
+    <p id="saveResult" class="footer-message" role="status"></p>
+    <button id="ok" class="btn-primary" type="button">OK</button>
+    <button id="cancel" class="btn" type="button">Cancel</button>
+    <button id="apply" class="btn" type="button" disabled>Apply</button>
+  </footer>
   <script src="options.js"></script>
 </body>
 </html>

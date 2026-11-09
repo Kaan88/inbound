@@ -57,6 +57,21 @@ test('EXT.B6: the built Firefox manifest carries that CSP, and the Chrome build 
     const chrome = JSON.parse(fs.readFileSync(path.join(out, 'chrome', 'manifest.json'), 'utf8'));
     assert.equal('content_security_policy' in chrome, false);
     assert.ok(fs.existsSync(path.join(out, 'firefox', 'background.js')));
+    // EXT.R8: both builds carry the shared look (the web UI's tokens, kit and theme script) and the extension's layout,
+    // and every page links them, theme.js first so the first paint has the chosen theme.
+    for (const target of ['chrome', 'firefox']) {
+      for (const file of ['tokens.css', 'ui-kit.css', 'theme.js', 'extension.css']) {
+        assert.ok(fs.existsSync(path.join(out, target, file)), `${target}/${file}`);
+      }
+      assert.equal(fs.readFileSync(path.join(out, target, 'tokens.css'), 'utf8'),
+        fs.readFileSync(path.join(root, '..', '..', 'webui', 'src', 'tokens.css'), 'utf8'), 'copied as it is');
+      for (const page of ['popup.html', 'options.html', 'handoff.html', 'batch.html']) {
+        const html = fs.readFileSync(path.join(out, target, page), 'utf8');
+        assert.match(html, /<script src="theme\.js"><\/script>\s*<link rel="stylesheet" href="tokens\.css" \/>\s*<link rel="stylesheet" href="ui-kit\.css" \/>\s*<link rel="stylesheet" href="extension\.css" \/>/, page);
+        assert.doesNotMatch(html, /<script>[^<]/, `${page}: no inline script (MV3)`);
+        assert.doesNotMatch(html, /style="[^"]*(#|rgb)/, `${page}: no colour outside the tokens`);
+      }
+    }
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }

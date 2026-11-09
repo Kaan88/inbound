@@ -44,7 +44,7 @@ test('EXT.B7 popup: in server mode the ask form shows the server\'s folder, favo
     assert.deepEqual(waiting, [true]);
     assert.equal(page.el('askCard').classList.contains('hidden'), false);
     assert.equal(page.el('askFileName').value, 'a.iso');
-    assert.equal(page.el('askSource').textContent, 'site.test · 3.0 MB');
+    assert.equal(page.el('askSource').textContent, '3.00 MB · site.test', 'size first, then the site, in the web UI\'s numbers (EXT.R8)');
     assert.equal(page.el('askDestination').value, '/downloads');
     assert.equal(page.el('askDestination').placeholder, 'The server\'s default folder');
     assert.deepEqual(favorites(page), ['', '/downloads/movies'], 'the server\'s favorites, not this PC\'s');
@@ -52,7 +52,7 @@ test('EXT.B7 popup: in server mode the ask form shows the server\'s folder, favo
     assert.equal(page.el('askLocalHint').classList.contains('hidden'), true);
     assert.deepEqual(radios(page).map(radio => `${radio.value}${radio.checked ? '*' : ''}`), ['local', 'server*']);
     await wait(300);
-    assert.equal(page.el('askFreeSpace').textContent, '5.0 GB free on the server');
+    assert.equal(page.el('askFreeSpace').textContent, '5.00 GB free on the server');
     assert.equal(browsed.at(-1), '/downloads');
 
     await page.el('askBrowse').click();
@@ -135,10 +135,10 @@ test('EXT.R7 popup (review 1): Choose... for This PC, switched from the server, 
     local.checked = true;
     await local.dispatch('change');
     page.el('askFileName').value = 'renamed.iso';
-    page.el('askStartMode').value = 'later';
     page.el('askDestination').value = 'D:\\Games';
     await page.el('askBrowse').click();
-    assert.deepEqual(moved.draft, { target: 'local', fileName: 'renamed.iso', destination: 'D:\\Games', startMode: 'later' });
+    // Decision 1 (owner, 2026-11-09): no Start choice is carried; the window's buttons follow Options.
+    assert.deepEqual(moved.draft, { target: 'local', fileName: 'renamed.iso', destination: 'D:\\Games' });
     assert.equal(page.closed, true);
   } finally {
     page.restore();
@@ -201,7 +201,7 @@ test('EXT.B7 folder window: the server\'s free space is shown for the server\'s 
     await page.domReady();
     assert.equal(page.el('destination').value, '/downloads');
     await wait(300);
-    assert.equal(page.el('freeSpace').textContent, '5.0 GB free on the server');
+    assert.equal(page.el('freeSpace').textContent, '5.00 GB free on the server');
     const local = page.el('targetChoice').children.flatMap(label => label.children).find(node => node.value === 'local');
     local.checked = true;
     await local.dispatch('change');
@@ -245,7 +245,9 @@ test('EXT.R7 folder window (review 1): opened from the popup\'s Choose..., it st
     const checked = page.el('targetChoice').children.flatMap(label => label.children).find(node => node.type === 'radio' && node.checked);
     assert.equal(checked.value, 'local');
     assert.equal(page.el('fileName').value, 'renamed.iso');
-    assert.equal(page.el('startMode').value, 'later');
+    // Options > Default start ('now' here) picks the primary button, whatever an older draft says.
+    assert.equal(page.el('confirm').className, 'btn-primary');
+    assert.equal(page.el('later').className, 'btn');
     assert.equal(picked.initialPath, 'D:\\Downloads');
     assert.equal(page.el('destination').value, 'E:\\Chosen');
   } finally {

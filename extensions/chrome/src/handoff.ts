@@ -1,9 +1,14 @@
+// The folder window ("Download file info", EXT.R8 §3.4): a right-click download, or a caught one when the popup can't
+// ask. The save form is the popup's (ui/save-form.ts). "Start download" and "Download later" send this download only;
+// which one is primary comes from Options > Default start (owner decision, 2026-11-09).
+
 import { FormGate } from "./form-gate";
 import { pickDestinationFolder } from "./pick-destination";
-import {
-  FreeSpaceLine, renderTargetChoice, ServerFolderBrowser, setTargetChoiceEnabled, type OfferedTarget,
-} from "./destination-target";
+import { type OfferedTarget } from "./destination-target";
+import { firstTarget, markDefaultStart, SaveForm } from "./ui/save-form";
+import { applyTheme, followThemeChanges } from "./ui/theme";
 import type { TargetId } from "./transport";
+import { fitWindowToContent } from "./fit-window";
 
 interface PendingHandoff {
   id: string;
@@ -15,51 +20,62 @@ interface PendingHandoff {
 
 const params = new URLSearchParams(location.search);
 const handoffId = params.get("id") ?? "";
-// EXT.R7: opened from the toolbar popup's Choose… for This PC, so the app's folder dialog starts at once.
+// EXT.R7: opened from the toolbar popup's Browse… for This PC, so the app's folder dialog starts at once.
 const pickAtOnce = params.get("pick") === "1";
-const urlInput = document.getElementById("url") as HTMLInputElement;
+const urlText = document.getElementById("url") as HTMLElement;
+const copyButton = document.getElementById("copyUrl") as HTMLButtonElement;
 const nameInput = document.getElementById("fileName") as HTMLInputElement;
 const destinationInput = document.getElementById("destination") as HTMLInputElement;
 const browseDestinationButton = document.getElementById("browseDestination") as HTMLButtonElement;
-const startSelect = document.getElementById("startMode") as HTMLSelectElement;
 const confirmButton = document.getElementById("confirm") as HTMLButtonElement;
+const laterButton = document.getElementById("later") as HTMLButtonElement;
 const cancelButton = document.getElementById("cancel") as HTMLButtonElement;
 const keepButton = document.getElementById("keepInBrowser") as HTMLButtonElement;
-const favoritesField = document.getElementById("favoritesField") as HTMLLabelElement;
-const favoritesSelect = document.getElementById("favorites") as HTMLSelectElement;
-const targetField = document.getElementById("targetField") as HTMLFieldSetElement;
-const targetChoice = document.getElementById("targetChoice") as HTMLDivElement;
-const localHint = document.getElementById("localHint") as HTMLSpanElement;
-const serverHint = document.getElementById("serverHint") as HTMLSpanElement;
-// EXT.B7: the free space of the folder in Save in, from the server when the download goes there.
-const freeSpace = new FreeSpaceLine(document.getElementById("freeSpace") as HTMLSpanElement);
-// The folder the window opened with, for the target chosen. Sent only when changed, so the app (or the
-// server) keeps deciding the default.
-let defaultDestination = "";
-let targets: OfferedTarget[] = [];
-let target: TargetId = "local";
+const errorBox = document.getElementById("error") as HTMLParagraphElement;
+const successBox = document.getElementById("success") as HTMLParagraphElement;
 let held = false;
 let finished = false;
 // There is no request to confirm (no id, expired, or the worker could not be reached).
 let unavailable = false;
-// dm.getHandoff has not answered yet: the target and its folder are not known, so Download and Choose...
-// wait. Sending now would go to This PC whatever the default target is.
+// dm.getHandoff has not answered yet: the target and its folder are not known, so Start and Browse wait.
+// Sending now would go to This PC whatever the default target is.
 let loading = true;
-const errorBox = document.getElementById("error") as HTMLParagraphElement;
-const successBox = document.getElementById("success") as HTMLParagraphElement;
-// EXT.B2: Send and Choose... exclude each other; the buttons are drawn from this state only.
+// Options > Default start: the primary button, and the one Enter presses.
+let defaultStart: "now" | "later" = "now";
+// EXT.B2: Send and Browse exclude each other; the buttons are drawn from this state only.
 const gate = new FormGate(renderButtons);
+
+const form = new SaveForm({
+  targetField: document.getElementById("targetField") as HTMLElement,
+  targetChoice: document.getElementById("targetChoice") as HTMLElement,
+  destination: destinationInput,
+  browse: browseDestinationButton,
+  favoritesField: document.getElementById("favoritesField") as HTMLElement,
+  favorites: document.getElementById("favorites") as HTMLSelectElement,
+  freeSpace: document.getElementById("freeSpace") as HTMLElement,
+  serverFolders: document.getElementById("serverFolders") as HTMLElement,
+  localHint: document.getElementById("localHint") as HTMLElement,
+  serverHint: document.getElementById("serverHint") as HTMLElement,
+}, showError, clearError);
 renderButtons();
 
 function renderButtons(): void {
-  confirmButton.disabled = loading || unavailable || finished || !gate.canSend;
+  const off = loading || unavailable || finished || !gate.canSend;
+  confirmButton.disabled = off;
+  laterButton.disabled = off;
+  const sending = gate.sending ? "Sending…" : "";
+  confirmButton.textContent = sending && defaultStart === "now" ? sending : "Start download";
+  laterButton.textContent = sending && defaultStart === "later" ? sending : "Download later";
   browseDestinationButton.disabled = loading || !gate.canPick;
   // Keep in browser during a send could keep the file in the browser and add it to the app too.
   keepButton.disabled = gate.sending;
-  setTargetChoiceEnabled(targetChoice, !loading && gate.canPick);
+  form.setTargetChoiceEnabled(!loading && gate.canPick);
 }
 
 function markUnavailable(message: string): void {
+  // EXT.R8 §3.4: nothing to fill in, only the reason and Close.
+  document.body?.classList.add("unavailable");
+  cancelButton.textContent = "Close";
   showError(message);
   unavailable = true;
   loading = false;
@@ -70,6 +86,14 @@ function showError(message: string): void {
   errorBox.textContent = message;
   errorBox.classList.remove("hidden");
   successBox.classList.add("hidden");
+  void fitWindowToContent().catch(() => undefined);
+}
+
+/** Hides the error line: any error, or only this one. */
+function clearError(message: string): void {
+  if (message && errorBox.textContent !== message) return;
+  errorBox.textContent = "";
+  errorBox.classList.add("hidden");
 }
 
 function showSuccess(message: string): void {
@@ -79,6 +103,7 @@ function showSuccess(message: string): void {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  followThemeChanges();
   if (!handoffId) {
     markUnavailable("This window has no download to confirm. Start again from the right-click menu.");
     return;
@@ -89,10 +114,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       ok?: boolean;
       handoff?: PendingHandoff;
       held?: boolean;
-      defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string };
+      defaults?: { destination?: string; favorites?: Array<{ name: string; path: string }>; startMode?: string; theme?: string };
       targets?: OfferedTarget[];
       target?: TargetId;
-      draft?: { target?: TargetId; fileName?: string; destination?: string; startMode?: string };
+      draft?: { target?: TargetId; fileName?: string; destination?: string };
       error?: string;
     };
     if (!response?.ok || !response.handoff) {
@@ -100,26 +125,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    urlInput.value = response.handoff.url;
+    urlText.textContent = response.handoff.url;
+    urlText.title = response.handoff.url;
     nameInput.value = response.handoff.suggestedFileName || "";
-    startSelect.value = response.defaults?.startMode === "later" ? "later" : "now";
+    defaultStart = markDefaultStart(response.defaults?.startMode, confirmButton, laterButton);
     // EXT.R1: This PC or the paired server, each with its own default folder. One target: no choice shown.
-    targets = Array.isArray(response.targets) && response.targets.length > 0
+    const targets: OfferedTarget[] = Array.isArray(response.targets) && response.targets.length > 0
       ? response.targets
       : [{ id: "local", label: "This PC", chooser: "dialog", defaultFolder: response.defaults?.destination ?? "",
         favorites: response.defaults?.favorites ?? [] }];
-    // EXT.R7: moved here by the toolbar popup's Choose...: start from what the user set there.
+    // EXT.R7: moved here by the toolbar popup's Browse…: start from what the user set there.
     const draft = response.draft;
-    const first = targets.find((offered) => offered.id === draft?.target) ??
-      targets.find((offered) => offered.id === response.target) ?? targets[0]!;
-    renderTargetChoice(targetField, targetChoice, targets, first.id, useTarget);
-    useTarget(first);
+    const first = targets.find((offered) => offered.id === draft?.target) ?? firstTarget(targets, response.target);
+    form.showTargets(targets, first);
     if (draft) {
       if (draft.fileName) nameInput.value = draft.fileName;
-      if (draft.startMode === "later" || draft.startMode === "now") startSelect.value = draft.startMode;
       if (draft.destination && first.id === draft.target) {
         destinationInput.value = draft.destination;
-        freeSpace.update(first.id, draft.destination);
+        form.freeSpace.update(first.id, draft.destination);
       }
     }
     // A caught download waits in the browser while this window is open; leaving it there is a choice.
@@ -131,28 +154,32 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderButtons();
     // UI.R4: the favorites row can make the form taller than at first load; fit again, within the screen.
     void fitWindowToContent().catch(() => undefined);
-    if (pickAtOnce && target === "local" && !browseDestinationButton.disabled) browseDestinationButton.click();
+    if (pickAtOnce && form.target === "local" && !browseDestinationButton.disabled) browseDestinationButton.click();
   } catch (error) {
     markUnavailable(error instanceof Error ? error.message : String(error));
   }
 });
 
-confirmButton.addEventListener("click", async () => {
+async function start(startMode: "now" | "later"): Promise<void> {
   if (loading || unavailable || finished || !gate.canSend) return;
   // The server's folder list stays shut while a send runs: a folder picked then would not be the one sent.
-  serverFolders.close();
-  await gate.send(sendToApp);
-});
+  form.serverFolders.close();
+  await gate.send(() => sendToApp(startMode));
+}
 
-async function sendToApp(): Promise<void> {
+confirmButton.addEventListener("click", () => start("now"));
+laterButton.addEventListener("click", () => start("later"));
+
+async function sendToApp(startMode: "now" | "later"): Promise<void> {
   errorBox.classList.add("hidden");
+  const target = form.target;
   try {
     const response = (await chrome.runtime.sendMessage({
       type: "dm.confirmHandoff",
       id: handoffId,
       fileName: nameInput.value.trim(),
-      destination: destinationInput.value.trim() === defaultDestination ? "" : destinationInput.value.trim(),
-      startMode: startSelect.value,
+      destination: form.destinationToSend(),
+      startMode,
       target,
     })) as {
       ok?: boolean;
@@ -185,6 +212,14 @@ async function sendToApp(): Promise<void> {
 
 cancelButton.addEventListener("click", () => window.close());
 
+copyButton.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(urlText.textContent ?? "");
+    copyButton.textContent = "Copied";
+    setTimeout(() => { copyButton.textContent = "Copy"; }, 1500);
+  } catch { /* the address can still be selected */ }
+});
+
 /**
  * While a caught download waits on this window, a port to the background worker stays open. Its pings
  * keep the worker, which holds the browser's file-name callback in memory, from being stopped as idle;
@@ -216,64 +251,36 @@ keepButton.addEventListener("click", async () => {
   window.close();
 });
 
-favoritesSelect.addEventListener("change", () => {
-  if (favoritesSelect.value) destinationInput.value = favoritesSelect.value;
-  favoritesSelect.value = "";
-  freeSpace.update(target, destinationInput.value);
-});
-
-destinationInput.addEventListener("input", () => freeSpace.update(target, destinationInput.value));
-
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (form.serverFolders.isOpen) { form.serverFolders.close(); return; }
     if (gate.sending) return; // the send decides; closing now could also resume the browser's copy
     if (held) void keepInBrowser().then(() => window.close());
     else window.close();
   }
-  else if (event.key === "Enter" && !confirmButton.disabled &&
-           (event.target === nameInput || event.target === destinationInput)) confirmButton.click();
-});
-
-const serverFolders = new ServerFolderBrowser(document.getElementById("serverFolders") as HTMLDivElement, (path) => {
-  destinationInput.value = path;
-  freeSpace.update(target, path);
-}, showError);
-
-/** Switches the window to one target: its default folder, its favorites, its wording. */
-function useTarget(offered: OfferedTarget): void {
-  target = offered.id;
-  defaultDestination = offered.defaultFolder ?? "";
-  destinationInput.value = defaultDestination;
-  destinationInput.placeholder = offered.id === "server" ? "The server's default folder" : "The app's default folder";
-  serverFolders.close();
-  favoritesSelect.replaceChildren(favoritesSelect.options[0] ?? new Option("Pick a favorite folder…", ""));
-  for (const favorite of offered.favorites ?? []) {
-    const option = document.createElement("option");
-    option.value = favorite.path;
-    option.textContent = favorite.name === favorite.path ? favorite.path : `${favorite.name} (${favorite.path})`;
-    favoritesSelect.append(option);
+  else if (event.key === "Enter" && (event.target === nameInput || event.target === destinationInput)) {
+    (defaultStart === "later" ? laterButton : confirmButton).click();
   }
-  favoritesField.classList.toggle("hidden", (offered.favorites ?? []).length === 0);
-  // The server did not answer when the window opened: say so now rather than only after Download.
-  if (offered.id === "server" && offered.error) showError(offered.error);
-  else errorBox.classList.add("hidden");
-  localHint.classList.toggle("hidden", offered.id === "server");
-  serverHint.classList.toggle("hidden", offered.id !== "server");
-  freeSpace.update(offered.id, defaultDestination);
-  void fitWindowToContent().catch(() => undefined);
-}
+});
 
 browseDestinationButton.addEventListener("click", async () => {
   // This PC: the desktop app's folder dialog. The server: its own folders, listed here.
   if (loading) return;
-  if (target === "server") {
+  if (form.target === "server") {
     if (!gate.canPick) return;
-    if (serverFolders.isOpen) serverFolders.close();
-    else void serverFolders.open(destinationInput.value).then(() => fitWindowToContent().catch(() => undefined));
+    void form.toggleServerFolders().then(() => fitWindowToContent().catch(() => undefined));
     return;
   }
-  await gate.pick(() => pickDestinationFolder(destinationInput, browseDestinationButton, showError));
+  await gate.pick(async () => {
+    const before = destinationInput.value;
+    await pickDestinationFolder(destinationInput, browseDestinationButton, showError);
+    // U-EX-12: a folder was chosen, so an error about the one before is stale.
+    if (destinationInput.value !== before) clearError("");
+  });
 });
-import { fitWindowToContent } from "./fit-window";
+
+// The theme from the stored settings, for a window opened before theme.js could know it.
+void chrome.storage?.local?.get?.("settings")?.then?.((stored: { settings?: { theme?: "system" | "light" | "dark" } }) =>
+  applyTheme(stored?.settings?.theme))?.catch?.(() => undefined);
 
 void fitWindowToContent().catch(() => undefined);
