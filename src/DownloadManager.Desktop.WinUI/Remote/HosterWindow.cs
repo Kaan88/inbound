@@ -20,7 +20,9 @@ internal sealed class HosterWindow : Window
     private readonly TextBox _search = new() { PlaceholderText = "Search hosts", MinWidth = 240 };
     private readonly CheckBox _downOnly = new() { Content = "Down only" };
     private readonly Button _reload = new() { Content = "Reload", MinWidth = 92 };
-    private readonly StackPanel _rows = new() { Spacing = 2 };
+    // UI.R31: each host is a card row with an Up or Down chip.
+    private readonly StackPanel _rows = new() { Spacing = 6 };
+    private readonly Button _close = new() { Content = "Close", MinWidth = 92 };
     private readonly StatusLine _status = new("Host list status");
     private List<RemoteHosterDto> _hosters = [];
 
@@ -46,9 +48,22 @@ internal sealed class HosterWindow : Window
         var scroller = new ScrollViewer { Content = _rows, Padding = InboundTheme.DialogScrollPadding, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(scroller, 1);
         _root.Children.Add(scroller);
-        _status.Text.TextWrapping = TextWrapping.Wrap;
-        Grid.SetRow(_status.Text, 2);
-        _root.Children.Add(_status.Text);
+        // UI.R31: the footer, as in every secondary window: what the list says on the left, Close on the right.
+        _status.Text.Style = InboundUi.Style("InboundSecondaryTextStyle");
+        _status.Text.VerticalAlignment = VerticalAlignment.Center;
+        var footer = new Grid { ColumnSpacing = 12 };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.Children.Add(_status.Text);
+        Grid.SetColumn(_close, 1);
+        footer.Children.Add(_close);
+        Grid.SetRow(footer, 2);
+        _root.Children.Add(footer);
+        _close.Click += (_, _) => Close();
+        var escape = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
+        escape.Invoked += (_, args) => { args.Handled = true; Close(); };
+        _root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+        _root.KeyboardAccelerators.Add(escape);
 
         AutomationProperties.SetName(_search, "Search hosts");
         AutomationProperties.SetName(_rows, "File hosts");
@@ -121,15 +136,16 @@ internal sealed class HosterWindow : Window
         }
 
         if (_rows.Children.Count == 0 && _hosters.Count > 0)
-            _rows.Children.Add(new TextBlock { Text = "No host matches.", Opacity = 0.72, Margin = new Thickness(4, 8, 0, 0) });
+            _rows.Children.Add(InboundUi.EmptyState("\uE721", "No host matches."));
     }
 
     private static UIElement Row(RemoteHosterDto hoster)
     {
-        var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(4, 6, 4, 6) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        var row = new Grid { ColumnSpacing = 10 };
+        // The icon's column exists only when there is an icon, so a row without one isn't indented.
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         if (Uri.TryCreate(hoster.IconUrl, UriKind.Absolute, out var icon) && icon.Scheme == Uri.UriSchemeHttps)
         {
@@ -142,22 +158,19 @@ internal sealed class HosterWindow : Window
         var text = new StackPanel { Spacing = 2 };
         text.Children.Add(new TextBlock { Text = hoster.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         if (Details(hoster) is { Length: > 0 } details)
-            text.Children.Add(new TextBlock { Text = details, FontSize = 12, Opacity = 0.72, TextWrapping = TextWrapping.Wrap });
+            text.Children.Add(InboundUi.Secondary(details));
         if (!string.IsNullOrWhiteSpace(hoster.Note))
-            text.Children.Add(new TextBlock { Text = hoster.Note, FontSize = 12, Opacity = 0.72, TextWrapping = TextWrapping.Wrap });
+            text.Children.Add(InboundUi.Secondary(hoster.Note));
         Grid.SetColumn(text, 1);
         row.Children.Add(text);
 
-        var state = new TextBlock
-        {
-            Text = hoster.Available ? "Up" : "Down",
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Foreground = InboundTheme.Brush(hoster.Available ? "InboundStatusDoneBrush" : "InboundStatusFailedBrush", row),
-        };
-        Grid.SetColumn(state, 2);
-        row.Children.Add(state);
-        AutomationProperties.SetName(row, $"{hoster.Name}, {state.Text}");
-        return row;
+        var state = new StatusChip(hoster.Available ? "Up" : "Down", hoster.Available ? "InboundStatusDoneBrush" : "InboundStatusFailedBrush");
+        state.Element.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(state.Element, 2);
+        row.Children.Add(state.Element);
+        var card = InboundUi.Card(row, new Thickness(12, 8, 12, 8));
+        AutomationProperties.SetName(card, $"{hoster.Name}, {state.Text.Text}");
+        return card;
     }
 
     private static string Details(RemoteHosterDto hoster)
@@ -168,10 +181,10 @@ internal sealed class HosterWindow : Window
         else if (linkLimit is { } limit) parts.Add($"{limit} links a day");
         if (hoster.DailyBandwidthUsed is { } bytesUsed)
             parts.Add(hoster.DailyBandwidthLimit is { } bytesLimit and > 0
-                ? $"Today {FolderChooser.Size(bytesUsed)} of {FolderChooser.Size(bytesLimit)}"
-                : $"Today {FolderChooser.Size(bytesUsed)}");
-        else if (hoster.DailyBandwidthLimit is { } dailyBytes and > 0) parts.Add($"{FolderChooser.Size(dailyBytes)} a day");
-        if (hoster.PerLinkSizeLimit is { } perLink and > 0) parts.Add($"Up to {FolderChooser.Size(perLink)} a file");
+                ? $"Today {UiFormat.Bytes(bytesUsed)} of {UiFormat.Bytes(bytesLimit)}"
+                : $"Today {UiFormat.Bytes(bytesUsed)}");
+        else if (hoster.DailyBandwidthLimit is { } dailyBytes and > 0) parts.Add($"{UiFormat.Bytes(dailyBytes)} a day");
+        if (hoster.PerLinkSizeLimit is { } perLink and > 0) parts.Add($"Up to {UiFormat.Bytes(perLink)} a file");
         return string.Join(" · ", parts);
     }
 }
