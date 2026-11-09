@@ -88,7 +88,8 @@ not used.
 **What the app gives the extension:** to show downloads in the toolbar popup, the app sends the extension
 its download list, including downloads you did not send from Chrome: addresses, page addresses, file
 names, folders and progress. The popup shows the newest 20 and lets you pause, resume, retry or delete them in the
-app, and, only if you tick "Delete the file too", delete the file. When the folder window opens, the app
+app, and, for a finished download only if you tick "Delete the file too", delete the file. Deleting an unfinished
+download always deletes its partial data. When the folder window opens, the app
 sends the default download folder and your favorite folders. The app's other settings, passwords and
 cookies are not sent to the extension. The extension keeps the list only in memory and sends it nowhere
 else.
@@ -149,9 +150,9 @@ app does not write cookies to them.
 
 Removing the extension or uninstalling the app does not delete this data. Removing a download from the
 list deletes its record and its cookies. It does not delete the recent-addresses list, the logs, or the
-size, status and dates kept for the app's statistics. If a paused or failed download is taken off the list
-with its data kept (the command-line `remove --keep-file`), a small progress file containing its addresses
-also stays behind. To erase everything, exit the app from its
+size, status and dates kept for the app's statistics. If an unfinished download is taken off the list
+with its data kept (the command-line `remove --keep-file`), its partial file and a small progress file
+containing its addresses also stay behind. To erase everything, exit the app from its
 tray icon, then delete that folder.
 
 ## Who else sees anything

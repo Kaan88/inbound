@@ -58,6 +58,20 @@ export function latestJobsByTarget(jobs: readonly JobSummary[], limit = POPUP_JO
   ];
 }
 
+/**
+ * Whether Delete asks about the file. Only a finished download has one to keep; an unfinished one has only
+ * partial data, which nothing can use once the download is off the list, so Delete always removes it, as the
+ * app's own window and the web UI do (UI.B19). Without this a kept partial file, and the folder holding it, stayed.
+ */
+export function deleteAsksAboutFile(job: JobSummary): boolean {
+  return job.state === "completed";
+}
+
+/** What Delete sends as deleteFile: the box's answer for a finished download, always yes otherwise. */
+export function deleteFileFor(job: JobSummary, boxTicked: boolean): boolean {
+  return deleteAsksAboutFile(job) ? boxTicked : true;
+}
+
 /** Pause or resume (retry for a failed one), then delete; only what the app says the job allows. */
 export function actionsFor(job: JobSummary): JobAction[] {
   const actions: JobAction[] = [];
