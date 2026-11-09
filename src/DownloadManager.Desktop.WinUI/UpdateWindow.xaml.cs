@@ -20,8 +20,8 @@ public sealed partial class UpdateWindow : Window
         // UI.R14: sized for the display's scaling (it was clipped at 150%), and in the middle of the main window.
         WindowLayout.ResizeForDpi(this, 460, 250);
         WindowLayout.CenterOnMainWindow(this);
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
         Title = "Inbound Download Manager update";
         WindowLayout.ApplyChrome(this, Root);
 

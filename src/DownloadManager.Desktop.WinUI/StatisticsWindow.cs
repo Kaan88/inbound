@@ -27,8 +27,8 @@ public sealed class StatisticsWindow : Window
         // Tall enough that the closing note is not cut off at 100%; it still scrolls on a shorter screen.
         WindowLayout.ResizeForDpi(this, 650, 720);
         WindowPlacement.Track(this, "statistics");
-        var icon = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        var icon = WindowLayout.AppIconPath;
+        if (File.Exists(icon)) AppWindow.SetIcon(WindowLayout.IconArgument(icon));
 
         var root = new StackPanel { Spacing = 14, Margin = new Thickness(16) };
         AppTheme.Track(root);

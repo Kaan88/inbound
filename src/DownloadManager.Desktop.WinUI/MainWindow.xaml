@@ -40,7 +40,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <MenuBar Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
+        <MenuBar x:Name="MainMenuBar" Grid.Row="0" Background="{ThemeResource InboundChromeBrush}" BorderThickness="0" Padding="4,1">
             <MenuBarItem x:Name="TasksMenu" Title="Tasks" AccessKey="T">
                 <MenuFlyoutItem Text="Add New Download…" AccessKey="N" Click="MenuAdd_Click">
                     <MenuFlyoutItem.KeyboardAccelerators>
