@@ -1,5 +1,6 @@
 using DownloadManager.Contracts;
 using DownloadManager.Core;
+using DownloadManager.Persistence;
 
 namespace DownloadManager.Integration.Tests;
 
@@ -199,5 +200,52 @@ public sealed partial class RuntimeServiceTests
         var spent = await ctx.WaitFor(one.Id, j => j.State == "failed" && j.UpdatedAt > last.UpdatedAt && j.QueueRetryAt is null,
             TimeSpan.FromSeconds(20));
         Assert.Equal(1, spent.QueueRetryCount);
+    }
+    [Fact]
+    public async Task ADownloadPausedBeforeTheFlagExistedIsTakenAsTheUsersPause()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "test-work", "legacy-pause-" + Guid.NewGuid().ToString("N"));
+        var paths = new StoragePaths(Path.Combine(root, "state"));
+        var destination = Path.Combine(root, "downloads");
+        Directory.CreateDirectory(destination);
+        paths.EnsureCreated();
+        try
+        {
+            var store = new JsonJobStore(paths);
+            DownloadJob PausedJob(string name, int seed) => new()
+            {
+                Url = $"{_server.BaseAddress}/file/{name}?size=65536&seed={seed}", FileName = name,
+                DestinationDirectory = destination, FinalFilePath = Path.Combine(destination, name),
+                PartFilePath = Path.Combine(destination, name + ".part"), State = DownloadState.Paused,
+                QueueId = 0, IsQueued = true, QueueProcessing = true,
+            };
+
+            // Saved by an older build: no pausedByUser at all. And one this build paused for the queue (false, written).
+            var legacy = PausedJob("legacy-paused.bin", 41);
+            var queuePaused = PausedJob("queue-paused.bin", 42);
+            await store.SaveAsync(legacy);
+            await store.SaveAsync(queuePaused);
+            var file = Directory.EnumerateFiles(paths.JobsDirectory, "*.json").Single(f => File.ReadAllText(f).Contains("legacy-paused.bin"));
+            var lines = File.ReadAllLines(file).Where(line => !line.Contains("\"pausedByUser\"", StringComparison.Ordinal)).ToArray();
+            Assert.NotEqual(File.ReadAllLines(file).Length, lines.Length);
+            File.WriteAllLines(file, lines);
+
+            Assert.True((await store.LoadAsync(legacy.Id))!.PausedByUser);
+            Assert.False((await store.LoadAsync(queuePaused.Id))!.PausedByUser);
+
+            await using var ctx = await ServiceContext.CreateAsync(_server, paths, destination, autoResume: false);
+            Assert.True((await ctx.Service.QueueActionAsync(new QueueActionRequest { QueueId = 0, Action = "start" })).Ok);
+            await ctx.WaitFor(queuePaused.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+            Assert.Equal("paused", ctx.Service.GetJob(legacy.Id)!.State);
+            Assert.True(ctx.Service.GetJob(legacy.Id)!.PausedByUser);
+
+            // Its own Resume still runs it.
+            Assert.True((await ctx.Service.ResumeAsync(legacy.Id)).Ok);
+            await ctx.WaitFor(legacy.Id, j => j.State == "completed", TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 }

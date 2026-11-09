@@ -225,6 +225,7 @@ public sealed class JsonJobStore : IJobStore
                 }
 
                 NormalizeJob(job);
+                MarkLegacyPauseAsTheUsers(job, json);
                 jobs.Add(job);
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException)
@@ -255,6 +256,7 @@ public sealed class JsonJobStore : IJobStore
             }
 
             NormalizeJob(job);
+            MarkLegacyPauseAsTheUsers(job, json);
             return job;
         }
         catch (Exception ex) when (ex is JsonException or IOException)
@@ -402,6 +404,23 @@ public sealed class JsonJobStore : IJobStore
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A job saved paused before <see cref="DownloadJob.PausedByUser"/> existed carries no flag, and which pause it was
+    /// is not known. It is taken as the user's, so starting its queue never resumes it; its own Resume still does (U-WL-2).
+    /// </summary>
+    private static void MarkLegacyPauseAsTheUsers(DownloadJob job, string json)
+    {
+        if (job.State != DownloadState.Paused || job.PausedByUser) return;
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object) return;
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (string.Equals(property.Name, nameof(DownloadJob.PausedByUser), StringComparison.OrdinalIgnoreCase)) return;
+        }
+
+        job.PausedByUser = true;
     }
 
     private static void NormalizeJob(DownloadJob job)
