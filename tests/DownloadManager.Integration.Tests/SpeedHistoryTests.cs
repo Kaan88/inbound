@@ -1,4 +1,4 @@
-using DownloadManager.Contracts;
+﻿using DownloadManager.Contracts;
 using DownloadManager.Core;
 using DownloadManager.Runtime;
 using TestServer;
@@ -9,6 +9,41 @@ namespace DownloadManager.Integration.Tests;
 public sealed class SpeedHistoryTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 8, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void ADownloadsOwnFiguresStartWhenItStartedAndHoldThenDropToZero()
+    {
+        var history = new SpeedHistory(T0);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        Assert.Null(history.Read(a, T0.AddSeconds(1)));
+        for (var s = 10; s <= 12; s++)
+        {
+            history.Report(a, 1000, T0.AddSeconds(s));
+            history.Report(b, 5000, T0.AddSeconds(s));
+        }
+
+        // Nothing after second 12: second 13 and 14 hold the last figure, then 0.
+        var read = history.Read(a, T0.AddSeconds(16))!;
+        Assert.Equal(a, read.JobId);
+        Assert.Equal(T0.AddSeconds(10), read.Start);
+        Assert.Equal([1000L, 1000, 1000, 1000, 1000, 0, 0], read.BytesPerSecond);
+        // The total is both downloads.
+        Assert.Equal(6000, history.Read(T0.AddSeconds(16)).BytesPerSecond[11]);
+    }
+
+    [Fact]
+    public void AStoppedDownloadsFiguresAreLetGo()
+    {
+        var history = new SpeedHistory(T0);
+        var a = Guid.NewGuid();
+        history.Report(a, 1000, T0.AddSeconds(1));
+        history.Stopped(a, T0.AddSeconds(2));
+        Assert.Null(history.Read(a, T0.AddSeconds(3)));
+        // Running again starts a new track.
+        history.Report(a, 2000, T0.AddSeconds(5));
+        Assert.Equal(T0.AddSeconds(5), history.Read(a, T0.AddSeconds(5))!.Start);
+    }
 
     [Fact]
     public void AnIdleHourReadsAsZerosFromTheTimesAlone()
@@ -268,5 +303,14 @@ public sealed class HostSpeedHistoryTests : IAsyncLifetime
 
         Assert.Equal(history.Start, later.Start);
         Assert.Contains(later.BytesPerSecond.TakeLast(3), value => value > 64 * 1024);
+
+        // F-12: the same download's own figures, for Progress Details opened mid-download.
+        var own = (await connection.RequestAsync(MessageTypes.SpeedHistoryGet, new SpeedHistoryRequest { JobId = added.Job!.Id })).GetPayload<SpeedHistoryDto>();
+        Assert.Equal(added.Job.Id, own.JobId);
+        Assert.Contains(own.BytesPerSecond, value => value > 64 * 1024);
+        // A download that isn't running has none; the answer still names it, so the window knows it was asked.
+        var none = (await connection.RequestAsync(MessageTypes.SpeedHistoryGet, new SpeedHistoryRequest { JobId = Guid.NewGuid() })).GetPayload<SpeedHistoryDto>();
+        Assert.NotNull(none.JobId);
+        Assert.Empty(none.BytesPerSecond);
     }
 }

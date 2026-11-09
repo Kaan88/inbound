@@ -157,6 +157,10 @@ public sealed partial class HostConnection : IAsyncDisposable
     public Task<IpcMessage> GetSpeedHistoryAsync(CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.SpeedHistoryGet, new { }, TimeSpan.FromSeconds(8), cancellationToken);
 
+    /// <summary>F-12: one download's figures while it runs. An older Host answers with the total (no <c>jobId</c>).</summary>
+    public Task<IpcMessage> GetSpeedHistoryAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => RequestAsync(MessageTypes.SpeedHistoryGet, new SpeedHistoryRequest { JobId = jobId }, TimeSpan.FromSeconds(8), cancellationToken);
+
     public Task<IpcMessage> AddAsync(AddJobRequest request, CancellationToken cancellationToken = default)
         => RequestAsync(MessageTypes.JobAdd, request, TimeSpan.FromSeconds(20), cancellationToken);
 

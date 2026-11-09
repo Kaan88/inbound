@@ -52,8 +52,7 @@ internal sealed class PackageWindow : Window
     private readonly TextBlock _ringCaption = new() { FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 3, 0, 0) };
     private readonly List<InfoTile> _tiles = [];
     // UI.R34: Progress Details' speed card, for the whole package, sampled once a second by the same rule (UI.B20).
-    // It starts closed to its figures bar so the window still fits a 768-pixel screen; its toggle opens the plot.
-    private readonly DownloadSpeedGraph _chart = new() { Heading = "Speed", PeriodSeconds = 60, IsExpanded = false };
+    private readonly DownloadSpeedGraph _chart = new() { Heading = "Speed", PeriodSeconds = 60 };
     private Border? _chartCard;
     private readonly DispatcherTimer _chartTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     // With no Extraction tab, one tab would look odd: the files get a section heading instead.
@@ -112,7 +111,7 @@ internal sealed class PackageWindow : Window
 
         // The chosen file's details are the longer of the two, and the list scrolls well in less room.
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star), GridLength.Auto, GridLength.Auto })
-            _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 110 : 0 });
+            _root.RowDefinitions.Add(new RowDefinition { Height = height, MinHeight = height.IsStar ? 84 : 0 });
         _openFolder.Visibility = Visibility.Collapsed;
         _delete.Visibility = Visibility.Collapsed;
         _delete.Margin = new Thickness(0, 0, 16, 0);
@@ -198,6 +197,7 @@ internal sealed class PackageWindow : Window
             foreach (var job in snapshot.Jobs) _jobs[job.Id] = job;
             SetMembers(snapshot.Settings.DownloadGroups);
             _ = ReadArchivesAsync();
+            _ = LoadSpeedHistoryAsync();
         });
         _connection.GroupsChanged += groups => DispatcherQueue.TryEnqueue(() =>
         {
@@ -300,6 +300,40 @@ internal sealed class PackageWindow : Window
         var rates = _members.Where(_jobs.ContainsKey).Select(id => _jobs[id])
             .Select(job => SpeedSample.JobRate(job.State, job.BytesPerSecond, job.UpdatedAt, now));
         _chart.AddSample(now, SpeedSample.Total(_hostConnected, rates.ToList()));
+    }
+
+    /// <summary>
+    /// F-12: the files' figures from the Host, added up second by second, so the package's graph opened mid-download
+    /// shows what came before. Files the Host has none for (not running, or an older Host) add nothing.
+    /// </summary>
+    private async Task LoadSpeedHistoryAsync()
+    {
+        try
+        {
+            var totals = new SortedDictionary<long, long>();
+            foreach (var id in _members.ToList())
+            {
+                if (_jobs.GetValueOrDefault(id) is not { State: "downloading" or "connecting" or "verifying" or "retryWaiting" }) continue;
+                var reply = await _connection.GetSpeedHistoryAsync(id);
+                if (_closed) return;
+                if (reply.Type != MessageTypes.SpeedHistoryResult || reply.GetPayload<SpeedHistoryDto>() is not { } history || history.JobId != id) continue;
+                var start = history.Start.ToUnixTimeSeconds();
+                for (var i = 0; i < history.BytesPerSecond.Count; i++)
+                {
+                    var second = start + i * (long)history.IntervalSeconds;
+                    totals[second] = totals.GetValueOrDefault(second) + Math.Max(0, history.BytesPerSecond[i]);
+                }
+            }
+            if (totals.Count == 0) return;
+            var first = totals.Keys.First();
+            var values = new List<long>();
+            for (var second = first; second <= totals.Keys.Last(); second++) values.Add(totals.GetValueOrDefault(second));
+            _chart.LoadHistory(DateTimeOffset.FromUnixTimeSeconds(first), 1, values);
+        }
+        catch (Exception ex)
+        {
+            UiTrace.Write($"Package speed history not loaded: {ex.Message}");
+        }
     }
 
     private void UpdateChartSeen() => _chart.IsSeen = !_closed && AppWindow.IsVisible && _chartCard is { Visibility: Visibility.Visible }
