@@ -216,6 +216,16 @@ default window width. With one remote or archive row selected, the status bar sa
     action is the accent button; Delete is `InboundUi.DeleteButton`, a red trash glyph with its label. Once a
     window's work is done, actions that can't apply hide rather than grey out.
   - Account or check results are an `InfoBar` (Success, Error or Informational), not a plain sentence.
+- My provider (UI.R32) is one `ProviderPanel` in two layouts. In the main window the sidebar's My provider entry shows
+  its full layout in the list's place (A: catalog columns, a 360px details pane with the file tree, the folder and the
+  Download buttons); the toolbar button and Ctrl+T show it as a drawer, the right pane of a `SplitView` (C: two-line
+  cards, the chosen one holding its files). Which opens first is Options > Window > "Open My provider as" (full view by
+  default); each layout has the button to the other, and the switch keeps the tab, the chosen item, the scroll and the
+  folder. The drawer covers the list unless pinned, and a pinned drawer still covers it when the list would get
+  narrower than 520px. It is the one place with in-app Acrylic (`InboundDrawerBrush`), because it lies over the opaque
+  list where Mica can't show. "Open in its own window" puts the same panel in a window for a second screen. Nothing in
+  the panel reads or ticks while no view of it shows. After a Download the list shows an `InfoBar` (Added N files from
+  the item, Show, Back to My provider).
 - Selection in a list of places (the sidebar, the Scheduler's queues) is a rounded fill set in from the edges
   (`InboundCategoryItemStyle`: radius 4, margin 4,1), matching the Options page list.
 - Secondary text uses `TextFillColorSecondaryBrush` in XAML or

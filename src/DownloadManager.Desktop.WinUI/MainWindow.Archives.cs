@@ -217,6 +217,12 @@ public sealed partial class MainWindow
     {
         var rows = ArchiveRules.DownloadsBehind(OnlySelectedRecords, _jobsById.ContainsKey).Select(id => _jobsById[id]).ToList();
         if (rows.Count == 0) return;
+        ShowRowsOnList(rows);
+    }
+
+    /// <summary>These rows selected on All Downloads, their packages opened, the first in view and focused.</summary>
+    private void ShowRowsOnList(List<JobViewModel> rows)
+    {
 
         // A file in a closed package has no row until the package opens.
         var closed = rows.Select(row => row.PackageId).OfType<Guid>().Distinct().Where(package => !_uiState.ExpandedPackages.Contains(package)).ToList();

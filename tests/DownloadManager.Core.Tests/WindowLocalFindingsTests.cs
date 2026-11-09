@@ -228,7 +228,7 @@ public sealed class WindowLocalFindingsTests
     [Fact]
     public void U_WL_11_the_row_menu_selects_its_row_and_download_says_the_window_closes()
     {
-        var source = File.ReadAllText(WinUiFile("MyProviderWindow.cs"));
+        var source = File.ReadAllText(WinUiFile("ProviderPanel.cs"));
         Assert.Contains("_list.ContextRequested += List_ContextRequested;", source);
         Assert.Contains("_list.SelectedItem = row;", source);
         Assert.Contains("then closes this window", source);

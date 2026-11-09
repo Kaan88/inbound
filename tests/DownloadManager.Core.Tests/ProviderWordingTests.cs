@@ -13,7 +13,7 @@ public sealed partial class ProviderWordingTests
         "src/DownloadManager.Desktop.WinUI/Remote",
         "src/DownloadManager.Desktop.WinUI/MainWindow.AddFlows.cs",
         "src/DownloadManager.Desktop.WinUI/MainWindow.Remote.cs",
-        "src/DownloadManager.Desktop.WinUI/MyProviderWindow.cs",
+        "src/DownloadManager.Desktop.WinUI/ProviderPanel.cs",
         "src/DownloadManager.Desktop.WinUI/ContainerImportDialog.cs",
         "src/DownloadManager.Runtime/Remote",
         "src/DownloadManager.Providers.TorBox",

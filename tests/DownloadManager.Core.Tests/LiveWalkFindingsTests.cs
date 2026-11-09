@@ -41,7 +41,7 @@ public class LiveWalkFindingsTests
     [Fact]
     public void Each_way_a_sorted_list_can_come_to_show_part_of_the_account_goes_on_reading()
     {
-        var source = File.ReadAllText(Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI", "MyProviderWindow.cs"));
+        var source = File.ReadAllText(Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI", "ProviderPanel.cs"));
         Assert.Equal(3, source.Split("RemoteItemSort.NeedsTheRest(").Length - 1);
     }
 
@@ -57,7 +57,7 @@ public class LiveWalkFindingsTests
     [Fact]
     public void A_list_sorted_while_it_reads_on_shows_the_first_rows_of_the_order()
     {
-        var source = File.ReadAllText(Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI", "MyProviderWindow.cs"));
+        var source = File.ReadAllText(Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI", "ProviderPanel.cs"));
         Assert.Contains("if (onShow && more && _sortKey is not null) ShowWhereTheOrderPuts(page);", source, StringComparison.Ordinal);
     }
 
@@ -72,7 +72,7 @@ public class LiveWalkFindingsTests
     public void No_window_lets_WinUI_float_a_shortcuts_name_over_it()
     {
         var folder = Path.Combine(Root(), "src", "DownloadManager.Desktop.WinUI");
-        var rootsWithShortcuts = new[] { ("MainWindow.xaml.cs", "RootGrid"), ("MyProviderWindow.cs", "_root"), ("PackageWindow.cs", "_root"), ("SettingsWindow.cs", "_root"), ("DownloadWindow.xaml.cs", "Root") };
+        var rootsWithShortcuts = new[] { ("MainWindow.xaml.cs", "RootGrid"), ("ProviderPanel.cs", "_root"), ("PackageWindow.cs", "_root"), ("SettingsWindow.cs", "_root"), ("DownloadWindow.xaml.cs", "Root") };
         foreach (var (file, root) in rootsWithShortcuts)
         {
             var source = File.ReadAllText(Path.Combine(folder, file));
