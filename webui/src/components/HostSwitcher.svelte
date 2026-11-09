@@ -63,7 +63,8 @@
   }
 </script>
 
-<svelte:window onclick={(event) => { if (open && !(event.target as HTMLElement).closest?.('[data-host-switcher]')) open = false; }} onkeydown={(event) => { if (event.key === 'Escape' && open) { open = false; toggle?.focus(); } }} />
+<!-- The event's path, not the target: Add takes its own button out of the list before this runs, and the menu must stay. -->
+<svelte:window onclick={(event) => { if (open && !event.composedPath().some((node) => node instanceof HTMLElement && node.hasAttribute('data-host-switcher'))) open = false; }} onkeydown={(event) => { if (event.key === 'Escape' && open) { open = false; toggle?.focus(); } }} />
 
 <div class="relative min-w-0" data-host-switcher>
   <!-- A server glyph, not the theme's monitor (U-WU-19); the host's name shows on a phone too. -->
