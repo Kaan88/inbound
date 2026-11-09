@@ -203,35 +203,51 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   (`ask-panel.ts`: file name, This PC or Server, Save in with Choose…, favorites, free space on the server,
   Start, Download and Keep in browser), "1 of 3" and the names of the others; when nothing waits it is the
   usual popup with its download list, which then shows the download just sent. Several downloads at once open
-  the popup once and queue in it; a download caught while the popup is open joins the queue. The popup holds a
-  port (`dm.ask`) open to the worker while it is open: its pings keep the worker alive, and the port closing
-  means the popup closed, so whatever still waits goes back to the browser, exactly as when the folder window
-  is closed without a choice (one being sent waits for the answer). A popup closes when it loses the focus (a
-  click on the page, another window, or a tab switch), so that too leaves the download to the browser.
-  Choose… for the server lists its folders inside the popup. Choose… for This PC would open the desktop app's
-  folder dialog, which takes the focus and so closes the popup: instead the waiting downloads move to folder
-  windows (`dm.askInWindow`), the chosen one opening its dialog at once (`handoff.html?pick=1`). Right-click
-  downloads always use the window. API facts relied on:
+  the popup once and queue in it: from the `openPopup` call until the popup's port connects (or the 5-second
+  wait runs out) the popup counts as opening, `openPopup` is not called again (Firefox refuses a second call
+  while the first popup loads), and downloads caught meanwhile join the queue. A download caught while the popup
+  is open joins the queue. The popup holds a port (`dm.ask`) open to the worker while it is open: its pings keep
+  the worker alive, and the port closing means the popup closed, so whatever it showed and still waits goes back
+  to the browser, exactly as when the folder window is closed without a choice (one being sent waits for the
+  answer). The popup also says it is closing on `pagehide` (`dm.askClosing`), because Firefox reports the port
+  closed about a second after the popup has gone. A popup closes when it loses the focus (a click on the page,
+  another window, or a tab switch), so that too leaves the download to the browser. A download counts as shown
+  once it was in an open popup for 500 ms; one caught as the popup was already closing (it goes within about a
+  tenth of a second of losing the focus) was never seen, so the popup opens again for it, once. Choose… for the
+  server lists its folders inside the popup. Choose… for This PC would open the desktop app's folder dialog,
+  which takes the focus and so closes the popup: instead the waiting downloads move to folder windows
+  (`dm.askInWindow`), the chosen one opening its dialog at once (`handoff.html?pick=1`) and starting from what
+  was set in the popup (target, file name, folder and start mode). Right-click downloads always use the window.
+  API facts relied on:
   - Chrome: `action.openPopup()` is available to every extension from Chrome 127; from 118 to 126 only to
     policy-installed extensions ([chrome.action](https://developer.chrome.com/docs/extensions/reference/api/action#method-openPopup),
     [MDN compatibility data](https://github.com/mdn/browser-compat-data/blob/main/webextensions/api/action.json)).
     The manifest minimum is 109, so older browsers have no usable call. Edge follows Chromium.
   - Chrome, and Firefox from 149: a `windowId` naming a window that is not focused is refused
     ([MDN action.openPopup](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/action/openPopup)).
-    A download item names no window, so the worker asks `windows.getLastFocused({ windowTypes: ["normal"] })`
-    and does not call `openPopup` when that window is not focused.
+    A download item names no window, so the worker looks for the focused window of type `normal` in
+    `windows.getAll({ windowTypes: ["normal"] })` and does not call `openPopup` when there is none. It checks
+    the type itself: in Firefox 159, `windows.getLastFocused({ windowTypes: ["normal"] })` returned a focused
+    folder window (type `popup`), and `openPopup` then succeeded there with nothing shown (seen on a test
+    profile, 2026-11-09).
   - Firefox: `action.openPopup()` from 109, but before 149 only from a user gesture
     ([MDN compatibility data](https://github.com/mdn/browser-compat-data/blob/main/webextensions/api/action.json);
     [Mozilla add-ons blog, Firefox 149-152](https://blog.mozilla.org/addons/2026/04/23/webextensions-api-changes-firefox-149-152/),
     Desktop only). A caught download is not a gesture, so Firefox 140 to 148 refuses and the window asks. From
     150, uplifted to 149, it also refuses while a context menu, doorhanger or notification is open
     ([bug 2022281](https://bugzilla.mozilla.org/show_bug.cgi?id=2022281)).
-  - The call resolves when the popup opens and rejects when it does not (MDN).
+  - The call resolves when the popup opens and rejects when it does not (MDN). Seen on test instances
+    (2026-11-09): Chromium 158 resolves only once the popup page has loaded and connected, and rejects with
+    "Failed to open popup." when the popup was closed while loading; Firefox 159 resolves before the page
+    connects.
 
-  **Fallback to the window:** when `action.openPopup` is missing, when the browser's front window is not
-  focused (or there is none), when the call is refused, or when an opened popup has not connected within
-  5 seconds, every waiting download gets its own folder window, as before EXT.R7. A folder window that can't be
-  opened, or does not connect within 20 seconds, gives its download back to the browser.
+  **Fallback to the window:** when `action.openPopup` is missing, when no normal browser window is focused,
+  when the call is refused, or when the popup has not connected within 5 seconds of the call (also when the
+  call never answers), every waiting download gets its own folder window, as before EXT.R7. The exception is a
+  popup the user closed before it could ask: if the popup page was there while `openPopup` was pending
+  (`runtime.getContexts` in Chromium, `extension.getViews` in Firefox) and the call was then refused, or the
+  page is gone when the 5 seconds run out, no choice was made and the browser keeps the downloads. A folder
+  window that can't be opened, or does not connect within 20 seconds, gives its download back to the browser.
 
   Checked on 2026-11-09 with test instances only (a test Host, a test server on 127.0.0.1 and a local file
   server; downloads to test folders): Chrome for Testing 158 with the unpacked build and a server-only pairing
@@ -241,6 +257,22 @@ Firefox is required (owner decision 2026-11-06, ROADMAP EXT.E1). The same source
   reaching the test Host (the popup opened by itself with This PC and Server; switching target, the server's
   folder list, a send to a server folder; closing the popup started the download again in Firefox; with the
   window not in front, three folder windows, closed, gave the three back to Firefox). Edge was not run.
+
+  Checked again later on 2026-11-09 after the fixes for a download caught while the popup closes, several
+  downloads while it loads, a focused folder window in Firefox and Choose… carrying the popup's choices (test
+  Host, test server and file server as above; the test native host registered under the Chromium key and
+  removed afterwards): Playwright's Chromium 158, headed, and Firefox 159, headed over BiDi. In both, a
+  download caught as the popup lost the focus opened the popup again and asked (Chromium 3 of 3, Firefox 4 of
+  4, with the final build; a temporary trace in earlier Chromium runs showed the reopening 8 times); three downloads at once opened one popup with "1 of 3" (in Chromium also 100 and
+  250 ms apart, on a build before the last two changes); a popup shown for over a second and closed gave its
+  downloads to the browser without opening again. In Firefox, with
+  a popup-type window focused, `openPopup` was not called and a folder window asked. Choose… for This PC after
+  switching from Server, renaming and choosing Start later opened a window on This PC with that name and start
+  mode, and the test Host's folder dialog. A minimised Chromium window got the folder window. Not reproduced:
+  a popup closed before its page connects. In Chromium that leaves only a few milliseconds (the page connects
+  before `openPopup` answers); a close forced in that gap was refused with "Failed to open popup." before the
+  page was seen, so the folder window asked. In Firefox the page connected even when the popup was closed
+  while loading, so the popup opened again once. The closed-before-connecting rules are covered by the npm tests.
 - **Popup:** the newest 20 of all the app's downloads, whatever started them, with Pause, Resume (Retry for
   a failed one) and Delete, which asks first and has "Delete the file too", unticked. Each action goes on a
   native connection of its own, as the folder picker does: the Host answers one command at a time per

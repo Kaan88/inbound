@@ -8,13 +8,20 @@ const {
 } = require('./harness.cjs');
 
 const asking = { ...catching, destinationMode: 'ask' };
+// A download counts as seen in the popup once it was there 500 ms; these tests close popups at once, so they
+// count it as seen at once unless a test says otherwise (the D1 tests).
+global.__inboundAskSeenMs = 0;
 
-/** A browser whose toolbar popup can be opened: openPopup's calls, and a front window that is focused or not. */
-function withPopup(settings = asking, { focused = true, openPopup } = {}) {
+/**
+ * A browser whose toolbar popup can be opened: openPopup's calls, and a front window that is focused or not.
+ * windows: what windows.getAll answers (Firefox includes a focused folder window, type popup).
+ */
+function withPopup(settings = asking, { focused = true, openPopup, windows } = {}) {
   const made = capturingChrome(settings);
   const calls = [];
   made.harness.chrome.action.openPopup = openPopup ?? (async (options) => { calls.push(options); });
-  made.harness.chrome.windows.getLastFocused = async (query) => ({ id: 7, type: 'normal', focused, query });
+  made.harness.chrome.windows.getLastFocused = async (query) => (windows ?? [{ id: 7, type: 'normal', focused }]).find(w => w.focused) ?? { id: 7, type: 'normal', focused, query };
+  made.harness.chrome.windows.getAll = async () => windows ?? [{ id: 7, type: 'normal', focused }];
   return { ...made, openPopupCalls: calls };
 }
 
@@ -164,7 +171,7 @@ for (const [name, options, opens] of [
   });
 }
 
-test('EXT.R7: a popup that opens but never connects hands its downloads to folder windows', async () => {
+test('EXT.R7: a popup that opens but never connects, and the browser cannot tell whether it is still there, hands its downloads to folder windows', async () => {
   const { harness, log, openPopupCalls } = withPopup();
   global.__inboundPopupConnectMs = 20;
   try {
@@ -269,4 +276,239 @@ test('EXT.R7 on Firefox: a download caught from its response waits in the popup;
     await settle(() => log.downloaded.length);
     assert.deepEqual(log.downloaded, [{ url: 'https://site.test/get?id=9', filename: 'ff.zip' }]);
   });
+});
+
+test('EXT.R7 (review 2, e2e D2): downloads caught after openPopup resolved but before the popup connected join it; openPopup is not called again', async () => {
+  // Firefox refuses a second call while the first popup is loading.
+  let open = false;
+  const calls = [];
+  const { harness, log } = withPopup(asking, { openPopup: async (options) => {
+    calls.push(options);
+    if (open) throw new Error('openPopup() cannot be called while another panel is open');
+    open = true;
+  } });
+  global.__inboundPopupConnectMs = 60;
+  try {
+    await withBackground(harness, async () => {
+      const answers = [];
+      catchDownload(harness, 101, 'one.zip', answers);
+      await settle(() => calls.length === 1 && harness.session.askQueue?.length === 1);
+      await new Promise(resolve => setTimeout(resolve, 5)); // openPopup has resolved; the page is still loading
+      catchDownload(harness, 102, 'two.zip', answers);
+      catchDownload(harness, 103, 'three.zip', answers);
+      await settle(() => log.paused.length === 3 && harness.session.askQueue?.length === 3);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(calls.length, 1, 'no second openPopup while the first popup loads');
+      assert.deepEqual(log.windows, [], 'nothing moved to windows');
+      const popup = openAskPort(harness);
+      assert.deepEqual((await queue(harness)).map(item => item.fileName), ['one.zip', 'two.zip', 'three.zip']);
+      // Past the connect wait: the connected popup keeps them.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.deepEqual(log.windows, []);
+      assert.deepEqual(log.resumed, []);
+      assert.equal((await queue(harness)).length, 3);
+        popup.close();
+      await settle(() => log.resumed.length === 3);
+      assert.deepEqual(answers, [101, 102, 103]);
+    });
+  } finally { delete global.__inboundPopupConnectMs; }
+});
+
+/** Runs with the browser's real seen time: a popup closed within 500 ms of showing a download never saw it. */
+async function withSeenTime(run) {
+  global.__inboundAskSeenMs = 500;
+  try { await run(); } finally { global.__inboundAskSeenMs = 0; }
+}
+
+test('EXT.R7 (e2e D1): a download caught while the popup is closing opens the popup again instead of going to the browser', () => withSeenTime(async () => {
+  const { harness, log, openPopupCalls } = withPopup();
+  await withBackground(harness, async () => {
+    const answers = [];
+    // Open with nothing waiting (as after a Download), then losing the focus as the next download starts.
+    const closing = openAskPort(harness);
+    catchDownload(harness, 111, 'next.zip', answers);
+    await settle(() => closing.posted.some(message => message.type === 'dm.askChanged' && message.waiting === 1));
+    closing.close(); // closed at once: it never showed it
+    await settle(() => openPopupCalls.length === 1);
+    assert.deepEqual(log.resumed, [], 'not given to the browser');
+    assert.deepEqual(log.windows, []);
+    assert.deepEqual((await queue(harness)).map(item => item.fileName), ['next.zip']);
+
+    // The popup that opened again shows it; closing that one after a while gives it back.
+    const again = openAskPort(harness);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    again.close();
+    await settle(() => log.resumed.length === 1);
+    assert.deepEqual(answers, [111]);
+    assert.equal(openPopupCalls.length, 1);
+  });
+}));
+
+test('EXT.R7: a download shown in the popup for a while goes back to the browser when the popup closes, without opening it again', () => withSeenTime(async () => {
+  const { harness, log, openPopupCalls } = withPopup();
+  await withBackground(harness, async () => {
+    const answers = [];
+    const popup = openAskPort(harness);
+    catchDownload(harness, 112, 'seen.zip', answers);
+    await settle(() => popup.posted.length);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    popup.close();
+    await settle(() => log.resumed.length === 1);
+    assert.deepEqual(answers, [112]);
+    assert.deepEqual(openPopupCalls, []);
+  });
+}));
+
+test('EXT.R7 (e2e D1): the popup opens again only once for a download it never showed', () => withSeenTime(async () => {
+  const { harness, log, openPopupCalls } = withPopup();
+  await withBackground(harness, async () => {
+    const answers = [];
+    const first = openAskPort(harness);
+    catchDownload(harness, 121, 'a.zip', answers);
+    await settle(() => first.posted.length);
+    first.close();
+    await settle(() => openPopupCalls.length === 1);
+    // The second popup closes without showing it either: now the browser keeps it.
+    openAskPort(harness).close();
+    await settle(() => log.resumed.length === 1);
+    assert.equal(openPopupCalls.length, 1);
+    assert.deepEqual(answers, [121]);
+    assert.deepEqual(await queue(harness), []);
+  });
+}));
+
+test('EXT.R7 (e2e D3, Firefox): a focused folder window (type popup) is not where the toolbar popup opens; the folder window asks', async () => {
+  const { harness, log, openPopupCalls } = withPopup(asking, {
+    windows: [{ id: 47, type: 'popup', focused: true }, { id: 7, type: 'normal', focused: false }],
+  });
+  await withBackground(harness, async () => {
+    catchDownload(harness, 131, 'a.zip', []);
+    await settle(() => log.windows.length === 1);
+    assert.deepEqual(openPopupCalls, []);
+    assert.match(log.windows[0].url, /handoff\.html\?id=/);
+    assert.deepEqual(log.resumed, []);
+  });
+});
+
+test('EXT.R7: the popup opens in the focused normal window among several', async () => {
+  const { harness, openPopupCalls } = withPopup(asking, {
+    windows: [{ id: 3, type: 'normal', focused: false }, { id: 9, type: 'normal', focused: true }],
+  });
+  await withBackground(harness, async () => {
+    catchDownload(harness, 141, 'a.zip', []);
+    await settle(() => openPopupCalls.length);
+    assert.deepEqual(openPopupCalls, [{ windowId: 9 }]);
+  });
+});
+
+for (const [name, setup, expectWindow] of [
+  ['the browser says the popup is gone (runtime.getContexts, Chrome)', (chrome) => { chrome.runtime.getContexts = async () => []; }, false],
+  ['the browser says the popup is gone (extension.getViews, Firefox)', (chrome) => { chrome.extension = { getViews: () => [] }; }, false],
+  ['the popup page is still there but never connected', (chrome) => { chrome.runtime.getContexts = async () => [{ contextType: 'POPUP' }]; }, true],
+]) {
+  test(`EXT.R7 (review 3): a popup that never connects: when ${name}, ${expectWindow ? 'folder windows ask' : 'the browser keeps the downloads'}`, async () => {
+    const { harness, log, openPopupCalls } = withPopup();
+    setup(harness.chrome);
+    global.__inboundPopupConnectMs = 20;
+    try {
+      await withBackground(harness, async () => {
+        const answers = [];
+        catchDownload(harness, 151, 'a.iso', answers);
+        catchDownload(harness, 152, 'b.iso', answers);
+        await settle(() => openPopupCalls.length && log.paused.length === 2);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (expectWindow) {
+          assert.equal(log.windows.length, 2);
+          assert.deepEqual(log.resumed, []);
+        } else {
+          assert.deepEqual(log.windows, [], 'no folder windows for a popup the user closed');
+          assert.deepEqual(log.resumed, [151, 152]);
+          assert.deepEqual(answers, [151, 152]);
+        }
+        assert.deepEqual(await queue(harness), []);
+      });
+    } finally { delete global.__inboundPopupConnectMs; }
+  });
+}
+
+test('EXT.R7 (review 1): Choose... from the popup carries its target, file name, folder and start mode to the window', async () => {
+  const { harness, log } = withPopup();
+  await withBackground(harness, async () => {
+    catchDownload(harness, 161, 'a.iso', []);
+    await settle(() => log.paused.length);
+    openAskPort(harness);
+    const [item] = await queue(harness);
+    const draft = { target: 'local', fileName: 'renamed.iso', destination: 'E:\\Fav', startMode: 'later', extra: 'dropped' };
+    assert.equal((await sendRuntimeMessage(harness, { type: 'dm.askInWindow', id: item.id, pick: true, draft }, ownPage('popup.html'))).ok, true);
+    assert.match(log.windows[0].url, /pick=1$/);
+    const info = sendRuntimeMessage(harness, { type: 'dm.getHandoff', id: item.id }, ownPage('handoff.html'));
+    await answerNative(harness, 'settings.downloadFolders', { ok: true, defaultFolder: 'D:\\Downloads', favorites: [] });
+    assert.deepEqual((await info).draft, { target: 'local', fileName: 'renamed.iso', destination: 'E:\\Fav', startMode: 'later' });
+    assert.equal(harness.session[`handoff.${item.id}`].windowDraft.fileName, 'renamed.iso', 'kept for a worker restart');
+  });
+});
+
+test('EXT.R7 (review 3, Chromium): openPopup refused after its page was there (closed while loading) gives the downloads back; refused without a page, the windows ask', async () => {
+  for (const shownFirst of [true, false]) {
+    let contexts = [];
+    const { harness, log } = withPopup(asking, { openPopup: async () => {
+      if (shownFirst) contexts = [{ contextType: 'POPUP' }];
+      await new Promise(resolve => setTimeout(resolve, 60));
+      contexts = [];
+      throw new Error('Failed to open popup.');
+    } });
+    harness.chrome.runtime.getContexts = async () => contexts;
+    await withBackground(harness, async () => {
+      const answers = [];
+      catchDownload(harness, 181, 'a.iso', answers);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (shownFirst) {
+        assert.deepEqual(log.windows, [], 'the user closed it: no folder window');
+        assert.deepEqual(log.resumed, [181]);
+        assert.deepEqual(answers, [181]);
+      } else {
+        assert.equal(log.windows.length, 1);
+        assert.deepEqual(log.resumed, []);
+      }
+      assert.deepEqual(await queue(harness), []);
+    });
+  }
+});
+
+test('EXT.R7 (e2e D1, Firefox): the popup says it is closing before its port closes; a download caught after that is not counted as seen', () => withSeenTime(async () => {
+  const { harness, log, openPopupCalls } = withPopup();
+  await withBackground(harness, async () => {
+    const answers = [];
+    const popup = openAskPort(harness);
+    catchDownload(harness, 191, 'shown.zip', answers);
+    await settle(() => popup.posted.length);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    // pagehide: the popup is gone now, although Firefox closes the port only about a second later.
+    for (const listener of popup.port.onMessage.listeners) listener({ type: 'dm.askClosing' });
+    await settle(() => log.resumed.length === 1);
+    assert.deepEqual(answers, [191], 'shown long enough: back to the browser at once');
+    assert.deepEqual(openPopupCalls, []);
+    // A download caught now waits for a new popup, not for the closed one.
+    catchDownload(harness, 192, 'late.zip', answers);
+    await settle(() => openPopupCalls.length === 1);
+    popup.close(); // the late disconnect changes nothing
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(log.resumed, [191]);
+    assert.deepEqual((await queue(harness)).map(item => item.fileName), ['late.zip']);
+  });
+}));
+
+test('EXT.R7: an openPopup call that never answers does not hold the queue: the folder windows ask', async () => {
+  const { harness, log } = withPopup(asking, { openPopup: () => new Promise(() => {}) });
+  global.__inboundPopupConnectMs = 20;
+  try {
+    await withBackground(harness, async () => {
+      catchDownload(harness, 201, 'a.iso', []);
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.equal(log.windows.length, 1);
+      catchDownload(harness, 202, 'b.iso', []);
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.equal(log.windows.length, 2, 'the next download is not stuck behind it either');
+    });
+  } finally { delete global.__inboundPopupConnectMs; }
 });
