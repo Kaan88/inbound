@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Security.Principal;
 using DownloadManager.Contracts;
 
@@ -11,6 +12,7 @@ namespace DownloadManager.Integration.Tests;
 /// <see cref="HostHelloPipeTests"/> go through it against the real Host.
 /// </summary>
 [Trait("Platform", "Windows")]
+[SupportedOSPlatform("windows")]
 public sealed class PipeOwnerTests
 {
     private const string NoApi = "https://example.invalid/v1/api/";

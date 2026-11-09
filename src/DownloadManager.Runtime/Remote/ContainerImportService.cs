@@ -514,6 +514,8 @@ public sealed class ContainerImportService : IDisposable
     /// <summary>Only when the user asks. It hands the file to a JDownloader running on this computer, and the links stay there.</summary>
     public async Task<JDownloaderBridgeResult> SendToJDownloaderAsync(string? path, CancellationToken cancellationToken = default)
     {
+        // As for a preview: a reference whose upload was cleaned up says so, and a client that kept it uploads again.
+        if (_jobs.UploadGone(path) is { } gone) return new JDownloaderBridgeResult(JDownloaderBridgeStatus.InvalidInput, gone);
         if (Confine(ref path) is { } refused)
         {
             return new JDownloaderBridgeResult(JDownloaderBridgeStatus.InvalidInput, refused);
