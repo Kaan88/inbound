@@ -247,14 +247,35 @@ export function nothingToDelete(count: number): string {
     : 'Their archives were removed after extraction, so no files are deleted.';
 }
 
+export const mixedDeleteNote = 'Unfinished downloads always lose their partial data; the box decides only the finished files.';
+
+/**
+ * UI.B19: what Delete sends as deleteFile for one download. An unfinished one has only partial data, which nothing can
+ * use once it is off the list, so it always goes, whatever the box says, as when it is deleted alone. The box
+ * ("Delete from disk") decides only a finished file.
+ */
+export function deleteFileFor(job: Job, deleteFinishedFiles: boolean): boolean {
+  return job.state !== 'completed' || deleteFinishedFiles;
+}
+
+/** The selection split by what {@link deleteFileFor} sends, as one remove each: data going first, then files kept. */
+export function deleteBatches(jobs: readonly Job[], deleteFinishedFiles: boolean): { ids: string[]; deleteFile: boolean }[] {
+  const withData = jobs.filter((job) => deleteFileFor(job, deleteFinishedFiles)).map((job) => job.id);
+  const keepFile = jobs.filter((job) => !deleteFileFor(job, deleteFinishedFiles)).map((job) => job.id);
+  return [{ ids: withData, deleteFile: true }, { ids: keepFile, deleteFile: false }].filter((batch) => batch.ids.length > 0);
+}
+
 /** The Delete dialog: its title and words, and whether a finished file is there to delete. */
 export function deletePlan(jobs: readonly Job[]): DeletePlan {
   const anyCompleted = jobs.some((job) => job.state === 'completed' && !job.fileRemovedAfterExtraction);
+  const anyUnfinished = jobs.some((job) => job.state !== 'completed');
   const noFilesLeft = jobs.length > 0 && jobs.every((job) => job.fileRemovedAfterExtraction);
   const question = jobs.length === 1 ? `Remove '${jobs[0].fileName}' from the list?` : `Remove ${jobs.length} downloads from the list?`;
   return {
     title: jobs.length === 1 ? 'Delete download?' : `Delete ${jobs.length} downloads?`,
-    text: noFilesLeft ? `${question} ${nothingToDelete(jobs.length)}` : anyCompleted ? question : `${question} Partial data is always removed.`,
+    text: noFilesLeft ? `${question} ${nothingToDelete(jobs.length)}`
+      : anyCompleted ? (anyUnfinished ? `${question} ${mixedDeleteNote}` : question)
+      : `${question} Partial data is always removed.`,
     offerFiles: anyCompleted,
     deleteFile: !anyCompleted && !noFilesLeft,
   };

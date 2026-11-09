@@ -10,7 +10,7 @@
     extractAgainQuestion, extractSummary, leftExtracting, planForRows, removeQuestion as archiveRemoveQuestion, targetOf, type ArchivePasswordTarget,
   } from '../lib/archives';
   import {
-    archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteCompletedText, deletePlan,
+    archivePasswordText, archivePrimary, archiveRetryText, archiveRemovable, cancelTargets, canGroup, connectionChoices, deleteBatches, deleteCompletedText, deletePlan,
     downloadChoices, emptyText, isTypingTarget, megabyte, menuLabel, moveCursor, nextSort, offersDownloadAll, parseSort,
     pauseTargets, planFileMenu, priorityTargets, queueText, remoteEnterAction, resumeTargets,
     selectAfterClick, sharedQueueId, speedChoices, speedIsPreset, speedLimitLabel, suggestPackageName, type SortKey, type SortState,
@@ -411,12 +411,17 @@
       title: plan.title,
       text: plan.text,
       ok: 'Delete',
-      box: plan.offerFiles ? { label: 'Delete from disk: the downloaded files and any partial data', checked: deleteFromDisk } : undefined,
+      box: plan.offerFiles ? { label: 'Delete from disk: the downloaded files', checked: deleteFromDisk } : undefined,
       onok: async (box) => {
-        const deleteFile = plan.offerFiles ? box : plan.deleteFile;
-        const result = await store.attempt<{ ok: boolean }>('job.remove', { jobId: ids[0], jobIds: ids, deleteFile });
-        if (result?.ok) {
-          store.toast(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}${deleteFile && plan.offerFiles ? ' and their files' : ''}.`);
+        const deleteFinished = plan.offerFiles && box;
+        // UI.B19: unfinished downloads always lose their partial data; the box decides only the finished files.
+        let ok = true;
+        for (const batch of deleteBatches(jobs, deleteFinished)) {
+          const result = await store.attempt<{ ok: boolean }>('job.remove', { jobId: batch.ids[0], jobIds: batch.ids, deleteFile: batch.deleteFile });
+          ok &&= result?.ok === true;
+        }
+        if (ok) {
+          store.toast(`Deleted ${ids.length} download${ids.length === 1 ? '' : 's'}${deleteFinished ? ' and their files' : ''}.`);
           selected = new Set();
         }
       },

@@ -48,7 +48,9 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
     private const int MaxLinkRefreshesPerRun = 2;
     private const int MaxPackageMembers = 1000;
 
-    private sealed record RemoteAddContext(RemoteSource Source, long? ExpectedTotalBytes, string? ExpectedMd5, int MaxConnections);
+    /// <param name="GivenFolder">The package's folder the file's path is put under (UI.B19).</param>
+    private sealed record RemoteAddContext(RemoteSource Source, long? ExpectedTotalBytes, string? ExpectedMd5, int MaxConnections,
+        string? GivenFolder = null);
 
     /// <summary>Where a provider's files go when the user named no folder.</summary>
     public string DefaultDownloadDirectory
@@ -294,7 +296,8 @@ public sealed partial class DownloadManagerService : IRemoteJobHost
             QueueId = request.QueueId,
             OwnerExtensionId = RemoteOwnerPrefix + source.Provider,
             ClientRequestId = $"{source.RemoteJobId}/{source.FileId}",
-        }, cancellationToken, new RemoteAddContext(source, request.ExpectedTotalBytes, request.ExpectedMd5, request.MaxConnections))
+        }, cancellationToken, new RemoteAddContext(source, request.ExpectedTotalBytes, request.ExpectedMd5, request.MaxConnections,
+            Normalized(request.DestinationRoot)))
             .ConfigureAwait(false);
 
         if (added.ErrorCode == "invalid_destination" && FolderCanBeUsed(request.DestinationRoot))

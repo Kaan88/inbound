@@ -1,5 +1,5 @@
 import { connectionProblem } from "./connection-problem";
-import { actionsFor, latestJobsByTarget, type JobAction, type JobSummary } from "./job-list";
+import { actionsFor, deleteAsksAboutFile, deleteFileFor, latestJobsByTarget, type JobAction, type JobSummary } from "./job-list";
 
 interface Settings {
   enabled: boolean;
@@ -158,16 +158,20 @@ function actionRow(job: JobSummary): HTMLDivElement {
   const label = job.fileName || "this download";
   if (confirmingDelete.has(job.id)) {
     const option = document.createElement("label");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.checked = confirmingDelete.get(job.id) === true;
-    box.addEventListener("change", () => confirmingDelete.set(job.id, box.checked));
-    option.append(box, "Delete the file too");
+    if (deleteAsksAboutFile(job)) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = confirmingDelete.get(job.id) === true;
+      box.addEventListener("change", () => confirmingDelete.set(job.id, box.checked));
+      option.append(box, "Delete the file too");
+    } else {
+      option.append("Partial data is removed too.");
+    }
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.textContent = "Delete";
     confirm.title = job.target === "server" ? `Remove ${label} from the server` : `Remove ${label} from Inbound`;
-    confirm.addEventListener("click", () => void runJobAction(job, "remove", confirmingDelete.get(job.id) === true));
+    confirm.addEventListener("click", () => void runJobAction(job, "remove", deleteFileFor(job, confirmingDelete.get(job.id) === true)));
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "quiet";
