@@ -6,6 +6,7 @@ using DownloadManager.Runtime;
 using DownloadManager.Runtime.Archives;
 using DownloadManager.Runtime.Ipc;
 using DownloadManager.Runtime.Remote;
+using DownloadManager.Runtime.WebUi;
 
 namespace DownloadManager.Host;
 
@@ -145,10 +146,26 @@ internal static class Program
 
         service.TrayAvailable = false;
         var platform = new LinuxHostPlatform(service, log);
+        // D8: a .torrent or container file a browser uploaded through the web bridge, by its reference.
+        var bridgeLauncher = new WebBridgeLauncher(log.Warn);
+        if (File.Exists(bridgeLauncher.BridgePath))
+            remoteJobs.ResolveReference = new UploadFolder(Path.Combine(paths.Root, UploadFolder.FolderName)).Resolve;
+        // D8: a browser on another device, through the web bridge, asks for the web role and gets these rights.
+        using var webSessions = new WebSessionProfile(service, platform.Capabilities, archivesStarted ? archives : null,
+            remoteStarted ? remote.Registry : null, remoteStarted ? remoteJobs : null, log.Info);
+        // D8: the web UI. With its box cleared this starts nothing: no process, no timer, nothing listening.
+        var webUi = new WebUiSupervisor(new WebUiConfigStore(paths.Root),
+            new WebUiPlatform(bridgeLauncher, new LinuxFirewall(), new ProcListenerCheck(),
+                new WebUiPasswordFile(paths.Root, log.Warn), new LocalNetworkAddresses()),
+            paths.Root, PipeNames.HostHelloPipe(), log);
         var dispatcher = new HostCommandDispatcher(service, platform, log, remoteStarted ? remoteCommands : null)
         {
             Archives = archivesStarted ? new ArchiveIpcDispatcher(archives) : null,
+            WebSessions = webSessions.Rights,
+            WebUi = webUi,
         };
+        webUi.Changed += (_, status) => dispatcher.BroadcastWebUiChanged(status);
+        webUi.CloseWebSessions = () => dispatcher.CloseSessions(ClientRoles.Web);
         archives.Changed += (_, change) => dispatcher.BroadcastArchiveChanged(change);
         completionExecutor.ExitHost = () => _ = Task.Run(async () =>
         {
@@ -228,6 +245,14 @@ internal static class Program
         service.TrayAvailable = platform.TrayAvailable = tray is not null;
         if (tray is not null) service.JobChanged += (_, _) => tray.RequestRefresh();
 
+        webUi.Notice = notifications.Notify;
+        // Off the start path: the bridge takes a moment, and the socket it talks to is open already.
+        _ = Task.Run(async () =>
+        {
+            try { await webUi.StartAsync().ConfigureAwait(false); }
+            catch (Exception ex) { log.Error($"The web UI could not start: {ex.GetType().Name}"); }
+        });
+
         log.Info("Host ready.");
         if (open) platform.OpenUi();
 
@@ -250,6 +275,8 @@ internal static class Program
             log.Warn($"Exit notice: {ex.GetType().Name}");
         }
 
+        // First, so no browser starts anything while the rest stops.
+        await Step(() => webUi.StopAsync(), "Web UI shutdown", log).ConfigureAwait(false);
         // Shutting down stops what is running, which isn't news about any package.
         downloadNotices.Dispose();
         remoteNotices?.Dispose();

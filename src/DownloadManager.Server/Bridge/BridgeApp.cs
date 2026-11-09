@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Text.Json;
 using DownloadManager.Contracts;
 using DownloadManager.Server.Auth;
@@ -103,7 +103,7 @@ public sealed class BridgeApp : IAsyncDisposable
             Urls = urls,
             SignInRequired = true,
             AllowedHostNames = hosts,
-            HostKind = HostKinds.Windows,
+            HostKind = OperatingSystem.IsLinux() ? HostKinds.Linux : HostKinds.Windows,
             Bridge = true,
             TicketKey = key,
             SessionCookieName = $"{ServerAuth.CookieName}_{port}",
