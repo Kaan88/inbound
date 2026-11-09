@@ -14,9 +14,18 @@
   let version = $state(0);
   let open = $state(readOpen());
 
+  // Open by default, except on a phone, where it would take a sixth of the height (U-WU-22); a choice made is kept.
   function readOpen(): boolean {
+    let saved: string | null = null;
     try {
-      return localStorage.getItem('inbound.speedGraph') !== 'closed';
+      saved = localStorage.getItem('inbound.speedGraph');
+    } catch {
+      // A private window: the default.
+    }
+    if (saved === 'open') return true;
+    if (saved === 'closed') return false;
+    try {
+      return !matchMedia('(max-width: 767px)').matches;
     } catch {
       return true;
     }
@@ -62,11 +71,9 @@
     return () => clearInterval(timer);
   });
 
-  const now = $derived.by(() => {
-    void version;
-    const last = history.samples[history.samples.length - 1];
-    return last ?? null;
-  });
+  // The figure beside the title is the one the status bar shows, worked out from the same downloads at the same moment
+  // (U-WU-14); the line is drawn from the samples, one a second.
+  const now = $derived(speedSample(Object.values(store.model.jobs), store.connection === 'open', store.model.snapshots > 0, Date.now()));
   const ceiling = $derived.by(() => {
     void version;
     return graphCeiling(history.peak());

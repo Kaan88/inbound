@@ -201,9 +201,10 @@ The browser front end (`webui/`) follows the same rules with web tools:
   is kept per browser.
 - **Status colors and bars** are the desktop's: the state's color on the status text, a 6 px bar under it while a
   download is active or paused with progress, a moving bar when the size is unknown.
-- **Layout:** header, sidebar of views with counts, toolbar (icon over label; icons alone below 768 px, the words kept
-  for screen readers), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
-  lines per download on a phone. The sidebar becomes a drawer below 768 px; dialogs fill the screen on a phone.
+- **Layout:** header, sidebar of views with counts, toolbar (icon over label, smaller below 768 px; the bar never
+  scrolls sideways: the buttons that don't fit go into More, least needed first), the list as a grid that keeps the desktop's columns on a wide window and becomes two or three
+  lines per download on a phone. The sidebar becomes a drawer below 768 px, with its own close button; dialogs fill
+  the screen on a phone, and Back closes them. On a touch screen every target is at least 40 px each way.
 - **Icons:** our own outline glyphs on a 24-unit grid (`Icon.svelte`), colored with the icon tokens.
 - **Verifying:** `npm run screens` (see `webui/README.md`) captures every screen at 1360 and 390 pixels wide in both
   themes into `artifacts\webui\`, and fails on a console error, a page error or a page that scrolls sideways. Look

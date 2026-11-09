@@ -2,7 +2,7 @@
 // RemoteFileTree.cs). Nothing here touches the DOM, so the tests run it as it is.
 
 import type { ContainerAddResult, ContainerPreview, Job, RemoteAccount, RemoteFile, RemoteItem, RemoteJob } from './types';
-import type { Tone } from './format';
+import { dateOnly, type Tone } from './format';
 
 // ---- Words -------------------------------------------------------------------------------------------
 
@@ -320,10 +320,7 @@ export interface RemoteItemView {
 }
 
 function day(value: string | undefined | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000) return '';
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
+  return dateOnly(value);
 }
 
 function itemStatus(item: RemoteItem, provider: string, failed: boolean): string {

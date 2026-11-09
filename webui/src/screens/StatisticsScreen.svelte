@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { exactBytes } from '../lib/details';
-  import { bytes } from '../lib/format';
+  import { bytes, dateOnly, dateTime } from '../lib/format';
   import { store } from '../lib/store.svelte';
   import type { Statistics } from '../lib/types';
 
@@ -71,7 +71,7 @@
   );
   const captured = $derived(
     stats
-      ? `Updated ${new Date(stats.capturedAt).toLocaleString()}` + (stats.firstRecordedAt ? ` · Tracking since ${new Date(stats.firstRecordedAt).toLocaleDateString()}` : ' · No recorded downloads yet')
+      ? `Updated ${dateTime(stats.capturedAt)}` + (stats.firstRecordedAt ? ` · Tracking since ${dateOnly(stats.firstRecordedAt)}` : ' · No recorded downloads yet')
       : 'Reading the statistics…',
   );
 </script>
