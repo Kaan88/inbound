@@ -164,6 +164,8 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.O,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift,
             OpenServerMenuFromKeyboard));
+        InitializeProviderViews();
+        foreach (var accelerator in ProviderAccelerators()) RootGrid.KeyboardAccelerators.Add(accelerator);
         for (var number = 0; number <= ServerSwitch.MostNumbered; number++)
         {
             var chosen = number;
@@ -919,11 +921,12 @@ public sealed partial class MainWindow : Window
 
             if (tag.StartsWith(RemoteBrowseTag, StringComparison.Ordinal))
             {
+                // UI.R32, A: My provider takes the list's place; the category shown before stays the one to go back to.
                 OpenProviderWindow(tag[RemoteBrowseTag.Length..]);
-                RestoreCategorySelection();
                 return;
             }
 
+            LeaveProviderFull(selectCategory: false);
             _category = tag;
             RebuildVisible();
         }
@@ -1056,6 +1059,7 @@ public sealed partial class MainWindow : Window
         flyout.Items.Add(_menuProperties = CreateContextItem("Properties", MenuProperties_Click));
         _recordFileItems.AddRange([_menuOpen, _menuOpenWith, _menuOpenFolder, _separatorAfterOpen, _menuDelete, separatorAfterRemove, progressDetails, _menuProperties]);
         AddRemoteContextItems(flyout);
+        AddShowInProviderItem(flyout);
         JobsList.ContextFlyout = flyout;
     }
 
@@ -1127,6 +1131,7 @@ public sealed partial class MainWindow : Window
 
         HideLocalContextItemsIfRemoteOnly();
         ShowArchiveContextItems();
+        ShowProviderContextItem();
 
         if (_priorityMenu is not null)
         {
@@ -4035,6 +4040,7 @@ public sealed partial class MainWindow : Window
             var autoResume = new CheckBox { Content = "Resume unfinished downloads when Inbound starts", IsChecked = settings.AutoResumeUnfinishedOnStartup };
             var closeCompletely = new CheckBox { Content = "Free the window's memory when I close it (downloads keep running in the background)", IsChecked = settings.CloseWindowCompletely };
             ToolTipService.SetToolTip(closeCompletely, "Downloads keep running in the background. Opening the window again from the tray takes a moment longer.");
+            var providerOpens = ProviderOpensBox();
             var useCategoryFolders = new CheckBox { Content = "Save downloads to a folder for their category", IsChecked = settings.UseCategoryFolders };
             // UI.R23: the source of every window's theme. View > Dark Mode sets it too, so the box follows that.
             string[] themeValues = [ThemeChoices.System, ThemeChoices.Light, ThemeChoices.Dark];
@@ -4270,7 +4276,7 @@ public sealed partial class MainWindow : Window
             const int ConnectionPage = 3, ProxyPage = 4, SiteLoginsPage = 5, UpdatesPage = 6, SoundsPage = 7;
             window.AddPage("General", "\uE80F",
                 SettingsWindow.Section("Startup"), launch, autoResume,
-                SettingsWindow.Section("Window"), themeBox, closeCompletely,
+                SettingsWindow.Section("Window"), themeBox, closeCompletely, providerOpens,
                 SettingsWindow.Section("Capturing downloads"), integration, clipboard);
             var saveTo = new List<UIElement> { directoryRow, SettingsWindow.Section("Folders by category"), useCategoryFolders,
                 SettingsWindow.Hint("Downloads of these types go to their own folder. Leave a field empty to use the default folder. Turned off, every download goes to the default folder.") };
@@ -4423,6 +4429,7 @@ public sealed partial class MainWindow : Window
                 settings.ConnectionProfiles = profiles;
                 settings.LaunchAtStartup = launch.IsChecked == true;
                 settings.CloseWindowCompletely = closeCompletely.IsChecked == true;
+                SaveProviderOpens(providerOpens);
                 settings.Theme = themeValues[Math.Max(0, themeBox.SelectedIndex)];
                 settings.UseCategoryFolders = useCategoryFolders.IsChecked == true;
                 settings.ClipboardMonitoring = clipboard.IsChecked == true;

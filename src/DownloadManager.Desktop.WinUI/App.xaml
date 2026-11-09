@@ -38,6 +38,8 @@
                     <SolidColorBrush x:Key="InboundCardBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="InboundCardStrokeBrush" Color="#14FFFFFF" />
                     <SolidColorBrush x:Key="InboundWindowFallbackBrush" Color="#202020" />
+                    <!-- UI.R32: My provider's drawer lies over the opaque list, where Mica can't show, so it frosts in the app. -->
+                    <AcrylicBrush x:Key="InboundDrawerBrush" TintColor="#202020" TintOpacity="0.7" TintLuminosityOpacity="0.85" FallbackColor="#202020" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <!-- UI.B21: light Mica takes the wallpaper's hue strongly (a teal cast beside the white lists), so light
@@ -65,6 +67,7 @@
                     <SolidColorBrush x:Key="InboundCardBrush" Color="#B3FFFFFF" />
                     <SolidColorBrush x:Key="InboundCardStrokeBrush" Color="#13000000" />
                     <SolidColorBrush x:Key="InboundWindowFallbackBrush" Color="#F3F3F3" />
+                    <AcrylicBrush x:Key="InboundDrawerBrush" TintColor="#F3F3F3" TintOpacity="0.7" TintLuminosityOpacity="0.85" FallbackColor="#F3F3F3" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
