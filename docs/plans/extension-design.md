@@ -152,7 +152,7 @@ Layout:
 |    Downloading 62%              18.4 MB/s · 1m 45s                          | 16: status (tone) · rate · time, muted
 |    ██████████████████████░░░░░░░░░░░                                        |  6: bar, reserved slot always
 |-----------------------------------------------------------------------------|  1: --divider
-| 🗜 project-assets.part2.rar                    1.00 GB        [▶] [🗑]       |
+| 📄 project-assets.part2.bin                    1.00 GB        [▶] [🗑]       |
 |    Paused 40%                                                               |
 |    █████████░░░░░░░░░░░░░░░░                                                |
 |-----------------------------------------------------------------------------|
@@ -182,7 +182,7 @@ Layout:
 
 ```
 | Delete download?                                        | 14/600
-| Remove 'project-assets.part1.rar' from the list?        | 13
+| Remove 'project-assets.part1.bin' from the list?        | 13
 | ☐ Delete from disk: the downloaded file                 | completed only, unticked
 |   (unfinished: "Partial data is always removed.")       | 12 muted
 |                                  [Delete] [Cancel]      | Delete = .btn-danger; focus on Cancel
@@ -213,10 +213,10 @@ It replaces the list while caught downloads wait.
 ```
 | [icon16] Download file info                          1 of 2  [‹][›] [✕]     | 40 --chrome; ✕ = Keep in browser
 +-----------------------------------------------------------------------------+
-| 🗜 project-assets.part1.rar                                                  | 13/600, glyph 24 --icon-info
+| 📄 project-assets.part1.bin                                                  | 13/600, glyph 24 --icon-info
 |    1.00 GB · downloads.example.com                                          | 12 muted; host only
 | File name                                                                   | .label
-| [project-assets.part1.rar                                               ]   | .field; name selected up to extension
+| [project-assets.part1.bin                                               ]   | .field; name selected up to extension
 | Send to   [ 🖥 This PC | ☁ home-server ]                                     | .segmented 28; only when both work
 | Destination folder                                                          |
 | [D:\Downloads\Compressed                                  ▾] [Browse…]      | mono; ▾ = favorites of the target
@@ -244,8 +244,8 @@ It replaces the list while caught downloads wait.
 | [icon16] Download file info                                                    | 40 .dialog-header
 +--------------------------------------------------------------------------------+
 | Address                                                                        |
-| https://downloads.example.com/files/project-assets.part1.rar           [Copy]  | plain text, mono 12 muted, no box
-| File name        [project-assets.part1.rar                                  ]  |
+| https://downloads.example.com/files/project-assets.part1.bin           [Copy]  | plain text, mono 12 muted, no box
+| File name        [project-assets.part1.bin                                  ]  |
 | Send to          [ 🖥 This PC | ☁ home-server ]                                |
 | Destination folder [D:\Downloads\Compressed                     ▾] [Browse…]   |
 | Applies to this download only.                                                 | .hint
@@ -269,7 +269,7 @@ States, keeping today's logic:
 | [🔍 Filter by name, type or site                             ] [All types ▾]  | 40 toolbar --chrome
 +--------------------------------------------------------------------------------+
 | ☑ │ File Name                                  │ Type │ Site                   | 27 header --chrome, 12/600, sortable
-| ☑ │ 🗜 project-assets.part1.rar                  │ RAR  │ downloads.example.com  | rows 27; URL in title + aria-description
+| ☑ │ 📄 project-assets.part1.bin                  │ BIN  │ downloads.example.com  | rows 27; URL in title + aria-description
 | ☐ │ 💿 linux-desktop-24.04-amd64.iso             │ ISO  │ downloads.example.com  | list flex:1, the only scroll
 +--------------------------------------------------------------------------------+
 | Package name [Example downloads page          ]   (2+ links; default page title)|
@@ -409,8 +409,8 @@ Contrast (WCAG 2.x, computed for this spec and asserted by the test in §8):
 
 **Fixture data.** All invented, with no cookies or real hosts:
 - `linux-desktop-24.04-amd64.iso`: 5.00 GB, downloading 62 %, 18.4 MB/s, 105 s left.
-- `project-assets.part2.rar`: paused 40 %.
-- `project-assets.part1.rar`: completed.
+- `project-assets.part2.bin`: paused 40 %.
+- `project-assets.part1.bin`: completed.
 - `installer-2.4.1.exe`: failed, HTTP 403.
 - Host `downloads.example.com`, server `home-server`.
 - The same names are used in the desktop capture.

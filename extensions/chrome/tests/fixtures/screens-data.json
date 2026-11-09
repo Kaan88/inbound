@@ -13,7 +13,7 @@
       "createdAt": "2026-11-09T09:58:00Z", "canPause": true, "canResume": false, "startMode": "startNow"
     },
     {
-      "id": "6f1c2a10-0000-4000-8000-000000000002", "target": "local", "fileName": "project-assets.part2.rar", "state": "paused",
+      "id": "6f1c2a10-0000-4000-8000-000000000002", "target": "local", "fileName": "project-assets.part2.bin", "state": "paused",
       "receivedBytes": 429496730, "totalBytes": 1073741824, "progress": 0.4, "createdAt": "2026-11-09T09:57:00Z",
       "canPause": false, "canResume": true, "startMode": "startNow"
     },
@@ -23,30 +23,30 @@
       "canPause": false, "canResume": true, "startMode": "startNow"
     },
     {
-      "id": "6f1c2a10-0000-4000-8000-000000000003", "target": "server", "fileName": "project-assets.part1.rar", "state": "completed",
+      "id": "6f1c2a10-0000-4000-8000-000000000003", "target": "server", "fileName": "project-assets.part1.bin", "state": "completed",
       "receivedBytes": 1073741824, "totalBytes": 1073741824, "progress": 1, "createdAt": "2026-11-09T09:56:00Z",
       "canPause": false, "canResume": false, "startMode": "startNow"
     }
   ],
   "targets": [
-    { "id": "local", "label": "This PC", "chooser": "dialog", "defaultFolder": "D:\\Downloads\\Compressed",
+    { "id": "local", "label": "This PC", "chooser": "dialog", "defaultFolder": "D:\\Downloads\\Software",
       "favorites": [{ "name": "Games", "path": "D:\\Games" }, { "name": "ISOs", "path": "E:\\ISOs" }] },
     { "id": "server", "label": "Server", "chooser": "list", "address": "http://home-server:8080", "defaultFolder": "/downloads",
       "favorites": [{ "name": "Movies", "path": "/downloads/movies" }] }
   ],
   "ask": [
-    { "id": "ask-1", "fileName": "project-assets.part1.rar", "url": "https://downloads.example.com/files/project-assets.part1.rar", "totalBytes": 1073741824 },
-    { "id": "ask-2", "fileName": "project-assets.part2.rar", "url": "https://downloads.example.com/files/project-assets.part2.rar", "totalBytes": 1073741824 }
+    { "id": "ask-1", "fileName": "project-assets.part1.bin", "url": "https://downloads.example.com/files/project-assets.part1.bin", "totalBytes": 1073741824 },
+    { "id": "ask-2", "fileName": "project-assets.part2.bin", "url": "https://downloads.example.com/files/project-assets.part2.bin", "totalBytes": 1073741824 }
   ],
   "handoff": {
-    "id": "ask-1", "url": "https://downloads.example.com/files/project-assets.part1.rar", "pageUrl": "https://downloads.example.com/",
-    "suggestedFileName": "project-assets.part1.rar"
+    "id": "ask-1", "url": "https://downloads.example.com/files/project-assets.part1.bin", "pageUrl": "https://downloads.example.com/",
+    "suggestedFileName": "project-assets.part1.bin"
   },
   "page": {
     "pageUrl": "https://downloads.example.com/", "pageTitle": "Example downloads page",
     "links": [
-      { "url": "https://downloads.example.com/files/project-assets.part1.rar", "text": "project-assets.part1.rar", "kind": "file", "extension": "rar", "host": "downloads.example.com" },
-      { "url": "https://downloads.example.com/files/project-assets.part2.rar", "text": "project-assets.part2.rar", "kind": "file", "extension": "rar", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/files/project-assets.part1.bin", "text": "project-assets.part1.bin", "kind": "file", "extension": "bin", "host": "downloads.example.com" },
+      { "url": "https://downloads.example.com/files/project-assets.part2.bin", "text": "project-assets.part2.bin", "kind": "file", "extension": "bin", "host": "downloads.example.com" },
       { "url": "https://downloads.example.com/files/linux-desktop-24.04-amd64.iso", "text": "linux-desktop-24.04-amd64.iso", "kind": "file", "extension": "iso", "host": "downloads.example.com" },
       { "url": "https://downloads.example.com/files/installer-2.4.1.exe", "text": "installer-2.4.1.exe", "kind": "file", "extension": "exe", "host": "downloads.example.com" },
       { "url": "https://downloads.example.com/release-notes.html", "text": "release-notes.html", "kind": "page", "extension": "html", "host": "downloads.example.com" },
