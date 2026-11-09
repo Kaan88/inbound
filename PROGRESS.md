@@ -1,5 +1,10 @@
 ﻿# Progress — session handoff
 
+### D7 stage 2: the window on Linux and the AppImage layout (2026-11-09, `linux-host`, partial)
+- The WinUI window builds through Uno for Linux and runs on KDE Wayland (XWayland) against `inbound-host`; the owner saw it working. Single instance over a user-only Unix socket (`ActivationSignal`); the Win32 window calls are skipped on Linux; file icons are generic there for now.
+- `scripts/package-appimage.sh` builds a self-contained AppDir (Host, CLI, native host, web server; the window in `desktop/`). `AppRun` handles `--native-host`, `--cli` and `--host`; started with no argument it starts the Host, then the window. Checked from the AppDir with no .NET installed and a sandbox data folder: Host and window started, `--cli list` listed the downloads, `--native-host` answered `jobs.query` with `jobs.snapshot`.
+- Not done: packing the `.AppImage` file (appimagetool is not installed here), a run from a packed AppImage, and the WinUI project's own build on Windows after the shared-file changes.
+
 ### D7 stage 1, step 6: the web UI on the Linux Host (2026-11-09, `linux-host`)
 - The Windows Host's web UI (D8) on Linux: `WebUiSupervisor` with the shared `WebBridgeLauncher` (program name per OS), `WebUiPasswordFile` and `LocalNetworkAddresses`; `ProcListenerCheck` (`/proc/net/tcp[6]` and the bridge's `/proc/<pid>/fd`) in place of `GetExtendedTcpTable`; `LinuxFirewall` reports `ready` (no per-program rule exists on Linux to add).
 - The bridge (`DownloadManager.Server --bridge`) opens the Linux Host's hello socket through `UnixSockets` and reports host kind `linux`.
