@@ -46,6 +46,37 @@ export function priorityText(priority: number | undefined): string {
   return value > 0 ? 'High' : value < 0 ? 'Low' : 'Normal';
 }
 
+// ---- Start and Stop (U-WL-1) -----------------------------------------------------------------------------------
+// The host's queue start rule, as the window has it (QueueCommands.cs): a running queue still holds its "later"
+// downloads, and the ones its stop, quota, a move or an exit paused, until it is started. One the user paused is not
+// among them (the host also marks a pause saved before pausedByUser existed as the user's).
+
+/** Whether only a Start of its queue lets this download go. */
+export function isWaitingForStart(job: Pick<Job, 'state' | 'startMode' | 'pausedByUser'>): boolean {
+  if (job.state === 'queued') return (job.startMode ?? '').toLowerCase() === 'later';
+  return job.state === 'paused' && !job.pausedByUser;
+}
+
+export function waitingForStart(queue: Pick<Queue, 'id'>, jobs: Iterable<Job>): number {
+  return queueMembers(jobs, queue.id).filter(isWaitingForStart).length;
+}
+
+/** Start is offered for a stopped queue, and for a running one that still holds downloads waiting for it. */
+export function canStartQueue(queue: Pick<Queue, 'id' | 'isRunning'>, jobs: Iterable<Job>): boolean {
+  return !queue.isRunning || waitingForStart(queue, jobs) > 0;
+}
+
+export function canStopQueue(queue: Pick<Queue, 'isRunning'>): boolean {
+  return queue.isRunning;
+}
+
+/** "Running", "Stopped", or "Running, 2 waiting for Start". */
+export function queueStateText(queue: Pick<Queue, 'id' | 'isRunning'>, jobs: Iterable<Job>): string {
+  if (!queue.isRunning) return 'Stopped';
+  const waiting = waitingForStart(queue, jobs);
+  return waiting === 0 ? 'Running' : `Running, ${waiting} waiting for Start`;
+}
+
 /** Queues in the host's order. */
 export function orderedQueues(queues: Queue[]): Queue[] {
   return [...queues].sort((a, b) => a.order - b.order || a.id - b.id);

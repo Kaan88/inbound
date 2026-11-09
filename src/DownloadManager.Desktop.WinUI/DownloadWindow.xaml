@@ -16,6 +16,9 @@
 
         <StackPanel x:Name="Header" Spacing="4">
             <TextBlock x:Name="Heading" Text="Connecting…" FontSize="21" FontWeight="SemiBold" />
+            <!-- U-WL-3: why it failed, right under the heading that says Failed, not in the notice above the buttons. -->
+            <TextBlock x:Name="FailureText" Visibility="Collapsed" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                       Foreground="{ThemeResource InboundErrorTextBrush}" AutomationProperties.Name="Why it failed" />
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="24" />
