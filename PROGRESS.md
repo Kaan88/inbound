@@ -25,6 +25,10 @@
 - Browser runs on test instances only (test Host `extask`, test server on 127.0.0.1:19580, a local file server; downloads to test folders): Chrome for Testing 158 (server only: the Chromium native-host key was another track's, with its manifest gone, so This PC was "not found") and Firefox 159 (headed, BiDi, both targets; the installed app's Firefox key reached the test Host). Edge not run. The owner's exact EXT.B7 screen was not reproduced: the folder window already showed the server's folders.
 - Left: the owner's check in Edge and Firefox; a release of the extension.
 
+### Owner after 0.6.5 (2026-11-09)
+
+- Owner on the open checks: the web UI in the Windows app and managing the mini PC from the window (D8, D9) "Works great"; the VM checks and the light-mode walk "later"; the full test run before the next release "still the same". Small loose ends are to be done whenever they fit a piece of work. New: the "Added N files" bar should go after 3 seconds (UI.R33); Progress Details' graph fills in pieces (UI.B22); the package window should look more like Progress Details (UI.R34). Owner now works on Linux (CachyOS); the WinUI app cannot be built there.
+
 ### 0.6.5 release (2026-11-09)
 
 - **Released 2026-11-09** (tag `v0.6.5`, squashed to `main` as 96fbde0 without the local-only docs; binaries `0.6.5+96fbde0`). Checks: the live feed serves 0.6.5 and its signature verifies with the same key; Setup, the zip and the XPI on GitHub match SHA256SUMS; `extensions/firefox-updates.json` on `main` points at the XPI on v0.6.5; a scan of the package, release files, XPI and every tracked file found no secret; the Docker image workflow for the tag succeeded.
