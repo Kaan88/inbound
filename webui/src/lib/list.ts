@@ -741,32 +741,81 @@ export function speedLimitLabel(bytesPerSecond: number): string {
 
 // ---- The speed graph ----
 
-/** The speed history: one sample a second, with gaps (null) while the server is not reachable. */
+/** What the graph draws: the newest ten minutes of the history, one sample a second. */
+export const speedGraphWindow = 600;
+
+/** The speed history: one sample a second, with gaps (null) while the server is not reachable. Keeps the Host's full hour. */
 export class SpeedHistory {
   samples: (number | null)[] = [];
-  constructor(readonly limit = 600) {}
+  /** The Unix second the newest sample was taken in. */
+  private newestSecond = 0;
+  constructor(readonly limit = 3600) {}
 
-  add(rate: number | null): void {
+  add(rate: number | null, second = Math.floor(Date.now() / 1000)): void {
     this.samples.push(rate === null ? null : Math.max(0, rate));
+    this.newestSecond = second;
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
   /**
-   * The server's own figures (speed.history, one a second, the last the second under way), put before what this page
-   * sampled since it opened. As many of the server's newest are left out as were sampled here, so no second shows twice.
+   * Takes the server's own figures (speed.history, one a second, the last the second under way) in place of what this page
+   * sampled, which may hold gaps from a hidden tab or a lost connection. `start` is the time of the first figure. The
+   * newest second this page sampled stays at the end for the second under way, but only when it is that second or later,
+   * so no second shows twice; otherwise, or when this page has a gap there, the server's own last figure ends the line.
    */
-  seed(serverSamples: readonly number[]): void {
-    const finished = serverSamples.slice(0, -1);
-    const older = finished.slice(0, Math.max(0, finished.length - this.samples.length));
-    this.samples = [...older.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0)), ...this.samples];
+  replace(serverSamples: readonly number[], start?: string): void {
+    const clean = serverSamples.map((rate) => (Number.isFinite(rate) ? Math.max(0, rate) : 0));
+    if (clean.length === 0) return;
+    const finished = clean.slice(0, -1);
+    const tail = this.samples[this.samples.length - 1] ?? null;
+    const first = start === undefined ? Number.NaN : Date.parse(start) / 1000;
+    const underWay = Math.floor(first) + clean.length - 1;
+    const keepLocal = tail !== null && Number.isFinite(underWay) && this.newestSecond >= underWay;
+    this.samples = [...finished, keepLocal ? tail : clean[clean.length - 1]];
     if (this.samples.length > this.limit) this.samples.splice(0, this.samples.length - this.limit);
   }
 
-  peak(): number {
+  /** The newest `count` samples, which is all the graph has room for. */
+  recent(count = speedGraphWindow): (number | null)[] {
+    return this.samples.length > count ? this.samples.slice(-count) : this.samples;
+  }
+
+  /** The highest rate among the newest `count` samples. */
+  peak(count = speedGraphWindow): number {
     let peak = 0;
-    for (const sample of this.samples) if (sample !== null && sample > peak) peak = sample;
+    for (const sample of this.recent(count)) if (sample !== null && sample > peak) peak = sample;
     return peak;
   }
+}
+
+/** What is under the pointer on the speed graph; rate is null for a gap. */
+export interface GraphHover {
+  index: number;
+  rate: number | null;
+  /** Seconds before the newest sample. */
+  age: number;
+}
+
+/**
+ * The sample nearest the pointer. x is in the graph's own units (0 to width); the newest sample is at the right edge and
+ * the line starts where the history does, as it is drawn. Null when the pointer is left of the first sample.
+ */
+export function hoverPoint(samples: readonly (number | null)[], x: number, width = 600, windowSize = speedGraphWindow): GraphHover | null {
+  if (samples.length === 0 || !Number.isFinite(x)) return null;
+  const step = width / (windowSize - 1);
+  const offset = width - (samples.length - 1) * step;
+  const index = Math.round((x - offset) / step);
+  if (index < 0 && (x - offset) / step < -0.5) return null;
+  const at = Math.min(samples.length - 1, Math.max(0, index));
+  return { index: at, rate: samples[at], age: samples.length - 1 - at };
+}
+
+/** How long before the newest sample, as the desktop graph says it. */
+export function agoText(seconds: number): string {
+  if (seconds < 1.5) return 'now';
+  if (seconds < 60) return `${Math.round(seconds)} s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${String(Math.floor(seconds % 60)).padStart(2, '0')} s ago`;
+  return `${Math.floor(seconds / 3600)} h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')} min ago`;
 }
 
 /**
